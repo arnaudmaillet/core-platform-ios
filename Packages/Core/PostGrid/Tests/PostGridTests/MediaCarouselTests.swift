@@ -651,68 +651,56 @@ struct CarouselChipsAreFixedTests {
         }
     }
 
-    /// The chips ON THE PREVIEW — the box's own furniture, which is the page
-    /// indicator and nothing else now that the counters closed the card from
-    /// a line under the preview. In reading order.
-    private func previewChipFrames(in cell: PostGridListRowCell) -> [CGRect] {
-        guard let preview = cell.mediaHeroRect else { return [] }
-        return chips(in: cell)
-            .map { $0.convert($0.bounds, to: cell.contentView) }
-            .filter { $0.minY < preview.maxY }
-            .sorted { $0.minX < $1.minX }
+    /// The page indicator, on the closing line under the preview.
+    private func indicator(in cell: PostGridListRowCell) -> MediaPageIndicatorView? {
+        chips(in: cell).compactMap { $0 as? MediaPageIndicatorView }.first
     }
 
-    /// The closing line's chips — under the preview, in reading order.
-    private func linePills(in cell: PostGridListRowCell) -> [PostMetaPillView] {
-        guard let preview = cell.mediaHeroRect else { return [] }
-        return chips(in: cell).filter { $0.convert($0.bounds, to: cell.contentView).minY >= preview.maxY }
+    private func indicatorFrame(in cell: PostGridListRowCell) -> CGRect? {
+        indicator(in: cell).map { $0.convert($0.bounds, to: cell.contentView) }
     }
 
-    /// ⚠️ THE REQUIREMENT: the indicator belongs to the PREVIEW, not to what
-    /// is inside it, so scrolling the pages must not move it.
-    ///
-    /// The natural way to write a carousel is to put its furniture in the scroll
-    /// view — everything is then one subtree and nothing needs pinning — and it
-    /// carries the furniture off the screen with page two. Here the scroll view
-    /// is a sibling BELOW it inside the box, and this measures the difference.
-    @Test func theChipsDoNotTravelWithThePages() {
+    /// The closing line's counters, in reading order.
+    private func counterPills(in cell: PostGridListRowCell) -> [PostMetaPillView] {
+        chips(in: cell).filter { !($0 is MediaPageIndicatorView) }
+    }
+
+    /// ⚠️ THE REQUIREMENT: the indicator belongs to the CARD's closing line,
+    /// not to what scrolls inside the preview, so paging must not move it.
+    @Test func theIndicatorDoesNotTravelWithThePages() throws {
         let cell = row(pages: 4)
-        let before = previewChipFrames(in: cell)
-        // The indicator alone.
-        #expect(before.count == 1)
+        let before = try #require(indicatorFrame(in: cell))
 
         #expect(cell.debugScrollCarousel(toPage: 3, animated: false))
         cell.layoutIfNeeded()
 
-        let after = previewChipFrames(in: cell)
-        #expect(after.count == before.count)
-        for (old, new) in zip(before, after) {
-            #expect(abs(old.minX - new.minX) < 0.5)
-            #expect(abs(old.minY - new.minY) < 0.5)
-        }
+        let after = try #require(indicatorFrame(in: cell))
+        #expect(abs(before.minX - after.minX) < 0.5)
+        #expect(abs(before.minY - after.minY) < 0.5)
     }
 
-    /// An indicator for a collection, and nothing on the preview of a
-    /// single-media post. An indicator for one page is furniture answering a
-    /// question nobody asked.
+    /// An indicator for a collection, and none for a single-media post. An
+    /// indicator for one page is furniture answering a question nobody asked.
     @Test func onlyACollectionWearsAnIndicator() {
-        #expect(previewChipFrames(in: row(pages: 1)).count == 0)
-        #expect(previewChipFrames(in: row(pages: 4)).count == 1)
+        #expect(indicator(in: row(pages: 1)) == nil)
+        #expect(indicator(in: row(pages: 4)) != nil)
     }
 
-    /// The indicator is a pill tall — the same chip the closing line is made
-    /// of — and rests on the box's bottom trailing corner at the furniture
-    /// inset, clear of the preview's corner arc.
-    @Test func theIndicatorIsAPillOnThePreviewsTrailingCorner() throws {
+    /// The indicator LEADS the closing line, under the preview, a pill tall,
+    /// with the counters closing the line after it.
+    @Test func theIndicatorLeadsTheClosingLine() throws {
         let cell = row(pages: 4)
-        let chip = try #require(previewChipFrames(in: cell).first)
-        let carousel = try #require(cell.debugCarousel)
-        let box = try #require(carousel.superview).convert(carousel.superview!.bounds, to: cell.contentView)
-        let inset = PostGridListRowCell.mediaFurnitureInset
-
+        let preview = try #require(cell.mediaHeroRect)
+        let chip = try #require(indicatorFrame(in: cell))
+        #expect(chip.minY >= preview.maxY)
         #expect(abs(chip.height - PostMetaPillView.height) < 0.5)
-        #expect(abs(box.maxX - chip.maxX - inset) < 0.5)
-        #expect(abs(box.maxY - chip.maxY - inset) < 0.5)
+        // An unauthored post's date leads the line; the indicator follows it
+        // in the leading half.
+        #expect(chip.minX >= PostGridListRowCell.captionInset - 0.5)
+        #expect(chip.midX < cell.bounds.midX)
+        for pill in counterPills(in: cell) {
+            #expect(pill.convert(pill.bounds, to: cell.contentView).minX > chip.maxX)
+        }
     }
 
     /// The indicator is a CONTROL: a drag across it asks for pages, one per dot
@@ -759,7 +747,7 @@ struct CarouselChipsAreFixedTests {
     /// have cleared it.
     @Test func aRecycledRowDropsThePreviousCollection() {
         let cell = row(pages: 4)
-        #expect(previewChipFrames(in: cell).count == 1)
+        #expect(indicator(in: cell) != nil)
 
         cell.prepareForReuse()
         cell.configure(
@@ -772,61 +760,61 @@ struct CarouselChipsAreFixedTests {
         )
         cell.layoutIfNeeded()
 
-        #expect(previewChipFrames(in: cell).count == 0)
-        #expect(linePills(in: cell).count == 2)
+        #expect(indicator(in: cell) == nil)
+        #expect(counterPills(in: cell).count == 2)
         #expect(cell.debugScrollCarousel(toPage: 1, animated: false) == false)
     }
 
     /// A row whose counters are wide, so a layout that squeezed them shows up
     /// as a measurement rather than as a coincidence: six-figure counts, since
     /// "160" and "12" fit inside almost anything.
-    private func spaciousRow() -> PostGridListRowCell {
+    private func spaciousRow(width: CGFloat = 390) -> PostGridListRowCell {
         let ninetyMinutesAgo = Int64(Date().timeIntervalSince1970 * 1000) - 90 * 60 * 1000
         return row(
-            pages: 6, reactions: 1_600_000, comments: 128_000,
+            pages: 6, width: width, reactions: 1_600_000, comments: 128_000,
             publishedAtMS: ninetyMinutesAgo
         )
     }
 
-    /// ⚠️ A COUNT IS NEVER CLIPPED. Clipped, it reads as a number the post
-    /// has, and it is not one. Measuring each chip against what it asks for
-    /// UNCONSTRAINED is the part that matters: a frame-order or gap assertion
-    /// passes just as happily on a row of ellipses.
-    @Test func theCountersAreNeverSqueezed() {
-        let cell = spaciousRow()
-        let line = linePills(in: cell)
-        #expect(line.count == 2)
-        for chip in line {
-            let wanted = chip.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
-            #expect(chip.bounds.width >= wanted - 0.5)
+    /// ⚠️ A COUNT IS NEVER CLIPPED, AND THE INDICATOR IS WHAT GIVES WAY.
+    /// Clipped, a count reads as a number the post has, and it is not one.
+    /// Measuring each chip against what it asks for UNCONSTRAINED is the part
+    /// that matters: a frame-order or gap assertion passes just as happily on
+    /// a row of ellipses.
+    @Test func theCountersAreNeverSqueezedAndTheIndicatorYields() throws {
+        let roomy = spaciousRow()
+        // Narrow enough that five dots no longer fit beside two six-figure
+        // counts and the date, wide enough that two still do.
+        let tight = spaciousRow(width: 262)
+        for cell in [roomy, tight] {
+            let line = counterPills(in: cell)
+            #expect(line.count == 2)
+            for chip in line {
+                let wanted = chip.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
+                #expect(chip.bounds.width >= wanted - 0.5)
+            }
         }
+        let roomyChip = try #require(indicator(in: roomy))
+        let tightChip = try #require(indicator(in: tight))
+        #expect(tightChip.bounds.width < roomyChip.bounds.width)
+        #expect(tightChip.bounds.width >= tightChip.minimumChipWidth - 0.5)
     }
 
-    /// ⚠️ AND THE FURNITURE IS NOT BEHIND THE PAGES.
-    ///
-    /// The indicator is laid out against the preview and the carousel scrolls
-    /// underneath it, which is a Z-ORDER promise no frame assertion can see:
-    /// every test in this file went on passing while a chip sat correctly
-    /// placed and completely covered. It happened for a reason worth pinning —
-    /// the carousel was inserted below a NAMED chip, which was the lowest one
-    /// only for as long as nobody reordered them.
-    @Test func theCarouselIsBehindTheIndicator() throws {
+    /// The preview holds NO furniture now: nothing sits over the pages but
+    /// the pages. Asserted on the box's subviews, so a chip put back on the
+    /// preview under another name is the regression.
+    @Test func thePreviewWearsNoChips() throws {
         let cell = spaciousRow()
         let carousel = try #require(cell.debugCarousel)
         let box = try #require(carousel.superview)
-        let order = box.subviews
-        let carouselIndex = try #require(order.firstIndex(of: carousel))
-
-        let chips = order.enumerated().filter { $0.element is PostMetaPillView }
-        #expect(chips.count == 1)
-        #expect(chips.allSatisfy { $0.offset > carouselIndex })
+        #expect(box.subviews.allSatisfy { !($0 is PostMetaPillView) })
     }
 
-    /// The closing line packs its chips at one gap each, trailing: comments,
-    /// then likes, at the caption's inset.
-    @Test func theLinePacksItsChipsTrailing() {
+    /// The closing line packs the counters at one gap each, trailing:
+    /// comments, then likes, at the caption's inset.
+    @Test func theLinePacksItsCountersTrailing() {
         let cell = spaciousRow()
-        let frames = linePills(in: cell).map { $0.convert($0.bounds, to: cell.contentView) }
+        let frames = counterPills(in: cell).map { $0.convert($0.bounds, to: cell.contentView) }
         #expect(frames.count == 2)
         #expect(abs((frames[1].minX - frames[0].maxX) - PostGridListRowCell.chipGap) < 0.5)
         #expect(abs(cell.contentView.bounds.maxX - frames[1].maxX - PostGridListRowCell.captionInset) < 0.5)

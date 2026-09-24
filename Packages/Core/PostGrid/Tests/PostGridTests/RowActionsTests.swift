@@ -88,24 +88,34 @@ struct RowActionsTests {
         let below = controls.filter { $0.convert($0.bounds, to: cell.contentView).minY >= caption.maxY }
         #expect(above.count == 1)
         #expect(above.first?.accessibilityLabel == "More actions")
-        #expect(below.map(\.accessibilityLabel) == ["Repost", "Save"])
+        #expect(Set(below.map(\.accessibilityLabel)) == ["Repost", "Save"])
     }
 
-    /// The closing line reads `[comments][likes][repost][save]`, trailing —
-    /// what the post has, then what the viewer can do with it.
-    @Test func theClosingLineReadsCountsThenControls() {
+    /// The closing line reads `[save][repost] ······ [comments][likes]`: what
+    /// the viewer does leads, at the caption's inset, and what the post has
+    /// closes the line at the same inset on the other side.
+    @Test func theClosingLineReadsControlsThenCounts() {
         let cell = row()
         let ordered = pills(in: cell.contentView).sorted {
             $0.convert($0.bounds, to: cell.contentView).minX < $1.convert($1.bounds, to: cell.contentView).minX
         }
         #expect(ordered.count == 4)
-        #expect(ordered[0] is PostCardPillView && !(ordered[0] is PostActionPillView))
-        #expect(ordered[1] is PostCardPillView && !(ordered[1] is PostActionPillView))
-        #expect(ordered[2] is PostActionPillView)
-        #expect(ordered[3] is PostActionPillView)
+        #expect(ordered[0] is PostActionPillView)
+        #expect(ordered[1] is PostActionPillView)
+        #expect(ordered[2] is PostCardPillView && !(ordered[2] is PostActionPillView))
+        #expect(ordered[3] is PostCardPillView && !(ordered[3] is PostActionPillView))
+        let controls = buttons(in: cell.contentView).filter { $0.accessibilityLabel != "More actions" }
+            .sorted { $0.convert($0.bounds, to: cell.contentView).minX < $1.convert($1.bounds, to: cell.contentView).minX }
+        #expect(controls.map(\.accessibilityLabel) == ["Save", "Repost"])
+        let leading = ordered.first!.convert(ordered.first!.bounds, to: cell.contentView).minX
         let trailing = cell.contentView.bounds.maxX
-            - (ordered.last?.convert(ordered.last!.bounds, to: cell.contentView).maxX ?? 0)
+            - ordered.last!.convert(ordered.last!.bounds, to: cell.contentView).maxX
+        #expect(abs(leading - PostGridListRowCell.captionInset) < 0.5)
         #expect(abs(trailing - PostGridListRowCell.captionInset) < 0.5)
+        // And the two groups are apart: the slack is between them.
+        let gap = ordered[2].convert(ordered[2].bounds, to: cell.contentView).minX
+            - ordered[1].convert(ordered[1].bounds, to: cell.contentView).maxX
+        #expect(gap > PostGridListRowCell.chipGap * 4)
     }
 
     /// ⚠️ Every capsule on the line is the SAME height, measured against a
@@ -214,9 +224,10 @@ struct RowActionsTests {
         #expect(standIn.visibleRowActions == shown)
     }
 
-    /// ⚠️ A BARE band — a profile's own rows — names nobody and keeps the
-    /// date and the "...", on a line a pill tall rather than a disc tall.
-    @Test func aBareBandKeepsTheDateAndTheOverflowOnAShorterLine() throws {
+    /// ⚠️ A BARE band — a profile's own rows — names nobody and keeps only
+    /// the "...", on a line a pill tall rather than a disc tall; the date
+    /// moves to the closing line, leading it.
+    @Test func aBareBandKeepsTheOverflowAndTheDateLeadsTheClosingLine() throws {
         let cell = PostGridListRowCell(frame: CGRect(x: 0, y: 0, width: 343, height: 200))
         cell.configure(
             with: Self.post(), imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
@@ -238,8 +249,50 @@ struct RowActionsTests {
             return view.subviews.flatMap(labels)
         }
         let visible = labels(band).filter { !$0.isHidden && $0.superviewChainIsVisible }
-        #expect(visible.map(\.text) == [PostMetadata.compactAge(ofMillis: 0)])
+        #expect(visible.isEmpty)
         #expect(buttons(in: band).map(\.accessibilityLabel) == ["More actions"])
+
+        // The date, on the closing line, at the caption's inset — before the
+        // counters.
+        let age = PostMetadata.compactAge(ofMillis: 0)
+        let date = try #require(labels(cell.contentView).first {
+            $0.text == age && !$0.isHidden && $0.superviewChainIsVisible
+        })
+        let dateFrame = date.convert(date.bounds, to: cell.contentView)
+        #expect(abs(dateFrame.minX - PostGridListRowCell.captionInset) < 0.5)
+        let counters = pills(in: cell.contentView)
+        #expect(counters.count == 2)
+        for pill in counters {
+            let frame = pill.convert(pill.bounds, to: cell.contentView)
+            #expect(frame.minX > dateFrame.maxX)
+            #expect(abs(frame.midY - dateFrame.midY) < 1)
+        }
+    }
+
+    /// And a bare band with NOTHING to offer — the viewer's own post — is no
+    /// band: the caption starts at the card's top, and no "..." is drawn.
+    @Test func aBareBandWithNoMenuCollapses() throws {
+        let cell = PostGridListRowCell(frame: CGRect(x: 0, y: 0, width: 343, height: 200))
+        cell.configure(
+            with: Self.post(), imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            showsAuthorIdentity: false
+        )
+        cell.authorMenuActions = { [] }
+        let attributes = UICollectionViewLayoutAttributes(forCellWith: IndexPath(item: 0, section: 0))
+        attributes.frame = cell.frame
+        cell.bounds.size.height = cell.preferredLayoutAttributesFitting(attributes).frame.height
+        cell.layoutIfNeeded()
+
+        #expect(cell.revealCaptionTop == 0)
+        #expect(cell.authorBandModel == nil)
+        #expect(buttons(in: cell.contentView).isEmpty)
+        let caption = try #require(labels(in: cell.contentView).first {
+            $0.font == .preferredFont(forTextStyle: .body)
+        })
+        #expect(abs(caption.convert(caption.bounds, to: cell.contentView).minY
+            - PostGridListRowCell.captionTopInset) < 0.5)
+        // The row still says when.
+        #expect(cell.renderedAgeText == PostMetadata.compactAge(ofMillis: 0))
     }
 
     /// And a post that carries no author at all is bare whatever the caller

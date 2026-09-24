@@ -213,7 +213,7 @@ public final class SectionHeaderPillButton: UIButton {
     /// inline shape was something you could only see by scrolling back up to a
     /// header that was never a title in the first place. A list resting at its
     /// top has nothing pinned; it just has a top.
-    public func updatePresentation(in scrollView: UIScrollView) {
+    public func updatePresentation(in scrollView: UIScrollView, animated: Bool = true) {
         guard let host = superview else { return }
         let pinLine = scrollView.contentOffset.y + scrollView.adjustedContentInset.top
         let top = host.convert(host.bounds, to: scrollView).minY
@@ -223,7 +223,7 @@ public final class SectionHeaderPillButton: UIButton {
         // Later headers reach the line only long after this is satisfied, so it
         // costs them nothing.
         let isHoldingSomethingBack = pinLine > Metrics.morphDistance
-        setPresentation(isAtTheLine && isHoldingSomethingBack ? .pinned : .inline)
+        setPresentation(isAtTheLine && isHoldingSomethingBack ? .pinned : .inline, animated: animated)
     }
 
     /// Starts watching the enclosing scroll view, so every host gets this
@@ -240,19 +240,48 @@ public final class SectionHeaderPillButton: UIButton {
         // `.initial` so a header dequeued mid-scroll adopts its shape on the
         // frame it appears in, rather than arriving inline over a pinned
         // position and correcting itself on the next tick.
+        hasSettledOnce = false
         scrollObservation = scrollView.observe(
             \.contentOffset, options: [.initial, .new]
         ) { [weak self] scrollView, _ in
             MainActor.assumeIsolated {
-                // Un-animated on the very first look: adopting a shape is not a
-                // change the viewer made, and a header dequeued already pinned
-                // should not dissolve into place under them.
                 guard let self else { return }
-                if self.window == nil { self.presentation = .inline }
-                self.updatePresentation(in: scrollView)
+                // ⚠️ DEFERRED BY ONE TURN OF THE RUN LOOP, and it is the whole
+                // fix for a header that flickered into a title mid-scroll.
+                //
+                // `contentOffset` is written BEFORE the collection view lays
+                // out, so at the moment this fires a pinned header still has
+                // the frame of the previous tick. Scrolling up, that frame is
+                // one tick's travel BELOW the new pin line — and a fast flick
+                // moves more than `morphDistance` in one tick, so the header
+                // read as "off the line", dissolved into a title, and dissolved
+                // back once the layout pass re-pinned it. A shape that flips
+                // for one frame in the middle of a scroll is exactly the
+                // "header doing something" the crossfade exists to avoid.
+                //
+                // By the next turn the layout pass has run and every frame is
+                // consistent; a scroll tick never arrives in between, since
+                // the display link that drives it is itself a run-loop source.
+                // One evaluation per tick, whatever the number of writes.
+                guard !self.hasPendingPresentationUpdate else { return }
+                self.hasPendingPresentationUpdate = true
+                DispatchQueue.main.async { [weak self, weak scrollView] in
+                    guard let self, let scrollView else { return }
+                    self.hasPendingPresentationUpdate = false
+                    // Un-animated on the very first look: adopting a shape is
+                    // not a change the viewer made, and a header dequeued
+                    // already pinned should not dissolve into place under
+                    // them.
+                    let animated = self.hasSettledOnce
+                    self.hasSettledOnce = true
+                    self.updatePresentation(in: scrollView, animated: animated)
+                }
             }
         }
     }
+
+    private var hasPendingPresentationUpdate = false
+    private var hasSettledOnce = false
 
     private func enclosingScrollView() -> UIScrollView? {
         var view: UIView? = superview

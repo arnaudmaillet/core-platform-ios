@@ -22,7 +22,8 @@ private func row(
     comments: Int64? = 12,
     views: Int64? = 4_200,
     pages: Int = 1,
-    width: CGFloat = 390
+    width: CGFloat = 390,
+    publishedAtMS: Int64 = 0
 ) -> PostGridListRowCell {
     let cell = PostGridListRowCell(frame: CGRect(x: 0, y: 0, width: width, height: 400))
     let page = GalleryPost.MediaPage(thumbnailURL: URL(string: "mock://photo/1"))
@@ -33,7 +34,7 @@ private func row(
             isRepost: false,
             pages: kind == .text ? [] : Array(repeating: page, count: pages),
             caption: "A caption short enough to leave the card its own shape.",
-            publishedAtMS: 0,
+            publishedAtMS: publishedAtMS,
             reactionCount: reactions,
             commentCount: comments,
             viewCount: views
@@ -140,10 +141,10 @@ struct MediaMetaPillPlacementTests {
         }
     }
 
-    /// The page indicator is the preview's one piece of furniture, on its
-    /// bottom trailing corner at the furniture inset, and a pill tall so it
-    /// reads as the same kind of chip as the line below.
-    @Test func theIndicatorRestsOnThePreviewsBottomTrailingCorner() throws {
+    /// The page indicator is on the closing line, LEADING it — with the
+    /// controls, before the counters — under the preview rather than on it,
+    /// and a pill tall like everything else on the line.
+    @Test func theIndicatorLeadsTheClosingLineUnderThePreview() throws {
         let cell = row(kind: .photo, pages: 3)
         let preview = try #require(cell.mediaHeroRect)
         func indicators(_ view: UIView) -> [MediaPageIndicatorView] {
@@ -154,13 +155,52 @@ struct MediaMetaPillPlacementTests {
             indicators(cell.contentView).first { isVisible($0, within: cell.contentView) }
         )
         let frame = chip.convert(chip.bounds, to: cell.contentView)
-        let inset = PostGridListRowCell.mediaFurnitureInset
-        #expect(abs(preview.maxY - frame.maxY - inset) < 0.5)
+        #expect(frame.minY >= preview.maxY)
         #expect(abs(frame.height - PostMetaPillView.height) < 0.5)
-        // A single-media row's box is the preview; the chip sits at its
-        // trailing furniture inset. (A collection's page is narrower than
-        // the box by the peek, so the chip is measured against the box.)
-        #expect(frame.maxX <= cell.bounds.width - PostGridListRowCell.mediaInset - inset + 0.5)
+        // An unauthored post wears a bare band, so its date leads the line
+        // and the indicator follows it; both are in the leading half.
+        #expect(frame.minX >= PostGridListRowCell.captionInset - 0.5)
+        #expect(frame.midX < cell.bounds.midX)
+        for pill in visiblePills(in: cell) where !(pill is MediaPageIndicatorView) {
+            let counter = pill.convert(pill.bounds, to: cell.contentView)
+            #expect(counter.minX > frame.maxX)
+            #expect(abs(counter.midY - frame.midY) < 0.5)
+        }
+    }
+
+    /// ⚠️ THE INDICATOR YIELDS FIRST. On a narrow card the counts keep their
+    /// full width and the run of dots shortens; a clipped count is a wrong
+    /// count, a shorter run of dots still says "there is more".
+    @Test func theIndicatorGivesWayBeforeTheCounts() throws {
+        // A RECENT date, so the bare band's line carries "1h" rather than a
+        // full 1970 date that would fill the row on its own and put every
+        // chip below its floor — nothing to measure then.
+        let ninetyMinutesAgo = Int64(Date().timeIntervalSince1970 * 1000) - 90 * 60 * 1000
+        let wide = row(
+            kind: .photo, reactions: 1_600_000, comments: 128_000, pages: 12, width: 390,
+            publishedAtMS: ninetyMinutesAgo
+        )
+        // Narrow enough that five dots no longer fit beside two six-figure
+        // counts, wide enough that two still do.
+        let narrow = row(
+            kind: .photo, reactions: 1_600_000, comments: 128_000, pages: 12, width: 262,
+            publishedAtMS: ninetyMinutesAgo
+        )
+        func indicator(_ cell: PostGridListRowCell) -> MediaPageIndicatorView? {
+            func walk(_ view: UIView) -> [MediaPageIndicatorView] {
+                if let chip = view as? MediaPageIndicatorView { return [chip] }
+                return view.subviews.flatMap(walk)
+            }
+            return walk(cell.contentView).first
+        }
+        let wideChip = try #require(indicator(wide))
+        let narrowChip = try #require(indicator(narrow))
+        #expect(narrowChip.bounds.width < wideChip.bounds.width)
+        #expect(narrowChip.bounds.width >= narrowChip.minimumChipWidth - 0.5)
+        for pill in visiblePills(in: narrow) where !(pill is MediaPageIndicatorView) {
+            let wanted = pill.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
+            #expect(pill.bounds.width >= wanted - 0.5)
+        }
     }
 
     /// A single photograph shows no indicator at all.

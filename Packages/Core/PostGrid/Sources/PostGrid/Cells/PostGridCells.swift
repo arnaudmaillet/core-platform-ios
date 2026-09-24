@@ -109,7 +109,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// seamless. The window has to be the card, and the offset has to be
     /// carried instead of avoided.
     public var revealCaptionTop: CGFloat {
-        PostAuthorBandView.captionOffset(showsIdentity: showsAuthorIdentity)
+        authorBand.captionOffset
     }
 
     /// The caption's own height plus the inset above it, in the register the
@@ -999,7 +999,10 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
 
     /// Everything the preview wears that the flight does not reproduce.
     private var furnitureViews: [UIView] {
-        [pageIndicator]
+        // Nothing, since the counters and the page indicator moved to the
+        // closing line under the preview: the flight carries the media and
+        // the card around it stays, line included.
+        []
     }
 
     /// Whether a flight is currently standing in for this row's media.
@@ -1373,6 +1376,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     public var onRepostTapped: (() -> Void)? {
         didSet {
             repostPill.isHidden = onRepostTapped == nil
+            syncClosingLine()
         }
     }
 
@@ -1380,6 +1384,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     public var onBookmarkTapped: (() -> Void)? {
         didSet {
             bookmarkPill.isHidden = onBookmarkTapped == nil
+            syncClosingLine()
         }
     }
 
@@ -1415,6 +1420,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         repostPill.isHidden = !repost
         bookmarkPill.isHidden = !bookmark
         isBookmarked = saved
+        syncClosingLine()
     }
 
     /// What the row's date is CURRENTLY reading, so a stand-in can show the
@@ -1431,7 +1437,11 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// The band this row is drawing — the date included — so a reveal's prop
     /// can be configured from the row's own reading rather than from a second
     /// look at the post.
-    public var authorBandModel: PostAuthorBandView.Model? { authorBand.model }
+    public var authorBandModel: PostAuthorBandView.Model? {
+        // A collapsed band draws nothing, and a prop copying it would draw a
+        // "..." over a card that has none — see `PostAuthorBandView.isCollapsed`.
+        authorBand.isCollapsed ? nil : authorBand.model
+    }
 
     /// What the row's closing line is actually drawing, so a test can compare
     /// a stand-in against a row rather than against a literal.
@@ -1443,6 +1453,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     public func overrideAgeText(_ text: String) {
         guard let model = authorBand.model else { return }
         authorBand.configure(with: model.withAge(text), imagePipeline: nil)
+        closingAgeLabel.text = text
     }
 
     private let card = UIView()
@@ -1458,11 +1469,8 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// The VIEW is shared with the reveal's transition prop — see
     /// `PostAuthorBandView` for why that matters.
     private let authorBand = PostAuthorBandView()
-    /// Whether the band names a person, or is the bare date-and-overflow line
-    /// a profile's own posts wear. Decides the caption's offset.
-    private var showsAuthorIdentity = true
-    /// The caption hangs off the band, which every row wears in one shape or
-    /// the other.
+    /// The caption hangs off the band — at the band's gap when the band draws
+    /// something, and flush when it has collapsed to nothing.
     private var captionFollowsBand: NSLayoutConstraint!
     private let captionLabel = UILabel()
     private var isCaptionExpanded = false
@@ -1494,10 +1502,14 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     )
     private var closingLikesPill: PostCardPillView!
     private var closingCommentsPill: PostCardPillView!
-    /// The closing row's two controls, each in its own capsule beside the two
-    /// counters: `[comments][likes][repost][save]`. One capsule per verb, so a
-    /// hidden control closes its own slot and the row never carries an empty
-    /// capsule.
+    /// The closing row's date — drawn only when the band above is BARE, so a
+    /// profile's own cards still say when. On a card with an identity the
+    /// date is on the handle's line instead.
+    private let closingAgeLabel = UILabel()
+    /// The closing row's two controls, each in its own capsule, leading the
+    /// line: `[save][repost][pages] ······ [comments][likes]`. One capsule per
+    /// verb, so a hidden control closes its own slot and the row never carries
+    /// an empty capsule.
     private let repostButton = PostActionPillView.makeGlyphControl(
         systemName: "arrow.2.squarepath", label: "Repost"
     )
@@ -1536,6 +1548,14 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     private var metaFollowsCaption: NSLayoutConstraint!
     /// Active for media rows only: the closing row hangs off the preview.
     private var metaFollowsMedia: NSLayoutConstraint!
+    /// The closers a card uses when its closing line has NOTHING on it — no
+    /// count, nothing wired, no date to show: the caption or the preview then
+    /// closes the card at the content inset, and the line is not paid for.
+    private var captionClosesCard: NSLayoutConstraint!
+    private var mediaClosesCard: NSLayoutConstraint!
+    /// The give in the closing line, kept so the line can tell whether it is
+    /// showing anything but this.
+    private let lineSpacer = UIView()
     /// Active for text rows only: the line is the card's last thing. A media
     /// row ends at the preview instead — see `mediaClosesCard`.
     private var metaClosesCard: NSLayoutConstraint!
@@ -1588,6 +1608,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
             equalTo: authorBand.bottomAnchor, constant: Self.authorFollowGap
         )
         captionFollowsBand.isActive = true
+        authorBand.onShapeChange = { [weak self] in self?.syncCaptionToBand() }
 
         mediaView.contentMode = .scaleAspectFill
         mediaView.clipsToBounds = true
@@ -1635,22 +1656,28 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         hold.cancelsTouchesInView = true
         mediaView.addGestureRecognizer(hold)
 
-        buildMediaFurniture()
-
-        let spacer = UIView()
+        let spacer = lineSpacer
         spacer.setContentHuggingPriority(UILayoutPriority(1), for: .horizontal)
         // ⚠️ ONE CLOSING ROW, ON EVERY CARD, and it is where every control is.
         //
-        //     ·······  [comments][likes][repost][save]
+        //     [save][repost][2h][pages] ·······  [comments][likes]
         //
-        // The counters used to sit on a media card's photograph and under a
-        // text card's caption, and the repost and save controls sat in the
+        // What the viewer DOES leads the line and what the post HAS closes
+        // it. The counters used to sit on a media card's photograph and under
+        // a text card's caption, and the repost and save controls sat in the
         // header beside the name — two clusters of controls per card, and a
         // different one depending on whether the post carried a picture. Now
         // the header says who and when, the picture is a picture, and this
         // row is the one place a finger goes. It closes the card whatever the
         // card holds: under the caption of a text post, under the preview of
         // a media post.
+        //
+        // The date joins the leading group only on a card whose band is bare
+        // (a profile's own), and the page indicator only on a collection. Of
+        // everything on the line the INDICATOR is what gives way first when
+        // the width runs out — a shorter run of dots still says "there is
+        // more" — and a count never truncates: a clipped count is a wrong
+        // count.
         //
         // Card pills, not media ones: what is behind them is the card's flat
         // fill, which a material would resolve to and vanish into.
@@ -1662,22 +1689,53 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         bookmarkButton.addTarget(self, action: #selector(bookmarkPressed), for: .touchUpInside)
         repostPill.isHidden = true
         bookmarkPill.isHidden = true
+        closingAgeLabel.font = .preferredFont(forTextStyle: .footnote)
+        closingAgeLabel.adjustsFontForContentSizeCategory = true
+        closingAgeLabel.textColor = .secondaryLabel
+        closingAgeLabel.setContentCompressionResistancePriority(.init(999), for: .horizontal)
+        closingAgeLabel.isHidden = true
+        // A pill tall, like everything else on the line, and the first thing
+        // to yield: below the counts' 999 and above its own two-dot floor.
+        pageIndicator.setContentCompressionResistancePriority(.init(740), for: .horizontal)
+        pageIndicator.setContentHuggingPriority(.required, for: .horizontal)
+        let dotFloor = pageIndicator.widthAnchor.constraint(
+            greaterThanOrEqualToConstant: pageIndicator.minimumChipWidth
+        )
+        dotFloor.priority = UILayoutPriority(749)
+        let indicatorHeight = pageIndicator.heightAnchor.constraint(equalToConstant: PostMetaPillView.height)
+        indicatorHeight.priority = UILayoutPriority(999)
+        NSLayoutConstraint.activate([dotFloor, indicatorHeight])
+        pageIndicator.isHidden = true
         let metaRow = UIStackView(
-            arrangedSubviews: [spacer, closingCommentsPill, closingLikesPill, repostPill, bookmarkPill]
+            arrangedSubviews: [
+                bookmarkPill, repostPill, closingAgeLabel, pageIndicator,
+                spacer, closingCommentsPill, closingLikesPill
+            ]
         )
         self.metaRow = metaRow
         metaRow.axis = .horizontal
         metaRow.alignment = .center
         // The chips' own gap: capsules side by side belong together more
         // closely than a run of loose labels did. The spacer takes up
-        // everything else.
+        // everything else — and the gap either side of it is the spacer's
+        // own, so a line with nothing leading it still ends at the counters.
         metaRow.spacing = Self.chipGap
         metaRow.constrain(in: card) { parent in
             metaRow.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: Self.captionInset)
             metaRow.trailingAnchor.constraint(
                 equalTo: parent.trailingAnchor, constant: -Self.captionInset
             )
+            // A pill tall whatever is on it: a line holding only the date is
+            // the same line as one holding capsules, and the card under it
+            // the same height.
+            metaRow.heightAnchor.constraint(equalToConstant: PostMetaPillView.height)
         }
+        captionClosesCard = captionLabel.bottomAnchor.constraint(
+            equalTo: card.bottomAnchor, constant: -Self.contentInset
+        )
+        mediaClosesCard = mediaView.bottomAnchor.constraint(
+            equalTo: card.bottomAnchor, constant: -Self.mediaInset
+        )
         metaFollowsCaption = metaRow.topAnchor.constraint(
             equalTo: captionLabel.bottomAnchor, constant: Self.captionFollowGap
         )
@@ -1695,50 +1753,31 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
             ),
             mediaView.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: Self.mediaInset),
             mediaView.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -Self.mediaInset),
-            mediaHeight,
-            // The closing row follows the preview, at the gap the caption
-            // keeps to whatever follows it.
-            metaFollowsMedia
+            mediaHeight
         ]
+    }
+
+    /// Whether the closing line shows anything at all, and the card's closer
+    /// with it. Asked after every change to what is on the line — a
+    /// configure, a control wired or unwired, scenery drawn — because a line
+    /// with nothing on it is not drawn and not paid for: the caption or the
+    /// preview closes the card instead.
+    private func syncClosingLine() {
+        let hasMedia = !mediaView.isHidden
+        let isEmpty = metaRow.arrangedSubviews.allSatisfy { $0.isHidden || $0 === lineSpacer }
+        metaRow.isHidden = isEmpty
+        // The line keeps hanging off the caption or the preview either way —
+        // hidden, it draws nothing, and an unconstrained hidden view is an
+        // ambiguity for nothing.
+        metaFollowsCaption.isActive = !hasMedia
+        metaFollowsMedia.isActive = hasMedia
+        metaClosesCard.isActive = !isEmpty
+        captionClosesCard.isActive = isEmpty && !hasMedia
+        mediaClosesCard.isActive = isEmpty && hasMedia
     }
 
     @objc private func repostPressed() { onRepostTapped?() }
     @objc private func bookmarkPressed() { onBookmarkTapped?() }
-
-    /// The preview's one piece of furniture: the page indicator, resting on
-    /// the preview's bottom trailing corner — inside the preview so that the
-    /// ONE alpha that conceals the media while a flight is in the air takes it
-    /// too (see `setHeroMediaConcealed`).
-    ///
-    /// Held off both edges by `mediaFurnitureInset`, which is what puts it
-    /// clear of the preview's corner arcs and lets it be a capsule — see that
-    /// property for the geometry.
-    private func buildMediaFurniture() {
-        pageIndicator.constrain(in: mediaView) { parent in
-            pageIndicator.trailingAnchor.constraint(
-                equalTo: parent.trailingAnchor, constant: -Self.mediaFurnitureInset
-            )
-            pageIndicator.bottomAnchor.constraint(
-                equalTo: parent.bottomAnchor, constant: -Self.mediaFurnitureInset
-            )
-            // ⚠️ The SAME HEIGHT as the card's text chips, not its own. A row
-            // of 6pt dots is shorter than a line of caption2, so a chip sized
-            // by its contents reads as a different kind of thing from the
-            // capsules under the preview.
-            pageIndicator.heightAnchor.constraint(equalToConstant: PostMetaPillView.height)
-            pageIndicator.leadingAnchor.constraint(
-                greaterThanOrEqualTo: parent.leadingAnchor, constant: Self.mediaFurnitureInset
-            )
-        }
-        // The two-dot floor, below the counts' required resistance: at the
-        // largest accessibility sizes something has to give, and a shorter run
-        // of dots still says "there is more, you are here".
-        let dotFloor = pageIndicator.widthAnchor.constraint(
-            greaterThanOrEqualToConstant: pageIndicator.minimumChipWidth
-        )
-        dotFloor.priority = UILayoutPriority(749)
-        dotFloor.isActive = true
-    }
 
     /// The carousel, built on first use — most posts have one piece of media and
     /// should not pay for a scroll view they will never scroll.
@@ -1822,8 +1861,17 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         to post: GalleryPost, imagePipeline: ImagePipeline, showsIdentity: Bool
     ) {
         let model = PostAuthorBandView.Model(post: post, showsIdentity: showsIdentity)
-        showsAuthorIdentity = model.showsIdentity
         authorBand.configure(with: model, imagePipeline: imagePipeline)
+        // A bare band says nothing about WHEN; the closing line does.
+        closingAgeLabel.text = model.age
+        closingAgeLabel.isHidden = model.showsIdentity
+    }
+
+    /// Follows the band's shape: the caption sits a gap under a band that
+    /// draws something and flush with the card's top under one that has
+    /// collapsed — a profile's own post with nothing to offer in a "...".
+    private func syncCaptionToBand() {
+        captionFollowsBand.constant = authorBand.isCollapsed ? 0 : Self.authorFollowGap
     }
 
     @available(*, unavailable)
@@ -1995,9 +2043,6 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // row is reconfigured, and everything above has just set the furniture
         // visible. Without this the badge lights up mid-dismissal.
         if isHeroMediaConcealed { setHeroMediaConcealed(true) }
-        // The closing row follows the caption on a text card and the preview
-        // on a media card; either way it closes the card.
-        metaFollowsCaption.isActive = !hasMedia
         NSLayoutConstraint.deactivate(hasMedia ? [] : mediaConstraints)
         NSLayoutConstraint.activate(hasMedia ? mediaConstraints : [])
 
@@ -2026,6 +2071,8 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
             ? { [weak self] in self?.onCommentsTapped?() }
             : nil
         closingCommentsPill.setTapHandler(openComments)
+        // ⚠️ AFTER the indicator has been configured below, since it is on the
+        // line too — see the end of this method.
 
         mediaView.image = nil
         mediaView.backgroundColor = post.kind == .video ? .darkGray : .tertiarySystemFill
@@ -2035,6 +2082,9 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // post on exactly the path it has always taken — same load, same video
         // surface, same cover.
         pageIndicator.configure(count: post.pages.count, current: 0)
+        // Everything on the line is decided now: the counts, the date, the
+        // indicator. The controls arrive from the host afterwards and re-ask.
+        syncClosingLine()
         if post.isCollection {
             // The box behind the pages is the CARD, not the placeholder fill a
             // single-media row uses: with a gutter between pages and a sliver of

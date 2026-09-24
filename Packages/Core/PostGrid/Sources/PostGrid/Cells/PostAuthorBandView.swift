@@ -8,7 +8,7 @@ import UIKit
 /// ```
 ///   identity                                   bare
 ///   ┌───────────────────────────────────┐      ┌───────────────────────────┐
-///   │ (◯) Name                      ••• │      │ 2h                    ••• │
+///   │ (◯) Name                      ••• │      │                       ••• │
 ///   │     @handle · 2h                  │      └───────────────────────────┘
 ///   └───────────────────────────────────┘
 /// ```
@@ -17,9 +17,10 @@ import UIKit
 /// on the handle's line — one line that says who and when, so the row below
 /// the caption is free for what the viewer can DO. **Bare** is what a card
 /// wears where the identity would only repeat the screen: a profile's own
-/// posts, already under that person's name. The date and the overflow are
-/// what remain, on a line the height of a pill, because a date alone does
-/// not need a disc's worth of card.
+/// posts, already under that person's name. The overflow is what remains, on
+/// a line the height of a pill — and when there is no overflow either (the
+/// viewer's own posts), no line at all: the band collapses and the caption
+/// starts at the card's top. The date then lives on the card's closing line.
 ///
 /// The trailing end is the "..." alone. Repost and save used to sit beside it
 /// in a capsule, which gave every card two clusters of controls — one at the
@@ -152,18 +153,44 @@ public final class PostAuthorBandView: UIView {
     /// whether the control is drawn at all, and again when it is pressed, for
     /// what it says.
     public var menuActions: (() -> [PostCardMenuAction])? {
-        didSet { menuButton.isHidden = menuActions?().isEmpty ?? true }
+        didSet {
+            menuButton.isHidden = menuActions?().isEmpty ?? true
+            syncShape()
+        }
     }
 
     /// What the band is currently drawing.
     public private(set) var model: Model?
 
+    /// Fired when the band changes between drawing something and drawing
+    /// nothing, so the row can close the gap it keeps under it.
+    public var onShapeChange: (() -> Void)?
+
+    /// A BARE band with no "..." to offer draws nothing at all, and is then
+    /// no band: zero tall, so the caption starts at the card's top. A
+    /// profile's own posts, on the viewer's own profile, are the case.
+    public private(set) var isCollapsed = false
+
+    /// How far below a card's top edge its caption begins under THIS band —
+    /// the band's height plus its gap, or nothing when the band is nothing.
+    public var captionOffset: CGFloat {
+        guard let model, !isCollapsed else { return 0 }
+        return Self.captionOffset(showsIdentity: model.showsIdentity)
+    }
+
+    private func syncShape() {
+        let isBare = model.map { !$0.showsIdentity } ?? false
+        let collapsed = isBare && menuButton.isHidden
+        guard collapsed != isCollapsed else { return }
+        isCollapsed = collapsed
+        bareHeightConstraint.constant = collapsed ? 0 : Self.bareHeight
+        onShapeChange?()
+    }
+
     private let avatar = MonogramAvatarView(diameter: PostAuthorBandView.avatarDiameter)
     private let avatarImage = AvatarImageView()
     private let nameLabel = UILabel()
     private let handleLabel = UILabel()
-    /// The bare band's date, alone on the leading side.
-    private let bareAgeLabel = UILabel()
     private let menuButton = PostActionPillView.makeGlyphControl(systemName: "ellipsis", label: "More actions")
     private let identityControl = UIControl()
     /// The identity's vertical claim on the band — released for a bare band,
@@ -191,12 +218,10 @@ public final class PostAuthorBandView: UIView {
         nameLabel.textColor = .label
         nameLabel.lineBreakMode = .byTruncatingTail
 
-        for label in [handleLabel, bareAgeLabel] {
-            label.font = .preferredFont(forTextStyle: .footnote)
-            label.adjustsFontForContentSizeCategory = true
-            label.textColor = .secondaryLabel
-            label.lineBreakMode = .byTruncatingTail
-        }
+        handleLabel.font = .preferredFont(forTextStyle: .footnote)
+        handleLabel.adjustsFontForContentSizeCategory = true
+        handleLabel.textColor = .secondaryLabel
+        handleLabel.lineBreakMode = .byTruncatingTail
 
         let identity = UIStackView(arrangedSubviews: [nameLabel, handleLabel])
         identity.axis = .vertical
@@ -224,7 +249,6 @@ public final class PostAuthorBandView: UIView {
         identity.isUserInteractionEnabled = false
         nameLabel.isUserInteractionEnabled = false
         handleLabel.isUserInteractionEnabled = false
-        bareAgeLabel.isUserInteractionEnabled = false
 
         // The menu IS the button's action — no touch-up handler, so there is no
         // frame in which the control is pressed and nothing has appeared.
@@ -250,7 +274,6 @@ public final class PostAuthorBandView: UIView {
         // clipped.
         nameLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         handleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        bareAgeLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         // The picture is laid OVER the monogram rather than replacing it — the
         // app's avatar contract: initials are the rendered state and a
@@ -261,12 +284,10 @@ public final class PostAuthorBandView: UIView {
         identityControl.addSubview(avatar)
         identityControl.addSubview(identity)
         addSubview(identityControl)
-        addSubview(bareAgeLabel)
         addSubview(menuButton)
         avatar.translatesAutoresizingMaskIntoConstraints = false
         identity.translatesAutoresizingMaskIntoConstraints = false
         identityControl.translatesAutoresizingMaskIntoConstraints = false
-        bareAgeLabel.translatesAutoresizingMaskIntoConstraints = false
         identityHeightConstraints = [
             identityControl.topAnchor.constraint(equalTo: topAnchor),
             identityControl.bottomAnchor.constraint(equalTo: bottomAnchor)
@@ -289,16 +310,6 @@ public final class PostAuthorBandView: UIView {
             identity.centerYAnchor.constraint(equalTo: avatar.centerYAnchor),
             identity.trailingAnchor.constraint(equalTo: identityControl.trailingAnchor),
 
-            // The bare date sits on the caption's own column: the line is
-            // read with the words under it, not with the capsules two lines
-            // further down, and a padding borrowed from a capsule reads as
-            // an indent beside a bare "...".
-            bareAgeLabel.leadingAnchor.constraint(equalTo: leadingAnchor),
-            bareAgeLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            bareAgeLabel.trailingAnchor.constraint(
-                lessThanOrEqualTo: menuButton.leadingAnchor, constant: -Spacing.sm
-            ),
-
             menuButton.trailingAnchor.constraint(equalTo: trailingAnchor),
             // ⚠️ TOP-ALIGNED, and it is the CARD's corner that decides that.
             //
@@ -311,7 +322,6 @@ public final class PostAuthorBandView: UIView {
         ])
         NSLayoutConstraint.activate(identityHeightConstraints)
         menuButton.isHidden = true
-        bareAgeLabel.isHidden = true
     }
 
     @available(*, unavailable)
@@ -330,8 +340,6 @@ public final class PostAuthorBandView: UIView {
 
         let showsIdentity = model.showsIdentity
         identityControl.isHidden = !showsIdentity
-        bareAgeLabel.isHidden = showsIdentity
-        bareAgeLabel.text = model.age
         if showsIdentity {
             bareHeightConstraint.isActive = false
             NSLayoutConstraint.activate(identityHeightConstraints)
@@ -339,6 +347,7 @@ public final class PostAuthorBandView: UIView {
             NSLayoutConstraint.deactivate(identityHeightConstraints)
             bareHeightConstraint.isActive = true
         }
+        syncShape()
 
         nameLabel.text = model.name
         // "@handle · 2h": who and when on one quiet line. A post with no
@@ -375,6 +384,7 @@ public final class PostAuthorBandView: UIView {
     /// transition exists to make invisible.
     public func showMenuControlAsScenery() {
         menuButton.isHidden = false
+        syncShape()
     }
 
     /// Drops any in-flight picture load. Called from the row's reuse.

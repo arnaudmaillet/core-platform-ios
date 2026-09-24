@@ -763,10 +763,14 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
     /// Read from the POST rather than from the cell, so it answers for a row
     /// that has scrolled out as readily as for one on screen.
     func textRowAuthorBand(for postID: PostID) -> PostAuthorBandView.Model? {
-        if let model = (cell(for: postID) as? PostGridListRowCell)?.authorBandModel { return model }
-        return posts.first { $0.id == postID }.map {
-            PostAuthorBandView.Model(post: $0, showsIdentity: showsAuthorIdentity(for: $0))
-        }
+        if let row = cell(for: postID) as? PostGridListRowCell { return row.authorBandModel }
+        guard let post = posts.first(where: { $0.id == postID }) else { return nil }
+        let showsIdentity = showsAuthorIdentity(for: post)
+        // A bare band with no "..." is no band — see
+        // `PostAuthorBandView.isCollapsed` — and a prop for it would draw a
+        // control the card does not have.
+        guard showsIdentity || showsAuthorMenu(for: post) else { return nil }
+        return PostAuthorBandView.Model(post: post, showsIdentity: showsIdentity)
     }
 
 
