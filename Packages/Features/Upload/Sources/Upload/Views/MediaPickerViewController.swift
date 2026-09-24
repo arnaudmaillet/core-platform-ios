@@ -605,12 +605,7 @@ private extension MediaPickerViewController {
     /// grid of shimmering layers under the album would keep animating for
     /// nothing.
     func dismissSkeleton() {
-        guard skeleton.superview != nil else { return }
-        UIView.animate(withDuration: 0.25, delay: 0, options: [.beginFromCurrentState]) {
-            self.skeleton.alpha = 0
-        } completion: { _ in
-            self.skeleton.removeFromSuperview()
-        }
+        skeleton.fadeOutSkeleton(removing: true)
     }
 }
 
