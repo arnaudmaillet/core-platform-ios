@@ -91,9 +91,9 @@ struct ProfileBannerFormatTests {
         #expect((1 - stops[climb + 1]) * banner.height <= ProfileBannerView.posterFootDepth + 0.5)
     }
 
-    /// The climb to the counters is eased in: gentle at the top, steep at
-    /// the bottom. Halfway along it, the tone is a quarter of what it will
-    /// be at the counters, not half.
+    /// The climb to the counters is eased in: gentle at the top, steeper at
+    /// the bottom, and between a line and a square — halfway along it, the
+    /// tone is about a third of what it will be at the counters.
     @Test func aPostersClimbIsGentleFirstAndSteepLast() {
         let header = header(format: .poster)
         let alphas = header.debugBannerFadeAlphas
@@ -112,7 +112,10 @@ struct ProfileBannerFormatTests {
         // opacities, not in where they land.
         let spans = (1...climb).map { stops[$0] - stops[$0 - 1] }
         for span in spans { #expect(abs(span - spans[0]) < 0.001) }
-        #expect(abs(alphas[climb / 2] - ProfileBannerView.posterFadeAtCounters / 4) < 0.001)
+        let halfway = ProfileBannerView.posterFadeAtCounters * pow(0.5, ProfileBannerView.posterClimbExponent)
+        #expect(abs(alphas[climb / 2] - halfway) < 0.001)
+        #expect(halfway > ProfileBannerView.posterFadeAtCounters / 4)
+        #expect(halfway < ProfileBannerView.posterFadeAtCounters / 2)
     }
 
     /// On the way up the picture lags the content, and a poster is gone by

@@ -167,15 +167,16 @@ final class ProfileBannerView: UIView {
     /// The run-out's opacity at `t` of the way from its start to the
     /// counters, as a share of `posterFadeAtCounters`.
     ///
-    /// Eased IN: gentle at the top, steep at the bottom. A linear ramp put
+    /// Eased IN: gentle at the top, steeper at the bottom. A linear ramp put
     /// as much of the page's tone over the picture's upper half as over
     /// its lower, so the poster started greying the moment the run-out
-    /// began. Squared, the first half of the climb spends a quarter of the
-    /// tone and the picture stays itself for longer; the tone then arrives
-    /// quickly where the type needs it.
+    /// began; a square, tried next, held the tone back too long and then
+    /// dumped it. This sits between the two — `t^1.5` — so the first half
+    /// of the climb spends about a third of the tone.
+    static let posterClimbExponent: CGFloat = 1.5
     static func posterClimb(_ t: CGFloat) -> CGFloat {
         let t = max(0, min(t, 1))
-        return t * t
+        return pow(t, posterClimbExponent)
     }
 
     /// The poster's stops, as (location, alpha) pairs, for a banner of
