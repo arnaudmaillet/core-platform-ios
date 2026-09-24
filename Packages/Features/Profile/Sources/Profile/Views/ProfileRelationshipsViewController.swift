@@ -89,7 +89,12 @@ final class ProfileRelationshipsViewController: UIViewController {
             )
         }
         let start = Self.directions.firstIndex(of: viewModel.direction) ?? 0
-        self.pager = HorizontalPagerView(pages: pages.map(\.view), initialIndex: start)
+        // ⚠️ LAZY, AND THE DIFFERENCE IS THE WHOLE PUSH. `pages.map(\.view)`
+        // loaded all three lists here, in the init, and each rendered a
+        // viewport of skeleton rows before the push began —
+        // `-presentation-budget` blamed this screen for ~200 ms of it. A page
+        // is made when the pager is about to show it (charter P3).
+        self.pager = HorizontalPagerView(lazyPages: pages.map { page in { page.view } }, initialIndex: start)
         super.init(nibName: nil, bundle: nil)
         // The profile underneath hides the tab bar on push; this screen is one
         // level deeper and must not bring it back.

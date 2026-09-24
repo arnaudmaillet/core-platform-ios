@@ -65,6 +65,9 @@ public final class HorizontalPagerView: UIView {
     private var reportedIndex: Int
     private let scrollView = HorizontalPagerScrollView()
     private let pages: [UIView]
+    /// One maker per page for a pager built with `init(lazyPages:)`; nil once
+    /// that page's view has been made and installed in its host.
+    private var makers: [(() -> UIView)?]
     private var lastLayoutWidth: CGFloat = 0
     /// Weak, and compared by identity: a page rebuilt behind the pager gets a
     /// new scroller, and republishing the same one on every layout pass would
@@ -75,8 +78,34 @@ public final class HorizontalPagerView: UIView {
     ///   edge effect under the header over it (`UIScrollView.prefersClearTopEdge`).
     ///   True for every host but one: the media picker leaves its effect
     ///   alone, and says why where it builds its pager.
-    public init(pages: [UIView], initialIndex: Int = 0, prefersClearTopEdge: Bool = true) {
+    public convenience init(pages: [UIView], initialIndex: Int = 0, prefersClearTopEdge: Bool = true) {
+        self.init(pages: pages, makers: [], initialIndex: initialIndex, prefersClearTopEdge: prefersClearTopEdge)
+    }
+
+    /// A pager whose pages are MADE when they are about to be seen, not when
+    /// the pager is.
+    ///
+    /// ⚠️ **THIS IS WHAT KEEPS A CONTAINER'S PUSH TO ONE PAGE'S COST (charter
+    /// P3).** A container that hands over `children.map(\.view)` loads every
+    /// child's view in its own init — the relationship lists rendered three
+    /// skeleton pages, the inbox four surfaces, in the turn that pushed them.
+    /// Here each page is a closure; the one at `initialIndex` runs at once
+    /// (the page on screen must be there at frame 0), and every other runs the
+    /// first time a scroll, a scrub or a `setActivePage` brings it within
+    /// reach — from `scrollViewDidScroll`, which is not an animation block, so
+    /// a page made mid-swipe lays out outside anyone's animation (P15).
+    ///
+    /// Each lazy page lives in a plain host view so the page chain, the
+    /// constraints and `OnScreenScroller` see the same hierarchy either way.
+    public convenience init(lazyPages: [() -> UIView], initialIndex: Int = 0, prefersClearTopEdge: Bool = true) {
+        let hosts = lazyPages.map { _ in UIView() }
+        self.init(pages: hosts, makers: lazyPages, initialIndex: initialIndex, prefersClearTopEdge: prefersClearTopEdge)
+        installPageIfNeeded(activeIndex)
+    }
+
+    private init(pages: [UIView], makers: [() -> UIView], initialIndex: Int, prefersClearTopEdge: Bool) {
         self.pages = pages
+        self.makers = makers
         let start = pages.indices.contains(initialIndex) ? initialIndex : 0
         activeIndex = start
         reportedIndex = start
@@ -137,6 +166,23 @@ public final class HorizontalPagerView: UIView {
     /// progress anyone heard is from part-way through, so the header's lens is
     /// left pointing at a different tab than the one on screen. Called when
     /// the inbox returns, which is BEFORE the pop draws its first frame.
+    /// Makes a lazy page's view and pins it into its host; nothing for an
+    /// eager pager or a page already made.
+    private func installPageIfNeeded(_ index: Int) {
+        guard makers.indices.contains(index), let make = makers[index] else { return }
+        makers[index] = nil
+        let page = make()
+        page.pin(to: pages[index])
+    }
+
+    /// The pages a fractional progress touches: both neighbours of a
+    /// position between two pages, one page when settled on it.
+    private func installPages(around progress: CGFloat) {
+        guard !makers.isEmpty else { return }
+        installPageIfNeeded(Int(progress.rounded(.down)))
+        installPageIfNeeded(Int(progress.rounded(.up)))
+    }
+
     public func reassertActivePage() {
         guard bounds.width > 0, pages.indices.contains(activeIndex) else { return }
         scrollView.setContentOffset(CGPoint(x: offsetX(for: activeIndex), y: 0), animated: false)
@@ -203,6 +249,7 @@ public final class HorizontalPagerView: UIView {
     /// to `scrollViewDidScroll` — was simply wrong.
     public func setActivePage(_ index: Int, animated: Bool) {
         guard pages.indices.contains(index), index != activeIndex else { return }
+        installPageIfNeeded(index)
         activeIndex = index
         guard bounds.width > 0 else { return }
         scrollView.setContentOffset(CGPoint(x: offsetX(for: index), y: 0), animated: animated)
@@ -231,6 +278,7 @@ public final class HorizontalPagerView: UIView {
     public func scrub(to progress: CGFloat) {
         guard bounds.width > 0, pages.count > 1 else { return }
         let clamped = min(max(progress, 0), CGFloat(pages.count - 1))
+        installPages(around: clamped)
         let slot = isRTL ? CGFloat(pages.count - 1) - clamped : clamped
         scrollView.setContentOffset(CGPoint(x: slot * bounds.width, y: 0), animated: false)
     }
@@ -308,6 +356,7 @@ public final class HorizontalPagerView: UIView {
 extension HorizontalPagerView: UIScrollViewDelegate {
     public func scrollViewDidScroll(_ scrollView: UIScrollView) {
         guard bounds.width > 0 else { return }
+        installPages(around: progress)
         onProgress?(progress)
     }
 

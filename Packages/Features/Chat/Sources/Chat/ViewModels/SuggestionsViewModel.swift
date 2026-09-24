@@ -27,7 +27,10 @@ public final class SuggestionsViewModel {
     private var accounts: [SuggestedAccount] = []
     private var following: Set<ProfileID> = []
     private var dismissed: Set<ProfileID> = []
-    private var phase: Phase = .loading { didSet { onPhaseChange?(phase) } }
+    /// Readable, because a surface's view can be built after the first phase
+    /// landed (the inbox no longer loads every surface up front) and must
+    /// render what is current, not `.loading`.
+    public private(set) var phase: Phase = .loading { didSet { onPhaseChange?(phase) } }
     private var load: Task<Void, Never>?
     private var hasLoaded = false
 
