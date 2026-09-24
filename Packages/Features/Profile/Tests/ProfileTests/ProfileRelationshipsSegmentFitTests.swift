@@ -205,15 +205,26 @@ struct ProfileRelationshipsTabSyncTests {
     func everyListFadesUnderTheHeader() {
         let controller = makeController()
         let paging = controller.pager.pagingScrollView
-        var lists: [UICollectionView] = []
-        func collect(_ view: UIView) {
-            if let list = view as? UICollectionView { lists.append(list) }
-            view.subviews.forEach(collect)
+        func lists() -> [UICollectionView] {
+            var found: [UICollectionView] = []
+            func collect(_ view: UIView) {
+                if let list = view as? UICollectionView { found.append(list) }
+                view.subviews.forEach(collect)
+            }
+            collect(paging)
+            return found
         }
-        collect(paging)
 
-        #expect(lists.count == 3, "Followers, Following and Friends")
-        #expect(lists.allSatisfy { $0.topEdgeEffect.isHidden })
+        // ⚠️ ONE list at construction, not three: the pager makes a page when
+        // it is about to show it (charter P3), so the push costs the opening
+        // list alone. Paging to the others makes them.
+        #expect(lists().count == 1, "only the opening list exists before anyone pages")
+        controller.pager.setActivePage(1, animated: false)
+        controller.pager.setActivePage(2, animated: false)
+
+        let all = lists()
+        #expect(all.count == 3, "Followers, Following and Friends")
+        #expect(all.allSatisfy { $0.topEdgeEffect.isHidden })
         #expect(paging.topEdgeEffect.isHidden)
     }
 }

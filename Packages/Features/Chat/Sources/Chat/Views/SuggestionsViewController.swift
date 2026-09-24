@@ -55,7 +55,7 @@ final class SuggestionsViewController: UIViewController {
         configureTableView()
         configureStatusViews()
         viewModel.onPhaseChange = { [weak self] phase in self?.render(phase) }
-        render(.loading)
+        render(viewModel.phase)
     }
 
     private func configureTableView() {

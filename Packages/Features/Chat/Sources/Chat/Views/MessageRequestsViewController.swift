@@ -59,6 +59,12 @@ final class MessageRequestsViewController: UIViewController {
         self.imagePipeline = imagePipeline
         self.avatars = avatars
         super.init(nibName: nil, bundle: nil)
+        // Published from the init, off the view model, and from off screen
+        // too — a request landing while the viewer is on another tab is
+        // exactly what the badge is for, and the inbox reads a surface's
+        // chrome before its view exists (charter P3).
+        viewModel.onNewCountChange = { [weak self] _ in self?.publishChrome() }
+        publishChrome()
     }
 
     @available(*, unavailable)
@@ -71,11 +77,9 @@ final class MessageRequestsViewController: UIViewController {
         configureStatusViews()
 
         viewModel.onPhaseChange = { [weak self] phase in self?.render(phase) }
-        // Published from off screen too — a request landing while the viewer is
-        // on another tab is exactly what the badge is for.
-        viewModel.onNewCountChange = { [weak self] _ in self?.publishChrome() }
-        publishChrome()
-        render(.loading)
+        // Whatever the view model holds now — the catalog may have answered
+        // before this view was asked for.
+        render(viewModel.phase)
     }
 
     private func configureTableView() {
