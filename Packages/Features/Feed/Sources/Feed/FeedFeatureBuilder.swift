@@ -49,8 +49,10 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     /// clients are already wired, and the composition root hands the same
     /// instances to whoever needs them.
     private let socialGraph: (any SocialGraphWriting)?
-    /// The Text Post page's drafts. Nil keeps the app's own list on this
-    /// device; a test hands in one of its own.
+    /// The Text Post page's drafts. The app hands in its one store (built
+    /// once in `AppContainer`, charter P4); a test hands in one of its own.
+    /// Nil is the fallback for a caller that has neither, and it costs a file
+    /// read on every composer — which is why the app never leaves it nil.
     private let postDrafts: PostDraftStore?
     public init(
         repository: any FeedProviding,
