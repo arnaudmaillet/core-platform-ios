@@ -154,9 +154,15 @@ final class ProfileHeaderView: UIView {
     /// avatar's top to where a band would hold it — under the chrome, a gap
     /// below it — so the two shapes meet at the same picture: none.
     func setTravelled(_ travelled: CGFloat) {
-        let fadeOut = Metrics.bannerClearance(for: .poster) - Metrics.bannerClearance(for: .band)
+        bannerView.setTravelled(travelled, fadeOutTravel: posterFadeOutTravel)
+    }
+
+    /// The travel that brings a poster's avatar to where a band holds its
+    /// own — the point the poster is gone by, and a detent the scroll rests
+    /// at (see `ProfileScrollDetents`).
+    var posterFadeOutTravel: CGFloat {
+        Metrics.bannerClearance(for: .poster) - Metrics.bannerClearance(for: .band)
             + Metrics.avatarSize / 2
-        bannerView.setTravelled(travelled, fadeOutTravel: fadeOut)
     }
 
     private var hasAppliedBannerFormat = false

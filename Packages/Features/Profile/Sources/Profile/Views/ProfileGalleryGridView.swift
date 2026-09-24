@@ -52,6 +52,13 @@ final class ProfileGalleryGridView: UIView {
     private var pendingRevealPostID: PostID?
     /// Fired when a drag ends, with how far the page was pulled past its top.
     var onPullReleased: ((CGFloat) -> Void)?
+    /// Where a release comes to rest while the header is on screen, in the
+    /// travelled space — see `ProfileScrollDetents`. Empty means free.
+    var snapDetents: [CGFloat] = []
+    /// A snap decided at the release with no momentum behind it, which the
+    /// scroll view will not carry out on its own — see
+    /// `scrollViewDidEndDragging`.
+    private var pendingSnap: CGFloat?
     /// A row's author was tapped — its disc, its name or its handle.
     var onAuthorTapped: ((GalleryPost) -> Void)?
     /// What a row's "..." offers. Asked at press time, per row; the screen
@@ -1078,8 +1085,42 @@ extension ProfileGalleryGridView: UIScrollViewDelegate {
     /// Above this, a scroll is a fling and nothing new should start.
     private static let maximumStartVelocity: CGFloat = 2200
 
+    /// ⚠️ THE SNAP IS WRITTEN INTO THE TARGET, not applied after the fact.
+    ///
+    /// Moving the offset once deceleration has finished is a second motion
+    /// the viewer sees start. Rewriting where the deceleration is heading,
+    /// here, folds the snap into the one motion already under way — the
+    /// scroll simply arrives at the detent as if that were where it was
+    /// always going.
+    func scrollViewWillEndDragging(
+        _ scrollView: UIScrollView, withVelocity velocity: CGPoint,
+        targetContentOffset: UnsafeMutablePointer<CGPoint>
+    ) {
+        pendingSnap = nil
+        let inset = scrollView.contentInset.top
+        let target = targetContentOffset.pointee.y + inset
+        let snapped = ProfileScrollDetents.snapped(target: target, detents: snapDetents)
+        #if DEBUG
+        // `-profile-snap-audit`: where a release was heading, and where it
+        // was sent instead.
+        if ProcessInfo.processInfo.arguments.contains("-profile-snap-audit") {
+            print("[profile-snap] from=\(Int(verticalOffset)) target=\(Int(target)) velocity=\(Int(velocity.y * 100))"
+                + " detents=\(snapDetents.map { Int($0) }) → \(snapped.map { String(Int($0)) } ?? "free")")
+        }
+        #endif
+        guard let snapped, abs(snapped - target) > 0.5 else { return }
+        targetContentOffset.pointee.y = snapped - inset
+        // With no momentum the scroll view stops where the finger left it and
+        // ignores the target, so the snap has to be driven by hand.
+        if abs(velocity.y) < 0.01 { pendingSnap = snapped - inset }
+    }
+
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
         if !decelerate { reconcileAutoplay() }
         onPullReleased?(max(0, -verticalOffset))
+        if !decelerate, let pendingSnap {
+            self.pendingSnap = nil
+            scrollView.setContentOffset(CGPoint(x: scrollView.contentOffset.x, y: pendingSnap), animated: true)
+        }
     }
 }

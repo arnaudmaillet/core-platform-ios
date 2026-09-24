@@ -359,6 +359,12 @@ final class ProfileGalleryPagerView: UIView {
         self.contentFloor = max(0, contentFloor)
     }
 
+    /// Where a release rests while the header is on screen — the same
+    /// detents on every page, since the header is one object.
+    func setSnapDetents(_ detents: [CGFloat]) {
+        for page in pages { page.snapDetents = detents }
+    }
+
     /// Where a page should sit, given where the screen currently is.
     ///
     /// **The offset is two things stacked, and only one of them belongs to the

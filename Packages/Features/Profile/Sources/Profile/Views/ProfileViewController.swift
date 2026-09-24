@@ -1123,6 +1123,13 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         // screen's business and starts being each tab's own. See the pager's
         // `alignedOffset`.
         galleryPager.setSharedTravel(dockLine: headerTravel, contentFloor: contentTravel)
+        // Where a release rests while the header is on screen: the top, the
+        // identity with the poster gone (posters only), the first post.
+        galleryPager.setSnapDetents(ProfileScrollDetents.detents(
+            for: headerView.bannerFormat,
+            posterFadeOut: headerView.posterFadeOutTravel,
+            firstPost: contentTravel
+        ))
     }
 
     /// Opens the followers / following lists on the tapped counter's tab.
