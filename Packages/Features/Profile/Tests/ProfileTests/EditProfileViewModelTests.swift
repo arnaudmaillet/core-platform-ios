@@ -8,13 +8,17 @@ private actor EditStubProvider: ProfileProviding {
     private let updateError: Error?
     private(set) var updateCalls: [(displayName: String, bio: String, website: String, links: [ProfileLink])] = []
     private(set) var handleCalls: [String] = []
+    private(set) var profileReads = 0
 
     init(profile: UserProfile, updateError: Error? = nil) {
         self.profile = profile
         self.updateError = updateError
     }
 
-    func currentUserProfile() async throws -> UserProfile { profile }
+    func currentUserProfile() async throws -> UserProfile {
+        profileReads += 1
+        return profile
+    }
     func profile(id: ProfileID) async throws -> UserProfile { profile }
     func relationship(for profileID: ProfileID) async throws -> ProfileRelationship { .me }
     func setFollowing(_ following: Bool, for profileID: ProfileID) async throws {}
@@ -75,6 +79,30 @@ struct EditProfileViewModelTests {
             website: "https://ada.example",
             links: [ProfileLink(label: "Notes", url: "https://ada.example/notes")]
         )))
+    }
+
+    /// Charter P7: the profile screen already holds the profile, so the
+    /// editor opens on it — ready in the same turn, and with no fetch behind
+    /// it that could land on top of what the viewer is typing.
+    @Test func seededFormIsReadyAtOnceAndNeverFetches() async {
+        let provider = EditStubProvider(profile: viewerProfile())
+        let viewModel = EditProfileViewModel(repository: provider, seed: viewerProfile(), onSaved: {})
+        var phases: [EditProfileViewModel.Phase] = []
+        viewModel.onPhaseChange = { phases.append($0) }
+
+        viewModel.viewDidLoad()
+        #expect(phases.count == 1, "ready before the turn ends, not after an await")
+        #expect(phases.first == .ready(.init(
+            displayName: "Ada Lovelace",
+            username: "ada",
+            bio: "Countess of computing",
+            website: "https://ada.example",
+            links: [ProfileLink(label: "Notes", url: "https://ada.example/notes")]
+        )))
+
+        await settle()
+        #expect(await provider.profileReads == 0, "a seeded form does not fetch")
+        #expect(phases.count == 1)
     }
 
     @Test func exposesAvatarURLOnLoad() async {
