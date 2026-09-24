@@ -40,8 +40,17 @@ final class ProfileHeaderView: UIView {
         static let avatarRingWidth: CGFloat = 3
         static let badgeSize: CGFloat = 18
         /// Raw-media window between the navigation chrome and the identity
-        /// block — the banner's breathing room.
-        static let bannerClearance: CGFloat = 160
+        /// block, per banner shape. A poster's is the picture's whole stage —
+        /// nothing sits on it — so it gets more; a band's is the strip.
+        static func bannerClearance(for format: ProfileBannerFormat) -> CGFloat {
+            switch format {
+            case .band: 140
+            case .poster: 200
+            }
+        }
+        /// How far above the run-out's start the picture is still clear: the
+        /// fade begins this much above the avatar's top.
+        static let posterFadeLead: CGFloat = 40
         /// Side length of the circular glass bubbles in the action tray (and
         /// thus the height of the whole tray).
         static let bubbleSize: CGFloat = 44
@@ -97,8 +106,57 @@ final class ProfileHeaderView: UIView {
     /// a full banner-clearance below this inset; the banner ignores it and
     /// bleeds to y = 0.
     var chromeTopInset: CGFloat = 0 {
-        didSet { columnTopConstraint?.constant = chromeTopInset + Metrics.bannerClearance }
+        didSet { columnTopConstraint?.constant = columnTopConstant }
     }
+
+    /// The banner's shape — see `ProfileBannerFormat`. Read off the picture
+    /// as it lands; settable for QA.
+    private(set) var bannerFormat: ProfileBannerFormat = .unresolved
+
+    /// Where the identity column starts: below the chrome and the banner's
+    /// clearance — and, for a band, pulled back up by half the avatar so the
+    /// disc straddles the strip's edge.
+    private var columnTopConstant: CGFloat {
+        let overlap = bannerFormat == .band ? Metrics.avatarSize / 2 : 0
+        return chromeTopInset + Metrics.bannerClearance(for: bannerFormat) - overlap
+    }
+
+    /// Adopts a banner shape: the column's start, where the banner ends, how
+    /// the name sits against the avatar, and whether the picture runs out.
+    func setBannerFormat(_ format: ProfileBannerFormat) {
+        #if DEBUG
+        let format = ProfileBannerFormat.debugOverride ?? format
+        #endif
+        guard format != bannerFormat || !hasAppliedBannerFormat else { return }
+        hasAppliedBannerFormat = true
+        bannerFormat = format
+        columnTopConstraint?.constant = columnTopConstant
+        // A band ends on the avatar's midline, its edge cut by the disc; a
+        // poster runs to the foot of the tray.
+        bannerEndsAtTray?.isActive = format == .poster
+        bannerEndsAtAvatarMidline?.isActive = format == .band
+        // Beside a straddling disc the name sits on the page BELOW the strip:
+        // bottom-aligned, so its lines fall in the disc's lower half. On a
+        // poster the two are centred on each other as before.
+        topRow.alignment = format == .band ? .bottom : .center
+        bannerView.setFormat(format)
+        setNeedsLayout()
+    }
+
+    private var hasAppliedBannerFormat = false
+    private var bannerEndsAtTray: NSLayoutConstraint?
+    private var bannerEndsAtAvatarMidline: NSLayoutConstraint?
+    private let topRow = UIStackView()
+    private let statsRow = UIStackView()
+
+    #if DEBUG
+    var debugBannerFrame: CGRect { bannerView.frame }
+    var debugAvatarFrame: CGRect { avatarView.convert(avatarView.bounds, to: self) }
+    var debugTrayFrame: CGRect { actionRowForDebug?.convert(actionRowForDebug!.bounds, to: self) ?? .zero }
+    var debugBannerShowsFade: Bool { bannerView.debugShowsFade }
+    var debugBannerFadeLocations: [CGFloat] { bannerView.debugFadeLocations }
+    private weak var actionRowForDebug: UIView?
+    #endif
 
     /// Builds the mutual's rail menu, resolved at PRESENTATION so the rows
     /// reflect live membership rather than whatever was true when the button
@@ -135,6 +193,11 @@ final class ProfileHeaderView: UIView {
         bannerView = ProfileBannerView(imagePipeline: imagePipeline)
         super.init(frame: .zero)
         configureSubviews()
+        // The picture decides the shape, whenever it lands.
+        bannerView.onImageResolved = { [weak self] image in
+            self?.setBannerFormat(.resolved(forImageSize: image.size))
+        }
+        setBannerFormat(.unresolved)
     }
 
     @available(*, unavailable)
@@ -584,7 +647,9 @@ final class ProfileHeaderView: UIView {
 
         // The 4-metric counter row, last element of the header: equal cells
         // across the full content width, right above the content threshold.
-        let statsRow = UIStackView(arrangedSubviews: [followersStat, followingStat, reactionsStat, viewsStat])
+        for stat in [followersStat, followingStat, reactionsStat, viewsStat] {
+            statsRow.addArrangedSubview(stat)
+        }
         statsRow.axis = .horizontal
         statsRow.alignment = .center
         statsRow.distribution = .fillEqually
@@ -741,10 +806,14 @@ final class ProfileHeaderView: UIView {
         identityColumn.alignment = .fill
         identityColumn.spacing = Spacing.xs
 
-        let topRow = UIStackView(arrangedSubviews: [avatarView, identityColumn])
+        topRow.addArrangedSubview(avatarView)
+        topRow.addArrangedSubview(identityColumn)
         topRow.axis = .horizontal
         topRow.alignment = .center
         topRow.spacing = Spacing.md
+        #if DEBUG
+        actionRowForDebug = actionRow
+        #endif
 
         var websiteConfig = UIButton.Configuration.plain()
         websiteConfig.image = UIImage(systemName: "link")
@@ -803,7 +872,7 @@ final class ProfileHeaderView: UIView {
         }
 
         let columnTop = column.topAnchor.constraint(
-            equalTo: topAnchor, constant: chromeTopInset + Metrics.bannerClearance
+            equalTo: topAnchor, constant: columnTopConstant
         )
         columnTopConstraint = columnTop
         column.constrain(in: self) { parent in
@@ -823,17 +892,30 @@ final class ProfileHeaderView: UIView {
         // re-centres against it.
         let avatarSide = avatarView.heightAnchor.constraint(equalToConstant: Metrics.avatarSize)
         avatarSide.priority = .defaultHigh
+        // Where the banner ENDS is the shape's — see `setBannerFormat`, which
+        // activates exactly one of these.
+        bannerEndsAtTray = bannerView.bottomAnchor.constraint(equalTo: actionRow.bottomAnchor)
+        bannerEndsAtAvatarMidline = bannerView.bottomAnchor.constraint(equalTo: avatarView.centerYAnchor)
         NSLayoutConstraint.activate([
-            // The banner ends under the identity block, where it used to end
-            // under the tray — the tray is the header's last line now, and a
-            // photograph running down to it would swallow the counters.
-            bannerView.bottomAnchor.constraint(equalTo: topRow.bottomAnchor),
             avatarView.widthAnchor.constraint(equalTo: avatarView.heightAnchor),
             avatarSide,
             avatarView.heightAnchor.constraint(lessThanOrEqualToConstant: Metrics.avatarMaxSize)
         ])
     }
 
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard bannerFormat == .poster else { return }
+        // The nested stacks settle AFTER this pass — the note on
+        // `CircleAvatarView` — so they are settled here by hand before the
+        // frames are read: the run-out is placed against where the avatar
+        // and the counters actually are, not where they were a pass ago.
+        topRow.superview?.layoutIfNeeded()
+        let avatar = avatarView.convert(avatarView.bounds, to: bannerView)
+        let stats = statsRow.convert(statsRow.bounds, to: bannerView)
+        guard avatar.height > 0, stats.minY > avatar.minY else { return }
+        bannerView.setFade(start: avatar.minY - Metrics.posterFadeLead, opaque: stats.minY)
+    }
 }
 
 /// An image view that stays a circle whatever side length layout resolves for

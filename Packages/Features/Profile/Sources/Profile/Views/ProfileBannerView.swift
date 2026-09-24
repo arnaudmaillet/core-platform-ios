@@ -26,6 +26,18 @@ final class ProfileBannerView: UIView {
     private let imagePipeline: ImagePipeline
     private var imageTask: Task<Void, Never>?
     private var currentImageURL: URL?
+    /// The picture that landed, whatever its route — from the cache before
+    /// the first layout, or from a fetch afterwards — so the header can read
+    /// its shape off it. See `ProfileBannerFormat`.
+    var onImageResolved: ((UIImage) -> Void)?
+    /// The shape the banner is drawn in. A band has no run-out at all: the
+    /// picture ends on a clean edge the avatar's ring cuts across.
+    private var format: ProfileBannerFormat = .unresolved
+    /// Where the poster's run-out begins and where it is opaque, in this
+    /// view's own points from its top — set by the header from where the
+    /// identity block actually landed.
+    private var fadeStart: CGFloat = 0
+    private var fadeOpaque: CGFloat = 0
 
     init(imagePipeline: ImagePipeline) {
         self.imagePipeline = imagePipeline
@@ -40,10 +52,9 @@ final class ProfileBannerView: UIView {
         imageView.clipsToBounds = true
         imageView.pin(to: mediaContainer)
 
-        // The identity block starts a full banner-clearance below the chrome
-        // (~55% of the banner's height), so raw media owns the upper half and
-        // the fade is near-opaque by the time the name lines begin.
-        bottomFade.locations = [0.28, 0.55, 0.76, 1]
+        // Provisional until the header has laid its column out and says
+        // where the run-out goes — see `setFade(start:opaque:)`.
+        bottomFade.locations = [0.42, 0.55, 0.68, 1]
         topScrim.locations = [0, 1]
         layer.addSublayer(bottomFade)
         layer.addSublayer(topScrim)
@@ -68,6 +79,14 @@ final class ProfileBannerView: UIView {
 
         guard let url else { return }
         let pipeline = imagePipeline
+        // Synchronously from the cache when it can: the shape is read off the
+        // picture, and a shape decided before the first layout is a header
+        // that never jumps. A fetch still decides it, one layout later.
+        if let cached = pipeline.cachedImage(for: url) {
+            imageView.image = cached
+            onImageResolved?(cached)
+            return
+        }
         imageTask = Task { [weak self] in
             guard let image = try? await pipeline.image(for: url) else { return }
             guard let self, !Task.isCancelled, self.currentImageURL == url else { return }
@@ -79,8 +98,35 @@ final class ProfileBannerView: UIView {
             ) {
                 self.imageView.image = image
             }
+            self.onImageResolved?(image)
         }
     }
+
+    /// Dresses the banner for a shape. A band drops its run-out entirely.
+    func setFormat(_ format: ProfileBannerFormat) {
+        guard format != self.format else { return }
+        self.format = format
+        bottomFade.isHidden = format == .band
+        setNeedsLayout()
+    }
+
+    /// Where the poster's run-out begins and where it is fully the page's
+    /// tone, in this view's points from its top. The header sets both from
+    /// where its identity block landed, so the picture stays untouched above
+    /// the avatar and the counters always sit on solid page.
+    func setFade(start: CGFloat, opaque: CGFloat) {
+        guard start != fadeStart || opaque != fadeOpaque else { return }
+        fadeStart = start
+        fadeOpaque = opaque
+        setNeedsLayout()
+    }
+
+    #if DEBUG
+    /// The run-out's stops as fractions of the banner's height, for a test
+    /// that asks where the picture is left alone.
+    var debugFadeLocations: [CGFloat] { (bottomFade.locations ?? []).map { CGFloat($0.doubleValue) } }
+    var debugShowsFade: Bool { !bottomFade.isHidden }
+    #endif
 
     // MARK: - Redaction
 
@@ -108,6 +154,21 @@ final class ProfileBannerView: UIView {
         CATransaction.setDisableActions(true)
         bottomFade.frame = bounds
         topScrim.frame = CGRect(x: 0, y: 0, width: bounds.width, height: min(160, bounds.height))
+        // The run-out, placed in POINTS and converted here: clear until it
+        // starts, most of the way by halfway, opaque at the counters, and
+        // opaque to the edge — so the block from the counters down reads on
+        // solid page while the name row alone sits on the fade.
+        if format == .poster, bounds.height > 0, fadeOpaque > fadeStart {
+            let height = bounds.height
+            let start = max(0, min(fadeStart / height, 1))
+            let opaque = max(start, min(fadeOpaque / height, 1))
+            bottomFade.locations = [
+                NSNumber(value: Double(start)),
+                NSNumber(value: Double((start + opaque) / 2)),
+                NSNumber(value: Double(opaque)),
+                1
+            ]
+        }
         CATransaction.commit()
     }
 
