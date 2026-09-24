@@ -58,6 +58,13 @@ final class ProfileHeaderView: UIView {
         /// strip's edge cuts the disc high and the name below sits clear of
         /// it, with air above.
         static let bandOverlap: CGFloat = avatarSize / 4
+        /// On a band, how far under the strip's edge the name begins: the
+        /// name hangs just below the picture rather than sinking to the foot
+        /// of the disc.
+        static let bandNameGap: CGFloat = Spacing.sm
+        /// The air above the tray, carried by the tray itself so it holds
+        /// whether or not a website row sits above it.
+        static let trayGap: CGFloat = Spacing.md
         /// How far above the counters the poster's run-out begins. The avatar
         /// and the name sit on the picture itself; the tone arrives for the
         /// numbers and is strong by the bio.
@@ -145,10 +152,15 @@ final class ProfileHeaderView: UIView {
         bannerView.isHidden = format == .none
         bannerEndsAtTray?.isActive = format == .poster
         bannerEndsInAvatar?.isActive = format != .poster
-        // Beside a straddling disc the name sits on the page BELOW the strip:
-        // bottom-aligned, so its lines fall in the disc's lower half. On a
-        // poster, and with no picture, the two are centred on each other.
-        topRow.alignment = format == .band ? .bottom : .center
+        // Beside a straddling disc the name sits on the page just BELOW the
+        // strip's edge: top-aligned with the disc and pushed down by the
+        // strip's reach into it plus a small gap. Bottom-aligning it instead
+        // sank the name to the foot of the disc, a long way under the
+        // picture. On a poster, and with no picture, the two are centred on
+        // each other.
+        topRow.alignment = format == .band ? .top : .center
+        identityColumn.directionalLayoutMargins.top =
+            format == .band ? Metrics.bandOverlap + Metrics.bandNameGap : 0
         bannerView.setFormat(format)
         setNeedsLayout()
     }
@@ -173,6 +185,7 @@ final class ProfileHeaderView: UIView {
     private var bannerEndsInAvatar: NSLayoutConstraint?
     private let topRow = UIStackView()
     private let statsRow = UIStackView()
+    private let identityColumn = UIStackView()
 
     #if DEBUG
     var debugBannerFrame: CGRect { bannerView.frame }
@@ -860,10 +873,15 @@ final class ProfileHeaderView: UIView {
 
         // Right column of the top block: name over @handle, centred against
         // the avatar.
-        let identityColumn = UIStackView(arrangedSubviews: [nameRow, handleLabel])
+        identityColumn.addArrangedSubview(nameRow)
+        identityColumn.addArrangedSubview(handleLabel)
         identityColumn.axis = .vertical
         identityColumn.alignment = .fill
         identityColumn.spacing = Spacing.xs
+        // The band pushes the name down inside the column — see
+        // `setBannerFormat`.
+        identityColumn.isLayoutMarginsRelativeArrangement = true
+        identityColumn.directionalLayoutMargins = .zero
 
         topRow.addArrangedSubview(avatarView)
         topRow.addArrangedSubview(identityColumn)
@@ -905,11 +923,20 @@ final class ProfileHeaderView: UIView {
         let column = UIStackView(arrangedSubviews: [topRow, statsRow, bioLabel, websiteButton, actionRow])
         column.axis = .vertical
         column.alignment = .fill
+        // Air between the block's rows: a step more than the standard stack
+        // at every seam, because this block sits alone under a picture and
+        // read as packed at the standard pitch — counters on the name, tray
+        // on the bio.
         column.spacing = Spacing.sm
-        column.setCustomSpacing(Spacing.lg, after: topRow)
-        column.setCustomSpacing(Spacing.md, after: statsRow)
-        column.setCustomSpacing(Spacing.lg, after: websiteButton)
-        actionRow.heightAnchor.constraint(equalToConstant: Metrics.bubbleSize).isActive = true
+        column.setCustomSpacing(Spacing.xl, after: topRow)
+        column.setCustomSpacing(Spacing.lg, after: statsRow)
+        column.setCustomSpacing(Spacing.md, after: bioLabel)
+        column.setCustomSpacing(Spacing.md, after: websiteButton)
+        // The tray carries its own air above, so the gap holds whether the
+        // row before it is the website or the bio.
+        actionRow.isLayoutMarginsRelativeArrangement = true
+        actionRow.directionalLayoutMargins.top = Metrics.trayGap
+        actionRow.heightAnchor.constraint(equalToConstant: Metrics.bubbleSize + Metrics.trayGap).isActive = true
 
         // Layering: banner first (back), identity column on top of it. The
         // banner bleeds to the header's very top — the column starts below the

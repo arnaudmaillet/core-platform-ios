@@ -229,5 +229,7 @@ struct ProfileBannerFormatTests {
         let name = try #require(labels(header).first { $0.text == "Kenji Tanaka" })
         let frame = name.convert(name.bounds, to: header)
         #expect(frame.minY >= header.debugBannerFrame.maxY - 0.5)
+        // Just below it — a small gap, not the foot of the disc.
+        #expect(abs(frame.minY - header.debugBannerFrame.maxY - 8) < 1)
     }
 }
