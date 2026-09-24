@@ -1211,6 +1211,14 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
             return
         }
         let pageFrame = context.finalFrame(for: toVC)
+        // ⚠️ SETUP WITH VIEW ANIMATIONS OFF — see `ZoomAnimator.present` for the
+        // measurement. iOS 26/27 calls this inside an implicit animation
+        // context of the transition's duration, so a frame or a first layout
+        // assigned here would animate from the view's previous (or zero)
+        // frame: the screen unfolding from the top-left. The poses below are
+        // frame 0; only the blocks after the restore may animate.
+        let animationsWereEnabled = UIView.areAnimationsEnabled
+        UIView.setAnimationsEnabled(false)
 
         // THE WHOLE POINT, and the reason none of the impersonation defects
         // can occur here: the destination is installed at full size and laid
@@ -1331,6 +1339,7 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
         let screenRadius = ScreenGeometry.cornerRadius(behind: container)
         ZoomFlight.applyRecededChrome(to: presenting, radius: screenRadius)
 
+        UIView.setAnimationsEnabled(animationsWereEnabled)
         let duration = transitionDuration(using: context)
         // TAIL-WEIGHTED, on its own clock — the hero's `delayFactor: 0.35`,
         // reproduced here because the first capture showed why it exists: run
@@ -1604,6 +1613,14 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             animator.addCompletion { _ in context.completeTransition(false) }
             return animator
         }
+        // ⚠️ SETUP WITH VIEW ANIMATIONS OFF — see `ZoomAnimator.present` for the
+        // measurement. iOS 26/27 calls this inside an implicit animation
+        // context of the transition's duration, so a frame or a first layout
+        // assigned here would animate from the view's previous (or zero)
+        // frame: the screen unfolding from the top-left. The poses below are
+        // frame 0; only the blocks after the restore may animate.
+        let animationsWereEnabled = UIView.areAnimationsEnabled
+        UIView.setAnimationsEnabled(false)
         let pageFrame = fromView.frame
         toView.frame = context.finalFrame(for: toVC)
         container.insertSubview(toView, belowSubview: fromView)
@@ -1684,6 +1701,7 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         let chrome = returningChrome
         let chromeAlpha: CGFloat = 1
         chrome?.alpha = 0
+        UIView.setAnimationsEnabled(animationsWereEnabled)
 
         // The chevron has no finger, so the swap's fractions become keyframes on
         // the spring's own clock — the same schedule, the same empty beat, one

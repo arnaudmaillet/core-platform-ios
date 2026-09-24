@@ -543,6 +543,13 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         results.didMove(toParent: self)
         results.applyQuery("")
         results.view.alpha = 0
+        // ⚠️ LAID OUT NOW, before any of the three animations below. The
+        // accessory's removal, the bar's hide and the header's morph each
+        // relayout this view inside their own block, and a results list that
+        // has never had a pass takes its first one in there — every row
+        // growing out of the top-left corner under the fade-in. Only the first
+        // search per inbox sees it; the list is reused with its frame after.
+        view.layoutIfNeeded()
 
         // Searching is a mode, not a place: the tab bar is a way OUT of it that
         // would take the query with it, and the results deserve the height.

@@ -216,6 +216,24 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             context.completeTransition(false)
             return UIViewPropertyAnimator(duration: duration, curve: .linear)
         }
+        // ⚠️ THE WHOLE SETUP RUNS WITH VIEW ANIMATIONS OFF, and the reason is
+        // measured, not assumed. On iOS 26/27 UIKit calls this from inside an
+        // implicit animation context of the transition's own duration
+        // (`_UIViewControllerTransitioningRunCustomTransitionWithRequest` →
+        // `_setAlongsideAnimations:toRunByEndOfBlock:animated:`), so every
+        // frame assigned below whose old value differs — the destination's
+        // root, posed at the page rect; anything `layoutIfNeeded` lays out for
+        // the first time — is animated FROM that old value. Traced with
+        // `-first-layout-trace`: the feed's root view carried 0.42s
+        // `position`/`bounds.size` animations from a 312x195 rect to the page,
+        // under the card. Invisible while the card covers it; the unfold from
+        // a corner the moment anything reveals the page early. The poses below
+        // are the flight's STARTING state, and a starting state is never
+        // animated into — the property animator built at the end owns every
+        // motion this leg has.
+        let animationsWereEnabled = UIView.areAnimationsEnabled
+        UIView.setAnimationsEnabled(false)
+        defer { UIView.setAnimationsEnabled(animationsWereEnabled) }
         // Dims the map around the flying card; tail-weighted so the map reads
         // through for most of the flight and recedes to black as the card lands.
         let dim = ZoomFlight.makeDimView(frame: container.bounds)
@@ -915,6 +933,14 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             context.completeTransition(false)
             return UIViewPropertyAnimator(duration: duration, curve: .linear)
         }
+        // Same rule as the present leg, for the same measured reason: UIKit
+        // runs this inside an implicit animation context, and the presenter
+        // reinstalled below arrives with whatever frame it last had. Its
+        // re-pose, the card's page pose and the receded chrome are the leg's
+        // starting state; the animator owns the motion.
+        let animationsWereEnabled = UIView.areAnimationsEnabled
+        UIView.setAnimationsEnabled(false)
+        defer { UIView.setAnimationsEnabled(animationsWereEnabled) }
         // Reinstall the presenter (`.to`) behind the departing card — a
         // navigation controller removes non-top views, so it isn't in the
         // hierarchy yet.

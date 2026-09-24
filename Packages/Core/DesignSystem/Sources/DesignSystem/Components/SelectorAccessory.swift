@@ -642,6 +642,7 @@ public final class SelectorAccessory {
         // a zero-sized view.
         hostView.setNeedsLayout()
         hostView.layoutIfNeeded()
+        Self.settlePendingLayout(of: controller)
 
         // ⚠️ **THIS WAS THE PLAIN PROPERTY SETTER, WHICH IS UIKIT'S UNANIMATED
         // FORM** — while the remove has always used `setBottomAccessory(_:
@@ -714,11 +715,36 @@ public final class SelectorAccessory {
         }
         clearCatchUp()
         ride(coordinator) { animated in
+            Self.settlePendingLayout(of: controller)
             controller.setBottomAccessory(nil, animated: animated)
         }
         SelectorAccessoryHost.emit(
             "removed me=\(Self.shortID(hostView))",
             options: options)
+    }
+
+    /// Lays out everything under the tab bar controller that is still waiting
+    /// for its FIRST pass, with animations off, before the accessory changes.
+    ///
+    /// ⚠️ **THE CURE FOR THE SCREEN THAT UNFOLDS FROM THE TOP-LEFT.** Both
+    /// `setBottomAccessory(_:animated:)` forms relayout the tab container
+    /// INSIDE an animation block (`-[_UITabContainerView
+    /// updateBottomAccessoryAnimated:]` → `layoutBelowIfNeeded`, a 0.18s block
+    /// even on the coordinator path), and the change moves every child's safe
+    /// area, so the whole subtree is laid out in there. A screen that has just
+    /// been pushed or selected and has not had a layout pass yet — a hero
+    /// destination whose cells have not been dequeued, a tab root on its first
+    /// visit — gets that first pass inside the block, and every one of its
+    /// subviews animates from a zero frame at the origin to where it belongs.
+    /// Traced with `-first-layout-trace` on a flight from the profile: chrome,
+    /// gradient, backdrop, media card, video view, all `bounds.size from
+    /// {-402, -874}` over 0.18s, under the flying card. Settling the pending
+    /// pass here, unanimated, means the block only ever moves views that
+    /// already have a place — which is what "riding the transition" was meant
+    /// to be.
+    private static func settlePendingLayout(of controller: UITabBarController) {
+        guard controller.isViewLoaded, controller.view.window != nil else { return }
+        UIView.performWithoutAnimation { controller.view.layoutIfNeeded() }
     }
 
     /// A short, stable name for a host view, so a trace can say WHICH band

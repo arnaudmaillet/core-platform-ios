@@ -31,8 +31,17 @@ final class AppCoordinator: Coordinator {
     }
 
     func start() {
+        #if DEBUG
+        // `-first-layout-trace`: names the animation block that captures a
+        // screen's first layout (the "unfolds from the top-left" defect).
+        // Installed before the first root so the launch swap is covered too.
+        FirstLayoutTrace.installIfRequested()
+        #endif
         window.rootViewController = LaunchViewController()
         window.makeKeyAndVisible()
+        #if DEBUG
+        FirstLayoutTrace.selfTestIfRequested(in: window)
+        #endif
 
         #if DEBUG
         // Dev convenience: `-mock-auto-login` signs into the mock BFF fixture
@@ -279,8 +288,19 @@ final class AppCoordinator: Coordinator {
             window.rootViewController = viewController
             return
         }
+        // ⚠️ THE SWAP RUNS INSIDE `performWithoutAnimation`, for the reason
+        // `UINavigationController.crossDissolve` states: a `UIView.transition`
+        // block is an animation block, and the new root's first layout inside
+        // it animates every subview from a zero frame — the whole shell
+        // unfolding from the top-left corner behind the dissolve. The dissolve
+        // is the container's transition and survives animations being disabled
+        // for the block; the implicit frame animations do not. Laid out in the
+        // same breath so nothing of the first pass is left for a later block.
         UIView.transition(with: window, duration: 0.3, options: .transitionCrossDissolve) {
-            self.window.rootViewController = viewController
+            UIView.performWithoutAnimation {
+                self.window.rootViewController = viewController
+                self.window.layoutIfNeeded()
+            }
         }
     }
 }

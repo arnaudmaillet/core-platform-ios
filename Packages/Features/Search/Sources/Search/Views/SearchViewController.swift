@@ -547,7 +547,11 @@ final class SearchViewController: UIViewController {
             // results screen would stack two views of the same state, and going
             // back would walk through spellings the viewer abandoned. That
             // property is why the answer was given its own screen at all.
-            navigationController?.popViewController(animated: false)
+            //
+            // A CUT, not merely unanimated — see `UINavigationController.cut`.
+            navigationController?.cut { [weak self] in
+                self?.navigationController?.popViewController(animated: false)
+            }
         }
     }
 
@@ -590,7 +594,9 @@ final class SearchViewController: UIViewController {
                 postSurfaces: postSurfaces,
                 mode: .refine
             )
-            results.navigationController?.pushViewController(refine, animated: false)
+            // A CUT, not merely unanimated — see `UINavigationController.cut`.
+            guard let navigation = results.navigationController else { return }
+            navigation.cut { navigation.pushViewController(refine, animated: false) }
         }
 
         // ⚠️ THIS SCREEN LEAVES THE STACK AS THE ANSWER ARRIVES. Back on the
@@ -608,7 +614,10 @@ final class SearchViewController: UIViewController {
         var stack = navigation.viewControllers
         stack.removeAll { $0 === self }
         stack.append(results)
-        navigation.setViewControllers(stack, animated: false)
+        // A CUT, not merely unanimated — see `UINavigationController.cut`. The
+        // keyboard is on its way down as this runs, and its block is exactly
+        // the kind that used to pick up the arriving screen's first layout.
+        navigation.cut { navigation.setViewControllers(stack, animated: false) }
     }
 
     /// ⚠️ KEPT AS ITS OWN METHOD WITH ONE CALLER. It reads like something to
