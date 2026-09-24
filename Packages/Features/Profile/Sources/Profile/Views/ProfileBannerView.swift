@@ -102,13 +102,28 @@ final class ProfileBannerView: UIView {
         }
     }
 
-    /// Dresses the banner for a shape. A band drops its run-out entirely.
+    /// Dresses the banner for a shape: the run-out's colours differ — a
+    /// band's is a short, light softening of its edge; a poster's carries
+    /// the identity and never quite hides the picture.
     func setFormat(_ format: ProfileBannerFormat) {
         guard format != self.format else { return }
         self.format = format
-        bottomFade.isHidden = format == .band
+        refreshGradientColors()
         setNeedsLayout()
     }
+
+    /// How far above a band's edge its softening begins.
+    static let bandFadeDepth: CGFloat = 56
+    /// How much of the page's tone a band's edge reaches: a softening, not a
+    /// run-out — the edge is still an edge, the avatar's ring still cuts it.
+    static let bandFadeAlpha: CGFloat = 0.5
+    /// The poster's run-out at the counters, and at its foot. Neither is
+    /// opaque: the picture shows through to the tray, faintly, so the poster
+    /// reads as running the whole way down — while the page's tone is
+    /// strong enough under every line of type for it to stay page ink on
+    /// page colour.
+    static let posterFadeAtCounters: CGFloat = 0.75
+    static let posterFadeAtFoot: CGFloat = 0.92
 
     /// Where the poster's run-out begins and where it is fully the page's
     /// tone, in this view's points from its top. The header sets both from
@@ -125,6 +140,10 @@ final class ProfileBannerView: UIView {
     /// The run-out's stops as fractions of the banner's height, for a test
     /// that asks where the picture is left alone.
     var debugFadeLocations: [CGFloat] { (bottomFade.locations ?? []).map { CGFloat($0.doubleValue) } }
+    /// The run-out's opacity at each stop.
+    var debugFadeAlphas: [CGFloat] {
+        (bottomFade.colors as? [CGColor] ?? []).map { $0.alpha }
+    }
     var debugShowsFade: Bool { !bottomFade.isHidden }
     #endif
 
@@ -154,20 +173,29 @@ final class ProfileBannerView: UIView {
         CATransaction.setDisableActions(true)
         bottomFade.frame = bounds
         topScrim.frame = CGRect(x: 0, y: 0, width: bounds.width, height: min(160, bounds.height))
-        // The run-out, placed in POINTS and converted here: clear until it
-        // starts, most of the way by halfway, opaque at the counters, and
-        // opaque to the edge — so the block from the counters down reads on
-        // solid page while the name row alone sits on the fade.
-        if format == .poster, bounds.height > 0, fadeOpaque > fadeStart {
-            let height = bounds.height
-            let start = max(0, min(fadeStart / height, 1))
-            let opaque = max(start, min(fadeOpaque / height, 1))
-            bottomFade.locations = [
-                NSNumber(value: Double(start)),
-                NSNumber(value: Double((start + opaque) / 2)),
-                NSNumber(value: Double(opaque)),
-                1
-            ]
+        let height = bounds.height
+        switch format {
+        case .band:
+            // A short softening of the strip's edge, and nothing above it.
+            if height > 0 {
+                let start = max(0, (height - Self.bandFadeDepth) / height)
+                bottomFade.locations = [NSNumber(value: Double(start)), 1]
+            }
+        case .poster:
+            // The run-out, placed in POINTS and converted here: clear until
+            // it starts, most of the way by the counters, and strongest at
+            // the foot — never quite hiding the picture, which runs under
+            // the tray.
+            if height > 0, fadeOpaque > fadeStart {
+                let start = max(0, min(fadeStart / height, 1))
+                let counters = max(start, min(fadeOpaque / height, 1))
+                bottomFade.locations = [
+                    NSNumber(value: Double(start)),
+                    NSNumber(value: Double((start + counters) / 2)),
+                    NSNumber(value: Double(counters)),
+                    1
+                ]
+            }
         }
         CATransaction.commit()
     }
@@ -178,12 +206,20 @@ final class ProfileBannerView: UIView {
         // what the identity block actually sits on, or it ends in a lighter
         // band the width of the screen.
         let background = Surface.page
-        bottomFade.colors = [
-            background.withAlphaComponent(0).cgColor,
-            background.withAlphaComponent(0.85).cgColor,
-            background.cgColor,
-            background.cgColor
-        ]
+        switch format {
+        case .band:
+            bottomFade.colors = [
+                background.withAlphaComponent(0).cgColor,
+                background.withAlphaComponent(Self.bandFadeAlpha).cgColor
+            ]
+        case .poster:
+            bottomFade.colors = [
+                background.withAlphaComponent(0).cgColor,
+                background.withAlphaComponent(0.45).cgColor,
+                background.withAlphaComponent(Self.posterFadeAtCounters).cgColor,
+                background.withAlphaComponent(Self.posterFadeAtFoot).cgColor
+            ]
+        }
         topScrim.colors = [
             UIColor.black.withAlphaComponent(0.35).cgColor,
             UIColor.black.withAlphaComponent(0).cgColor

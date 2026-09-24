@@ -41,10 +41,13 @@ final class ProfileHeaderView: UIView {
         static let badgeSize: CGFloat = 18
         /// Raw-media window between the navigation chrome and the identity
         /// block, per banner shape. A poster's is the picture's whole stage —
-        /// nothing sits on it — so it gets more; a band's is the strip.
+        /// nothing sits on it — so it gets more. A band's is exactly half
+        /// the avatar: the disc's top sits ON the chrome's bottom edge, with
+        /// no strip of picture between the two, and the band ends on the
+        /// disc's midline.
         static func bannerClearance(for format: ProfileBannerFormat) -> CGFloat {
             switch format {
-            case .band: 140
+            case .band: avatarSize / 2
             case .poster: 200
             }
         }
@@ -155,6 +158,7 @@ final class ProfileHeaderView: UIView {
     var debugTrayFrame: CGRect { actionRowForDebug?.convert(actionRowForDebug!.bounds, to: self) ?? .zero }
     var debugBannerShowsFade: Bool { bannerView.debugShowsFade }
     var debugBannerFadeLocations: [CGFloat] { bannerView.debugFadeLocations }
+    var debugBannerFadeAlphas: [CGFloat] { bannerView.debugFadeAlphas }
     private weak var actionRowForDebug: UIView?
     #endif
 

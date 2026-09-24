@@ -60,8 +60,16 @@ struct ProfileBannerFormatTests {
         let avatar = header.debugAvatarFrame
         #expect(abs(banner.maxY - avatar.midY) < 0.5)
         #expect(banner.minY == 0)
-        // And the picture carries no run-out: a clean edge.
-        #expect(!header.debugBannerShowsFade)
+        // The disc's top sits on the chrome's bottom edge: no strip of
+        // picture between the two.
+        #expect(abs(avatar.minY - header.chromeTopInset) < 0.5)
+        #expect(abs(banner.height - (header.chromeTopInset + avatar.height / 2)) < 0.5)
+        // The edge is softened, lightly and only near the edge — not run out.
+        let stops = header.debugBannerFadeLocations
+        let alphas = header.debugBannerFadeAlphas
+        #expect(stops.count == 2)
+        #expect(stops[0] * banner.height >= banner.height - ProfileBannerView.bandFadeDepth - 0.5)
+        #expect(alphas.last == ProfileBannerView.bandFadeAlpha)
     }
 
     /// A poster runs to the foot of the tray, and the identity sits on it.
@@ -70,11 +78,18 @@ struct ProfileBannerFormatTests {
         let banner = header.debugBannerFrame
         let tray = header.debugTrayFrame
         #expect(abs(banner.maxY - tray.maxY) < 0.5)
-        #expect(header.debugBannerShowsFade)
+        // And the picture is never quite hidden: the run-out's strongest
+        // stop, at the foot, still lets it through.
+        let alphas = header.debugBannerFadeAlphas
+        #expect(alphas.count == 4)
+        #expect(alphas[3] < 1)
+        #expect(alphas[3] > alphas[2])
+        #expect(alphas[2] > alphas[1])
     }
 
-    /// The poster's picture is left alone above the avatar and the fade is
-    /// opaque by the counters — the name row alone sits on the run-out.
+    /// The poster's picture is left alone above the avatar and the run-out
+    /// is most of the way by the counters — the name row alone sits on the
+    /// lighter part of it.
     @Test func aPostersFadeStartsAboveTheAvatarAndIsOpaqueByTheCounters() {
         let header = header(format: .poster)
         let banner = header.debugBannerFrame
@@ -90,13 +105,13 @@ struct ProfileBannerFormatTests {
         #expect(stops[0] > 0.4)
     }
 
-    /// A band is the shorter header, by the difference in clearance plus the
-    /// half-avatar the disc climbs back up the strip.
+    /// A band is the shorter header, by exactly the poster's clearance: the
+    /// band's column starts on the chrome, the poster's a clearance below it.
     @Test func aBandIsShorterThanAPoster() {
         let band = header(format: .band)
         let poster = header(format: .poster)
         #expect(band.bounds.height < poster.bounds.height)
-        #expect(abs((poster.bounds.height - band.bounds.height) - (60 + 48)) < 1)
+        #expect(abs((poster.bounds.height - band.bounds.height) - 200) < 1)
     }
 
     /// On a band the name sits BELOW the strip's edge, on the page — not on
