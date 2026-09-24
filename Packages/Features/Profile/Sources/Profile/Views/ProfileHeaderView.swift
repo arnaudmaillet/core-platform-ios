@@ -53,8 +53,9 @@ final class ProfileHeaderView: UIView {
         }
         /// The air between the chrome's bottom edge and a band's avatar.
         static let bandGap: CGFloat = Spacing.md
-        /// How far above the run-out's start the picture is still clear: the
-        /// fade begins this much above the avatar's top.
+        /// How far above the counters the poster's run-out begins. The avatar
+        /// and the name sit on the picture itself; the tone arrives for the
+        /// numbers and is strong by the bio.
         static let posterFadeLead: CGFloat = 40
         /// Side length of the circular glass bubbles in the action tray (and
         /// thus the height of the whole tray).
@@ -168,6 +169,7 @@ final class ProfileHeaderView: UIView {
     var debugBannerFrame: CGRect { bannerView.frame }
     var debugAvatarFrame: CGRect { avatarView.convert(avatarView.bounds, to: self) }
     var debugTrayFrame: CGRect { actionRowForDebug?.convert(actionRowForDebug!.bounds, to: self) ?? .zero }
+    var debugStatsFrame: CGRect { statsRow.convert(statsRow.bounds, to: self) }
     var debugBannerShowsFade: Bool { bannerView.debugShowsFade }
     var debugBannerFadeLocations: [CGFloat] { bannerView.debugFadeLocations }
     var debugBannerFadeAlphas: [CGFloat] { bannerView.debugFadeAlphas }
@@ -929,10 +931,15 @@ final class ProfileHeaderView: UIView {
         // frames are read: the run-out is placed against where the avatar
         // and the counters actually are, not where they were a pass ago.
         topRow.superview?.layoutIfNeeded()
-        let avatar = avatarView.convert(avatarView.bounds, to: bannerView)
         let stats = statsRow.convert(statsRow.bounds, to: bannerView)
-        guard avatar.height > 0, stats.minY > avatar.minY else { return }
-        bannerView.setFade(start: avatar.minY - Metrics.posterFadeLead, opaque: stats.minY)
+        guard stats.height > 0 else { return }
+        // Clear until just above the counters, strong by the bio: the
+        // counters climb through the steep part of the curve, and the avatar
+        // and the name above them stand on the picture itself.
+        bannerView.setFade(
+            start: stats.minY - Metrics.posterFadeLead,
+            opaque: stats.maxY + Spacing.md
+        )
     }
 }
 

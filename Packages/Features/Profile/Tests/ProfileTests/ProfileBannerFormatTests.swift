@@ -152,22 +152,25 @@ struct ProfileBannerFormatTests {
         #expect(abs(header.debugBannerPictureShift - 100 * ProfileBannerView.parallaxShare) < 0.5)
     }
 
-    /// The poster's picture is left alone above the avatar and the run-out
-    /// is most of the way by the counters — the name row alone sits on the
-    /// lighter part of it.
-    @Test func aPostersFadeStartsAboveTheAvatarAndIsOpaqueByTheCounters() {
+    /// The poster's picture is left alone down past the avatar and the name:
+    /// the run-out begins just above the counters and is strong by the bio.
+    @Test func aPostersFadeStartsAboveTheCountersAndIsStrongByTheBio() {
         let header = header(format: .poster)
         let banner = header.debugBannerFrame
         let avatar = header.debugAvatarFrame
+        let stats = header.debugStatsFrame
         let stops = header.debugBannerFadeLocations
         #expect(stops.count == ProfileBannerView.posterClimbSamples + 3)
         let start = stops[0] * banner.height
-        let opaque = stops[ProfileBannerView.posterClimbSamples] * banner.height
-        #expect(abs(start - (avatar.minY - 40)) < 1)
-        #expect(opaque > avatar.maxY)
-        #expect(opaque < header.debugTrayFrame.minY)
-        // Most of the picture is clear: the run-out begins past two fifths.
-        #expect(stops[0] > 0.4)
+        let strong = stops[ProfileBannerView.posterClimbSamples] * banner.height
+        #expect(abs(start - (stats.minY - 40)) < 1)
+        // The lead reaches into the avatar's lower edge, where the curve is
+        // still at nothing; the disc's upper half and the name are clear.
+        #expect(start > avatar.midY)
+        #expect(abs(strong - (stats.maxY + 12)) < 1)
+        #expect(strong < header.debugTrayFrame.minY)
+        // Most of the picture is clear: the run-out begins past half.
+        #expect(stops[0] > 0.5)
     }
 
     /// A band is the shorter header, by exactly the poster's clearance: the
