@@ -62,9 +62,6 @@ final class ProfileBannerView: UIView {
             imageView.bottomAnchor.constraint(equalTo: mediaContainer.bottomAnchor)
         ])
 
-        // Provisional until the header has laid its column out and says
-        // where the run-out goes — see `setFade(start:opaque:)`.
-        bottomFade.locations = [0.42, 0.55, 0.68, 1]
         topScrim.locations = [0, 1]
         layer.addSublayer(bottomFade)
         layer.addSublayer(topScrim)
@@ -163,6 +160,43 @@ final class ProfileBannerView: UIView {
     static let posterFadeAtCounters: CGFloat = 0.75
     static let posterFadeNearFoot: CGFloat = 0.92
     static let posterFootDepth: CGFloat = 40
+    /// How many segments the run-out's climb from clear to the counters is
+    /// sampled in. The climb is a CURVE, not a line — see `posterClimb`.
+    static let posterClimbSamples = 4
+
+    /// The run-out's opacity at `t` of the way from its start to the
+    /// counters, as a share of `posterFadeAtCounters`.
+    ///
+    /// Eased IN: gentle at the top, steep at the bottom. A linear ramp put
+    /// as much of the page's tone over the picture's upper half as over
+    /// its lower, so the poster started greying the moment the run-out
+    /// began. Squared, the first half of the climb spends a quarter of the
+    /// tone and the picture stays itself for longer; the tone then arrives
+    /// quickly where the type needs it.
+    static func posterClimb(_ t: CGFloat) -> CGFloat {
+        let t = max(0, min(t, 1))
+        return t * t
+    }
+
+    /// The poster's stops, as (location, alpha) pairs, for a banner of
+    /// `height` whose run-out starts at `start` and reaches the counters at
+    /// `counters` — both in points from the top.
+    static func posterStops(height: CGFloat, start: CGFloat, counters: CGFloat) -> [(CGFloat, CGFloat)] {
+        let startFraction = max(0, min(start / height, 1))
+        let countersFraction = max(startFraction, min(counters / height, 1))
+        let nearFoot = max(countersFraction, (height - posterFootDepth) / height)
+        var stops: [(CGFloat, CGFloat)] = []
+        for sample in 0...posterClimbSamples {
+            let t = CGFloat(sample) / CGFloat(posterClimbSamples)
+            stops.append((
+                startFraction + (countersFraction - startFraction) * t,
+                posterFadeAtCounters * posterClimb(t)
+            ))
+        }
+        stops.append((nearFoot, posterFadeNearFoot))
+        stops.append((1, 1))
+        return stops
+    }
 
     /// Where the poster's run-out begins and where it is fully the page's
     /// tone, in this view's points from its top. The header sets both from
@@ -228,16 +262,10 @@ final class ProfileBannerView: UIView {
             // the foot — never quite hiding the picture, which runs under
             // the tray.
             if height > 0, fadeOpaque > fadeStart {
-                let start = max(0, min(fadeStart / height, 1))
-                let counters = max(start, min(fadeOpaque / height, 1))
-                let nearFoot = max(counters, (height - Self.posterFootDepth) / height)
-                bottomFade.locations = [
-                    NSNumber(value: Double(start)),
-                    NSNumber(value: Double((start + counters) / 2)),
-                    NSNumber(value: Double(counters)),
-                    NSNumber(value: Double(nearFoot)),
-                    1
-                ]
+                let stops = Self.posterStops(height: height, start: fadeStart, counters: fadeOpaque)
+                bottomFade.locations = stops.map { NSNumber(value: Double($0.0)) }
+                let background = Surface.page
+                bottomFade.colors = stops.map { background.withAlphaComponent($0.1).cgColor }
             }
         }
         CATransaction.commit()
@@ -256,13 +284,11 @@ final class ProfileBannerView: UIView {
                 background.withAlphaComponent(Self.bandFadeAlpha).cgColor
             ]
         case .poster:
-            bottomFade.colors = [
-                background.withAlphaComponent(0).cgColor,
-                background.withAlphaComponent(0.45).cgColor,
-                background.withAlphaComponent(Self.posterFadeAtCounters).cgColor,
-                background.withAlphaComponent(Self.posterFadeNearFoot).cgColor,
-                background.cgColor
-            ]
+            // Provisional until layout places the stops from the column's
+            // frames — the same shape, at a guessed height.
+            let stops = Self.posterStops(height: 600, start: 260, counters: 400)
+            bottomFade.colors = stops.map { background.withAlphaComponent($0.1).cgColor }
+            bottomFade.locations = stops.map { NSNumber(value: Double($0.0)) }
         }
         topScrim.colors = [
             UIColor.black.withAlphaComponent(0.35).cgColor,
