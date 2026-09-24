@@ -208,7 +208,9 @@ public final class ProfileViewModel {
 
     /// The currently rendered profile — retained so a follow toggle can nudge
     /// its follower count without a full reload.
-    private var profile: UserProfile? {
+    /// The profile as last loaded (or seeded from the cache), for whoever
+    /// opens a screen that needs it in hand — the editor, for one.
+    public private(set) var profile: UserProfile? {
         didSet {
             // Only a change of SUBJECT matters here: an optimistic follower
             // nudge rebuilds this value for the same person, and re-asking
@@ -368,8 +370,25 @@ public final class ProfileViewModel {
     // MARK: - Inputs
 
     public func viewDidLoad() {
+        // ⚠️ A REVISIT RENDERS THE CACHED PROFILE AT FRAME 0 (charter P7). The
+        // cache used to be read on an account switch alone; a second visit to
+        // a profile opened on a skeleton and re-revealed a page the viewer had
+        // seen seconds before. Seeded, the fetch REFRESHES: the phase moves
+        // only if something changed, and the gallery revalidates in place
+        // rather than resetting to its bones.
+        if case .profile(let id) = source, let cached = cache?.profile(for: id) {
+            profile = cached
+            phase = .content(ProfileDisplayModel(profile: cached))
+            loadRelationship(for: id)
+            loadGallery(for: cached, reset: true)
+            galleryWasSeeded = true
+        }
         reload()
     }
+
+    /// True between a cache seed and the fetch that confirms it, so that
+    /// fetch revalidates the gallery instead of resetting it.
+    private var galleryWasSeeded = false
 
     /// Pull-to-refresh. Coalesced: a refresh while one is in flight is ignored.
     public func refresh() {
@@ -846,8 +865,11 @@ public final class ProfileViewModel {
                 }
                 self.loadRelationship(for: profile.id)
                 // Every (re)load refreshes the grid too: the caches reset so
-                // pull-to-refresh picks up new posts alongside the header.
-                self.loadGallery(for: profile, reset: true)
+                // pull-to-refresh picks up new posts alongside the header —
+                // except right after a cache seed, whose grid is loading or
+                // loaded already and only needs confirming.
+                self.loadGallery(for: profile, reset: !self.galleryWasSeeded)
+                self.galleryWasSeeded = false
             } catch is CancellationError {
                 // Superseded by a newer load; leave the phase alone.
             } catch {

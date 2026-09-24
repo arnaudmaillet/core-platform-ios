@@ -332,18 +332,22 @@ public final class PostDetailViewModel {
         // A draft has no post to load — see `postID`.
         guard let postID else { return }
         load?.cancel()
+        // ⚠️ THE WARM CACHE IS READ FIRST, SYNCHRONOUSLY (charter P7). A post
+        // opened from a feed is in the repository's mirror already, and this
+        // screen used to open on a spinner and fetch it again. `peekPost` is
+        // the same read the pin-opened feed seeds from: nil on a miss, never
+        // a fetch. The fetch then confirms it, and re-renders only if the
+        // post changed underneath.
+        var seeded: FeedEntry?
+        if case .loading = phase, let cached = repository.peekPost(postID) {
+            seeded = cached
+            show(cached)
+        }
         load = Task { [weak self] in
             guard let self else { return }
             do {
                 let entry = try await self.repository.loadPost(postID)
-                self.authorID = entry.author.id
-                self.authorStub = ProfileIdentityStub(
-                    handle: entry.author.handle,
-                    displayName: entry.author.displayName
-                )
-                self.engagement = EngagementState(likeCount: entry.likeCount, isLiked: false)
-                self.phase = .content(PostDetailDisplayModel(entry: entry, now: self.now()))
-                self.onEngagementChange?(self.engagement)
+                if entry != seeded { self.show(entry) }
             } catch is CancellationError {
                 // Superseded; leave the phase alone.
             } catch {
@@ -353,6 +357,17 @@ public final class PostDetailViewModel {
             }
             self.load = nil
         }
+    }
+
+    private func show(_ entry: FeedEntry) {
+        authorID = entry.author.id
+        authorStub = ProfileIdentityStub(
+            handle: entry.author.handle,
+            displayName: entry.author.displayName
+        )
+        engagement = EngagementState(likeCount: entry.likeCount, isLiked: false)
+        phase = .content(PostDetailDisplayModel(entry: entry, now: now()))
+        onEngagementChange?(engagement)
     }
 
     /// Comments are best-effort: a failure just shows an empty section rather
