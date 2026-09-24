@@ -280,6 +280,16 @@ final class AppContainer {
     /// about a feed spend because both surfaces hold this same object.
     private(set) lazy var walletStore = WalletStore()
 
+    /// The Text Post page's drafts: ONE store for the app's lifetime.
+    ///
+    /// ⚠️ Built once here and handed to the feed builder, because
+    /// `PostDraftStore()` reads and decodes its file in its init, and the
+    /// builder used to construct a fresh one every time "+" → Text Post
+    /// presented the composer — a synchronous disk read in the turn that
+    /// presents a sheet (charter P4). The drafts list inside the composer
+    /// shares the same instance, so the two can never disagree.
+    private(set) lazy var postDraftStore = PostDraftStore()
+
     // MARK: - Feed
 
     private lazy var feedRepository = FeedRepository(
@@ -348,7 +358,8 @@ final class AppContainer {
         // counter.v1, so a card can show reach. The timeline read hydrates
         // likes only, and a card's counter chip shows VIEWS — without this it
         // has nothing to say and hides itself, which is what it did.
-        counterClient: Counter_V1_CounterServiceClient(client: authenticatedRPCClient)
+        counterClient: Counter_V1_CounterServiceClient(client: authenticatedRPCClient),
+        postDrafts: postDraftStore
     )
 
     // MARK: - Maps
