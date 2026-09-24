@@ -41,7 +41,7 @@ final class PhotosMediaLibrary: MediaLibraryReading {
     private var assetsByID: [String: PHAsset] = [:]
 
     /// Photos and videos, newest first — the one shape every fetch here wants.
-    private static var contents: PHFetchOptions {
+    nonisolated private static var contents: PHFetchOptions {
         let options = PHFetchOptions()
         options.predicate = NSPredicate(
             format: "mediaType == %d || mediaType == %d",
@@ -57,7 +57,7 @@ final class PhotosMediaLibrary: MediaLibraryReading {
     /// Curated rather than "every smart album Photos has": the rest are hidden
     /// albums, recently deleted, or lists a post has no use for. The fallback
     /// title is only reached when Photos hands back no localized one.
-    private static let smartAlbums: [(subtype: PHAssetCollectionSubtype, fallbackTitle: String)] = [
+    nonisolated private static let smartAlbums: [(subtype: PHAssetCollectionSubtype, fallbackTitle: String)] = [
         (.smartAlbumUserLibrary, "Recents"),
         (.smartAlbumFavorites, "Favorites"),
         (.smartAlbumVideos, "Videos"),
@@ -111,12 +111,59 @@ final class PhotosMediaLibrary: MediaLibraryReading {
         #if DEBUG
         await DebugPhotoAlbumSeeder.seedIfAsked()
         #endif
+        let scan = await Task.detached(priority: .userInitiated) { Self.scanAlbums() }.value
+        collectionsByID = scan.collections
+        return scan.albums
+    }
 
+    func items(in album: MediaLibraryAlbum.ID) async -> [MediaLibraryItem] {
+        guard let collection = collectionsByID[album] else { return [] }
+        let handle = CollectionHandle(collection)
+        let scan = await Task.detached(priority: .userInitiated) { Self.scanItems(in: handle.collection) }.value
+        assetsByID.merge(scan.assets) { _, new in new }
+        return scan.items
+    }
+
+    // MARK: - Enumeration, off the main actor
+
+    /// ⚠️ **THE WALKS BELOW RUN IN A DETACHED TASK, AND THAT IS THE WHOLE
+    /// POINT OF THEIR SHAPE (charter P4).** `albums()` fetches every asset of
+    /// every album to count it, and `items(in:)` touches every asset of the
+    /// one it opens; on a full device that is seconds, and it used to run on
+    /// the main actor in the picker's presentation turn — `-presentation-budget`
+    /// blamed `MediaPickerViewController` for 500 ms on a library of 26. Photos
+    /// is safe to read from any queue and `PHObject`s are immutable, so the
+    /// walk is a `nonisolated` function returning value types, and the handles
+    /// it collected cross back in a box that says so. The protocol stays
+    /// `@MainActor`: the map of handles and the thumbnail requests still live
+    /// there, unchanged.
+    ///
+    /// ⚠️ **NOTHING HERE MAY BE A CLOSURE WRITTEN IN THIS TYPE'S ISOLATION.**
+    /// A closure written inside a `@MainActor` type inherits its isolation and
+    /// TRAPS when Photos calls it elsewhere (`videoFile(for:)` and
+    /// `DebugPhotoAlbumSeeder` both paid for that); `static nonisolated` has
+    /// no isolation to inherit.
+    private struct AlbumScan: @unchecked Sendable {
+        let albums: [MediaLibraryAlbum]
+        let collections: [String: PHAssetCollection]
+    }
+
+    private struct ItemScan: @unchecked Sendable {
+        let items: [MediaLibraryItem]
+        let assets: [String: PHAsset]
+    }
+
+    private struct CollectionHandle: @unchecked Sendable {
+        let collection: PHAssetCollection
+        init(_ collection: PHAssetCollection) { self.collection = collection }
+    }
+
+    nonisolated private static func scanAlbums() -> AlbumScan {
         var found: [MediaLibraryAlbum] = []
         var collections: [String: PHAssetCollection] = [:]
 
         func offer(_ collection: PHAssetCollection, fallbackTitle: String?) {
-            let count = PHAsset.fetchAssets(in: collection, options: Self.contents).count
+            let count = PHAsset.fetchAssets(in: collection, options: contents).count
             // An empty album is left out: a pill reading "(0)" offers nothing,
             // and Photos ships several that most libraries never fill.
             guard count > 0 else { return }
@@ -132,7 +179,7 @@ final class PhotosMediaLibrary: MediaLibraryReading {
             )
         }
 
-        for smart in Self.smartAlbums {
+        for smart in smartAlbums {
             let fetched = PHAssetCollection.fetchAssetCollections(
                 with: .smartAlbum, subtype: smart.subtype, options: nil
             )
@@ -146,18 +193,17 @@ final class PhotosMediaLibrary: MediaLibraryReading {
             offer(userAlbums.object(at: index), fallbackTitle: nil)
         }
 
-        collectionsByID = collections
-        return found
+        return AlbumScan(albums: found, collections: collections)
     }
 
-    func items(in album: MediaLibraryAlbum.ID) async -> [MediaLibraryItem] {
-        guard let collection = collectionsByID[album] else { return [] }
-        let assets = PHAsset.fetchAssets(in: collection, options: Self.contents)
+    nonisolated private static func scanItems(in collection: PHAssetCollection) -> ItemScan {
+        let fetched = PHAsset.fetchAssets(in: collection, options: contents)
         var items: [MediaLibraryItem] = []
-        items.reserveCapacity(assets.count)
-        for index in 0..<assets.count {
-            let asset = assets.object(at: index)
-            assetsByID[asset.localIdentifier] = asset
+        var assets: [String: PHAsset] = [:]
+        items.reserveCapacity(fetched.count)
+        for index in 0..<fetched.count {
+            let asset = fetched.object(at: index)
+            assets[asset.localIdentifier] = asset
             items.append(
                 MediaLibraryItem(
                     id: asset.localIdentifier,
@@ -165,7 +211,7 @@ final class PhotosMediaLibrary: MediaLibraryReading {
                 )
             )
         }
-        return items
+        return ItemScan(items: items, assets: assets)
     }
 
     // MARK: - Thumbnails

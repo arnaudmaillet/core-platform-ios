@@ -137,10 +137,28 @@ final class DebugMediaLibrary: MediaLibraryReading {
     /// notice's OTHER route — Settings — is the one worth driving on a simulator.
     func presentLimitedPicker(from host: UIViewController) {}
 
-    func albums() async -> [MediaLibraryAlbum] { albumList }
+    /// `-upload-fake-latency <ms>` makes the stand-in answer as slowly as a
+    /// full device's library does: a synthetic library answers instantly, so
+    /// the skeleton the picker draws while it waits (charter P8) could be
+    /// shipped without anyone ever seeing it. Applied to the two walks the
+    /// real library runs off the main actor, not to thumbnails.
+    private var latency: Duration {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let flag = arguments.firstIndex(of: "-upload-fake-latency"),
+              arguments.count > flag + 1,
+              let milliseconds = Int(arguments[flag + 1])
+        else { return .zero }
+        return .milliseconds(milliseconds)
+    }
+
+    func albums() async -> [MediaLibraryAlbum] {
+        try? await Task.sleep(for: latency)
+        return albumList
+    }
 
     func items(in album: MediaLibraryAlbum.ID) async -> [MediaLibraryItem] {
-        contents[album] ?? items
+        try? await Task.sleep(for: latency)
+        return contents[album] ?? items
     }
 
     /// ⚠️ **A STAND-IN MUST NOT BE THE SHAPE OF WHATEVER ASKED FOR IT.** This
