@@ -101,8 +101,11 @@ final class PresentationBudgetUITests: XCTestCase {
               ceilingMs: 950, trackedBy: "charter PR 5b (thread first layout)", drive: firstCellThenBack),
         Route("profile → post → back", ["-select-tab", "3"],
               ceilingMs: 550, trackedBy: "charter PR 5b (feed first layout)", drive: firstCellThenBack),
+        // PR 3 (#193, lazy pager pages): 3 lists rendered at push → 1.
+        // Harness alone 212–334 ms on a loaded host; what remains is the one
+        // page's skeleton rows and the accessory's settle.
         Route("profile → relationships", ["-select-tab", "3", "-profile-relationships"],
-              ceilingMs: 750, trackedBy: "charter PR 3"),
+              ceilingMs: 550, trackedBy: "charter PR 3 (done); what remains is the page itself"),
         Route("profile → share sheet", ["-select-tab", "3", "-profile-share-demo"],
               ceilingMs: 350, trackedBy: "charter PR 7"),
         // 313 ms on a quiet host, 737 ms with three builds running beside the
