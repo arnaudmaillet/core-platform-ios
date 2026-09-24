@@ -254,7 +254,15 @@ final class NewPostMediaCell: UICollectionViewListCell {
             let chosen = edits[id] ?? .untouched
             Task { [weak picture] in
                 let image = await thumbnail(id, size)
-                picture?.image = image.map { chosen.applied(to: $0, artwork: nil) }
+                // Drawn off the main actor (charter P13): a page with a cut
+                // or a look is a CoreImage render, and this ran it on the
+                // main actor for every tile as its picture arrived.
+                let dressed: UIImage? = if let image, !chosen.finish(includingOverlays: true).isNone {
+                    await Task.detached(priority: .userInitiated) { chosen.applied(to: image, artwork: nil) }.value
+                } else {
+                    image
+                }
+                picture?.image = dressed
             }
         }
         // ⚠️ **HELD HERE, AT BUILD, AND NOT WHEN THE RIPPLE STARTS.** The build
