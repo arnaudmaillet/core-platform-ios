@@ -36,6 +36,9 @@ final class AppCoordinator: Coordinator {
         // screen's first layout (the "unfolds from the top-left" defect).
         // Installed before the first root so the launch swap is covered too.
         FirstLayoutTrace.installIfRequested()
+        // `-presentation-budget`: times the run-loop turn that brings each
+        // screen on and names the frames it spent it in (charter P2).
+        PresentationBudget.installIfRequested()
         #endif
         window.rootViewController = LaunchViewController()
         window.makeKeyAndVisible()
