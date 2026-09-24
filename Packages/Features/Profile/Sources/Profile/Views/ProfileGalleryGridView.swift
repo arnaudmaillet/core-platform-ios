@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import DesignSystem
 import MediaCore
 import MediaPlayback
@@ -51,11 +52,27 @@ final class ProfileGalleryGridView: UIView {
     private var pendingRevealPostID: PostID?
     /// Fired when a drag ends, with how far the page was pulled past its top.
     var onPullReleased: ((CGFloat) -> Void)?
+    /// Where a release comes to rest while the header is on screen, in the
+    /// travelled space — see `ProfileScrollDetents`. Empty means free.
+    var snapDetents: [CGFloat] = []
+    /// A snap decided at the release with no momentum behind it, which the
+    /// scroll view will not carry out on its own — see
+    /// `scrollViewDidEndDragging`.
+    private var pendingSnap: CGFloat?
     /// A row's author was tapped — its disc, its name or its handle.
     var onAuthorTapped: ((GalleryPost) -> Void)?
     /// What a row's "..." offers. Asked at press time, per row; the screen
     /// decides, because this view knows nothing about what can be serviced.
     var authorMenuActions: ((AuthorMenuContext) -> [PostCardMenuAction])?
+    /// Fired when the viewer asks to repost a row's post. Nothing sets it yet
+    /// — the same open seam For You has (`ForYouGridPage.onRepostRequested`):
+    /// the control is drawn because the card's design calls for it.
+    var onRepostRequested: ((GalleryPost) -> Void)?
+    /// The viewer's saved pile, the SAME store the Saved tab reads, so a card
+    /// here and the tab below cannot disagree about whether a post is saved.
+    /// Nil where no pile exists (anyone else's profile in some setups); the
+    /// save control is then not drawn.
+    private let bookmarks: PostBookmarkStore?
 
     /// Everything a host needs to build one row's menu.
     struct AuthorMenuContext {
@@ -159,11 +176,13 @@ final class ProfileGalleryGridView: UIView {
         imagePipeline: ImagePipeline,
         style: Style,
         tab: ProfileTab,
-        videoPlayback: VideoPlaybackController? = nil
+        videoPlayback: VideoPlaybackController? = nil,
+        bookmarks: PostBookmarkStore? = nil
     ) {
         self.imagePipeline = imagePipeline
         self.style = style
         self.tab = tab
+        self.bookmarks = bookmarks
         // The SAME coordinator the For You surfaces use, on the same terms:
         // candidates ranked by distance from the viewport centre, the nearest
         // N kept. Six for a mosaic, five for a timeline — a column fits fewer
@@ -385,11 +404,24 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
             let cell = collectionView.dequeueReusableCell(
                 withReuseIdentifier: PostGridListRowCell.reuseID, for: indexPath
             ) as! PostGridListRowCell
+            // ⚠️ THE SAME CARD FOR YOU DRAWS, wired the same way. A profile
+            // shows reposts among the posts, so the author on the card is
+            // news even here — the row is not a place to abbreviate.
             cell.configure(
                 with: post,
                 imagePipeline: imagePipeline,
                 captionExpanded: captionExpansion.isExpanded(post.id)
             )
+            // See `ForYouGridPage`: repost has no action yet and is drawn
+            // anyway; save toggles the shared pile and reads its answer back.
+            cell.onRepostTapped = { [weak self] in self?.onRepostRequested?(post) }
+            if let bookmarks {
+                cell.isBookmarked = bookmarks.isSaved(post.id.rawValue)
+                cell.onBookmarkTapped = { [weak cell] in
+                    _ = bookmarks.toggle(post.id.rawValue)
+                    cell?.isBookmarked = bookmarks.isSaved(post.id.rawValue)
+                }
+            }
             // Captured by POST, never by index path: the row that asked can
             // have moved by the time the answer is applied.
             cell.onRevealFullCaption = { [weak self] in
@@ -701,12 +733,13 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
             // row.
             captionExpanded: captionExpansion.isExpanded(postID),
             showsAuthorMenu: showsAuthorMenu(for: post),
-            // ⚠️ NEITHER control, because this surface wires neither: nothing
-            // here sets `onRepostTapped` or `onBookmarkTapped`, so the row's
-            // header carries the "..." alone and a stand-in drawing a repost
-            // would end every dismissal with a control vanishing. If this
-            // screen ever wires them, this is the line that has to know.
-            actions: .none,
+            // What the row wires — see `configure`: repost always, save when
+            // there is a pile — so the stand-in lands on a card drawing the
+            // same controls rather than ending with one vanishing.
+            actions: .init(
+                repost: true, bookmark: bookmarks != nil,
+                saved: bookmarks?.isSaved(postID.rawValue) ?? false
+            ),
             // The row's own date when there is a row — a compact age is a
             // function of the clock, and the row worked its own out when it was
             // configured.
@@ -742,7 +775,8 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
     /// Read from the POST rather than from the cell, so it answers for a row
     /// that has scrolled out as readily as for one on screen.
     func textRowAuthorBand(for postID: PostID) -> PostAuthorBandView.Model? {
-        posts.first { $0.id == postID }.flatMap(PostAuthorBandView.Model.init(post:))
+        if let row = cell(for: postID) as? PostGridListRowCell { return row.authorBandModel }
+        return posts.first { $0.id == postID }.map { PostAuthorBandView.Model(post: $0) }
     }
 
 
@@ -1051,8 +1085,42 @@ extension ProfileGalleryGridView: UIScrollViewDelegate {
     /// Above this, a scroll is a fling and nothing new should start.
     private static let maximumStartVelocity: CGFloat = 2200
 
+    /// ⚠️ THE SNAP IS WRITTEN INTO THE TARGET, not applied after the fact.
+    ///
+    /// Moving the offset once deceleration has finished is a second motion
+    /// the viewer sees start. Rewriting where the deceleration is heading,
+    /// here, folds the snap into the one motion already under way — the
+    /// scroll simply arrives at the detent as if that were where it was
+    /// always going.
+    func scrollViewWillEndDragging(
+        _ scrollView: UIScrollView, withVelocity velocity: CGPoint,
+        targetContentOffset: UnsafeMutablePointer<CGPoint>
+    ) {
+        pendingSnap = nil
+        let inset = scrollView.contentInset.top
+        let target = targetContentOffset.pointee.y + inset
+        let snapped = ProfileScrollDetents.snapped(target: target, detents: snapDetents)
+        #if DEBUG
+        // `-profile-snap-audit`: where a release was heading, and where it
+        // was sent instead.
+        if ProcessInfo.processInfo.arguments.contains("-profile-snap-audit") {
+            print("[profile-snap] from=\(Int(verticalOffset)) target=\(Int(target)) velocity=\(Int(velocity.y * 100))"
+                + " detents=\(snapDetents.map { Int($0) }) → \(snapped.map { String(Int($0)) } ?? "free")")
+        }
+        #endif
+        guard let snapped, abs(snapped - target) > 0.5 else { return }
+        targetContentOffset.pointee.y = snapped - inset
+        // With no momentum the scroll view stops where the finger left it and
+        // ignores the target, so the snap has to be driven by hand.
+        if abs(velocity.y) < 0.01 { pendingSnap = snapped - inset }
+    }
+
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
         if !decelerate { reconcileAutoplay() }
         onPullReleased?(max(0, -verticalOffset))
+        if !decelerate, let pendingSnap {
+            self.pendingSnap = nil
+            scrollView.setContentOffset(CGPoint(x: scrollView.contentOffset.x, y: pendingSnap), animated: true)
+        }
     }
 }

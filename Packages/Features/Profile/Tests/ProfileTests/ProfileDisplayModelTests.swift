@@ -60,19 +60,23 @@ struct ProfileDisplayModelTests {
         #expect(ProfileDisplayModel.format(.exact(1_234)) == "1.2K")
         #expect(ProfileDisplayModel.format(.atLeast(200)) == "200+")
         #expect(ProfileDisplayModel.format(.atLeast(1_000)) == "1K+")
-        #expect(ProfileDisplayModel.format(.unavailable) == "—")
+        #expect(ProfileDisplayModel.format(.unavailable) == nil)
     }
 
     @Test func distinguishesZeroFromUnavailable() {
-        // A user with no followers reads "0"; an unreadable counter reads "—".
+        // A user with no followers reads "0"; an unreadable counter has no
+        // text at all, and the column is not drawn.
         #expect(ProfileDisplayModel(profile: profile(followers: .exact(0))).followerText == "0")
-        #expect(ProfileDisplayModel(profile: profile(followers: .unavailable)).followerText == "—")
+        #expect(ProfileDisplayModel(profile: profile(followers: .unavailable)).followerText == nil)
     }
 
-    @Test func rendersMissingCountsAsDash() {
+    /// A dash where a count should be reads as a defect, so a missing counter
+    /// hides its column instead — every column alike, since a row that hid
+    /// Views and dashed Followers would be two rules for one thing.
+    @Test func hidesMissingCounts() {
         let model = ProfileDisplayModel(profile: profile(followers: .unavailable, following: .unavailable))
-        #expect(model.followerText == "—")
-        #expect(model.followingText == "—")
+        #expect(model.followerText == nil)
+        #expect(model.followingText == nil)
     }
 
     @Test func formatsWebsiteInstagramStyle() {
@@ -88,12 +92,12 @@ struct ProfileDisplayModelTests {
         #expect(model.viewsText == "200+")
     }
 
-    @Test func reactionsAndViewsReadUnavailableWhenUnprojected() {
+    @Test func reactionsAndViewsAreHiddenWhenUnprojected() {
         // Wherever counter.v1 doesn't project these metrics (the fleet, and
-        // views on the mock), the band must not claim "0".
+        // views on the mock), the band must not claim "0" — nor draw a dash.
         let model = ProfileDisplayModel(profile: profile())
-        #expect(model.reactionsText == "—")
-        #expect(model.viewsText == "—")
+        #expect(model.reactionsText == nil)
+        #expect(model.viewsText == nil)
     }
 
     @Test func bannerMirrorsAvatarUntilCoverAssetExists() {

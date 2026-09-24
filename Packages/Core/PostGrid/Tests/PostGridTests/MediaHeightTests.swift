@@ -143,12 +143,17 @@ struct MediaHeightInRowTests {
             - PostGridListRowCell.mediaHeight(forCardWidth: 320, aspectRatio: 4.0 / 5.0)) < 0.5)
     }
 
-    /// And the card still closes at the preview whatever shape it is — the rule
-    /// the chips moved onto the media for.
-    @Test func aTallCardStillClosesAtItsPreview() throws {
+    /// And the card still closes on its line under the preview whatever shape
+    /// the preview is: the gap, a pill, the foot inset — no slack.
+    @Test func aTallCardStillClosesOnItsLineUnderThePreview() throws {
         let cell = row(aspect: 9.0 / 16.0)
         let preview = try #require(cell.mediaHeroRect)
+        let line = PostGridListRowCell.captionFollowGap
+            + PostMetaPillView.height + PostGridListRowCell.metaBottomInset
 
-        #expect(abs(cell.bounds.height - preview.maxY - PostGridListRowCell.mediaInset) < 0.5)
+        // Within a point rather than exactly: the fitted height ceils a
+        // fractional preview, and `==` on fractional `CGFloat`s is how this
+        // repo has failed CI before.
+        #expect(abs(cell.bounds.height - preview.maxY - line) < 1)
     }
 }

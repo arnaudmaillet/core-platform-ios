@@ -16,7 +16,7 @@ import UIKit
 ///   (owned by `ProfileViewController`), NOT in this view;
 /// - then the two-column identity block — circular avatar left, sized to span
 ///   the three lines beside it: display name + verified badge, @handle, and
-///   the Liquid Glass action tray (a leading Message-or-Edit-Profile capsule,
+///   the flat action tray (a leading Message-or-Edit-Profile capsule,
 ///   then QR-code and see-more bubbles trailing-aligned);
 /// - below, full width: the 4-metric counter row (Followers / Following /
 ///   Reactions / Views) directly under the identity block, then bio and
@@ -32,15 +32,37 @@ final class ProfileHeaderView: UIView {
         /// Gap between groups. Small enough to read as one flowing change
         /// rather than three separate ones.
         static let stagger: TimeInterval = 0.05
-        /// Dynamic-Type ceiling for the avatar (it normally tracks the
-        /// identity column's height, ~95pt at default sizes).
+        /// The avatar's side — what the disc resolved to while it spanned a
+        /// three-line identity column, kept now that the column is two.
+        static let avatarSize: CGFloat = 96
+        /// Dynamic-Type ceiling for the avatar.
         static let avatarMaxSize: CGFloat = 110
         static let avatarRingWidth: CGFloat = 3
         static let badgeSize: CGFloat = 18
         /// Raw-media window between the navigation chrome and the identity
-        /// block — the banner's breathing room.
-        static let bannerClearance: CGFloat = 160
-        /// Side length of the circular glass bubbles in the action tray (and
+        /// block, per banner shape. A poster's is the picture's whole stage —
+        /// nothing sits on it — so it gets more. A band's is exactly half
+        /// the avatar: the disc's top sits ON the chrome's bottom edge, with
+        /// no strip of picture between the two, and the band ends on the
+        /// disc's midline.
+        static func bannerClearance(for format: ProfileBannerFormat) -> CGFloat {
+            switch format {
+            case .band, .none: bandGap
+            case .poster: 200
+            }
+        }
+        /// The air between the chrome's bottom edge and the avatar, on a band
+        /// and on a header with no picture.
+        static let bandGap: CGFloat = Spacing.md
+        /// How far down the avatar a band reaches: its first quarter, so the
+        /// strip's edge cuts the disc high and the name below sits clear of
+        /// it, with air above.
+        static let bandOverlap: CGFloat = avatarSize / 4
+        /// How far above the counters the poster's run-out begins. The avatar
+        /// and the name sit on the picture itself; the tone arrives for the
+        /// numbers and is strong by the bio.
+        static let posterFadeLead: CGFloat = 40
+        /// Side length of the circular bubbles in the action tray (and
         /// thus the height of the whole tray).
         static let bubbleSize: CGFloat = 44
         /// Content margins of the identity block — wider than the standard
@@ -66,14 +88,15 @@ final class ProfileHeaderView: UIView {
     private let followingStat = ProfileStatView(caption: "Following")
     private let reactionsStat = ProfileStatView(caption: "Reactions")
     private let viewsStat = ProfileStatView(caption: "Views")
-    private let messageButton = UIButton(configuration: .glass())
-    private let editButton = UIButton(configuration: .glass())
+    private let messageButton = UIButton(configuration: .gray())
+    private let editButton = UIButton(configuration: .gray())
     /// Keep-this-profile-on-the-map's-people-rails, immediately right of
     /// Message. Hidden unless the viewer follows this profile — see
     /// `configureMapPin`.
-    private let mapPinButton = UIButton(configuration: .glass())
-    private let qrCodeButton = UIButton(configuration: .glass())
-    private let moreButton = UIButton(configuration: .glass())
+    private let mapPinButton = UIButton(configuration: .gray())
+    private let followButton = UIButton(configuration: .gray())
+    private let qrCodeButton = UIButton(configuration: .gray())
+    private let moreButton = UIButton(configuration: .gray())
     private var columnTopConstraint: NSLayoutConstraint?
 
     /// Pins the banner's top to the scroll viewport's top edge (required,
@@ -94,13 +117,89 @@ final class ProfileHeaderView: UIView {
     /// a full banner-clearance below this inset; the banner ignores it and
     /// bleeds to y = 0.
     var chromeTopInset: CGFloat = 0 {
-        didSet { columnTopConstraint?.constant = chromeTopInset + Metrics.bannerClearance }
+        didSet { columnTopConstraint?.constant = columnTopConstant }
     }
+
+    /// The banner's shape — see `ProfileBannerFormat`. Read off the picture
+    /// as it lands; settable for QA.
+    private(set) var bannerFormat: ProfileBannerFormat = .unresolved
+
+    /// Where the identity column starts: below the chrome and the banner's
+    /// clearance. A band's clearance is only the air under the chrome — the
+    /// strip reaches down INTO the avatar rather than the avatar climbing up
+    /// into the strip.
+    private var columnTopConstant: CGFloat {
+        chromeTopInset + Metrics.bannerClearance(for: bannerFormat)
+    }
+
+    /// Adopts a banner shape: the column's start, where the banner ends, how
+    /// the name sits against the avatar, and whether the picture runs out.
+    func setBannerFormat(_ format: ProfileBannerFormat) {
+        guard format != bannerFormat || !hasAppliedBannerFormat else { return }
+        hasAppliedBannerFormat = true
+        bannerFormat = format
+        columnTopConstraint?.constant = columnTopConstant
+        // A band ends a quarter of the way down the avatar, its edge cut by
+        // the disc; a poster runs to the foot of the tray; no picture, no
+        // banner.
+        bannerView.isHidden = format == .none
+        bannerEndsAtTray?.isActive = format == .poster
+        bannerEndsInAvatar?.isActive = format != .poster
+        // Beside a straddling disc the name sits on the page BELOW the strip:
+        // bottom-aligned, so its lines fall in the disc's lower half. On a
+        // poster, and with no picture, the two are centred on each other.
+        topRow.alignment = format == .band ? .bottom : .center
+        bannerView.setFormat(format)
+        setNeedsLayout()
+    }
+
+    /// The scroll, handed down to the banner: the picture lags the content,
+    /// and a poster fades out over exactly the travel that brings the
+    /// avatar's top to where a band would hold it — under the chrome, a gap
+    /// below it — so the two shapes meet at the same picture: none.
+    func setTravelled(_ travelled: CGFloat) {
+        bannerView.setTravelled(travelled, fadeOutTravel: posterFadeOutTravel)
+    }
+
+    /// The travel that brings a poster's avatar to where a band holds its
+    /// own — the point the poster is gone by, and a detent the scroll rests
+    /// at (see `ProfileScrollDetents`).
+    var posterFadeOutTravel: CGFloat {
+        Metrics.bannerClearance(for: .poster) - Metrics.bannerClearance(for: .band)
+    }
+
+    private var hasAppliedBannerFormat = false
+    private var bannerEndsAtTray: NSLayoutConstraint?
+    private var bannerEndsInAvatar: NSLayoutConstraint?
+    private let topRow = UIStackView()
+    private let statsRow = UIStackView()
+
+    #if DEBUG
+    var debugBannerFrame: CGRect { bannerView.frame }
+    var debugAvatarFrame: CGRect { avatarView.convert(avatarView.bounds, to: self) }
+    var debugTrayFrame: CGRect { actionRowForDebug?.convert(actionRowForDebug!.bounds, to: self) ?? .zero }
+    var debugStatsFrame: CGRect { statsRow.convert(statsRow.bounds, to: self) }
+    var debugBannerIsHidden: Bool { bannerView.isHidden }
+    var debugTrayButtons: [UIButton] {
+        [followButton, messageButton, editButton, mapPinButton, qrCodeButton, moreButton]
+    }
+    var debugBannerShowsFade: Bool { bannerView.debugShowsFade }
+    var debugBannerFadeLocations: [CGFloat] { bannerView.debugFadeLocations }
+    var debugBannerFadeAlphas: [CGFloat] { bannerView.debugFadeAlphas }
+    var debugBannerAlpha: CGFloat { bannerView.alpha }
+    var debugBannerPictureShift: CGFloat { bannerView.debugPictureShift }
+    private weak var actionRowForDebug: UIView?
+    #endif
 
     /// Builds the mutual's rail menu, resolved at PRESENTATION so the rows
     /// reflect live membership rather than whatever was true when the button
     /// was configured — the same bargain `setMoreMenu` strikes.
     var makeMapPinMenu: (() -> UIMenu)?
+    /// Invoked when the Follow / Following capsule is tapped (other users
+    /// only). The capsule lives HERE, beside Message, rather than in the
+    /// navigation bar: the two are one decision about one person, and a
+    /// finger should not have to travel from the bar to the tray to make it.
+    var onFollowTapped: (() -> Void)?
     /// Invoked when the Message button is tapped (other users only).
     var onMessageTapped: (() -> Void)?
     /// Invoked when the Edit Profile capsule is tapped (own profile only).
@@ -127,6 +226,11 @@ final class ProfileHeaderView: UIView {
         bannerView = ProfileBannerView(imagePipeline: imagePipeline)
         super.init(frame: .zero)
         configureSubviews()
+        // The picture decides the shape, whenever it lands.
+        bannerView.onImageResolved = { [weak self] image in
+            self?.setBannerFormat(.resolved(forImageSize: image.size))
+        }
+        setBannerFormat(.unresolved)
     }
 
     @available(*, unavailable)
@@ -156,8 +260,19 @@ final class ProfileHeaderView: UIView {
         reactionsStat.setValue(model.reactionsText)
         viewsStat.setValue(model.viewsText)
 
+        applyBannerPresence(model.bannerImageURL)
         bannerView.setImageURL(model.bannerImageURL)
         loadAvatar(model.avatarURL)
+    }
+
+    /// No picture, no banner — and a picture arriving on a header that had
+    /// none takes the unresolved shape until it has said which it is.
+    private func applyBannerPresence(_ url: URL?) {
+        if url == nil {
+            setBannerFormat(.none)
+        } else if bannerFormat == .none {
+            setBannerFormat(.unresolved)
+        }
     }
 
     /// Applies `model` as a set of small, lightly staggered cross-dissolves —
@@ -189,6 +304,7 @@ final class ProfileHeaderView: UIView {
             self.nameLabel.text = model.displayName
             self.handleLabel.text = model.handle
             self.verifiedBadge.isHidden = !model.isVerified
+            self.applyBannerPresence(model.bannerImageURL)
             self.bannerView.setImageURL(model.bannerImageURL)
             self.loadAvatar(model.avatarURL)
         }
@@ -250,25 +366,45 @@ final class ProfileHeaderView: UIView {
         moreButton.menu = menu
     }
 
-    /// Adjusts the tray's leading capsule to the viewer's relationship: Message
-    /// for other users, Edit Profile for the viewer's own profile (they're
-    /// mutually exclusive, sharing the slot beside the avatar); the QR and
-    /// see-more bubbles are always available. The Follow / Following capsule
-    /// still lives in the navigation bar (styled by `ProfileViewController`) —
-    /// only Edit moved down here.
+    /// Adjusts the tray's capsules to the viewer's relationship: Follow or
+    /// Following beside Message for other users, Edit Profile alone for the
+    /// viewer's own profile; the star, QR and see-more bubbles trail whichever
+    /// is showing.
+    ///
+    /// Follow is the one PROMINENT capsule on the screen — the action a
+    /// stranger's profile exists to invite — and it goes quiet the moment it
+    /// has been taken, so Following reads as a state rather than a second
+    /// call to action.
     func configureAction(_ state: ProfileViewModel.FollowButton) {
         switch state {
         case .follow, .following:
+            followButton.isHidden = false
+            var config = Self.capsule(prominent: state == .follow)
+            config.title = state == .follow ? "Follow" : "Following"
+            followButton.configuration = config
+            followButton.accessibilityLabel = config.title
             messageButton.isHidden = false
             editButton.isHidden = true
         case .edit:
+            followButton.isHidden = true
             messageButton.isHidden = true
             editButton.isHidden = false
         case .hidden:
+            followButton.isHidden = true
             messageButton.isHidden = true
             editButton.isHidden = true
         }
     }
+
+    #if DEBUG
+    /// Fires the follow capsule's own action — the simulator cannot tap it
+    /// through the harness, so the QA path presses it from here.
+    func debugTapFollow() -> Bool {
+        guard !followButton.isHidden else { return false }
+        followButton.sendActions(for: .primaryActionTriggered)
+        return true
+    }
+    #endif
 
     /// Poses the map-favorite star beside Message.
     ///
@@ -293,7 +429,7 @@ final class ProfileHeaderView: UIView {
             mapPinButton.showsMenuAsPrimaryAction = false
             return
         }
-        mapPinButton.configuration = Self.glassBubble(
+        mapPinButton.configuration = Self.bubble(
             systemImage: Self.mapFavoriteSymbol(isFavorited: state.isFavorited)
         )
         mapPinButton.showsMenuAsPrimaryAction = true
@@ -452,10 +588,22 @@ final class ProfileHeaderView: UIView {
         redactionBones = [avatarBone, nameBone, handleBone, bioFirst, bioSecond, websiteBone]
     }
 
-    /// Shared chrome for the tray's glass text capsules: Liquid Glass pill
-    /// with a semibold compact title.
-    private static func styledCapsule(_ base: UIButton.Configuration) -> UIButton.Configuration {
-        var config = base
+    /// The tray's text capsules, FLAT.
+    ///
+    /// ⚠️ NOT GLASS. Liquid Glass is a material for chrome that floats over
+    /// content — it earns its place by showing what passes beneath it. These
+    /// buttons sit on the page with nothing behind them, so glass here was
+    /// a blur of a flat grey, which reads as a rendering fault rather than
+    /// as depth. The platform's own answer for a button on a page is the
+    /// filled family: one PROMINENT capsule in the tint, for the action the
+    /// screen invites (Follow), and quiet grey capsules with page ink for
+    /// the rest (Following, Message, Edit Profile). That is the pairing every
+    /// profile screen on the platform has settled on, and it is the same
+    /// grey the cards' pills wear, so the tray and the list read as one
+    /// system.
+    private static func capsule(prominent: Bool) -> UIButton.Configuration {
+        var config: UIButton.Configuration = prominent ? .filled() : .gray()
+        if !prominent { config.baseForegroundColor = .label }
         config.cornerStyle = .capsule
         // md, not lg, side insets: the capsule shares the avatar-side column
         // with three bubbles; the tighter title keeps the tray within budget.
@@ -470,9 +618,11 @@ final class ProfileHeaderView: UIView {
         return config
     }
 
-    /// A circular Liquid Glass bubble holding a single SF Symbol.
-    private static func glassBubble(systemImage: String) -> UIButton.Configuration {
-        var config = UIButton.Configuration.glass()
+    /// A circular flat bubble holding a single SF Symbol, in the same grey as
+    /// the quiet capsules beside it, with page ink.
+    private static func bubble(systemImage: String) -> UIButton.Configuration {
+        var config = UIButton.Configuration.gray()
+        config.baseForegroundColor = .label
         config.cornerStyle = .capsule
         config.image = UIImage(systemName: systemImage)
         config.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(textStyle: .body)
@@ -485,6 +635,7 @@ final class ProfileHeaderView: UIView {
         currentAvatarURL = url
         avatarTask?.cancel()
         avatarView.image = nil // fall back to the monogram until (and unless) the image resolves
+        monogramLabel.isHidden = false
 
         guard let url else { return }
         let pipeline = imagePipeline
@@ -497,6 +648,12 @@ final class ProfileHeaderView: UIView {
                 options: [.transitionCrossDissolve, .allowUserInteraction]
             ) {
                 self.avatarView.image = image
+                // ⚠️ The initials GO when the picture lands. They are a
+                // subview of the image view, so they draw ABOVE it — left
+                // visible, "KT" sat across the photograph for as long as the
+                // profile was on screen. The contract is initials first, then
+                // the picture, not both.
+                self.monogramLabel.isHidden = true
             }
         }
     }
@@ -549,7 +706,9 @@ final class ProfileHeaderView: UIView {
 
         // The 4-metric counter row, last element of the header: equal cells
         // across the full content width, right above the content threshold.
-        let statsRow = UIStackView(arrangedSubviews: [followersStat, followingStat, reactionsStat, viewsStat])
+        for stat in [followersStat, followingStat, reactionsStat, viewsStat] {
+            statsRow.addArrangedSubview(stat)
+        }
         statsRow.axis = .horizontal
         statsRow.alignment = .center
         statsRow.distribution = .fillEqually
@@ -588,7 +747,13 @@ final class ProfileHeaderView: UIView {
             verifiedBadge.heightAnchor.constraint(equalToConstant: Metrics.badgeSize)
         ])
 
-        var messageConfig = Self.styledCapsule(.glass())
+        followButton.isHidden = true
+        followButton.addAction(
+            UIAction { [weak self] _ in self?.onFollowTapped?() },
+            for: .primaryActionTriggered
+        )
+
+        var messageConfig = Self.capsule(prominent: false)
         messageConfig.title = "Message"
         messageButton.configuration = messageConfig
         messageButton.isHidden = true
@@ -600,7 +765,7 @@ final class ProfileHeaderView: UIView {
         // Edit Profile: the own-profile action, a glass capsule sharing the
         // leading slot with Message (never both shown). Same capsule styling as
         // Message so the two read as one action affordance beside the avatar.
-        var editConfig = Self.styledCapsule(.glass())
+        var editConfig = Self.capsule(prominent: false)
         editConfig.title = "Edit Profile"
         editButton.configuration = editConfig
         editButton.isHidden = true
@@ -612,17 +777,17 @@ final class ProfileHeaderView: UIView {
         // Same bubble as QR and see-more, but sitting with the LEADING capsule
         // rather than with the trailing pair: it acts on the person Message
         // acts on, so it belongs beside it.
-        mapPinButton.configuration = Self.glassBubble(
+        mapPinButton.configuration = Self.bubble(
             systemImage: Self.mapFavoriteSymbol(isFavorited: false)
         )
         mapPinButton.isHidden = true
 
-        qrCodeButton.configuration = Self.glassBubble(systemImage: "qrcode")
+        qrCodeButton.configuration = Self.bubble(systemImage: "qrcode")
         qrCodeButton.addAction(
             UIAction { [weak self] _ in self?.onQRCodeTapped?() },
             for: .primaryActionTriggered
         )
-        moreButton.configuration = Self.glassBubble(systemImage: "ellipsis")
+        moreButton.configuration = Self.bubble(systemImage: "ellipsis")
         moreButton.accessibilityLabel = "More actions"
         // The menu IS the primary action — one tap opens it, no intermediate
         // callback. The controller supplies the content (see `setMoreMenu`).
@@ -635,20 +800,35 @@ final class ProfileHeaderView: UIView {
         // neighbors get zero stack spacing — the spacer IS the gap — so the
         // tray degrades gracefully when width is scarce. The split holds
         // whichever leading capsule is visible.
-        let traySpacer = UIView()
-        traySpacer.setContentHuggingPriority(UILayoutPriority(1), for: .horizontal)
+        // ⚠️ THE TRAY IS A FULL-WIDTH ROW UNDER THE BIO, not a line beside
+        // the avatar.
+        //
+        // Follow used to live in the navigation bar and Message in the
+        // identity column, two decisions about one person a finger's travel
+        // apart. Put together they no longer fit beside a disc: Following +
+        // Message + three bubbles need ~300pt and the column has ~240. So the
+        // whole tray moved down to the header's last line, the width of the
+        // page — the arrangement a profile screen has settled on everywhere
+        // else — and the identity column beside the avatar is the name and
+        // the handle alone.
+        //
+        // The two capsules share the width left by the bubbles equally: the
+        // pair reads as one control with two halves, and Follow is the one
+        // that is prominent.
         let actionRow = UIStackView(
-            arrangedSubviews: [messageButton, editButton, mapPinButton, traySpacer, qrCodeButton, moreButton]
+            arrangedSubviews: [followButton, messageButton, editButton, mapPinButton, qrCodeButton, moreButton]
         )
         actionRow.axis = .horizontal
         actionRow.alignment = .fill
         actionRow.distribution = .fill
         actionRow.spacing = Spacing.sm
-        // The leading group (capsule + map pin) keeps its own gap; the spacer
-        // IS the gap to the trailing bubbles, so its neighbours take zero.
-        actionRow.setCustomSpacing(0, after: editButton)
-        actionRow.setCustomSpacing(0, after: mapPinButton)
-        actionRow.setCustomSpacing(0, after: traySpacer)
+        for capsule in [followButton, messageButton, editButton] {
+            capsule.setContentHuggingPriority(UILayoutPriority(1), for: .horizontal)
+            capsule.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        }
+        let equalCapsules = messageButton.widthAnchor.constraint(equalTo: followButton.widthAnchor)
+        equalCapsules.priority = UILayoutPriority(999)
+        equalCapsules.isActive = true
         // ⚠️ The map pin is the one bubble that HIDES, and it must not carry
         // the square tie the other two do. `height == width` is required, the
         // row is `.fill` (every arranged subview's height equals the row's,
@@ -678,18 +858,21 @@ final class ProfileHeaderView: UIView {
             ])
         }
 
-        // Right column of the top block: name, @handle, then the glass tray —
-        // three lines the avatar spans.
-        let identityColumn = UIStackView(arrangedSubviews: [nameRow, handleLabel, actionRow])
+        // Right column of the top block: name over @handle, centred against
+        // the avatar.
+        let identityColumn = UIStackView(arrangedSubviews: [nameRow, handleLabel])
         identityColumn.axis = .vertical
         identityColumn.alignment = .fill
         identityColumn.spacing = Spacing.xs
-        identityColumn.setCustomSpacing(Spacing.md, after: handleLabel)
 
-        let topRow = UIStackView(arrangedSubviews: [avatarView, identityColumn])
+        topRow.addArrangedSubview(avatarView)
+        topRow.addArrangedSubview(identityColumn)
         topRow.axis = .horizontal
         topRow.alignment = .center
         topRow.spacing = Spacing.md
+        #if DEBUG
+        actionRowForDebug = actionRow
+        #endif
 
         var websiteConfig = UIButton.Configuration.plain()
         websiteConfig.image = UIImage(systemName: "link")
@@ -719,12 +902,14 @@ final class ProfileHeaderView: UIView {
         // content threshold. Wider vertical rhythm than the standard xs-step
         // stacks: the header sits against a full-bleed banner and needs air
         // between its major containers to read premium.
-        let column = UIStackView(arrangedSubviews: [topRow, statsRow, bioLabel, websiteButton])
+        let column = UIStackView(arrangedSubviews: [topRow, statsRow, bioLabel, websiteButton, actionRow])
         column.axis = .vertical
         column.alignment = .fill
         column.spacing = Spacing.sm
         column.setCustomSpacing(Spacing.lg, after: topRow)
         column.setCustomSpacing(Spacing.md, after: statsRow)
+        column.setCustomSpacing(Spacing.lg, after: websiteButton)
+        actionRow.heightAnchor.constraint(equalToConstant: Metrics.bubbleSize).isActive = true
 
         // Layering: banner first (back), identity column on top of it. The
         // banner bleeds to the header's very top — the column starts below the
@@ -746,7 +931,7 @@ final class ProfileHeaderView: UIView {
         }
 
         let columnTop = column.topAnchor.constraint(
-            equalTo: topAnchor, constant: chromeTopInset + Metrics.bannerClearance
+            equalTo: topAnchor, constant: columnTopConstant
         )
         columnTopConstraint = columnTop
         column.constrain(in: self) { parent in
@@ -756,37 +941,47 @@ final class ProfileHeaderView: UIView {
             column.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -Spacing.xl)
         }
 
-        // The avatar spans the identity column's three lines: a square tied to
-        // the column's height (the column sits at its natural height; the
-        // avatar has no intrinsic size — see CircleAvatarView — so it follows).
-        // Past the required Dynamic-Type cap the avatar stops growing and
-        // re-centers against the column.
+        // The avatar is a fixed disc now that the tray no longer sits beside
+        // it: the identity column is two lines, which is no height to tie a
+        // disc to. `avatarSize` is what the three-line column used to resolve
+        // to, so the block keeps the proportions it had.
         //
-        // ⚠️ **BELOW the labels' compression resistance (750), and the 250 points
-        // between this and the old 999 are a clipped name on iPhone SE 3.** The
-        // tie runs BOTH ways: the avatar is square, so its height is also its
-        // width, and its width is whatever the action tray leaves beside it. At
-        // 375pt the tray needs ~236 of the 335 available, which leaves an 87pt
-        // avatar — and an equality that outranks the labels then dragged the
-        // column down to 87 as well, against the ~101 its three lines need. The
-        // shortfall landed on the least resistant thing in the column, and a
-        // `UILabel` squashed to 9pt draws its line clipped rather than moving it:
-        // measured `frame = (0 0; 114 9)` for a title3 name, top half missing.
-        //
-        // At 749 the column keeps its natural height and the tie simply breaks
-        // by the shortfall — the avatar stays as wide as the room allows and
-        // centers against a taller column. Nothing changes where both fit: 402pt
-        // resolves a 100pt avatar against a 100pt column, tie intact.
-        let avatarSpan = avatarView.heightAnchor.constraint(equalTo: identityColumn.heightAnchor)
-        avatarSpan.priority = .defaultHigh - 1
+        // High, not required, so a Dynamic-Type name that needs more than the
+        // disc's height is not clipped — the column then grows and the disc
+        // re-centres against it.
+        let avatarSide = avatarView.heightAnchor.constraint(equalToConstant: Metrics.avatarSize)
+        avatarSide.priority = .defaultHigh
+        // Where the banner ENDS is the shape's — see `setBannerFormat`, which
+        // activates exactly one of these.
+        bannerEndsAtTray = bannerView.bottomAnchor.constraint(equalTo: actionRow.bottomAnchor)
+        bannerEndsInAvatar = bannerView.bottomAnchor.constraint(
+            equalTo: avatarView.topAnchor, constant: Metrics.bandOverlap
+        )
         NSLayoutConstraint.activate([
-            bannerView.bottomAnchor.constraint(equalTo: actionRow.bottomAnchor),
             avatarView.widthAnchor.constraint(equalTo: avatarView.heightAnchor),
-            avatarSpan,
+            avatarSide,
             avatarView.heightAnchor.constraint(lessThanOrEqualToConstant: Metrics.avatarMaxSize)
         ])
     }
 
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard bannerFormat == .poster else { return }
+        // The nested stacks settle AFTER this pass — the note on
+        // `CircleAvatarView` — so they are settled here by hand before the
+        // frames are read: the run-out is placed against where the avatar
+        // and the counters actually are, not where they were a pass ago.
+        topRow.superview?.layoutIfNeeded()
+        let stats = statsRow.convert(statsRow.bounds, to: bannerView)
+        guard stats.height > 0 else { return }
+        // Clear until just above the counters, strong by the bio: the
+        // counters climb through the steep part of the curve, and the avatar
+        // and the name above them stand on the picture itself.
+        bannerView.setFade(
+            start: stats.minY - Metrics.posterFadeLead,
+            opaque: stats.maxY + Spacing.md
+        )
+    }
 }
 
 /// An image view that stays a circle whatever side length layout resolves for

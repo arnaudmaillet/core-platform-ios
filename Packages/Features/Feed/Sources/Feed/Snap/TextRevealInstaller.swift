@@ -66,15 +66,17 @@ enum TextRevealInstaller {
     /// Vertically it sits where the CARD puts its band above its caption, so a
     /// window landing on the card's rect lands one band on the other:
     /// `captionOffset` up from the caption, then back down by the inset the
-    /// card keeps above it.
-    static func bandRect(anchoredTo anchor: CGRect) -> CGRect {
+    /// card keeps above it. The band's SHAPE decides both numbers — a bare
+    /// band is a pill tall, an identity one a disc tall — so the rect is
+    /// asked for the model it will hold.
+    static func bandRect(anchoredTo anchor: CGRect, showsIdentity: Bool = true) -> CGRect {
         let inset = PostGridListRowCell.captionInset
         return CGRect(
             x: anchor.minX + inset,
-            y: anchor.minY - PostAuthorBandView.captionOffset
+            y: anchor.minY - PostAuthorBandView.captionOffset(showsIdentity: showsIdentity)
                 + PostGridListRowCell.captionTopInset,
             width: max(0, anchor.width - inset * 2),
-            height: PostAuthorBandView.avatarDiameter
+            height: PostAuthorBandView.height(showsIdentity: showsIdentity)
         )
     }
 
@@ -163,7 +165,7 @@ enum TextRevealInstaller {
                     return
                 }
                 (feed as? SnapFeedViewController)?.installRevealAuthorBand(
-                    in: bandRect(anchoredTo: anchor),
+                    in: bandRect(anchoredTo: anchor, showsIdentity: band.showsIdentity),
                     model: band,
                     pipeline: pipeline
                 )

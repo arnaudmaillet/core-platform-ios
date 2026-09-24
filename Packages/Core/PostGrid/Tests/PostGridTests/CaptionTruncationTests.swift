@@ -148,7 +148,9 @@ struct CaptionTruncationTests {
     @Test func aCaptionThatFitsCutsBelowTheCard() throws {
         let cell = Self.sized(Self.short)
         let cut = try #require(cell.revealCut)
-        #expect(cut == cell.bounds.height)
+        // In the DESTINATION's register: the page's caption row has no band,
+        // so the card's own band comes off the top.
+        #expect(cut == cell.bounds.height - cell.revealCaptionTop)
         // And it is BELOW the metric line, not above it: the page carries the
         // same one at the same offset, so veiling it would hide something the
         // card is showing.

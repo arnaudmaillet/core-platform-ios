@@ -59,6 +59,15 @@ struct PostCardMenuTests {
         #expect(PostCardMenuAction.unfollow {}.attributes == [])
     }
 
+    /// A post of one's own offers what it is for: change it, remove it. The
+    /// rows exist before the features do, and only the removal is red.
+    @Test func ownPostRowsAreEditAndDelete() {
+        #expect(PostCardMenuAction.edit {}.title == "Edit post")
+        #expect(PostCardMenuAction.delete {}.title == "Delete post")
+        #expect(PostCardMenuAction.edit {}.attributes == [])
+        #expect(PostCardMenuAction.delete {}.attributes == .destructive)
+    }
+
     @Test func theRowRunsTheHandlerItWasBuiltWith() {
         final class Box: @unchecked Sendable { var fired = false }
         let box = Box()

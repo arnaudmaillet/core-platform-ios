@@ -39,13 +39,13 @@ import UIKit
 /// the caption is the same words in the same place. The correction only shows
 /// itself when there was something to correct.
 public final class RevealDismissCardView: UIView, RevealStandInShaping {
-    /// What the row's header is showing in its trailing pill.
+    /// What the row's closing line is showing beside its counters.
     ///
     /// A value rather than three parameters, because the three are one answer:
-    /// they are read together off one row and drawn together into one capsule,
+    /// they are read together off one row and drawn together into one line,
     /// and a caller that got two of them from the row and the third from a
     /// habit is exactly the mismatch this exists to prevent.
-    public struct BandActions: Sendable, Equatable {
+    public struct RowActions: Sendable, Equatable {
         public var repost: Bool
         public var bookmark: Bool
         public var saved: Bool
@@ -58,7 +58,7 @@ public final class RevealDismissCardView: UIView, RevealStandInShaping {
 
         /// A row whose host wired neither control — a profile gallery's, until
         /// it does.
-        public static let none = BandActions(repost: false, bookmark: false, saved: false)
+        public static let none = RowActions(repost: false, bookmark: false, saved: false)
     }
 
     private let card: PostGridListRowCell
@@ -102,7 +102,8 @@ public final class RevealDismissCardView: UIView, RevealStandInShaping {
         imagePipeline: ImagePipeline,
         captionExpanded: Bool = false,
         showsAuthorMenu: Bool = true,
-        actions: BandActions = .none,
+        showsAuthorIdentity: Bool = true,
+        actions: RowActions = .none,
         ageText: String? = nil,
         height: CGFloat? = nil
     ) {
@@ -111,16 +112,23 @@ public final class RevealDismissCardView: UIView, RevealStandInShaping {
         backgroundColor = PostGridListRowCell.cardFillColor
         isUserInteractionEnabled = false
 
-        card.configure(with: post, imagePipeline: imagePipeline, captionExpanded: captionExpanded)
+        // `showsAuthorIdentity` is the same kind of answer as the rest: the
+        // shape of band the ROW wears. A profile's own cards wear the bare
+        // one, and a stand-in that drew a name above them would land a disc
+        // on a line that has none.
+        card.configure(
+            with: post, imagePipeline: imagePipeline, captionExpanded: captionExpanded,
+            showsAuthorIdentity: showsAuthorIdentity
+        )
         // Drawn but not wired, and only when the row has one — see the note on
         // the initialiser. A stand-in with no handlers would hide the control
         // by default, which is the wrong answer for the rows that do have it.
         if showsAuthorMenu {
             card.showAuthorMenuControlAsScenery()
         }
-        // The header's trailing pill, on the same terms: drawn, never wired,
+        // The closing line's controls, on the same terms: drawn, never wired,
         // and only what the row itself is showing.
-        card.showBandActionsAsScenery(
+        card.showRowActionsAsScenery(
             repost: actions.repost, bookmark: actions.bookmark, saved: actions.saved
         )
         // ⚠️ THE ROW'S DATE, not this instant's. See

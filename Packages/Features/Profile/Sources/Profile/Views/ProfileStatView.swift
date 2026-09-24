@@ -63,7 +63,14 @@ final class ProfileStatView: UIControl {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    func setValue(_ text: String) {
+    /// A column with no number is not drawn at all.
+    ///
+    /// A dash where a count should be reads as something broken. The counter
+    /// plane is expected to answer for every column in production, so this is
+    /// the rare case — and when it happens, the honest thing is a row of the
+    /// counts that exist rather than a placeholder pretending to be one.
+    func setValue(_ text: String?) {
+        isHidden = text == nil
         valueLabel.text = text
         // "1.2K, Followers" — the number leads, because that is what the
         // column is for; the caption names it.

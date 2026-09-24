@@ -632,116 +632,74 @@ struct CarouselChipsAreFixedTests {
         return cell
     }
 
-    private func chipFrames(in cell: PostGridListRowCell) -> [CGRect] {
-        func pills(_ view: UIView) -> [UIView] {
-            if isChip(view) { return [view] }
-            return view.subviews.flatMap(pills)
-        }
-        // ⚠️ ON SCREEN, which is a question about a chip's ANCESTORS and not
-        // about the chip.
-        //
-        // This filtered on the pill's own `isHidden` and was right for exactly
-        // as long as a media row was the only row with pills in it. A card now
-        // builds BOTH shapes and hides one — the closing line by hiding its
-        // stack, the preview's chips by hiding the preview — so a chip of the
-        // shape that is not being drawn still answers `isHidden == false`, and
-        // every count here silently gained two.
-        func isOnScreen(_ view: UIView) -> Bool {
-            sequence(first: view, next: \.superview)
-                .prefix { $0 !== cell.contentView.superview }
-                .allSatisfy { !$0.isHidden && $0.alpha > 0 }
-        }
-        return pills(cell.contentView)
-            .filter(isOnScreen)
-            .map { $0.convert($0.bounds, to: cell.contentView) }
-            .sorted { $0.minX < $1.minX }
+    /// Whether `view` is being drawn, which is a question about its
+    /// ANCESTORS as much as itself — a text row hides the preview, never the
+    /// chip inside it.
+    private func isOnScreen(_ view: UIView, in cell: PostGridListRowCell) -> Bool {
+        sequence(first: view, next: \.superview)
+            .prefix { $0 !== cell.contentView.superview }
+            .allSatisfy { !$0.isHidden && $0.alpha > 0 }
     }
 
-    /// ⚠️ A CHIP IS A BOX ON THE ROW, not a capsule.
-    ///
-    /// Three of the four wear one; the date lost its capsule and kept the box,
-    /// so a check for `PostMetaPillView` alone silently stopped counting it —
-    /// and the tests that read `frames[3]` crashed rather than failed, which is
-    /// the loudest possible version of a good outcome.
-    private func isChip(_ view: UIView) -> Bool {
-        view is PostMetaPillView || view is PostChipSlotView
-    }
-
-    /// The chips actually being drawn, in reading order — same rule as
-    /// `chipFrames`, for the tests that need the views and not their frames.
-    private func onScreenPills(in cell: PostGridListRowCell) -> [UIView] {
-        func pills(_ view: UIView) -> [UIView] {
-            if isChip(view) { return [view] }
-            return view.subviews.flatMap(pills)
+    private func chips(in cell: PostGridListRowCell) -> [PostMetaPillView] {
+        func walk(_ view: UIView) -> [PostMetaPillView] {
+            if let pill = view as? PostMetaPillView { return [pill] }
+            return view.subviews.flatMap(walk)
         }
-        func isOnScreen(_ view: UIView) -> Bool {
-            sequence(first: view, next: \.superview)
-                .prefix { $0 !== cell.contentView.superview }
-                .allSatisfy { !$0.isHidden && $0.alpha > 0 }
-        }
-        return pills(cell.contentView).filter(isOnScreen).sorted {
+        return walk(cell.contentView).filter { isOnScreen($0, in: cell) }.sorted {
             $0.convert($0.bounds, to: cell).minX < $1.convert($1.bounds, to: cell).minX
         }
     }
 
-    /// ⚠️ THE REQUIREMENT: the chips and the indicator belong to the PREVIEW,
-    /// not to what is inside it, so scrolling the pages must not move them.
-    ///
-    /// The natural way to write a carousel is to put its furniture in the scroll
-    /// view — everything is then one subtree and nothing needs pinning — and it
-    /// carries the counters off the screen with page two. Here the scroll view
-    /// is a sibling BELOW them inside the box, and this measures the difference.
-    @Test func theChipsDoNotTravelWithThePages() {
+    /// The page indicator, on the closing line under the preview.
+    private func indicator(in cell: PostGridListRowCell) -> MediaPageIndicatorView? {
+        chips(in: cell).compactMap { $0 as? MediaPageIndicatorView }.first
+    }
+
+    private func indicatorFrame(in cell: PostGridListRowCell) -> CGRect? {
+        indicator(in: cell).map { $0.convert($0.bounds, to: cell.contentView) }
+    }
+
+    /// The closing line's counters, in reading order.
+    private func counterPills(in cell: PostGridListRowCell) -> [PostMetaPillView] {
+        chips(in: cell).filter { !($0 is MediaPageIndicatorView) }
+    }
+
+    /// ⚠️ THE REQUIREMENT: the indicator belongs to the CARD's closing line,
+    /// not to what scrolls inside the preview, so paging must not move it.
+    @Test func theIndicatorDoesNotTravelWithThePages() throws {
         let cell = row(pages: 4)
-        let before = chipFrames(in: cell)
-        // likes, comments, indicator, age.
-        #expect(before.count == 4)
+        let before = try #require(indicatorFrame(in: cell))
 
         #expect(cell.debugScrollCarousel(toPage: 3, animated: false))
         cell.layoutIfNeeded()
 
-        let after = chipFrames(in: cell)
-        #expect(after.count == before.count)
-        for (old, new) in zip(before, after) {
-            #expect(abs(old.minX - new.minX) < 0.5)
-            #expect(abs(old.minY - new.minY) < 0.5)
-        }
+        let after = try #require(indicatorFrame(in: cell))
+        #expect(abs(before.minX - after.minX) < 0.5)
+        #expect(abs(before.minY - after.minY) < 0.5)
     }
 
-    /// Three chips for a collection — counters, indicator, age — and two for a
-    /// single-media post. An indicator for one page is furniture answering a
-    /// question nobody asked.
+    /// An indicator for a collection, and none for a single-media post. An
+    /// indicator for one page is furniture answering a question nobody asked.
     @Test func onlyACollectionWearsAnIndicator() {
-        // Likes, comments, age — and a fourth only when there are pages to
-        // indicate.
-        #expect(chipFrames(in: row(pages: 1)).count == 3)
-        #expect(chipFrames(in: row(pages: 4)).count == 4)
+        #expect(indicator(in: row(pages: 1)) == nil)
+        #expect(indicator(in: row(pages: 4)) != nil)
     }
 
-    /// It sits BETWEEN the other two, which is the placement asked for and the
-    /// one a centred-on-the-leftover-space version would break the moment a
-    /// counter gained a digit.
-    ///
-    /// ⚠️ On one line of CENTRES, not one bottom edge. The three chips are
-    /// different heights — a row of 6pt dots against a line of caption2 — so a
-    /// shared bottom puts the short one's mass below the others, and the row
-    /// stops reading as a row.
-    @Test func theIndicatorSitsBetweenTheCountersAndTheDate() throws {
+    /// The indicator LEADS the closing line, under the preview, a pill tall,
+    /// with the counters closing the line after it.
+    @Test func theIndicatorLeadsTheClosingLine() throws {
         let cell = row(pages: 4)
-        let frames = chipFrames(in: cell)
-        // likes, comments, indicator, age.
-        #expect(frames.count == 4)
-
-        for (left, right) in zip(frames, frames.dropFirst()) {
-            #expect(left.maxX <= right.minX)
-            #expect(abs(left.midY - right.midY) < 0.5)
-        }
-        // ⚠️ And every chip is the SAME HEIGHT. A row of 6pt dots is shorter
-        // than a line of caption2, so an indicator sized by its contents came
-        // out visibly smaller than the three beside it — which is what stopped
-        // the four reading as one row.
-        for frame in frames {
-            #expect(abs(frame.height - frames[0].height) < 0.5)
+        let preview = try #require(cell.mediaHeroRect)
+        let chip = try #require(indicatorFrame(in: cell))
+        #expect(chip.minY >= preview.maxY)
+        #expect(abs(chip.height - PostMetaPillView.height) < 0.5)
+        // An unauthored post's date leads the line; the indicator follows it
+        // in the leading half.
+        #expect(chip.minX >= PostGridListRowCell.captionInset - 0.5)
+        #expect(chip.midX < cell.bounds.midX)
+        for pill in counterPills(in: cell) {
+            #expect(pill.convert(pill.bounds, to: cell.contentView).minX > chip.maxX)
         }
     }
 
@@ -789,7 +747,7 @@ struct CarouselChipsAreFixedTests {
     /// have cleared it.
     @Test func aRecycledRowDropsThePreviousCollection() {
         let cell = row(pages: 4)
-        #expect(chipFrames(in: cell).count == 4)
+        #expect(indicator(in: cell) != nil)
 
         cell.prepareForReuse()
         cell.configure(
@@ -802,97 +760,64 @@ struct CarouselChipsAreFixedTests {
         )
         cell.layoutIfNeeded()
 
-        #expect(chipFrames(in: cell).count == 3)
+        #expect(indicator(in: cell) == nil)
+        #expect(counterPills(in: cell).count == 2)
         #expect(cell.debugScrollCarousel(toPage: 1, animated: false) == false)
     }
 
-    /// A row whose chips have room to move, so a layout that mispositions them
-    /// shows up as a measurement rather than as a coincidence.
-    ///
-    /// ⚠️ Three fixture choices, each load-bearing:
-    ///
-    /// - **Six-figure counts.** Whether the counters get squeezed depends on how
-    ///   wide they are; "160" and "12" fit inside almost anything.
-    /// - **A RECENT date**, so the age chip is "1h" rather than "Jan 1 1970" —
-    ///   a 123pt date chip filled the row on its own and clamped every gap to
-    ///   the minimum, which made the two spaces trivially equal and the whole
-    ///   assertion vacuous. It passed under the broken layout.
-    /// - **Ninety minutes**, not sixty: an hour on the nose sits on the boundary
-    ///   the formatter rounds at.
-    private func spaciousRow() -> PostGridListRowCell {
+    /// A row whose counters are wide, so a layout that squeezed them shows up
+    /// as a measurement rather than as a coincidence: six-figure counts, since
+    /// "160" and "12" fit inside almost anything.
+    private func spaciousRow(width: CGFloat = 390) -> PostGridListRowCell {
         let ninetyMinutesAgo = Int64(Date().timeIntervalSince1970 * 1000) - 90 * 60 * 1000
         return row(
-            pages: 6, reactions: 1_600_000, comments: 128_000,
+            pages: 6, width: width, reactions: 1_600_000, comments: 128_000,
             publishedAtMS: ninetyMinutesAgo
         )
     }
 
-    /// ⚠️ A COUNT IS NEVER CLIPPED TO MAKE ROOM FOR THE INDICATOR.
-    ///
-    /// The regression this pins: the indicator was centred on the PREVIEW, which
-    /// fixes its leading edge at half the width and caps what is left for the
-    /// counters — so the comments chip rendered "💬 …" while empty preview sat
-    /// on the other side of the dots. Clipped, it reads as a number the post
-    /// has, and it is not one.
-    ///
+    /// ⚠️ A COUNT IS NEVER CLIPPED, AND THE INDICATOR IS WHAT GIVES WAY.
+    /// Clipped, a count reads as a number the post has, and it is not one.
     /// Measuring each chip against what it asks for UNCONSTRAINED is the part
-    /// that matters: a frame-order or gap assertion passes just as happily on a
-    /// row of ellipses.
-    @Test func theCountersAreNeverSqueezedByTheIndicator() {
-        let cell = spaciousRow()
-        let ordered = onScreenPills(in: cell)
-        #expect(ordered.count == 4)
-
-        // Likes, comments and the date at their unconstrained width. The
-        // indicator is excluded on purpose — yielding is its job.
-        for chip in [ordered[0], ordered[1], ordered[3]] {
-            let wanted = chip.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
-            #expect(chip.bounds.width >= wanted - 0.5)
+    /// that matters: a frame-order or gap assertion passes just as happily on
+    /// a row of ellipses.
+    @Test func theCountersAreNeverSqueezedAndTheIndicatorYields() throws {
+        let roomy = spaciousRow()
+        // Narrow enough that five dots no longer fit beside two six-figure
+        // counts and the date, wide enough that two still do.
+        let tight = spaciousRow(width: 262)
+        for cell in [roomy, tight] {
+            let line = counterPills(in: cell)
+            #expect(line.count == 2)
+            for chip in line {
+                let wanted = chip.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
+                #expect(chip.bounds.width >= wanted - 0.5)
+            }
         }
+        let roomyChip = try #require(indicator(in: roomy))
+        let tightChip = try #require(indicator(in: tight))
+        #expect(tightChip.bounds.width < roomyChip.bounds.width)
+        #expect(tightChip.bounds.width >= tightChip.minimumChipWidth - 0.5)
     }
 
-    /// ⚠️ AND NONE OF THE FURNITURE IS BEHIND THE PAGES.
-    ///
-    /// The chips are laid out against the preview and the carousel scrolls
-    /// underneath them, which is a Z-ORDER promise no frame assertion can see:
-    /// every test in this file went on passing while the date sat correctly
-    /// placed and completely covered. It happened for a reason worth pinning —
-    /// the carousel was inserted below a NAMED chip, which was the lowest one
-    /// only for as long as nobody reordered them.
-    ///
-    /// Asserted against every chip rather than the date alone: the next
-    /// reordering will move a different one to the bottom.
-    @Test func theCarouselIsBehindEveryChip() throws {
+    /// The preview holds NO furniture now: nothing sits over the pages but
+    /// the pages. Asserted on the box's subviews, so a chip put back on the
+    /// preview under another name is the regression.
+    @Test func thePreviewWearsNoChips() throws {
         let cell = spaciousRow()
         let carousel = try #require(cell.debugCarousel)
         let box = try #require(carousel.superview)
-        let order = box.subviews
-        let carouselIndex = try #require(order.firstIndex(of: carousel))
-
-        let chips = order.enumerated().filter { isChip($0.element) }
-        #expect(chips.count == 4)
-        #expect(chips.allSatisfy { $0.offset > carouselIndex })
+        #expect(box.subviews.allSatisfy { !($0 is PostMetaPillView) })
     }
 
-    /// ⚠️ And the indicator CLOSES THE ROW WITH THE COUNTERS: date, all the
-    /// slack, then indicator-comments-likes packed at one gap each.
-    ///
-    /// It used to float between two guides of equal width, centred on the
-    /// preview — which capped the counters' room at half of it whatever they
-    /// needed. The trailing group now takes the width it needs and the give is
-    /// all in front of it.
-    @Test func theIndicatorClosesTheRowWithTheCounters() {
-        let chips = chipFrames(in: spaciousRow())
-        #expect(chips.count == 4)
-
-        let gap = PostGridListRowCell.chipGap
-        // Packed: indicator to comments, comments to likes.
-        #expect(abs((chips[2].minX - chips[1].maxX) - gap) < 0.5)
-        #expect(abs((chips[3].minX - chips[2].maxX) - gap) < 0.5)
-        // And the slack is genuine — this row has room to spare, so "packed"
-        // above is a measured result rather than three chips clamped against a
-        // width they could not exceed.
-        #expect(chips[1].minX - chips[0].maxX > gap + 1)
+    /// The closing line packs the counters at one gap each, trailing:
+    /// comments, then likes, at the caption's inset.
+    @Test func theLinePacksItsCountersTrailing() {
+        let cell = spaciousRow()
+        let frames = counterPills(in: cell).map { $0.convert($0.bounds, to: cell.contentView) }
+        #expect(frames.count == 2)
+        #expect(abs((frames[1].minX - frames[0].maxX) - PostGridListRowCell.chipGap) < 0.5)
+        #expect(abs(cell.contentView.bounds.maxX - frames[1].maxX - PostGridListRowCell.captionInset) < 0.5)
     }
 }
 

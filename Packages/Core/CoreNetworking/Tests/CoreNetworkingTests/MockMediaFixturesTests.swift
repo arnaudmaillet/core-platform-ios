@@ -174,15 +174,32 @@ struct MockMediaFixturesTests {
         for post in dataset.posts {
             #expect(post.media.map { $0.url.hasPrefix("mock://") } ?? true)
         }
-        for author in dataset.authors {
+        for author in dataset.authors where !author.avatarURL.isEmpty {
             #expect(author.avatarURL.hasPrefix("mock://"))
         }
+    }
+
+    /// The corpus seeds every banner shape: landscape avatars (a band),
+    /// portrait ones (a poster), and authors with none (no banner).
+    @Test func authorsComeInEveryBannerShape() {
+        let dataset = MockSocialDataset()
+        let shapes = dataset.authors.indices.map { MockSocialDataset.avatarShape(index: $0) }
+        #expect(shapes.contains { $0 == nil })
+        #expect(shapes.contains { $0.map { $0.0 > $0.1 } == true })
+        #expect(shapes.contains { $0.map { $0.0 < $0.1 } == true })
+        #expect(MockSocialDataset.avatarShape(index: 0)?.0 == 1600)
+        #expect(MockSocialDataset.avatarShape(index: 1)?.1 == 1600)
+        #expect(MockSocialDataset.avatarShape(index: 3) == nil)
+        // And the URL says the shape it was given.
+        #expect(dataset.authors[0].avatarURL.hasSuffix("w=1600&h=900"))
+        #expect(dataset.authors[3].avatarURL.isEmpty)
     }
 
     @Test func realAssetCatalogSeedsRemoteMedia() {
         let dataset = MockSocialDataset(mediaCatalog: .realAssets)
         #expect(dataset.mediaCatalog == .realAssets)
-        #expect(dataset.authors.allSatisfy { $0.avatarURL.hasPrefix("https://") })
+        #expect(dataset.authors.allSatisfy { $0.avatarURL.isEmpty || $0.avatarURL.hasPrefix("https://") })
+        #expect(dataset.authors.contains { $0.avatarURL.hasPrefix("https://") })
 
         let remoteMedia = dataset.posts.compactMap(\.media).filter { $0.url.hasPrefix("https://") }
         #expect(!remoteMedia.isEmpty)

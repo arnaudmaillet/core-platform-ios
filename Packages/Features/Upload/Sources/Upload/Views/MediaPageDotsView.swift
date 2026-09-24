@@ -8,7 +8,7 @@ import UIKit
 /// `PostGrid.MediaPageIndicatorView` does this and is tested — but promoting it
 /// to DesignSystem means moving ~1590 lines across seven files
 /// (`MediaPageIndicatorView`, `PostMetaPillView`, `CarouselPlaybackAudit`,
-/// `PostMetricLabel`, `PageScrubber`, `PageWindow`, `MediaDateInk`), because the
+/// `PostMetricLabel`, `PageScrubber`, `PageWindow`), because the
 /// chip reaches a font helper, an ink vocabulary, a window rule and a DEBUG
 /// audit harness. That is PostGrid's chrome layer, not a shared component.
 ///

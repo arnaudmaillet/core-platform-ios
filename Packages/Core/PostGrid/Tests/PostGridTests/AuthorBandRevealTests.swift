@@ -38,7 +38,12 @@ struct AuthorBandRevealTests {
             publishedAtMS: 1_780_000_000_000,
             authorID: authored ? ProfileID("p1") : nil,
             authorName: authored ? "Ava Moreau" : nil,
-            authorHandle: authored ? "ava" : nil
+            authorHandle: authored ? "ava" : nil,
+            // A count, so both rows carry the same closing line: the bare one
+            // puts its date there, the authored one keeps it on the handle,
+            // and the line is a pill tall in both cases only while it shows
+            // something.
+            reactionCount: 12
         )
     }
 
@@ -64,11 +69,21 @@ struct AuthorBandRevealTests {
         return cell
     }
 
-    /// A post with no author identity has no band, so its caption starts at the
-    /// card's own inset and the transition needs no offset at all — the
-    /// behaviour every profile gallery still gets.
+    /// A post with no author identity and nothing to offer in a "..." wears
+    /// no band at all — the bare band collapses — so its caption starts at
+    /// the card's own inset: the behaviour the viewer's own rows get.
     @Test func anUnauthoredRowHasNoCaptionOffset() {
         #expect(Self.sized(Self.short, authored: false).revealCaptionTop == 0)
+    }
+
+    /// Give that row a "..." and the bare band is back, a pill tall.
+    @Test func anUnauthoredRowWithAMenuOffsetsByTheBareBand() {
+        let cell = Self.sized(Self.short, authored: false)
+        cell.authorMenuActions = { [.report(perform: {})] }
+        #expect(cell.revealCaptionTop
+            == PostAuthorBandView.bareHeight + PostGridListRowCell.authorFollowGap)
+        cell.authorMenuActions = { [] }
+        #expect(cell.revealCaptionTop == 0)
     }
 
     /// An authored one offsets by the disc and the gap under it, exactly.
@@ -86,7 +101,8 @@ struct AuthorBandRevealTests {
     @Test func theBandGrowsTheCardByTheOffsetItDeclares() {
         let bare = Self.sized(Self.short, authored: false)
         let banded = Self.sized(Self.short, authored: true)
-        #expect(abs((banded.bounds.height - bare.bounds.height) - banded.revealCaptionTop) < 1)
+        #expect(abs((banded.bounds.height - bare.bounds.height)
+            - (banded.revealCaptionTop - bare.revealCaptionTop)) < 1)
     }
 
     /// And the cut does not move, because it is measured in the DESTINATION's

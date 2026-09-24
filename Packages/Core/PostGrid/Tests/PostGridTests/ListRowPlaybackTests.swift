@@ -96,19 +96,17 @@ struct ListRowPlaybackTests {
         #expect(cell.makeVideoRenderViewIfNeeded() === made, "a second ask must reuse the first surface")
     }
 
-    /// ⚠️ THE CLIP GOES UNDER THE ROW'S FURNITURE — every piece of it.
+    /// ⚠️ THE CLIP GOES AT THE BACK OF THE PREVIEW BOX, under anything the
+    /// box ever holds.
     ///
-    /// The preview box holds the counters, the date and the page indicator as
-    /// its own subviews, and `pin(to:)` begins with `addSubview`, which puts
-    /// the pinned view at the FRONT. Skip the re-ordering and the player covers
-    /// the lot: measured on a single-video card as "the counters and the
-    /// timestamp have disappeared".
-    ///
-    /// Asserted against EVERY sibling rather than against one named glyph. The
-    /// previous version of this test pinned the surface against the play badge
-    /// alone; the badge went away and the assertion went with it, taking the
-    /// rule it was standing for.
-    @Test func thePlayingSurfaceSitsUnderTheRowsFurniture() {
+    /// `pin(to:)` begins with `addSubview`, which puts the pinned view at the
+    /// FRONT. The box used to hold the counters, the date and the page
+    /// indicator, and skipping the re-ordering covered the lot: measured on a
+    /// single-video card as "the counters and the timestamp have disappeared".
+    /// That furniture is on the card's closing line now, but the rule stands
+    /// for whatever the box holds next — a paused mark, a badge — so the
+    /// surface is asserted at index zero rather than under a named sibling.
+    @Test func thePlayingSurfaceSitsAtTheBackOfThePreview() {
         let cell = row()
         let surface = cell.makeVideoRenderViewIfNeeded()
 
@@ -116,9 +114,6 @@ struct ListRowPlaybackTests {
             Issue.record("the surface was never parented")
             return
         }
-        // The furniture has to actually BE there, or "underneath all of it" is
-        // a claim about an empty set.
-        #expect(box.subviews.count > 1)
         #expect(index == 0)
     }
 

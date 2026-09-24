@@ -61,21 +61,14 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
     /// arithmetic reads either way.
     private static let pressedScale: CGFloat = 1.26
 
-    /// ⚠️ NO GROUND, ON ANY SURFACE, IN ANY STATE.
+    /// NO MATERIAL: the chip stands on the card's flat fill, like every other
+    /// capsule on the closing line — see the initialiser.
     ///
-    /// Every other chip in this row is a NUMBER, and a number over a photograph
-    /// needs a floor to be legible on. The dots do not — they are their own
-    /// contrast, light ink over a counter-toned halo, the same treatment the
-    /// date wears for the same reason. What the capsule added was a claim that
-    /// something here could be pressed, made permanently, in the middle of a
-    /// row that is otherwise furniture.
-    ///
-    /// This went through a shorter-lived version where the ground appeared
-    /// under a finger and faded out behind it. It is recorded because the
-    /// reasoning survives the decision: a lens opening in the middle of a
-    /// caption is a strange answer to a drag, and the dots moving under the
-    /// finger — see `applyPressFeedback` — was the feedback being asked for all
-    /// along.
+    /// It used to stand on the photograph with no ground at all, light dots
+    /// over a halo, because a capsule there was a claim that something could
+    /// be pressed in the middle of a row that was otherwise furniture. It is
+    /// on the card now, in a line where every capsule IS pressed, and a chip
+    /// with no fill beside four that have one read as a hole in the line.
     override public func makeGround() -> UIVisualEffect? { nil }
 
     /// The scrub, exposed so a host can make its OWN pan yield to it.
@@ -123,6 +116,9 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
                 bottom: PostMetaPillView.insets.bottom, trailing: 0
             )
         )
+        // The card pill's own fill — the same the counters and the controls
+        // beside it wear (`PostCardPillView`), painted rather than sampled.
+        contentView.backgroundColor = .tertiarySystemFill
         // The one chip that IS a control. `PostMetaPillView` turns interaction
         // off because a counter that swallowed touches would put a dead corner
         // on the preview; this one has something to do with them.
@@ -408,26 +404,12 @@ final class PageDotsView: UIView {
         dots.forEach { $0.removeFromSuperview() }
         dots = (0..<count).map { _ in
             let dot = UIView()
-            // ⚠️ THE DATE'S INK, because the dots stand on the same thing the
-            // date does: a photograph.
-            //
-            // They were `PostMetaPillView.foreground` — a dark grey chosen for
-            // a LIGHT material — which was right for exactly as long as there
-            // was always a capsule under them. There is not: the ground now
-            // arrives with the finger, so at rest these are dark marks on
-            // whatever the picture happens to be, and on a dark frame they were
-            // measured as invisible. A control nobody can see is a worse answer
-            // than the capsule that was removed.
-            //
-            // Light fill plus a counter-toned halo is what `MediaDateInk`
-            // already worked out for the same problem, and it holds under the
-            // material too: that ground is translucent and follows the picture,
-            // so ink that survives the picture survives the ground.
-            dot.backgroundColor = MediaDateInk.colour
-            dot.layer.shadowColor = MediaDateInk.halo.cgColor
-            dot.layer.shadowOffset = .zero
-            dot.layer.shadowRadius = MediaDateInk.haloRadius
-            dot.layer.shadowOpacity = MediaDateInk.haloOpacity
+            // The card's own ink, since the dots stand on the card's fill
+            // now and not on a photograph: `label`, the current page at full
+            // strength and the others at a third (see `layoutSubviews`). They
+            // were white over a halo while they sat on the picture, and white
+            // on a light capsule is nothing at all.
+            dot.backgroundColor = PostMetaPillView.foreground
             dot.layer.cornerRadius = MediaPageIndicatorView.dotDiameter / 2
             addSubview(dot)
             return dot

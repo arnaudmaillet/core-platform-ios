@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import DesignSystem
 import MediaCore
 import MediaPlayback
@@ -95,7 +96,8 @@ final class ProfileGalleryPagerView: UIView {
     init(
         imagePipeline: ImagePipeline,
         tabs: [ProfileTab] = ProfileTab.publicTabs,
-        videoPlayback: VideoPlaybackController? = nil
+        videoPlayback: VideoPlaybackController? = nil,
+        bookmarks: PostBookmarkStore? = nil
     ) {
         pageOrder = tabs
         pages = tabs.map { tab in
@@ -105,7 +107,8 @@ final class ProfileGalleryPagerView: UIView {
                 // Liked are whatever the viewer kept, which is mostly not.
                 style: tab == .format(.media) ? .grid : .list,
                 tab: tab,
-                videoPlayback: videoPlayback
+                videoPlayback: videoPlayback,
+                bookmarks: bookmarks
             )
         }
         super.init(frame: .zero)
@@ -354,6 +357,12 @@ final class ProfileGalleryPagerView: UIView {
     func setSharedTravel(dockLine: CGFloat, contentFloor: CGFloat) {
         self.dockLine = max(0, dockLine)
         self.contentFloor = max(0, contentFloor)
+    }
+
+    /// Where a release rests while the header is on screen — the same
+    /// detents on every page, since the header is one object.
+    func setSnapDetents(_ detents: [CGFloat]) {
+        for page in pages { page.snapDetents = detents }
     }
 
     /// Where a page should sit, given where the screen currently is.

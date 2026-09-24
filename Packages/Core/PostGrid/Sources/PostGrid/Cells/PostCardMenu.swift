@@ -22,6 +22,12 @@ public enum PostCardMenuAction {
     case unfollow(perform: () -> Void)
     /// Raise a moderation case against the post.
     case report(perform: () -> Void)
+    /// The viewer's OWN post: change it. Offered before the feature exists,
+    /// so the menu says what a card of one's own is for; the handler is the
+    /// host's, and nothing today.
+    case edit(perform: () -> Void)
+    /// The viewer's own post: remove it. Same terms as `edit`.
+    case delete(perform: () -> Void)
 
     /// Public so a surface can audit what it composed — the menu itself is a
     /// system surface no screenshot can read.
@@ -35,6 +41,8 @@ public enum PostCardMenuAction {
         switch self {
         case .unfollow: "Unfollow"
         case .report: "Report"
+        case .edit: "Edit post"
+        case .delete: "Delete post"
         }
     }
 
@@ -42,6 +50,8 @@ public enum PostCardMenuAction {
         switch self {
         case .unfollow: "person.badge.minus"
         case .report: "flag"
+        case .edit: "pencil"
+        case .delete: "trash"
         }
     }
 
@@ -51,14 +61,15 @@ public enum PostCardMenuAction {
     /// serious row indistinguishable from its routine one.
     var attributes: UIMenuElement.Attributes {
         switch self {
-        case .unfollow: []
-        case .report: .destructive
+        case .unfollow, .edit: []
+        case .report, .delete: .destructive
         }
     }
 
     var handler: () -> Void {
         switch self {
-        case .unfollow(let perform), .report(let perform): perform
+        case .unfollow(let perform), .report(let perform),
+             .edit(let perform), .delete(let perform): perform
         }
     }
 

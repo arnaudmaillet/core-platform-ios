@@ -1737,10 +1737,13 @@ final class ForYouGridPage: UIView {
     }
 
     /// The row's author band, for the destination to borrow during a flight.
-    /// Read from the POST rather than from the cell, so it answers for a row
-    /// that has scrolled out as readily as for one on screen.
+    /// The realized ROW's own reading when there is one — its date included,
+    /// which is a function of the clock and must match what the card says —
+    /// and the post's otherwise, so it answers for a row that has scrolled
+    /// out as readily as for one on screen.
     func textRowAuthorBand(for postID: PostID) -> PostAuthorBandView.Model? {
-        posts.first { $0.id == postID }.flatMap(PostAuthorBandView.Model.init(post:))
+        if let model = (cell(for: postID) as? PostGridListRowCell)?.authorBandModel { return model }
+        return posts.first { $0.id == postID }.map { PostAuthorBandView.Model(post: $0) }
     }
 
     /// The pipeline this page draws with, so a borrowed band can load the same
@@ -2521,7 +2524,10 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
             for: indexPath
         ) as! ForYouSectionHeaderView
         let section = sections.indices.contains(indexPath.section) ? sections[indexPath.section] : .earlier
-        header.setTitle(section.title)
+        // "New · 8": the header says how much is new, so the viewer knows the
+        // size of the run before scrolling it — the number the tab's badge
+        // carries, on the section it describes.
+        header.setTitle(section == .new ? "\(section.title) · \(split)" : section.title)
         // Tapping a header means "show me this part" — the same gesture the
         // inbox's pills answer.
         header.onTap = { [weak self] in self?.scrollToSection(indexPath.section) }

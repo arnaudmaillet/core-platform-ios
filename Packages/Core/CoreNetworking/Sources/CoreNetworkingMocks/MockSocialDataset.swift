@@ -731,10 +731,17 @@ public struct MockSocialDataset: Sendable {
         ]
         // `mediaCatalog` here is the initializer parameter, not the stored
         // property — reading `self` mid-init would not compile.
+        //
+        // ⚠️ THREE SHAPES OF AVATAR, because the profile's banner IS its
+        // avatar until the contract grows a cover field, and the banner takes
+        // its shape from the picture: a landscape avatar gives a band, a
+        // portrait one a poster, and no avatar no banner at all. Every fourth
+        // author has none; the rest alternate.
         func avatarURL(index: Int) -> String {
+            guard let shape = Self.avatarShape(index: index) else { return "" }
             switch mediaCatalog {
-            case .synthetic: "mock://avatar/\(index)?w=128&h=128"
-            case .realAssets: MockMediaFixtures.avatarURL(index: index)
+            case .synthetic: return "mock://avatar/\(index)?w=\(shape.0)&h=\(shape.1)"
+            case .realAssets: return MockMediaFixtures.imageURL(index: index, width: shape.0, height: shape.1)
             }
         }
         authors = names.enumerated().map { index, name in
@@ -899,6 +906,14 @@ public struct MockSocialDataset: Sendable {
     /// field the contracts actually have; when the per-surface fields land,
     /// this seed moves onto them and nothing else changes. See
     /// `dev/BACKEND_GAPS.md` §13.
+    /// The shape of an author's avatar — and so of their banner — or nil for
+    /// an author with no picture. Landscape on even indices, portrait on odd,
+    /// none on every fourth: `prof-0` band, `prof-1` poster, `prof-3` bare.
+    public static func avatarShape(index: Int) -> (Int, Int)? {
+        if index % 4 == 3 { return nil }
+        return index % 2 == 0 ? (1600, 900) : (900, 1600)
+    }
+
     public static func isRelationshipsPrivate(profileIndex: Int) -> Bool {
         profileIndex % 9 < 4
     }

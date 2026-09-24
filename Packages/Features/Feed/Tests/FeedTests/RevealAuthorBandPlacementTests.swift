@@ -40,9 +40,21 @@ struct RevealAuthorBandPlacementTests {
     @Test func theBandSitsWhereTheCardPutsItsOwn() {
         let rect = TextRevealInstaller.bandRect(anchoredTo: Self.anchor)
         #expect(rect.minY
-            == Self.anchor.minY - PostAuthorBandView.captionOffset
+            == Self.anchor.minY - PostAuthorBandView.captionOffset(showsIdentity: true)
                 + PostGridListRowCell.captionTopInset)
         #expect(rect.height == PostAuthorBandView.avatarDiameter)
+    }
+
+    /// A BARE band — a profile's own rows — is a pill tall, and the rect
+    /// follows: the same gap under it, a shorter climb above the caption.
+    @Test func aBareBandIsAPillTall() {
+        let rect = TextRevealInstaller.bandRect(anchoredTo: Self.anchor, showsIdentity: false)
+        #expect(rect.height == PostAuthorBandView.bareHeight)
+        #expect(rect.minY
+            == Self.anchor.minY - PostAuthorBandView.captionOffset(showsIdentity: false)
+                + PostGridListRowCell.captionTopInset)
+        let captionInWindow = Self.anchor.minY + PostGridListRowCell.captionTopInset
+        #expect(captionInWindow - rect.maxY == PostAuthorBandView.captionGap)
     }
 
     /// The gap the band leaves under itself is the card's own — otherwise the
