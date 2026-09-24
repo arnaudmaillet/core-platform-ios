@@ -16,7 +16,9 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     private let onLogout: (() -> Void)?
     /// Builds the edit form (for the viewer's own profile); the closure it
     /// receives is invoked after a successful save. Nil for other users.
-    private let makeEditViewController: ((@escaping () -> Void) -> UIViewController)?
+    /// Handed the profile this screen holds, so the editor opens on it
+    /// instead of fetching it again (charter P7).
+    private let makeEditViewController: ((UserProfile?, @escaping () -> Void) -> UIViewController)?
     /// Builds the account settings screen (own profile only, the gear's
     /// destination). Nil for other users.
     private let makeSettingsViewController: (() -> UIViewController)?
@@ -261,7 +263,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         videoPlayback: VideoPlaybackController? = nil,
         shareTargeting: (any ProfileShareTargeting)? = nil,
         onLogout: (() -> Void)?,
-        makeEditViewController: ((@escaping () -> Void) -> UIViewController)? = nil,
+        makeEditViewController: ((UserProfile?, @escaping () -> Void) -> UIViewController)? = nil,
         makeSettingsViewController: (() -> UIViewController)? = nil,
         switcherFactory: ProfileSwitcherMenuFactory? = nil,
         makeRelationshipsViewController: (
@@ -1283,7 +1285,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         // returns here. Edits are per-field (each pushes its own screen), so a
         // save refreshes the profile underneath but does NOT pop the editor —
         // the user leaves the list themselves when done.
-        let editViewController = makeEditViewController { [weak self] in
+        let editViewController = makeEditViewController(viewModel.profile) { [weak self] in
             self?.viewModel.refresh()
         }
         navigationController?.pushViewController(editViewController, animated: true)
