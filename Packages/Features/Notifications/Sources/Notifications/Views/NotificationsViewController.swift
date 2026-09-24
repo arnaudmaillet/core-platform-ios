@@ -17,7 +17,8 @@ final class NotificationsViewController: UIViewController {
         return table
     }()
     private let refreshControl = UIRefreshControl()
-    private let spinner = UIActivityIndicatorView(style: .large)
+    /// Rows where the rows will be, until the first page lands (charter P8).
+    private let skeleton = PersonListSkeletonView(avatarSize: 40, showsTrailingBone: true)
     private let statusLabel = UILabel()
     private lazy var markAllReadButton = UIBarButtonItem(
         title: "Mark all read",
@@ -82,11 +83,8 @@ final class NotificationsViewController: UIViewController {
     }
 
     private func configureStatusViews() {
-        spinner.hidesWhenStopped = true
-        spinner.constrain(in: view) { parent in
-            spinner.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
-            spinner.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
-        }
+        skeleton.pin(to: view)
+        skeleton.isHidden = true
 
         statusLabel.font = .preferredFont(forTextStyle: .body)
         statusLabel.adjustsFontForContentSizeCategory = true
@@ -106,26 +104,41 @@ final class NotificationsViewController: UIViewController {
     private func render(_ phase: NotificationsViewModel.Phase) {
         switch phase {
         case .loading:
-            if !refreshControl.isRefreshing { spinner.startAnimating() }
-            tableView.isHidden = true
+            // A pull-to-refresh keeps its own indicator and its rows; only a
+            // first load, with nothing to show, wears the skeleton.
+            if !refreshControl.isRefreshing {
+                skeleton.isHidden = false
+                skeleton.alpha = 1
+                tableView.isHidden = true
+            }
             statusLabel.isHidden = true
         case .content(let models):
-            spinner.stopAnimating()
             refreshControl.endRefreshing()
             statusLabel.isHidden = true
             tableView.isHidden = false
             modelsByID = Dictionary(uniqueKeysWithValues: models.map { ($0.id, $0) })
             apply(models.map(\.id))
+            dismissSkeleton()
         case .empty:
-            spinner.stopAnimating()
             refreshControl.endRefreshing()
             tableView.isHidden = true
+            dismissSkeleton()
             showStatus("No activity yet.")
         case .failed(let message):
-            spinner.stopAnimating()
             refreshControl.endRefreshing()
             tableView.isHidden = true
+            dismissSkeleton()
             showStatus(message)
+        }
+    }
+
+    /// Bones out, rows in: a cross-fade, never a pop (charter P10).
+    private func dismissSkeleton() {
+        guard !skeleton.isHidden else { return }
+        UIView.animate(withDuration: 0.25) {
+            self.skeleton.alpha = 0
+        } completion: { _ in
+            self.skeleton.isHidden = true
         }
     }
 

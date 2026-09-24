@@ -27,6 +27,10 @@ final class SearchPeoplePage: UIViewController {
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Int, ProfileID>!
     private let spinner = UIActivityIndicatorView(style: .medium)
+    /// The first query's wait, before there is a list to re-query over
+    /// (charter P8): rows where the rows will be. A LATER query keeps its
+    /// results on screen and the small spinner over them.
+    private let skeleton = PersonListSkeletonView()
     private let statusView = EmptyStateView()
 
     private var modelsByID: [ProfileID: SearchResultDisplayModel] = [:]
@@ -100,6 +104,21 @@ final class SearchPeoplePage: UIViewController {
         ])
         spinner.hidesWhenStopped = true
         statusView.isHidden = true
+        skeleton.pin(to: view)
+        skeleton.isHidden = true
+    }
+
+    private func showSkeleton(_ shown: Bool) {
+        if shown {
+            skeleton.isHidden = false
+            skeleton.alpha = 1
+        } else if !skeleton.isHidden {
+            UIView.animate(withDuration: 0.25) {
+                self.skeleton.alpha = 0
+            } completion: { _ in
+                self.skeleton.isHidden = true
+            }
+        }
     }
 
     /// How many people are on screen. The only thing a test can honestly
@@ -142,11 +161,16 @@ final class SearchPeoplePage: UIViewController {
     func render(_ state: State) {
         switch state {
         case .loading:
-            spinner.startAnimating()
+            if dataSource.snapshot().numberOfItems == 0 {
+                showSkeleton(true)
+            } else {
+                spinner.startAnimating()
+            }
             statusView.isHidden = true
 
         case .results(let models):
             spinner.stopAnimating()
+            showSkeleton(false)
             modelsByID = Dictionary(uniqueKeysWithValues: models.map { ($0.id, $0) })
             var snapshot = NSDiffableDataSourceSnapshot<Int, ProfileID>()
             if !models.isEmpty {
@@ -182,6 +206,7 @@ final class SearchPeoplePage: UIViewController {
 
         case .empty(let query):
             spinner.stopAnimating()
+            showSkeleton(false)
             dataSource.apply(NSDiffableDataSourceSnapshot<Int, ProfileID>(), animatingDifferences: true)
             statusView.configure(
                 symbolName: "magnifyingglass",
@@ -192,6 +217,7 @@ final class SearchPeoplePage: UIViewController {
 
         case .failed(let message):
             spinner.stopAnimating()
+            showSkeleton(false)
             statusView.configure(
                 symbolName: "exclamationmark.triangle", title: "Couldn't search", subtitle: message
             )

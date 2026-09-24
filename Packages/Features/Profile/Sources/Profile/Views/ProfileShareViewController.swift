@@ -147,7 +147,9 @@ final class ProfileShareViewController: UIViewController {
     /// bottom content inset rather than a constraint — see `configureResultsList`.
     private var keyboardOverlap: CGFloat = 0
     private let emptyResultsLabel = UILabel()
-    private let resultsSpinner = UIActivityIndicatorView(style: .medium)
+    /// Rows where the people will be while a search runs with nothing to
+    /// show yet (charter P8) — the spinner it replaces stood in an empty band.
+    private let resultsSkeleton = PersonListSkeletonView()
     /// The suggestion set, retained so entering search can show it instantly.
     /// An empty list behind a blinking cursor reads as "no one to send to";
     /// the people you'd most likely pick are already in hand.
@@ -744,11 +746,7 @@ final class ProfileShareViewController: UIViewController {
     /// results are loading", which is the one thing it doesn't mean. The
     /// 250ms debounce keeps the blank beat short.
     private func setSpinning(_ spinning: Bool) {
-        if spinning {
-            resultsSpinner.startAnimating()
-        } else {
-            resultsSpinner.stopAnimating()
-        }
+        resultsSkeleton.isHidden = !spinning
         resultsView.isHidden = spinning || !isSearching
     }
 
@@ -820,12 +818,12 @@ final class ProfileShareViewController: UIViewController {
 
         // Centred on the list rather than pinned under the field: it marks
         // "the answer is coming", and the answer fills the list.
-        resultsSpinner.hidesWhenStopped = true
-        resultsSpinner.constrain(in: view) { _ in
-            resultsSpinner.centerXAnchor.constraint(equalTo: resultsView.centerXAnchor)
-            // Below the floating search row, not the list's top edge — which
-            // now runs behind that row.
-            resultsSpinner.topAnchor.constraint(equalTo: column.bottomAnchor, constant: Spacing.xxl)
+        resultsSkeleton.isHidden = true
+        resultsSkeleton.constrain(in: view) { parent in
+            resultsSkeleton.topAnchor.constraint(equalTo: column.bottomAnchor, constant: Spacing.xxl)
+            resultsSkeleton.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
+            resultsSkeleton.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
+            resultsSkeleton.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
         }
         emptyResultsLabel.constrain(in: view) { parent in
             emptyResultsLabel.topAnchor.constraint(equalTo: column.bottomAnchor, constant: Spacing.xxl)
