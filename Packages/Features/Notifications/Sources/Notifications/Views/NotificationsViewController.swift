@@ -107,8 +107,7 @@ final class NotificationsViewController: UIViewController {
             // A pull-to-refresh keeps its own indicator and its rows; only a
             // first load, with nothing to show, wears the skeleton.
             if !refreshControl.isRefreshing {
-                skeleton.isHidden = false
-                skeleton.alpha = 1
+                skeleton.showSkeleton()
                 tableView.isHidden = true
             }
             statusLabel.isHidden = true
@@ -132,14 +131,9 @@ final class NotificationsViewController: UIViewController {
         }
     }
 
-    /// Bones out, rows in: a cross-fade, never a pop (charter P10).
+    /// Bones out, rows in: the one cross-fade (charter P10).
     private func dismissSkeleton() {
-        guard !skeleton.isHidden else { return }
-        UIView.animate(withDuration: 0.25) {
-            self.skeleton.alpha = 0
-        } completion: { _ in
-            self.skeleton.isHidden = true
-        }
+        skeleton.fadeOutSkeleton()
     }
 
     private func apply(_ ids: [String]) {
