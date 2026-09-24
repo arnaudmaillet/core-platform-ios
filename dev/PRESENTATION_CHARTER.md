@@ -157,6 +157,12 @@ the PR fixing the route lowers or removes. That is how the sweep is green on
 every merge and still refuses a regression. Like the hero suites it runs on
 demand (`hero-uitests.yml`), not in the required checks.
 
+⚠️ **The sweep's numbers move with the host.** The same route read 313 ms on a
+quiet host and 737 ms with three builds running beside the sweep. A ceiling
+is for a regression of the code, so the routes the fix PRs have not reached
+carry ~2.5x head-room, and a red sweep on a loaded host is re-run quiet
+before it is believed.
+
 ⚠️ **The sweep's numbers are not the charter's 8 ms.** It runs a DEBUG build
 on a simulator under XCUITest: no optimizer, an accessibility runtime that
 roughly doubles a turn, and an Apple-silicon host that is faster than the SE
@@ -191,13 +197,13 @@ composer exists. Both join the list below.
 Each PR is one clause made true for one set of screens, verifiable on its own,
 and mergeable on green. Order is by user-visible cost, not by size.
 
-### PR 1 — The budget instrument (P2)
+### PR 1 — The budget instrument (P2) — shipped (#191)
 
 `-presentation-budget` and `-presentation-budget-trap` as above, plus the
 sweep test. Ships FIRST so every later PR can cite a before/after number
 instead of a feeling. No production code changes.
 
-### PR 2 — Media picker off the main actor (P4, P8)
+### PR 2 — Media picker off the main actor (P4, P8) — #192
 
 `PhotosMediaLibrary.albums()` and `items(in:)` walk every asset of every album
 on the main actor (`PhotosMediaLibrary.swift`), and `MediaLibraryReading` is
@@ -212,7 +218,7 @@ most-used destination and the largest library is the slowest.
   the sheet, so the album strip and the grid frame are final at frame 0.
 - Before/after on the simulator with `-seed-photo-albums` and on a device.
 
-### PR 3 — Containers load lazily (P1, P3)
+### PR 3 — Containers load lazily (P1, P3) — #193
 
 - `ProfileRelationshipsViewController` builds both list pages' views in its
   init (`pages.map(\.view)`); load the opening page only.
@@ -222,23 +228,32 @@ most-used destination and the largest library is the slowest.
   the surfaces, so nothing else observes a page that is not loaded yet —
   verify that claim, do not assume it.
 
-### PR 4 — Stores built once (P4)
+### PR 4 — Stores built once (P4) — #194
 
 `TextPostComposerViewController` receives `postDrafts ?? PostDraftStore()` and
 the app never injects it, so every "+" → Text Post reads and decodes the
 drafts file synchronously at presentation. Build the store once in the app's
 composition root and inject it; the drafts screen shares the instance.
 
-### PR 5 — Pin-opened feed builds its models off the main actor (P13)
+### PR 5 — Pin-opened feed builds its models off the main actor (P13) — RE-SCOPED after measurement
 
-The pin path runs `FeedDisplayModelBuilder().build(cached, …)` synchronously
-before the push (`FeedFeatureBuilder.swift`), the same text measurement the
-feed itself runs in `Task.detached` "by design". Either the seed is prebuilt
-when the pin is prewarmed (the prewarm already happens on viewport settle, so
-the display models can be warmed with it and peeked like the entries), or the
-seed carries entries and the feed measures them off-main after frame 0 over
-its skeleton page. The first keeps the measured no-flash arrival, so it is the
-one to try first.
+The audit's premise was that `FeedDisplayModelBuilder().build(cached, …)` on
+the pin path ran text measurement on the main actor before the push. Measured
+on 24 September 2026 with `-presentation-budget`: it does not. The builder
+formats strings only (`FeedItemDisplayModel.swift`), and the sampler never
+put it among the hottest frames. The pin route's turn (155–392 ms, debug
+sim) is spent in `ZoomAnimator.present` / `ZoomFlightInterruptor.startInteractiveTransition`
+running the snap feed's first layout, which is PR 5b. The second turn on that
+route (`PostDetailViewController` inside `installCommentsPanel`) is the
+comments warm, already held back until `zoomTransitionDidEnd` + 0.6 s by
+design — it is after the flight, not in it. Nothing to do here; the work is
+5b's.
+
+A symbol-image cache for `SnapShortcutRailView` (one `UIImage(systemName:)`
+per bubble per configure, which the sampler had listed) was tried the same
+day and measured at 182 / 176 ms against 155 / 392 ms before — no gain
+outside the noise, so it was not shipped. The feed's first-layout cost is not
+the symbols.
 
 ### PR 6 — Editor thumbnails render off the main actor (P13)
 
@@ -268,12 +283,16 @@ over a drawn map.
 
 Found by the instrument: whatever opens the snap feed (a For You tile, a
 profile tile, a map pin), its first layout inside the hero's setup is the
-largest screen turn in the app. The sampler blames `SnapShortcutRailView.setSymbols`
-(a `UIImage(systemName:)` per bubble, every time), `SnapFeedCell.configure`
-and a `Collection.map` in the cell provider. Cache the symbol images once,
-and move what `configure` does per item that is not layout off the first
-pass. Measure with `-presentation-budget` on the For You route before and
-after; the sweep's three feed routes share one ceiling to lower.
+largest screen turn in the app. The sampler blames the zoom flight's setup
+(`ZoomAnimator.present`, `ZoomFlightInterruptor.startInteractiveTransition`)
+running `SnapFeedCell.configure` and the cell provider's `Collection.map`;
+the symbol images were tried and ruled out (see PR 5). The next candidates,
+in order: what `SnapFeedCell.configure` builds per item that is not needed
+for the first frame (the comment band, the ticker, the rail), and whether the
+flight can present over a cell configured for its poster alone with the rest
+arriving after `zoomTransitionDidEnd`. Measure with `-presentation-budget` on
+the map-pin route (harness alone, quiet host) before and after; the sweep's
+three feed routes share one ceiling to lower.
 
 ### PR 5c — The "+" menu (P2)
 
