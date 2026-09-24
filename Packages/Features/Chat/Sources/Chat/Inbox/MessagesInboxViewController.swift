@@ -142,18 +142,22 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         // of the hierarchy until search opens.
         searchResults?.loadViewIfNeeded()
 
-        // Loaded up front, not lazily: a surface has to be able to publish its
+        // ⚠️ THE CHILDREN ARE ADDED HERE, THEIR VIEWS ARE NOT LOADED. This used
+        // to `loadViewIfNeeded()` every surface so each could publish its
         // chrome — the All tab's unread count, the Requests badge — before it
-        // has ever been paged to, or the header would start out blank.
+        // had been paged to. The chrome no longer needs a view: a surface
+        // publishes it from its init, off the view model, so the header is
+        // right at frame 0 and only the starting page's view is built in the
+        // turn that shows this screen (charter P3). The pager makes the others
+        // as a swipe or a tab reaches them.
         for surface in surfaces {
             addChild(surface)
-            surface.loadViewIfNeeded()
         }
         // A route that arrived before this point decides the starting page.
         let startIndex = pendingCategory
             .flatMap { category in surfaces.firstIndex { $0.category == category } } ?? initialIndex
         pendingCategory = nil
-        pagerView = HorizontalPagerView(pages: surfaces.map(\.view), initialIndex: startIndex)
+        pagerView = HorizontalPagerView(lazyPages: surfaces.map { surface in { surface.view } }, initialIndex: startIndex)
         pagerView.pin(to: view)
         // ⚠️ AFTER the pager, every time. `configureSearch` runs first and adds the
         // search host, so the pager lands on top of it — the bar was mounted,

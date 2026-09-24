@@ -70,6 +70,12 @@ final class ConversationListViewController: UIViewController {
         self.imagePipeline = imagePipeline
         self.avatars = avatars
         super.init(nibName: nil, bundle: nil)
+        // The chrome is the container's, and the container reads it before
+        // this view exists: the inbox no longer loads every surface's view up
+        // front (charter P3), so the badge is published from here, off the
+        // view model alone.
+        viewModel.onNewCountChange = { [weak self] _ in self?.publishChrome() }
+        publishChrome()
     }
 
     @available(*, unavailable)
@@ -80,11 +86,12 @@ final class ConversationListViewController: UIViewController {
         view.backgroundColor = .systemBackground
         configureTableView()
         configureStatusViews()
-        publishChrome()
 
         viewModel.onPhaseChange = { [weak self] phase in self?.render(phase) }
-        viewModel.onNewCountChange = { [weak self] _ in self?.publishChrome() }
-        render(.loading)
+        // The view model may have moved past `.loading` before this view was
+        // asked for (the catalog replays its snapshot at subscription), so the
+        // first render is whatever it holds now, not a fresh skeleton.
+        render(viewModel.phase)
 
         #if DEBUG
         // `-chat-pin-demo` pins the last VISIBLE row ~2s in and shows the tint
