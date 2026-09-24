@@ -32,7 +32,16 @@ struct MapFavoritesRepositoryTests {
         #expect(favorites.count == dataset.followedProfileIDs.count)
         #expect(Set(favorites.map(\.profileID.rawValue)) == dataset.followedProfileIDs)
         #expect(favorites.allSatisfy { !$0.title.isEmpty })
-        #expect(favorites.allSatisfy { $0.avatarURL != nil })
+        // The avatar is the dataset's: a picture where the author has one and
+        // none where they have none — the corpus seeds authors without one,
+        // so "everyone has a picture" would be asserting the fixture wrong.
+        let avatarByID = Dictionary(
+            dataset.authors.map { ($0.profileID, $0.avatarURL) }, uniquingKeysWith: { first, _ in first }
+        )
+        #expect(favorites.allSatisfy {
+            ($0.avatarURL != nil) == !(avatarByID[$0.profileID.rawValue] ?? "").isEmpty
+        })
+        #expect(favorites.contains { $0.avatarURL != nil })
         let titlesByID = Dictionary(uniqueKeysWithValues: favorites.map { ($0.profileID.rawValue, $0.title) })
         #expect(titlesByID["prof-0"] == "Ava Moreau")
     }
