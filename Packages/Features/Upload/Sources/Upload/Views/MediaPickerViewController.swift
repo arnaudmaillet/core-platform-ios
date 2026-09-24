@@ -74,7 +74,9 @@ final class MediaPickerViewController: UIViewController {
 
     /// Shown from the moment the screen opens until the library has answered —
     /// including while the system is asking the viewer for permission.
-    private let spinner = UIActivityIndicatorView(style: .large)
+    /// The album's stand-in until the library answers (charter P8): bones
+    /// where the tiles will be, not a wheel in an empty sheet.
+    private let skeleton = MediaAlbumSkeletonView()
     /// Built once the albums are known: a strip with no segments has nothing to
     /// lay out, and the toolbar stays down until there is something to show.
     private var albumBar: PagedTabBar?
@@ -139,16 +141,14 @@ final class MediaPickerViewController: UIViewController {
 
         // ⚠️ **THE WAIT IS NOT ALWAYS SHORT, AND IT IS NOT ALWAYS OURS.**
         // Reading the library takes a moment on a full device, and when the
-        // system's own permission sheet is up this screen sits behind it —
-        // blank, with nothing to say it is about to do anything. Centred in the
-        // SAFE area, not the view: the album is full-bleed behind its bars, so
-        // the view's middle is not the middle of what the viewer can see.
-        spinner.hidesWhenStopped = true
-        spinner.startAnimating()
-        spinner.constrain(in: view) { parent in
-            spinner.centerXAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.centerXAnchor)
-            spinner.centerYAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.centerYAnchor)
-        }
+        // system's own permission sheet is up this screen sits behind it. What
+        // stands in is the album's own shape — a grid of bones with the tiles'
+        // gutter, side and corner — so the first frame already looks like the
+        // screen, and the photographs land into it rather than replacing a
+        // wheel. It goes in at index 0, where the pager will go, under the
+        // tray and the empty state.
+        view.insertSubview(skeleton, at: 0)
+        skeleton.pin(to: view)
 
         Task { await load() }
     }
@@ -391,7 +391,7 @@ final class MediaPickerViewController: UIViewController {
     /// ⚠️ **THE PAGER IS BUILT HERE AND NOT IN `viewDidLoad`.**
     /// `HorizontalPagerView` takes its pages at construction and the albums are
     /// read asynchronously, so there is nothing to build until they land. It goes
-    /// in at index 0 so the tray, the empty state and the spinner stay above it.
+    /// in at index 0 so the tray, the empty state and the skeleton stay above it.
     private func configurePager(for albums: [MediaLibraryAlbum], bar: PagedTabBar) {
         pages = albums.map { _ in makePage() }
         // ⚠️ THE ONE PAGER THAT LEAVES ITS TOP EDGE EFFECT ALONE. The album
@@ -406,7 +406,7 @@ final class MediaPickerViewController: UIViewController {
         // `parent.addSubview(self)` unconditionally, and `addSubview` MOVES a
         // view that is already in the hierarchy to the TOP of its siblings — so
         // inserting the pager at 0 and then pinning it put the album back over
-        // the chosen-media strip, its blur and the spinner, and the strip stopped
+        // the chosen-media strip, its blur and the skeleton, and the strip stopped
         // being drawn at all.
         //
         // Measured rather than reasoned: the strip reported `idx=1`, which is
@@ -426,7 +426,7 @@ final class MediaPickerViewController: UIViewController {
         // helper calls `addSubview` unconditionally, which MOVES a view to the
         // top of its siblings; doing it to the pager once put the album over the
         // chosen-media strip and stopped the strip drawing at all. Anchoring
-        // above the pager by name keeps the tray, its blur, the spinner and the
+        // above the pager by name keeps the tray, its blur, the skeleton and the
         // empty state where they were put.
         view.insertSubview(accessNotice, aboveSubview: pager)
         accessNotice.translatesAutoresizingMaskIntoConstraints = false
@@ -570,7 +570,7 @@ private extension MediaPickerViewController {
         // refusal followed by a grant would otherwise leave the album loaded,
         // correct, and invisible.
         pager?.isHidden = false
-        spinner.stopAnimating()
+        dismissSkeleton()
         // Merged, never replaced — the tray and the step after this one are both
         // handed items the visible album may no longer be showing.
         for item in loaded { itemsByID[item.id] = item }
@@ -597,7 +597,20 @@ private extension MediaPickerViewController {
         )
         emptyState.isHidden = false
         pager?.isHidden = true
-        spinner.stopAnimating()
+        dismissSkeleton()
+    }
+
+    /// Bones out, album in — a cross-fade, never a pop (charter P10). The
+    /// skeleton is removed rather than hidden: nothing brings it back, and a
+    /// grid of shimmering layers under the album would keep animating for
+    /// nothing.
+    func dismissSkeleton() {
+        guard skeleton.superview != nil else { return }
+        UIView.animate(withDuration: 0.25, delay: 0, options: [.beginFromCurrentState]) {
+            self.skeleton.alpha = 0
+        } completion: { _ in
+            self.skeleton.removeFromSuperview()
+        }
     }
 }
 
@@ -827,7 +840,7 @@ extension MediaPickerViewController {
     /// Internal for tests: the items the album ON SCREEN is showing.
     var debugItems: [MediaLibraryItem] { debugActivePage?.items ?? [] }
     /// Internal for tests: whether the screen is still saying it is working.
-    var debugIsLoading: Bool { spinner.isAnimating }
+    var debugIsLoading: Bool { skeleton.superview != nil && skeleton.alpha == 1 }
     /// Internal for tests: the pager, so a test can assert the strip and the
     /// pages stay in step — which is the whole contract of this screen's chrome.
     var debugPager: HorizontalPagerView? { pager }
