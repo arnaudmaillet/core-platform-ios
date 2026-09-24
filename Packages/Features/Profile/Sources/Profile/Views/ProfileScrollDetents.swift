@@ -16,7 +16,8 @@ import CoreGraphics
 ///
 /// A poster has three: the picture, the identity with the picture gone
 /// (exactly where the band would hold the avatar, so the two shapes meet),
-/// and the first post. A band has two, since its top IS the second.
+/// and the first post. A band has two, since its top IS the second — and so
+/// does a header with no picture at all.
 ///
 /// Past the last detent the offset belongs to the list and is left alone.
 enum ProfileScrollDetents {

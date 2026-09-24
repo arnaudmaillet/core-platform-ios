@@ -35,10 +35,14 @@ import Foundation
 /// cropped into the wrong shape. A square is a poster — it is what every
 /// banner was before the band existed, and a square cropped to a strip
 /// loses the subject's head or feet. A build can force either with
-/// `-profile-banner band|poster` for QA.
+/// `-profile-banner band|poster|none` for QA — `none` being what a profile
+/// with no picture gets, which every mock profile has one of.
 enum ProfileBannerFormat: Equatable, Sendable {
     case band
     case poster
+    /// No picture at all: the header is the identity block on the page,
+    /// starting under the chrome, with no banner drawn and nothing to fade.
+    case none
 
     /// Wider than tall is a band; anything else a poster. The margin keeps a
     /// nearly-square picture a poster, since a strip cropped from it would
@@ -53,16 +57,19 @@ enum ProfileBannerFormat: Equatable, Sendable {
     static let unresolved: ProfileBannerFormat = .poster
 
     #if DEBUG
-    /// `-profile-banner band|poster`: forces the shape whatever the picture
-    /// is, so either can be looked at on a corpus whose pictures happen to
-    /// be all one shape.
+    /// `-profile-banner band|poster|none`: forces the shape whatever the
+    /// picture is, so any can be looked at on a corpus whose pictures happen
+    /// to be all one shape.
     static var debugOverride: ProfileBannerFormat? {
         let arguments = ProcessInfo.processInfo.arguments
         guard let index = arguments.firstIndex(of: "-profile-banner"), index + 1 < arguments.count
         else { return nil }
+        // ⚠️ Spelled in full: in an optional context `.none` is `Optional.none`
+        // — nil — and the case silently vanished.
         switch arguments[index + 1] {
-        case "band": return .band
-        case "poster": return .poster
+        case "band": return ProfileBannerFormat.band
+        case "poster": return ProfileBannerFormat.poster
+        case "none": return ProfileBannerFormat.none
         default: return nil
         }
     }

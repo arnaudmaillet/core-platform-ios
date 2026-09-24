@@ -9,6 +9,7 @@ struct ProfileScrollDetentsTests {
     @Test func aPosterHasThreeDetentsAndABandTwo() {
         #expect(ProfileScrollDetents.detents(for: .poster, posterFadeOut: 188, firstPost: 600) == [0, 188, 600])
         #expect(ProfileScrollDetents.detents(for: .band, posterFadeOut: 188, firstPost: 600) == [0, 600])
+        #expect(ProfileScrollDetents.detents(for: .none, posterFadeOut: 188, firstPost: 600) == [0, 600])
     }
 
     /// A middle detent past the first post would be a stop the header cannot

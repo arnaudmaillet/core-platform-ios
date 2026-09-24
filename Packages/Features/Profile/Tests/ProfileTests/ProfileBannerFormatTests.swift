@@ -12,7 +12,9 @@ struct ProfileBannerFormatTests {
         func fetchImageData(for url: URL) async throws -> Data { Data() }
     }
 
-    private func header(width: CGFloat = 393, format: ProfileBannerFormat) -> ProfileHeaderView {
+    private func header(
+        width: CGFloat = 393, format: ProfileBannerFormat, picture: Bool = true
+    ) -> ProfileHeaderView {
         let header = ProfileHeaderView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()))
         header.chromeTopInset = 103
         header.configure(with: ProfileDisplayModel(profile: UserProfile(
@@ -20,7 +22,7 @@ struct ProfileBannerFormatTests {
             handle: "kenji.dev",
             displayName: "Kenji Tanaka",
             bio: "Building small tools for small teams.",
-            avatarURL: nil,
+            avatarURL: picture ? URL(string: "https://kenji.example/avatar.jpg") : nil,
             websiteURL: URL(string: "https://kenji.example"),
             isVerified: false,
             followerCount: .exact(4),
@@ -29,7 +31,7 @@ struct ProfileBannerFormatTests {
             viewCount: .exact(12)
         )))
         header.configureAction(.following)
-        header.setBannerFormat(format)
+        if picture { header.setBannerFormat(format) }
         header.frame = CGRect(x: 0, y: 0, width: width, height: 1)
         header.frame.size.height = header.systemLayoutSizeFitting(
             CGSize(width: width, height: UIView.layoutFittingCompressedSize.height),
@@ -52,18 +54,19 @@ struct ProfileBannerFormatTests {
         #expect(ProfileBannerFormat.resolved(forImageSize: .zero) == .poster)
     }
 
-    /// A band ends on the avatar's midline: the disc straddles the strip's
-    /// edge, its ring cutting the picture.
-    @Test func aBandEndsOnTheAvatarsMidline() {
+    /// A band ends a third of the way down the avatar: the disc straddles the
+    /// strip's edge high, its ring cutting the picture, and the name below
+    /// has air above it.
+    @Test func aBandEndsInTheAvatarsFirstThird() {
         let header = header(format: .band)
         let banner = header.debugBannerFrame
         let avatar = header.debugAvatarFrame
-        #expect(abs(banner.maxY - avatar.midY) < 0.5)
+        #expect(abs(banner.maxY - (avatar.minY + avatar.height / 3)) < 0.5)
         #expect(banner.minY == 0)
         // The disc's top sits a small gap under the chrome's bottom edge: air,
         // not a strip of picture.
         #expect(abs(avatar.minY - (header.chromeTopInset + 12)) < 0.5)
-        #expect(abs(banner.height - (header.chromeTopInset + 12 + avatar.height / 2)) < 0.5)
+        #expect(abs(banner.height - (header.chromeTopInset + 12 + avatar.height / 3)) < 0.5)
         // The edge is softened, lightly and only near the edge — not run out.
         let stops = header.debugBannerFadeLocations
         let alphas = header.debugBannerFadeAlphas
@@ -183,6 +186,36 @@ struct ProfileBannerFormatTests {
         let poster = header(format: .poster)
         #expect(band.bounds.height < poster.bounds.height)
         #expect(abs((poster.bounds.height - band.bounds.height) - (200 - 12)) < 1)
+    }
+
+    /// A profile with no picture has no banner at all: the identity block
+    /// starts under the chrome, as a band's does, and nothing is drawn above
+    /// it.
+    @Test func noPictureMeansNoBanner() {
+        let header = header(format: .poster, picture: false)
+        #expect(header.bannerFormat == .none)
+        #expect(header.debugBannerIsHidden)
+        #expect(abs(header.debugAvatarFrame.minY - (header.chromeTopInset + 12)) < 0.5)
+        // And it is as short as a band.
+        #expect(abs(header.bounds.height - self.header(format: .band).bounds.height) < 0.5)
+    }
+
+    /// ⚠️ THE TRAY IS FLAT. Glass is for chrome over content; these buttons
+    /// sit on the page, and glass there is a blur of nothing. One prominent
+    /// filled capsule for Follow, grey capsules and bubbles for the rest.
+    @Test func theTrayWearsNoGlass() {
+        let header = header(format: .band)
+        for button in header.debugTrayButtons {
+            #expect(button.configuration?.background.visualEffect == nil)
+        }
+        header.configureAction(.follow)
+        let follow = header.debugTrayButtons[0]
+        let message = header.debugTrayButtons[1]
+        #expect(follow.configuration?.title == "Follow")
+        #expect(follow.configuration?.background.visualEffect == nil)
+        // Follow is the one prominent capsule: it does not wear the quiet
+        // grey the others do.
+        #expect(follow.configuration?.background.backgroundColor != message.configuration?.background.backgroundColor)
     }
 
     /// On a band the name sits BELOW the strip's edge, on the page — not on

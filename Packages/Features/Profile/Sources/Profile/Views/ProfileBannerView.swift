@@ -251,6 +251,8 @@ final class ProfileBannerView: UIView {
         topScrim.frame = CGRect(x: 0, y: 0, width: bounds.width, height: min(160, bounds.height))
         let height = bounds.height
         switch format {
+        case .none:
+            break
         case .band:
             // A short softening of the strip's edge, and nothing above it.
             if height > 0 {
@@ -279,6 +281,8 @@ final class ProfileBannerView: UIView {
         // band the width of the screen.
         let background = Surface.page
         switch format {
+        case .none:
+            bottomFade.colors = []
         case .band:
             bottomFade.colors = [
                 background.withAlphaComponent(0).cgColor,
