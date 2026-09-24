@@ -4,7 +4,9 @@ import UIKit
 /// One tile of the library grid: the thumbnail, the number it was chosen in,
 /// and — for a video — how long it runs.
 final class MediaPickerGridCell: UICollectionViewCell {
-    private enum Metrics {
+    /// Shared with `MediaAlbumSkeletonView`, which draws a bone with the same
+    /// corner where this cell's thumbnail will be.
+    enum Metrics {
         static let badgeSize: CGFloat = 24
         static let badgeInset: CGFloat = 6
         /// ⚠️ **NO LONGER THE TRAY'S RADIUS, AND THAT IS DELIBERATE.** This was
