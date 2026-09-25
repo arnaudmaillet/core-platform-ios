@@ -144,11 +144,18 @@ final class SearchPeoplePage: UIViewController {
               !didTapForQA
         else { return }
         didTapForQA = true
+        // Marked done on the FIRST results, so the 2s beat still starts there —
+        // but the tap now waits for the row it names. Those first results can
+        // be a partial answer (fewer rows than the index), and the old
+        // `guard … else { return }` then dropped the tap without a word and no
+        // later render could retry it, since the flag was already set.
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-            guard let self,
-                  self.dataSource.snapshot().numberOfItems > row
-            else { return }
-            self.collectionView(self.collectionView, didSelectItemAt: IndexPath(item: row, section: 0))
+            QAWait.until("search-tap-user \(row)", { [weak self] in
+                (self?.dataSource.snapshot().numberOfItems ?? 0) > row
+            }) { [weak self] in
+                guard let self else { return }
+                self.collectionView(self.collectionView, didSelectItemAt: IndexPath(item: row, section: 0))
+            }
         }
     }
     #endif

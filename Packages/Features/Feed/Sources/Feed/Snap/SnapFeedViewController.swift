@@ -613,9 +613,15 @@ final class SnapFeedViewController: UIViewController {
     /// kind without scroll injection.
     private var didDebugPageSwipe = false
     private var didDebugFling = false
+    private var didDebugAutoDismiss = false
 
     private func runDebugAppearanceHooks() {
-        if ProcessInfo.processInfo.arguments.contains("-snap-auto-dismiss"), isClosable {
+        // Once per screen, like every other hook here: this runs from
+        // `viewDidAppear`, and without the flag each re-appearance (a sheet
+        // dismissed over the feed, a pop back onto it) armed ANOTHER close —
+        // a second `closeFeed()` 2.5s later against whatever was then on top.
+        if !didDebugAutoDismiss, ProcessInfo.processInfo.arguments.contains("-snap-auto-dismiss"), isClosable {
+            didDebugAutoDismiss = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
                 self?.closeFeed()
             }
@@ -650,15 +656,32 @@ final class SnapFeedViewController: UIViewController {
                 self?.debugFlingPages(pages)
             }
         }
+        // ⚠️ WAITS FOR THE PAGE TO EXIST, not for 1.5s. On a cold run the
+        // posts had not arrived by then, `indices.contains(target)` failed and
+        // the hook returned without a word — the screenshot showed page 0 and
+        // read as the page asked for. The 1.5s stays as the floor (the feed's
+        // own settle); past it the jump waits for the data, and says so if it
+        // never comes or the jump does not land.
         if !didDebugScroll,
            let flagIndex = arguments.firstIndex(of: "-snap-start-index"),
            arguments.indices.contains(flagIndex + 1),
            let target = Int(arguments[flagIndex + 1]) {
             didDebugScroll = true
+            let label = "-snap-start-index \(target)"
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                guard let self, self.orderedIDs.indices.contains(target) else { return }
-                self.collectionView.scrollToItem(at: IndexPath(item: target, section: 0), at: .top, animated: false)
-                self.updateActiveItem()
+                QAWait.until(label, { [weak self] in
+                    guard let self else { return false }
+                    return self.orderedIDs.indices.contains(target) && self.collectionView.bounds.height > 0
+                }) { [weak self] in
+                    guard let self else { return }
+                    self.collectionView.scrollToItem(at: IndexPath(item: target, section: 0), at: .top, animated: false)
+                    self.updateActiveItem()
+                    if self.lifecycle.activeIndex == target {
+                        print("[qa] \(label): active page \(target) of \(self.orderedIDs.count)")
+                    } else {
+                        QAWait.fail(label, "jumped but active page is \(self.lifecycle.activeIndex.map(String.init) ?? "nil")")
+                    }
+                }
             }
         }
         // `-feed-open-wallet`: presents the wallet sheet over the feed ~2s
@@ -728,37 +751,51 @@ final class SnapFeedViewController: UIViewController {
         // page ~2.5s after appear (after any `-snap-start-index` jump at
         // 1.5s settles) — the mutated layout can be screenshotted without
         // tap injection.
+        //
+        // ⚠️ "AFTER THE JUMP" IS A STATE, not a time. With `-snap-start-index`
+        // the 2.5s used to race the jump's own 1.5s + data arrival: on a cold
+        // run the engagement opened on page 0 and the jump then scrolled away
+        // under it. It now waits for the active page to BE the jump's target
+        // (or, alone, for any active page), and says so if that never happens.
         if !didDebugCommentsDemo, arguments.contains("-snap-comments-demo") {
             didDebugCommentsDemo = true
+            let jumpTarget = arguments.firstIndex(of: "-snap-start-index")
+                .flatMap { arguments.indices.contains($0 + 1) ? Int(arguments[$0 + 1]) : nil }
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
-                guard let self, let index = self.lifecycle.activeIndex,
-                      self.orderedIDs.indices.contains(index) else { return }
-                self.presentComments(for: self.orderedIDs[index])
-                // `-snap-comments-close N`: dismisses the engagement N
-                // seconds after it opens, landing the page back at rest.
-                // The RETURN leg is a state change of its own — the page's
-                // chrome comes back and the empty state re-reads its words
-                // — and it was the one leg no launch arg could reach, so it
-                // could only be reasoned about. Chained off the open rather
-                // than scheduled from appear, so the delay means what it
-                // says whatever the open cost.
-                guard let flag = arguments.firstIndex(of: "-snap-comments-close"),
-                      arguments.indices.contains(flag + 1),
-                      let after = Double(arguments[flag + 1]) else { return }
-                DispatchQueue.main.asyncAfter(deadline: .now() + after) { [weak self] in
-                    self?.dismissComments()
-                    // `-snap-comments-reopen N`: taps the entry point again N
-                    // seconds after the close. The REOPEN is what a broken
-                    // teardown kills — the page still looks right, and every
-                    // comment surface is simply dead — so the QA path has to
-                    // go all the way round.
-                    guard let flag = arguments.firstIndex(of: "-snap-comments-reopen"),
+                QAWait.until("-snap-comments-demo", { [weak self] in
+                    guard let self, let index = self.lifecycle.activeIndex,
+                          self.orderedIDs.indices.contains(index) else { return false }
+                    return jumpTarget == nil || index == jumpTarget
+                }) { [weak self] in
+                    guard let self, let index = self.lifecycle.activeIndex,
+                          self.orderedIDs.indices.contains(index) else { return }
+                    self.presentComments(for: self.orderedIDs[index])
+                    // `-snap-comments-close N`: dismisses the engagement N
+                    // seconds after it opens, landing the page back at rest.
+                    // The RETURN leg is a state change of its own — the page's
+                    // chrome comes back and the empty state re-reads its words
+                    // — and it was the one leg no launch arg could reach, so it
+                    // could only be reasoned about. Chained off the open rather
+                    // than scheduled from appear, so the delay means what it
+                    // says whatever the open cost.
+                    guard let flag = arguments.firstIndex(of: "-snap-comments-close"),
                           arguments.indices.contains(flag + 1),
-                          let reopenAfter = Double(arguments[flag + 1]) else { return }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + reopenAfter) { [weak self] in
-                        guard let self, let index = self.lifecycle.activeIndex,
-                              self.orderedIDs.indices.contains(index) else { return }
-                        self.presentComments(for: self.orderedIDs[index])
+                          let after = Double(arguments[flag + 1]) else { return }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + after) { [weak self] in
+                        self?.dismissComments()
+                        // `-snap-comments-reopen N`: taps the entry point again N
+                        // seconds after the close. The REOPEN is what a broken
+                        // teardown kills — the page still looks right, and every
+                        // comment surface is simply dead — so the QA path has to
+                        // go all the way round.
+                        guard let flag = arguments.firstIndex(of: "-snap-comments-reopen"),
+                              arguments.indices.contains(flag + 1),
+                              let reopenAfter = Double(arguments[flag + 1]) else { return }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + reopenAfter) { [weak self] in
+                            guard let self, let index = self.lifecycle.activeIndex,
+                                  self.orderedIDs.indices.contains(index) else { return }
+                            self.presentComments(for: self.orderedIDs[index])
+                        }
                     }
                 }
             }
@@ -2323,10 +2360,28 @@ final class SnapFeedViewController: UIViewController {
     /// Each step is an ordinary offset change followed by the delegate callback
     /// UIKit would have sent, so everything that reacts to scrolling reacts
     /// here: the paging footer, and the page that owns the picture.
+    ///
+    /// ⚠️ WAITS FOR THE NEXT PAGE TO BE REACHABLE before it moves. The
+    /// ceiling stops at the first page whose data has not arrived, so a fling
+    /// fired at a fixed 3s on a cold run clamped to the page it started on:
+    /// `target == start`, 24 steps of zero distance, and `[fling] begin` /
+    /// `[fling] settle` printed exactly as for a real one — a run that scrolled
+    /// nothing read as a pass. It now waits for `target > start`, and a page
+    /// that never becomes reachable is a `[qa] GAVE UP`, never a fling.
     func debugFlingPages(_ remaining: Int) {
         guard remaining > 0 else { return }
+        QAWait.until("-snap-fling (\(remaining) left)", { [weak self] in
+            guard let self else { return false }
+            let page = self.collectionView.bounds.height
+            guard page > 0 else { return false }
+            return CGFloat(self.reachableCeiling()) * page > self.collectionView.contentOffset.y + 0.5
+        }) { [weak self] in
+            self?.debugFlingOnePage(remaining)
+        }
+    }
+
+    private func debugFlingOnePage(_ remaining: Int) {
         let page = collectionView.bounds.height
-        guard page > 0 else { return }
         let start = collectionView.contentOffset.y
         let target = min(start + page, CGFloat(reachableCeiling()) * page)
         let steps = 24
@@ -2707,6 +2762,12 @@ final class SnapFeedViewController: UIViewController {
     private var hitchWorst: CFTimeInterval = 0
     private var hitchDropped = 0
     private var hitchLabel = "transition"
+    /// Which watch the running link belongs to. Two watches inside 1.5s used
+    /// to share one timer's fate: the FIRST watch's timer invalidated the
+    /// second's link after a fraction of its window and printed under the
+    /// second's label — a short, clean-looking reading for a transition that
+    /// was barely measured. A timer now only stops the watch it started.
+    private var hitchToken = 0
 
     /// Counts frames the transition misses. `-engage-profile` only.
     ///
@@ -2716,6 +2777,11 @@ final class SnapFeedViewController: UIViewController {
     private func beginHitchWatch(_ label: String = "transition") {
         guard ProcessInfo.processInfo.arguments.contains("-engage-profile") else { return }
         hitchLabel = label
+        hitchToken += 1
+        let token = hitchToken
+        if hitchLink != nil {
+            print("[engage] \(label) superseded an unfinished watch; its reading is dropped")
+        }
         hitchLink?.invalidate()
         hitchLast = CACurrentMediaTime()
         hitchWorst = 0
@@ -2724,7 +2790,7 @@ final class SnapFeedViewController: UIViewController {
         link.add(to: .main, forMode: .common)
         hitchLink = link
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-            guard let self else { return }
+            guard let self, self.hitchToken == token else { return }
             self.hitchLink?.invalidate()
             self.hitchLink = nil
             print(String(format: "[engage] %-16@ worst gap %5.1f ms, %d dropped (>25ms) in 1.5s",

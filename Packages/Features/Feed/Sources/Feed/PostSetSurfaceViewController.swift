@@ -160,13 +160,29 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
               !didOpenForQA
         else { return }
         didOpenForQA = true
+        // ⚠️ WAITS FOR THE POSTS, not for 2s. `.posts` arrives with ids only;
+        // the page is filled by the hydration below, and on a cold run that
+        // took longer than the delay: `openTile` found no posts and returned
+        // without a word, and the once-flag was already spent, so nothing ever
+        // retried. The 2s stays as the floor (the tab's own settle); past it
+        // the tap waits for the tile to exist and says so if it never does.
+        let label = "-search-open-post \(index)"
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-            self?.openTile(at: index)
+            QAWait.until(label, { [weak self] in
+                guard let self else { return false }
+                return self.page.posts.indices.contains(index) && self.openPost != nil
+            }) { [weak self] in
+                guard let self else { return }
+                print("[qa] \(label): opening \(self.page.posts[index].id) of \(self.page.posts.count)")
+                self.openTile(at: index)
+            }
         }
     }
 
     /// ⚠️ ONCE. `show` is called on every republication and BOTH post tabs get
     /// it, so an unguarded hook would stage a flight per call and per tab.
+    /// Set when the hook ARMS: the wait above then covers a slow hydration
+    /// (and gives up out loud), so a republication never stacks a second tap.
     private var didOpenForQA = false
     #endif
 

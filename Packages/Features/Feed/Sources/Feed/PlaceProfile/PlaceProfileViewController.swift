@@ -338,11 +338,24 @@ final class PlaceProfileViewController: UIViewController {
                 self?.tabBar.debugSimulateTap(at: index)
             }
         }
+        // ⚠️ WAITS FOR THE PAGE'S POSTS, not for 2s. The line below used to
+        // print "scrolled to X" whatever happened: on a cold run the page was
+        // still empty, the offset clamped to the minimum travel (or went
+        // nowhere) and the run still said it had scrolled. It now waits for
+        // the active page to hold posts, and reports where it actually ended.
         if let offset = value("-maps-place-scroll") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-                guard let self else { return }
-                debugScrollActivePage(to: CGFloat(offset))
-                print("[place] scrolled to \(offset)")
+                QAWait.until("-maps-place-scroll \(offset)", { [weak self] in
+                    guard let self, self.hostedPages.indices.contains(self.activeIndex),
+                          let grid = self.hostedPages[self.activeIndex] as? ForYouGridPage
+                    else { return false }
+                    return !grid.posts.isEmpty
+                }) { [weak self] in
+                    guard let self else { return }
+                    debugScrollActivePage(to: CGFloat(offset))
+                    let actual = hostedPages[activeIndex].verticalOffset
+                    print("[place] scrolled to \(offset) (actual \(Int(actual)), tab \(activeIndex))")
+                }
             }
         }
         // `-maps-place-open-tile <index>`: opens a post from whichever tab is
@@ -351,34 +364,49 @@ final class PlaceProfileViewController: UIViewController {
         // third post of the Activity list" — the case where the departure
         // screen and the landing screen can disagree, and the only way to see
         // that disagreement is to leave from the tab that is not the default.
+        //
+        // ⚠️ WAITS FOR THE TILE TO EXIST, not for 2.6s: a cold page had no
+        // posts yet and the open below was a silent no-op (only `posts=-1` or
+        // `post=nil` in the line hinted at it). It also remembers which flight
+        // was the latest BEFORE it opened, so `-maps-place-tile-dismiss` can
+        // tell this tile's flight from the one before it.
         if let index = value("-maps-place-open-tile").map(Int.init) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.6) { [weak self] in
-                guard let self else { return }
-                let grid = hostedPages.indices.contains(activeIndex)
-                    ? hostedPages[activeIndex] as? ForYouGridPage : nil
-                // The ELECTION, not just the tap: a text row that opens with
-                // no window is a plain push, and a plain push looks like a
-                // perfectly good animation. Only the line says which happened.
-                let post = grid?.posts.indices.contains(index) == true
-                    ? grid?.posts[index] : nil
-                let window = post.flatMap { p in grid.flatMap { textRowReveal(for: p, in: $0) } }
-                print("[place] opening tile \(index) from tab \(activeIndex)"
-                    + " posts=\(grid?.posts.count ?? -1)"
-                    + " post=\(post?.id.rawValue ?? "nil")"
-                    + " hero=\(post.flatMap { grid?.heroAppearance(for: $0.id) } != nil)"
-                    + " window=\(window != nil)")
-                // ⚠️ THROUGH THE DELEGATE, NOT THE HOST'S OWN METHOD. Calling
-                // `openTile` directly skips `didSelectItemAt` and therefore
-                // `ForYouGridPage.open(at:)`, which is where a tap REMEMBERS
-                // the row to settle clear of the chrome. So the one thing this
-                // hook exists to exercise — where a dismissal comes back to —
-                // was the one thing it could not reach, and a run showed a card
-                // returning still half behind the tab bar whether the code was
-                // right or wrong. `ForYouGridPage.debugSelectItem` carries the
-                // same warning about `-foryou-open`, which made this mistake
-                // first.
-                if grid?.debugSelectItem(at: index) != true {
-                    openTile(at: index, in: grid)
+                QAWait.until("-maps-place-open-tile \(index)", { [weak self] in
+                    guard let self, self.hostedPages.indices.contains(self.activeIndex),
+                          let grid = self.hostedPages[self.activeIndex] as? ForYouGridPage
+                    else { return false }
+                    return grid.posts.indices.contains(index)
+                }) { [weak self] in
+                    guard let self else { return }
+                    debugFlightBeforeTileOpen = ZoomTransitionController.debugMostRecent
+                    debugDidOpenTile = true
+                    let grid = hostedPages.indices.contains(activeIndex)
+                        ? hostedPages[activeIndex] as? ForYouGridPage : nil
+                    // The ELECTION, not just the tap: a text row that opens with
+                    // no window is a plain push, and a plain push looks like a
+                    // perfectly good animation. Only the line says which happened.
+                    let post = grid?.posts.indices.contains(index) == true
+                        ? grid?.posts[index] : nil
+                    let window = post.flatMap { p in grid.flatMap { textRowReveal(for: p, in: $0) } }
+                    print("[place] opening tile \(index) from tab \(activeIndex)"
+                        + " posts=\(grid?.posts.count ?? -1)"
+                        + " post=\(post?.id.rawValue ?? "nil")"
+                        + " hero=\(post.flatMap { grid?.heroAppearance(for: $0.id) } != nil)"
+                        + " window=\(window != nil)")
+                    // ⚠️ THROUGH THE DELEGATE, NOT THE HOST'S OWN METHOD. Calling
+                    // `openTile` directly skips `didSelectItemAt` and therefore
+                    // `ForYouGridPage.open(at:)`, which is where a tap REMEMBERS
+                    // the row to settle clear of the chrome. So the one thing this
+                    // hook exists to exercise — where a dismissal comes back to —
+                    // was the one thing it could not reach, and a run showed a card
+                    // returning still half behind the tab bar whether the code was
+                    // right or wrong. `ForYouGridPage.debugSelectItem` carries the
+                    // same warning about `-foryou-open`, which made this mistake
+                    // first.
+                    if grid?.debugSelectItem(at: index) != true {
+                        openTile(at: index, in: grid)
+                    }
                 }
             }
         }
@@ -397,12 +425,40 @@ final class PlaceProfileViewController: UIViewController {
             // Horizontal by default: that is the escape this hook exists for.
             let axis: ZoomDismissAxis =
                 arguments.contains("-maps-place-tile-dismiss-vertical") ? .vertical : .horizontal
-            DispatchQueue.main.asyncAfter(deadline: .now() + after) {
-                print("[place] scripting tile-feed dismissal axis=\(axis)")
-                ZoomTransitionController.debugMostRecent?.debugScriptedGrab(axis: axis)
+            // ⚠️ THE TILE'S OWN FLIGHT, LANDED — not whatever is most recent
+            // at `after` seconds. If the open failed or came late,
+            // `debugMostRecent` was still the PREVIOUS flight (the one that
+            // brought this page up), and the grab dismissed the wrong screen
+            // while the line said it had scripted the tile's. The delay stays
+            // as the floor; past it the grab waits for a controller NEWER than
+            // the one the open hook saw, with a screen above this page and no
+            // transition running.
+            let requiresTileOpen = arguments.contains("-maps-place-open-tile")
+            DispatchQueue.main.asyncAfter(deadline: .now() + after) { [weak self] in
+                QAWait.until("-maps-place-tile-dismiss", { [weak self] in
+                    guard let self, let nav = self.navigationController,
+                          nav.topViewController !== self, nav.transitionCoordinator == nil,
+                          let recent = ZoomTransitionController.debugMostRecent
+                    else { return false }
+                    guard requiresTileOpen else { return true }
+                    return self.debugDidOpenTile && recent !== self.debugFlightBeforeTileOpen
+                }) {
+                    if !requiresTileOpen {
+                        print("[qa] -maps-place-tile-dismiss: no -maps-place-open-tile in this run;"
+                            + " grabbing the most recent flight, unverified")
+                    }
+                    print("[place] scripting tile-feed dismissal axis=\(axis)")
+                    ZoomTransitionController.debugMostRecent?.debugScriptedGrab(axis: axis)
+                }
             }
         }
     }
+
+    /// The latest flight controller at the moment `-maps-place-open-tile`
+    /// fired — WEAK, so remembering it keeps nothing alive; a controller that
+    /// has since gone reads as nil, which is still "not the tile's".
+    private weak var debugFlightBeforeTileOpen: ZoomTransitionController?
+    private var debugDidOpenTile = false
 
     private func scheduleDebugPopIfRequested() {
         guard !didScheduleDebugPop,

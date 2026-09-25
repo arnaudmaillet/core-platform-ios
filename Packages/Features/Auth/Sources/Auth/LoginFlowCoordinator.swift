@@ -1,4 +1,7 @@
 import UIKit
+#if DEBUG
+import DesignSystem
+#endif
 
 /// Destinations of the flow-wide toolbar legal links.
 enum AuthLegalLink: CaseIterable {
@@ -293,36 +296,74 @@ final class LoginFlowCoordinator {
     /// number (live formatting), Send Code into the verification sheet,
     /// auto-verifies into the unavailable alert. `-login-demo-signup` /
     /// `-login-demo-forgot` — land on the respective placeholders.
+    ///
+    /// ⚠️ EVERY STEP WAITS FOR A STACK AT REST, not for a clock. The 1s used to
+    /// start when `start()` BUILT the root — before the shell had installed it,
+    /// let alone shown it — and `-login-demo-forgot` pushed its second screen a
+    /// fixed 1s after the first, which under Slow Animations landed mid-push.
+    /// Each push now waits for the stack to be in a window, with no transition
+    /// in flight and the screen it expects on top, and says `[qa] GAVE UP`
+    /// when that never happens. The 1s stays as a beat before the first push.
     private func runQAHooksIfNeeded() {
         let arguments = ProcessInfo.processInfo.arguments
         if arguments.contains("-login-demo-error") {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [self] in
+            qaWhenSettled("login-demo-error", on: MethodSelectionViewController.self) { [self] in
                 showEmailAuth()
-                if let top = navigationController?.topViewController as? CredentialsAuthViewController {
-                    top.qaAutoSubmit = (identifier: "demo", password: "wrong-password")
+                guard let top = navigationController?.topViewController as? CredentialsAuthViewController else {
+                    QAWait.fail("login-demo-error", "the email screen is not on top after the push")
+                    return
                 }
+                top.qaAutoSubmit = (identifier: "demo", password: "wrong-password")
             }
         } else if arguments.contains("-login-demo-phone") {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [self] in
+            qaWhenSettled("login-demo-phone", on: MethodSelectionViewController.self) { [self] in
                 showPhoneAuth()
-                if let top = navigationController?.topViewController as? PhoneAuthViewController {
-                    top.qaAutoSend = "612345678"
+                guard let top = navigationController?.topViewController as? PhoneAuthViewController else {
+                    QAWait.fail("login-demo-phone", "the phone screen is not on top after the push")
+                    return
                 }
+                top.qaAutoSend = "612345678"
             }
         } else if arguments.contains("-login-demo-signup") {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [self] in
+            qaWhenSettled("login-demo-signup", on: MethodSelectionViewController.self) { [self] in
                 showRegistration()
             }
         } else if arguments.contains("-login-demo-forgot") {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [self] in
+            qaWhenSettled("login-demo-forgot email", on: MethodSelectionViewController.self) { [self] in
                 showEmailAuth()
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [self] in
+                // The second push waits for the first to LAND, not for 1s.
+                QAWait.until("login-demo-forgot reset", { [self] in
+                    qaStackIsAtRest(on: CredentialsAuthViewController.self)
+                }) { [self] in
                     showPasswordReset()
-                    if let top = navigationController?.topViewController as? PasswordResetViewController {
-                        top.qaAutoSubmit = "demo"
+                    guard let top = navigationController?.topViewController as? PasswordResetViewController else {
+                        QAWait.fail("login-demo-forgot", "the reset screen is not on top after the push")
+                        return
                     }
+                    top.qaAutoSubmit = "demo"
                 }
             }
+        }
+    }
+
+    /// The flow's stack is on screen, not mid-transition, with `expected` on top.
+    private func qaStackIsAtRest(on expected: UIViewController.Type) -> Bool {
+        guard let navigation = navigationController,
+              navigation.view.window != nil,
+              navigation.transitionCoordinator == nil,
+              let top = navigation.topViewController
+        else { return false }
+        return type(of: top) == expected
+    }
+
+    /// Waits the 1s beat, then for `qaStackIsAtRest(on:)`, then runs `action`.
+    private func qaWhenSettled(
+        _ label: String,
+        on expected: UIViewController.Type,
+        _ action: @escaping @MainActor () -> Void
+    ) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [self] in
+            QAWait.until(label, { [self] in qaStackIsAtRest(on: expected) }, then: action)
         }
     }
     #endif
