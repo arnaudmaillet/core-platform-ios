@@ -282,6 +282,11 @@ final class SnapCommentTickerView: UIView {
     }
 
     func setComments(_ comments: [TickerCommentModel]) {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-ticker-trace") {
+            print(String(format: "[ticker] %.3f setComments n=%d same=%@ active=%@ width=%.0f mode=%@ reserves=%@", CACurrentMediaTime(), comments.count, comments == queue ? "Y" : "N", isActive ? "Y" : "N", bounds.width, "\(mode)", reservesBand ? "Y" : "N"))
+        }
+        #endif
         guard comments != queue else { return }
         let wasEmpty = queue.isEmpty
         stopStream()
@@ -308,6 +313,11 @@ final class SnapCommentTickerView: UIView {
     /// dragged partway in — with the cell's activation seam doubling as the
     /// backgrounding stop / foregrounding restart edge.
     func setActive(_ active: Bool) {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-ticker-trace") {
+            print(String(format: "[ticker] %.3f setActive %@ (was %@) width=%.0f", CACurrentMediaTime(), active ? "Y" : "N", isActive ? "Y" : "N", bounds.width))
+        }
+        #endif
         guard isActive != active else { return }
         isActive = active
         active ? startIfNeeded() : stopStream()
@@ -336,8 +346,28 @@ final class SnapCommentTickerView: UIView {
 
     // MARK: - Lane scheduling (steady conveyor)
 
+    /// ⚠️ **NO PRE-FILL WHILE THE PAGE IS FLYING IN.** The pre-fill lays the
+    /// bubble train across `bounds.width` — and during a hero flight the page
+    /// is laid out at the CARD's width first, so a train laid then holds one
+    /// or two bubbles, and the band that lands at full width is empty with
+    /// bubbles arriving from the right (filmed on a device, 25 September
+    /// 2026). Held, the ticker waits; released at landing, it pre-fills at the
+    /// width it will keep and fades in with the chrome.
+    private var isHeldForFlight = false
+
+    func setHeldForFlight(_ held: Bool) {
+        guard held != isHeldForFlight else { return }
+        isHeldForFlight = held
+        if !held { startIfNeeded() }
+    }
+
     private func startIfNeeded() {
-        guard isActive, mode == .parked, !queue.isEmpty, bounds.width > 0,
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-ticker-trace") {
+            print(String(format: "[ticker] %.3f startIfNeeded active=%@ mode=%@ queue=%d width=%.0f", CACurrentMediaTime(), isActive ? "Y" : "N", "\(mode)", queue.count, bounds.width))
+        }
+        #endif
+        guard isActive, mode == .parked, !queue.isEmpty, bounds.width > 0, !isHeldForFlight,
               !UIAccessibility.isReduceMotionEnabled else { return }
         mode = .conveying
         for lane in 0..<Self.laneCount {

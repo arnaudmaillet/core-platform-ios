@@ -446,6 +446,7 @@ final class SnapChromeView: UIView {
     /// never the current constant), so re-layout converges immediately.
     override func layoutSubviews() {
         super.layoutSubviews()
+        hasLaidOut = true
         shortcutRail.bottomReservedInset = commentTicker.bounds.height
 
         // The caption's two-line/timestamp composition is width-dependent —
@@ -736,9 +737,13 @@ final class SnapChromeView: UIView {
     func updateCommentStreams(_ streams: FeedViewModel.CommentStreams) {
         guard hasMedia else { return }
         commentTicker.setComments(streams.reactions)
-        // Loaded and empty: the reservation was wrong, the band goes. Loaded
-        // and full: it stays whatever the card said.
-        if streams.isLoaded {
+        // Loaded, the band follows the bubbles: none, it goes. A SEED (top
+        // comments from the cache, not loaded) knows nearly as well — a seed
+        // with cues and no bubbles reserved the band by the card's count and
+        // left the pill floating over a hole until the load collapsed it
+        // (filmed on a device, 25 September 2026). Only a page with no
+        // streams at all keeps the card's guess.
+        if streams.isLoaded || streams.commentCount > 0 {
             commentTicker.setReservesBand(!streams.reactions.isEmpty)
         }
         // Read AFTER the band has resolved its own hidden state — it also
@@ -783,7 +788,29 @@ final class SnapChromeView: UIView {
         // any test — reads the previous seat's frames. The run loop hides
         // this; an explicit `layoutIfNeeded` does not.
         setNeedsLayout()
+        // A band that comes or goes while the page is on screen SLIDES the
+        // pill and the caption to their new seat instead of dropping them
+        // there: the change is real (the load disagreed with the guess) and
+        // rare, and a slide is what a viewer forgives. Never on a first
+        // layout (a cell being configured is not in a window yet) and never
+        // while the chrome is held for a flight.
+        if window != nil, alpha > 0, hasLaidOut {
+            UIView.animate(withDuration: 0.25, delay: 0,
+                           options: [.beginFromCurrentState, .allowUserInteraction]) {
+                self.layoutIfNeeded()
+            }
+        }
     }
+
+    private var hasLaidOut = false
+
+    #if DEBUG
+    /// The caption's frame in `space`, for the landing probe that compares
+    /// the flight replica with the page it fades into.
+    func debugCaptionFrame(in space: UICoordinateSpace) -> CGRect {
+        captionLabel.convert(captionLabel.bounds, to: space)
+    }
+    #endif
 
     /// Streams while the owning cell is on screen (visibility-scoped — a
     /// page dragged partway in already flows; see the cell's
@@ -791,6 +818,12 @@ final class SnapChromeView: UIView {
     /// How many media pages the post has, and which one is showing. A count
     /// below two hides the indicator — a readout for a single photograph is
     /// furniture answering a question nobody asked.
+    /// The flight's hold, passed to the ticker: no pre-fill at a transient
+    /// width (see `SnapCommentTickerView.setHeldForFlight`).
+    func setTickerHeldForFlight(_ held: Bool) {
+        commentTicker.setHeldForFlight(held)
+    }
+
     func setMediaPageCount(_ count: Int, current: Int, clipPages: Set<Int> = []) {
         mediaPageBar.configure(count: count, current: current, clipPages: clipPages)
     }
