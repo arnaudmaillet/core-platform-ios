@@ -343,6 +343,9 @@ final class SnapFeedViewController: UIViewController {
     /// seam's warm). Distinct from `commentsEngagedID`, which means on
     /// screen and interactive.
     private var prewarmedCommentsID: PostID?
+    /// The landing's deferred warm, while it waits — see
+    /// `scheduleIdleCommentsWarm`. Held so leaving can call it off.
+    private var idleCommentsWarm: DispatchWorkItem?
     /// The RESTING panel built ahead for a text page — see
     /// `prewarmRestingComments`. Deliberately not the engagement slot.
     private var prewarmedRestingID: PostID?
@@ -422,10 +425,29 @@ final class SnapFeedViewController: UIViewController {
             // Reveal the viewer's just-posted item: a prepend on a full-screen
             // pager otherwise shifts it above the viewport. Defer so the
             // snapshot apply lands first.
+            //
+            // ⚠️ THE SETTLE BELONGS TO THE END OF THE SCROLL, NOT ITS START.
+            // Settling straight after an animated `scrollToItem` read the
+            // offset the animation had not moved yet: the picture followed
+            // the pager to the new post (`scrollViewDidScroll`), and the bar,
+            // the ticker and the lifecycle stayed on the page it left until
+            // the viewer scrolled by hand. An animated scroll settles in
+            // `scrollViewDidEndScrollingAnimation`; one with nothing to move
+            // (already on the first page) or off-window settles here.
             DispatchQueue.main.async {
                 guard let self, !self.orderedIDs.isEmpty else { return }
-                self.collectionView.scrollToItem(at: IndexPath(item: 0, section: 0), at: .top, animated: true)
-                self.updateActiveItem()
+                let first = IndexPath(item: 0, section: 0)
+                let onFirstPage = SnapActiveItemTracker.activeIndex(
+                    contentOffsetY: self.collectionView.contentOffset.y,
+                    pageHeight: self.collectionView.bounds.height,
+                    itemCount: self.orderedIDs.count
+                ) == 0
+                if onFirstPage || self.view.window == nil {
+                    self.collectionView.scrollToItem(at: first, at: .top, animated: false)
+                    self.updateActiveItem()
+                } else {
+                    self.collectionView.scrollToItem(at: first, at: .top, animated: true)
+                }
             }
         }
     }
@@ -717,11 +739,8 @@ final class SnapFeedViewController: UIViewController {
                 guard let self else { return }
                 let target = (self.lifecycle.activeIndex ?? 0) + 1
                 guard self.orderedIDs.indices.contains(target) else { return }
+                // Settles in scrollViewDidEndScrollingAnimation.
                 self.collectionView.scrollToItem(at: IndexPath(item: target, section: 0), at: .top, animated: true)
-                // Animated scrolls end in scrollViewDidEndScrollingAnimation,
-                // which this VC doesn't observe (finger scrolls don't emit
-                // it); settle the active page manually like the jump arg.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { self.updateActiveItem() }
             }
         }
         // `-snap-comments-demo`: opens the comments engagement on the active
@@ -816,6 +835,10 @@ final class SnapFeedViewController: UIViewController {
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         setNativePopSuppressed(false)
+        // A grab-to-dismiss or a pop is under way: the landing's warm must not
+        // build ~100 ms of panel inside it. A cancelled grab lands again, and
+        // that landing schedules its own.
+        cancelIdleCommentsWarm()
         // Hand the shared bars back on the way out (see `releaseChromeTheme`).
         releaseChromeTheme()
         // Unlike the visibility bookkeeping below, the toolbar choreography
@@ -2837,10 +2860,42 @@ final class SnapFeedViewController: UIViewController {
     /// Warms the active page's comments once the screen has actually gone
     /// quiet, re-checking on arrival — the page may have moved on, or the
     /// viewer may have engaged already, in which case there is nothing to do.
+    ///
+    /// ⚠️ **0.6 s IS A GUESS AT "QUIET", SO THE ARRIVAL CHECKS IT.** The timer
+    /// only knew the page, not the screen: a swipe, a grab-to-dismiss or a
+    /// pop begun inside the delay got the ~100–150 ms build in the middle of
+    /// the gesture — the stall this deferral exists to keep out of sight,
+    /// moved into the viewer's hands. On arrival it now needs the screen on
+    /// screen and still: no transition, no finger on the pager, no
+    /// deceleration, no dismissal. Moving → try again one delay later; gone →
+    /// drop it (a new page is warmed by its own settle, a return by its own
+    /// landing). One pending warm at most, and leaving calls it off.
     private func scheduleIdleCommentsWarm() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.idleWarmDelay) { [weak self] in
-            self?.rewarmActivePageComments()
+        idleCommentsWarm?.cancel()
+        let warm = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.idleCommentsWarm = nil
+            guard self.isOnScreen, self.view.window != nil else { return }
+            guard self.isQuietForCommentsWarm else { return self.scheduleIdleCommentsWarm() }
+            self.rewarmActivePageComments()
         }
+        idleCommentsWarm = warm
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.idleWarmDelay, execute: warm)
+    }
+
+    private func cancelIdleCommentsWarm() {
+        idleCommentsWarm?.cancel()
+        idleCommentsWarm = nil
+    }
+
+    /// Nothing is moving that ~100 ms of layout could stall.
+    private var isQuietForCommentsWarm: Bool {
+        transitionCoordinator == nil
+            && !isAwaitingZoomPresentation
+            && !isEngagedDismissalActive
+            && !collectionView.isTracking
+            && !collectionView.isDragging
+            && !collectionView.isDecelerating
     }
 
     /// Warms the page that is active RIGHT NOW — the disengagement's tail,
@@ -4059,6 +4114,14 @@ extension SnapFeedViewController: UICollectionViewDelegate {
     }
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        updateActiveItem()
+        updatePagingFooter(for: scrollView)
+    }
+
+    /// A programmatic animated scroll (the own-post reveal) ends here, never
+    /// in the drag callbacks — without it the page it lands on is never
+    /// settled.
+    func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
         updateActiveItem()
         updatePagingFooter(for: scrollView)
     }

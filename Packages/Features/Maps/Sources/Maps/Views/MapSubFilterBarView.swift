@@ -257,6 +257,10 @@ final class MapSubFilterBarView: UIView {
     /// taps land mid-animation; `.beginFromCurrentState` retargets the
     /// alphas, this retargets the *intent*).
     private var transitionGeneration = 0
+    /// The row a pending cross-dissolve will land — see `transition(to:)`.
+    /// Held rather than captured, so a restack arriving during the fade-out
+    /// updates what lands instead of being overwritten by it.
+    private var pendingTransitionOptions: [MapSubFilterOption]?
 
     /// The one fixed button, contextual by scroll position — see
     /// `MapSubFilterHeaderRole`. Born in the organize role, which is also its
@@ -384,6 +388,7 @@ final class MapSubFilterBarView: UIView {
     func setOptions(_ options: [MapSubFilterOption]) {
         // Direct set supersedes any in-flight cross-dissolve…
         transitionGeneration += 1
+        pendingTransitionOptions = nil
         for task in avatarTasks { task.cancel() }
         avatarTasks.removeAll()
         selectedSubFilters = []
@@ -528,6 +533,17 @@ final class MapSubFilterBarView: UIView {
     /// laid out for). Lands as the sheet begins dismissing, so the row is
     /// already right by the time it is uncovered.
     func restack(to options: [MapSubFilterOption]) {
+        // ⚠️ **MID-SWAP, THE RESTACK IS FOR THE ROW THAT IS ARRIVING.** The
+        // cells on screen belong to the primary being faded OUT, and the
+        // handoff used to land the list it captured when it was scheduled —
+        // so a refresh that restacked the new primary inside the ~150 ms
+        // fade (a star added elsewhere) was overwritten by the older list,
+        // and the caller, which recorded the fresh one as rendered, never
+        // corrected it. The fresh list replaces what the handoff will land.
+        if pendingTransitionOptions != nil {
+            pendingTransitionOptions = options
+            return
+        }
         let options = carryingKnownHandles(options)
         orderedSubFilters = options.map(\.subFilter)
         optionsBySubFilter = Dictionary(uniqueKeysWithValues: options.map { ($0.subFilter, $0) })
@@ -576,13 +592,16 @@ final class MapSubFilterBarView: UIView {
     func transition(to options: [MapSubFilterOption]) {
         transitionGeneration += 1
         let generation = transitionGeneration
+        pendingTransitionOptions = options
         UIView.mapBarFade { self.collectionView.alpha = 0 }
         let handoff = UIView.mapBarFadeDuration * Self.transitionHandoff
         DispatchQueue.main.asyncAfter(deadline: .now() + handoff) { [weak self] in
-            guard let self, generation == transitionGeneration else { return }
+            guard let self, generation == transitionGeneration,
+                  let landing = pendingTransitionOptions else { return }
             // `setOptions` swaps the content and springs the surface back up,
-            // retargeting the fade-out that is still in flight.
-            setOptions(options)
+            // retargeting the fade-out that is still in flight. It lands the
+            // NEWEST list for this swap, not the one captured above.
+            setOptions(landing)
         }
     }
 
