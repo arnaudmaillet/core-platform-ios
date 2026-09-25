@@ -303,10 +303,7 @@ final class SnapCommentTickerView: UIView {
         // beat the prefetch): ease the pre-filled train in instead of popping
         // it. Off-screen configuration (`window == nil`) skips this — the
         // band is simply there when the page scrolls in.
-        if wasEmpty, !comments.isEmpty, window != nil {
-            alpha = 0
-            UIView.animate(withDuration: 0.3) { self.alpha = 1 }
-        }
+        if wasEmpty, !comments.isEmpty, window != nil, mode == .conveying { playEntrance() }
     }
 
     /// Visibility-scoped: any on-screen page streams — including one being
@@ -320,7 +317,10 @@ final class SnapCommentTickerView: UIView {
         #endif
         guard isActive != active else { return }
         isActive = active
-        active ? startIfNeeded() : stopStream()
+        // Activation is the moment the page is shown: the train enters with
+        // the same lead-in and fade as the subtitle pill beside it, whether
+        // it was pre-filled now or laid earlier under a held chrome.
+        active ? startIfNeeded(fadingIn: true) : stopStream()
     }
 
     /// Cell reuse: drop content, activation, and every in-flight bubble — a
@@ -375,7 +375,15 @@ final class SnapCommentTickerView: UIView {
     func setHeldForFlight(_ held: Bool) {
         guard held != isHeldForFlight else { return }
         isHeldForFlight = held
-        if !held { startIfNeeded() }
+        if !held { startIfNeeded(fadingIn: true) }
+    }
+
+    /// The page has just landed by a flight that never held the chrome (a
+    /// reveal): a train laid during the flight, unseen behind the replica,
+    /// enters now instead of standing there when the replica goes.
+    func replayEntrance() {
+        guard mode == .conveying, window != nil else { return }
+        playEntrance()
     }
 
     private func startIfNeeded(fadingIn: Bool = false) {
@@ -397,10 +405,24 @@ final class SnapCommentTickerView: UIView {
             stopStream()
             return
         }
-        if fadingIn, window != nil {
-            alpha = 0
-            UIView.animate(withDuration: 0.3) { self.alpha = 1 }
-        }
+        if fadingIn, window != nil { playEntrance() }
+    }
+
+    /// The band's entrance: the pill's own lead-in and fade, so the two
+    /// zones arrive together rather than the band popping beside a pill
+    /// that fades. ⚠️ On a device the 0.3 s alone read as a pop (filmed 25
+    /// September 2026), for the same reason the pill's tenth of a second
+    /// did — the eye needs the dark beat before the ramp.
+    private func playEntrance() {
+        layer.removeAnimation(forKey: "ticker-entrance")
+        let entrance = CAKeyframeAnimation(keyPath: "opacity")
+        let lead = SnapSubtitleView.leadInDelay, fade = SnapSubtitleView.fadeDuration
+        let total = lead + fade
+        entrance.values = [0, 0, 1]
+        entrance.keyTimes = [0, NSNumber(value: lead / total), 1]
+        entrance.duration = total
+        layer.add(entrance, forKey: "ticker-entrance")
+        alpha = 1
     }
 
     private func stopStream() {

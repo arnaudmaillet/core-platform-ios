@@ -824,6 +824,11 @@ final class SnapChromeView: UIView {
         commentTicker.setHeldForFlight(held)
     }
 
+    /// See `SnapCommentTickerView.replayEntrance`.
+    func replayCommentBandEntrance() {
+        commentTicker.replayEntrance()
+    }
+
     func setMediaPageCount(_ count: Int, current: Int, clipPages: Set<Int> = []) {
         mediaPageBar.configure(count: count, current: current, clipPages: clipPages)
     }
