@@ -400,9 +400,12 @@ final class SnapCommentTickerView: UIView {
             prefillLane(lane)
         }
         // A train that could place nothing (a band narrower than a bubble)
-        // is not a start: parked again, the next layout tries at its width.
+        // is not a start: parked again, and tried once more on the next turn
+        // as well as on the next layout — the width it needs may already be
+        // there by then without any layout to say so.
         if laneBubbles.allSatisfy(\.isEmpty) {
             stopStream()
+            DispatchQueue.main.async { [weak self] in self?.startIfNeeded(fadingIn: true) }
             return
         }
         if fadingIn, window != nil { playEntrance() }
