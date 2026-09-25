@@ -114,6 +114,27 @@ struct ConversationThreadViewControllerTests {
         #expect(stream.topEdgeEffect.isHidden)
     }
 
+    /// ⚠️ **ON THE TAIL IN THE SAME TURN, NOT ONE TURN LATER.** Estimated row
+    /// heights refine as the tail realises, so a single pass lands short; the
+    /// correction used to be a second pass a run-loop turn later — after the
+    /// short frame had been committed, and with nothing left to retry when that
+    /// pass refined the heights again. Read synchronously, with no hop allowed.
+    @Test func aLongTranscriptOpensExactlyOnItsNewestMessage() throws {
+        let long = (0..<80).map { index in
+            Self.message("m\(index)", daysBack: 0, minutes: Double(index),
+                         mine: index.isMultiple(of: 3))
+        }
+        let (screen, _, _, _) = makeScreen(phase: .content(long))
+        let stream = try #require(Self.firstView(UICollectionView.self, in: screen.view))
+
+        let tail = stream.contentSize.height + stream.adjustedContentInset.bottom - stream.bounds.height
+        #expect(stream.contentSize.height > stream.bounds.height * 2, "guard: the transcript scrolls")
+        #expect(abs(stream.contentOffset.y - tail) < 1,
+                "opened \(Int(tail - stream.contentOffset.y))pt short of the newest message")
+        let newest = IndexPath(item: long.count - 1, section: 0)
+        #expect(stream.indexPathsForVisibleItems.contains(newest), "the newest message is not on screen")
+    }
+
     @Test func anEmptyConversationIsThePostsEmptyPage() throws {
         let (screen, _, _, _) = makeScreen(phase: .content([]))
         let stream = try #require(Self.firstView(UICollectionView.self, in: screen.view))
