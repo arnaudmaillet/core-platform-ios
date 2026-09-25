@@ -36,7 +36,11 @@ struct MapAnnotationHoldTests {
         let view = MKAnnotationView(annotation: nil, reuseIdentifier: nil)
 
         pop.hold([view], deadline: 0.2)
-        try await Task.sleep(for: .milliseconds(450))
+        // Until the deadline has run, however late a loaded host delivers it
+        // (a fixed 450 ms was this suite's own flake on CI).
+        for _ in 0..<100 where pop.isHolding(view) {
+            try await Task.sleep(for: .milliseconds(50))
+        }
 
         #expect(!pop.isHolding(view), "a picture that never came must not leave a hole")
     }
