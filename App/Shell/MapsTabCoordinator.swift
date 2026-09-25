@@ -85,7 +85,8 @@ final class MapsTabCoordinator: TabCoordinator {
         // of the bell ([coin] [bell]).
         walletBadge = WalletBadgeInstaller(
             wallet: container.walletStore,
-            presenter: navigationController
+            presenter: navigationController,
+            makeSheet: { [unowned container] in container.makeWalletSheet() }
         ) { [weak self] item in
             guard let self else { return }
             // ⚠️ `[0]` IS THE SCREEN EDGE: search takes the corner the bell

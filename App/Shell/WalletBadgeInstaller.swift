@@ -22,6 +22,8 @@ final class WalletBadgeInstaller {
     private let badge = WalletBadgeButton()
     /// The presenting screen, for the sheet.
     private weak var presenter: UIViewController?
+    /// Builds the sheet the badge presents (`AppContainer.makeWalletSheet`).
+    private let makeSheet: () -> UIViewController
     /// Where the item goes, and how the host re-applies a fresh one. Called on
     /// install and again whenever the count's width changes.
     private let apply: (UIBarButtonItem) -> Void
@@ -41,10 +43,12 @@ final class WalletBadgeInstaller {
     init(
         wallet: WalletStore,
         presenter: UIViewController?,
+        makeSheet: @escaping () -> UIViewController,
         apply: @escaping (UIBarButtonItem) -> Void
     ) {
         self.wallet = wallet
         self.presenter = presenter
+        self.makeSheet = makeSheet
         self.apply = apply
 
         badge.addAction(
@@ -111,6 +115,6 @@ final class WalletBadgeInstaller {
     }
 
     func presentSheet() {
-        presenter?.present(WalletClaimViewController(wallet: wallet), animated: true)
+        presenter?.present(makeSheet(), animated: true)
     }
 }
