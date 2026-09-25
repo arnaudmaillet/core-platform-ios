@@ -71,8 +71,10 @@ final class MapAnnotationPopChoreographer {
     /// so the key is identity — a reused view starting a new pop-in is what
     /// retires the stale animator still pointing at it.
     private var arrivals: [ObjectIdentifier: UIViewPropertyAnimator] = [:]
-    /// Markers on the map, at zero, waiting for a picture — see `hold`.
-    private var held: Set<ObjectIdentifier> = []
+    /// Markers on the map, at zero, waiting for a picture, each with the
+    /// hold that holds it — see `hold`.
+    private var held: [ObjectIdentifier: Int] = [:]
+    private var holdSerial = 0
 
     /// In-flight departures, keyed by the caller's stable identity (encoding
     /// single-vs-cluster so a pin and the cluster it collapses into never share
@@ -108,7 +110,7 @@ final class MapAnnotationPopChoreographer {
     /// "leave it alone" would leave some markers invisible.
     func settle(_ views: [MKAnnotationView]) {
         for view in views {
-            held.remove(ObjectIdentifier(view))
+            held.removeValue(forKey: ObjectIdentifier(view))
             arrivals.removeValue(forKey: ObjectIdentifier(view))?.stopAnimation(true)
             view.alpha = 1
             view.transform = .identity
@@ -137,10 +139,18 @@ final class MapAnnotationPopChoreographer {
             arrivals.removeValue(forKey: key)?.stopAnimation(true)
             view.alpha = 0
             view.transform = MapAnnotationPop.collapsedTransform
-            held.insert(key)
+            holdSerial += 1
+            let hold = holdSerial
+            held[key] = hold
+            // ⚠️ **THIS hold's deadline, not the view's.** MapKit recycles
+            // annotation views, and one released and held again — for a
+            // different annotation — within the 2.5 s was let in by the FIRST
+            // hold's deadline, before its own picture had arrived: an undressed
+            // marker popping in under fast pans. The deadline releases only the
+            // hold it was armed for.
             Task { @MainActor [weak self, weak view] in
                 try? await Task.sleep(nanoseconds: UInt64(deadline * 1_000_000_000))
-                guard let self, let view, self.held.contains(ObjectIdentifier(view)) else { return }
+                guard let self, let view, self.held[ObjectIdentifier(view)] == hold else { return }
                 self.release(view)
             }
         }
@@ -149,12 +159,12 @@ final class MapAnnotationPopChoreographer {
     /// Lets a held marker in, now that it has something to show. A no-op for a
     /// view that was never held, so a late report cannot re-pop a settled pin.
     func release(_ view: MKAnnotationView) {
-        guard held.remove(ObjectIdentifier(view)) != nil else { return }
+        guard held.removeValue(forKey: ObjectIdentifier(view)) != nil else { return }
         popIn([view])
     }
 
     /// Whether this view is waiting on its picture.
-    func isHolding(_ view: MKAnnotationView) -> Bool { held.contains(ObjectIdentifier(view)) }
+    func isHolding(_ view: MKAnnotationView) -> Bool { held[ObjectIdentifier(view)] != nil }
 
     func popIn(_ views: [MKAnnotationView]) {
         for (index, view) in views.enumerated() {
