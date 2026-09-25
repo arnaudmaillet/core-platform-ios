@@ -336,11 +336,20 @@ The flag stays off until the author has watched the film on a device. What
 remains in the flight turn is the cell's own configure and UIKit's layout of
 it, which no single frame owns.
 
-### PR 5c — The "+" menu (P2)
+### PR 5c — The "+" menu (P2) — measured, closed
 
-`CreateTabItem.presentMenu` pays for the `UIMenu`'s controller on the tap,
-before the composer or the picker exists. Measure whether the cost is the
-menu's images or the menu itself; if the latter, a prebuilt menu.
+Measured 25 September 2026 with `-open-create-menu` (the tap's own path,
+`shouldSelectTab` → `performPrimaryAction`), harness alone, quiet host:
+the turn that presents the menu is 179 / 202 / 243 ms with the three symbol
+images and 174 / 188 / 302 ms without them. Same number. Three quarters of
+its samples carry NO app frame at all; the rest are the synchronous
+`performPrimaryAction` call. The menu is already built once at init; what
+the tap pays is UIKit's context-menu presentation (`_UIContextMenuActionsOnlyViewController`,
+its platter and its snapshot), which every context menu in iOS pays and
+which a release build on a device pays far less of. Nothing of ours to move.
+The only lever would be to stop using a `UIMenu` for the "+" — a design
+change, not an optimisation — so this is closed unless the menu itself is
+redesigned.
 
 ### PR 9 — One `Loadable` and one cross-fade (P10, P11) — #200
 

@@ -298,6 +298,16 @@ final class MainTabCoordinator: NSObject, Coordinator {
                 self?.openCreate(destination)
             }
         }
+        // `-open-create-menu`: the "+" MENU itself, through the very path a
+        // tap takes (`shouldSelectTab`), ~1.5s in — the menu is a `UIMenu`
+        // no simulator tap can open, and `-presentation-budget` needs its
+        // presentation turn on its own, without a composer behind it.
+        if arguments.contains("-open-create-menu") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                guard let self else { return }
+                _ = self.tabBarController(self.tabBarController, shouldSelectTab: self.createItem.tab)
+            }
+        }
         // `-tab-round-trip` leaves the current tab and comes back ~1.5s apart.
         // Pair with any push that hides the bar (`-open-my-profile`,
         // `-open-conversation`): the round trip is the only way to reach
