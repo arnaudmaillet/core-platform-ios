@@ -109,7 +109,13 @@ public final class VideoRenderView: UIView {
         } else if let playerLayer {
             playerLayer.videoGravity = videoGravity
             updatePosterVisibility(ready: playerLayer.isReadyForDisplay)
-            readinessObservation = playerLayer.observe(\.isReadyForDisplay, options: [.new]) { [weak self] _, _ in
+            // ⚠️ `@Sendable`, because KVO may call it OFF the main thread —
+            // which is what the hop below is for. Written bare in this
+            // main-actor type, the handler would inherit the main actor and
+            // trap on that call (`dispatch_assert_queue_fail`) before ever
+            // reaching the hop; it compiles either way. The same trap as the
+            // PhotoKit handlers (see `MediaSoundtrackSourcing.VideoDelegate`).
+            readinessObservation = playerLayer.observe(\.isReadyForDisplay, options: [.new]) { @Sendable [weak self] _, _ in
                 DispatchQueue.main.async {
                     MainActor.assumeIsolated {
                         guard let self else { return }

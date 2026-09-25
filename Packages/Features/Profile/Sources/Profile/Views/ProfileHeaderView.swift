@@ -91,6 +91,8 @@ final class ProfileHeaderView: UIView {
     private let handleLabel = UILabel()
     private let bioLabel = UILabel()
     private let websiteButton = UIButton(configuration: .plain())
+    /// Bumped by every configure — see `dissolve`.
+    private var configureGeneration = 0
     private let followersStat = ProfileStatView(caption: "Followers")
     private let followingStat = ProfileStatView(caption: "Following")
     private let reactionsStat = ProfileStatView(caption: "Reactions")
@@ -256,6 +258,8 @@ final class ProfileHeaderView: UIView {
     // MARK: - Configuration
 
     func configure(with model: ProfileDisplayModel) {
+        // Supersedes any staggered group still waiting to land.
+        configureGeneration += 1
         monogramLabel.text = model.avatarMonogram
         nameLabel.text = model.displayName
         handleLabel.text = model.handle
@@ -310,9 +314,11 @@ final class ProfileHeaderView: UIView {
             configure(with: model)
             return
         }
+        configureGeneration += 1
+        let generation = configureGeneration
         // Identity first: the banner's colour field and the avatar carry most of
         // the "this is someone else now" signal, and the name says it outright.
-        dissolve([bannerView, avatarView, nameLabel, handleLabel, verifiedBadge], after: 0) {
+        dissolve([bannerView, avatarView, nameLabel, handleLabel, verifiedBadge], after: 0, generation: generation) {
             self.monogramLabel.text = model.avatarMonogram
             self.nameLabel.text = model.displayName
             self.handleLabel.text = model.handle
@@ -321,13 +327,13 @@ final class ProfileHeaderView: UIView {
             self.bannerView.setImageURL(model.bannerImageURL)
             self.loadAvatar(model.avatarURL)
         }
-        dissolve([followersStat, followingStat, reactionsStat, viewsStat], after: Metrics.stagger) {
+        dissolve([followersStat, followingStat, reactionsStat, viewsStat], after: Metrics.stagger, generation: generation) {
             self.followersStat.setValue(model.followerText)
             self.followingStat.setValue(model.followingText)
             self.reactionsStat.setValue(model.reactionsText)
             self.viewsStat.setValue(model.viewsText)
         }
-        dissolve([bioLabel, websiteButton], after: Metrics.stagger * 2) {
+        dissolve([bioLabel, websiteButton], after: Metrics.stagger * 2, generation: generation) {
             self.bioLabel.text = model.bio
             self.bioLabel.isHidden = !model.hasBio
             self.websiteURL = model.websiteURL
@@ -346,7 +352,17 @@ final class ProfileHeaderView: UIView {
     /// inside the transition on purpose: they alter this group's own height, and
     /// letting them ride the dissolve is what stops the column below from
     /// jumping while the text is still half faded.
-    private func dissolve(_ views: [UIView], after delay: TimeInterval, _ changes: @escaping () -> Void) {
+    ///
+    /// ⚠️ **A DELAYED GROUP IS DROPPED IF ANY LATER CONFIGURE HAS LANDED.** Each
+    /// group captures its own call's model; a render that arrived inside the
+    /// 0.05–0.10 s stagger — a fresh fetch applied plainly because the header
+    /// had left the window — was then overwritten by the older model's stats and
+    /// bio, until the next render. `generation` is the call's; the delayed
+    /// groups run only while it is still the newest.
+    private func dissolve(
+        _ views: [UIView], after delay: TimeInterval, generation: Int,
+        _ changes: @escaping () -> Void
+    ) {
         let run = {
             var pending = views
             guard let first = pending.popLast() else { return changes() }
@@ -369,7 +385,10 @@ final class ProfileHeaderView: UIView {
             )
         }
         guard delay > 0 else { return run() }
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: run)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, generation == self.configureGeneration else { return }
+            run()
+        }
     }
 
     /// Installs the see-more bubble's overflow menu. Set once with a menu whose
