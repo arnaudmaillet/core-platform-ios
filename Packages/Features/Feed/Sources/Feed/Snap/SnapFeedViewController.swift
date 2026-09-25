@@ -2517,11 +2517,16 @@ final class SnapFeedViewController: UIViewController {
             deferred.cell.removeRestingPlaceholder(deferred.placeholder)
             return
         }
+        // `installRestingPanel` takes the placeholder down as it mounts; the
+        // removal below covers the paths that mount nothing (the preview
+        // branch, a slot already held).
+        deferredResting = deferred
         presentRestingComments(for: deferred.id, host: deferred.cell)
         #if DEBUG
         print("[defer-resting] mounted engaged=\(commentsEngagedID?.rawValue ?? "none") content=\(commentsContentVC != nil) preview=\(previewRestingID?.rawValue ?? "none")")
         #endif
-        deferred.cell.removeRestingPlaceholder(deferred.placeholder)
+        deferredResting = nil
+        deferred.cell.removeRestingPlaceholder(deferred.placeholder, animated: false)
     }
 
     private func presentRestingComments(for id: PostID, host cell: SnapFeedCell) {
@@ -2629,6 +2634,14 @@ final class SnapFeedViewController: UIViewController {
     private func installRestingPanel(
         _ content: UIViewController, for id: PostID, host cell: SnapFeedCell
     ) {
+        // Whatever path mounts the real panel, a placeholder standing on this
+        // cell goes NOW, not on a fade: the panel draws the same caption and
+        // either real rows or its own bones, and bones showing through under
+        // real rows is exactly what a cross-fade produced on a device.
+        if let deferred = deferredResting, deferred.cell === cell {
+            deferredResting = nil
+            cell.removeRestingPlaceholder(deferred.placeholder, animated: false)
+        }
         content.view.backgroundColor = .clear
         // Inherited, exactly like the media panel — the cell decides.
         content.overrideUserInterfaceStyle = .unspecified
@@ -2893,7 +2906,12 @@ final class SnapFeedViewController: UIViewController {
         }
         // The settled text page owns the interface: promote what is already
         // mounted, or mount it.
-        if activeIsText, let activeID, !promoteRestingPreview(for: activeID),
+        // ⚠️ NOT WHILE A PLACEHOLDER STANDS FOR THIS PAGE. The settle can land
+        // here mid-flight, and mounting the real panel then put real rows
+        // over the placeholder's bones for the rest of the flight (filmed on
+        // a device, 25 September 2026). The landing mounts it.
+        if activeIsText, let activeID, deferredResting?.id != activeID,
+           !promoteRestingPreview(for: activeID),
            commentsEngagedID == nil,
            let cell = collectionView.cellForItem(
                at: IndexPath(item: activeIndex, section: 0)
