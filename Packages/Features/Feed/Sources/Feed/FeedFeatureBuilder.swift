@@ -124,6 +124,24 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         )
     }
 
+    public func postEntries(_ ids: [PostID]) async -> [PostID: FeedEntry] {
+        var found: [PostID: FeedEntry] = [:]
+        var missing: [PostID] = []
+        for id in ids {
+            if let entry = repository.peekPost(id) { found[id] = entry } else { missing.append(id) }
+        }
+        let repository = repository
+        await withTaskGroup(of: (PostID, FeedEntry?).self) { group in
+            for id in missing {
+                group.addTask { (id, try? await repository.loadPost(id)) }
+            }
+            for await (id, entry) in group {
+                if let entry { found[id] = entry }
+            }
+        }
+        return found
+    }
+
     public func prewarmPosts(_ ids: [PostID]) async {
         #if DEBUG
         // See `isColdOpenForced`: a warmed corpus seeds synchronously and the

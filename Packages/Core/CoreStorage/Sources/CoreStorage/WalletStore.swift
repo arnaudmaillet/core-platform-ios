@@ -20,6 +20,45 @@ public struct WalletSnapshot: Equatable, Sendable {
     /// Consecutive UTC days with at least one claim. 0 when the chain is
     /// broken (no claim yesterday or today), not the stale last value.
     public let streakDays: Int
+    /// Gems (the charter's currency B) earned by stakes that have settled —
+    /// earned-only, so it is the sum of their rewards and nothing else.
+    public let gems: Int
+}
+
+/// A stake of points (the charter's currency A) on a post or comment, and
+/// what it came to.
+///
+/// ⚠️ **SETTLEMENT IS DEFERRED, BY DESIGN** (charter V5.3 §33): a stake is
+/// ACTIVE until `settlesAt`, and only then has an outcome — a reward in gems,
+/// or none. Mock-only today: no service settles anything, so the outcome is
+/// derived here from the target and the amount (`Policy.mockOutcome`) — stable,
+/// so a stake never changes its mind between two readings.
+public struct WalletStake: Equatable, Sendable, Identifiable {
+    public enum Outcome: Equatable, Sendable {
+        /// The stake was judged to have carried information: gems earned.
+        case gems(Int)
+        /// Settled with nothing earned — popularity alone pays nothing.
+        case noReward
+    }
+
+    /// The post (or comment) staked on.
+    public let targetID: String
+    /// Points committed, all stakes on this target together.
+    public let amount: Int
+    /// When the first of them was placed.
+    public let stakedAt: Date
+    /// When the stake settles.
+    public let settlesAt: Date
+    /// Nil while the stake is still active.
+    public let outcome: Outcome?
+
+    public var id: String { targetID }
+    public var isSettled: Bool { outcome != nil }
+    /// The gems it earned, 0 while active or when it earned none.
+    public var gems: Int {
+        if case .gems(let earned) = outcome { return earned }
+        return 0
+    }
 }
 
 public extension WalletSnapshot {
@@ -108,6 +147,26 @@ public final class WalletStore: @unchecked Sendable {
         /// that cannot show whether they work. Mock-only; the real wallet
         /// provisions at 0.
         public static let seededBalance = 250
+        /// How long a stake stays ACTIVE before it settles (charter §33's
+        /// deferred settlement) — a mock value until a service decides.
+        public static let settlementDelay: TimeInterval = 6 * 60 * 60
+
+        /// A stake's settled outcome, MOCK: stable per target and amount, so
+        /// the same stake always settles the same way. About 55% earn gems —
+        /// between 15% and 49% of the points staked, at least 1 — and the rest
+        /// earn nothing, which the charter insists is a normal outcome.
+        public static func mockOutcome(targetID: String, amount: Int) -> WalletStake.Outcome {
+            // FNV-1a: `hashValue` is seeded per process and would re-roll the
+            // outcome on every launch.
+            var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+            for byte in targetID.utf8 {
+                hash ^= UInt64(byte)
+                hash = hash &* 0x0000_0100_0000_01b3
+            }
+            guard hash % 100 < 55 else { return .noReward }
+            let percent = 15 + Int((hash / 100) % 35)
+            return .gems(max(1, amount * percent / 100))
+        }
     }
 
     private enum Key {
@@ -119,7 +178,10 @@ public final class WalletStore: @unchecked Sendable {
         static let claimedTodayDay = "wallet.claimedTodayDay"
         static let streakDays = "wallet.streakDays"
         static let boostTotals = "wallet.boostTotals"
+        /// When each target's first stake was placed (seconds since 1970).
+        static let stakedAt = "wallet.stakedAt"
         static let seeded = "wallet.seeded"
+        static let demoStakesSeeded = "wallet.demoStakesSeeded"
     }
 
     /// Fired after every balance-affecting change, on whatever thread made
@@ -149,7 +211,7 @@ public final class WalletStore: @unchecked Sendable {
         if arguments.contains("-wallet-reset") {
             for key in [Key.balance, Key.lifetimeEarned, Key.lifetimeSpent, Key.lastClaimAt,
                         Key.claimedToday, Key.claimedTodayDay, Key.streakDays, Key.boostTotals,
-                        Key.seeded] {
+                        Key.stakedAt, Key.seeded, Key.demoStakesSeeded] {
                 defaults.removeObject(forKey: key)
             }
         }
@@ -183,6 +245,16 @@ public final class WalletStore: @unchecked Sendable {
             defaults.set(Policy.seededBalance, forKey: Key.balance)
             defaults.set(true, forKey: Key.seeded)
         }
+        // Boosts recorded before stakes had a date are dated now, as already
+        // settled — once, and then they keep that date.
+        let totals = defaults.dictionary(forKey: Key.boostTotals) as? [String: Int] ?? [:]
+        var dates = defaults.dictionary(forKey: Key.stakedAt) as? [String: Double] ?? [:]
+        let undated = totals.keys.filter { dates[$0] == nil }
+        if !undated.isEmpty {
+            let settled = now().addingTimeInterval(-Policy.settlementDelay).timeIntervalSince1970
+            for target in undated { dates[target] = settled }
+            defaults.set(dates, forKey: Key.stakedAt)
+        }
     }
 
     // MARK: - Reads
@@ -200,6 +272,42 @@ public final class WalletStore: @unchecked Sendable {
     /// Total points ever boosted into one post or comment, this device.
     public func boostTotal(forTarget targetID: String) -> Int {
         lock.withLock { boostTotalsLocked()[targetID] ?? 0 }
+    }
+
+    /// Every stake, as of `now()`: the ACTIVE ones first, soonest to settle
+    /// first; then the SETTLED ones, most recent first.
+    public func stakes() -> [WalletStake] {
+        lock.withLock { stakesLocked(at: now()) }
+    }
+
+    /// Mock mode's demo ledger: stakes on real posts of the mock corpus, some
+    /// still active and some settled, so the wallet's stake list has something
+    /// to show on a fresh install. Once per install; the balance is untouched
+    /// (these points were "spent" before the install began).
+    ///
+    /// ⚠️ The composition root calls it in MOCK mode only, with ids it knows
+    /// exist: stakes on posts no backend can resolve would be rows about
+    /// nothing.
+    public func seedDemoStakesIfNeeded(targetIDs: [String]) {
+        let seeded: Bool = lock.withLock {
+            guard !defaults.bool(forKey: Key.demoStakesSeeded) else { return false }
+            defaults.set(true, forKey: Key.demoStakesSeeded)
+            var totals = boostTotalsLocked()
+            var dates = defaults.dictionary(forKey: Key.stakedAt) as? [String: Double] ?? [:]
+            // Hours ago, and amounts: three active, the rest settled.
+            let plan: [(hours: Double, amount: Int)] = [
+                (0.5, 10), (2.5, 100), (4.75, 20), (7, 40), (20, 100), (30, 10), (52, 60), (75, 20),
+            ]
+            let moment = now()
+            for (target, stake) in zip(targetIDs, plan) where totals[target] == nil {
+                totals[target] = stake.amount
+                dates[target] = moment.addingTimeInterval(-stake.hours * 3600).timeIntervalSince1970
+            }
+            defaults.set(totals, forKey: Key.boostTotals)
+            defaults.set(dates, forKey: Key.stakedAt)
+            return true
+        }
+        if seeded { postDidChange() }
     }
 
     // MARK: - Mutations
@@ -257,6 +365,13 @@ public final class WalletStore: @unchecked Sendable {
             let targetTotal = held + spend
             totals[targetID] = targetTotal
             defaults.set(totals, forKey: Key.boostTotals)
+            // The stake's clock starts with its FIRST points; adding to it
+            // does not restart it.
+            var dates = defaults.dictionary(forKey: Key.stakedAt) as? [String: Double] ?? [:]
+            if dates[targetID] == nil {
+                dates[targetID] = now().timeIntervalSince1970
+                defaults.set(dates, forKey: Key.stakedAt)
+            }
             return .boosted(newBalance: newBalance, targetTotal: targetTotal, spent: spend)
         }
         if case .boosted = outcome { postDidChange() }
@@ -288,6 +403,10 @@ public final class WalletStore: @unchecked Sendable {
                 totals[targetID] = remaining
             } else {
                 totals.removeValue(forKey: targetID)
+                // Undone entirely: there is no stake left to settle.
+                var dates = defaults.dictionary(forKey: Key.stakedAt) as? [String: Double] ?? [:]
+                dates.removeValue(forKey: targetID)
+                defaults.set(dates, forKey: Key.stakedAt)
             }
             defaults.set(totals, forKey: Key.boostTotals)
             return (newBalance, remaining)
@@ -330,8 +449,25 @@ public final class WalletStore: @unchecked Sendable {
             claimAmount: claimAmount,
             claimedToday: claimedToday,
             dailyClaimCap: Policy.dailyClaimCap,
-            streakDays: displayStreakLocked(today: today)
+            streakDays: displayStreakLocked(today: today),
+            gems: stakesLocked(at: moment).reduce(0) { $0 + $1.gems }
         )
+    }
+
+    private func stakesLocked(at moment: Date) -> [WalletStake] {
+        let dates = defaults.dictionary(forKey: Key.stakedAt) as? [String: Double] ?? [:]
+        let stakes = boostTotalsLocked().compactMap { target, amount -> WalletStake? in
+            guard amount > 0, let stamp = dates[target] else { return nil }
+            let stakedAt = Date(timeIntervalSince1970: stamp)
+            let settlesAt = stakedAt.addingTimeInterval(Policy.settlementDelay)
+            return WalletStake(
+                targetID: target, amount: amount, stakedAt: stakedAt, settlesAt: settlesAt,
+                outcome: moment >= settlesAt ? Policy.mockOutcome(targetID: target, amount: amount) : nil
+            )
+        }
+        let active = stakes.filter { !$0.isSettled }.sorted { $0.settlesAt < $1.settlesAt }
+        let settled = stakes.filter(\.isSettled).sorted { $0.settlesAt > $1.settlesAt }
+        return active + settled
     }
 
     /// Today's claim earnings — a stored count that only counts if it was

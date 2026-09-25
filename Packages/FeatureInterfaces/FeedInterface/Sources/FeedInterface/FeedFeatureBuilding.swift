@@ -262,6 +262,12 @@ public protocol FeedFeatureBuilding: ConversationThreadScreenBuilding, TextPostS
     /// go. Posts render their posters here.
     func makePostSetSurface(style: PostSetSurfaceStyle) -> any PostSetSurface
 
+    /// The posts behind `ids`, for a surface that lists posts by id without
+    /// being a feed — the wallet's stakes. Cached entries answer at once; the
+    /// rest are fetched together. A post that cannot be loaded is simply
+    /// absent from the answer.
+    func postEntries(_ ids: [PostID]) async -> [PostID: FeedEntry]
+
     func makeClusterGallery(
         postIDs: [PostID],
         title: String,

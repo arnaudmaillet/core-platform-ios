@@ -60,7 +60,8 @@ final class ProfileTabCoordinator: TabCoordinator {
         // someone else's, and a viewer's balance has no business on it.
         walletBadge = WalletBadgeInstaller(
             wallet: container.walletStore,
-            presenter: navigationController
+            presenter: navigationController,
+            makeSheet: { [unowned container] in container.makeWalletSheet() }
         ) { [weak profile] item in
             (profile as? (any HeaderAccessoryHosting))?.setTrailingAccessoryItem(item)
         }

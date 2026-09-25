@@ -47,7 +47,8 @@ final class ForYouTabCoordinator: TabCoordinator {
         // written from out here would be erased by it.
         walletBadge = WalletBadgeInstaller(
             wallet: container.walletStore,
-            presenter: navigationController
+            presenter: navigationController,
+            makeSheet: { [unowned container] in container.makeWalletSheet() }
         ) { [weak forYou] item in
             (forYou as? (any HeaderAccessoryHosting))?.setTrailingAccessoryItem(item)
         }

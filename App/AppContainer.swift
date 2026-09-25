@@ -278,7 +278,26 @@ final class AppContainer {
     /// ONE instance, deliberately: `WalletStore`'s change notification is
     /// scoped to the instance that changed, so the map badge only hears
     /// about a feed spend because both surfaces hold this same object.
-    private(set) lazy var walletStore = WalletStore()
+    private(set) lazy var walletStore: WalletStore = {
+        let store = WalletStore()
+        // Mock mode has no settlement service, so the claim sheet's stake
+        // list would open empty on every fresh install. A one-time demo plan
+        // stakes on the first mock posts — some active, some settled.
+        if environment == .mock {
+            store.seedDemoStakesIfNeeded(targetIDs: mockBackend.dataset.posts.prefix(8).map(\.postID))
+        }
+        return store
+    }()
+
+    /// The wallet sheet every balance badge presents: the store, plus the
+    /// Feed feature's post lookup so each stake row shows its post.
+    func makeWalletSheet() -> UIViewController {
+        WalletClaimViewController(
+            wallet: walletStore,
+            lookUpPosts: { [unowned self] ids in await self.feedFeature.postEntries(ids) },
+            imagePipeline: imagePipeline
+        )
+    }
 
     /// The Text Post page's drafts: ONE store for the app's lifetime.
     ///
@@ -347,7 +366,7 @@ final class AppContainer {
         wallet: walletStore,
         // The SAME sheet the map's badge presents — one claim surface,
         // reachable from wherever the balance is showing.
-        makeWalletSheet: { [unowned self] in WalletClaimViewController(wallet: self.walletStore) },
+        makeWalletSheet: { [unowned self] in self.makeWalletSheet() },
         // A post card's "..." raises moderation cases and unfollows through the
         // SAME two repositories the profile screen uses. Feed sees only the
         // `CoreModels` protocols; which class satisfies them is the composition
@@ -681,9 +700,7 @@ final class AppContainer {
         // one claim countdown — and the sheet is the shell's, so it crosses as
         // a closure. Same wiring as the two pushed hosts in Feed.
         wallet: walletStore,
-        makeWalletSheet: { [unowned self] in
-            WalletClaimViewController(wallet: self.walletStore)
-        }
+        makeWalletSheet: { [unowned self] in self.makeWalletSheet() }
     )
 
     // MARK: - Notifications
