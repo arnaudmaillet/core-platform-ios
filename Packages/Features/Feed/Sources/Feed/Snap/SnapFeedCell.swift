@@ -1701,6 +1701,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// ticker, subtitle, shortcut rail) rides the page with structurally
     /// accurate bounds. Same doctrine as the flight replica's captured
     /// insets — one chrome scaffold, one inset authority.
+    #if DEBUG
+    var debugChrome: SnapChromeView { chrome }
+    var debugChromeInsets: UIEdgeInsets { frozenInsets }
+    #endif
+
     func applyChromeInsets(_ insets: UIEdgeInsets) {
         frozenInsets = insets
         chrome.setFixedInsets(insets)
@@ -2648,6 +2653,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// appearing, but something that had been there all along stopping being
     /// covered.
     func setChromeHeldForFlight(_ held: Bool) {
+        chrome.setTickerHeldForFlight(held)
         if held {
             chrome.alpha = 0
             return

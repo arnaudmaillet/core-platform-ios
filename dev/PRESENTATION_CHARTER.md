@@ -370,6 +370,37 @@ in, staggered (`revealIfReplacingBones`); a post whose comments were cached
 never shows bones and its rows are there at once — which is what the
 author saw when a media card opened on its comments, and which is right.
 
+### PR 5d, second pass — what the device films asked for (25 September)
+
+Three more, each from a film on the author's phone after the first pass:
+
+- **The replica followed the safe area one step behind the page.** The
+  flight's chrome replica took the insets once, when the animator asked for
+  it; the page's cells took every change. When the safe area moved during
+  the flight (the bar under the presented page going away), the two
+  disagreed by that much at landing — the caption and the rail stepped up
+  ~10pt as one faded into the other. `viewSafeAreaInsetsDidChange` now
+  re-inset the replica too. `-landing-probe` prints both captions' frames
+  in window space at the instant of the swap: on the simulator, identical.
+- **A seed decides the band, not only a load.** A seed with cues and no
+  bubbles reserved the band by the card's count and left the pill floating
+  over a hole until the load collapsed it. Any streams with a count now
+  decide from the bubbles; only a page with no streams keeps the card's
+  guess. And a band that comes or goes while the page is on screen SLIDES
+  the pill and the caption (0.25 s) instead of dropping them.
+- **No ticker pre-fill while the page is flying in.** The pre-fill lays the
+  bubble train across `bounds.width`; laid at a transient width during a
+  flight, the band that lands at full width is mostly empty and fills from
+  the right. The cell's flight hold now holds the ticker too, and the
+  release at landing pre-fills at the width the band keeps. `-ticker-trace`
+  prints every `setComments` / `setActive` / start with the width it saw.
+
+⚠️ **THE MOCK'S DENSE POSTS ARE NOT WHERE THE ROUTES LAND.** The pin route
+and For You tiles 0–11 have no ticker on the simulator; tiles 12 and 13 do
+(`-foryou-open 12`), and the timeline's index 8 (`-open-feed
+-snap-start-index 8`). Found by scanning with `-ticker-trace`, which is
+cheaper than reading the dataset.
+
 ### PR 5c — The "+" menu (P2) — measured, closed
 
 Measured 25 September 2026 with `-open-create-menu` (the tap's own path,

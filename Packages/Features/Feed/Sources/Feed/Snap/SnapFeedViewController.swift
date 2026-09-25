@@ -903,6 +903,13 @@ final class SnapFeedViewController: UIViewController {
         for cell in collectionView.visibleCells {
             (cell as? SnapFeedCell)?.applyChromeInsets(view.safeAreaInsets)
         }
+        // ⚠️ THE FLIGHT'S CHROME REPLICA TOO. It takes the insets once, when
+        // the animator asks for it; the page's cells take every change. When
+        // the safe area moved during the flight (the bar under the presented
+        // page going away), the two disagreed by that much at landing — the
+        // caption and the rail stepped up ~10pt as the replica faded into
+        // the page (filmed on a device, 25 September 2026).
+        flightChrome?.setFixedInsets(view.safeAreaInsets)
         // The COMMENT PANEL too, and this is the seam that makes staging work
         // without anyone doing inset arithmetic by hand.
         //
@@ -4896,6 +4903,19 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
             print(String(format: "[zoom-live] %.3f landed", CACurrentMediaTime()))
+        }
+        #endif
+        #if DEBUG
+        // `-landing-probe`: the replica's caption against the page's, in
+        // window space, at the instant one fades into the other. A delta here
+        // is the "small jump at the end of the hero" a device shows.
+        if ProcessInfo.processInfo.arguments.contains("-landing-probe"),
+           let window = view.window, let replica = flightChrome,
+           let page = activeSnapCell?.debugChrome {
+            let a = replica.debugCaptionFrame(in: window), b = page.debugCaptionFrame(in: window)
+            print(String(format: "[landing-probe] replica caption y=%.1f h=%.1f w=%.1f | page caption y=%.1f h=%.1f w=%.1f",
+                         a.minY, a.height, a.width, b.minY, b.height, b.width)
+                  + " | insets page=\(activeSnapCell?.debugChromeInsets ?? .zero) replica=\(replica.layoutMargins)")
         }
         #endif
         flightChrome = nil
