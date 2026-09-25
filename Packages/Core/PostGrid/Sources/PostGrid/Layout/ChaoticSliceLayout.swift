@@ -204,6 +204,9 @@ public final class ChaoticSliceLayout: UICollectionViewLayout {
     private var stack = ChaoticSliceStack(frames: [], slices: [], contentHeight: 0, slotMetrics: [])
     private var attributes: [UICollectionViewLayoutAttributes] = []
     private var cacheKey: CacheKey?
+    /// A host asked for slot shapes before there was any geometry and was told
+    /// "arrange later" (`[]`) — so the first geometry owes it a replan.
+    private var owesPlanOnFirstGeometry = false
 
     private struct CacheKey: Equatable {
         let width: CGFloat
@@ -261,7 +264,11 @@ public final class ChaoticSliceLayout: UICollectionViewLayout {
     /// about yet. Returns an empty array when the view has no geometry, which
     /// the host reads as "arrange later", and `onPlanInvalidated` brings it back.
     public func slotMetrics(forItemCount count: Int) -> [SlotMetrics] {
-        guard count > 0, let geometry = resolvedGeometry() else { return [] }
+        guard count > 0 else { return [] }
+        guard let geometry = resolvedGeometry() else {
+            owesPlanOnFirstGeometry = true
+            return []
+        }
         if count == stack.slotMetrics.count, cacheKey?.width == geometry.width,
            cacheKey?.sliceHeight == geometry.sliceHeight {
             return stack.slotMetrics
@@ -295,7 +302,17 @@ public final class ChaoticSliceLayout: UICollectionViewLayout {
         guard key != cacheKey else { return }
         // A changed item count leaves every existing slot's shape alone — only
         // the geometry can re-shape slots, and only that is worth a re-arrange.
-        let reshaped = cacheKey.map { $0.width != key.width || $0.sliceHeight != key.sliceHeight } ?? false
+        //
+        // ⚠️ **AND THE FIRST GEOMETRY RE-PLANS A HOST THAT WAS TOLD "LATER".**
+        // `reshaped` compares against the previous key, and there is none the
+        // first time — so a feed seeded before the grid had a width (a warm
+        // cache applied from `viewDidLoad`) was arranged in reading order and
+        // never re-planned, leaving clips in slots that crop them. Only when a
+        // host actually got `[]`: a first layout nobody asked about ahead of
+        // time has nothing to redo, and a reload on frame 0 is not free.
+        let reshaped = cacheKey.map { $0.width != key.width || $0.sliceHeight != key.sliceHeight }
+            ?? owesPlanOnFirstGeometry
+        owesPlanOnFirstGeometry = false
         cacheKey = key
 
         stack = engine.stack(

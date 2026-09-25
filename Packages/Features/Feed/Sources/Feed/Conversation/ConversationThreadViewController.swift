@@ -73,6 +73,9 @@ final class ConversationThreadViewController: UIViewController {
     private var peer = ConversationThreadPerson(id: nil, name: "", avatarURL: nil)
     private var viewer = ConversationThreadPerson(id: nil, name: "You", avatarURL: nil)
     private var hasRenderedContent = false
+    /// First content arrived before the stream had a height to pin against —
+    /// see `pinToTail`.
+    private var owesTailPin = false
     private var hasEstablishedClearance = false
     private var newestID: String?
     private var pendingFlashID: String?
@@ -166,6 +169,7 @@ final class ConversationThreadViewController: UIViewController {
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         guard mode == .full else {
+            if owesTailPin { pinToTail() }
             // A peek's platter settles its size over several passes; keep the
             // tail pinned until it does, never while a finger is down.
             if collectionView.bounds.size != lastPreviewSize {
@@ -176,6 +180,8 @@ final class ConversationThreadViewController: UIViewController {
         }
         fitAccessory()
         syncBottomClearance()
+        // After the clearance, in the same pass: see `pinToTail`.
+        if owesTailPin { pinToTail() }
     }
 
     // MARK: - Setup
@@ -460,10 +466,7 @@ final class ConversationThreadViewController: UIViewController {
         let newestChanged = newest?.id != newestID
         newestID = newest?.id
         if isFirstContent {
-            // Twice: estimated heights refine once the first rows realize, and
-            // the first pass lands short of the tail.
-            scrollToBottom(animated: false)
-            DispatchQueue.main.async { [weak self] in self?.scrollToBottom(animated: false) }
+            pinToTail()
         } else if newestChanged, newest?.isMine == true || isNearBottom {
             scrollToBottom(animated: true)
         }
@@ -629,6 +632,38 @@ final class ConversationThreadViewController: UIViewController {
         let insets = collectionView.adjustedContentInset
         let bottom = collectionView.contentSize.height + insets.bottom - collectionView.bounds.height
         collectionView.setContentOffset(CGPoint(x: 0, y: max(-insets.top, bottom)), animated: animated)
+    }
+
+    /// Lands the first content on its newest message, exactly, before the
+    /// frame is committed.
+    ///
+    /// ⚠️ **NOT "ONCE NOW AND ONCE NEXT TURN".** Estimated heights refine as
+    /// the rows at the tail realise, so the first pass lands short — and the
+    /// second pass used to run a run-loop turn later, after the short frame
+    /// had been committed: content arriving on screen showed one frame at the
+    /// wrong offset and then jumped, and on a long transcript the second pass
+    /// realised new rows that refined AGAIN, stopping short with nothing left
+    /// to retry. Here each pass lays out at the offset it just set, and it
+    /// repeats until the content height stops moving (bounded).
+    ///
+    /// ⚠️ **AND NOT BEFORE THE COMPOSER'S CLEARANCE EXISTS.** The first resting
+    /// bottom inset is deliberately not treated as travel (`syncBottomClearance`),
+    /// so a tail pinned before it lands a composer's height short — which the
+    /// old next-turn pass was also silently absorbing. A stream with no height,
+    /// or a full screen whose clearance is not established yet, owes the pin
+    /// to its layout pass, which pays it right after the clearance.
+    private func pinToTail() {
+        guard collectionView.bounds.height > 0, mode != .full || hasEstablishedClearance else {
+            owesTailPin = true
+            return
+        }
+        owesTailPin = false
+        for _ in 0..<4 {
+            let heightBefore = collectionView.contentSize.height
+            scrollToBottom(animated: false)
+            collectionView.layoutIfNeeded()
+            if abs(collectionView.contentSize.height - heightBefore) < 0.5 { break }
+        }
     }
 
     private func scrollToMessage(_ messageID: String) {

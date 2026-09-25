@@ -15,6 +15,9 @@ final class AccountSettingsViewController: UIViewController {
 
     private var details: AccountDetails?
     private var isShowingSkeleton = false
+    /// A notice owed to the viewer once this list is back on screen — see
+    /// `reportReadOnly`.
+    private var pendingNotice: String?
 
     private enum Section: Int, CaseIterable {
         case accountInfo, security, danger, session
@@ -259,10 +262,22 @@ final class AccountSettingsViewController: UIViewController {
     }
 
     /// The child editor pops itself on Save; report the read-only reality on the
-    /// settings list a beat later (once the pop has landed).
+    /// settings list once the pop has landed.
+    ///
+    /// ⚠️ **"LANDED" IS `viewDidAppear`, NOT THE NEXT RUN-LOOP TURN.** The
+    /// editor calls `onSave` and then starts its pop, so one hop later the pop
+    /// had only just begun: the alert came up over a screen still sliding
+    /// (~350 ms) with the keyboard still leaving. Held until this list is back,
+    /// on the pop's own completion, however long it takes.
     private func reportReadOnly(_ message: String) {
-        DispatchQueue.main.async { [weak self] in
-            self?.presentInfo(message)
+        pendingNotice = message
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        if let notice = pendingNotice {
+            pendingNotice = nil
+            presentInfo(notice)
         }
     }
 
