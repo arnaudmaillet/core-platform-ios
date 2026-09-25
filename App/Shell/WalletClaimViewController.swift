@@ -169,10 +169,10 @@ final class WalletClaimViewController: UIViewController {
         // — Balance header —
         // The points token: a gold STAR, deliberately not a currency glyph —
         // the balance is app points, and a dollar sign promises money the
-        // product doesn't hold (the badges wear the same star).
+        // product doesn't hold (the badges wear the same coin).
         let palette = UIImage.SymbolConfiguration(paletteColors: [.white, .systemYellow])
             .applying(UIImage.SymbolConfiguration(pointSize: 40, weight: .semibold))
-        coinView.image = UIImage(systemName: "star.circle.fill", withConfiguration: palette)?
+        coinView.image = UIImage(systemName: PointsSymbol.coin, withConfiguration: palette)?
             .withRenderingMode(.alwaysOriginal)
         coinView.tintColor = .systemYellow
         coinView.contentMode = .center

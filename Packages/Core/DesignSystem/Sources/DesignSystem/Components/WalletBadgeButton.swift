@@ -95,7 +95,7 @@ public final class WalletBadgeButton: UIButton {
         // palette. Static — only the count ever changes.
         let palette = UIImage.SymbolConfiguration(paletteColors: [.white, .systemYellow])
             .applying(UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold))
-        coinView.image = UIImage(systemName: "star.circle.fill", withConfiguration: palette)?
+        coinView.image = UIImage(systemName: PointsSymbol.coin, withConfiguration: palette)?
             .withRenderingMode(.alwaysOriginal)
         coinView.tintColor = .systemYellow
         coinView.isUserInteractionEnabled = false
@@ -111,7 +111,7 @@ public final class WalletBadgeButton: UIButton {
         NSLayoutConstraint.activate([
             coinView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Spacing.sm),
             coinView.centerYAnchor.constraint(equalTo: centerYAnchor),
-            // sm, not xs: the star glyph fills its bounds edge-to-edge
+            // sm, not xs: the coin glyph fills its bounds edge-to-edge
             // (unlike the old currency glyph), so 4pt read as glued.
             countLabel.leadingAnchor.constraint(equalTo: coinView.trailingAnchor, constant: Spacing.sm),
             countLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Spacing.sm),

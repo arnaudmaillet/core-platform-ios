@@ -517,7 +517,7 @@ final class SnapRailBoostButton: UIButton {
             : (remaining > 0 ? remaining : WalletStore.Policy.perTargetBoostCap)
         let maxAction = UIAction(
             title: "Max (\(shownMax) points)",
-            image: UIImage(systemName: "star.fill")
+            image: UIImage(systemName: PointsSymbol.glyph)
         ) { [weak self] _ in self?.onBoost?(maxAmount) }
         if maxAmount <= 0 { maxAction.attributes = .disabled }
         actions.append(maxAction)
@@ -525,7 +525,7 @@ final class SnapRailBoostButton: UIButton {
         for amount in WalletStore.Policy.boostDenominations.reversed() {
             let action = UIAction(
                 title: "\(amount) points",
-                image: UIImage(systemName: "star.fill")
+                image: UIImage(systemName: PointsSymbol.glyph)
             ) { [weak self] _ in self?.onBoost?(amount) }
             if amount > availableBalance || amount > remaining { action.attributes = .disabled }
             actions.append(action)
@@ -581,7 +581,7 @@ final class SnapRailBoostButton: UIButton {
             title.foregroundColor = .systemYellow
             config.attributedTitle = title
         } else {
-            config.image = UIImage(systemName: "star.fill")?
+            config.image = UIImage(systemName: PointsSymbol.glyph)?
                 .withConfiguration(UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold))
         }
         config.baseForegroundColor = .white

@@ -180,7 +180,7 @@ final class CommentsInputBar: UIView {
         // default denomination, long-press opens the amount menu (the rail
         // anchor's exact contract — one post, two surfaces, one behavior).
         boostButton.configuration?.image = UIImage(
-            systemName: "star.fill",
+            systemName: PointsSymbol.glyph,
             withConfiguration: UIImage.SymbolConfiguration(weight: .semibold)
         )
         boostButton.configuration?.cornerStyle = .capsule
@@ -631,7 +631,7 @@ final class CommentsInputBar: UIView {
         } else {
             boostButton.configuration?.attributedTitle = nil
             boostButton.configuration?.image = UIImage(
-                systemName: "star.fill",
+                systemName: PointsSymbol.glyph,
                 withConfiguration: UIImage.SymbolConfiguration(weight: .semibold)
             )
         }
@@ -685,7 +685,7 @@ final class CommentsInputBar: UIView {
             : (remaining > 0 ? remaining : WalletStore.Policy.perTargetBoostCap)
         let maxAction = UIAction(
             title: "Max (\(shownMax) points)",
-            image: UIImage(systemName: "star.fill")
+            image: UIImage(systemName: PointsSymbol.glyph)
         ) { [weak self] _ in self?.onBoost?(maxAmount) }
         if maxAmount <= 0 { maxAction.attributes = .disabled }
         actions.append(maxAction)
@@ -693,7 +693,7 @@ final class CommentsInputBar: UIView {
         for amount in WalletStore.Policy.boostDenominations.reversed() {
             let action = UIAction(
                 title: "\(amount) points",
-                image: UIImage(systemName: "star.fill")
+                image: UIImage(systemName: PointsSymbol.glyph)
             ) { [weak self] _ in self?.onBoost?(amount) }
             if amount > boostBalance || amount > remaining { action.attributes = .disabled }
             actions.append(action)
