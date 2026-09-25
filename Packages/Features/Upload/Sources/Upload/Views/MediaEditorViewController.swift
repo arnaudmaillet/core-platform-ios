@@ -539,6 +539,8 @@ final class MediaEditorViewController: UIViewController {
     /// crop is still drawing — and a flag would let the first one to finish stop
     /// the indicator for both.
     private var rendersInFlight = 0
+    /// The busy stretch's pending reveal — see `beginRender`.
+    private var spinnerReveal: DispatchWorkItem?
 
     private let busy: UIActivityIndicatorView = {
         let spinner = UIActivityIndicatorView(style: .large)
@@ -556,17 +558,30 @@ final class MediaEditorViewController: UIViewController {
 
     /// ⚠️ **NOT WHILE A SLIDER IS UNDER A FINGER** (`MediaEditorEffectsMode`):
     /// a render is always in flight during a drag, and the spinner would flash.
+    ///
+    /// ⚠️ **THE DELAY RUNS FROM THE START OF A BUSY STRETCH, AND ONE STRETCH HAS
+    /// ONE TIMER.** A timer per render let render A's fire while a later render B
+    /// had begun a few milliseconds earlier — the count was non-zero, so the
+    /// spinner came up for B's last instants and went straight down: the flash
+    /// the delay exists to prevent, on quick taps through the looks. The timer
+    /// is armed when the count leaves zero and called off when it returns there.
     private func beginRender() {
         rendersInFlight += 1
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.spinnerDelay) { [weak self] in
+        guard rendersInFlight == 1 else { return }
+        let reveal = DispatchWorkItem { [weak self] in
             guard let self, rendersInFlight > 0, !effectsMode.isTracking else { return }
             busy.startAnimating()
         }
+        spinnerReveal = reveal
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.spinnerDelay, execute: reveal)
     }
 
     private func endRender() {
         rendersInFlight = max(0, rendersInFlight - 1)
-        if rendersInFlight == 0 { busy.stopAnimating() }
+        guard rendersInFlight == 0 else { return }
+        spinnerReveal?.cancel()
+        spinnerReveal = nil
+        busy.stopAnimating()
     }
 
     /// Draws a picture as the author left it, off the main thread, and hands it to
@@ -2183,8 +2198,24 @@ final class MediaEditorViewController: UIViewController {
     /// stopped for good. Measured in the test that found it. A couple of turns
     /// of the runloop is all it takes, and the guard is what stops a resume
     /// landing under a SECOND sheet opened straight after the first.
+    ///
+    /// ⚠️ **A DISMISSAL STILL IN FLIGHT IS WAITED FOR, NOT COUNTED IN TURNS.**
+    /// The video picker calls `dismiss(animated: true)` and answers "cancelled"
+    /// in the same breath, so the news arrives at the START of a ~0.35 s
+    /// slide-down — and two run-loop turns are microseconds. The retries ran out
+    /// under the sheet and the clip stayed stopped for good. A sheet that is
+    /// leaving hands the resume to its own transition's completion, which asks
+    /// again (the second-sheet guard still holds).
     func resumeAfterACover(retries: Int = 0) {
         guard !isCovered else {
+            if let leaving = presentedViewController, leaving.isBeingDismissed,
+               let coordinator = leaving.transitionCoordinator {
+                coordinator.animate(alongsideTransition: nil) { [weak self] context in
+                    guard !context.isCancelled else { return }
+                    self?.resumeAfterACover(retries: 2)
+                }
+                return
+            }
             guard retries > 0 else { return }
             DispatchQueue.main.async { [weak self] in self?.resumeAfterACover(retries: retries - 1) }
             return

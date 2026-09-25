@@ -70,16 +70,31 @@ final class SelectorPillMotion {
 
     // MARK: Placing
 
-    /// The model's moves until the run loop turns are not a travel — a
-    /// layout pass places it several times, one pass after another — so
-    /// they land at once.
+    /// The model's moves until the current transaction commits are not a
+    /// travel — a layout pass places it several times, one pass after
+    /// another — so they land at once.
+    ///
+    /// ⚠️ **THE COMMIT, NOT THE NEXT MAIN-QUEUE HOP.** The layout this
+    /// protects runs at the commit, in the run loop's before-waiting pass,
+    /// and the main queue drains BEFORE that: called from a handler
+    /// (`setTitles`, `didMoveToWindow`), the hop cleared the flag first and
+    /// the layout's re-placement read as speed — a stretch and ease-back
+    /// where the pill should have landed. `ZoomAnimator` measured the same
+    /// ordering (`afterCurrentTransactionCommits`); this is its technique:
+    /// an empty nested transaction's completion arrives only once the
+    /// enclosing commit — layout included — has gone.
     func snapOnNextMove() {
         snapsNextMove = true
-        DispatchQueue.main.async { [weak self] in self?.endSnapping() }
+        CATransaction.begin()
+        CATransaction.setCompletionBlock { [weak self] in
+            // Documented to arrive on the main thread.
+            MainActor.assumeIsolated { self?.endSnapping() }
+        }
+        CATransaction.commit()
     }
 
-    /// The layout is over: the next move is a travel again. (The run loop
-    /// calls this; a test, which does not turn it, calls it by hand.)
+    /// The layout is over: the next move is a travel again. (The commit
+    /// calls this; a test, which does not run one, calls it by hand.)
     func endSnapping() { snapsNextMove = false }
 
     /// Where the body is drawn to: the model's centre, pulled towards the
