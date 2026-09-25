@@ -422,10 +422,29 @@ final class SnapFeedViewController: UIViewController {
             // Reveal the viewer's just-posted item: a prepend on a full-screen
             // pager otherwise shifts it above the viewport. Defer so the
             // snapshot apply lands first.
+            //
+            // ⚠️ THE SETTLE BELONGS TO THE END OF THE SCROLL, NOT ITS START.
+            // Settling straight after an animated `scrollToItem` read the
+            // offset the animation had not moved yet: the picture followed
+            // the pager to the new post (`scrollViewDidScroll`), and the bar,
+            // the ticker and the lifecycle stayed on the page it left until
+            // the viewer scrolled by hand. An animated scroll settles in
+            // `scrollViewDidEndScrollingAnimation`; one with nothing to move
+            // (already on the first page) or off-window settles here.
             DispatchQueue.main.async {
                 guard let self, !self.orderedIDs.isEmpty else { return }
-                self.collectionView.scrollToItem(at: IndexPath(item: 0, section: 0), at: .top, animated: true)
-                self.updateActiveItem()
+                let first = IndexPath(item: 0, section: 0)
+                let onFirstPage = SnapActiveItemTracker.activeIndex(
+                    contentOffsetY: self.collectionView.contentOffset.y,
+                    pageHeight: self.collectionView.bounds.height,
+                    itemCount: self.orderedIDs.count
+                ) == 0
+                if onFirstPage || self.view.window == nil {
+                    self.collectionView.scrollToItem(at: first, at: .top, animated: false)
+                    self.updateActiveItem()
+                } else {
+                    self.collectionView.scrollToItem(at: first, at: .top, animated: true)
+                }
             }
         }
     }
@@ -717,11 +736,8 @@ final class SnapFeedViewController: UIViewController {
                 guard let self else { return }
                 let target = (self.lifecycle.activeIndex ?? 0) + 1
                 guard self.orderedIDs.indices.contains(target) else { return }
+                // Settles in scrollViewDidEndScrollingAnimation.
                 self.collectionView.scrollToItem(at: IndexPath(item: target, section: 0), at: .top, animated: true)
-                // Animated scrolls end in scrollViewDidEndScrollingAnimation,
-                // which this VC doesn't observe (finger scrolls don't emit
-                // it); settle the active page manually like the jump arg.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { self.updateActiveItem() }
             }
         }
         // `-snap-comments-demo`: opens the comments engagement on the active
@@ -4059,6 +4075,14 @@ extension SnapFeedViewController: UICollectionViewDelegate {
     }
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        updateActiveItem()
+        updatePagingFooter(for: scrollView)
+    }
+
+    /// A programmatic animated scroll (the own-post reveal) ends here, never
+    /// in the drag callbacks — without it the page it lands on is never
+    /// settled.
+    func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
         updateActiveItem()
         updatePagingFooter(for: scrollView)
     }

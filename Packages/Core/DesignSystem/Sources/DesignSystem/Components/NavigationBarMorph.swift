@@ -43,14 +43,23 @@ public extension UIViewController {
     /// Applies `change` to the navigation item inside a cross-dissolve of the
     /// bar. Falls back to applying it outright when there is no bar to dissolve
     /// — a modally presented screen, or one whose controller has gone.
-    func morphNavigationBar(duration: TimeInterval = 0.26, _ change: @escaping () -> Void) {
+    ///
+    /// `completion` runs when the dissolve ends (at once when there is none):
+    /// the signal for anything that waits for the morph, instead of a guessed
+    /// delay that a slow frame outlives.
+    func morphNavigationBar(
+        duration: TimeInterval = 0.26,
+        _ change: @escaping () -> Void,
+        completion: ((Bool) -> Void)? = nil
+    ) {
         guard let bar = navigationController?.navigationBar else {
             change()
+            completion?(true)
             return
         }
         UIView.transition(with: bar, duration: duration,
                           options: [.transitionCrossDissolve, .allowUserInteraction],
-                          animations: change)
+                          animations: change, completion: completion)
     }
 }
 
