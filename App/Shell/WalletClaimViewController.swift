@@ -167,14 +167,14 @@ final class WalletClaimViewController: UIViewController {
 
     private func buildLayout() {
         // — Balance header —
-        // The points token: a gold STAR, deliberately not a currency glyph —
-        // the balance is app points, and a dollar sign promises money the
-        // product doesn't hold (the badges wear the same star).
-        let palette = UIImage.SymbolConfiguration(paletteColors: [.white, .systemYellow])
+        // The points token: a red HEART coin (points are likes), deliberately
+        // not a currency glyph — a dollar sign promises money the
+        // product doesn't hold (the badges wear the same coin).
+        let palette = PointsSymbol.coinPalette
             .applying(UIImage.SymbolConfiguration(pointSize: 40, weight: .semibold))
-        coinView.image = UIImage(systemName: "star.circle.fill", withConfiguration: palette)?
+        coinView.image = UIImage(systemName: PointsSymbol.coin, withConfiguration: palette)?
             .withRenderingMode(.alwaysOriginal)
-        coinView.tintColor = .systemYellow
+        coinView.tintColor = PointsSymbol.tint
         coinView.contentMode = .center
 
         balanceLabel.font = .monospacedDigitSystemFont(ofSize: 46, weight: .bold)
@@ -246,7 +246,7 @@ final class WalletClaimViewController: UIViewController {
 
         progressTrack.backgroundColor = .quaternarySystemFill
         progressTrack.layer.cornerRadius = Metrics.progressHeight / 2
-        progressFill.backgroundColor = .systemYellow
+        progressFill.backgroundColor = PointsSymbol.tint
         progressFill.layer.cornerRadius = Metrics.progressHeight / 2
         progressFill.translatesAutoresizingMaskIntoConstraints = false
         progressTrack.addSubview(progressFill)

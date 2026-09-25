@@ -22,6 +22,57 @@ struct PressFeedbackTests {
         UIControl(frame: CGRect(x: 0, y: 0, width: width, height: height))
     }
 
+    // MARK: - The app-wide dim
+
+    /// ⚠️ **THE APP'S ONE PRESS IS A SHRINK AND A SLIGHT FADE** (25 September
+    /// 2026). The fade is held on the layer by its key while pressed, and gone
+    /// with the release — and it is not motion, so Reduce Motion keeps it.
+    @Test func aDimmingPressHoldsItsFadeUntilTheRelease() {
+        let button = control()
+        let feedback = PressFeedback.attach(to: button, sound: nil, dims: true, reducesMotion: { false })
+
+        button.sendActions(for: .touchDown)
+        #expect(feedback.debugIsDimmedOnTheLayer, "the dim is not on the layer")
+        #expect(feedback.debugIsHeldOnTheLayer, "guard: the shrink is held too")
+        #expect(button.alpha == 1, "the dim wrote the model")
+
+        button.sendActions(for: .touchUpInside)
+        #expect(!feedback.debugIsDimmedOnTheLayer, "the dim outlived the press")
+    }
+
+    @Test func underReduceMotionTheDimStaysAndNothingMoves() {
+        let button = control()
+        let feedback = PressFeedback.attach(to: button, sound: nil, dims: true, reducesMotion: { true })
+
+        button.sendActions(for: .touchDown)
+        #expect(feedback.debugIsDimmedOnTheLayer, "Reduce Motion took the dim, which is not motion")
+        #expect(!feedback.debugIsHeldOnTheLayer, "something moved under Reduce Motion")
+        button.sendActions(for: .touchCancel)
+        #expect(!feedback.debugIsDimmedOnTheLayer)
+    }
+
+    @Test func aPressWithoutTheDimDoesNotFade() {
+        let button = control()
+        let feedback = PressFeedback.attach(to: button, reducesMotion: { false })
+        button.sendActions(for: .touchDown)
+        #expect(!feedback.debugIsDimmedOnTheLayer, "a press that did not ask to dim dimmed")
+    }
+
+    /// A view whose host already owns the touch (the page indicator's scrub)
+    /// drives the same press by hand — no recogniser installed.
+    @Test func aDrivenPressIsTheSamePressWithNoHook() {
+        let view = UIView(frame: CGRect(x: 0, y: 0, width: 60, height: 32))
+        let feedback = PressFeedback.driven(by: view, dims: true, reducesMotion: { false })
+        #expect(view.gestureRecognizers?.isEmpty ?? true, "a driven press installed a recogniser")
+        #expect(PressFeedback.attached(to: view) === feedback)
+
+        feedback.press()
+        #expect(feedback.debugIsHeldOnTheLayer && feedback.debugIsDimmedOnTheLayer)
+        feedback.release(asTap: false)
+        #expect(!feedback.debugIsHeldOnTheLayer && !feedback.debugIsDimmedOnTheLayer)
+        #expect(feedback.debugEvents.last == .released(tap: false, sprang: true), "\(feedback.debugEvents)")
+    }
+
     // MARK: - A control
 
     @Test func aControlGivesUnderThePressAndTicksOnTheTap() throws {
