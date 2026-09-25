@@ -305,6 +305,17 @@ final class SnapSubtitleView: UIView {
         }
     }
 
+    /// A flight has landed on this page: the pill it set under a hidden
+    /// chrome enters now, with its lead-in and fade, on the cue it was
+    /// showing — the caption, the rail and the bar were in the flight's
+    /// replica and simply stop being covered; the pill was not.
+    func replayEntrance() {
+        guard isActive, !cues.isEmpty else { return }
+        stopCycle()
+        nextIndex = (nextIndex + cues.count - 1) % cues.count
+        startIfNeeded(fadingIn: true)
+    }
+
     /// Clears cue content and state (cell reuse).
     func reset() {
         stopCycle()
