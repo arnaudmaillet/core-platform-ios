@@ -1258,8 +1258,13 @@ final class PostDetailViewController: UIViewController {
     private func revealIfReplacingBones(_ cell: UICollectionViewCell, at indexPath: IndexPath) {
         guard revealsLoadedRows else { return }
         cell.alpha = 0
+        // ⚠️ NOT `.beginFromCurrentState`: that reads the from-value off the
+        // PRESENTATION layer, where a reused cell is still at 1 — the 0 staged
+        // on the line above, in the same turn, is not there yet, so the fade
+        // ran 1 → 1 and the row simply appeared. There is no in-flight fade to
+        // pick up here; each reveal starts from the 0 it sets.
         UIView.animate(withDuration: 0.28, delay: 0.03 * Double(min(indexPath.item, 12)),
-                       options: [.allowUserInteraction, .beginFromCurrentState]) {
+                       options: [.allowUserInteraction]) {
             cell.alpha = 1
         }
     }

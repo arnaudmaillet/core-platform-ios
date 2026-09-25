@@ -56,6 +56,10 @@ final class SnapCommentTickerView: UIView {
     /// Minimum horizontal daylight between two bubbles in the same lane —
     /// generous, so the slow glide reads sparse rather than congested.
     static let interItemGap: CGFloat = 16
+    /// Next-turn attempts after a train that placed nothing — see
+    /// `startIfNeeded`.
+    private static let emptyTrainRetryLimit = 2
+    private var emptyTrainRetries = 0
     private static let laneSpacing: CGFloat = 3
 
     // MARK: Interaction tuning
@@ -317,6 +321,7 @@ final class SnapCommentTickerView: UIView {
         #endif
         guard isActive != active else { return }
         isActive = active
+        emptyTrainRetries = 0
         // Activation is the moment the page is shown: the train enters with
         // the same lead-in and fade as the subtitle pill beside it, whether
         // it was pre-filled now or laid earlier under a held chrome.
@@ -328,6 +333,7 @@ final class SnapCommentTickerView: UIView {
     func reset() {
         stopStream()
         isActive = false
+        emptyTrainRetries = 0
         isHeldForFlight = false // a hold nobody released must not ride a recycled cell
         queue = []
         laneQueues = Array(repeating: [], count: Self.laneCount)
@@ -420,11 +426,21 @@ final class SnapCommentTickerView: UIView {
         // is not a start: parked again, and tried once more on the next turn
         // as well as on the next layout — the width it needs may already be
         // there by then without any layout to say so.
+        //
+        // ⚠️ **A FEW TURNS, NOT EVERY TURN.** Unbounded, a band that STAYED
+        // narrower than a bubble (a transient layout mid-flight) rebuilt and
+        // tore down its train on every run-loop turn for as long as it lasted
+        // — and `stopStream` cycles the pan recognizer, cancelling any grab in
+        // progress, each time. The layout that widens the band still lays the
+        // train; these turns only cover a width that arrives without one.
         if laneBubbles.allSatisfy(\.isEmpty) {
             stopStream()
+            guard emptyTrainRetries < Self.emptyTrainRetryLimit else { return }
+            emptyTrainRetries += 1
             DispatchQueue.main.async { [weak self] in self?.startIfNeeded(fadingIn: true) }
             return
         }
+        emptyTrainRetries = 0
         if fadingIn, window != nil { playEntrance() }
     }
 

@@ -598,10 +598,11 @@ final class ConversationThreadViewController: UIViewController {
         contextMenu.beginTextSelection(at: indexPath)
     }
 
-    /// Deleting asks first. Presented a turn later so it lands after the
-    /// context menu's own dismissal rather than racing it.
+    /// Deleting asks first, once the context menu has finished leaving —
+    /// its own dismissal, not a guessed run-loop turn (see
+    /// `ThreadRowContextMenu.afterMenuDismissal`).
     private func confirmDelete(_ messageID: String) {
-        DispatchQueue.main.async { [weak self] in
+        contextMenu.afterMenuDismissal { [weak self] in
             guard let self, self.presentedViewController == nil else { return }
             let sheet = UIAlertController(title: nil, message: nil, preferredStyle: .actionSheet)
             sheet.addAction(UIAlertAction(title: "Delete Message", style: .destructive) { [weak self] _ in
@@ -631,12 +632,26 @@ final class ConversationThreadViewController: UIViewController {
         collectionView.setContentOffset(CGPoint(x: 0, y: max(-insets.top, bottom)), animated: animated)
     }
 
+    /// Brings a quoted message to the middle of the stream and flashes it —
+    /// when the scroll ends, or at once if there is nothing to scroll.
+    ///
+    /// ⚠️ **NOT A 0.5 s FALLBACK.** "Already on screen, no scroll will end"
+    /// used to be covered by a timer that fired whatever happened: a second
+    /// quote tapped inside it had its flash taken by the first timer mid-scroll
+    /// (on a cell still moving, or on none — and then lost), and a quote that
+    /// was already centred flashed half a second late. The target offset is
+    /// computed here, so the method knows which of the two cases it is in.
     private func scrollToMessage(_ messageID: String) {
         guard let indexPath = dataSource.indexPath(for: .message(messageID)) else { return }
         pendingFlashID = messageID
-        collectionView.scrollToItem(at: indexPath, at: .centeredVertically, animated: true)
-        // Already on screen: no scroll animation will end to fire the flash.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.flashPending() }
+        collectionView.layoutIfNeeded()
+        guard let row = collectionView.layoutAttributesForItem(at: indexPath)?.frame else { return }
+        let insets = collectionView.adjustedContentInset
+        let visible = collectionView.bounds.height - insets.top - insets.bottom
+        let maxOffset = max(-insets.top, collectionView.contentSize.height + insets.bottom - collectionView.bounds.height)
+        let target = min(max(row.midY - insets.top - visible / 2, -insets.top), maxOffset)
+        guard abs(target - collectionView.contentOffset.y) >= 1 else { return flashPending() }
+        collectionView.setContentOffset(CGPoint(x: collectionView.contentOffset.x, y: target), animated: true)
     }
 
     private func flashPending() {
@@ -769,6 +784,9 @@ final class ConversationThreadViewController: UIViewController {
 extension ConversationThreadViewController: UICollectionViewDelegate {
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
         contextMenu.endTextSelection()
+        // The reader took over: a flash landing after their own scroll would
+        // point at something they have moved away from.
+        pendingFlashID = nil
     }
 
     func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
