@@ -1432,20 +1432,27 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// looks as it will once the real panel is mounted over it.
     func installRestingPlaceholder(_ placeholder: UIView) {
         installComments(placeholder)
-        // Visible at once, WITHOUT marking the cell engaged: the real panel's
-        // mount goes through `installComments` (alpha 0) and then
+        // The engaged LOOK — container and frost up, backdrop dimmed, the
+        // chrome's rail down — WITHOUT marking the cell engaged: the real
+        // panel's mount goes through `installComments` (alpha 0) and then
         // `setCommentsEngaged(true)` to show it, and a cell already marked
-        // engaged would skip that second step and leave both invisible.
-        commentsContainer.alpha = 1
+        // engaged would skip that second step and leave both invisible. The
+        // rail matters: with the look applied by hand the page flew in with
+        // its reaction bubbles showing, which the real panel then hid.
+        setCommentsEngagementProgress(0)
         if window != nil, headerFrost.effect == nil {
             headerFrost.effect = UIBlurEffect(style: SnapCommentsLayout.frostStyle)
         }
     }
 
     /// The real panel has been mounted above it: the stand-in fades and goes.
-    func removeRestingPlaceholder(_ placeholder: UIView) {
+    func removeRestingPlaceholder(_ placeholder: UIView, animated: Bool = true) {
         guard placeholder.superview != nil else { return }
-        placeholder.fadeOutSkeleton(removing: true)
+        if animated {
+            placeholder.fadeOutSkeleton(removing: true)
+        } else {
+            placeholder.removeFromSuperview()
+        }
     }
 
     func setCommentsEngaged(_ engaged: Bool) {

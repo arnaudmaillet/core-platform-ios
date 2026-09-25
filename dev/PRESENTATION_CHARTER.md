@@ -332,9 +332,18 @@ rows. Filmed both, frame by frame: the flagged page arrives with its caption
 and bones, lands, and the real comments land into it with the bones fading
 under them. A media card opened on its comments still lands engaged.
 
-The flag stays off until the author has watched the film on a device. What
-remains in the flight turn is the cell's own configure and UIKit's layout of
-it, which no single frame owns.
+Watched on a device the same morning, two defects, both fixed: the settle
+could land mid-flight and mount the real panel over the placeholder's bones
+(`reconcileRestingInterface` now leaves a page alone while its placeholder
+stands), and the cross-fade let bones show through under real rows (the
+placeholder is removed the instant any path mounts the panel, in
+`installRestingPanel`). The placeholder also wears the whole engaged look
+(`setCommentsEngagementProgress(0)`), or the page flew in with its reaction
+rail showing.
+
+The flag stays off until the author has watched the film on a device again.
+What remains in the flight turn is the cell's own configure and UIKit's
+layout of it, which no single frame owns.
 
 ### PR 5c — The "+" menu (P2) — measured, closed
 
