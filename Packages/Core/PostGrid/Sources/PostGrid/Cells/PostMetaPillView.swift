@@ -210,14 +210,17 @@ public class PostMetaPillView: UIVisualEffectView {
         tap = recognizer
         // A press response, because the capsule is the app's own statement that
         // what is in one can be pressed — and a control that answers a finger
-        // with nothing until its screen changes reads as a miss. Scale rather
-        // than a fill: the chip's ground is a material, and darkening a
-        // material is how it stops looking like one.
-        let press = UILongPressGestureRecognizer(target: self, action: #selector(handlePress))
-        press.minimumPressDuration = 0
-        press.cancelsTouchesInView = false
-        press.delegate = self
-        addGestureRecognizer(press)
+        // with nothing until its screen changes reads as a miss.
+        //
+        // ⚠️ **THE APP'S ONE PRESS, NOT THIS CHIP'S OWN.** It had its own — a
+        // 0.9 scale on a bouncy spring — while the page indicator beside it
+        // SWELLED under the finger and the profile's capsules only dimmed:
+        // three answers to one gesture on one screen, reported from a device
+        // as "incohérent". `PressFeedback` is the shared one (a light shrink
+        // and a slight fade); silent here, the chip's action is the feedback.
+        // The fade is an opacity step, not a darker fill: a material darkened
+        // stops looking like one.
+        PressFeedback.attach(toView: self, sound: nil, dims: true)
     }
 
     private var tapHandler: (() -> Void)?
@@ -225,17 +228,6 @@ public class PostMetaPillView: UIVisualEffectView {
 
     @objc private func handleTap() {
         tapHandler?()
-    }
-
-    @objc private func handlePress(_ recognizer: UIGestureRecognizer) {
-        let held = recognizer.state == .began || recognizer.state == .changed
-        UIView.animate(
-            withDuration: 0.42, delay: 0,
-            usingSpringWithDamping: 0.55, initialSpringVelocity: 0.8,
-            options: [.allowUserInteraction, .beginFromCurrentState]
-        ) {
-            self.transform = held ? CGAffineTransform(scaleX: 0.9, y: 0.9) : .identity
-        }
     }
 
     #if DEBUG
@@ -348,17 +340,6 @@ extension UIView {
             view = current.superview
         }
         return true
-    }
-}
-
-extension PostMetaPillView: UIGestureRecognizerDelegate {
-    /// The press is a highlight, not a claim: it runs alongside the tap it
-    /// belongs to, and alongside whatever the row is doing with the same touch.
-    public func gestureRecognizer(
-        _ gestureRecognizer: UIGestureRecognizer,
-        shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
-    ) -> Bool {
-        true
     }
 }
 
@@ -478,6 +459,12 @@ public final class PostActionPillView: PostCardPillView {
     /// A capsule around exactly one glyph control.
     public convenience init(control: UIView) {
         self.init(contents: [control], spacing: 0, insets: Self.glyphInsets)
+        // The app's one press (see `setTapHandler`), on the whole pill: the
+        // button inside answers its own events, and its system highlight is
+        // the glyph's dim — so the pill only gives.
+        if let control = control as? UIControl {
+            PressFeedback.attach(to: control, moving: self, sound: nil)
+        }
     }
 
     @available(*, unavailable)

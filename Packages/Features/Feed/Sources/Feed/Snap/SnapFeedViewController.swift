@@ -2726,6 +2726,7 @@ final class SnapFeedViewController: UIViewController {
         // cell goes NOW, not on a fade: the panel draws the same caption and
         // either real rows or its own bones, and bones showing through under
         // real rows is exactly what a cross-fade produced on a device.
+        let replacesStandIn = deferredResting?.cell === cell
         if let deferred = deferredResting, deferred.cell === cell {
             deferredResting = nil
             cell.removeRestingPlaceholder(deferred.placeholder, animated: false)
@@ -2777,6 +2778,10 @@ final class SnapFeedViewController: UIViewController {
         detail?.setComposerTracksKeyboard(id == activePostID)
         cell.setCommentsEngaged(true)
         cell.contentView.layoutIfNeeded()
+        // The stand-in's bones went at once (above); comments that were
+        // already loaded then arrive on the panel's own reveal rather than
+        // being there in the same frame the bones vanished.
+        if replacesStandIn { detail?.revealVisibleComments() }
     }
 
     #if DEBUG

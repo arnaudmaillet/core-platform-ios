@@ -72,8 +72,15 @@ struct ProfileRelationshipsSearchCaretTests {
         screen.controller.presentSearch()
         #expect(!caretIsVisible(screen), "guard: the second morph hides the caret")
 
-        // Past every morph and every timer the old code armed.
+        // Past every morph and every timer the old code armed — and THEN until
+        // the newest morph's completion has run, however late a loaded
+        // simulator delivers it. A bare fixed wait here was this suite's own
+        // flake: green alone, red inside the full parallel run, where the
+        // 0.3 s dissolve's completion can land after 800 ms. The old code
+        // still fails it: its last timer left the caret `.clear` for good,
+        // so the wait below times out on it.
         try await Task.sleep(for: .milliseconds(800))
+        try await settle(until: { caretIsVisible(screen) })
 
         #expect(screen.controller.searchField.tintColor == resting,
                 "the caret was restored to the first morph's .clear")

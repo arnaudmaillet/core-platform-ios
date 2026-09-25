@@ -48,7 +48,7 @@ final class ProfileHeaderView: UIView {
         static func bannerClearance(for format: ProfileBannerFormat) -> CGFloat {
             switch format {
             case .band, .none: bandGap
-            case .poster: 200
+            case .poster: HeroBannerMetrics.posterStage
             }
         }
         /// The air between the chrome's bottom edge and the avatar, on a band
@@ -75,7 +75,7 @@ final class ProfileHeaderView: UIView {
         /// Content margins of the identity block — wider than the standard
         /// `Spacing.lg` page margin so the header reads airy against the
         /// full-bleed banner.
-        static let horizontalInset: CGFloat = 20
+        static let horizontalInset: CGFloat = HeroBannerMetrics.identityInset
     }
 
     /// The identity block's page margin, published so the selector directly
@@ -824,6 +824,13 @@ final class ProfileHeaderView: UIView {
         // The menu IS the primary action — one tap opens it, no intermediate
         // callback. The controller supplies the content (see `setMoreMenu`).
         moreButton.showsMenuAsPrimaryAction = true
+        // The app's one press (`PressFeedback`): the tray's controls give a
+        // little under the finger like every card control does. Their system
+        // highlight is the dim, so only the shrink is added; silent — the
+        // action answers.
+        for button in [followButton, messageButton, editButton, mapPinButton, qrCodeButton, moreButton] {
+            PressFeedback.attach(to: button, sound: nil)
+        }
 
         // The Liquid Glass tray, split composition: the leading capsule
         // (Message for others, Edit Profile for the viewer) leads the identity

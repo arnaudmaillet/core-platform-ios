@@ -155,6 +155,9 @@ final class PostDetailViewController: UIViewController {
     /// A post whose comments were cached never shows bones and never sets
     /// this, so its rows are there at once (charter P7, P10).
     private var revealsLoadedRows = false
+    /// Views staged for the reveal, played once the apply is over — see
+    /// `playStagedReveal`.
+    private var stagedReveals: [UIView] = []
     private var commentsLoaded = false
     private var streamModels: [String: CommentDisplayModel] = [:]
     /// The full-mode post section (header/media/engagement), built once
@@ -1234,17 +1237,16 @@ final class PostDetailViewController: UIViewController {
         guard case .loaded(let models) = state else { return }
         latestComments = models
         streamModels = Dictionary(models.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        // Bones were on screen and real rows are about to take their place:
-        // the rows of this one apply fade in. Cleared on the next turn, so a
-        // later scroll configures rows plainly.
-        if !commentsLoaded, hasAppliedStream, !models.isEmpty {
-            revealsLoadedRows = true
-            DispatchQueue.main.async { [weak self] in self?.revealsLoadedRows = false }
-        }
+        // Bones were on screen and real rows are about to take their place.
+        let replacesBones = !commentsLoaded && hasAppliedStream && !models.isEmpty
         commentsLoaded = true
         if models.count != commentCount {
             commentCount = models.count
             onCommentCountChange?(models.count)
+        }
+        if replacesBones {
+            revealLoadedComments()
+            return
         }
         // The first apply lands cold (nothing to animate FROM); reloads,
         // sort re-ranks, and submissions animate as native diffs — moves,
@@ -1252,20 +1254,132 @@ final class PostDetailViewController: UIViewController {
         applyStream(animated: hasAppliedStream)
     }
 
+    /// The bones step aside and the loaded comments arrive, one after the
+    /// other.
+    ///
+    /// ⚠️ **THIS USED TO BE A FADE NOBODY SAW, TWICE OVER.** The flag that
+    /// asked new cells to fade was cleared by a `DispatchQueue.main.async` —
+    /// which drains BEFORE the commit's layout pass, the one that dequeues
+    /// the cells — so no row ever read it; and the staged fade used
+    /// `.beginFromCurrentState`, which runs 1 → 1 on a reused cell. What the
+    /// viewer got was UIKit's own insert animation: the bones gone in a frame
+    /// and the rows up in two or three (measured at 30 fps, reported from a
+    /// device as "ils apparaissent directement").
+    ///
+    /// Now: the visible bones are lifted off as snapshots and faded out; the
+    /// snapshot is applied WITHOUT UIKit's diff animation, and laid out in
+    /// this same pass so every visible row is dequeued while the reveal is
+    /// armed; each row then rises into place (`revealLoadedRow`).
+    private func revealLoadedComments() {
+        fadeOutVisibleBones()
+        revealsLoadedRows = true
+        applyStream(animated: false)
+        collectionView.layoutIfNeeded()
+        revealsLoadedRows = false
+        playStagedReveal()
+    }
+
+    /// The comments already on screen arrive as a reveal — for a panel
+    /// mounted over a stand-in that was showing bones where they are
+    /// (`SnapFeedViewController.installRestingPanel`). A panel still loading
+    /// shows its own bones and reveals when they are replaced; the caption
+    /// row never moves (it is on the same pixels as the stand-in's).
+    func revealVisibleComments() {
+        guard commentsLoaded, collectionView.window != nil else { return }
+        let rows = collectionView.indexPathsForVisibleItems.sorted()
+            .compactMap { indexPath -> UIView? in
+                guard let item = streamDataSource.itemIdentifier(for: indexPath) else { return nil }
+                switch item {
+                case .comment, .seam: return collectionView.cellForItem(at: indexPath)?.contentView
+                default: return nil
+                }
+            }
+        let pills = collectionView.indexPathsForVisibleSupplementaryElements(
+            ofKind: DayPillHeaderView.elementKind
+        ).compactMap {
+            collectionView.supplementaryView(forElementKind: DayPillHeaderView.elementKind, at: $0)
+        }
+        guard !rows.isEmpty else { return }
+        revealsLoadedRows = true
+        (pills + rows).forEach(revealLoadedRow)
+        revealsLoadedRows = false
+        playStagedReveal()
+    }
+
+    private func fadeOutVisibleBones() {
+        guard collectionView.window != nil else { return }
+        for cell in collectionView.visibleCells {
+            guard let indexPath = collectionView.indexPath(for: cell),
+                  case .skeletonPlaceholder = streamDataSource.itemIdentifier(for: indexPath),
+                  let ghost = cell.snapshotView(afterScreenUpdates: false)
+            else { continue }
+            ghost.frame = cell.frame
+            ghost.isUserInteractionEnabled = false
+            collectionView.addSubview(ghost)
+            UIView.animate(withDuration: Self.boneFade, delay: 0, options: [.curveEaseOut]) {
+                ghost.alpha = 0
+            } completion: { _ in
+                ghost.removeFromSuperview()
+            }
+        }
+    }
+
     // MARK: - Stream data source
 
-    /// A short, staggered fade for a row that replaces a bone.
-    private func revealIfReplacingBones(_ cell: UICollectionViewCell, at indexPath: IndexPath) {
+    /// How long the bones take to step aside.
+    static let boneFade: TimeInterval = 0.2
+    /// The first row starts as the bones are half gone; each next one a beat
+    /// later, up to `revealStaggerCap` rows — past that the tail arrives
+    /// together rather than trickling in for a second.
+    static let revealLead: TimeInterval = 0.08
+    static let revealStagger: TimeInterval = 0.045
+    static let revealStaggerCap = 8
+    /// A rise of a few points and a hair of scale: the row settles INTO its
+    /// place rather than appearing on it. Small on purpose — a list, not a
+    /// stage entrance.
+    static let revealRise: CGFloat = 10
+    static let revealScale: CGFloat = 0.97
+
+    /// Stages one row of the reveal (`revealLoadedComments`) at its start:
+    /// invisible, a little low and a little small. Driven on the CONTENT view,
+    /// so the layout's own attributes on the cell are never fought.
+    ///
+    /// ⚠️ **STAGED HERE, PLAYED LATER.** The cells are dequeued INSIDE the
+    /// data source's apply, which UIKit runs without animation — a
+    /// `UIView.animate` issued from the cell registration there is swallowed,
+    /// and the rows simply appeared (measured: three rows staged, none seen
+    /// fading). `playStagedReveal` animates them once the apply is over.
+    private func revealLoadedRow(_ target: UIView) {
         guard revealsLoadedRows else { return }
-        cell.alpha = 0
-        // ⚠️ NOT `.beginFromCurrentState`: that reads the from-value off the
-        // PRESENTATION layer, where a reused cell is still at 1 — the 0 staged
-        // on the line above, in the same turn, is not there yet, so the fade
-        // ran 1 → 1 and the row simply appeared. There is no in-flight fade to
-        // pick up here; each reveal starts from the 0 it sets.
-        UIView.animate(withDuration: 0.28, delay: 0.03 * Double(min(indexPath.item, 12)),
-                       options: [.allowUserInteraction]) {
-            cell.alpha = 1
+        target.alpha = 0
+        if !UIAccessibility.isReduceMotionEnabled {
+            target.transform = CGAffineTransform(translationX: 0, y: Self.revealRise)
+                .scaledBy(x: Self.revealScale, y: Self.revealScale)
+        }
+        stagedReveals.append(target)
+    }
+
+    /// Plays the staged rows into place: faded up from nothing, risen and
+    /// scaled on a soft spring, in stagger order (fade alone under Reduce
+    /// Motion — nothing was moved).
+    ///
+    /// ⚠️ NOT `.beginFromCurrentState`: it reads the from-value off the
+    /// PRESENTATION layer, where a reused view is still at rest — the start
+    /// staged in this same turn is not there yet, and the animation would run
+    /// end → end, invisibly.
+    private func playStagedReveal() {
+        let staged = stagedReveals
+        stagedReveals.removeAll()
+        for (order, target) in staged.enumerated() {
+            UIView.animate(
+                withDuration: 0.5,
+                delay: Self.revealLead + Self.revealStagger * Double(min(order, Self.revealStaggerCap)),
+                usingSpringWithDamping: 0.9, initialSpringVelocity: 0,
+                options: [.allowUserInteraction]
+            ) {
+                target.alpha = 1
+                target.transform = .identity
+            }
         }
     }
 
@@ -1292,7 +1406,7 @@ final class PostDetailViewController: UIViewController {
             [weak self] cell, indexPath, commentID in
             guard let self, let model = self.streamModels[commentID] else { return }
             self.configureCommentRow(cell.row, with: model)
-            self.revealIfReplacingBones(cell, at: indexPath)
+            self.revealLoadedRow(cell.contentView)
         }
         // The same row, liftable (text pages): no menu of its own, the
         // stream's `rowContextMenu` lifts it.
@@ -1300,7 +1414,7 @@ final class PostDetailViewController: UIViewController {
             [weak self] cell, indexPath, commentID in
             guard let self, let model = self.streamModels[commentID] else { return }
             self.configureCommentRow(cell.row, with: model)
-            self.revealIfReplacingBones(cell, at: indexPath)
+            self.revealLoadedRow(cell.contentView)
         }
         let seamCell = UICollectionView.CellRegistration<UICollectionViewCell, StreamItem> {
             [weak self] cell, _, item in
@@ -1440,6 +1554,8 @@ final class PostDetailViewController: UIViewController {
                   case .day(let day) = self.streamDataSource.sectionIdentifier(for: indexPath.section)
             else { return }
             pill.configure(title: DayTitleFormatter.title(for: day))
+            // The day's pill arrives with the rows it heads.
+            self.revealLoadedRow(pill)
         }
         streamDataSource.supplementaryViewProvider = { collectionView, _, indexPath in
             collectionView.dequeueConfiguredReusableSupplementary(using: dayPill, for: indexPath)

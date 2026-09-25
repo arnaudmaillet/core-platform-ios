@@ -32,34 +32,19 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
     /// itself would be a second thing deciding where the pages are.
     public var onPageRequested: ((Int) -> Void)?
 
-    /// The chip's press response, and now the ONLY one it has.
+    /// The chip's press response, and the ONLY one it has.
     ///
-    /// It used to be skipped on the post screen, where the chip was a glass
-    /// lens and `isInteractive` flexed the material under a finger — a
-    /// transform there would have been a second effect fighting the system's.
-    /// There is no lens on either surface any more, so the dots' own movement
-    /// is what answers the finger everywhere.
+    /// ⚠️ **THE APP'S ONE PRESS, NOT A SWELL.** The chip used to grow to 1.26
+    /// under a finger — beside card pills that shrank and profile capsules
+    /// that only dimmed: three answers to one gesture, reported from a device
+    /// as "incohérent". It gives like everything else now (`PressFeedback`, a
+    /// light shrink and a slight fade), driven by the scrub's own state rather
+    /// than by a second recogniser beside it.
     private func applyPressFeedback() {
-        UIView.animate(
-            withDuration: 0.5, delay: 0,
-            usingSpringWithDamping: 0.52, initialSpringVelocity: 0.9,
-            options: [.allowUserInteraction, .beginFromCurrentState]
-        ) {
-            self.transform = self.isScrubbing
-                ? CGAffineTransform(scaleX: Self.pressedScale, y: Self.pressedScale)
-                : .identity
-        }
+        isScrubbing ? press.press() : press.release(asTap: false)
     }
 
-    /// How far the card's chip swells under a finger.
-    ///
-    /// ⚠️ THIS IS NOT THE EXPANSION THAT WAS REJECTED. That one changed the
-    /// chip's WIDTH, which re-laid the dots out: the target moved away from the
-    /// finger that had just landed on it. A uniform scale about the centre
-    /// magnifies the control without re-aiming it — and `location(in:)` reports
-    /// through the transform, so the page under the finger is the page the
-    /// arithmetic reads either way.
-    private static let pressedScale: CGFloat = 1.26
+    private lazy var press = PressFeedback.driven(by: self, dims: true)
 
     /// NO MATERIAL: the chip stands on the card's flat fill, like every other
     /// capsule on the closing line — see the initialiser.

@@ -52,6 +52,8 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     // cleared when the release animation completes.
     private var context: (any UIViewControllerContextTransitioning)?
     private var flight: ZoomFlight?
+    /// The held card's give — see `GrabDeformation`. Lives for one grab.
+    private var deformation: GrabDeformation?
     private var dim: UIView?
     /// The feed's native bottom toolbar — navigation-controller chrome above
     /// this container, never part of the flight card. Captured at stage time
@@ -325,6 +327,8 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
 
         self.context = context
         self.flight = flight
+        deformation?.cancel()
+        deformation = GrabDeformation(layer: flight.card.layer)
         self.dim = dim
         #if DEBUG
         // ⚠️ HERE, AND NOWHERE EARLIER. Armed from `beginGrab` — either before
@@ -521,6 +525,10 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         )
         let offset = activeAxis.offset(along: bandedAlong, across: bandedAcross)
         flight.card.center = CGPoint(x: pageCenter.x + offset.x, y: pageCenter.y + offset.y)
+        // The give: the card stretches a little along the way it is carried —
+        // measured from the card's own (banded) travel, so what it leans into
+        // is the motion the viewer sees.
+        deformation?.track(translation: offset)
 
         // Scale channel: the card shrinks but keeps the PAGE's aspect ratio the
         // whole time it is held.
@@ -638,6 +646,9 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     private func releaseGrab(translation: CGPoint, velocity: CGPoint, ended: Bool, in view: UIView) {
         guard isInteracting, let context, let flight else { return }
         isInteracting = false
+        // Let go with the finger: the give eases out under the release spring.
+        deformation?.release()
+        deformation = nil
         destination?.setContentScrollEnabled(true)
 
         let progress = ZoomTransitionGeometry.dismissProgress(
@@ -766,6 +777,8 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     private func finishTransition(cancelled: Bool) {
         // Whatever happens below, the staged frame-0 hide is stale from here.
         hasAbandonedContentHide = true
+        deformation?.cancel()
+        deformation = nil
         // The settlement is decided by `ZoomGrabSettlement.plan` — pure, so
         // the branch that only a cancelled grab with a donated surface reaches
         // is pinned by a unit test rather than by a device session.
