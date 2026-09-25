@@ -574,15 +574,16 @@ final class SnapRailBoostButton: UIButton {
     private static func makeConfiguration(glass: Bool, spentTotal: Int) -> UIButton.Configuration {
         var config: UIButton.Configuration = glass ? .glass() : .plain()
         if spentTotal > 0 {
-            // The receipt face: the compact count in wallet gold, replacing
+            // The receipt face: the compact count in points red, replacing
             // the glyph outright — the 36pt circle holds one or the other.
             var title = AttributedString(spentTotal.formattedCompact())
             title.font = .monospacedDigitSystemFont(ofSize: 13, weight: .bold)
-            title.foregroundColor = .systemYellow
+            title.foregroundColor = PointsSymbol.tint
             config.attributedTitle = title
         } else {
-            config.image = UIImage(systemName: PointsSymbol.glyph)?
-                .withConfiguration(UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold))
+            config.image = PointsSymbol.glyphImage(
+                UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
+            )
         }
         config.baseForegroundColor = .white
         config.contentInsets = .zero

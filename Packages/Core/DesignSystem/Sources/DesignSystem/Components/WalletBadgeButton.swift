@@ -22,7 +22,7 @@ import UIKit
 /// on.
 ///
 /// # The coin's ring
-/// The next-claim countdown is drawn as a thin gold RING around the coin,
+/// The next-claim countdown is drawn as a thin RING around the coin, in points red,
 /// closing clockwise as the claim approaches and standing complete while
 /// one is ready. Around the COIN, not the capsule: the glass pill is the
 /// bar's own drawing, rendered outside this view's bounds, so a border
@@ -40,7 +40,7 @@ import UIKit
 /// it. Fired async so the mutation never lands mid-bar-layout.
 ///
 /// When the wallet has a claim waiting, the coin also PULSES — a slow scale
-/// breath with a gold glow — and stops the moment the claim is taken or the
+/// breath with a red glow — and stops the moment the claim is taken or the
 /// day's cap is hit. Pulse and ring are both re-armed on window attach
 /// because repeating/running `CAAnimation`s die silently every time the
 /// view leaves a window, which would strand the badge looking idle while a
@@ -87,17 +87,17 @@ public final class WalletBadgeButton: UIButton {
     public init() {
         super.init(frame: .zero)
 
-        // The points token: a gold STAR, deliberately not a currency glyph —
-        // the balance is app points, and a dollar sign promises money the
+        // The points token: a red HEART coin (points are likes), deliberately
+        // not a currency glyph — a dollar sign promises money the
         // product doesn't hold. `.alwaysOriginal` because glass vibrancy
         // ignores tint for palette symbols (the bell badge's rule); the
         // explicit tint below is the belt for renderers that drop the
         // palette. Static — only the count ever changes.
-        let palette = UIImage.SymbolConfiguration(paletteColors: [.white, .systemYellow])
+        let palette = PointsSymbol.coinPalette
             .applying(UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold))
         coinView.image = UIImage(systemName: PointsSymbol.coin, withConfiguration: palette)?
             .withRenderingMode(.alwaysOriginal)
-        coinView.tintColor = .systemYellow
+        coinView.tintColor = PointsSymbol.tint
         coinView.isUserInteractionEnabled = false
 
         countLabel.font = .monospacedDigitSystemFont(ofSize: 15, weight: .semibold)
@@ -127,7 +127,7 @@ public final class WalletBadgeButton: UIButton {
         ringLayer.fillColor = nil
         ringLayer.lineWidth = Metrics.ringWidth
         ringLayer.lineCap = .round
-        ringLayer.strokeColor = UIColor.systemYellow.cgColor
+        ringLayer.strokeColor = PointsSymbol.tint.cgColor
         ringLayer.strokeEnd = 0
         ringLayer.isHidden = true
         layer.addSublayer(ringLayer)
@@ -282,7 +282,7 @@ public final class WalletBadgeButton: UIButton {
         pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
         coinView.layer.add(pulse, forKey: Self.pulseKey)
         // The glow rides the same state, static while the scale breathes.
-        coinView.layer.shadowColor = UIColor.systemYellow.cgColor
+        coinView.layer.shadowColor = PointsSymbol.tint.cgColor
         coinView.layer.shadowOpacity = 0.8
         coinView.layer.shadowRadius = 6
         coinView.layer.shadowOffset = .zero

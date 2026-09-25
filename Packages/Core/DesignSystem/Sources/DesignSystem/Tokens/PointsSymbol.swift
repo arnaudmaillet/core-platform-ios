@@ -1,4 +1,4 @@
-import Foundation
+import UIKit
 
 /// The glyph for POINTS — what the wallet holds and what a boost spends.
 ///
@@ -13,4 +13,18 @@ public enum PointsSymbol {
     public static let glyph = "heart.fill"
     /// The coin: the wallet's balance badge and the claim screen.
     public static let coin = "heart.circle.fill"
+    /// Points' colour — a like's red (product decision, 25 September 2026),
+    /// where points used to be wallet gold.
+    public static let tint: UIColor = .systemRed
+    /// The coin as drawn: a white heart on a red disc — a token that reads at
+    /// badge size, where a red heart alone on the bar's glass would not.
+    public static var coinPalette: UIImage.SymbolConfiguration {
+        UIImage.SymbolConfiguration(paletteColors: [.white, tint])
+    }
+    /// A points glyph that carries its own red whatever the control's tint.
+    public static func glyphImage(_ configuration: UIImage.SymbolConfiguration? = nil) -> UIImage? {
+        let image = configuration.map { UIImage(systemName: glyph, withConfiguration: $0) }
+            ?? UIImage(systemName: glyph)
+        return image?.withTintColor(tint, renderingMode: .alwaysOriginal)
+    }
 }

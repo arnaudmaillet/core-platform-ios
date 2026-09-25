@@ -179,9 +179,8 @@ final class CommentsInputBar: UIView {
         // The boost control, in the slot the media "+" held: tap spends the
         // default denomination, long-press opens the amount menu (the rail
         // anchor's exact contract — one post, two surfaces, one behavior).
-        boostButton.configuration?.image = UIImage(
-            systemName: PointsSymbol.glyph,
-            withConfiguration: UIImage.SymbolConfiguration(weight: .semibold)
+        boostButton.configuration?.image = PointsSymbol.glyphImage(
+            UIImage.SymbolConfiguration(weight: .semibold)
         )
         boostButton.configuration?.cornerStyle = .capsule
         boostButton.accessibilityLabel = "Boost post"
@@ -620,7 +619,7 @@ final class CommentsInputBar: UIView {
         if total > 0 {
             var title = AttributedString(total.formattedCompact())
             title.font = .monospacedDigitSystemFont(ofSize: 13, weight: .bold)
-            title.foregroundColor = .systemYellow
+            title.foregroundColor = PointsSymbol.tint
             boostButton.configuration?.attributedTitle = title
             boostButton.configuration?.image = nil
             // `.glass()`'s default content insets leave a 38pt circle ~10pt
@@ -630,9 +629,8 @@ final class CommentsInputBar: UIView {
             boostButton.configuration?.contentInsets = .zero
         } else {
             boostButton.configuration?.attributedTitle = nil
-            boostButton.configuration?.image = UIImage(
-                systemName: PointsSymbol.glyph,
-                withConfiguration: UIImage.SymbolConfiguration(weight: .semibold)
+            boostButton.configuration?.image = PointsSymbol.glyphImage(
+                UIImage.SymbolConfiguration(weight: .semibold)
             )
         }
         boostButton.accessibilityValue = total > 0 ? "\(total) points spent" : nil
@@ -751,7 +749,7 @@ final class CommentsInputBar: UIView {
         let label = UILabel()
         label.text = "+\(amount)"
         label.font = .monospacedDigitSystemFont(ofSize: 17, weight: .heavy)
-        label.textColor = .systemYellow
+        label.textColor = PointsSymbol.tint
         label.layer.shadowColor = UIColor.black.cgColor
         label.layer.shadowOpacity = 0.5
         label.layer.shadowRadius = 3
