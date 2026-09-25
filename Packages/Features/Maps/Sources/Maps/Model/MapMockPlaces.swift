@@ -44,13 +44,18 @@ enum MapMockPlaces {
     /// governs the demo exactly as the wire will. Base cell 14 is a
     /// stand-in: the scale math never reads it, and the true Paris base
     /// cell needs the H3 kernel to compute.
+    // Each place's RANK is fictional (product ask, 25 September 2026: "fait
+    // un rank fictif dans le mock") — no wire carries one; see
+    // `MapPlace.rank`. Paris is #3 of the cities, as the ask put it.
     static let paris = MapPlace(
         id: "city:paris", name: "Paris", kind: .city,
-        h3Index: H3CellGeometry.makeIndex(resolution: 5, baseCell: 14)
+        h3Index: H3CellGeometry.makeIndex(resolution: 5, baseCell: 14),
+        rank: 3
     )
     static let france = MapPlace(
         id: "country:france", name: "France", kind: .country,
-        h3Index: H3CellGeometry.makeIndex(resolution: 1, baseCell: 14)
+        h3Index: H3CellGeometry.makeIndex(resolution: 1, baseCell: 14),
+        rank: 2
     )
 
     // The wider European roster (`MockGeoDiscoveryService.hierarchyAnchors`
@@ -61,47 +66,58 @@ enum MapMockPlaces {
     // (17 / 840 km) is what the dynamic rule reads.
     static let lyon = MapPlace(
         id: "city:lyon", name: "Lyon", kind: .city,
-        h3Index: H3CellGeometry.makeIndex(resolution: 5, baseCell: 14)
+        h3Index: H3CellGeometry.makeIndex(resolution: 5, baseCell: 14),
+        rank: 9
     )
     static let marseille = MapPlace(
         id: "city:marseille", name: "Marseille", kind: .city,
-        h3Index: H3CellGeometry.makeIndex(resolution: 5, baseCell: 14)
+        h3Index: H3CellGeometry.makeIndex(resolution: 5, baseCell: 14),
+        rank: 12
     )
     static let barcelona = MapPlace(
         id: "city:barcelona", name: "Barcelona", kind: .city,
-        h3Index: H3CellGeometry.makeIndex(resolution: 5, baseCell: 20)
+        h3Index: H3CellGeometry.makeIndex(resolution: 5, baseCell: 20),
+        rank: 2
     )
     static let madrid = MapPlace(
         id: "city:madrid", name: "Madrid", kind: .city,
-        h3Index: H3CellGeometry.makeIndex(resolution: 5, baseCell: 20)
+        h3Index: H3CellGeometry.makeIndex(resolution: 5, baseCell: 20),
+        rank: 5
     )
     static let berlin = MapPlace(
         id: "city:berlin", name: "Berlin", kind: .city,
-        h3Index: H3CellGeometry.makeIndex(resolution: 5, baseCell: 15)
+        h3Index: H3CellGeometry.makeIndex(resolution: 5, baseCell: 15),
+        rank: 6
     )
     static let rome = MapPlace(
         id: "city:rome", name: "Rome", kind: .city,
-        h3Index: H3CellGeometry.makeIndex(resolution: 5, baseCell: 21)
+        h3Index: H3CellGeometry.makeIndex(resolution: 5, baseCell: 21),
+        rank: 4
     )
     static let london = MapPlace(
         id: "city:london", name: "London", kind: .city,
-        h3Index: H3CellGeometry.makeIndex(resolution: 5, baseCell: 25)
+        h3Index: H3CellGeometry.makeIndex(resolution: 5, baseCell: 25),
+        rank: 1
     )
     static let spain = MapPlace(
         id: "country:spain", name: "Spain", kind: .country,
-        h3Index: H3CellGeometry.makeIndex(resolution: 1, baseCell: 20)
+        h3Index: H3CellGeometry.makeIndex(resolution: 1, baseCell: 20),
+        rank: 4
     )
     static let germany = MapPlace(
         id: "country:germany", name: "Germany", kind: .country,
-        h3Index: H3CellGeometry.makeIndex(resolution: 1, baseCell: 15)
+        h3Index: H3CellGeometry.makeIndex(resolution: 1, baseCell: 15),
+        rank: 5
     )
     static let italy = MapPlace(
         id: "country:italy", name: "Italy", kind: .country,
-        h3Index: H3CellGeometry.makeIndex(resolution: 1, baseCell: 21)
+        h3Index: H3CellGeometry.makeIndex(resolution: 1, baseCell: 21),
+        rank: 3
     )
     static let unitedKingdom = MapPlace(
         id: "country:uk", name: "United Kingdom", kind: .country,
-        h3Index: H3CellGeometry.makeIndex(resolution: 1, baseCell: 25)
+        h3Index: H3CellGeometry.makeIndex(resolution: 1, baseCell: 25),
+        rank: 1
     )
 
     /// The place LADDER a pin belongs to, most specific first — genuinely

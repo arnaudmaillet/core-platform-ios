@@ -48,7 +48,7 @@ final class ProfileHeaderView: UIView {
         static func bannerClearance(for format: ProfileBannerFormat) -> CGFloat {
             switch format {
             case .band, .none: bandGap
-            case .poster: 200
+            case .poster: HeroBannerMetrics.posterStage
             }
         }
         /// The air between the chrome's bottom edge and the avatar, on a band
@@ -75,7 +75,7 @@ final class ProfileHeaderView: UIView {
         /// Content margins of the identity block — wider than the standard
         /// `Spacing.lg` page margin so the header reads airy against the
         /// full-bleed banner.
-        static let horizontalInset: CGFloat = 20
+        static let horizontalInset: CGFloat = HeroBannerMetrics.identityInset
     }
 
     /// The identity block's page margin, published so the selector directly
