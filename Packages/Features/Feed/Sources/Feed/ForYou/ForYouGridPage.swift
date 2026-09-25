@@ -2425,6 +2425,17 @@ final class ForYouGridPage: UIView {
         let mustReload = mustReload
         self.mustReload = false
         guard rawPosts != incoming || showsSkeleton != skeleton else { return }
+        // ⚠️ **SETTLE ANY PENDING RELOAD AGAINST THE OLD MODEL FIRST.** A batch
+        // insert below takes its "before" counts from the collection view — and
+        // a `reloadData` still pending (the slice layout's first-geometry
+        // re-plan, `replanArrangement`, posts one a turn after `prepare`) makes
+        // it re-ask the data source instead, AFTER the model below has already
+        // grown: "before 27, after 27, insert 14" and an
+        // NSInternalInconsistencyException. Measured on the simulator: a
+        // second page landing in the same turn as that re-plan crashed For You
+        // at launch. A layout pass here consumes the reload while the counts
+        // are still the old ones; with nothing pending it costs nothing.
+        collectionView.layoutIfNeeded()
         // Hydration retires the skeleton with a cross-dissolve, the same
         // in-place hand-off the profile gallery uses.
         let dissolving = showsSkeleton && !skeleton && !incoming.isEmpty && window != nil

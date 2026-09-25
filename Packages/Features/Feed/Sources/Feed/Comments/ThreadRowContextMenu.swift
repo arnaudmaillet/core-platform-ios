@@ -59,6 +59,33 @@ final class ThreadRowContextMenu: NSObject {
     @objc private func dismissSelection() {
         endTextSelection()
     }
+
+    // MARK: - After the menu
+
+    /// A menu is up, or on its way down.
+    private var isMenuUp = false
+    private var isMenuDismissing = false
+    private var afterDismissal: [() -> Void] = []
+
+    /// Runs `work` once no menu is on screen: at once when none is, else when
+    /// the dismissal animation has finished.
+    ///
+    /// ⚠️ **FOR ANYTHING AN ACTION PRESENTS.** An action's handler runs while
+    /// the menu is still leaving, and a sheet presented then races that
+    /// dismissal; a "next run-loop turn" hop guessed at its length and, when
+    /// the guess was short, the presentation was refused (or dropped by a
+    /// `presentedViewController` guard) — the tap did nothing, silently.
+    func afterMenuDismissal(_ work: @escaping () -> Void) {
+        guard isMenuUp || isMenuDismissing else { return work() }
+        afterDismissal.append(work)
+    }
+
+    private func menuDidFinishDismissing() {
+        isMenuDismissing = false
+        let pending = afterDismissal
+        afterDismissal.removeAll()
+        pending.forEach { $0() }
+    }
 }
 
 extension ThreadRowContextMenu: UIContextMenuInteractionDelegate {
@@ -98,6 +125,28 @@ extension ThreadRowContextMenu: UIContextMenuInteractionDelegate {
         // system then fades the platter out in place.
         guard let cell = liftedCell, cell.window != nil else { return nil }
         return cell.liftPreview()
+    }
+
+    /// Displayed, not merely configured: a press that lifts before the menu
+    /// shows ends nothing, so a flag set at configuration could stay up for
+    /// good and hold every later action back.
+    func contextMenuInteraction(
+        _ interaction: UIContextMenuInteraction,
+        willDisplayMenuFor configuration: UIContextMenuConfiguration,
+        animator: (any UIContextMenuInteractionAnimating)?
+    ) {
+        isMenuUp = true
+    }
+
+    func contextMenuInteraction(
+        _ interaction: UIContextMenuInteraction,
+        willEndFor configuration: UIContextMenuConfiguration,
+        animator: (any UIContextMenuInteractionAnimating)?
+    ) {
+        isMenuUp = false
+        isMenuDismissing = true
+        guard let animator else { return menuDidFinishDismissing() }
+        animator.addCompletion { [weak self] in self?.menuDidFinishDismissing() }
     }
 }
 
