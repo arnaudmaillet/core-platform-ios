@@ -1427,6 +1427,27 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// the whole state change ONE motion on ONE surface. The player is
     /// untouched by construction: nothing here re-hosts it, and after the
     /// dock's removal nothing here even moves its surfaces.
+    /// A stand-in for the resting panel, shown at once (charter PR 5b): the
+    /// same container, the same frost, the same engaged chrome, so the page
+    /// looks as it will once the real panel is mounted over it.
+    func installRestingPlaceholder(_ placeholder: UIView) {
+        installComments(placeholder)
+        // Visible at once, WITHOUT marking the cell engaged: the real panel's
+        // mount goes through `installComments` (alpha 0) and then
+        // `setCommentsEngaged(true)` to show it, and a cell already marked
+        // engaged would skip that second step and leave both invisible.
+        commentsContainer.alpha = 1
+        if window != nil, headerFrost.effect == nil {
+            headerFrost.effect = UIBlurEffect(style: SnapCommentsLayout.frostStyle)
+        }
+    }
+
+    /// The real panel has been mounted above it: the stand-in fades and goes.
+    func removeRestingPlaceholder(_ placeholder: UIView) {
+        guard placeholder.superview != nil else { return }
+        placeholder.fadeOutSkeleton(removing: true)
+    }
+
     func setCommentsEngaged(_ engaged: Bool) {
         guard engaged != isCommentsEngaged else { return }
         isCommentsEngaged = engaged

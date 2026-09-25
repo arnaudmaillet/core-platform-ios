@@ -135,6 +135,10 @@ enum TextRevealInstaller {
         // before the push, so the panel exists before the animator lays the
         // destination out and its build is paid outside the flight.
         (feed as? SnapFeedViewController)?.presentLoadingPage()
+        // A reveal is a push with its own animator and never reaches the zoom
+        // hooks; this is the feed's only notice that a flight is coming
+        // (charter PR 5b, `-defer-resting-comments`).
+        (feed as? SnapFeedViewController)?.beginRevealPresentation()
         return RevealGeometry(
             sourceFrame: origin.rowFrame,
             // The CARD's shape unless the source says otherwise, which is every

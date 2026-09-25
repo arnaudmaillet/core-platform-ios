@@ -294,28 +294,47 @@ over a drawn map.
 - Profile's first load never reads `ProfileCache` (only account switching
   does); a revisit should render the cached profile at frame 0 and refresh.
 
-### PR 5b — The snap feed's first layout (P13) — open, and a product question
+### PR 5b — The snap feed's first layout (P13) — behind `-defer-resting-comments`
 
 Found by the instrument: whatever opens the snap feed (a For You tile, a
 profile tile, a map pin), its first layout inside the hero's setup is the
-largest screen turn in the app (For You tile 270 ms, pin 155 ms, debug sim,
-quiet host). After the symbols were ruled out twice (PR 5), the samples on
-the For You route read: `RevealPresentAnimator.animateTransition` running
-the feed's first layout (68 of ~150), inside it `willDisplay` →
-`presentRestingComments` → `installRestingPanel`, which builds a whole
-`PostDetailViewController` (the comments panel under the media) for the
-landing page (27), `SnapFeedCell.installComments` (18), the accessory's
-settle (15) and the lifecycle's `updateActiveItem` (15).
+largest screen turn in the app. On a TEXT page the caption lives inside the
+comments panel, so the page mounted a whole `PostDetailViewController` in
+`willDisplay`, inside the turn that sets the flight up.
 
-The resting comments panel is part of the page's FIRST FRAME by design
-(comments under the media, since 2026-08-06), so deferring it until after
-the flight is a product decision, not an optimisation: the page would land
-without its band and grow one. That is the one lever the sampler leaves that
-is worth ~20% of the turn; the rest is the cell's own configure and UIKit's
-layout of it, which a debug build inflates and which no single frame owns.
-Measure any attempt on the For You route (`-select-tab 1 -foryou-open 0`;
-⚠️ the hook fires only once the tile's cover has loaded, up to 15 s, so
-give it 22 s) and the map-pin route, harness alone, quiet host, three runs.
+Built 25 September 2026, behind a DEBUG flag, after the author chose the
+deferral: a `RestingCommentsPlaceholderView` (the caption as the same
+`CommentRowView` the panel's first row is, the comment rows as the same bones
+the panel draws while its comments load, at the stream's own insets) is
+installed in the cell's comments container for the flight's duration, and
+the real panel is mounted once the flight has landed — on the NEXT turn, so
+the landing frame commits first, except when the page was opened on its
+comments, where it is mounted before the pending comments are applied.
+
+⚠️ **THE TEXT REVEAL IS A PUSH, NOT A ZOOM.** It never reaches
+`zoomTransitionWillBegin` / `zoomTransitionDidEnd`; the installer's pre-push
+staging (`TextRevealInstaller.geometry`) is the feed's only notice, and
+`viewDidAppear` is its landing. Both flights raise the same
+`isAwaitingAnyFlight`. ⚠️ And a cell marked engaged by the placeholder
+skipped the real panel's reveal (`setCommentsEngaged` guards on the flag):
+the placeholder makes the container visible without marking the cell.
+
+Measured, For You text tile (`-foryou-open 0`), harness alone, three runs:
+
+| | Flight turn | Mount turn (after landing) |
+|---|---|---|
+| Flag off | 271 / 261 / 253 ms | — (inside the flight turn) |
+| Flag on | 178 / 182 / 180 ms | 153 / 136 / 157 ms |
+
+A third off the flight, and the panel's own cost moved to a turn after the
+landing frame, over a placeholder that already shows the caption and the
+rows. Filmed both, frame by frame: the flagged page arrives with its caption
+and bones, lands, and the real comments land into it with the bones fading
+under them. A media card opened on its comments still lands engaged.
+
+The flag stays off until the author has watched the film on a device. What
+remains in the flight turn is the cell's own configure and UIKit's layout of
+it, which no single frame owns.
 
 ### PR 5c — The "+" menu (P2)
 
