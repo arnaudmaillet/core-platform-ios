@@ -236,9 +236,30 @@ public final class FeedViewModel {
     /// The cached streams for `id` — the pull side for cell
     /// (re)configuration; `.empty` until `pageDidBecomeActive` has loaded
     /// them or when the post failed both engagement gates.
+    /// What a cell shows at once. ⚠️ **READ FROM THE WARM CACHE FIRST,
+    /// SYNCHRONOUSLY (charter P7).** The grid prefetches a visible tile's
+    /// top comments, so by the time the tile is tapped the repository holds
+    /// them; building the ticker and the subtitle cues from that cache here
+    /// puts them on the page's first frame instead of after the flight. The
+    /// seed is kept apart from `streamsByPost` so the full load still runs
+    /// and replaces it. `isLoaded` stays false on a seed: a seed can never
+    /// say "no comments".
     public func commentStreams(for id: PostID) -> CommentStreams {
-        streamsByPost[id] ?? .empty
+        if let loaded = streamsByPost[id] { return loaded }
+        if let seeded = seededStreams[id] { return seeded }
+        guard let entries = commentsProvider?.cachedTopComments(for: id), !entries.isEmpty else { return .empty }
+        let reactions = tickerBuilder.build(entries, postID: id)
+        let seed = CommentStreams(
+            reactions: reactions,
+            subtitles: subtitleBuilder.build(entries, postID: id, tickerIsRendering: !reactions.isEmpty),
+            commentCount: entries.count,
+            isLoaded: false
+        )
+        seededStreams[id] = seed
+        return seed
     }
+
+    private var seededStreams: [PostID: CommentStreams] = [:]
 
     private func loadCommentStreams(for id: PostID) async {
         defer { streamLoads[id] = nil }

@@ -336,6 +336,31 @@ The flag stays off until the author has watched the film on a device. What
 remains in the flight turn is the cell's own configure and UIKit's layout of
 it, which no single frame owns.
 
+### PR 5d — A media page's chrome at landing (P7, P9)
+
+Filmed on a device, 25 September 2026: a media page's page bar, subtitle
+pill and ticker band appeared all at once when the flight landed, and the
+caption jumped with them. Three causes, three fixes:
+
+- **The band's space is decided from the card, not from the fetch.** The
+  ticker was hidden until its comments arrived, after the flight; the pill
+  then moved from the band's seat to above it, and the caption with it. A
+  page whose card counts comments (or does not know) reserves the band —
+  empty and transparent — from its first frame; the bubbles fade into it;
+  a page loaded with none lets it go.
+- **The streams are seeded from the comments cache, synchronously.** The
+  grid prefetches a visible tile's top comments; `commentStreams(for:)`
+  builds the ticker and the cues from that cache on the spot, kept apart
+  from the loaded streams so the full load still runs and replaces them.
+- **The flight's chrome replica carries the whole picture.** It carried the
+  caption and the author alone; it now carries the page bar and the streams
+  too, so the fade at landing swaps two identical pictures.
+
+And the comments panel's own arrival: the rows that replace the bones fade
+in, staggered (`revealIfReplacingBones`); a post whose comments were cached
+never shows bones and its rows are there at once — which is what the
+author saw when a media card opened on its comments, and which is right.
+
 ### PR 5c — The "+" menu (P2) — measured, closed
 
 Measured 25 September 2026 with `-open-create-menu` (the tap's own path,

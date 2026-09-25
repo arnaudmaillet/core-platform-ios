@@ -150,6 +150,11 @@ final class PostDetailViewController: UIViewController {
     /// cold load has nothing to animate FROM); everything after — folds,
     /// sorts, submissions — animates natively.
     private var hasAppliedStream = false
+    /// True for the one apply that replaces the skeleton rows with the
+    /// loaded comments: those cells fade in, staggered, instead of popping.
+    /// A post whose comments were cached never shows bones and never sets
+    /// this, so its rows are there at once (charter P7, P10).
+    private var revealsLoadedRows = false
     private var commentsLoaded = false
     private var streamModels: [String: CommentDisplayModel] = [:]
     /// The full-mode post section (header/media/engagement), built once
@@ -1229,6 +1234,13 @@ final class PostDetailViewController: UIViewController {
         guard case .loaded(let models) = state else { return }
         latestComments = models
         streamModels = Dictionary(models.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        // Bones were on screen and real rows are about to take their place:
+        // the rows of this one apply fade in. Cleared on the next turn, so a
+        // later scroll configures rows plainly.
+        if !commentsLoaded, hasAppliedStream, !models.isEmpty {
+            revealsLoadedRows = true
+            DispatchQueue.main.async { [weak self] in self?.revealsLoadedRows = false }
+        }
         commentsLoaded = true
         if models.count != commentCount {
             commentCount = models.count
@@ -1241,6 +1253,16 @@ final class PostDetailViewController: UIViewController {
     }
 
     // MARK: - Stream data source
+
+    /// A short, staggered fade for a row that replaces a bone.
+    private func revealIfReplacingBones(_ cell: UICollectionViewCell, at indexPath: IndexPath) {
+        guard revealsLoadedRows else { return }
+        cell.alpha = 0
+        UIView.animate(withDuration: 0.28, delay: 0.03 * Double(min(indexPath.item, 12)),
+                       options: [.allowUserInteraction, .beginFromCurrentState]) {
+            cell.alpha = 1
+        }
+    }
 
     private func configureStreamDataSource() {
         let postCell = UICollectionView.CellRegistration<UICollectionViewCell, StreamItem> {
@@ -1262,16 +1284,18 @@ final class PostDetailViewController: UIViewController {
         // interaction allocation per dequeue — the scroll path does layout
         // and text, and nothing else.
         let commentCell = UICollectionView.CellRegistration<CommentCell, String> {
-            [weak self] cell, _, commentID in
+            [weak self] cell, indexPath, commentID in
             guard let self, let model = self.streamModels[commentID] else { return }
             self.configureCommentRow(cell.row, with: model)
+            self.revealIfReplacingBones(cell, at: indexPath)
         }
         // The same row, liftable (text pages): no menu of its own, the
         // stream's `rowContextMenu` lifts it.
         let liftableCommentCell = UICollectionView.CellRegistration<ThreadRowCell, String> {
-            [weak self] cell, _, commentID in
+            [weak self] cell, indexPath, commentID in
             guard let self, let model = self.streamModels[commentID] else { return }
             self.configureCommentRow(cell.row, with: model)
+            self.revealIfReplacingBones(cell, at: indexPath)
         }
         let seamCell = UICollectionView.CellRegistration<UICollectionViewCell, StreamItem> {
             [weak self] cell, _, item in

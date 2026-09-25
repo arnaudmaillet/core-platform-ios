@@ -535,6 +535,13 @@ final class SnapChromeView: UIView {
             subtitleView.setCues([])
             commentEmptyState.setVisible(false)
         }
+        // The band's space, from what the card already knows (charter P9):
+        // a count above zero reserves it, an unknown count reserves it too
+        // (a collapse on "none" is rarer than a jump on "some"), zero does
+        // not. The bubbles fade into it when the streams land.
+        let knownComments = model.cardMetrics?.comments
+        commentTicker.setReservesBand(hasMedia && (knownComments ?? 1) > 0)
+        applyBandPresence()
         // Every configure, not just the text branch: a recycled scaffold
         // arrives seated for the PREVIOUS post's band, and a media page
         // whose stream hasn't landed yet has no band either.
@@ -729,6 +736,11 @@ final class SnapChromeView: UIView {
     func updateCommentStreams(_ streams: FeedViewModel.CommentStreams) {
         guard hasMedia else { return }
         commentTicker.setComments(streams.reactions)
+        // Loaded and empty: the reservation was wrong, the band goes. Loaded
+        // and full: it stays whatever the card said.
+        if streams.isLoaded {
+            commentTicker.setReservesBand(!streams.reactions.isEmpty)
+        }
         // Read AFTER the band has resolved its own hidden state — it also
         // stands down under Reduce Motion, which the queue alone wouldn't
         // tell us.
