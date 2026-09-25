@@ -264,6 +264,23 @@ final class SnapCommentTickerView: UIView {
         imagePipeline = pipeline
     }
 
+    /// ⚠️ **THE BAND'S SPACE IS DECIDED BEFORE ITS CONTENT ARRIVES (charter
+    /// P9).** The comments a page's band shows come from a fetch that lands
+    /// after the flight, and the band used to be hidden until then — so at
+    /// landing it appeared, the subtitle pill moved from the band's seat to
+    /// above it, and the caption jumped with it (filmed on a device, 25
+    /// September 2026). A page whose card already says it has comments
+    /// reserves the band from its first frame: the band is there, empty and
+    /// transparent, and the bubbles fade into it when they land. A page that
+    /// turns out to have none lets it go.
+    private(set) var reservesBand = false
+
+    func setReservesBand(_ reserves: Bool) {
+        guard reserves != reservesBand else { return }
+        reservesBand = reserves
+        isHidden = (queue.isEmpty && !reserves) || UIAccessibility.isReduceMotionEnabled
+    }
+
     func setComments(_ comments: [TickerCommentModel]) {
         guard comments != queue else { return }
         let wasEmpty = queue.isEmpty
@@ -275,7 +292,7 @@ final class SnapCommentTickerView: UIView {
                 .map(\.element)
             laneNextIndex[lane] = 0
         }
-        isHidden = comments.isEmpty || UIAccessibility.isReduceMotionEnabled
+        isHidden = (comments.isEmpty && !reservesBand) || UIAccessibility.isReduceMotionEnabled
         startIfNeeded()
         // Data landing on a page that is ALREADY on screen (a slow network
         // beat the prefetch): ease the pre-filled train in instead of popping

@@ -5012,6 +5012,23 @@ extension SnapFeedViewController: ZoomTransitionDestination {
               let model = modelsByID[orderedIDs[index]] else { return }
         chrome.configure(with: model)
         chrome.setImagePipeline(imagePipeline)
+        // ⚠️ THE REPLICA CARRIES EVERYTHING THE PAGE'S CHROME WILL SHOW AT
+        // LANDING (charter P9). It used to carry the caption and the author
+        // alone: the page bar, the subtitle pill and the ticker's band then
+        // appeared all at once when the page's own chrome faded in, and the
+        // caption jumped with them (filmed on a device, 25 September 2026).
+        // Same page count, same streams — whatever the cache already holds —
+        // so the fade at landing swaps two identical pictures.
+        if model.isCollection {
+            chrome.setMediaPageCount(
+                model.mediaPages.count,
+                current: activeSnapCell?.currentMediaPage ?? 0,
+                clipPages: Set(model.mediaPages.enumerated().filter { $0.element.videoURL != nil }.map(\.offset))
+            )
+        } else if model.mediaKind == .video, model.mediaURL != nil {
+            chrome.setMediaPageCount(1, current: 0, clipPages: [0])
+        }
+        chrome.updateCommentStreams(viewModel.commentStreams(for: model.id))
         // The replica's boost anchor wears the same face as the live one —
         // a boosted post must not flash back to the glyph mid-flight.
         chrome.setBoostTotal(wallet?.boostTotal(forTarget: model.id.rawValue) ?? 0)
