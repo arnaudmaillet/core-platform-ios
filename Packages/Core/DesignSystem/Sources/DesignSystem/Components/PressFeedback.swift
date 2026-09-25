@@ -123,6 +123,16 @@ public final class PressFeedback {
         /// element, and so does a release. `releaseDampingRatio(travel:)` solves
         /// the damping from that.
         public static let landingOvershoot: CGFloat = 0.011
+        /// How much a pressed element fades, for the hosts that ask
+        /// (`dims: true`) — the app-wide press, 25 September 2026: "a light
+        /// shrink and a slight dim, the same on every button".
+        ///
+        /// ⚠️ **OPACITY, NOT A DARKER FILL**, and additive, like the scale: a
+        /// material pill darkened stops reading as a material, and a fill
+        /// written to the model would race whoever else animates the view's
+        /// alpha (a card's furniture fades in). A fifth of a step off opacity
+        /// reads as "held" without the control looking disabled.
+        public static let pressedDim: Float = 0.15
     }
 
     /// The scale a press takes an element of `size` to — see `Metrics.depth`.
@@ -169,16 +179,20 @@ public final class PressFeedback {
     private let sound: UISound?
     /// False for a control that already moves under a finger of its own accord.
     private let scales: Bool
+    /// Whether a press also fades the target a little — see `Metrics.pressedDim`.
+    private let dims: Bool
+    private var isDimmed = false
     private let reducesMotion: @MainActor () -> Bool
 
     private init(
-        target: UIView, style: Style, sound: UISound?, scales: Bool,
+        target: UIView, style: Style, sound: UISound?, scales: Bool, dims: Bool = false,
         reducesMotion: @escaping @MainActor () -> Bool
     ) {
         self.target = target
         self.style = style
         self.sound = sound
         self.scales = scales
+        self.dims = dims
         self.reducesMotion = reducesMotion
     }
 
@@ -203,10 +217,11 @@ public final class PressFeedback {
         moving target: UIView? = nil,
         sound: UISound? = .tap,
         scales: Bool = true,
+        dims: Bool = false,
         reducesMotion: @escaping @MainActor () -> Bool = { UIAccessibility.isReduceMotionEnabled }
     ) -> PressFeedback {
         let feedback = PressFeedback(
-            target: target ?? control, style: .press, sound: sound, scales: scales,
+            target: target ?? control, style: .press, sound: sound, scales: scales, dims: dims,
             reducesMotion: reducesMotion
         )
         control.addAction(UIAction { _ in feedback.press() }, for: [.touchDown, .touchDragEnter])
@@ -233,14 +248,36 @@ public final class PressFeedback {
         style: Style = .press,
         moving target: UIView? = nil,
         sound: UISound? = .tap,
+        dims: Bool = false,
         reducesMotion: @escaping @MainActor () -> Bool = { UIAccessibility.isReduceMotionEnabled }
     ) -> PressFeedback {
         let feedback = PressFeedback(
             target: target ?? view, style: style, sound: sound, scales: true,
-            reducesMotion: reducesMotion
+            dims: dims && style == .press, reducesMotion: reducesMotion
         )
         view.isUserInteractionEnabled = true
         view.addGestureRecognizer(PressGestureRecognizer(feedback: feedback))
+        remember(feedback, on: view)
+        return feedback
+    }
+
+    /// A press for a view whose HOST already knows when the finger is down —
+    /// a scrubber whose own gesture owns the touch — and calls `press()` and
+    /// `release(asTap:)` itself. No hook is installed.
+    ///
+    /// ⚠️ **NOT A SECOND RECOGNISER ON A VIEW THAT HAS ITS OWN.** The page
+    /// indicator's scrub is a zero-delay recogniser; a watcher beside it would
+    /// be one more party to every arbitration that touch goes through.
+    public static func driven(
+        by view: UIView,
+        sound: UISound? = nil,
+        dims: Bool = false,
+        reducesMotion: @escaping @MainActor () -> Bool = { UIAccessibility.isReduceMotionEnabled }
+    ) -> PressFeedback {
+        let feedback = PressFeedback(
+            target: view, style: .press, sound: sound, scales: true, dims: dims,
+            reducesMotion: reducesMotion
+        )
         remember(feedback, on: view)
         return feedback
     }
@@ -267,6 +304,12 @@ public final class PressFeedback {
     public func press() {
         guard !isPressed, let target else { return }
         isPressed = true
+        // The dim is not motion: it stays under Reduce Motion, like the sound.
+        if dims {
+            isDimmed = true
+            target.layer.add(Self.dimHolding(), forKey: Self.dimKey)
+            target.layer.add(Self.dimEasing(), forKey: nil)
+        }
         let moves = scales && !reducesMotion()
         let factor = style == .hold ? Metrics.heldScale : Self.pressedScale(for: target.bounds.size)
         scale = moves ? factor : 1
@@ -296,6 +339,11 @@ public final class PressFeedback {
         let held = scale
         isPressed = false
         scale = 1
+        if isDimmed, let layer = target?.layer {
+            isDimmed = false
+            layer.removeAnimation(forKey: Self.dimKey)
+            layer.add(Self.dimLifting(), forKey: nil)
+        }
         guard wasPressed || asTap else { return }
         let sprang = wasPressed && held != 1
         if sprang, let layer = target?.layer {
@@ -314,6 +362,42 @@ public final class PressFeedback {
     // MARK: - The curves
 
     private static let holdKey = "designSystem.pressFeedback.hold"
+    private static let dimKey = "designSystem.pressFeedback.dim"
+
+    /// The dim, on the scale's scheme: HELD at `-pressedDim` (additive opacity
+    /// is summed onto the model's), with a transient that starts at the
+    /// opposite so the first frame nets to nothing and eases into the hold.
+    private static func dimHolding() -> CABasicAnimation {
+        let hold = CABasicAnimation(keyPath: "opacity")
+        hold.isAdditive = true
+        hold.fromValue = -Metrics.pressedDim
+        hold.toValue = -Metrics.pressedDim
+        hold.duration = 1
+        hold.fillMode = .forwards
+        hold.isRemovedOnCompletion = false
+        return hold
+    }
+
+    private static func dimEasing() -> CABasicAnimation {
+        let ease = CABasicAnimation(keyPath: "opacity")
+        ease.isAdditive = true
+        ease.fromValue = Metrics.pressedDim
+        ease.toValue = 0
+        ease.duration = Metrics.response
+        ease.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        return ease
+    }
+
+    /// Back up from the held dim over the spring's own response.
+    private static func dimLifting() -> CABasicAnimation {
+        let lift = CABasicAnimation(keyPath: "opacity")
+        lift.isAdditive = true
+        lift.fromValue = -Metrics.pressedDim
+        lift.toValue = 0
+        lift.duration = Metrics.releaseResponse
+        lift.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        return lift
+    }
 
     /// ⚠️ **ADDITIVE ON `transform` MEANS CONCATENATED**, which is what makes a
     /// press compose with an arrival rather than add half-sizes together:
@@ -390,6 +474,11 @@ public final class PressFeedback {
     /// piece of the drawing that CAN be asked, because it is attached by key.
     public var debugIsHeldOnTheLayer: Bool {
         target?.layer.animation(forKey: Self.holdKey) != nil
+    }
+
+    /// Internal for tests: whether the held dim is on the layer.
+    public var debugIsDimmedOnTheLayer: Bool {
+        target?.layer.animation(forKey: Self.dimKey) != nil
     }
 
     /// Internal for tests: the recogniser a plain view was given, nil for a
