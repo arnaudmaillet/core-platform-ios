@@ -16,7 +16,11 @@ struct QAWaitTests {
         QAWait.until("later", interval: 0.02, { ready }) { ran += 1 }
         #expect(ran == 0)
         ready = true
-        try await Task.sleep(for: .milliseconds(150))
+        // Until it has acted, or 5 s — a fixed wait flakes on a loaded host.
+        for _ in 0..<100 where ran == 0 {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        try await Task.sleep(for: .milliseconds(100))
         #expect(ran == 1, "acted \(ran) times")
     }
 
