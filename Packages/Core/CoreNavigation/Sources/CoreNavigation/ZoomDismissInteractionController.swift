@@ -373,8 +373,18 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         detachDeadline = 0
         hasYieldedDip = false
         lastDragTranslation = nil
+        //
+        // ⚠️ AND RE-ASKED ON ARRIVAL: IS THIS STILL THE GRAB IT WAS FOR? The
+        // hop is a turn in which touch events can land — a flick whose `.ended`
+        // queued behind this staging, or a system gesture cancelling the pan —
+        // and `releaseGrab` then reports the outcome and starts the release
+        // spring. A dip arriving after that re-posed the card with
+        // `.beginFromCurrentState` over the release, and told the destination
+        // "progress 0, not settling" after it had been told the outcome: card
+        // and page pulled apart for the rest of the landing. Same rule as the
+        // content hide above (`hasAbandonedContentHide`).
         DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
+            guard let self, self.isInteracting, self.flight?.card === flight.card else { return }
             self.detachDeadline = CACurrentMediaTime() + Self.detachDuration
             // Progress is still ~0 one runloop turn in, so this is the same dip
             // it always was; pan events re-aim it from here.
