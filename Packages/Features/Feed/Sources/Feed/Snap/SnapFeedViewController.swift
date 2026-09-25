@@ -589,6 +589,9 @@ final class SnapFeedViewController: UIViewController {
             // finds its panel exactly as it would have without the deferral.
             isAwaitingRevealPresentation = false
             landDeferredRestingComments()
+            // The reveal held no chrome, so the band's train was laid during
+            // the flight, unseen behind the replica: it enters now.
+            activeSnapCell?.replayCommentBandEntrance()
         }
         if !isAwaitingZoomPresentation { applyPendingComments(animated: true) }
         #if DEBUG

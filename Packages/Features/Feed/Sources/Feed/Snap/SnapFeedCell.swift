@@ -2652,6 +2652,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// real thing was revealed on one frame. That is the pop: not something
     /// appearing, but something that had been there all along stopping being
     /// covered.
+    /// A reveal has landed: the band enters now (see the ticker).
+    func replayCommentBandEntrance() {
+        chrome.replayCommentBandEntrance()
+    }
+
     func setChromeHeldForFlight(_ held: Bool) {
         chrome.setTickerHeldForFlight(held)
         if held {
