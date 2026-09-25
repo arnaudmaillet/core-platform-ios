@@ -339,10 +339,27 @@ final class SnapCommentTickerView: UIView {
         super.layoutSubviews()
         layer.cornerRadius = bounds.height / 2 // capsule end (see init)
         blurView.frame = bounds
-        // Activation can precede first layout (configure → willBecomeActive
-        // before the cell is sized); spawning needs a real width.
-        startIfNeeded()
+        // ⚠️ **A TRAIN LAID AT ONE WIDTH IS RE-LAID AT ANOTHER.** The pre-fill
+        // spreads the bubbles across `bounds.width` once, when the stream
+        // starts — and a page flying in, a cell being reused, a chrome
+        // re-inset can all start it at a width that is not the one the band
+        // keeps. Laid narrow, the band that lands wide is empty on the left
+        // with bubbles arriving from the right (filmed on a device and on
+        // the simulator, 25 September 2026). So the width the train was laid
+        // for is remembered, and a layout that changes it lays the train
+        // again, from the left, fading in.
+        if mode == .conveying, abs(bounds.width - laidWidth) > 1 {
+            stopStream()
+            startIfNeeded(fadingIn: true)
+        } else {
+            // Activation can precede first layout (configure → willBecomeActive
+            // before the cell is sized); spawning needs a real width.
+            startIfNeeded()
+        }
     }
+
+    /// The band width the current train was pre-filled for.
+    private var laidWidth: CGFloat = 0
 
     // MARK: - Lane scheduling (steady conveyor)
 
@@ -361,17 +378,28 @@ final class SnapCommentTickerView: UIView {
         if !held { startIfNeeded() }
     }
 
-    private func startIfNeeded() {
+    private func startIfNeeded(fadingIn: Bool = false) {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-ticker-trace") {
-            print(String(format: "[ticker] %.3f startIfNeeded active=%@ mode=%@ queue=%d width=%.0f", CACurrentMediaTime(), isActive ? "Y" : "N", "\(mode)", queue.count, bounds.width))
+            print(String(format: "[ticker] %.3f startIfNeeded active=%@ mode=%@ queue=%d width=%.0f held=%@ window=%@ alpha=%.2f hidden=%@", CACurrentMediaTime(), isActive ? "Y" : "N", "\(mode)", queue.count, bounds.width, isHeldForFlight ? "Y" : "N", window != nil ? "Y" : "N", alpha, isHidden ? "Y" : "N"))
         }
         #endif
         guard isActive, mode == .parked, !queue.isEmpty, bounds.width > 0, !isHeldForFlight,
               !UIAccessibility.isReduceMotionEnabled else { return }
         mode = .conveying
+        laidWidth = bounds.width
         for lane in 0..<Self.laneCount {
             prefillLane(lane)
+        }
+        // A train that could place nothing (a band narrower than a bubble)
+        // is not a start: parked again, the next layout tries at its width.
+        if laneBubbles.allSatisfy(\.isEmpty) {
+            stopStream()
+            return
+        }
+        if fadingIn, window != nil {
+            alpha = 0
+            UIView.animate(withDuration: 0.3) { self.alpha = 1 }
         }
     }
 
@@ -429,6 +457,11 @@ final class SnapCommentTickerView: UIView {
             }
             cursor += width + Self.interItemGap
         }
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-ticker-trace") {
+            print(String(format: "[ticker] %.3f prefill lane=%d placed=%d bandWidth=%.0f", CACurrentMediaTime(), lane, laneBubbles[lane].count, bandWidth))
+        }
+        #endif
         armSpawn(lane: lane, after: TimeInterval((cursor - bandWidth) / speed))
     }
 
