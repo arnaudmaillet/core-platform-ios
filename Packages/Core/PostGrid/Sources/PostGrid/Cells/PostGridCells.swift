@@ -1453,10 +1453,14 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
 
     /// Makes this cell show `text` as its age.
     public func overrideAgeText(_ text: String) {
-        guard let model = authorBand.model else { return }
-        authorBand.configure(with: model.withAge(text), imagePipeline: nil)
+        // The age alone — the band keeps the picture it already has.
+        authorBand.setAge(text)
         closingAgeLabel.text = text
     }
+
+    /// Whether the author band is drawing a picture rather than initials —
+    /// for tests.
+    var authorBandShowsPicture: Bool { authorBand.isShowingPicture }
 
     private let card = UIView()
     /// The author band — shown only where the row's post actually carries an
