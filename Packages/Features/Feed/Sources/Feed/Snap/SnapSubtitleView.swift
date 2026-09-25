@@ -62,7 +62,10 @@ import UIKit
 /// under Reduce Motion even while the conveyor hides.
 final class SnapSubtitleView: UIView {
     /// The first appearance only — handoffs between cues are hard cuts.
-    static let fadeDuration: TimeInterval = 0.10
+    /// ⚠️ A tenth of a second read as a pop on a device (filmed 25 September
+    /// 2026: the pill was there from one frame to the next at 20 fps); this
+    /// is the length a viewer sees as a fade.
+    static let fadeDuration: TimeInterval = 0.30
     /// Dark lead-in between activation and the first cue, so the zone
     /// doesn't pop the instant the page settles.
     static let leadInDelay: TimeInterval = 0.35
