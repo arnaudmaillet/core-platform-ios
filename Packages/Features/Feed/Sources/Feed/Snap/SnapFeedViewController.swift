@@ -154,7 +154,45 @@ final class SnapFeedViewController: UIViewController {
     /// True between `zoomTransitionWillBegin` and `zoomTransitionDidEnd`. Cells
     /// realized inside that window inherit the playback deferral, so a page
     /// activating mid-flight cannot steal the render slot from the flying card.
-    private var isAwaitingZoomPresentation = false
+    private var isAwaitingZoomPresentation = false {
+        didSet {
+            // The flight is over, one way or another: a text page that stood
+            // on its placeholder gets its real panel now (charter PR 5b).
+            if !isAwaitingZoomPresentation, oldValue { landDeferredRestingComments() }
+        }
+    }
+
+    /// `-defer-resting-comments` (DEBUG): a text page arriving by a flight
+    /// shows a placeholder where its comments panel will be, and mounts the
+    /// panel once the flight has landed — instead of building a whole
+    /// `PostDetailViewController` inside the turn that sets the flight up.
+    /// Off by default until the film and the number say otherwise.
+    static var defersRestingCommentsForFlight: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-defer-resting-comments")
+        #else
+        false
+        #endif
+    }
+
+    /// The page whose panel is waiting for the flight to land.
+    private var deferredResting: (id: PostID, cell: SnapFeedCell, placeholder: RestingCommentsPlaceholderView)?
+
+    /// A text reveal is about to push this screen. The reveal is a navigation
+    /// push with its own animator, not a zoom presentation, so it never
+    /// reaches `zoomTransitionWillBegin` / `zoomTransitionDidEnd`: the
+    /// installer raises this before the push and `viewDidAppear` — the push's
+    /// landing — lowers it.
+    private var isAwaitingRevealPresentation = false
+
+    public func beginRevealPresentation() {
+        isAwaitingRevealPresentation = true
+    }
+
+    /// True while any flight — zoom or reveal — has this screen on its way.
+    private var isAwaitingAnyFlight: Bool {
+        isAwaitingZoomPresentation || isAwaitingRevealPresentation
+    }
     /// Whether the card staging that presentation is flying THIS page's player
     /// — the source's own answer, handed over by the transition controller.
     ///
@@ -545,6 +583,13 @@ final class SnapFeedViewController: UIViewController {
         // the route, because on the hero path this fires WITH the transition
         // and would spend the engagement's layout inside the flight's last
         // frames — the one place this screen refuses to spend it.
+        if isAwaitingRevealPresentation {
+            // The reveal's landing: the deferred panel goes in BEFORE the
+            // pending comments are applied, so a card opened on its comments
+            // finds its panel exactly as it would have without the deferral.
+            isAwaitingRevealPresentation = false
+            landDeferredRestingComments()
+        }
         if !isAwaitingZoomPresentation { applyPendingComments(animated: true) }
         #if DEBUG
         runDebugAppearanceHooks()
@@ -2165,7 +2210,7 @@ final class SnapFeedViewController: UIViewController {
     /// when the next page needed building, and the black rectangle came back
     /// unchanged.
     private func prewarmRestingComments(for id: PostID) {
-        guard !isAwaitingZoomPresentation,
+        guard !isAwaitingAnyFlight,
               prewarmedRestingID != id,
               modelsByID[id]?.mediaURL == nil,
               let makeCommentsPanelContent else { return }
@@ -2425,6 +2470,58 @@ final class SnapFeedViewController: UIViewController {
     private func discardPrewarmedResting() {
         prewarmedRestingVC = nil
         prewarmedRestingID = nil
+    }
+
+    /// The stand-in, for the flight's duration (charter PR 5b).
+    private func installRestingPlaceholder(for id: PostID, model: FeedItemDisplayModel, host cell: SnapFeedCell) {
+        if let current = deferredResting {
+            cell.removeRestingPlaceholder(current.placeholder)
+        }
+        let placeholder = RestingCommentsPlaceholderView(
+            model: model, imagePipeline: imagePipeline, safeAreaTop: view.safeAreaInsets.top
+        )
+        cell.installRestingPlaceholder(placeholder)
+        deferredResting = (id, cell, placeholder)
+        #if DEBUG
+        print("[defer-resting] placeholder installed for \(id.rawValue) bounds=\(placeholder.bounds) container=\(placeholder.superview?.frame ?? .zero) hidden=\(placeholder.superview?.isHidden ?? true) alpha=\(placeholder.superview?.alpha ?? -1)")
+        #endif
+    }
+
+    /// The flight has landed. A card opened ON its comments needs its panel
+    /// in this very turn, before the pending comments are applied, so it
+    /// finds it exactly as it would have without the deferral. Every other
+    /// landing lets the landing frame commit first and mounts on the next
+    /// turn: measured, the mount is ~160 ms (debug sim), and spent inside the
+    /// landing frame it would hold the animation's last frame back.
+    private func landDeferredRestingComments() {
+        guard let deferred = deferredResting else { return }
+        #if DEBUG
+        print("[defer-resting] landing \(deferred.id.rawValue) pending=\(pendingCommentsID?.rawValue ?? "none")")
+        #endif
+        if pendingCommentsID != nil {
+            mountDeferredRestingComments()
+        } else {
+            DispatchQueue.main.async { [weak self] in self?.mountDeferredRestingComments() }
+        }
+    }
+
+    /// The real panel goes in over the stand-in, on the same pixels, and the
+    /// stand-in fades.
+    private func mountDeferredRestingComments() {
+        guard let deferred = deferredResting else { return }
+        deferredResting = nil
+        guard deferred.cell.window != nil, orderedIDs.contains(deferred.id) else {
+            #if DEBUG
+            print("[defer-resting] mount skipped: window=\(deferred.cell.window != nil) known=\(orderedIDs.contains(deferred.id))")
+            #endif
+            deferred.cell.removeRestingPlaceholder(deferred.placeholder)
+            return
+        }
+        presentRestingComments(for: deferred.id, host: deferred.cell)
+        #if DEBUG
+        print("[defer-resting] mounted engaged=\(commentsEngagedID?.rawValue ?? "none") content=\(commentsContentVC != nil) preview=\(previewRestingID?.rawValue ?? "none")")
+        #endif
+        deferred.cell.removeRestingPlaceholder(deferred.placeholder)
     }
 
     private func presentRestingComments(for id: PostID, host cell: SnapFeedCell) {
@@ -3762,7 +3859,12 @@ extension SnapFeedViewController: UICollectionViewDelegate {
             // chrome. `presentRestingComments` makes this decision properly:
             // engagement if the slot is free, preview if it is not.
             if let model = modelsByID[id], model.mediaURL == nil {
-                presentRestingComments(for: id, host: snapCell)
+                if Self.defersRestingCommentsForFlight, isAwaitingAnyFlight,
+                   commentsEngagedID == nil, commentsContentVC == nil {
+                    installRestingPlaceholder(for: id, model: model, host: snapCell)
+                } else {
+                    presentRestingComments(for: id, host: snapCell)
+                }
             }
             // PHASE 2, when this cell is ALREADY the active page.
             //
