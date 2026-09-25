@@ -271,6 +271,18 @@ public final class FeedViewModel {
     private func loadCommentStreams(for id: PostID) async {
         defer { streamLoads[id] = nil }
         guard let commentsProvider else { return }
+        #if DEBUG
+        // `-comment-streams-delay <ms>`: the streams land this long after
+        // they were asked for — a device on a real network, where the ticker
+        // has to fill a page that is already on screen (filmed 25 September
+        // 2026: empty band, bubbles from the right). Pair with
+        // `-no-comment-seed` so nothing arrives earlier from the cache.
+        let arguments = ProcessInfo.processInfo.arguments
+        if let position = arguments.firstIndex(of: "-comment-streams-delay"),
+           let ms = arguments.dropFirst(position + 1).first.flatMap(Int.init) {
+            try? await Task.sleep(for: .milliseconds(ms))
+        }
+        #endif
         // Silent on failure: the load slot frees up, so the next activation
         // of this page retries.
         guard let entries = try? await commentsProvider.loadComments(for: id) else { return }
