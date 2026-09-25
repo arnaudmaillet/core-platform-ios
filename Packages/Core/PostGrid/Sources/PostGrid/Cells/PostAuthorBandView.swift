@@ -353,11 +353,7 @@ public final class PostAuthorBandView: UIView {
         syncShape()
 
         nameLabel.text = model.name
-        // "@handle · 2h": who and when on one quiet line. A post with no
-        // handle keeps the date alone there rather than an orphaned dot.
-        handleLabel.text = [model.handle.isEmpty ? nil : "@" + model.handle, model.age]
-            .compactMap { $0 }
-            .joined(separator: " · ")
+        renderHandleLine()
         avatar.setMonogram(model.monogram)
 
         guard showsIdentity, let url = model.avatarURL, let imagePipeline else { return }
@@ -377,6 +373,34 @@ public final class PostAuthorBandView: UIView {
             self.avatarImage.isHidden = false
         }
     }
+
+    /// Swaps the age on the band's second line, and nothing else.
+    ///
+    /// ⚠️ **NOT A RECONFIGURE.** A stand-in re-dated to the row's reading (see
+    /// `PostGridListRowCell.overrideAgeText`) went through `configure` with no
+    /// pipeline — which clears the picture and has nothing to load it back
+    /// with. The card a text post's dismissal flies home on wore the author's
+    /// INITIALS for the whole flight and the landing hold, and swapped to the
+    /// photograph when the real row took over: the avatar "reloading" on every
+    /// return, for a picture that was in the cache all along.
+    public func setAge(_ age: String) {
+        guard let model else { return }
+        self.model = model.withAge(age)
+        renderHandleLine()
+    }
+
+    /// "@handle · 2h": who and when on one quiet line. A post with no handle
+    /// keeps the date alone there rather than an orphaned dot.
+    private func renderHandleLine() {
+        guard let model else { return }
+        handleLabel.text = [model.handle.isEmpty ? nil : "@" + model.handle, model.age]
+            .compactMap { $0 }
+            .joined(separator: " · ")
+    }
+
+    /// Whether the band is drawing the author's picture (rather than their
+    /// initials) — for tests.
+    var isShowingPicture: Bool { !avatarImage.isHidden && avatarImage.image != nil }
 
     /// Draws the "..." without wiring it.
     ///
