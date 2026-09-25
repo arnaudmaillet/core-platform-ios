@@ -370,6 +370,16 @@ final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
             let caught = self.percentComplete
             self.update(min(max(caught + 0.1, 0), 1))
             print("[zoom-live] SCRIPTED INTERRUPT caught=\(String(format: "%.2f", caught)) mode=\(mode)")
+            // ⚠️ A CATCH NEAR THE END IS NOT A TEST OF THE REVERSAL. The 0.15s
+            // is wall-clock, the spring is not: after a main-thread hitch the
+            // flight is nearly home when this runs, `caught` lands near 1.0,
+            // and a `cancel` reverses a card that barely left — while the line
+            // above reads like any other catch. Said out loud, in the same
+            // words every hook uses (no DesignSystem here, so a plain print).
+            if caught > 0.8 {
+                print("[qa] GAVE UP -zoom-interrupt: caught at \(String(format: "%.2f", caught)) (> 0.80);"
+                    + " the flight had nearly landed, so this run did not exercise the reversal")
+            }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                 self.detach()
                 // Zero velocity, but the SAME spring a hand's release hands

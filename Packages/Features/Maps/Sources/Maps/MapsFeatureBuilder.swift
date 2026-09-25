@@ -210,6 +210,7 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
                 feedFeature().makeClusterGallery(
                     postIDs: postIDs,
                     title: place.galleryTitle,
+                    rank: place.rankBadge,
                     // The header's follow toggle, bound to THIS place's
                     // identity in the map's own store — which is also what
                     // the Favorites sub-filter reads, so the button and the

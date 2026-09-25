@@ -102,13 +102,27 @@ final class ConversationListViewController: UIViewController {
         // (front-running the data source on the live cell) goes unexercised.
         // Watch it with Slow Animations on: the band must be there on frame 0
         // of the slide, not when it lands.
+        //
+        // ⚠️ The 2 s is the beat that shows the list before the pin, not a
+        // promise that the rows are there: on a slow load there was no visible
+        // row yet, the guard returned, and the demo did nothing without a
+        // word. It now waits for a visible row on a list in a window (the
+        // table is only shown once the skeleton gives way to content), and
+        // prints GAVE UP if one never comes.
         if ProcessInfo.processInfo.arguments.contains("-chat-pin-demo") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-                guard let self,
-                      let indexPath = self.tableView.indexPathsForVisibleRows?.last,
-                      let id = self.adapter.itemIdentifier(for: indexPath)
-                else { return }
-                self.pin(id)
+                QAWait.until("-chat-pin-demo: a visible row", { [weak self] in
+                    guard let self else { return true }
+                    return view.window != nil && !tableView.isHidden
+                        && tableView.indexPathsForVisibleRows?.last
+                            .flatMap { self.adapter.itemIdentifier(for: $0) } != nil
+                }) { [weak self] in
+                    guard let self,
+                          let indexPath = self.tableView.indexPathsForVisibleRows?.last,
+                          let id = self.adapter.itemIdentifier(for: indexPath)
+                    else { return }
+                    self.pin(id)
+                }
             }
         }
         // `-chat-preview-demo` presents the context-menu preview construction

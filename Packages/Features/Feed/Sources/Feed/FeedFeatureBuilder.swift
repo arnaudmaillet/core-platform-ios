@@ -437,6 +437,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     public func makeClusterGallery(
         postIDs: [PostID],
         title: String,
+        rank: PlaceRankBadge?,
         following: ClusterGalleryFollowing?,
         feed: UIViewController,
         mapReturn: @escaping (@escaping () -> UIImage?) -> (any ZoomTransitionSource)?
@@ -446,6 +447,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         let gallery = PlaceProfileViewController(
             postIDs: postIDs,
             placeName: title,
+            rank: rank,
             imagePipeline: imagePipeline,
             videoPlayback: videoPlayback,
             following: following,

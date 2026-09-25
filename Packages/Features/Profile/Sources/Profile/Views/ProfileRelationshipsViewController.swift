@@ -337,6 +337,40 @@ final class ProfileRelationshipsViewController: UIViewController {
     // wears the same header as the inbox by design, so it changes with it.
 
     #if DEBUG
+    /// The launch-argument hooks in `viewDidAppear` run on the FIRST
+    /// appearance only. `viewDidAppear` fires again whenever something pushed
+    /// from here pops back — a row's profile, above all — and re-arming then
+    /// toggled `-profile-relationships-action`'s follow a second time (undoing
+    /// the first) and re-tapped `-profile-relationships-open-self`. The
+    /// profile screen learned the same lesson; see its `hasArmedDebugHooks`.
+    private var hasArmedDebugHooks = false
+
+    /// Runs `act` on the active list's rows once that list has SETTLED — out
+    /// of `.loading` — and prints a `[qa] GAVE UP` line when it settles into
+    /// anything but rows, or when `act` returns a reason it could not act.
+    ///
+    /// Settled rather than "has a row": the row the hook wants may be on a
+    /// later page, but a list that has answered is the last state worth
+    /// waiting for, and an empty / restricted / failed answer is a finished
+    /// one that should say so at once rather than time out.
+    private func qaWhenListSettled(
+        _ label: String,
+        _ act: @escaping @MainActor ([ProfileRelationshipsViewModel.Row]) -> String?
+    ) {
+        QAWait.until(label, { [weak self] in
+            guard let self else { return false }
+            return self.viewModel.phase(for: self.viewModel.direction) != .loading
+        }) { [weak self] in
+            guard let self else { return }
+            let phase = viewModel.phase(for: viewModel.direction)
+            guard case .content(let rows, _) = phase else {
+                QAWait.fail(label, "the \(viewModel.direction) list settled without rows: \(phase)")
+                return
+            }
+            if let reason = act(rows) { QAWait.fail(label, reason) }
+        }
+    }
+
     /// Continues the search QA sequence after typing: optionally clear, then
     /// optionally cancel. The clear step goes through the text field's own
     /// `editingChanged` — the same notification the system's clear glyph
@@ -382,6 +416,9 @@ final class ProfileRelationshipsViewController: UIViewController {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         #if DEBUG
+        // ARMED ONCE — see `hasArmedDebugHooks`.
+        defer { hasArmedDebugHooks = true }
+        if hasArmedDebugHooks { return }
         let arguments = ProcessInfo.processInfo.arguments
         // Dev convenience: `-profile-relationships-tab following|friends` opens
         // on that tab, and `-profile-relationships-action` fires the first row's
@@ -394,9 +431,23 @@ final class ProfileRelationshipsViewController: UIViewController {
             default: break
             }
         }
+        // Both row hooks keep their 2s beat (the push settles on camera first)
+        // and then WAIT FOR THE ROWS: the list is a network read, and under
+        // `-mock-latency` the fixed delay found no rows, the view model's
+        // `guard … else { return }` swallowed the tap, and the run printed
+        // nothing either way.
         if arguments.contains("-profile-relationships-action") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-                self?.viewModel.qaActivateFirstRowAction()
+                self?.qaWhenListSettled("profile-relationships-action") { rows in
+                    guard let target = rows.first(where: { !$0.isViewer }) else {
+                        return "no row other than the viewer's own"
+                    }
+                    guard target.action != .inert else {
+                        return "the first row (\(target.handle)) offers no action"
+                    }
+                    self?.viewModel.qaActivateFirstRowAction()
+                    return nil
+                }
             }
         }
         // Dev convenience: `-profile-relationships-open-self` taps the viewer's
@@ -404,7 +455,13 @@ final class ProfileRelationshipsViewController: UIViewController {
         // directly, with no stranger-profile frame in between.
         if arguments.contains("-profile-relationships-open-self") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-                self?.viewModel.qaOpenSelfRow()
+                self?.qaWhenListSettled("profile-relationships-open-self") { rows in
+                    guard rows.contains(where: \.isViewer) else {
+                        return "the viewer is not in this list"
+                    }
+                    self?.viewModel.qaOpenSelfRow()
+                    return nil
+                }
             }
         }
         // Dev convenience: `-profile-relationships-search <text>` types into

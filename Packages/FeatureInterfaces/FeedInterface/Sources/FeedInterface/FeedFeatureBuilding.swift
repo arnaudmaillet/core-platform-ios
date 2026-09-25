@@ -271,10 +271,48 @@ public protocol FeedFeatureBuilding: ConversationThreadScreenBuilding, TextPostS
     func makeClusterGallery(
         postIDs: [PostID],
         title: String,
+        rank: PlaceRankBadge?,
         following: ClusterGalleryFollowing?,
         feed: UIViewController,
         mapReturn: @escaping (@escaping () -> UIImage?) -> (any ZoomTransitionSource)?
     ) -> UIViewController
+}
+
+/// Where a place stands among places of its kind — "#3 City Rank" — shown as
+/// the first counter of its page.
+///
+/// ⚠️ **NO WIRE CARRIES THIS YET.** Mock mode supplies it from the place
+/// catalog (`MapMockPlaces`); production passes nil and the column is not
+/// drawn.
+public struct PlaceRankBadge: Equatable, Sendable {
+    /// 1-based.
+    public let position: Int
+    /// The caption: "City Rank", "Country Rank".
+    public let label: String
+
+    public init(position: Int, label: String) {
+        self.position = position
+        self.label = label
+    }
+
+    /// "#3".
+    public var positionText: String { "#\(position)" }
+}
+
+extension FeedFeatureBuilding {
+    /// A place with no rank to show.
+    public func makeClusterGallery(
+        postIDs: [PostID],
+        title: String,
+        following: ClusterGalleryFollowing?,
+        feed: UIViewController,
+        mapReturn: @escaping (@escaping () -> UIImage?) -> (any ZoomTransitionSource)?
+    ) -> UIViewController {
+        makeClusterGallery(
+            postIDs: postIDs, title: title, rank: nil, following: following,
+            feed: feed, mapReturn: mapReturn
+        )
+    }
 }
 
 /// A post surface once made: a view controller, and a way to tell it what to

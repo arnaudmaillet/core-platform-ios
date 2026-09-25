@@ -26,7 +26,7 @@ import UIKit
 ///   relationship screen ships. Deliberately For You's own vocabulary and
 ///   shapes: its Discover is a media grid and its Following is a card list,
 ///   which is exactly this pair for one place.
-/// The follow-this-place heart and a "..." menu keep the top-right slots.
+/// The follow-this-place pin and a "..." menu keep the top-right slots.
 ///
 /// It remains an ordinary navigation citizen — plain title ("Paris • City
 /// Cluster"), tab bar visible, native edge-pop back to the map — because
@@ -50,6 +50,8 @@ final class PlaceProfileViewController: UIViewController {
     private let bannerBox = UIView()
     private let bannerView = UIImageView()
     private let bannerScrim = GradientScrimView()
+    /// "#3 City Rank" — the first counter, when the place has a rank to show.
+    private let rankMetric = PlaceMetricView(title: "Rank")
     private let reactionsMetric = PlaceMetricView(title: "Reactions")
     private let viewsMetric = PlaceMetricView(title: "Views")
 
@@ -94,6 +96,7 @@ final class PlaceProfileViewController: UIViewController {
     /// selector docks, a name up there is competing with the one control the
     /// chrome exists to hold.
     private let placeName: String
+    private let rank: PlaceRankBadge?
     /// The banner's hero identity: the place's name, and nothing else.
     ///
     /// ⚠️ THE KIND LINE WAS DELETED, not hidden. "CITY CLUSTER" whispered above
@@ -134,7 +137,7 @@ final class PlaceProfileViewController: UIViewController {
     /// followable identity (`ClusterGalleryFollowing`); nil hides the button.
     private let following: ClusterGalleryFollowing?
     /// The two trailing items, held so the bar's group is composed in one
-    /// place — see `configureNavigationItems`. Either can be nil: the heart
+    /// place — see `configureNavigationItems`. Either can be nil: the pin
     /// needs a follow seam, the balance needs a wallet.
     private var followItem: UIBarButtonItem?
     private var walletItem: UIBarButtonItem?
@@ -338,11 +341,24 @@ final class PlaceProfileViewController: UIViewController {
                 self?.tabBar.debugSimulateTap(at: index)
             }
         }
+        // ⚠️ WAITS FOR THE PAGE'S POSTS, not for 2s. The line below used to
+        // print "scrolled to X" whatever happened: on a cold run the page was
+        // still empty, the offset clamped to the minimum travel (or went
+        // nowhere) and the run still said it had scrolled. It now waits for
+        // the active page to hold posts, and reports where it actually ended.
         if let offset = value("-maps-place-scroll") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-                guard let self else { return }
-                debugScrollActivePage(to: CGFloat(offset))
-                print("[place] scrolled to \(offset)")
+                QAWait.until("-maps-place-scroll \(offset)", { [weak self] in
+                    guard let self, self.hostedPages.indices.contains(self.activeIndex),
+                          let grid = self.hostedPages[self.activeIndex] as? ForYouGridPage
+                    else { return false }
+                    return !grid.posts.isEmpty
+                }) { [weak self] in
+                    guard let self else { return }
+                    debugScrollActivePage(to: CGFloat(offset))
+                    let actual = hostedPages[activeIndex].verticalOffset
+                    print("[place] scrolled to \(offset) (actual \(Int(actual)), tab \(activeIndex))")
+                }
             }
         }
         // `-maps-place-open-tile <index>`: opens a post from whichever tab is
@@ -351,34 +367,49 @@ final class PlaceProfileViewController: UIViewController {
         // third post of the Activity list" — the case where the departure
         // screen and the landing screen can disagree, and the only way to see
         // that disagreement is to leave from the tab that is not the default.
+        //
+        // ⚠️ WAITS FOR THE TILE TO EXIST, not for 2.6s: a cold page had no
+        // posts yet and the open below was a silent no-op (only `posts=-1` or
+        // `post=nil` in the line hinted at it). It also remembers which flight
+        // was the latest BEFORE it opened, so `-maps-place-tile-dismiss` can
+        // tell this tile's flight from the one before it.
         if let index = value("-maps-place-open-tile").map(Int.init) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.6) { [weak self] in
-                guard let self else { return }
-                let grid = hostedPages.indices.contains(activeIndex)
-                    ? hostedPages[activeIndex] as? ForYouGridPage : nil
-                // The ELECTION, not just the tap: a text row that opens with
-                // no window is a plain push, and a plain push looks like a
-                // perfectly good animation. Only the line says which happened.
-                let post = grid?.posts.indices.contains(index) == true
-                    ? grid?.posts[index] : nil
-                let window = post.flatMap { p in grid.flatMap { textRowReveal(for: p, in: $0) } }
-                print("[place] opening tile \(index) from tab \(activeIndex)"
-                    + " posts=\(grid?.posts.count ?? -1)"
-                    + " post=\(post?.id.rawValue ?? "nil")"
-                    + " hero=\(post.flatMap { grid?.heroAppearance(for: $0.id) } != nil)"
-                    + " window=\(window != nil)")
-                // ⚠️ THROUGH THE DELEGATE, NOT THE HOST'S OWN METHOD. Calling
-                // `openTile` directly skips `didSelectItemAt` and therefore
-                // `ForYouGridPage.open(at:)`, which is where a tap REMEMBERS
-                // the row to settle clear of the chrome. So the one thing this
-                // hook exists to exercise — where a dismissal comes back to —
-                // was the one thing it could not reach, and a run showed a card
-                // returning still half behind the tab bar whether the code was
-                // right or wrong. `ForYouGridPage.debugSelectItem` carries the
-                // same warning about `-foryou-open`, which made this mistake
-                // first.
-                if grid?.debugSelectItem(at: index) != true {
-                    openTile(at: index, in: grid)
+                QAWait.until("-maps-place-open-tile \(index)", { [weak self] in
+                    guard let self, self.hostedPages.indices.contains(self.activeIndex),
+                          let grid = self.hostedPages[self.activeIndex] as? ForYouGridPage
+                    else { return false }
+                    return grid.posts.indices.contains(index)
+                }) { [weak self] in
+                    guard let self else { return }
+                    debugFlightBeforeTileOpen = ZoomTransitionController.debugMostRecent
+                    debugDidOpenTile = true
+                    let grid = hostedPages.indices.contains(activeIndex)
+                        ? hostedPages[activeIndex] as? ForYouGridPage : nil
+                    // The ELECTION, not just the tap: a text row that opens with
+                    // no window is a plain push, and a plain push looks like a
+                    // perfectly good animation. Only the line says which happened.
+                    let post = grid?.posts.indices.contains(index) == true
+                        ? grid?.posts[index] : nil
+                    let window = post.flatMap { p in grid.flatMap { textRowReveal(for: p, in: $0) } }
+                    print("[place] opening tile \(index) from tab \(activeIndex)"
+                        + " posts=\(grid?.posts.count ?? -1)"
+                        + " post=\(post?.id.rawValue ?? "nil")"
+                        + " hero=\(post.flatMap { grid?.heroAppearance(for: $0.id) } != nil)"
+                        + " window=\(window != nil)")
+                    // ⚠️ THROUGH THE DELEGATE, NOT THE HOST'S OWN METHOD. Calling
+                    // `openTile` directly skips `didSelectItemAt` and therefore
+                    // `ForYouGridPage.open(at:)`, which is where a tap REMEMBERS
+                    // the row to settle clear of the chrome. So the one thing this
+                    // hook exists to exercise — where a dismissal comes back to —
+                    // was the one thing it could not reach, and a run showed a card
+                    // returning still half behind the tab bar whether the code was
+                    // right or wrong. `ForYouGridPage.debugSelectItem` carries the
+                    // same warning about `-foryou-open`, which made this mistake
+                    // first.
+                    if grid?.debugSelectItem(at: index) != true {
+                        openTile(at: index, in: grid)
+                    }
                 }
             }
         }
@@ -397,12 +428,40 @@ final class PlaceProfileViewController: UIViewController {
             // Horizontal by default: that is the escape this hook exists for.
             let axis: ZoomDismissAxis =
                 arguments.contains("-maps-place-tile-dismiss-vertical") ? .vertical : .horizontal
-            DispatchQueue.main.asyncAfter(deadline: .now() + after) {
-                print("[place] scripting tile-feed dismissal axis=\(axis)")
-                ZoomTransitionController.debugMostRecent?.debugScriptedGrab(axis: axis)
+            // ⚠️ THE TILE'S OWN FLIGHT, LANDED — not whatever is most recent
+            // at `after` seconds. If the open failed or came late,
+            // `debugMostRecent` was still the PREVIOUS flight (the one that
+            // brought this page up), and the grab dismissed the wrong screen
+            // while the line said it had scripted the tile's. The delay stays
+            // as the floor; past it the grab waits for a controller NEWER than
+            // the one the open hook saw, with a screen above this page and no
+            // transition running.
+            let requiresTileOpen = arguments.contains("-maps-place-open-tile")
+            DispatchQueue.main.asyncAfter(deadline: .now() + after) { [weak self] in
+                QAWait.until("-maps-place-tile-dismiss", { [weak self] in
+                    guard let self, let nav = self.navigationController,
+                          nav.topViewController !== self, nav.transitionCoordinator == nil,
+                          let recent = ZoomTransitionController.debugMostRecent
+                    else { return false }
+                    guard requiresTileOpen else { return true }
+                    return self.debugDidOpenTile && recent !== self.debugFlightBeforeTileOpen
+                }) {
+                    if !requiresTileOpen {
+                        print("[qa] -maps-place-tile-dismiss: no -maps-place-open-tile in this run;"
+                            + " grabbing the most recent flight, unverified")
+                    }
+                    print("[place] scripting tile-feed dismissal axis=\(axis)")
+                    ZoomTransitionController.debugMostRecent?.debugScriptedGrab(axis: axis)
+                }
             }
         }
     }
+
+    /// The latest flight controller at the moment `-maps-place-open-tile`
+    /// fired — WEAK, so remembering it keeps nothing alive; a controller that
+    /// has since gone reads as nil, which is still "not the tile's".
+    private weak var debugFlightBeforeTileOpen: ZoomTransitionController?
+    private var debugDidOpenTile = false
 
     private func scheduleDebugPopIfRequested() {
         guard !didScheduleDebugPop,
@@ -421,23 +480,39 @@ final class PlaceProfileViewController: UIViewController {
     /// How many posts seed a feed opened from a tile — the same window (and
     /// the same reason) as For You's.
     private static let seedWindow = 40
-    /// How much of the screen the banner claims. The place leads with its
-    /// picture, so the picture is most of the first screen.
-    private static let bannerHeightFraction: CGFloat = 0.7
     /// The floor a headless or not-yet-laid-out view falls back to, so a
     /// constraint built before the first layout pass is never zero.
     private static let bannerHeightFloor: CGFloat = 220
     /// How far the image lags the scroll, as a fraction of the header's travel.
     /// Enough to read as depth, little enough that the crop stays honest.
     private static let bannerParallaxFraction: CGFloat = 0.25
+    /// The gap between the name and the counters under it.
+    private static let nameToMetricsGap: CGFloat = Spacing.lg
 
-    /// The banner's height for the CURRENT viewport — 70% of it.
+    /// The banner's height: the PROFILE POSTER's geometry, not a share of the
+    /// screen.
+    ///
+    /// ⚠️ **IT WAS 70% OF THE VIEWPORT** — 612pt on an 874pt screen, the
+    /// picture reaching two-thirds down before the name — beside a profile
+    /// whose poster gives its picture a 200pt stage under the chrome. Two
+    /// screens of one design, read as two products ("la bannière est beaucoup
+    /// trop haute", 25 September 2026). Now it is the profile's rule: the
+    /// chrome, `HeroBannerMetrics.posterStage` of picture, then the identity —
+    /// the name and the counters — and the clearance under them. Re-derived on
+    /// every layout, since the name and the counters grow with Dynamic Type.
     private var bannerHeight: CGFloat {
-        let available = view.bounds.height > 0
-            ? view.bounds.height
-            : (view.window?.windowScene?.screen.bounds.height ?? 0)
-        guard available > 0 else { return Self.bannerHeightFloor }
-        return max(Self.bannerHeightFloor, available * Self.bannerHeightFraction)
+        let width = view.bounds.width - 2 * HeroBannerMetrics.identityInset
+        guard width > 0 else { return Self.bannerHeightFloor }
+        func height(of subject: UIView?) -> CGFloat {
+            subject?.systemLayoutSizeFitting(
+                CGSize(width: width, height: UIView.layoutFittingCompressedSize.height),
+                withHorizontalFittingPriority: .required,
+                verticalFittingPriority: .fittingSizeLevel
+            ).height ?? 0
+        }
+        return view.safeAreaInsets.top + HeroBannerMetrics.posterStage
+            + height(of: heroNameLabel) + Self.nameToMetricsGap + height(of: metricsBand)
+            + Self.identityClearance
     }
 
     /// How much taller than its viewport the image is cut. The parallax slides
@@ -455,6 +530,7 @@ final class PlaceProfileViewController: UIViewController {
     init(
         postIDs: [PostID],
         placeName: String = "",
+        rank: PlaceRankBadge? = nil,
         imagePipeline: ImagePipeline,
         videoPlayback: VideoPlaybackController?,
         following: ClusterGalleryFollowing? = nil,
@@ -465,6 +541,7 @@ final class PlaceProfileViewController: UIViewController {
     ) {
         self.postIDs = postIDs
         self.placeName = placeName
+        self.rank = rank
         self.imagePipeline = imagePipeline
         self.following = following
         self.wallet = wallet
@@ -500,6 +577,7 @@ final class PlaceProfileViewController: UIViewController {
         registerForTraitChanges([UITraitUserInterfaceStyle.self]) {
             (self: PlaceProfileViewController, _) in
             self.applyHeroLegibility()
+            self.rankMetric.applyBannerLegibility()
             self.reactionsMetric.applyBannerLegibility()
             self.viewsMetric.applyBannerLegibility()
         }
@@ -721,20 +799,26 @@ final class PlaceProfileViewController: UIViewController {
         heroNameLabel.textColor = .label
         heroNameLabel.adjustsFontSizeToFitWidth = true
         heroNameLabel.minimumScaleFactor = 0.6
-        // Centred: the name is the banner's caption, not a list header.
-        heroNameLabel.textAlignment = .center
+        // ⚠️ LEADING, on the profile's column: the place's name stands where
+        // an account's does on a poster, so the two pages read as one design.
+        heroNameLabel.textAlignment = .natural
         applyHeroLegibility()
         heroNameLabel.translatesAutoresizingMaskIntoConstraints = false
         bannerBox.addSubview(heroNameLabel)
 
-        let metrics = UIStackView(arrangedSubviews: [reactionsMetric, viewsMetric])
+        // The profile's counter row: equal cells across the full column width,
+        // the place's rank first when it has one (a hidden cell takes no
+        // share of the row).
+        rankMetric.isHidden = rank == nil
+        if let rank {
+            rankMetric.setText(rank.positionText, title: rank.label)
+        }
+        let metrics = UIStackView(arrangedSubviews: [rankMetric, reactionsMetric, viewsMetric])
         metrics.distribution = .fillEqually
-        // ⚠️ SET, not defaulted — and it never was. The stack shipped with no
-        // spacing at all, so two hugging `.fillEqually` columns sat edge to
-        // edge: about 124pt of clump in the middle of a 402pt screen. That is
-        // the mechanical cause of "ça ne respire pas", and no amount of
-        // retyping the fonts would have fixed it.
-        metrics.spacing = Spacing.xxl
+        // No spacing: the cells ARE the spacing, equal across the column, as
+        // on the profile. (The old +xxl answered a centred pair that clumped
+        // in the middle of the screen; the row spans the column now.)
+        metrics.spacing = 0
         metrics.alignment = .top
         metrics.translatesAutoresizingMaskIntoConstraints = false
         // ⚠️ INSIDE THE BANNER, under the name. The counters are part of the
@@ -800,19 +884,20 @@ final class PlaceProfileViewController: UIViewController {
             // stretch note above), so a pull-down stretches the image behind
             // it while the name holds its seat over the scrim. Centred, with
             // the counters directly beneath it and both over the picture.
-            heroNameLabel.centerXAnchor.constraint(equalTo: bannerBox.centerXAnchor),
             heroNameLabel.leadingAnchor.constraint(
-                greaterThanOrEqualTo: bannerBox.leadingAnchor, constant: Spacing.xl
+                equalTo: bannerBox.leadingAnchor, constant: HeroBannerMetrics.identityInset
             ),
             heroNameLabel.trailingAnchor.constraint(
-                lessThanOrEqualTo: bannerBox.trailingAnchor, constant: -Spacing.xl
+                lessThanOrEqualTo: bannerBox.trailingAnchor, constant: -HeroBannerMetrics.identityInset
             ),
             metrics.topAnchor.constraint(
-                equalTo: heroNameLabel.bottomAnchor, constant: Spacing.xl
+                equalTo: heroNameLabel.bottomAnchor, constant: Self.nameToMetricsGap
             ),
-            metrics.centerXAnchor.constraint(equalTo: bannerBox.centerXAnchor),
-            metrics.widthAnchor.constraint(
-                lessThanOrEqualTo: bannerBox.widthAnchor, constant: -(2 * Spacing.xl)
+            metrics.leadingAnchor.constraint(
+                equalTo: bannerBox.leadingAnchor, constant: HeroBannerMetrics.identityInset
+            ),
+            metrics.trailingAnchor.constraint(
+                equalTo: bannerBox.trailingAnchor, constant: -HeroBannerMetrics.identityInset
             ),
             // ⚠️ DERIVED FROM THE BAR, not typed. The selector now stands
             // INSIDE the banner's own rectangle, so the identity's foot has to
@@ -1052,8 +1137,8 @@ final class PlaceProfileViewController: UIViewController {
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         // Idempotent per value — the pages guard their own writes.
-        // The banner is a fraction of the viewport, so it is re-derived rather
-        // than fixed — a rotation or a different device is a different height.
+        // The banner is re-derived rather than fixed: the chrome, the name and
+        // the counters all change with the device and with Dynamic Type.
         bannerHeightConstraint?.constant = bannerHeight
         bannerScrimHeightConstraint?.constant = Self.scrimHeight(forBanner: bannerHeight)
         let header = headerHeight
@@ -1287,13 +1372,13 @@ final class PlaceProfileViewController: UIViewController {
         }
     }
 
-    /// ⚠️ INDEX 0 IS THE RIGHTMOST. The heart keeps the corner it has always
+    /// ⚠️ INDEX 0 IS THE RIGHTMOST. The pin keeps the corner it has always
     /// had and the balance sits inboard of it — the same order the map puts
     /// its coin inboard of the bell.
     ///
     /// ⚠️ EACH IN ITS OWN BUBBLE. `sharesBackground = false` is UIKit's
     /// opt-out from the one glass pill a trailing group otherwise draws
-    /// around everything in it. Left sharing, a balance and a heart read as
+    /// around everything in it. Left sharing, a balance and a pin read as
     /// one segmented control with a divider nobody drew.
     private func applyTrailingItems() {
         let items = [followItem, walletItem].compactMap { $0 }
@@ -1359,7 +1444,7 @@ final class PlaceProfileViewController: UIViewController {
         )
     }
 
-    /// The trailing heart, and nothing but the heart.
+    /// The trailing pin, and nothing but the pin.
     ///
     /// ⚠️ A PLAIN BAR ITEM, where this was a custom view carrying a label.
     /// The word is gone on purpose — the state is already in the fill, and a
@@ -1380,13 +1465,16 @@ final class PlaceProfileViewController: UIViewController {
     }
 
     /// One place decides both states' looks, so they can't drift: the outline
-    /// heart calls, the filled one rests. The word that used to sit beside it
+    /// pin calls, the filled one rests. The word that used to sit beside it
     /// is gone (see `configureFollowButton`), so the FILL is the whole of the
     /// state — which is why the label a screen reader hears still says both
     /// words.
     private func renderFollowState(_ isFollowing: Bool) {
         followState = isFollowing
-        followItem?.image = UIImage(systemName: isFollowing ? "heart.fill" : "heart")
+        // A PIN: following a place pins it (the map's "pinned" filter reads
+        // the same store), and the heart now means points — see
+        // `PointsSymbol`.
+        followItem?.image = UIImage(systemName: isFollowing ? "pin.fill" : "pin")
         followItem?.tintColor = isFollowing ? .secondaryLabel : .tintColor
         followItem?.accessibilityLabel = isFollowing
             ? "Unfollow this place" : "Follow this place"
@@ -2126,11 +2214,19 @@ extension PlaceProfileViewController {
     var debugBannerImageTop: CGFloat { bannerImageTop?.constant ?? 0 }
     /// Drives the header the way a scroll does, which the simulator cannot.
     func debugApplyHeaderOffset(_ travelled: CGFloat) { applyHeaderOffset(travelled) }
-    /// Whether the name and the counters are drawn ON the banner, centred.
+    /// Whether the name and the counters are drawn ON the banner.
     var debugIdentityRidesTheBanner: Bool {
-        heroNameLabel.textAlignment == .center
-            && heroNameLabel.isDescendant(of: bannerBox)
+        heroNameLabel.isDescendant(of: bannerBox)
             && (metricsBand.map { $0.isDescendant(of: bannerBox) } ?? false)
+    }
+    /// The name's and the counter row's frames, in the view's space.
+    var debugNameFrame: CGRect { heroNameLabel.convert(heroNameLabel.bounds, to: view) }
+    var debugMetricsFrame: CGRect {
+        metricsBand.map { $0.convert($0.bounds, to: view) } ?? .zero
+    }
+    /// The rank column as drawn — nil when it is not.
+    var debugRankColumn: (value: String?, caption: String?)? {
+        rankMetric.isHidden ? nil : (rankMetric.accessibilityValue, rankMetric.accessibilityLabel)
     }
     /// The band's two numbers as rendered — the place's own totals, which are
     /// deliberately NOT the gallery's (see `render`).
@@ -2196,18 +2292,17 @@ private final class PlaceMetricView: UIView {
         // DOWN from title2-bold (22). The name went 28 → 34, so the pair goes
         // from 28:22 — two bolds arguing about which is the headline — to
         // 34:20, which reads as a title and a measurement.
-        valueLabel.font = UIFontMetrics(forTextStyle: .title3).scaledFont(
-            for: .systemFont(ofSize: 20, weight: .semibold), maximumPointSize: 26
-        )
+        // ⚠️ THE PROFILE'S COUNTER TYPE (headline over caption1), since the
+        // row is the profile's row now: three cells across the column, the
+        // same shape as Followers / Following / Reactions.
+        valueLabel.font = .preferredFont(forTextStyle: .headline)
         valueLabel.adjustsFontForContentSizeCategory = true
         valueLabel.textColor = .label
         valueLabel.textAlignment = .center
         valueLabel.text = "—"
         // footnote, not caption1: the profile's counters are caption1 because
         // FOUR of them share one cell. Two on a full banner can afford a step.
-        titleLabel.font = UIFontMetrics(forTextStyle: .footnote).scaledFont(
-            for: .systemFont(ofSize: 13, weight: .regular), maximumPointSize: 17
-        )
+        titleLabel.font = .preferredFont(forTextStyle: .caption1)
         titleLabel.adjustsFontForContentSizeCategory = true
         titleLabel.textColor = .secondaryLabel
         titleLabel.textAlignment = .center
@@ -2246,6 +2341,14 @@ private final class PlaceMetricView: UIView {
         stored = value
         valueLabel.text = CountFormatter.compactString(for: value)
         accessibilityValue = valueLabel.text
+    }
+
+    /// A value that is not a count — the rank's "#3" — and its caption.
+    func setText(_ value: String, title: String) {
+        valueLabel.text = value
+        titleLabel.text = title
+        accessibilityLabel = title
+        accessibilityValue = value
     }
 
     #if DEBUG

@@ -920,10 +920,27 @@ extension MediaPickerViewController {
         // before and after a fix. A tap on the chevron is not an instrument: it
         // has already, on this branch, hit the wrong simulator once and landed a
         // zero-distance gesture on the navigation bar another time.
+        //
+        // ⚠️ THE POP WAITS FOR THE EDITOR TO HAVE LANDED, not for 2s. A pop
+        // issued while the push is still running is dropped by UIKit, the
+        // picker never re-appears, and its probe — the whole point of the trip
+        // — never runs; nothing said so. It now pops the editor THIS hook
+        // pushed, once it is on top with no transition in flight, and says so
+        // if there was no editor to push (an empty selection) or it never lands.
         if arguments.contains("-upload-edit-return") {
             goNext()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-                self?.navigationController?.popViewController(animated: true)
+            if let nav = navigationController, let editor = nav.topViewController, editor !== self {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak nav, weak editor] in
+                    QAWait.until("-upload-edit-return", { [weak nav, weak editor] in
+                        guard let nav, let editor else { return false }
+                        return nav.topViewController === editor && nav.transitionCoordinator == nil
+                            && editor.viewIfLoaded?.window != nil
+                    }) { [weak nav] in
+                        nav?.popViewController(animated: true)
+                    }
+                }
+            } else {
+                QAWait.fail("-upload-edit-return", "no editor was pushed (selection empty? pass -upload-pick)")
             }
         }
         if arguments.contains("-upload-bench-slides") { runSlideBench() }

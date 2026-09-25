@@ -588,10 +588,27 @@ final class MapsViewController: UIViewController {
                 }
             })
             if !subFilters.isEmpty {
+                // ⚠️ 3 s IS THE EARLIEST, NOT THE PROOF. It keeps this hook's
+                // place on the timeline its siblings are laid against
+                // (`-maps-tap-subfilter` at 6 s toggles what this selected),
+                // but "the row has loaded by then" was a guess: on a slow load
+                // the query was filtered while the bar carried no such pill,
+                // and the row landing afterwards (`setOptions`) cleared the
+                // selection — a filtered map with nothing selected, silently.
+                // So it also waits for the bar to actually carry every
+                // requested pill, in the row the controller means to show.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
-                    guard let self else { return }
-                    subFilterBar.setSelectedSubFilters(subFilters)
-                    viewModel.subFiltersChanged(subFilters)
+                    QAWait.until("-maps-select-subfilter \(tokens)", timeout: 20, { [weak self] in
+                        guard let self else { return true }
+                        let intended = Set(currentSubFilterOptions.map(\.subFilter))
+                        return subFilters.allSatisfy {
+                            intended.contains($0) && subFilterBar.entity(for: $0) != nil
+                        }
+                    }) { [weak self] in
+                        guard let self else { return }
+                        subFilterBar.setSelectedSubFilters(subFilters)
+                        viewModel.subFiltersChanged(subFilters)
+                    }
                 }
             }
         }
@@ -2075,10 +2092,42 @@ final class MapsViewController: UIViewController {
         // hero's transition controller; a reveal and a plain push have no such
         // hook on this side, and a soak that can only close a hero would stall
         // on the first text marker it met — which is exactly what the first run
-        // did. The delay is generous rather than tuned: it is a scheduling
-        // convenience, and nothing is measured against it.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
-            self?.closeSoakedFeed()
+        // did.
+        //
+        // ⚠️ BUT ON THE LANDING, NOT ON A CLOCK. It used to fire at a fixed
+        // 2.5 s with no generation check: on a slow simulator the flight had
+        // not landed, so the close grabbed a flight still presenting (or found
+        // nothing to close), and a close that ran late could hit the NEXT
+        // cycle's flight. It now waits for `soakFlightHasLanded` — which reads
+        // each route's own landing, see there — and is keyed by this cycle's
+        // generation, so a stale close is a no-op. Given up just before the
+        // 12 s watchdog, which then names and force-closes the cycle.
+        QAWait.until("[soak] close cycle \(generation) on \(target.0)", timeout: 10, { [weak self] in
+            guard let self else { return true }
+            return soakGeneration != generation || soakFlightHasLanded
+        }) { [weak self] in
+            guard let self, soakGeneration == generation else { return }
+            closeSoakedFeed()
+        }
+    }
+
+    /// Whether the soak's current flight is on screen and still — the moment a
+    /// finger could close it.
+    ///
+    /// The hero reports its own landing (`onDestinationShown` →
+    /// `destinationShown()` → `.open`). The reveal and the plain push have no
+    /// landing hook on this side (see `MapOpenGate.appearedAtRoot`: they sit in
+    /// `.presenting` for the whole round trip), so for those the landing is
+    /// the stack itself: something other than the map on top and no push
+    /// transition still running.
+    private var soakFlightHasLanded: Bool {
+        guard let nav = navigationController,
+              nav.transitionCoordinator == nil,
+              nav.topViewController !== self else { return false }
+        switch openGate.state {
+        case .open: return true
+        case .presenting(let route): return route != .hero
+        case .idle, .dismissing, .intermediate: return false
         }
     }
 
@@ -2250,26 +2299,73 @@ extension MapsViewController: MKMapViewDelegate {
            index + 1 < arguments.count {
             let wanted = arguments[index + 1]
             guard !didDebugOpenPin,
-                  let annotation = views.compactMap({ $0.annotation as? MapAnnotation })
-                      .first(where: { $0.pin.postID.rawValue == wanted })
+                  views.contains(where: { ($0.annotation as? MapAnnotation)?.pin.postID.rawValue == wanted })
             else { return }
             didDebugOpenPin = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-                self?.mapView.selectAnnotation(annotation, animated: true)
+            debugSelectMarker("-maps-open-post \(wanted)") { annotations in
+                annotations.compactMap { $0 as? MapAnnotation }
+                    .first { $0.pin.postID.rawValue == wanted }
             }
             return
         }
         let wantsText = arguments.contains("-maps-open-first-text-pin")
         guard !didDebugOpenPin,
               wantsText || arguments.contains("-maps-open-first-pin") else { return }
-        let annotations = views.compactMap { $0.annotation as? MapAnnotation }
         let preferred: MapPin.Kind = wantsText ? .text : .video
-        guard let annotation = annotations.first(where: { $0.pin.kind == preferred })
-            ?? (wantsText ? nil : annotations.first)
-        else { return }
+        // The same pick at arm time and at fire time: by kind, then any pin
+        // (media only). At fire time the post armed on is preferred, so a
+        // re-cluster that kept it does not swap the subject under the run.
+        let pick: @MainActor ([MapAnnotation]) -> MapAnnotation? = { annotations in
+            annotations.first(where: { $0.pin.kind == preferred })
+                ?? (wantsText ? nil : annotations.first)
+        }
+        guard let armed = pick(views.compactMap { $0.annotation as? MapAnnotation }) else { return }
         didDebugOpenPin = true
+        let armedID = armed.pin.postID
+        debugSelectMarker(wantsText ? "-maps-open-first-text-pin" : "-maps-open-first-pin") { annotations in
+            let pins = annotations.compactMap { $0 as? MapAnnotation }
+            return pins.first { $0.pin.postID == armedID } ?? pick(pins)
+        }
+    }
+
+    /// Taps the marker `resolve` picks from the map's CURRENT annotations,
+    /// once there is one the map could open.
+    ///
+    /// ⚠️ RE-RESOLVED AT FIRE TIME, NEVER CAPTURED. The openers used to keep
+    /// the annotation `didAdd` handed them and select it a second later. A
+    /// query response landing in that second re-clusters the map, the
+    /// captured object is no longer in `mapView.annotations`, the select is a
+    /// no-op — and the one-shot latch (`didDebugOpenPin`) forbids a retry, so
+    /// the run opened nothing and said nothing. This picks again from what is
+    /// on the map when it fires (the soak's own rule, `advanceSoakIfNeeded`),
+    /// waits for the pick to have a view and the gate to be open, and prints
+    /// a GAVE UP line if that never happens.
+    ///
+    /// The 1 s before the first look is pacing, not a readiness guess: the
+    /// marker's pop-in lands before it is tapped, so the flight leaves from a
+    /// settled marker rather than one still scaling up.
+    private func debugSelectMarker(
+        _ label: String,
+        _ resolve: @escaping @MainActor ([any MKAnnotation]) -> (any MKAnnotation)?,
+        then willSelect: (@MainActor (any MKAnnotation) -> Void)? = nil
+    ) {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-            self?.mapView.selectAnnotation(annotation, animated: true)
+            // Picked among the markers that have a VIEW — what the old
+            // `didAdd` batch was, and what a flight can leave from. Resolved
+            // in the check and again in the action: the action runs in the
+            // same turn the check passed, so both see the same map.
+            let shown: @MainActor (MKMapView) -> [any MKAnnotation] = { mapView in
+                mapView.annotations.filter { mapView.view(for: $0) != nil }
+            }
+            QAWait.until(label, timeout: 20, { [weak self] in
+                guard let self else { return true }
+                guard openGate.canOpen, view.window != nil else { return false }
+                return resolve(shown(mapView)) != nil
+            }) { [weak self] in
+                guard let self, let target = resolve(shown(mapView)) else { return }
+                willSelect?(target)
+                mapView.selectAnnotation(target, animated: true)
+            }
         }
     }
 
@@ -2309,14 +2405,19 @@ extension MapsViewController: MKMapViewDelegate {
         // instead, which is why the media filter matters here too.
         let wantsPlace = arguments.contains("-maps-open-place")
             || arguments.contains("-maps-open-hierarchy-cluster")
-        let clusters = views.compactMap { $0.annotation as? MapComputedCluster }
-            .filter {
-                $0.memberIDs.count > 1
-                    && (!wantsText || $0.representative.isText)
-                    && (!wantsMedia || !$0.representative.isText)
-                    && (!wantsPlace || $0.isHierarchyMarker)
-            }
-        guard let cluster = clusters.max(by: { $0.memberIDs.count < $1.memberIDs.count })
+        // The same pick at arm time (this batch) and at fire time (the whole
+        // map, see `debugSelectMarker`).
+        let pick: @MainActor ([MapComputedCluster]) -> MapComputedCluster? = { candidates in
+            candidates
+                .filter {
+                    $0.memberIDs.count > 1
+                        && (!wantsText || $0.representative.isText)
+                        && (!wantsMedia || !$0.representative.isText)
+                        && (!wantsPlace || $0.isHierarchyMarker)
+                }
+                .max(by: { $0.memberIDs.count < $1.memberIDs.count })
+        }
+        guard let cluster = pick(views.compactMap { $0.annotation as? MapComputedCluster })
         else {
             if wantsPlace {
                 print("[maps] -maps-open-place found NO hierarchy marker on screen"
@@ -2326,14 +2427,22 @@ extension MapsViewController: MKMapViewDelegate {
             return
         }
         didDebugOpenPin = true
-        let ids = Self.postIDs(of: cluster)
-        let kind = cluster.representative.isText ? "text" : "media"
-        print("[maps] cluster tap → representative=\(cluster.representative.postID.rawValue) "
-            + "(\(kind), \(MapMarkerPresentation(face: Self.face(of: cluster)))) "
-            + "opening \(ids.count) posts: \(ids.map(\.rawValue).joined(separator: ","))")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-            self?.mapView.selectAnnotation(cluster, animated: true)
-        }
+        // The marker armed on is preferred while it is still on the map
+        // (clusters keep their identity through representative churn); a
+        // re-cluster that retired it gets the same pick over what is there.
+        // The line is printed at FIRE time, from the cluster actually tapped,
+        // so it stays "the corpus the tap passed on" even after a re-cluster.
+        debugSelectMarker("-maps-open-first-cluster", { annotations in
+            let clusters = annotations.compactMap { $0 as? MapComputedCluster }
+            return clusters.first { $0 === cluster } ?? pick(clusters)
+        }, then: { tapped in
+            guard let cluster = tapped as? MapComputedCluster else { return }
+            let ids = Self.postIDs(of: cluster)
+            let kind = cluster.representative.isText ? "text" : "media"
+            print("[maps] cluster tap → representative=\(cluster.representative.postID.rawValue) "
+                + "(\(kind), \(MapMarkerPresentation(face: Self.face(of: cluster)))) "
+                + "opening \(ids.count) posts: \(ids.map(\.rawValue).joined(separator: ","))")
+        })
     }
     #endif
 
