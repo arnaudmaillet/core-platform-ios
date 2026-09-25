@@ -247,6 +247,13 @@ public final class FeedViewModel {
     public func commentStreams(for id: PostID) -> CommentStreams {
         if let loaded = streamsByPost[id] { return loaded }
         if let seeded = seededStreams[id] { return seeded }
+        #if DEBUG
+        // `-no-comment-seed`: the FIRST push of a post, as a device sees it
+        // before the grid has prefetched anything — the streams land by the
+        // load alone, after the flight. The ticker's pre-fill has to hold
+        // on that path too, and this is how it is filmed on the simulator.
+        if ProcessInfo.processInfo.arguments.contains("-no-comment-seed") { return .empty }
+        #endif
         guard let entries = commentsProvider?.cachedTopComments(for: id), !entries.isEmpty else { return .empty }
         let reactions = tickerBuilder.build(entries, postID: id)
         let seed = CommentStreams(
