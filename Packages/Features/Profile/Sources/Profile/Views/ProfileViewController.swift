@@ -759,12 +759,23 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         // view tree (frames included) once content has settled — numeric
         // spacing audits without pixel-measuring screenshots.
         if ProcessInfo.processInfo.arguments.contains("-profile-layout-audit") {
+            // The 1.5s is kept as a floor (the settle beat the audit was
+            // calibrated on), but the print now WAITS FOR THE PROFILE: on a slow
+            // run the fixed delay dumped the redacted skeleton header and the
+            // spacing audit measured bones, reading like a real layout.
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                guard let self else { return }
-                let description = self.headerView
-                    .perform(Selector(("recursiveDescription")))?
-                    .takeUnretainedValue()
-                print("PROFILE-LAYOUT-AUDIT\n\(description.map(String.init(describing:)) ?? "unavailable")")
+                QAWait.until("profile-layout-audit", { [weak self] in
+                    self?.viewModel.profile != nil
+                }) { [weak self] in
+                    guard let self else { return }
+                    // The content render lands in THIS turn's layout pass at
+                    // the earliest; flush it so the frames are the loaded ones.
+                    self.view.layoutIfNeeded()
+                    let description = self.headerView
+                        .perform(Selector(("recursiveDescription")))?
+                        .takeUnretainedValue()
+                    print("PROFILE-LAYOUT-AUDIT\n\(description.map(String.init(describing:)) ?? "unavailable")")
+                }
             }
         }
         // Dev convenience: `-profile-menu-audit` prints the "..." menu the
@@ -773,15 +784,28 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         // argument can otherwise reach — it opens on a tap, and the sim has no
         // touch injection.
         if ProcessInfo.processInfo.arguments.contains("-profile-menu-audit") {
+            // Waits for the RELATIONSHIP READ, not just the clock: the menu's
+            // moderation group and its Block/Unblock title are both decided by
+            // it, and with `-profile-relationship-delay` (3s) the fixed 1.5s
+            // printed `canModerate=false isBlocked=false` — the pre-read menu,
+            // reported as the answer. The read is in when this is someone
+            // else's profile we can moderate, or the subject is known to be the
+            // viewer (own profile, or a routed one the read said is self).
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                guard let self else { return }
-                let titles = self.moreMenuElements().flatMap { element -> [String] in
-                    guard let group = element as? UIMenu else { return [element.title] }
-                    return ["—"] + group.children.map(\.title)
+                QAWait.until("profile-menu-audit", { [weak self] in
+                    guard let self else { return false }
+                    return self.viewModel.canModerate
+                        || self.viewModel.relationshipsSubject?.isSelf == true
+                }) { [weak self] in
+                    guard let self else { return }
+                    let titles = self.moreMenuElements().flatMap { element -> [String] in
+                        guard let group = element as? UIMenu else { return [element.title] }
+                        return ["—"] + group.children.map(\.title)
+                    }
+                    print("PROFILE-MENU-AUDIT canModerate=\(self.viewModel.canModerate) "
+                        + "isBlocked=\(self.viewModel.isBlocked) items=\(titles)")
+                    self.copyProfileLink()
                 }
-                print("PROFILE-MENU-AUDIT canModerate=\(self.viewModel.canModerate) "
-                    + "isBlocked=\(self.viewModel.isBlocked) items=\(titles)")
-                self.copyProfileLink()
             }
         }
         let arguments = ProcessInfo.processInfo.arguments
@@ -793,10 +817,33 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         // its Privacy row, which sits behind two taps the simulator can't
         // deliver.
         if arguments.contains("-profile-edit-privacy") {
+            // Each step waits for the state the next one reads. The push needs
+            // a loaded profile (the editor is built from it) and a stack at
+            // rest with this screen on top; the Privacy row needs the editor
+            // to have LANDED. The fixed 1s between them used to reach for
+            // `topViewController as? EditProfileViewController` while the
+            // push was still in flight — or had never started — and no-op.
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-                self?.pushEditProfile()
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
-                    self?.qaOpenPrivacy()
+                guard let self else { return }
+                guard makeEditViewController != nil else {
+                    QAWait.fail("profile-edit-privacy", "this profile has no editor (not the viewer's own)")
+                    return
+                }
+                QAWait.until("profile-edit-privacy push", { [weak self] in
+                    guard let self, let navigation = self.navigationController else { return false }
+                    return self.viewModel.profile != nil
+                        && navigation.topViewController === self
+                        && navigation.transitionCoordinator == nil
+                }) { [weak self] in
+                    guard let self else { return }
+                    self.pushEditProfile()
+                    QAWait.until("profile-edit-privacy open", { [weak self] in
+                        guard let navigation = self?.navigationController else { return false }
+                        return navigation.topViewController is EditProfileViewController
+                            && navigation.transitionCoordinator == nil
+                    }) { [weak self] in
+                        self?.qaOpenPrivacy()
+                    }
                 }
             }
         }
@@ -909,18 +956,24 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         // the only state the header-alignment bug appears in.
         if let position = arguments.firstIndex(of: "-profile-scroll"),
            position + 1 < arguments.count, let points = Double(arguments[position + 1]) {
-            var attempts = 0
-            func attempt() {
-                attempts += 1
-                // Polls: a fixed delay clamps to the top while the page is still
-                // loading and the run then tests a tile at rest, which is the
-                // one state the alignment bug cannot appear in.
-                if galleryPager.debugSetVerticalOffset(CGFloat(points)) { return }
-                if attempts < 60 {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: attempt)
+            // Polls: a fixed delay clamps to the top while the page is still
+            // loading and the run then tests a tile at rest, which is the
+            // one state the alignment bug cannot appear in.
+            //
+            // Through `QAWait` now, so running out of attempts PRINTS — it
+            // used to fall off the end of the loop silently. What counts as
+            // done is `debugSetVerticalOffset`'s to say: the requested offset,
+            // or the end of a page whose content has actually loaded (see there
+            // for why a loading page's clamp used to pass on the first try).
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                QAWait.until("profile-scroll \(points)", timeout: 15, interval: 0.25, { [weak self] in
+                    self?.galleryPager.debugSetVerticalOffset(CGFloat(points)) ?? false
+                }) { [weak self] in
+                    guard let self else { return }
+                    print("[qa] profile-scroll settled requested=\(points) "
+                        + "offset=\(galleryPager.verticalOffset)")
                 }
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: attempt)
         }
         // `-profile-bar-tree`: the navigation bar's real subview tree. The own
         // profile reports a bar that is in a window, not hidden, at alpha 1, with
@@ -959,12 +1012,30 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
                 attempts += 1
                 // Far past any dock line; the page clamps to whatever it has.
                 _ = galleryPager.debugSetVerticalOffset(3_000)
+                // ⚠️ THE SUCCESS EXIT THIS LOOP NEVER HAD. It re-forced the
+                // offset for the full 40s and then printed GAVE UP on every run,
+                // docked or not — so the promised SETTLED line did not exist and
+                // the only verdict it could give was a failure. Docked is the
+                // header's own definition: the active page has travelled at
+                // least `headerTravel`, the line `applyHeaderOffset` stops the
+                // header at and the identity fade finishes on. A zero travel
+                // means the header has not laid out, which is not a dock.
+                let dockLine = headerTravel
+                let offset = galleryPager.verticalOffset
+                if dockLine > 0, offset >= dockLine - 0.5 {
+                    print("[dock] SETTLED docked=true attempts=\(attempts) "
+                        + "offset=\(offset) dockLine=\(dockLine) "
+                        + "offsets=\(galleryPager.debugVerticalOffsets)")
+                    return
+                }
                 if attempts < 160 {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: attempt)
                 } else {
                     print("[dock] GAVE UP docked=false attempts=\(attempts) "
                         + "offsets=\(galleryPager.debugVerticalOffsets) "
                         + "hasGallery=\(viewModel.hasGallery)")
+                    // The shared GAVE UP line too, so one grep covers every hook.
+                    QAWait.fail("profile-dock", "offset=\(offset) dockLine=\(dockLine)")
                 }
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: attempt)
@@ -997,54 +1068,34 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
             // dismiss-then-hand-off path, so the handoff itself is what gets
             // screenshotted, not a shortcut around it.
             let chained = arguments.dropFirst(index + 1).first
+            // Both steps are gated on state now. `presentShareSheet` returns
+            // without a word until `shareCard` exists (a loaded profile), and a
+            // stack mid-transition refuses the presentation — so the fixed 2s
+            // opened nothing on a slow run, and the chained step then optional-
+            // chained every call onto a nil sheet: a whole scripted sequence
+            // that exercised nothing and printed nothing.
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-                self?.presentShareSheet()
-                let chainedActions = [
-                    "activity", "send", "search", "search-empty", "search-cancel",
-                    "search-send", "search-scroll", "search-lower"
-                ]
-                guard chainedActions.contains(chained ?? "") else { return }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-                    let sheet = self?.presentedViewController as? ProfileShareViewController
-                    switch chained {
-                    case "activity": sheet?.qaHandOffToSystemShare()
-                    case "send": sheet?.qaSendToFirstTarget()
-                    case "search-scroll":
-                        sheet?.qaBeginSearch("a")
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                            sheet?.qaScrollResults(by: 90)
-                        }
-                    case "search-lower":
-                        // Lower the keyboard, then report whether Cancel is
-                        // still usable and fire it — the exact sequence that
-                        // used to strand the user in search.
-                        sheet?.qaBeginSearch("a")
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                            sheet?.qaLowerKeyboard()
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                                // Reported separately: a missing sheet and an
-                                // unusable button are different failures, and
-                                // `?? false` conflated them.
-                                print("CANCEL-USABLE sheet=\(sheet != nil) "
-                                    + "usable=\(sheet.map(\.qaCancelIsUsable).map(String.init) ?? "n/a")")
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                                    sheet?.qaTapCancel()
-                                }
-                            }
-                        }
-                    default:
-                        // `search-empty` opens search WITHOUT typing, which is
-                        // the suggestions-on-entry state.
-                        sheet?.qaBeginSearch(chained == "search-empty" ? "" : "a")
-                        // `search-cancel` also backs out again, so the
-                        // restored state is screenshottable.
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-                            switch chained {
-                            case "search-cancel": sheet?.qaCancelSearch()
-                            case "search-send": sheet?.qaSelectFirstResult()
-                            default: break
-                            }
-                        }
+                QAWait.until("profile-share-demo present", { [weak self] in
+                    guard let self, let navigation = self.navigationController else { return false }
+                    return self.viewModel.shareCard != nil
+                        && navigation.topViewController === self
+                        && navigation.transitionCoordinator == nil
+                        && self.presentedViewController == nil
+                }) { [weak self] in
+                    self?.presentShareSheet()
+                    let chainedActions = [
+                        "activity", "send", "search", "search-empty", "search-cancel",
+                        "search-send", "search-scroll", "search-lower"
+                    ]
+                    guard chainedActions.contains(chained ?? "") else { return }
+                    // Waits for the sheet to have FINISHED presenting (the 2s
+                    // stood in for that) rather than for the clock.
+                    QAWait.until("profile-share-demo \(chained ?? "")", { [weak self] in
+                        guard let sheet = self?.presentedViewController as? ProfileShareViewController
+                        else { return false }
+                        return !sheet.isBeingPresented && sheet.transitionCoordinator == nil
+                    }) { [weak self] in
+                        self?.qaRunShareChain(chained)
                     }
                 }
             }
@@ -1057,8 +1108,28 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         if let index = arguments.firstIndex(of: "-profile-block-demo") {
             let scope: ProfileBlockScope =
                 arguments.dropFirst(index + 1).first == "account" ? .account : .profile
+            // `block` returns without a word unless the profile has loaded AND
+            // the relationship read has made it moderatable — so the fixed 2s
+            // blocked nothing on a slow run and the run still looked done.
+            // Waits for the read to settle either way (moderatable, or known to
+            // be the viewer), then says why when it cannot block.
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-                self?.viewModel.block(scope)
+                QAWait.until("profile-block-demo", { [weak self] in
+                    guard let self else { return false }
+                    return self.viewModel.canModerate
+                        || self.viewModel.relationshipsSubject?.isSelf == true
+                }) { [weak self] in
+                    guard let self else { return }
+                    guard viewModel.canModerate else {
+                        QAWait.fail("profile-block-demo", "this is the viewer's own profile")
+                        return
+                    }
+                    guard !viewModel.isBlocked else {
+                        QAWait.fail("profile-block-demo", "the profile is already blocked")
+                        return
+                    }
+                    viewModel.block(scope)
+                }
             }
         }
         #endif
@@ -1219,8 +1290,71 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     /// editor rather than building the screen here, so what is verified is the
     /// real wiring and not a second path to the same class.
     private func qaOpenPrivacy() {
-        let editor = navigationController?.topViewController
-        (editor as? EditProfileViewController)?.qaOpenPrivacy()
+        // Says so when it cannot: an optional-chained call here was the silent
+        // no-op that let a run with no Privacy screen read as a pass.
+        guard let editor = navigationController?.topViewController as? EditProfileViewController else {
+            QAWait.fail("profile-edit-privacy", "the editor is not on top")
+            return
+        }
+        guard editor.onOpenPrivacy != nil else {
+            QAWait.fail("profile-edit-privacy", "the editor has no Privacy route wired")
+            return
+        }
+        editor.qaOpenPrivacy()
+    }
+
+    /// `-profile-share-demo <step>`: what runs inside the QR sheet once it has
+    /// finished presenting. Lifted out of `viewDidAppear` only to keep the
+    /// gated chain there readable; the steps and their pacing are unchanged.
+    private func qaRunShareChain(_ chained: String?) {
+        let sheet = presentedViewController as? ProfileShareViewController
+        if sheet == nil {
+            // The gate waited for this sheet; a nil here means it went away
+            // between the check and the step, and every call below would
+            // optional-chain into nothing.
+            QAWait.fail("profile-share-demo \(chained ?? "")", "the share sheet is not presented")
+            return
+        }
+        switch chained {
+        case "activity": sheet?.qaHandOffToSystemShare()
+        case "send": sheet?.qaSendToFirstTarget()
+        case "search-scroll":
+            sheet?.qaBeginSearch("a")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                sheet?.qaScrollResults(by: 90)
+            }
+        case "search-lower":
+            // Lower the keyboard, then report whether Cancel is
+            // still usable and fire it — the exact sequence that
+            // used to strand the user in search.
+            sheet?.qaBeginSearch("a")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                sheet?.qaLowerKeyboard()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                    // Reported separately: a missing sheet and an
+                    // unusable button are different failures, and
+                    // `?? false` conflated them.
+                    print("CANCEL-USABLE sheet=\(sheet != nil) "
+                        + "usable=\(sheet.map(\.qaCancelIsUsable).map(String.init) ?? "n/a")")
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                        sheet?.qaTapCancel()
+                    }
+                }
+            }
+        default:
+            // `search-empty` opens search WITHOUT typing, which is
+            // the suggestions-on-entry state.
+            sheet?.qaBeginSearch(chained == "search-empty" ? "" : "a")
+            // `search-cancel` also backs out again, so the
+            // restored state is screenshottable.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                switch chained {
+                case "search-cancel": sheet?.qaCancelSearch()
+                case "search-send": sheet?.qaSelectFirstResult()
+                default: break
+                }
+            }
+        }
     }
     #endif
 

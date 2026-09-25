@@ -1782,6 +1782,15 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // therefore of the grab, and said nothing about the button, which is
         // exactly where a defect survived being "verified".
         if ProcessInfo.processInfo.arguments.contains("-foryou-demo-tapback") {
+            // ⚠️ EXCLUSIVE WITH `-foryou-demo-grab`, and said so. Both hooks
+            // own `onDestinationShown` and both dismiss the feed; this
+            // assignment used to replace the grab's handler without a word, so
+            // a run passing both measured the back button while believing it
+            // had measured the grab. The tap-back still wins, as before.
+            if ProcessInfo.processInfo.arguments.contains("-foryou-demo-grab") {
+                QAWait.fail("-foryou-demo-grab",
+                            "overridden by -foryou-demo-tapback; the two are exclusive, pass one")
+            }
             transition.onDestinationShown = { [weak navigationController] in
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                     navigationController?.popViewController(animated: true)
@@ -1849,8 +1858,16 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             let arguments = ProcessInfo.processInfo.arguments
             let delay = position + 1 < arguments.count
                 ? (Double(arguments[position + 1]) ?? 1.5) : 1.5
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak transition] in
-                transition?.debugScriptedGrab()
+            // ⚠️ TIMED FROM THE LANDING, like the flight path's — not from
+            // here. This runs before the window's push is even issued, so a
+            // fixed delay from now shrank by however long the push took and, on
+            // a cold run, grabbed a screen still sliding in. The landing does
+            // reach this controller: the slide captured it as the delegate it
+            // displaced and forwards every `didShow` to it unconditionally.
+            transition.onDestinationShown = { [weak transition] in
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                    transition?.debugScriptedGrab()
+                }
             }
         }
         #endif
@@ -2900,14 +2917,28 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             attempts += 1
             let format = viewModel.format
             let posts = pager.posts(for: format)
+            // ⚠️ BOTH ENDS OF THE BUDGET SAY SO. Running out of attempts with
+            // no row used to stop without a word — a run that opened nothing
+            // read like one that opened something — and opening a row whose
+            // cover never arrived was just as quiet, though that capture is
+            // the "blank card" the paragraph above warns about.
             guard posts.indices.contains(index) else {
-                if attempts < 60 { DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: attempt) }
+                if attempts < 60 {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: attempt)
+                } else {
+                    QAWait.fail("-foryou-open \(index)",
+                                "row not loaded after \(attempts) attempts (\(posts.count) posts)")
+                }
                 return
             }
             let ready = pager.page(for: format)?.heroAppearance(for: posts[index].id)?.cover != nil
             guard ready || attempts >= 60 else {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: attempt)
                 return
+            }
+            if !ready {
+                print("[qa] -foryou-open \(index): opening WITHOUT a cover after \(attempts) attempts"
+                    + " (kind=\(posts[index].kind); expected for a text row, a blank card otherwise)")
             }
             // Through the page's own selection path, so a scripted open runs
             // the same code a tap does — including the scroll-into-view
@@ -2924,12 +2955,17 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             // process, which cannot distinguish per-push cost from one-time
             // warm-up of whatever the push touches first. Two more rounds
             // separate them.
+            //
+            // ⚠️ EACH LEG WAITS FOR THE ONE BEFORE IT TO LAND. The rounds were
+            // scheduled on a fixed 3s / +1.5s grid from the first open, and on
+            // a cold run the first push was still in the air at 3s: the pop
+            // landed mid-present, and every later leg ran against a stack in a
+            // state nobody had asked for. The delays stay as floors; past
+            // them a pop waits for the feed to be on top with no transition
+            // running, and a reopen for this screen to be back the same way.
             if ProcessInfo.processInfo.arguments.contains("-zoom-repeat") {
-                for round in 1...2 {
-                    let base = 3.0 * Double(round)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + base) { [weak self] in
-                        self?.navigationController?.popViewController(animated: true)
-                    }
+                func runRound(_ round: Int) {
+                    guard round <= 2 else { return }
                     // A DIFFERENT tile each round. Reopening the same one
                     // cannot tell a re-pointed feed from a stale one — both
                     // render the same post — so the harness would pass while
@@ -2939,10 +2975,26 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
                     // window and hides state the previous flight left behind.
                     let reopen = ProcessInfo.processInfo.arguments.contains("-zoom-repeat-same")
                         ? index : index + round
-                    DispatchQueue.main.asyncAfter(deadline: .now() + base + 1.5) { [weak self] in
-                        self?.openFeed(from: format, at: reopen)
+                    let popFloor = round == 1 ? 3.0 : 1.5
+                    DispatchQueue.main.asyncAfter(deadline: .now() + popFloor) { [weak self] in
+                        QAWait.until("-zoom-repeat round \(round) pop", { [weak self] in
+                            guard let self, let nav = self.navigationController else { return false }
+                            return nav.topViewController !== self && nav.transitionCoordinator == nil
+                        }) { [weak self] in
+                            self?.navigationController?.popViewController(animated: true)
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                                QAWait.until("-zoom-repeat round \(round) reopen", { [weak self] in
+                                    guard let self, let nav = self.navigationController else { return false }
+                                    return nav.topViewController === self && nav.transitionCoordinator == nil
+                                }) { [weak self] in
+                                    self?.openFeed(from: format, at: reopen)
+                                    runRound(round + 1)
+                                }
+                            }
+                        }
                     }
                 }
+                runRound(1)
             }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + openDelay, execute: attempt)

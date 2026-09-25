@@ -7,6 +7,9 @@ import DesignSystem
 import MediaPlayback
 import UIKit
 import Upload
+#if DEBUG
+import ChatInterface
+#endif
 
 /// Root coordinator. Owns the window and the top-level state machine:
 /// launching → auth → main. It is the single observer that turns
@@ -202,12 +205,19 @@ final class AppCoordinator: Coordinator {
                 container.router.route(to: .profile(ProfileID(arguments[index + 1]), stub: nil))
             }
             // `-open-profile-delayed <id> [seconds]` fires the same route
-            // after a delay (default ~3s — after `-select-tab 1` has pushed
-            // the feed), so a profile ABOVE the feed's custom nav delegate
-            // is reachable without driving a cell tap (the swipe-back-over-
-            // feed regression surface). The optional seconds lets the route
-            // land after slower setups — e.g. `-snap-comments-demo`'s
-            // engagement, for the engaged-outbound-push handoff surface.
+            // after a delay (default ~3s), so a profile ABOVE a pushed feed's
+            // custom nav delegate is reachable without driving a cell tap (the
+            // swipe-back-over-feed regression surface). The optional seconds
+            // lets the route land after slower setups — e.g.
+            // `-snap-comments-demo`'s engagement, for the engaged-outbound-push
+            // handoff surface.
+            //
+            // ⚠️ `-select-tab 1` NO LONGER PUSHES A FEED. It indexes
+            // `AppTab.allCases` (App/Shell/AppNavigating.swift), where 1 is the
+            // For You TAB — it selects a root and pushes nothing. The default
+            // 3 s used to be pegged to that push; now it is only a delay, and
+            // a feed to land above has to be opened by something else (e.g.
+            // a `-snap-*` / `-maps-open-*` hook), timed with the seconds knob.
             if let index = arguments.firstIndex(of: "-open-profile-delayed"), index + 1 < arguments.count {
                 let id = ProfileID(arguments[index + 1])
                 let delay = (index + 2 < arguments.count ? Double(arguments[index + 2]) : nil) ?? 3.0
@@ -257,11 +267,42 @@ final class AppCoordinator: Coordinator {
             // after the Messages list has loaded — reproducing the tap-a-row
             // path (warm identity directory, header present during the push),
             // where the immediate variant above is a cold deep link.
+            //
+            // ⚠️ "LOADED" IS NOW CHECKED, NOT ASSUMED. At a fixed 2 s a slow
+            // boot or `-mock-latency` pushed the thread over a skeleton — the
+            // cold path this flag exists to AVOID — and the run read as the
+            // warm one. The 2 s stays as the earliest moment; the route then
+            // waits for the inbox to be the active stack's root, on screen
+            // with nothing pushed over it, with a list table showing rows —
+            // and prints GAVE UP if it never is (pair with `-open-messages`
+            // or `-select-tab 2`: from another tab there is no list to wait
+            // for, and the push would not be the tap-a-row path anyway).
             if let index = arguments.firstIndex(of: "-open-conversation-settled"), index + 1 < arguments.count {
                 let id = ConversationID(arguments[index + 1])
                 let router = container.router
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                    router.route(to: .conversation(id))
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak tabCoordinator] in
+                    QAWait.until("-open-conversation-settled \(id.rawValue): a loaded Messages list", {
+                        guard let stack = tabCoordinator?.activeNavigationController,
+                              let inbox = stack.viewControllers.first as? MessagesInboxCategorySelecting,
+                              stack.topViewController === inbox,
+                              stack.transitionCoordinator == nil,
+                              let window = inbox.viewIfLoaded?.window else { return false }
+                        // A list surface with rows actually on screen: its
+                        // table is shown only once the skeleton is swapped
+                        // for content, and the pager keeps its other pages
+                        // off the window's bounds.
+                        func hasVisibleRows(_ view: UIView) -> Bool {
+                            if let table = view as? UITableView, !table.isHidden,
+                               !table.visibleCells.isEmpty,
+                               table.convert(table.bounds, to: window).intersects(window.bounds) {
+                                return true
+                            }
+                            return view.subviews.contains { !$0.isHidden && hasVisibleRows($0) }
+                        }
+                        return hasVisibleRows(inbox.view)
+                    }) {
+                        router.route(to: .conversation(id))
+                    }
                 }
             }
             if let index = arguments.firstIndex(of: "-message-user"), index + 1 < arguments.count {

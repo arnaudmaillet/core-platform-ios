@@ -330,13 +330,27 @@ final class ProfileGalleryPagerView: UIView {
     /// then never becomes true — the caller polled forever and kept re-applying
     /// the offset long after the run had moved on, overwriting the reveal it was
     /// there to observe. Clamped is a finished answer, not a failed one.
+    ///
+    /// ⚠️ **BUT ONLY A CLAMP AGAINST LOADED CONTENT IS AN ANSWER.** The old
+    /// test was `after == before`, which a page still in its skeleton — or
+    /// not laid out yet, clamping to zero — satisfies on the very first call:
+    /// the poll stopped at once and reported success from the top of the page,
+    /// the exact false pass the polling was added to prevent. It also compared
+    /// the RAW content offset against a TRAVELLED one, which differ by the
+    /// whole header inset, so "reached the target" could never be true and the
+    /// clamp branch was the only exit there was. Now: reached the requested
+    /// travel, or held at the page's end (the clamp in `setVerticalOffset`
+    /// measures that end after laying out) with real content in place, a
+    /// non-zero travel and nothing gained since the last try.
     func debugSetVerticalOffset(_ offset: CGFloat) -> Bool {
         guard pages.indices.contains(activeIndex) else { return false }
         let page = pages[activeIndex]
-        let before = page.currentVerticalOffset
+        let before = page.verticalOffset
         page.setVerticalOffset(offset)
-        let after = page.currentVerticalOffset
-        return abs(after - offset) < 1 || abs(after - before) < 1
+        let after = page.verticalOffset
+        if abs(after - offset) < 1 { return true }
+        let clampedAtEnd = after < offset && abs(after - before) < 1
+        return clampedAtEnd && !page.showsSkeleton && after > 0
     }
     #endif
 

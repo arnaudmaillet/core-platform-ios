@@ -4,6 +4,7 @@ import ProfileInterface
 import UIKit
 import Upload
 #if DEBUG
+import DesignSystem
 #endif
 
 /// The authenticated app shell: a `UITabBarController` composed of one child
@@ -292,10 +293,26 @@ final class MainTabCoordinator: NSObject, Coordinator {
         // destinations on launch through the menu's own code path, minus the
         // menu. Deferred ~0.6s rather than a tick: a PRESENTATION from a
         // controller that is not in a window yet is refused outright.
+        //
+        // ⚠️ AND THEN GATED ON THAT STATE, because 0.6 s was only a guess at
+        // it. On a slow boot the shell was still off-window (or the root swap
+        // still running), UIKit refused the presentation, and `openCreate`'s
+        // own `presentedViewController` guard turns away a second one — both
+        // silently. The 0.6 s stays as the earliest moment, keeping the
+        // composer's presentation off the launch's own turns; the hook then
+        // waits for a shell in a window with nothing presented and no
+        // transition running, and says GAVE UP if that never comes.
         if let index = arguments.firstIndex(of: "-open-create"), index + 1 < arguments.count,
            let destination = CreateTabItem.Destination(rawValue: arguments[index + 1]) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
-                self?.openCreate(destination)
+                QAWait.until("-open-create \(destination.rawValue)", { [weak self] in
+                    guard let self else { return true }
+                    return tabBarController.viewIfLoaded?.window != nil
+                        && tabBarController.presentedViewController == nil
+                        && tabBarController.transitionCoordinator == nil
+                }) { [weak self] in
+                    self?.openCreate(destination)
+                }
             }
         }
         // `-open-create-menu`: the "+" MENU itself, through the very path a
@@ -406,17 +423,53 @@ final class MainTabCoordinator: NSObject, Coordinator {
         // `-snap-auto-dismiss`, which pops it ~2.5s after each landing): the
         // second push must resume where the first left off — the retained-
         // timeline continuity the sim can't demonstrate by tapping.
+        //
+        // ⚠️ EACH STEP WAITS FOR THE ONE BEFORE IT, not for a clock. The second
+        // push used to fire at a fixed 7 s, which only worked while the first
+        // landing + the 2.5 s auto-dismiss + the pop all fit inside it: under
+        // Slow Animations (or without `-snap-auto-dismiss`) it landed on a
+        // feed still on top — a no-op push, and a "continuity" run that
+        // re-pushed nothing. Now: push once the stack is at rest, wait for
+        // the landing, wait for the pop, push again; GAVE UP at any step
+        // that never comes. The 1 s before the first push is the opening beat.
         if arguments.contains("-feed-repush-demo") {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in self?.openFeed() }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 7.0) { [weak self] in self?.openFeed() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                self?.debugPushFeedWhenResting("-feed-repush-demo first push") { [weak self] stack, feed in
+                    QAWait.until(
+                        "-feed-repush-demo pop of the first push (pair with -snap-auto-dismiss)",
+                        timeout: 30, { [weak stack] in
+                            guard let stack else { return true }
+                            return stack.transitionCoordinator == nil
+                                && !stack.viewControllers.contains(feed)
+                        }
+                    ) { [weak self] in
+                        self?.debugPushFeedWhenResting("-feed-repush-demo second push") { _, _ in }
+                    }
+                }
+            }
         }
         // `-feed-swipe-demo` pushes the feed, then drives the swipe-to-pop
         // twice: below the completion threshold (springs back), then past it
         // (pops home, bar returns) — the sim can't inject pans.
+        //
+        // ⚠️ The swipe used to fire at a fixed 3 s, 2 s after a push that
+        // under Slow Animations had not landed yet — a swipe into a push in
+        // flight. It now waits for the landing, then holds 1.5 s on the landed
+        // feed (pacing, so a recording shows it at rest before the grab), and
+        // swipes only if the feed is still on top at rest.
         if arguments.contains("-feed-swipe-demo") {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in self?.openFeed() }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
-                self?.feedFlow?.debugScriptedSwipe()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                self?.debugPushFeedWhenResting("-feed-swipe-demo") { stack, feed in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self, weak stack] in
+                        guard let self, let stack,
+                              stack.topViewController === feed,
+                              stack.transitionCoordinator == nil else {
+                            QAWait.fail("-feed-swipe-demo", "the feed was not on top at rest when the swipe was due")
+                            return
+                        }
+                        feedFlow.debugScriptedSwipe()
+                    }
+                }
             }
         }
         #endif
@@ -695,3 +748,46 @@ extension MainTabCoordinator: AppNavigating {
     }
 }
 
+
+#if DEBUG
+// MARK: - QA hooks: waiting on the stack, not on a clock
+
+extension MainTabCoordinator {
+    /// The selected tab's stack, when the shell is on screen with nothing
+    /// presented over it and no push or pop running on it — the only state a
+    /// scripted push can be trusted to land from.
+    fileprivate var debugRestingStack: UINavigationController? {
+        guard tabBarController.viewIfLoaded?.window != nil,
+              tabBarController.presentedViewController == nil,
+              let stack = tabBarController.selectedViewController as? UINavigationController,
+              stack.transitionCoordinator == nil else { return nil }
+        return stack
+    }
+
+    /// Pushes the timeline (`openFeed`, the bar's own path) once the selected
+    /// stack is at rest, then hands `landed` that stack and the feed once the
+    /// push has FINISHED — the stack deeper than it was and no transition
+    /// running. Each wait prints a `[qa] GAVE UP` line if it never comes, so
+    /// a demo that did not push, or whose push never landed, says so.
+    fileprivate func debugPushFeedWhenResting(
+        _ label: String,
+        landed: @escaping @MainActor (UINavigationController, UIViewController) -> Void
+    ) {
+        QAWait.until("\(label): a resting stack to push on", { [weak self] in
+            guard let self else { return true }
+            return debugRestingStack != nil
+        }) { [weak self] in
+            guard let self, let stack = debugRestingStack else { return }
+            let depth = stack.viewControllers.count
+            openFeed()
+            QAWait.until("\(label): the push landing", { [weak stack] in
+                guard let stack else { return true }
+                return stack.transitionCoordinator == nil && stack.viewControllers.count > depth
+            }) { [weak stack] in
+                guard let stack, let feed = stack.topViewController else { return }
+                landed(stack, feed)
+            }
+        }
+    }
+}
+#endif
