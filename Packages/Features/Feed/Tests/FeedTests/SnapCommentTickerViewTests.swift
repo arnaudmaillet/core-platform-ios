@@ -5,10 +5,19 @@ import UIKit
 @MainActor
 struct SnapCommentTickerViewTests {
     private let bandWidth: CGFloat = 400
+    /// The band lays no train outside a window (a flight on a layer in no
+    /// render tree completes at once and recycles its bubble), so every
+    /// ticker under test is hosted, the way the page hosts it.
+    private let window: UIWindow = {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 100))
+        window.isHidden = false
+        return window
+    }()
 
-    private func makeTicker(itemCount: Int = 12) -> SnapCommentTickerView {
+    private func makeTicker(itemCount: Int = 12, hosted: Bool = true) -> SnapCommentTickerView {
         let ticker = SnapCommentTickerView(frame: CGRect(x: 0, y: 0, width: bandWidth, height: 69))
         ticker.setComments((0..<itemCount).map { TickerCommentModel(id: "r\($0)", text: "GG 🔥 \($0)") })
+        if hosted { window.addSubview(ticker) }
         return ticker
     }
 
@@ -30,6 +39,35 @@ struct SnapCommentTickerViewTests {
         let labels = bubbleViews(ticker)
         #expect(labels.count >= SnapCommentTickerView.laneCount)
         #expect(labels.allSatisfy { $0.layer.animation(forKey: "flight") != nil })
+    }
+
+    /// A page can be configured and activated by the layout pass a
+    /// presentation triggers, before its collection is in any window. A
+    /// train laid then is nine bubbles whose flights completed at once — an
+    /// empty band with fresh spawns from the right (traced on a finger's
+    /// tap, 25 September 2026). So the band lays nothing until it has a
+    /// window, and lays the train the moment it gets one.
+    @Test func activationBeforeTheWindowLaysTheTrainOnArrival() {
+        let ticker = makeTicker(hosted: false)
+        ticker.setActive(true)
+        #expect(bubbleViews(ticker).isEmpty)
+
+        window.addSubview(ticker)
+        let labels = bubbleViews(ticker)
+        #expect(labels.count >= SnapCommentTickerView.laneCount)
+        #expect(labels.allSatisfy { $0.layer.animation(forKey: "flight") != nil })
+    }
+
+    /// Held for a flight, an active band with content lays nothing; the
+    /// release lays it, at the width the band then has.
+    @Test func aHeldBandLaysItsTrainAtTheRelease() {
+        let ticker = makeTicker()
+        ticker.setHeldForFlight(true)
+        ticker.setActive(true)
+        #expect(bubbleViews(ticker).isEmpty)
+
+        ticker.setHeldForFlight(false)
+        #expect(bubbleViews(ticker).count >= SnapCommentTickerView.laneCount)
     }
 
     @Test func deactivationClearsEveryBubble() {

@@ -3528,6 +3528,11 @@ final class SnapFeedViewController: UIViewController {
                 at: IndexPath(item: activate, section: 0)
             ) as? SnapFeedCell {
                 snapCell.defersPlaybackForFlight = defersPlaybackForStagingFlight
+                // The chrome's hold takes the same net, for the same reason:
+                // stamped on `activeSnapCell` alone it reached nobody, and
+                // the ticker laid its train unheld, off-window, mid-flight
+                // (see `willDisplay`).
+                if isAwaitingZoomPresentation { snapCell.setChromeHeldForFlight(true) }
             }
             lifecycleCell(at: activate)?.willBecomeActive()
             // The pages either side get ready NOW, at the settle, rather than
@@ -3858,6 +3863,16 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         // re-stated to every cell as it appears.
         (cell as? SnapFeedCell)?.setOwnsViewport(playbackOwner == indexPath.item)
         if lifecycle.activeIndex == indexPath.item {
+            // ⚠️ THE HOLD, TOO, IS STAMPED HERE — `zoomTransitionWillBegin`
+            // held `activeSnapCell`, and on a finger's tap that cell does not
+            // exist yet (traced 25 September 2026: `setActive Y … held=N
+            // window=N`, then a pre-fill of nine bubbles into a band that
+            // was not in any window). Unheld, the ticker laid its train
+            // during the flight, and the page landed on an empty band with
+            // bubbles arriving from the right and no fade. Only the page
+            // that will be active is held: a neighbour realised during the
+            // flight would never be released.
+            if isAwaitingZoomPresentation { (cell as? SnapFeedCell)?.setChromeHeldForFlight(true) }
             (cell as? SnapCellLifecycle)?.willBecomeActive()
         }
         // A text page's resting interface PRE-RENDERS on visibility (not
@@ -4791,6 +4806,9 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         isAwaitingZoomPresentation = true
         flightCarriesActivePlayer = flyingLivePlayer
         activeSnapCell?.defersPlaybackForFlight = defersPlaybackForStagingFlight
+        // Reaches a cell only when this screen is being re-presented over a
+        // page it already holds; the first present stamps both flags on the
+        // cell as it is realised (`apply` / `willDisplay`).
         activeSnapCell?.setChromeHeldForFlight(true)
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {

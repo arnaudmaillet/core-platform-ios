@@ -2676,13 +2676,15 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // The hold's opposite is not "visible", it is "whatever the page was
         // doing before it was covered".
         guard !isCommentsEngaged else { return }
-        UIView.animate(
-            withDuration: 0.26, delay: 0.02,
-            usingSpringWithDamping: 0.85, initialSpringVelocity: 0,
-            options: [.allowUserInteraction, .beginFromCurrentState]
-        ) {
-            self.chrome.alpha = 1
-        }
+        // ⚠️ NOT A FADE. The flight's replica carries this page's whole
+        // chrome — caption, rail, bar, header — fully drawn, so a chrome
+        // that fades in from zero when the replica goes is two frames of
+        // nothing and then a copy of what was there coming back: a flash
+        // (filmed 25 September 2026, the first time the hold reached a
+        // tapped page). What the replica did NOT carry enters on its own:
+        // the band through the ticker's release above, the pill here.
+        chrome.alpha = 1
+        chrome.replaySubtitleEntrance()
     }
 
     /// The page indicator's scrub, so the screen can make its dismissal yield.

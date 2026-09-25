@@ -829,6 +829,11 @@ final class SnapChromeView: UIView {
         commentTicker.replayEntrance()
     }
 
+    /// See `SnapSubtitleView.replayEntrance`.
+    func replaySubtitleEntrance() {
+        subtitleView.replayEntrance()
+    }
+
     func setMediaPageCount(_ count: Int, current: Int, clipPages: Set<Int> = []) {
         mediaPageBar.configure(count: count, current: current, clipPages: clipPages)
     }
