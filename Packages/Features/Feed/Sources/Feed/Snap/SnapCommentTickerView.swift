@@ -328,6 +328,7 @@ final class SnapCommentTickerView: UIView {
     func reset() {
         stopStream()
         isActive = false
+        isHeldForFlight = false // a hold nobody released must not ride a recycled cell
         queue = []
         laneQueues = Array(repeating: [], count: Self.laneCount)
         laneNextIndex = Array(repeating: 0, count: Self.laneCount)
@@ -361,6 +362,15 @@ final class SnapCommentTickerView: UIView {
     /// The band width the current train was pre-filled for.
     private var laidWidth: CGFloat = 0
 
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        // Content and activation can both precede the window (a cell
+        // configured and activated by the layout pass a presentation
+        // triggers, before the collection is on screen): the train is laid
+        // now, where its flights can run.
+        if window != nil { startIfNeeded(fadingIn: true) }
+    }
+
     // MARK: - Lane scheduling (steady conveyor)
 
     /// ⚠️ **NO PRE-FILL WHILE THE PAGE IS FLYING IN.** The pre-fill lays the
@@ -392,8 +402,15 @@ final class SnapCommentTickerView: UIView {
             print(String(format: "[ticker] %.3f startIfNeeded active=%@ mode=%@ queue=%d width=%.0f held=%@ window=%@ alpha=%.2f hidden=%@", CACurrentMediaTime(), isActive ? "Y" : "N", "\(mode)", queue.count, bounds.width, isHeldForFlight ? "Y" : "N", window != nil ? "Y" : "N", alpha, isHidden ? "Y" : "N"))
         }
         #endif
+        // ⚠️ NEVER OFF-WINDOW. A bubble's flight is a CA animation, and one
+        // added to a layer that is in no window is gone by the time the
+        // layer is: the model value rests at the exit, so the train laid
+        // here is nine bubbles already off the left edge (traced 25
+        // September 2026: `prefill … placed=4 … placed=5` at `window=N`, and
+        // a band that stayed empty until the first fresh spawn came in from
+        // the right). `didMoveToWindow` lays it once there is a window.
         guard isActive, mode == .parked, !queue.isEmpty, bounds.width > 0, !isHeldForFlight,
-              !UIAccessibility.isReduceMotionEnabled else { return }
+              window != nil, !UIAccessibility.isReduceMotionEnabled else { return }
         mode = .conveying
         laidWidth = bounds.width
         for lane in 0..<Self.laneCount {
