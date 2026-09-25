@@ -2183,8 +2183,24 @@ final class MediaEditorViewController: UIViewController {
     /// stopped for good. Measured in the test that found it. A couple of turns
     /// of the runloop is all it takes, and the guard is what stops a resume
     /// landing under a SECOND sheet opened straight after the first.
+    ///
+    /// ⚠️ **A DISMISSAL STILL IN FLIGHT IS WAITED FOR, NOT COUNTED IN TURNS.**
+    /// The video picker calls `dismiss(animated: true)` and answers "cancelled"
+    /// in the same breath, so the news arrives at the START of a ~0.35 s
+    /// slide-down — and two run-loop turns are microseconds. The retries ran out
+    /// under the sheet and the clip stayed stopped for good. A sheet that is
+    /// leaving hands the resume to its own transition's completion, which asks
+    /// again (the second-sheet guard still holds).
     func resumeAfterACover(retries: Int = 0) {
         guard !isCovered else {
+            if let leaving = presentedViewController, leaving.isBeingDismissed,
+               let coordinator = leaving.transitionCoordinator {
+                coordinator.animate(alongsideTransition: nil) { [weak self] context in
+                    guard !context.isCancelled else { return }
+                    self?.resumeAfterACover(retries: 2)
+                }
+                return
+            }
             guard retries > 0 else { return }
             DispatchQueue.main.async { [weak self] in self?.resumeAfterACover(retries: retries - 1) }
             return

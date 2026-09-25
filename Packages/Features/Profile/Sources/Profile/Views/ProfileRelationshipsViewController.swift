@@ -54,7 +54,9 @@ final class ProfileRelationshipsViewController: UIViewController {
     /// The native `.integratedButton` placement collapsed the whole leading group
     /// — back button, selector and all — into a `•••` on narrow bars, which is
     /// exactly what the inbox measured before it moved off that placement too.
-    private let searchField = TracedRelationshipsSearchField()
+    /// Internal, with `presentSearch`/`dismissSearch`, so tests can drive the
+    /// morph and read the caret it hides.
+    let searchField = TracedRelationshipsSearchField()
     private lazy var searchItem = UIBarButtonItem(
         image: UIImage(systemName: "magnifyingglass"),
         primaryAction: UIAction { [weak self] _ in self?.presentSearch() }
@@ -65,6 +67,12 @@ final class ProfileRelationshipsViewController: UIViewController {
     )
     private var restingRightItems: [UIBarButtonItem] = []
     private var isSearching = false
+    /// The caret's real colour while the morph hides it — see `presentSearch`.
+    /// Taken only when nothing is hidden, so a second morph can never save the
+    /// `.clear` of the first as the colour to come back to.
+    private var hiddenCaretTint: UIColor?
+    /// Bumped by every morph into the field: only the newest may show the caret.
+    private var caretMorph = 0
     /// The Cancel PILL's height, not the button's — see
     /// `NavigationBarMetrics.itemPlatterHeight`. This was 36 for the same
     /// reason the inbox's was, and looked short beside Cancel for the same
@@ -229,7 +237,7 @@ final class ProfileRelationshipsViewController: UIViewController {
     }
 
     /// Morphs this header into the field, exactly as the inbox does.
-    private func presentSearch() {
+    func presentSearch() {
         guard !isSearching else { return }
         isSearching = true
         #if DEBUG
@@ -250,8 +258,10 @@ final class ProfileRelationshipsViewController: UIViewController {
         // its destination width — so on the way there the caret rendered mid-field
         // and slid left as the layout resolved. Nothing else in the field moves;
         // this is the one part that had to wait.
-        let caretTint = searchField.tintColor
+        if hiddenCaretTint == nil { hiddenCaretTint = searchField.tintColor }
         searchField.tintColor = .clear
+        caretMorph += 1
+        let morph = caretMorph
         morphNavigationBar(duration: 0.3) {
             // ⚠️ The back button goes too, so the field has the full width and
             // this header reads exactly like the inbox's. Cancel is the way out
@@ -279,17 +289,30 @@ final class ProfileRelationshipsViewController: UIViewController {
             self.searchField.setNeedsLayout()
             self.searchField.layoutIfNeeded()
             self.searchField.becomeFirstResponder()
-        }
-        // Restored a beat after the crossfade ends, so it appears already in
-        // place rather than travelling to it.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.32) { [weak self] in
-            self?.searchField.tintColor = caretTint
+        } completion: { [weak self] _ in
+            // Restored when the crossfade ENDS, so it appears already in place
+            // rather than travelling to it.
+            //
+            // ⚠️ **ON THE MORPH'S OWN COMPLETION, NOT A GUESSED 0.32 s.** The
+            // timer outlived a Cancel tapped mid-morph (the dissolve allows
+            // touches): Search → Cancel → Search inside 0.32 s saved `.clear`
+            // as the colour to restore, and the caret was gone for the life of
+            // the screen. Only the newest morph, still searching, shows it.
+            guard let self, morph == self.caretMorph, self.isSearching else { return }
+            self.showCaret()
         }
     }
 
-    private func dismissSearch() {
+    private func showCaret() {
+        guard let tint = hiddenCaretTint else { return }
+        searchField.tintColor = tint
+        hiddenCaretTint = nil
+    }
+
+    func dismissSearch() {
         guard isSearching else { return }
         isSearching = false
+        showCaret()
         searchField.resignFirstResponder()
         searchField.text = nil
         applyQuery("")
