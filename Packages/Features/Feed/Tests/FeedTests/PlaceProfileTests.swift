@@ -34,11 +34,13 @@ struct PlaceProfileTests {
     private func makeProfile(
         following: ClusterGalleryFollowing? = nil,
         wallet: WalletStore? = nil,
-        posts: [GalleryPost] = []
+        posts: [GalleryPost] = [],
+        rank: PlaceRankBadge? = nil
     ) -> PlaceProfileViewController {
         PlaceProfileViewController(
             postIDs: posts.map(\.id),
             placeName: "Paris • City Cluster",
+            rank: rank,
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             videoPlayback: nil,
             following: following,
@@ -60,13 +62,51 @@ struct PlaceProfileTests {
         profile.viewDidLayoutSubviews()
     }
 
-    /// ⚠️ A FRACTION OF THE VIEWPORT, not a constant. The place leads with its
-    /// picture, and a fixed 220pt banner is a different share of the screen on
-    /// every device.
-    @Test func theBannerTakesSeventyPercentOfTheViewport() {
+    /// ⚠️ THE PROFILE POSTER'S GEOMETRY, NOT A SHARE OF THE SCREEN. It was 70%
+    /// of the viewport (612pt on this one) beside a profile whose poster gives
+    /// its picture a 200pt stage — two pages of one design reading as two
+    /// products. The name now stands where the profile's column starts: the
+    /// chrome plus `HeroBannerMetrics.posterStage`.
+    @Test func theNameStandsWhereTheProfilesColumnStarts() {
         let profile = makeProfile()
         laidOut(profile)
-        #expect(abs(profile.debugBannerHeight - 874 * 0.7) < 0.5)
+        let expected = profile.view.safeAreaInsets.top + HeroBannerMetrics.posterStage
+        #expect(abs(profile.debugNameFrame.minY - expected) < 1,
+                "name at \(profile.debugNameFrame.minY), the poster's column at \(expected)")
+        #expect(profile.debugBannerHeight < 874 * 0.6, "the banner is back to most of the screen")
+    }
+
+    /// The banner ends under the counters by the clearance, and nowhere else —
+    /// derived from its content, so Dynamic Type cannot put type off it.
+    @Test func theBannerEndsJustUnderTheCounters() {
+        let profile = makeProfile()
+        laidOut(profile)
+        #expect(abs(profile.debugIdentityClearance - (profile.debugBannerHeight - profile.debugMetricsFrame.maxY)) < 1)
+    }
+
+    /// On the profile's grid: the name on the column's leading edge, the
+    /// counters across the whole column.
+    @Test func theIdentityIsLaidOnTheProfilesColumn() {
+        let profile = makeProfile()
+        laidOut(profile)
+        #expect(abs(profile.debugNameFrame.minX - HeroBannerMetrics.identityInset) < 0.5)
+        #expect(abs(profile.debugMetricsFrame.minX - HeroBannerMetrics.identityInset) < 0.5)
+        #expect(abs(profile.debugMetricsFrame.maxX - (402 - HeroBannerMetrics.identityInset)) < 0.5)
+    }
+
+    /// "#3 City Rank" leads the counters when the place has a rank…
+    @Test func aRankedPlaceShowsItsRankFirst() {
+        let profile = makeProfile(rank: PlaceRankBadge(position: 3, label: "City Rank"))
+        laidOut(profile)
+        #expect(profile.debugRankColumn?.value == "#3")
+        #expect(profile.debugRankColumn?.caption == "City Rank")
+    }
+
+    /// …and a place with none (every place on the fleet today) draws no column.
+    @Test func anUnrankedPlaceDrawsNoRankColumn() {
+        let profile = makeProfile()
+        laidOut(profile)
+        #expect(profile.debugRankColumn == nil)
     }
 
     /// ⚠️ THE SELECTOR IS ON THE BANNER, NOT UNDER IT — bottoms level.
@@ -116,9 +156,8 @@ struct PlaceProfileTests {
     }
 
     /// The name and the counters are the place's identity, so they sit ON the
-    /// picture — centred, one under the other — rather than in a band beneath
-    /// it.
-    @Test func theNameAndCountersRideTheBannerCentred() {
+    /// picture, one under the other, rather than in a band beneath it.
+    @Test func theNameAndCountersRideTheBanner() {
         let profile = makeProfile()
         laidOut(profile)
         #expect(profile.debugIdentityRidesTheBanner)
@@ -361,26 +400,26 @@ struct PlaceProfileTests {
         ))
         profile.loadViewIfNeeded()
 
-        // The heart alone carries the state — no word rides beside it, so the
+        // The pin alone carries the state — no word rides beside it, so the
         // FILL is what a test reads and what a viewer sees.
         let item = try #require(profile.navigationItem.rightBarButtonItems?.first)
         #expect(item.title == nil, "a titled item would be charged its word against the bar")
-        #expect(item.image == UIImage(systemName: "heart"))
+        #expect(item.image == UIImage(systemName: "pin"))
         #expect(item.accessibilityLabel == "Follow this place")
 
         let action = try #require(item.primaryAction)
         action.performWithSender(nil, target: nil)
         #expect(followed, "the toggle reached the caller's store")
-        #expect(item.image == UIImage(systemName: "heart.fill"))
+        #expect(item.image == UIImage(systemName: "pin.fill"))
         #expect(item.accessibilityLabel == "Unfollow this place")
 
         action.performWithSender(nil, target: nil)
         #expect(!followed)
-        #expect(item.image == UIImage(systemName: "heart"))
+        #expect(item.image == UIImage(systemName: "pin"))
     }
 
     /// Each trailing item earns its place from a seam: no follow closure, no
-    /// heart; no wallet, no balance. An inert control would promise a feature
+    /// pin; no wallet, no balance. An inert control would promise a feature
     /// the caller cannot honor.
     @Test func trailingItemsAppearOnlyWithTheirSeams() {
         let bare = makeProfile(following: nil)
@@ -395,10 +434,10 @@ struct PlaceProfileTests {
     }
 
     /// The trailing pair, in the order the eye reads it: [points][♡]. Index 0
-    /// is the RIGHTMOST item, so the heart keeps the corner it has always had
+    /// is the RIGHTMOST item, so the pin keeps the corner it has always had
     /// and the balance sits inboard of it — the order the map already puts
     /// its coin inboard of the bell.
-    @Test func thePointsBalanceSitsInboardOfTheHeart() throws {
+    @Test func thePointsBalanceSitsInboardOfThePin() throws {
         let profile = makeProfile(
             following: ClusterGalleryFollowing(isFollowing: { false }, toggle: { true }),
             wallet: WalletStore(defaults: Self.makeWalletDefaults())
@@ -406,7 +445,7 @@ struct PlaceProfileTests {
         profile.loadViewIfNeeded()
         let items = try #require(profile.navigationItem.rightBarButtonItems)
         #expect(items.count == 2)
-        #expect(items[0].image == UIImage(systemName: "heart"), "the corner is the heart's")
+        #expect(items[0].image == UIImage(systemName: "pin"), "the corner is the pin's")
         #expect(items[1].customView is WalletBadgeButton)
         #expect(items[1].accessibilityLabel == "Points balance")
         // ⚠️ Each in its OWN bubble. Sharing the group's one platter is what

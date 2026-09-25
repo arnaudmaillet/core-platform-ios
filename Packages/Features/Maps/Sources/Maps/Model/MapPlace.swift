@@ -1,3 +1,4 @@
+import FeedInterface
 import Foundation
 
 /// A semantic place a pin belongs to — a city or a country. The active
@@ -40,12 +41,22 @@ public struct MapPlace: Sendable, Equatable, Hashable {
     /// its region is what a camera fit targets. Mock-filled today
     /// (`dev/issues/BACKEND_H3_BOUNDING_BOX.md`).
     public let h3Index: UInt64?
+    /// Where the place stands among places of its kind, 1-based — MOCK-FILLED
+    /// (`MapMockPlaces`); no wire carries a rank yet, so it is nil on the
+    /// fleet and the page draws no rank column.
+    public let rank: Int?
 
-    public init(id: String, name: String, kind: Kind, h3Index: UInt64? = nil) {
+    public init(id: String, name: String, kind: Kind, h3Index: UInt64? = nil, rank: Int? = nil) {
         self.id = id
         self.name = name
         self.kind = kind
         self.h3Index = h3Index
+        self.rank = rank
+    }
+
+    /// "#3 City Rank", as the page's first counter — nil without a rank.
+    public var rankBadge: PlaceRankBadge? {
+        rank.map { PlaceRankBadge(position: $0, label: "\(kind.rawValue) Rank") }
     }
 
     /// The gallery screen's title: "Paris • City Cluster".
