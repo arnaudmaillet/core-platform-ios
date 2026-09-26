@@ -263,6 +263,7 @@ final class SnapFeedViewController: UIViewController {
     private weak var ownAudibleSurface: VideoRenderView?
     private var isAudioYielded = false
     private let songPlayer = FeedSongPlayer()
+    private var coverSpinTimer: Timer?
     private var isForeground = true
     /// The inert page-chrome replica riding in the hero transition's flying
     /// card. Held weakly for the duration of a flight so a post that hydrates
@@ -3574,6 +3575,7 @@ final class SnapFeedViewController: UIViewController {
     private func refreshVisibility() {
         apply(lifecycle.setVisible(isOnScreen && isForeground))
         refreshAudibleSurface()
+        setCoverSpinWatch(isOnScreen && isForeground)
     }
 
     /// The page playback follows: the one covering most of the screen.
@@ -3762,8 +3764,17 @@ final class SnapFeedViewController: UIViewController {
         guard orderedIDs.indices.contains(index),
               let model = modelsByID[orderedIDs[index]] else { return }
         authorIdentityView.setAuthor(model, pipeline: imagePipeline)
+        // The cover is the SOUND's: its artwork, a note for a song that has
+        // none, and the post's own picture only for a sound with neither.
+        let postSound = sound(for: model)
+        let cover: SnapMediaAttributionView.Cover = switch (postSound?.artworkURL, postSound?.isOriginal) {
+        case (let artwork?, _): .artwork(artwork)
+        case (nil, false): .note
+        default: .post
+        }
         mediaAttributionView.setPost(
-            model, sound: soundLine(for: model).map { .sound($0) } ?? .none, pipeline: imagePipeline
+            model, sound: soundLine(for: model).map { .sound($0) } ?? .none, cover: cover,
+            pipeline: imagePipeline
         )
         // The bars float over the PAGE, so their text has to know what kind
         // of ground it is floating over. A media page is arbitrary and dark
@@ -3780,7 +3791,7 @@ final class SnapFeedViewController: UIViewController {
         refreshBookmarkGlyph(for: model.id)
         // The sound bubble is for posts that HAVE a sound: a clip, or a
         // collection with one. A photograph or a text page has nothing to mute.
-        soundItem.isHidden = sound(for: model) == nil
+        soundItem.isHidden = postSound == nil
     }
 
     // MARK: - Sound
@@ -3824,6 +3835,29 @@ final class SnapFeedViewController: UIViewController {
             song = sound(for: model)?.previewURL
         }
         songPlayer.play(song)
+    }
+
+    /// Turns the attribution's cover while the page's media plays — a clip
+    /// running, or a song — and stops it when it does not: a tap-to-pause, a
+    /// hold, the sound sheet covering the page, the screen leaving.
+    ///
+    /// ASKED rather than told: a clip pauses through half a dozen doors (the
+    /// viewer's tap, a hold, a sheet, a flight, a stall), and a quarter-second
+    /// look at the player is one rule where wiring every door would be six.
+    private func refreshCoverSpin() {
+        let playing = isOnScreen && ((activeSnapCell?.isClipAdvancing ?? false) || songPlayer.isPlaying)
+        mediaAttributionView.setSpinning(playing)
+    }
+
+    private func setCoverSpinWatch(_ on: Bool) {
+        coverSpinTimer?.invalidate()
+        coverSpinTimer = nil
+        if on {
+            coverSpinTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { self?.refreshCoverSpin() }
+            }
+        }
+        refreshCoverSpin()
     }
 
     private func toggleSound() {

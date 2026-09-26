@@ -125,13 +125,14 @@ final class SoundSheetHeaderView: UICollectionReusableView {
         expander.image = UIImage(systemName: "chevron.up")
         expander.preferredSymbolConfigurationForImage = .init(pointSize: 12, weight: .bold)
         expander.imagePadding = Spacing.sm
-        expander.contentInsets = .init(top: Spacing.sm, leading: 0, bottom: Spacing.sm, trailing: Spacing.sm)
+        expander.contentInsets = .init(top: Spacing.sm, leading: Spacing.sm, bottom: Spacing.sm, trailing: Spacing.sm)
         expander.baseForegroundColor = .secondaryLabel
         var title = AttributedString("Posts with this sound")
         title.font = UIFont.preferredFont(forTextStyle: .subheadline).withWeight(.semibold)
         expander.attributedTitle = title
         gridTitle.configuration = expander
-        gridTitle.contentHorizontalAlignment = .leading
+        // Centred: it is the sheet's hinge, not a column heading.
+        gridTitle.contentHorizontalAlignment = .center
         gridTitle.addAction(UIAction { [weak self] _ in self?.onToggleExpanded?() }, for: .primaryActionTriggered)
 
         let column = UIStackView(arrangedSubviews: [identity, actions, gridTitle])
@@ -180,48 +181,13 @@ final class SoundSheetHeaderView: UICollectionReusableView {
     func setPlaying(_ playing: Bool) {
         playButton.configuration?.image = UIImage(systemName: playing ? "pause.fill" : "play.fill")
         playButton.accessibilityLabel = playing ? "Pause sound" : "Play sound"
-        setSpinning(playing)
+        artwork.layer.setRecordSpinning(playing)
     }
 
     /// The chevron points where a tap goes: up to the grid, or back down.
     func setExpanded(_ expanded: Bool) {
         gridTitle.configuration?.image = UIImage(systemName: expanded ? "chevron.down" : "chevron.up")
         gridTitle.accessibilityHint = expanded ? "Shows less" : "Shows the posts"
-    }
-
-    /// The record turns while it plays — slowly, and it stops where it is.
-    private func setSpinning(_ spinning: Bool) {
-        let key = "sound.spin"
-        let layer = artwork.layer
-        if spinning {
-            guard layer.animation(forKey: key) == nil else {
-                resume(layer)
-                return
-            }
-            let spin = CABasicAnimation(keyPath: "transform.rotation.z")
-            spin.fromValue = 0
-            spin.toValue = CGFloat.pi * 2
-            spin.duration = 8
-            spin.repeatCount = .infinity
-            spin.isRemovedOnCompletion = false
-            layer.add(spin, forKey: key)
-            resume(layer)
-        } else if layer.animation(forKey: key) != nil, layer.speed != 0 {
-            // Paused in place rather than removed: the record stops where it
-            // is, and a second play turns it on from there.
-            let paused = layer.convertTime(CACurrentMediaTime(), from: nil)
-            layer.speed = 0
-            layer.timeOffset = paused
-        }
-    }
-
-    private func resume(_ layer: CALayer) {
-        guard layer.speed == 0 else { return }
-        let paused = layer.timeOffset
-        layer.speed = 1
-        layer.timeOffset = 0
-        layer.beginTime = 0
-        layer.beginTime = layer.convertTime(CACurrentMediaTime(), from: nil) - paused
     }
 
     func setMeta(_ meta: String) {

@@ -55,6 +55,7 @@ final class SnapMediaAttributionView: UIView {
     /// from "same page, better data".
     private var renderedModel: FeedItemDisplayModel?
     private var renderedSound: SoundCredit = .unresolved
+    private var renderedCover: Cover = .post
     private var renderedSoundLine: String?
     private var coverTask: Task<Void, Never>?
 
@@ -184,11 +185,28 @@ final class SnapMediaAttributionView: UIView {
         case none
     }
 
-    func setPost(_ model: FeedItemDisplayModel, sound: SoundCredit = .unresolved, pipeline: ImagePipeline) {
+    /// What the round cover shows.
+    enum Cover: Equatable {
+        /// The post's own picture — its thumbnail, or the author's avatar.
+        case post
+        /// The sound's artwork: the cover of the song or original sound.
+        case artwork(URL)
+        /// A sound with no artwork of its own: a note, never somebody's photo.
+        case note
+    }
+
+    func setPost(
+        _ model: FeedItemDisplayModel, sound: SoundCredit = .unresolved, cover: Cover = .post,
+        pipeline: ImagePipeline
+    ) {
         let soundLine: String? = if case .sound(let line) = sound { line } else { nil }
-        guard model != renderedModel || sound != renderedSound else { return }
+        guard model != renderedModel || sound != renderedSound || cover != renderedCover else { return }
+        let isNewPost = model.id != renderedModel?.id
         renderedModel = model
         renderedSound = sound
+        renderedCover = cover
+        // A new post's record starts upright; the same one keeps its angle.
+        if isNewPost { resetSpin() }
         renderedSoundLine = soundLine
         let line = switch sound {
         case .sound(let line): line
@@ -211,18 +229,64 @@ final class SnapMediaAttributionView: UIView {
         }
 
         coverTask?.cancel()
-        // The media's thumbnail is the closest thing to cover art the model
-        // carries; text posts fall back to the author's avatar.
-        guard let url = model.thumbnailURL ?? model.avatarURL else { return }
+        let url: URL?
+        switch cover {
+        case .note:
+            coverView.image = Self.noteImage
+            return
+        case .artwork(let artwork):
+            url = artwork
+        case .post:
+            // The media's thumbnail, else the author's avatar.
+            url = model.thumbnailURL ?? model.avatarURL
+        }
+        guard let url else { return }
         let id = model.id
         coverTask = Task { [weak self] in
-            guard let image = try? await pipeline.image(for: url) else { return }
+            // ⚠️ A file is read as it is: the mock pipeline paints a colour for
+            // any URL it does not recognise, a file among them.
+            let image: UIImage? = if url.isFileURL {
+                await Task.detached(priority: .userInitiated) {
+                    UIImage(contentsOfFile: url.path)?.preparingForDisplay()
+                }.value
+            } else {
+                try? await pipeline.image(for: url)
+            }
+            guard let image else { return }
             guard let self, self.postID == id else { return }
             UIView.transition(with: self.coverView, duration: 0.15, options: [.transitionCrossDissolve]) {
                 self.coverView.image = image
             }
         }
     }
+
+    /// Turns the cover like a record while the post's media plays, and stops
+    /// it where it is when it does not.
+    func setSpinning(_ spinning: Bool) {
+        coverView.layer.setRecordSpinning(spinning)
+    }
+
+    private func resetSpin() {
+        coverView.layer.removeAllAnimations()
+        coverView.layer.speed = 1
+        coverView.layer.timeOffset = 0
+        coverView.layer.beginTime = 0
+    }
+
+    /// A white note on the cover's own dark ground.
+    private static let noteImage: UIImage = {
+        let side: CGFloat = 64
+        return UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).image { context in
+            UIColor.darkGray.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: side, height: side))
+            let glyph = UIImage(systemName: "music.note")?
+                .withConfiguration(UIImage.SymbolConfiguration(pointSize: 26, weight: .semibold))
+                .withTintColor(.white, renderingMode: .alwaysOriginal)
+            if let glyph {
+                glyph.draw(at: CGPoint(x: (side - glyph.size.width) / 2, y: (side - glyph.size.height) / 2))
+            }
+        }
+    }()
 
     /// Content changes resize the item (content-sized by design); glide the
     /// bar's re-measure instead of letting it snap — the toolbar counterpart
