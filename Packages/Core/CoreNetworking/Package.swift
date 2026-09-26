@@ -38,7 +38,11 @@ let package = Package(
                 .product(name: "MediaCore", package: "MediaCore"),
                 .product(name: "Connect", package: "connect-swift"),
                 .product(name: "SwiftProtobuf", package: "swift-protobuf")
-            ]
+            ],
+            // The real clips and sounds the mock corpus plays (see
+            // `MockClipCatalog`). A folder reference, so the manifest keeps
+            // its file names.
+            resources: [.copy("Resources/MockClips")]
         ),
         .testTarget(
             name: "CoreNetworkingTests",

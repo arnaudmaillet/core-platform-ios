@@ -34,13 +34,23 @@ public enum VideoSynthesisError: Error, Equatable {
 public struct PlaceholderVideoFetcher: VideoSource {
     private let durationSeconds: Double
     private let framesPerSecond: Int32
+    private let bundledClip: (@Sendable (URL) -> URL?)?
 
-    public init(durationSeconds: Double = 2.5, framesPerSecond: Int32 = 30) {
+    /// - Parameter bundledClip: the real file behind a `mock://` URL, when the
+    ///   app ships one (the mock corpus's clips, with sound). Asked before
+    ///   anything is synthesized; nil keeps every `mock://` synthetic.
+    public init(
+        durationSeconds: Double = 2.5,
+        framesPerSecond: Int32 = 30,
+        bundledClip: (@Sendable (URL) -> URL?)? = nil
+    ) {
         self.durationSeconds = durationSeconds
         self.framesPerSecond = framesPerSecond
+        self.bundledClip = bundledClip
     }
 
     public func playableURL(for url: URL) async throws -> URL {
+        if let file = bundledClip?(url) { return file }
         // A local file (e.g. a just-picked/exported clip in the optimistic
         // compose insert) is already playable — play the real video, don't
         // synthesize over it.

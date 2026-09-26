@@ -8,7 +8,15 @@ network and no decoder — see `AnimatedIconArt`, `PinCardView.setPreviewSheet`.
 Ids are `<clip>-<segment>`; `MockMediaFixtures.bakedClip(for:)` maps a fixture to
 its `<clip>` and returns nil for the ones that have no sheet.
 
-## Re-baking
+## The mock clips' sheets (`clip-NN-0`)
+
+One sheet per real clip of the mock corpus, baked by
+`Scripts/import-mock-clips.py` together with the clips themselves — never by
+hand. One segment each: the clip's opening, which is also the poster the feed
+shows (`MockMediaFixtures.bakedClip(for:)` names the clip, `openingSegment`
+finds its `-0`).
+
+## Re-baking the film sheets
 
 The sources are the mock fixtures themselves (`MockMediaFixtures`), downloaded
 first — ⚠️ AVFoundation refuses REMOTE assets here (-11800), so bake local files:
@@ -40,7 +48,8 @@ media with. It did not always: until 94db33a it stretched, and every sheet was
 
 ## Cost
 
-12 sheets, 172pt cells, 24 frames each, ~2.5 MB in the bundle. That is the whole
+12 film sheets (~2.5 MB) + 53 clip sheets (~10.8 MB), 172pt cells, 24 frames
+each. That is the whole
 budget: sprite sheets at this size were measured against the alternatives in
 [[animated-map-icons]] (9 MB decomposed vs 217 MB projected for full sheets at
 128 icons), and the map's marker count is bounded by clustering to ~19.
