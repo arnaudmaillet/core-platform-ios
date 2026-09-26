@@ -29,7 +29,6 @@ final class ConversationListViewController: UIViewController {
         table.showsHorizontalScrollIndicator = false
         return table
     }()
-    private let refreshControl = UIRefreshControl()
     private let skeletonView = ConversationListSkeletonView()
     private let statusView = InboxStatusView()
 
@@ -203,8 +202,11 @@ final class ConversationListViewController: UIViewController {
         tableView.estimatedRowHeight = 72
         tableView.pin(to: view)
 
-        refreshControl.addAction(UIAction { [weak self] _ in self?.viewModel.refresh() }, for: .valueChanged)
-        tableView.refreshControl = refreshControl
+        // ⚠️ NO REFRESH CONTROL. Pulling this list down opens search now —
+        // see `InboxPullToSearch`, which the inbox container attaches to
+        // whichever page is in front. Freshness does not depend on a pull:
+        // the list reloads on every appearance (`viewWillAppear`) and every
+        // time this page becomes active (`surfaceDidBecomeActive`).
 
         adapter = ConversationListTableAdapter(tableView: tableView) {
             [weak self] tableView, indexPath, id in
@@ -249,7 +251,6 @@ final class ConversationListViewController: UIViewController {
             tableView.isHidden = true
             statusView.isHidden = true
         case .content(let sections):
-            refreshControl.endRefreshing()
             statusView.isHidden = true
             let models = sections.all
             // Rows whose content changed without moving. Applied straight to
@@ -281,7 +282,6 @@ final class ConversationListViewController: UIViewController {
             hasRenderedContent = true
             revealContent()
         case .empty:
-            refreshControl.endRefreshing()
             skeletonView.isHidden = true
             tableView.isHidden = true
             statusView.configure(
@@ -291,7 +291,6 @@ final class ConversationListViewController: UIViewController {
             )
             statusView.isHidden = false
         case .failed(let message):
-            refreshControl.endRefreshing()
             skeletonView.isHidden = true
             tableView.isHidden = true
             statusView.configure(symbol: "exclamationmark.triangle", title: "Something went wrong", message: message)
