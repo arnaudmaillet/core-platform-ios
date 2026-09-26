@@ -40,11 +40,13 @@ public struct PostSound: Sendable, Equatable, Identifiable {
     public var isOriginal: Bool { title == nil }
 }
 
-/// Answers which sound a clip is set to, and which posts use it.
+/// Answers which sound a post is set to, and which posts use it.
 public protocol PostSoundProviding: Sendable {
-    /// The sound under the clip at `videoURL`; nil when this provider does not
-    /// know it (the feed then treats it as the clip's original sound).
-    func sound(forVideo videoURL: URL) -> PostSound?
+    /// The sound `postID` plays: under its clip at `clip` when it shows one,
+    /// or the song a photograph, a collection or a text post is set to. Nil
+    /// when this provider does not know one — for a clip, the feed then treats
+    /// it as the clip's original sound; for anything else, the post has none.
+    func sound(forPost postID: PostID, clip: URL?) -> PostSound?
     /// The posts set to `sound`, most relevant first — the sound page's grid.
     func postIDs(using sound: PostSound) -> [PostID]
 }

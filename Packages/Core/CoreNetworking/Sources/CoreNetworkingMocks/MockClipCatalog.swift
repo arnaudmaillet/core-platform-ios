@@ -64,6 +64,21 @@ public struct MockClipCatalog: Sendable {
         return clips.first { $0.id == id }
     }
 
+    /// The clip named `id`.
+    public func clip(id: String) -> Clip? {
+        clips.first { $0.id == id }
+    }
+
+    /// The bundled full sound of the clip named `id`.
+    public func soundFileURL(clipID id: String) -> URL? {
+        file(named: "\(id)-sound.m4a")
+    }
+
+    /// The poster of the clip named `id`.
+    public func posterFileURL(clipID id: String) -> URL? {
+        file(named: "\(id).jpg")
+    }
+
     /// The bundled video file behind a clip URL.
     public func fileURL(forVideo url: URL) -> URL? {
         clip(for: url).flatMap { file(named: "\($0.id).mp4") }

@@ -18,7 +18,9 @@ struct SoundSheetTests {
             authorHandle: "ava",
             fallbackArtworkURL: nil,
             tiles: (0..<tiles).map {
-                SoundSheetViewController.Tile(postID: PostID("p\($0)"), thumbnailURL: nil, isCurrent: $0 == 0)
+                SoundSheetViewController.Tile(
+                    postID: PostID("p\($0)"), thumbnailURL: nil, caption: nil, isCurrent: $0 == 0
+                )
             },
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
         )
@@ -32,9 +34,9 @@ struct SoundSheetTests {
         #expect(presentation.prefersGrabberVisible)
     }
 
-    /// ⚠️ FROM LARGE, DOWN MEANS CLOSED: reaching large leaves only large, so
-    /// UIKit has no collapsed detent to stop at on the way down.
-    @Test func reachingLargeLeavesOnlyLargeAndCoversTheClip() throws {
+    /// Large covers the clip behind; coming back down to collapsed gives it
+    /// back — and collapsed is still there to come back to.
+    @Test func largeCoversAndCollapsedGivesTheClipBack() throws {
         let controller = sheet()
         let presentation = try #require(controller.sheetPresentationController)
         var covered: [Bool] = []
@@ -42,9 +44,12 @@ struct SoundSheetTests {
 
         presentation.selectedDetentIdentifier = .large
         controller.sheetPresentationControllerDidChangeSelectedDetentIdentifier(presentation)
-
-        #expect(presentation.detents.map(\.identifier) == [.large])
         #expect(covered == [true], "the clip behind did not pause at large")
+        #expect(presentation.detents.count == 2, "large must keep collapsed to come back to")
+
+        presentation.selectedDetentIdentifier = presentation.detents.first?.identifier
+        controller.sheetPresentationControllerDidChangeSelectedDetentIdentifier(presentation)
+        #expect(covered == [true, false], "back at collapsed, the clip did not play again")
     }
 
     /// The collapsed detent leaves the clip playing.
@@ -60,8 +65,8 @@ struct SoundSheetTests {
     }
 
     @Test func theMetaLineIsDurationAndCount() {
-        #expect(SoundSheetViewController.meta(duration: 30, videos: 1) == "0:30 · 1 video")
-        #expect(SoundSheetViewController.meta(duration: 75.4, videos: 3) == "1:15 · 3 videos")
-        #expect(SoundSheetViewController.meta(duration: nil, videos: 2) == "2 videos")
+        #expect(SoundSheetViewController.meta(duration: 30, posts: 1) == "0:30 · 1 post")
+        #expect(SoundSheetViewController.meta(duration: 75.4, posts: 3) == "1:15 · 3 posts")
+        #expect(SoundSheetViewController.meta(duration: nil, posts: 2) == "2 posts")
     }
 }

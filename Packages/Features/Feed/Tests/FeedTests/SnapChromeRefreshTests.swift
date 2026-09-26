@@ -99,6 +99,28 @@ struct SnapChromeRefreshTests {
         #expect(labels(in: pill).contains("Original sound · @you"))
     }
 
+    /// A post that plays nothing SAYS so, rather than showing its meta line
+    /// where a sound would be.
+    @Test func aPostWithNoSoundReadsNoAudio() {
+        let pill = SnapMediaAttributionView()
+        pill.setPost(model(author: "Demo Viewer", meta: "@you · 75d"), sound: .none, pipeline: pipeline)
+
+        #expect(labels(in: pill).contains("No audio"))
+        #expect(!labels(in: pill).contains("@you · 75d"))
+    }
+
+    /// A sound's own line replaces the derived one — a photograph or a text
+    /// post set to a song names the song.
+    @Test func aPostSetToASongNamesIt() {
+        let pill = SnapMediaAttributionView()
+        pill.setPost(
+            model(author: "Demo Viewer", meta: "@you · 75d"),
+            sound: .sound("Haru Haru · BIGBANG"), pipeline: pipeline
+        )
+
+        #expect(labels(in: pill).contains("Haru Haru · BIGBANG"))
+    }
+
     // MARK: - The author capsule
 
     @Test func theAuthorCapsuleFillsInWhenTheRealEntryLands() {
