@@ -34,9 +34,9 @@ struct SoundSheetTests {
         #expect(presentation.prefersGrabberVisible)
     }
 
-    /// ⚠️ FROM LARGE, DOWN MEANS CLOSED: reaching large leaves only large, so
-    /// UIKit has no collapsed detent to stop at on the way down.
-    @Test func reachingLargeLeavesOnlyLargeAndCoversTheClip() throws {
+    /// Large covers the clip behind; coming back down to collapsed gives it
+    /// back — and collapsed is still there to come back to.
+    @Test func largeCoversAndCollapsedGivesTheClipBack() throws {
         let controller = sheet()
         let presentation = try #require(controller.sheetPresentationController)
         var covered: [Bool] = []
@@ -44,9 +44,12 @@ struct SoundSheetTests {
 
         presentation.selectedDetentIdentifier = .large
         controller.sheetPresentationControllerDidChangeSelectedDetentIdentifier(presentation)
-
-        #expect(presentation.detents.map(\.identifier) == [.large])
         #expect(covered == [true], "the clip behind did not pause at large")
+        #expect(presentation.detents.count == 2, "large must keep collapsed to come back to")
+
+        presentation.selectedDetentIdentifier = presentation.detents.first?.identifier
+        controller.sheetPresentationControllerDidChangeSelectedDetentIdentifier(presentation)
+        #expect(covered == [true, false], "back at collapsed, the clip did not play again")
     }
 
     /// The collapsed detent leaves the clip playing.
