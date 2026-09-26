@@ -564,7 +564,7 @@ final class WalletClaimViewController: UIViewController {
     /// ⚠️ **OVER THE SHEET, NOT INSIDE IT.** The feed flies with a navigation
     /// push, and a sheet's own stack would keep the feed in the sheet's shape.
     /// So a clear, full-screen stack is presented over the sheet without
-    /// animation (`StakeFeedHost`), the feed is pushed onto IT, and the flight
+    /// animation (`OverSheetFeedHost`), the feed is pushed onto IT, and the flight
     /// measures the row through the clear host — the sheet stays visible
     /// underneath for the whole trip. The host dismisses itself, unanimated,
     /// once the feed has flown home.
@@ -584,13 +584,7 @@ final class WalletClaimViewController: UIViewController {
         let stream = Array(order[start...].compactMap { entries[PostID($0)] }.prefix(Self.feedWindow))
         let origin = heroOrigin(for: post, stakeID: id, stream: stream)
 
-        let host = StakeFeedHost()
-        let stack = UINavigationController(rootViewController: host)
-        stack.setNavigationBarHidden(true, animated: false)
-        stack.modalPresentationStyle = .overFullScreen
-        stack.view.backgroundColor = .clear
-        present(stack, animated: false) { [weak host] in
-            guard let host else { return }
+        OverSheetFeedHost.present(over: self) { host in
             openFeedHero(stream.map(\.id), host, origin)
         }
     }
@@ -727,32 +721,6 @@ extension WalletClaimViewController: UICollectionViewDelegate {
         collectionView.deselectItem(at: indexPath, animated: false)
         guard case .stake(let id) = dataSource.itemIdentifier(for: indexPath) else { return }
         openFeed(fromStake: id)
-    }
-}
-
-/// The clear root of the stack a stake's feed is pushed onto, presented over
-/// the wallet sheet (`WalletClaimViewController.openFeed`). It draws nothing
-/// — the sheet stays visible through it for the flight both ways — and takes
-/// the stack away, unanimated, once the feed has been popped back to it.
-private final class StakeFeedHost: UIViewController {
-    private var hasShownFeed = false
-
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        view.backgroundColor = .clear
-    }
-
-    override func viewWillDisappear(_ animated: Bool) {
-        super.viewWillDisappear(animated)
-        // Covered by the feed's push.
-        if navigationController?.topViewController !== self { hasShownFeed = true }
-    }
-
-    override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
-        // Back on top after the feed: the trip is over.
-        guard hasShownFeed else { return }
-        navigationController?.presentingViewController?.dismiss(animated: false)
     }
 }
 

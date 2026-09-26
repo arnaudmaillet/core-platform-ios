@@ -61,8 +61,18 @@ final class SoundSheetTileCell: UICollectionViewCell {
 
     override func prepareForReuse() {
         super.prepareForReuse()
+        contentView.alpha = 1
         loading?.cancel()
         imageView.image = nil
+    }
+
+    /// The picture on the tile, for the hero to take off with.
+    var cover: UIImage? { imageView.image }
+
+    /// Hides the tile while its post is in the air or open, so the card and
+    /// the tile are never both on screen.
+    func setConcealed(_ concealed: Bool) {
+        contentView.alpha = concealed ? 0 : 1
     }
 
     func configure(_ tile: SoundSheetViewController.Tile, pipeline: ImagePipeline) {
