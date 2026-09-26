@@ -34,13 +34,38 @@ public final class PostMetricLabel: UIView {
     ///   marks, and — the reason this appeared — it also made a card's counter
     ///   chips disagree with the band's control pill, which is glyph-only and
     ///   secondary: same capsule, same height, two different inks.
+    ///
+    /// - Parameter glyphPointSize: draws the glyph at this size instead of
+    ///   the text's — for a counter that is also a CONTROL on a card, whose
+    ///   glyph has to stand level with the card's other controls (see below).
     public init(
         symbol: String, font: UIFont, color: UIColor,
-        iconColor: UIColor? = nil, shadowed: Bool = false
+        iconColor: UIColor? = nil, shadowed: Bool = false,
+        glyphPointSize: CGFloat? = nil
     ) {
         icon = UIImageView(image: UIImage(systemName: symbol))
         super.init(frame: .zero)
-        icon.preferredSymbolConfiguration = UIImage.SymbolConfiguration(font: font, scale: .small)
+        if let glyphPointSize {
+            // ⚠️ THE CONTROLS' GLYPH, NOT THE TEXT'S (26 September 2026:
+            // "the comments and like icons look smaller than bookmark and
+            // repost"). They were: `.small` at the footnote's size is ~9pt of
+            // ink, the lone glyphs beside them ~13pt. Same point size and
+            // weight as `PostActionPillView.glyphConfiguration` now.
+            //
+            // The image view is held to the TEXT's line height, centred, so a
+            // bigger glyph never grows the capsule: every pill on a card is
+            // one declared height (`PostMetaPillView.height`), and the ink
+            // simply uses the padding the text leaves.
+            icon.preferredSymbolConfiguration = UIImage.SymbolConfiguration(
+                pointSize: glyphPointSize, weight: .medium, scale: .medium
+            )
+            icon.contentMode = .center
+            icon.translatesAutoresizingMaskIntoConstraints = false
+            icon.heightAnchor.constraint(equalToConstant: ceil(font.lineHeight)).isActive = true
+            icon.setContentHuggingPriority(.required, for: .horizontal)
+        } else {
+            icon.preferredSymbolConfiguration = UIImage.SymbolConfiguration(font: font, scale: .small)
+        }
         icon.tintColor = iconColor ?? color
         icon.setContentCompressionResistancePriority(.required, for: .horizontal)
 
