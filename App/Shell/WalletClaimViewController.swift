@@ -2,7 +2,9 @@ import CoreModels
 import CoreNavigation
 import CoreStorage
 import DesignSystem
+import FeedInterface
 import MediaCore
+import PostGrid
 import UIKit
 
 /// The wallet sheet behind the balance badges (map, feed, profile): the two
@@ -42,11 +44,16 @@ import UIKit
 final class WalletClaimViewController: UIViewController {
     /// Resolves stake targets to their posts — the Feed feature's, handed in
     /// by the composition root (`AppContainer.makeWalletSheet`).
-    typealias PostLookup = @MainActor ([PostID]) async -> [PostID: FeedEntry]
+    typealias PostLookup = @MainActor ([PostID]) async -> [PostID: GalleryPost]
+    /// Opens the feed on `postIDs` from `presenter`, flying from `origin` —
+    /// the Feed feature's `presentSnapFeedHero`, the For You and Profile
+    /// cards' own way in.
+    typealias OpenFeedHero = @MainActor ([PostID], UIViewController, SnapFeedHeroOrigin) -> Void
 
     private let wallet: WalletStore
     private let lookUpPosts: PostLookup?
     private let imagePipeline: ImagePipeline?
+    private let openFeedHero: OpenFeedHero?
 
     private nonisolated enum Section: Hashable { case summary, active, settled }
     private nonisolated enum Item: Hashable {
@@ -70,7 +77,7 @@ final class WalletClaimViewController: UIViewController {
     private var snapshot: WalletSnapshot
     private var stakes: [WalletStake] = []
     private var stakesByID: [String: WalletStake] = [:]
-    private var entries: [PostID: FeedEntry] = [:]
+    private var entries: [PostID: GalleryPost] = [:]
     private var requestedPosts: Set<PostID> = []
 
     private var countdownTimer: Timer?
@@ -94,7 +101,13 @@ final class WalletClaimViewController: UIViewController {
     /// Room under the grabber before the summary starts.
     private static let topInset: CGFloat = Spacing.xl
 
-    init(wallet: WalletStore, lookUpPosts: PostLookup? = nil, imagePipeline: ImagePipeline? = nil) {
+    init(
+        wallet: WalletStore,
+        lookUpPosts: PostLookup? = nil,
+        imagePipeline: ImagePipeline? = nil,
+        openFeedHero: OpenFeedHero? = nil
+    ) {
+        self.openFeedHero = openFeedHero
         self.wallet = wallet
         self.lookUpPosts = lookUpPosts
         self.imagePipeline = imagePipeline
@@ -164,6 +177,26 @@ final class WalletClaimViewController: UIViewController {
                 sheet.animateChanges { sheet.selectedDetentIdentifier = .large }
                 // The delegate is not told about a programmatic change.
                 self?.forgetSmallDetentOnceLarge()
+            }
+        }
+        // `-wallet-open-stake <n>`: opens the n-th stake row's post (0-based,
+        // list order) once its post has loaded — the row's own tap path.
+        if let index = arguments.firstIndex(of: "-wallet-open-stake"), index + 1 < arguments.count,
+           let row = Int(arguments[index + 1]) {
+            let stakeID: @MainActor () -> String? = { [weak self] in
+                guard let self else { return nil }
+                let ids = dataSource.snapshot().itemIdentifiers.compactMap { item -> String? in
+                    if case .stake(let id) = item { id } else { nil }
+                }
+                return ids.indices.contains(row) ? ids[row] : nil
+            }
+            QAWait.until("-wallet-open-stake \(row)", { [weak self] in
+                guard let self else { return true }
+                guard landed(), let id = stakeID() else { return false }
+                return entries[PostID(id)] != nil && stakeCell(for: id) != nil
+            }) { [weak self] in
+                guard let id = stakeID() else { return }
+                self?.openFeed(fromStake: id)
             }
         }
         // `-wallet-sheet-scroll <pt>`: scrolls the list, so the collapsed
@@ -249,7 +282,7 @@ final class WalletClaimViewController: UIViewController {
         let stakeRegistration = UICollectionView.CellRegistration<WalletStakeCell, Item> { [weak self] cell, _, item in
             guard let self, case .stake(let id) = item, let stake = stakesByID[id] else { return }
             cell.configure(
-                stake: stake, entry: entries[PostID(id)], now: Date(), imagePipeline: imagePipeline
+                stake: stake, post: entries[PostID(id)], now: Date(), imagePipeline: imagePipeline
             )
         }
         let emptyRegistration = UICollectionView.CellRegistration<WalletEmptyStakesCell, Item> { _, _, _ in }
@@ -494,6 +527,118 @@ final class WalletClaimViewController: UIViewController {
         }
     }
 
+    // MARK: - Opening a stake
+
+    /// Opens the feed on the staked posts, from the tapped one on, flying out
+    /// of its row the way a For You or Profile card opens — the thumbnail for
+    /// a media post, the card itself (the text reveal) for a text post.
+    ///
+    /// ⚠️ **OVER THE SHEET, NOT INSIDE IT.** The feed flies with a navigation
+    /// push, and a sheet's own stack would keep the feed in the sheet's shape.
+    /// So a clear, full-screen stack is presented over the sheet without
+    /// animation (`StakeFeedHost`), the feed is pushed onto IT, and the flight
+    /// measures the row through the clear host — the sheet stays visible
+    /// underneath for the whole trip. The host dismisses itself, unanimated,
+    /// once the feed has flown home.
+    ///
+    /// The window is the list's own order from the tapped row down, so the
+    /// feed pages through the stakes exactly as the sheet lists them; and a
+    /// dismissal lands on the row that opened it, whatever the viewer paged
+    /// to — the product rule of every ranked list in the app — crossfading
+    /// when the page it closes is another post's.
+    private func openFeed(fromStake id: String) {
+        guard let openFeedHero, presentedViewController == nil,
+              let post = entries[PostID(id)] else { return }
+        let order = dataSource.snapshot().itemIdentifiers.compactMap { item -> String? in
+            if case .stake(let stake) = item { stake } else { nil }
+        }
+        guard let start = order.firstIndex(of: id) else { return }
+        let stream = Array(order[start...].compactMap { entries[PostID($0)] }.prefix(Self.feedWindow))
+        let origin = heroOrigin(for: post, stakeID: id, stream: stream)
+
+        let host = StakeFeedHost()
+        let stack = UINavigationController(rootViewController: host)
+        stack.setNavigationBarHidden(true, animated: false)
+        stack.modalPresentationStyle = .overFullScreen
+        stack.view.backgroundColor = .clear
+        present(stack, animated: false) { [weak host] in
+            guard let host else { return }
+            openFeedHero(stream.map(\.id), host, origin)
+        }
+    }
+
+    /// How many stakes the feed is opened on, from the tapped one down.
+    private static let feedWindow = 20
+
+    private func stakeCell(for id: String) -> WalletStakeCell? {
+        guard let path = dataSource.indexPath(for: .stake(id)) else { return nil }
+        return collectionView.cellForItem(at: path) as? WalletStakeCell
+    }
+
+    /// The row's thumbnail (media) or card (text), in `space` — nil once it
+    /// has scrolled out of the list's visible part.
+    private func stakeFrame(for id: String, card: Bool, in space: UICoordinateSpace) -> CGRect? {
+        guard let cell = stakeCell(for: id) else { return nil }
+        let inList = cell.convert(cell.bounds, to: collectionView)
+        guard collectionView.bounds.intersects(inList) else { return nil }
+        return card ? cell.convert(cell.bounds, to: space) : cell.heroFrame(in: space)
+    }
+
+    private func heroOrigin(for post: GalleryPost, stakeID id: String, stream: [GalleryPost]) -> SnapFeedHeroOrigin {
+        let cell = stakeCell(for: id)
+        let cover = cell?.heroCover
+        let flies = post.kind != .text
+        // ⚠️ THE ROW IS NOT THE PAGE, so a text post's window needs a
+        // stand-in at both ends — the map marker's case, not the For You
+        // card's. A card's caption IS the page's caption, so its window can
+        // show the real page from frame 0; this row is an author, a snippet
+        // and a stake amount, and without a stand-in the window landed as a
+        // blank white card that sat there until the row popped back in
+        // (filmed: a third of a second). A picture of the row, taken now
+        // while it is still drawn, is what the window crossfades to and from.
+        let rowImage = cell?.renderedImage()
+        let standIn: () -> UIView? = {
+            guard let rowImage else { return nil }
+            let view = UIImageView(image: rowImage)
+            // At its own size, pinned top-left: the window is the row's rect
+            // only at the two ends, and a stretched row between them read as
+            // a smear (filmed on the opening).
+            view.contentMode = .topLeft
+            view.clipsToBounds = true
+            return view
+        }
+        return SnapFeedHeroOrigin(
+            post: post,
+            stream: stream,
+            hasHero: flies,
+            cover: cover,
+            style: .tile,
+            frame: { [weak self] space in self?.stakeFrame(for: id, card: false, in: space) },
+            isOnScreen: { [weak self] in
+                guard let self else { return false }
+                return stakeFrame(for: id, card: false, in: view) != nil
+            },
+            setConcealed: { [weak self] concealed in
+                self?.stakeCell(for: id)?.setHeroConcealed(concealed, wholeCard: false)
+            },
+            depthView: { [weak self] in self?.collectionView },
+            textReveal: flies ? nil : TextRevealOrigin(
+                rowFrame: { [weak self] space in self?.stakeFrame(for: id, card: true, in: space) },
+                captionEnd: nil,
+                depthView: { [weak self] in self?.collectionView },
+                makeDismissStandIn: { _ in standIn() },
+                makePresentStandIn: standIn,
+                alignsPageToSource: false,
+                pageFit: .covering,
+                cornerRadius: WalletSheetMetrics.rowCorner,
+                fill: Surface.card,
+                setConcealed: { [weak self] concealed in
+                    self?.stakeCell(for: id)?.setHeroConcealed(concealed, wholeCard: true)
+                }
+            )
+        )
+    }
+
     // MARK: - Clock
 
     /// Once a second: the claim countdown, and the active stakes' "settles
@@ -548,8 +693,42 @@ extension WalletClaimViewController: UICollectionViewDelegate {
         updateCompactBar()
     }
 
+    /// A stake row opens its post; nothing else on the sheet is pressable.
     func collectionView(_ collectionView: UICollectionView, shouldSelectItemAt indexPath: IndexPath) -> Bool {
-        false
+        guard case .stake(let id) = dataSource.itemIdentifier(for: indexPath) else { return false }
+        return entries[PostID(id)] != nil && openFeedHero != nil
+    }
+
+    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        collectionView.deselectItem(at: indexPath, animated: false)
+        guard case .stake(let id) = dataSource.itemIdentifier(for: indexPath) else { return }
+        openFeed(fromStake: id)
+    }
+}
+
+/// The clear root of the stack a stake's feed is pushed onto, presented over
+/// the wallet sheet (`WalletClaimViewController.openFeed`). It draws nothing
+/// — the sheet stays visible through it for the flight both ways — and takes
+/// the stack away, unanimated, once the feed has been popped back to it.
+private final class StakeFeedHost: UIViewController {
+    private var hasShownFeed = false
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .clear
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        // Covered by the feed's push.
+        if navigationController?.topViewController !== self { hasShownFeed = true }
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        // Back on top after the feed: the trip is over.
+        guard hasShownFeed else { return }
+        navigationController?.presentingViewController?.dismiss(animated: false)
     }
 }
 

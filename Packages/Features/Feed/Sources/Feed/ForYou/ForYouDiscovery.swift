@@ -147,48 +147,56 @@ public actor ForYouRepository: ForYouProviding {
     /// through first.
     private static func map(_ page: FeedPage) -> ForYouPage {
         ForYouPage(
-            posts: page.entries.map { entry in
-                let attachment = entry.post.attachments.first
-                let kind: GalleryPost.Kind = switch attachment.map({ MediaKind(mimeType: $0.mimeType) }) {
-                case .video: .video
-                case .image: .photo
-                case nil: .text
-                }
-                // ALL of them, in the author's order. `post.v1.PostView`
-                // has always carried a repeated `attachments`; this projection
-                // took `.first` and the collection died here rather than on the
-                // wire. The kind above still reads the first page, because a
-                // post is one thing in a filter even when it is five photos.
-                return GalleryPost(
-                    id: entry.post.id,
-                    kind: kind,
-                    isRepost: false,
-                    pages: entry.post.attachments.map { attachment in
-                        let isVideo = MediaKind(mimeType: attachment.mimeType) == .video
-                        return GalleryPost.MediaPage(
-                            thumbnailURL: attachment.thumbnailURL ?? attachment.url,
-                            // `url` is the stream itself, so a tile and the
-                            // full-screen viewer open the same asset — see
-                            // `GalleryPost.videoURL`.
-                            videoURL: isVideo ? attachment.url : nil,
-                            // Already 1 when the contract carried no dimensions,
-                            // which reads as square and so withholds autoplay —
-                            // see `GalleryPost.aspectRatio`.
-                            aspectRatio: attachment.aspectRatio
-                        )
-                    },
-                    caption: entry.post.caption,
-                    publishedAtMS: Int64(entry.post.publishedAt.timeIntervalSince1970 * 1000),
-                    // Carried so a tile tap can seed the full-screen page with
-                    // a COMPLETE projection; the grid renders none of it.
-                    authorID: entry.author.id,
-                    authorName: entry.author.displayName,
-                    authorHandle: entry.author.handle,
-                    authorAvatarURL: entry.author.avatarURL,
-                    reactionCount: entry.likeCount
+            posts: page.entries.map(galleryPost(from:)),
+            nextPageToken: page.nextPageToken
+        )
+    }
+}
+
+extension ForYouRepository {
+    /// One hydrated timeline entry as a grid post — the projection every
+    /// surface that draws or flies a post from a `FeedEntry` shares (For You's
+    /// pages, the wallet sheet's stakes), so a card and the feed it opens
+    /// can never disagree about what the post is.
+    static func galleryPost(from entry: FeedEntry) -> GalleryPost {
+        let attachment = entry.post.attachments.first
+        let kind: GalleryPost.Kind = switch attachment.map({ MediaKind(mimeType: $0.mimeType) }) {
+        case .video: .video
+        case .image: .photo
+        case nil: .text
+        }
+        // ALL of them, in the author's order. `post.v1.PostView`
+        // has always carried a repeated `attachments`; this projection
+        // took `.first` and the collection died here rather than on the
+        // wire. The kind above still reads the first page, because a
+        // post is one thing in a filter even when it is five photos.
+        return GalleryPost(
+            id: entry.post.id,
+            kind: kind,
+            isRepost: false,
+            pages: entry.post.attachments.map { attachment in
+                let isVideo = MediaKind(mimeType: attachment.mimeType) == .video
+                return GalleryPost.MediaPage(
+                    thumbnailURL: attachment.thumbnailURL ?? attachment.url,
+                    // `url` is the stream itself, so a tile and the
+                    // full-screen viewer open the same asset — see
+                    // `GalleryPost.videoURL`.
+                    videoURL: isVideo ? attachment.url : nil,
+                    // Already 1 when the contract carried no dimensions,
+                    // which reads as square and so withholds autoplay —
+                    // see `GalleryPost.aspectRatio`.
+                    aspectRatio: attachment.aspectRatio
                 )
             },
-            nextPageToken: page.nextPageToken
+            caption: entry.post.caption,
+            publishedAtMS: Int64(entry.post.publishedAt.timeIntervalSince1970 * 1000),
+            // Carried so a tile tap can seed the full-screen page with
+            // a COMPLETE projection; the grid renders none of it.
+            authorID: entry.author.id,
+            authorName: entry.author.displayName,
+            authorHandle: entry.author.handle,
+            authorAvatarURL: entry.author.avatarURL,
+            reactionCount: entry.likeCount
         )
     }
 }

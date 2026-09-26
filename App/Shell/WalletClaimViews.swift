@@ -2,6 +2,7 @@ import CoreModels
 import CoreStorage
 import DesignSystem
 import MediaCore
+import PostGrid
 import UIKit
 
 // The pieces of the wallet sheet (`WalletClaimViewController`): the summary at
@@ -325,6 +326,10 @@ final class WalletSummaryCell: UICollectionViewCell {
 /// ACTIVE — the points committed and how long until it settles.
 /// SETTLED — what it earned in gems, or "No reward" (a normal outcome: the
 /// charter pays demonstrated value, not attention), and how long ago.
+///
+/// A card, and a pressable one: it opens the post in the feed, flying from
+/// its thumbnail (media) or revealing from the card (text) — see
+/// `WalletClaimViewController.openFeed`.
 final class WalletStakeCell: UICollectionViewCell {
     private let thumbnail = UIImageView()
     private let titleLabel = UILabel()
@@ -342,6 +347,8 @@ final class WalletStakeCell: UICollectionViewCell {
         contentView.layer.cornerRadius = WalletSheetMetrics.rowCorner
         contentView.layer.cornerCurve = .continuous
         Surface.applyCardEdge(to: contentView)
+        // The app's one press: the card gives a little under the finger.
+        PressFeedback.attach(toView: contentView, sound: nil)
 
         thumbnail.contentMode = .scaleAspectFill
         thumbnail.clipsToBounds = true
@@ -395,22 +402,25 @@ final class WalletStakeCell: UICollectionViewCell {
         imageTask = nil
         shownURL = nil
         thumbnail.image = nil
+        // Concealment is per-FLIGHT state and must not ride a recycled row.
+        thumbnail.alpha = 1
+        contentView.alpha = 1
     }
 
-    func configure(stake: WalletStake, entry: FeedEntry?, now: Date, imagePipeline: ImagePipeline?) {
+    func configure(stake: WalletStake, post: GalleryPost?, now: Date, imagePipeline: ImagePipeline?) {
         // The post: who wrote it, and its opening words (a photograph with no
         // caption says what it is instead).
-        if let entry {
-            titleLabel.text = entry.author.displayName
-            let caption = entry.post.caption.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let post {
+            titleLabel.text = post.authorName ?? "Post"
+            let caption = post.caption.trimmingCharacters(in: .whitespacesAndNewlines)
             subtitleLabel.text = caption.isEmpty
-                ? (entry.post.attachments.isEmpty ? "Post" : "Photo or video")
+                ? (post.kind == .text ? "Post" : "Photo or video")
                 : caption.replacingOccurrences(of: "\n", with: " ")
         } else {
             titleLabel.text = "Post"
             subtitleLabel.text = " "
         }
-        applyThumbnail(entry: entry, imagePipeline: imagePipeline)
+        applyThumbnail(post: post, imagePipeline: imagePipeline)
         applyStatus(stake: stake, now: now)
         accessibilityLabel = [titleLabel.text, subtitleLabel.text].compactMap { $0 }.joined(separator: ", ")
     }
@@ -439,15 +449,15 @@ final class WalletStakeCell: UICollectionViewCell {
         accessibilityValue = [resultLabel.text, detailLabel.text].compactMap { $0 }.joined(separator: ", ")
     }
 
-    private func applyThumbnail(entry: FeedEntry?, imagePipeline: ImagePipeline?) {
-        let url = entry?.post.attachments.first.flatMap { $0.thumbnailURL ?? $0.url }
+    private func applyThumbnail(post: GalleryPost?, imagePipeline: ImagePipeline?) {
+        let url = post.flatMap { $0.kind == .text ? nil : $0.thumbnailURL }
         guard let url, let imagePipeline else {
             // A text post (or one not loaded yet) wears a quote on a tile.
             imageTask?.cancel()
             shownURL = nil
             thumbnail.contentMode = .center
             thumbnail.image = UIImage(
-                systemName: entry == nil ? "circle.dotted" : "text.quote",
+                systemName: post == nil ? "circle.dotted" : "text.quote",
                 withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .semibold)
             )
             return
@@ -465,6 +475,39 @@ final class WalletStakeCell: UICollectionViewCell {
             guard let image = try? await imagePipeline.image(for: url),
                   !Task.isCancelled, let self, self.shownURL == url else { return }
             self.thumbnail.image = image
+        }
+    }
+
+    // MARK: - Hero
+
+    /// The picture a flight takes off with — nil until the thumbnail loaded,
+    /// and for a text post, which has none.
+    var heroCover: UIImage? {
+        thumbnail.contentMode == .scaleAspectFill ? thumbnail.image : nil
+    }
+
+    /// The thumbnail's rect in `space` — where a media post's flight leaves
+    /// from and lands.
+    func heroFrame(in space: UICoordinateSpace) -> CGRect {
+        thumbnail.convert(thumbnail.bounds, to: space)
+    }
+
+    /// The row as drawn now — the stand-in a text post's window crossfades
+    /// to and from (`WalletClaimViewController.heroOrigin`).
+    func renderedImage() -> UIImage? {
+        guard bounds.width > 0, bounds.height > 0 else { return nil }
+        return UIGraphicsImageRenderer(bounds: bounds).image { _ in
+            drawHierarchy(in: bounds, afterScreenUpdates: false)
+        }
+    }
+
+    /// Hides the thumbnail while its twin is in the air (media), or the whole
+    /// card while the page is revealed over it (text).
+    func setHeroConcealed(_ concealed: Bool, wholeCard: Bool) {
+        if wholeCard {
+            contentView.alpha = concealed ? 0 : 1
+        } else {
+            thumbnail.alpha = concealed ? 0 : 1
         }
     }
 }
