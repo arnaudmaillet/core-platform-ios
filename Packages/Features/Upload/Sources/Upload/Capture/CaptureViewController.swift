@@ -6,7 +6,7 @@ import UIKit
 /// media editor the moment a capture is done.
 ///
 /// ```
-/// │ (⟲) (⚡)                     Next │  ← the stack's bar; Next once there is a clip
+/// │ (⟲) (⚡)              Next  ( ✕ ) │  ← the stack's bar; Next once there is a clip
 /// │ ┌──────────────────────────────┐  │
 /// │ │                              │  │
 /// │ │     the preview, 9:16,       │  │  ← the ratio's window; grid, countdown
@@ -14,7 +14,7 @@ import UIKit
 /// │ │      [0.5] [1×] [2] [3]      │  │  ← lens chips (or the band, when open)
 /// │ │  ▣       (  ◉  )       ⌫     │  │  ← library · shutter · undo
 /// │ └──────────────────────────────┘  │
-/// │ [ ⏱  ▭  ◐  ⊞ ]              ( ✕ ) │  ← the toolbar: the options, then close
+/// │                  [ ⏱  ▭  ◐  ⊞ ] │  ← the toolbar: the options, trailing
 /// ```
 ///
 /// ⚠️ **THE OPTIONS ARE ICONS IN A SELECTOR, AND AN ICON OPENS A BAND — THE
@@ -116,22 +116,6 @@ final class CaptureViewController: UIViewController {
     )
     private lazy var filterRow = MediaFilterRowView()
 
-    /// The toolbar's TRAILING button: close the camera — what Cancel was.
-    ///
-    /// ⚠️ **ASKED FOR**: "en bas … mettre le bouton X pour fermer l'appareil
-    /// photo". An `IconActionBar` of one `xmark`, drawn without a backdrop, so
-    /// the toolbar gives it the same glass bubble as the selector beside it —
-    /// the same height, on the same baseline — and it can be measured as a
-    /// strip (`BottomBarShare`).
-    private(set) lazy var closeBar: IconActionBar = {
-        let bar = IconActionBar(items: [IconActionBar.Item(symbolName: "xmark", accessibilityLabel: "Close camera")])
-        bar.hosting = .platter
-        // Red, as asked: the one control on the screen that throws a take away.
-        bar.tintColor = .systemRed
-        bar.onTap = { [weak self] _ in self?.closeTapped() }
-        return bar
-    }()
-
     /// The header's flip and flash, while they are offered — see
     /// `refreshHeader`.
     private var headerItems: (flip: UIBarButtonItem, flash: UIBarButtonItem)?
@@ -159,6 +143,9 @@ final class CaptureViewController: UIViewController {
     /// records or a countdown runs, and while the camera cannot be used at all
     /// (a notice): there is nothing to turn or to light.
     private func refreshHeader(animated: Bool) {
+        // The trailing side first: the close button stays up even with a
+        // notice (there is still a way out), only the flip and flash go.
+        applyTrailingHeader(animated: animated)
         let shown = !isChromeHidden && notice == nil
         if shown, headerItems == nil {
             let flip = UIBarButtonItem(
@@ -314,8 +301,7 @@ final class CaptureViewController: UIViewController {
         layoutWindow()
         let held = shareTheBar()
         guard !isHandingOver else { return }
-        let moved = zip([handedWidths?.selector, handedWidths?.close], [held?.selector, held?.close])
-            .contains { abs(($0 ?? -1) - ($1 ?? -2)) > 0.5 }
+        let moved = abs((handedWidths ?? -1) - (held ?? -2)) > 0.5
         if owesAHandover || moved { handOverSelector(animated: false) }
     }
 
@@ -395,8 +381,8 @@ final class CaptureViewController: UIViewController {
             self?.close()
         })
         alert.addAction(UIAlertAction(title: "Keep Recording", style: .cancel))
-        alert.popoverPresentationController?.sourceView = closeBar
-        alert.popoverPresentationController?.sourceRect = closeBar.bounds
+        alert.popoverPresentationController?.sourceItem =
+            navigationItem.rightBarButtonItems?.first { $0.identifier == Self.closeItemID }
         present(alert, animated: true)
     }
 
@@ -1420,12 +1406,46 @@ final class CaptureViewController: UIViewController {
             item.style = .done
             item.identifier = Self.nextItemID
             nextItem = item
-            navigationItem.setRightBarButtonItems([item], animated: animated)
+            applyTrailingHeader(animated: animated)
         } else if !shown, nextItem != nil {
             nextItem = nil
-            navigationItem.setRightBarButtonItems(nil, animated: animated)
+            applyTrailingHeader(animated: animated)
         }
         nextItem?.isEnabled = !isBusy
+    }
+
+    /// The header's trailing run: the close button at the edge — what Cancel
+    /// was, moved up from the toolbar's trailing end (26 September 2026:
+    /// "mettre la croix de fermeture en haut — [rotation][flash] ———
+    /// [croix]") — and "Next"
+    /// inboard of it while the take has a clip — `(⟲)(⚡) ---- [Next] (✕)`.
+    /// Everything goes while a clip records or a countdown runs, with the rest
+    /// of the chrome.
+    ///
+    /// ⚠️ A FRESH wrapper for the close button each time the run is rebuilt,
+    /// under a stable identifier (`bar-item-wrapper-drift`); "Next" keeps its
+    /// own item while it stays, as before.
+    private func applyTrailingHeader(animated: Bool) {
+        var items: [UIBarButtonItem] = []
+        if !isChromeHidden {
+            // A PLAIN glass item, not the `IconActionBar`: the bar draws a
+            // hosted view's glyph monochrome whatever its tint, and the close
+            // button is the one RED control on this screen (it throws a take
+            // away) — a system item takes the tint.
+            let close = UIBarButtonItem(
+                image: UIImage(systemName: "xmark"),
+                primaryAction: UIAction { [weak self] _ in self?.closeTapped() }
+            )
+            close.identifier = Self.closeItemID
+            close.accessibilityLabel = "Close camera"
+            close.tintColor = .systemRed
+            close.sharesBackground = false
+            items.append(close)
+            if let nextItem { items.append(nextItem) }
+        }
+        let current = navigationItem.rightBarButtonItems ?? []
+        guard current.map(\.identifier) != items.map(\.identifier) else { return }
+        navigationItem.setRightBarButtonItems(items.isEmpty ? nil : items, animated: animated)
     }
 
     /// Dims the shape's icon while the take has a clip — see `optionChosen`.
@@ -1452,10 +1472,11 @@ final class CaptureViewController: UIViewController {
     /// pass once the screen is in a window.
     private var owesAHandover = false
 
-    /// Puts the options and the close button in the stack's toolbar —
-    /// `[selector] ---- [close]` — or takes them out while a clip records or a
-    /// countdown runs. With a notice up there is nothing to choose, and the
-    /// close button stands alone.
+    /// Puts the options in the stack's toolbar, at its TRAILING end —
+    /// `---- [selector]` (26 September 2026: the options move to the right,
+    /// the close button to the header) — or takes them out while a clip
+    /// records or a countdown runs. With a notice up there is nothing to
+    /// choose, and the toolbar is empty.
     ///
     /// ⚠️ **THE SELECTOR TAKES AT MOST WHAT IT WANTS — ASKED FOR** ("il
     /// faudrait plutôt qu'il prenne en largeur maximale la largeur restante
@@ -1492,16 +1513,10 @@ final class CaptureViewController: UIViewController {
         owesAHandover = false
         _ = shareTheBar()
         let items: [UIBarButtonItem]
-        if isChromeHidden {
+        if isChromeHidden || notice != nil {
             items = []
-        } else if notice != nil {
-            items = [.flexibleSpace(), Self.barItem(closeBar, as: Self.closeItemID)]
         } else {
-            items = [
-                Self.barItem(selector, as: Self.optionsItemID),
-                .flexibleSpace(),
-                Self.barItem(closeBar, as: Self.closeItemID)
-            ]
+            items = [.flexibleSpace(), Self.barItem(selector, as: Self.optionsItemID)]
         }
         setToolbarItems(items, animated: animated)
         handedWidths = shareTheBar()
@@ -1518,48 +1533,32 @@ final class CaptureViewController: UIViewController {
 
     /// The two widths the bar was last handed; a share that has moved since
     /// is handed over again.
-    private var handedWidths: (selector: CGFloat, close: CGFloat)?
+    private var handedWidths: CGFloat?
 
     private(set) var barGeometry = ToolbarGeometry.fallback
 
-    /// Whether the last share left the flexible space nothing — the one
-    /// moment the gap between the two platters is the bar's own.
-    private var shareWasFlush = false
-
     private lazy var selectorWidth: NSLayoutConstraint =
         selector.widthAnchor.constraint(equalToConstant: IconSelectorBar.height)
-    private lazy var closeWidth: NSLayoutConstraint =
-        closeBar.widthAnchor.constraint(equalToConstant: IconActionBar.height)
 
     /// Holds the selector and the close button to their widths — see
     /// `handOverSelector`.
+    ///
+    /// ⚠️ **ONE STRIP NOW.** The selector stands alone at the toolbar's
+    /// trailing end, so its room is the bar less its two margins and ONE
+    /// platter — no second platter, no gap between two.
     @discardableResult
-    private func shareTheBar() -> (selector: CGFloat, close: CGFloat)? {
-        if let measured = BottomBarShare.measure(
-            leading: selector, trailing: closeBar, flush: shareWasFlush, keepingGap: barGeometry.gap
-        ) {
-            barGeometry = measured
-        }
+    private func shareTheBar() -> CGFloat? {
         guard let toolbar = navigationController?.toolbar, toolbar.bounds.width > 0 else {
             selectorWidth.isActive = false
-            closeWidth.isActive = false
             return nil
         }
-        let available = barGeometry.available(in: toolbar.bounds.width)
-        let held = EditorSelectorLayout.leadingCapped(
-            leadingWants: BottomBarShare.wantedWidth(of: selector),
-            trailingWants: BottomBarShare.wantedWidth(of: closeBar),
-            available: available,
-            leadingFloor: selector.intrinsicContentSize.height
-        )
-        shareWasFlush = available - held.leading - held.trailing < 0.5
-        selectorWidth.constant = held.leading
-        closeWidth.constant = held.trailing
+        let available = toolbar.bounds.width - 2 * barGeometry.margin - barGeometry.platter
+        let floor = selector.intrinsicContentSize.height
+        let held = max(min(BottomBarShare.wantedWidth(of: selector), available), min(floor, available))
+        selectorWidth.constant = held
         selectorWidth.isActive = true
-        closeWidth.isActive = true
-        selector.frame.size.width = held.leading
-        closeBar.frame.size.width = held.trailing
-        return (held.leading, held.trailing)
+        selector.frame.size.width = held
+        return held
     }
 
     static let optionsItemID = "upload.camera.toolbar.options"
@@ -1850,7 +1849,10 @@ final class CaptureViewController: UIViewController {
     private(set) var debugLastHandOff: ([MediaLibraryItem], [String: MediaEdits])?
     var debugSelector: IconSelectorBar { selector }
     var debugBand: MediaEditorBandView { band }
-    var debugCloseBar: IconActionBar { closeBar }
+    /// The header's close button, as the bar holds it.
+    var debugCloseItem: UIBarButtonItem? {
+        navigationItem.rightBarButtonItems?.first { $0.identifier == Self.closeItemID }
+    }
     func debugPickFlash(_ mode: CaptureFlashMode) { setFlash(mode) }
     /// The header's flip and flash, as the bar holds them.
     var debugFlipItem: UIBarButtonItem? {
@@ -1859,18 +1861,16 @@ final class CaptureViewController: UIViewController {
     var debugFlashItem: UIBarButtonItem? {
         navigationItem.leftBarButtonItems?.first { $0.identifier == Self.flashItemID }
     }
-    var debugBarShare: (
-        selector: CGFloat, close: CGFloat, available: CGFloat,
-        selectorWants: CGFloat, closeWants: CGFloat, floor: CGFloat
-    )? {
+    var debugBarShare: (selector: CGFloat, available: CGFloat, selectorWants: CGFloat, floor: CGFloat)? {
         guard let toolbar = navigationController?.toolbar, toolbar.bounds.width > 0 else { return nil }
         return (
-            selector.frame.width, closeBar.frame.width, barGeometry.available(in: toolbar.bounds.width),
-            BottomBarShare.wantedWidth(of: selector), BottomBarShare.wantedWidth(of: closeBar),
+            selector.frame.width,
+            toolbar.bounds.width - 2 * barGeometry.margin - barGeometry.platter,
+            BottomBarShare.wantedWidth(of: selector),
             selector.intrinsicContentSize.height
         )
     }
-    var debugHeldWidths: (selector: CGFloat, close: CGFloat) { (selectorWidth.constant, closeWidth.constant) }
+    var debugHeldSelectorWidth: CGFloat { selectorWidth.constant }
     var debugTimerRow: CaptureChoiceRowView<CaptureTimer> { timerRow }
     var debugRatioRow: CaptureChoiceRowView<CaptureRatio> { ratioRow }
     var debugFilterRow: MediaFilterRowView { filterRow }
