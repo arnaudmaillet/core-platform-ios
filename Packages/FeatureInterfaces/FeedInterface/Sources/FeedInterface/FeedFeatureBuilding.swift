@@ -280,7 +280,8 @@ public protocol FeedFeatureBuilding: ConversationThreadScreenBuilding, TextPostS
         rank: PlaceRankBadge?,
         following: ClusterGalleryFollowing?,
         feed: UIViewController,
-        mapReturn: @escaping (@escaping () -> UIImage?) -> (any ZoomTransitionSource)?
+        mapReturn: @escaping (@escaping () -> UIImage?) -> (any ZoomTransitionSource)?,
+        markerClose: ((UIViewController) -> RevealGeometry?)?
     ) -> UIViewController
 }
 
@@ -316,7 +317,7 @@ extension FeedFeatureBuilding {
     ) -> UIViewController {
         makeClusterGallery(
             postIDs: postIDs, title: title, rank: nil, following: following,
-            feed: feed, mapReturn: mapReturn
+            feed: feed, mapReturn: mapReturn, markerClose: nil
         )
     }
 }

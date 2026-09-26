@@ -178,6 +178,19 @@ final class PlaceProfileViewController: UIViewController {
     /// is on screen into the marker's face instead of cutting to it.
     var mapReturn: ((@escaping () -> UIImage?) -> (any ZoomTransitionSource)?)?
 
+    /// The map's way home as a WINDOW onto the marker (Maps'
+    /// `makeMarkerClose`) — preferred over `mapReturn` whenever it is set.
+    ///
+    /// ⚠️ The hero return flew the MARKER's face: under a grab this page was
+    /// hidden and a marker-shaped sliver of it rode the finger over black.
+    /// The window keeps the page itself under the finger and closes onto the
+    /// marker with a crossfade — the close a text post opened from the same
+    /// marker already takes.
+    var markerClose: ((UIViewController) -> RevealGeometry?)?
+    /// The window close's driver — built once (its pan attaches to the view),
+    /// installed as the stack's delegate whenever this page is top.
+    private var markerCloseDriver: InteractiveSlideDismissal?
+
     /// The tile a flight left THIS page from, and which tab it sat on — nil
     /// whenever the open post did not come from here (the map's Case B, where
     /// the viewer arrived from a marker and has never seen this grid).
@@ -285,6 +298,10 @@ final class PlaceProfileViewController: UIViewController {
 
     private func installMapReturnIfTop() {
         guard let nav = navigationController, nav.topViewController === self else { return }
+        if let markerClose {
+            installMarkerClose(markerClose, on: nav)
+            return
+        }
         if mapReturnTransition == nil,
            let source = mapReturn?({ [weak self] in self?.departureStill() }) {
             let transition = ZoomTransitionController(source: source, destination: self)
@@ -314,6 +331,30 @@ final class PlaceProfileViewController: UIViewController {
         // transition graph alive for the rest of the session.
         transition.displacedDelegate = mapReturnPreviousDelegate
         nav.delegate = transition
+    }
+
+    /// Arms the window close: the rightward grab and the back button both
+    /// close this page as a window onto the map's marker.
+    private func installMarkerClose(
+        _ markerClose: @escaping (UIViewController) -> RevealGeometry?,
+        on nav: UINavigationController
+    ) {
+        if markerCloseDriver == nil {
+            let slide = InteractiveSlideDismissal()
+            slide.resetForNewPresentation()
+            slide.attach(to: self, axes: [.horizontal])
+            // The same territory the hero grab had: the first tab, the
+            // leading strip anywhere, and never a carousel's own drag.
+            slide.consultsHorizontalPermission = true
+            // No marker to close onto (it left the map): the plain slide.
+            slide.fallbackSlideAxis = .horizontal
+            slide.prepareForDismissal = { [weak self, weak slide] _ in
+                guard let self, let slide else { return }
+                slide.revealGeometry = markerClose(self)
+            }
+            markerCloseDriver = slide
+        }
+        markerCloseDriver?.install(on: nav)
     }
 
     #if DEBUG
@@ -2469,7 +2510,11 @@ extension PlaceProfileViewController: ZoomTransitionDestination {
     /// the native edge pop — correct when the grab below is armed, and
     /// exactly wrong for the fallback case where `mapReturn` yielded nothing
     /// and the native slide IS the dismissal.
-    var zoomOwnsInteractiveDismissal: Bool { mapReturnTransition != nil }
+    var zoomOwnsInteractiveDismissal: Bool { mapReturnTransition != nil || markerCloseDriver != nil }
+
+    /// A WINDOW when the map handed one over (`markerClose`): the kind the
+    /// slide driver closes itself instead of forwarding to a hero.
+    var zoomDismissalKind: ZoomDismissalKind { markerClose != nil ? .card : .hero }
 
     /// A rightward drag means "previous tab" everywhere but the first one —
     /// the profile pager's own rule. The back button flies from any tab. And
