@@ -62,10 +62,10 @@ final class CreateTabItem {
     let tab: UITab
     /// Kept aligned over the bubble by `MainTabCoordinator`, which owns the bar.
     let overlay: UIButton
-    private let open: @MainActor (Destination) -> Void
+    private let opener: @MainActor (Destination) -> Void
 
     init(open: @escaping @MainActor (Destination) -> Void) {
-        self.open = open
+        self.opener = open
         // The provider is never asked for a screen that is shown — selection
         // is vetoed — but it must answer one.
         let tab = UISearchTab { _ in UIViewController() }
@@ -99,13 +99,20 @@ final class CreateTabItem {
         return true
     }
 
+    /// Opens `destination` exactly as picking its row in the menu does — the
+    /// road the hold-for-camera shortcut (`CreateHoldShortcut`) takes, so a
+    /// camera reached by holding is the camera reached by the menu.
+    func open(_ destination: Destination) {
+        opener(destination)
+    }
+
     /// The same choices as an action sheet, for when the anchor could not be
     /// placed. Anchored on the tab itself, which is a popover source item.
     func makeFallbackSheet() -> UIAlertController {
         let sheet = UIAlertController(title: nil, message: nil, preferredStyle: .actionSheet)
         for destination in Destination.allCases {
-            sheet.addAction(UIAlertAction(title: destination.title, style: .default) { [open] _ in
-                open(destination)
+            sheet.addAction(UIAlertAction(title: destination.title, style: .default) { [opener] _ in
+                opener(destination)
             })
         }
         sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))

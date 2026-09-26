@@ -118,6 +118,14 @@ final class MainTabCoordinator: NSObject, Coordinator {
         self?.openCreate(destination)
     }
 
+    /// Hold the "+" to go straight to the camera — the menu's Camera row
+    /// without the menu. See `CreateHoldShortcut`.
+    private lazy var createHold = CreateHoldShortcut(
+        tab: createItem.tab, tabBarController: tabBarController
+    ) { [weak self] in
+        self?.createItem.open(.camera)
+    }
+
     /// Tabs paired with their `AppTab`, in bar order — the lookup `selectTab`
     /// resolves against. Every bar button is in here now that the Feed action
     /// slot has become the For You root.
@@ -181,6 +189,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
         popGestureEnablers = orderedTabs.map { NativePopGestureEnabler(taking: $0.1.navigationController) }
         tabBarController.tabs = orderedTabs.map { $0.1.tab } + [createItem.tab]
         tabBarController.delegate = self
+        createHold.install()
         // ⚠️ **iOS 27 STOPPED DETACHING A SEARCH TAB BY ITS TYPE ALONE.** It now
         // gives the separate bubble — its "prominent" treatment — to the tab
         // named by `prominentTabIdentifier`, and when that is nil only to a
@@ -310,6 +319,20 @@ final class MainTabCoordinator: NSObject, Coordinator {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
                 guard let self else { return }
                 _ = self.tabBarController(self.tabBarController, shouldSelectTab: self.createItem.tab)
+            }
+        }
+        // `-plus-hold-demo <full|short|hold|drift>` holds the "+" through
+        // `CreateHoldShortcut`'s own press path — the recogniser's `.began`,
+        // `.changed` and `.ended` inputs, minus the recogniser, which no
+        // simulator script can hold down — so the disc, its ring, the arming
+        // and the camera opening can be filmed. Each step waits on the
+        // shortcut's state, never on a clock (the pauses are pacing, so a
+        // recording shows each state at rest), and prints GAVE UP if the
+        // state never comes. `[plus-hold]` lines go to stderr.
+        if let index = arguments.firstIndex(of: "-plus-hold-demo") {
+            let mode = index + 1 < arguments.count ? arguments[index + 1] : "full"
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                self?.debugPlusHoldDemo(mode: mode)
             }
         }
         // `-tab-round-trip` leaves the current tab and comes back ~1.5s apart.
@@ -558,6 +581,9 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
     /// VoiceOver and a hardware keyboard arrive by the same road.
     func tabBarController(_ tabBarController: UITabBarController, shouldSelectTab tab: UITab) -> Bool {
         guard tab === createItem.tab else { return true }
+        // A hold on the "+" that went on to show the camera disc is not a tap,
+        // whatever the bar makes of the lift — see `CreateHoldShortcut`.
+        if createHold.consumeSelection() { return false }
         // Place the anchor now rather than trust the last layout pass, and
         // never open the menu from an anchor outside a window: that raises.
         alignMenuOverlays()
@@ -749,6 +775,76 @@ extension MainTabCoordinator {
               let stack = tabBarController.selectedViewController as? UINavigationController,
               stack.transitionCoordinator == nil else { return nil }
         return stack
+    }
+
+    /// Drives `-plus-hold-demo`: see the hook in `start()`.
+    fileprivate func debugPlusHoldDemo(mode: String) {
+        let label = "-plus-hold-demo \(mode)"
+        let hold = createHold
+        QAWait.until("\(label): a resting shell with the + placed", { [weak self] in
+            guard let self else { return true }
+            return tabBarController.viewIfLoaded?.window != nil
+                && tabBarController.presentedViewController == nil
+                && tabBarController.transitionCoordinator == nil
+                && hold.debugBubbleCentre != nil
+        }) { [weak self] in
+            // Pacing: a second of the bar at rest before the finger lands.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                self?.debugRunPlusHold(mode: mode, label: label)
+            }
+        }
+    }
+
+    private func debugRunPlusHold(mode: String, label: String) {
+        let hold = createHold
+        // The shell's own controller, alive as long as the app: holding it
+        // here keeps every step below free of `self`.
+        let controller = tabBarController
+        let presented = { controller.presentedViewController.map { "\(type(of: $0))" } ?? "nil" }
+        hold.debugLog("\(label): press")
+        hold.debugPress()
+        switch mode {
+        case "short":
+            // Let go with the ring half full: the disc must shrink away and
+            // nothing may open.
+            QAWait.until("\(label): half a ring", { hold.debugProgress >= 0.5 }) {
+                let disc = hold.debugDisc
+                hold.debugLog(String(format: "\(label): release at %.2f", hold.debugProgress))
+                hold.debugRelease()
+                QAWait.until("\(label): the disc gone", { disc?.superview == nil }) {
+                    hold.debugLog("\(label): disc gone, presented=\(presented())")
+                }
+            }
+        case "drift":
+            // Slide off with the ring under way: the disc goes at once, while
+            // the finger is still down, and the lift then does nothing.
+            QAWait.until("\(label): a ring under way", { hold.debugProgress >= 0.4 }) {
+                hold.debugDrag(by: CGVector(dx: -90, dy: -30))
+                QAWait.until("\(label): abandoned", { hold.debugPhase == .abandoned }) {
+                    hold.debugLog("\(label): abandoned while held")
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                        hold.debugRelease()
+                        hold.debugLog("\(label): released, presented=\(presented())")
+                    }
+                }
+            }
+        case "hold":
+            // Stay armed, for a still of the full state.
+            QAWait.until("\(label): armed", { hold.debugPhase == .armed }) {
+                hold.debugLog("\(label): armed, holding")
+            }
+        default:
+            // "full": fill, hold armed a beat, let go — the camera opens.
+            QAWait.until("\(label): armed", { hold.debugPhase == .armed }) {
+                hold.debugLog("\(label): armed")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                    hold.debugRelease()
+                    QAWait.until("\(label): the camera presented", { controller.presentedViewController != nil }) {
+                        hold.debugLog("\(label): presented \(presented())")
+                    }
+                }
+            }
+        }
     }
 
     /// Pushes the timeline (`openFeed`, the bar's own path) once the selected
