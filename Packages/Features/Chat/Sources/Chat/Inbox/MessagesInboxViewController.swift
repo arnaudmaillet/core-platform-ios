@@ -33,7 +33,11 @@ import UIKit
 /// contributes rides its own tab: a badge, and the menu its long press offers.
 /// The one exception is search, which takes the title slot for its field —
 /// a `titleView` outranks a `title`, so the name hides and returns by itself.
-final class MessagesInboxViewController: UIViewController, MessagesInboxCategorySelecting {
+/// The shell adds two items of its own through `HeaderAccessoryHosting` — the
+/// notifications bell leading and the balance beside the magnifier — which
+/// are the app's rather than the inbox's, and so page with nothing either.
+final class MessagesInboxViewController: UIViewController, MessagesInboxCategorySelecting,
+    HeaderAccessoryHosting {
     /// The inbox's surfaces, in paging order.
     private let surfaces: [any InboxSurface]
     /// The shared glass tab capsule, hosted in the navigation bar's title slot.
@@ -499,9 +503,35 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         applyRestingBar()
     }
 
-    /// `[ ————————————————————————— ][ search ]`
+    /// The shell's items: the notifications bell at the head of the leading
+    /// group, the balance inboard of the magnifier. Stored because this screen
+    /// REWRITES its bar — search takes it over and gives it back — so an item
+    /// written onto the `navigationItem` from outside would be gone after the
+    /// first search.
+    private var leadingAccessoryItem: UIBarButtonItem?
+    private var trailingAccessoryItem: UIBarButtonItem?
+
+    /// Installs (or clears) the bell. While searching it is only remembered:
+    /// the searching bar carries nothing but the field and Cancel, and the
+    /// resting bar picks it up on the way back.
+    func setLeadingAccessoryItem(_ item: UIBarButtonItem?) {
+        leadingAccessoryItem = item
+        guard isViewLoaded, !isSearching else { return }
+        applyRestingBar()
+    }
+
+    /// Installs (or replaces, or clears) the balance — on the same terms.
+    func setTrailingAccessoryItem(_ item: UIBarButtonItem?) {
+        trailingAccessoryItem = item
+        guard isViewLoaded, !isSearching else { return }
+        applyRestingBar()
+    }
+
+    /// `[ bell ]———————————————————[ coins ][ search ]`
     ///
-    /// The resting bar is one item: the magnifier.
+    /// The resting bar is the magnifier plus whatever the shell hands in: the
+    /// bell leading, the balance inboard of the magnifier (`[0]` is the screen
+    /// edge, so search keeps the corner — the Maps and For You arrangement).
     ///
     /// ⚠️ AND THE EMPTY `titleView` IS GONE WITH THE SELECTOR. It was there
     /// because a nil title view leaves UIKit a central reservation the LEADING
@@ -510,8 +540,8 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     /// leading group there is nothing to make room for, and claiming the slot
     /// with a zero-sized view would now be cargo.
     private func applyRestingBar() {
-        navigationItem.rightBarButtonItems = [searchItem]
-        navigationItem.leftBarButtonItems = []
+        navigationItem.rightBarButtonItems = [searchItem, trailingAccessoryItem].compactMap { $0 }
+        navigationItem.leftBarButtonItems = [leadingAccessoryItem].compactMap { $0 }
         navigationItem.titleView = nil
     }
 

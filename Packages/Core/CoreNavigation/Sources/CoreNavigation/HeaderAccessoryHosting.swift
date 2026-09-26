@@ -1,12 +1,13 @@
 import UIKit
 
-/// A root screen that will carry ONE bar item it did not build.
+/// A screen that will carry bar items it did not build: one inboard of its
+/// trailing run, and one at the head of its leading run.
 ///
-/// The viewer's point balance stands in four headers — Explore, For You,
-/// Profile and the post screen — and it is the same number in all of them: one
-/// wallet, one claim countdown, one sheet. Rather than teach four screens what
-/// a wallet is, the shell owns that object and hands each screen an item to
-/// wear.
+/// The viewer's point balance stands in almost every header — the four root
+/// tabs, a pushed profile and the post screen — and it is the same number in
+/// all of them: one wallet, one claim countdown, one sheet. Rather than teach
+/// every screen what a wallet is, the shell owns that object and hands each
+/// screen an item to wear.
 ///
 /// The item cannot simply be written onto a `navigationItem` from outside,
 /// which is why this exists: these screens COMPOSE their trailing run — For You
@@ -19,7 +20,15 @@ import UIKit
 /// Setting it again REPLACES it: a badge whose count changes width hands over a
 /// fresh `UIBarButtonItem`, because a bar measures a custom view once, at
 /// install. `nil` clears it.
+///
+/// **The leading slot** is the notifications bell's. Every root header leads
+/// with it, and it is the shell's for the same reason the balance is: the
+/// unread state is one fact shown in four places. A screen that adopts this
+/// puts it FIRST in its leading run (`leftBarButtonItems[0]` is the screen
+/// edge), ahead of its own leading control, and keeps it through every rebuild.
+/// A pushed screen is never handed one — its leading edge is the back button.
 @MainActor
 public protocol HeaderAccessoryHosting: AnyObject {
     func setTrailingAccessoryItem(_ item: UIBarButtonItem?)
+    func setLeadingAccessoryItem(_ item: UIBarButtonItem?)
 }

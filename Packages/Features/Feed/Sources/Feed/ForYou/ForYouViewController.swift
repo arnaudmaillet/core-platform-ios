@@ -20,11 +20,11 @@ import UIKit
 /// scrubbing the pager, badges — is shared. The one thing it does that this
 /// screen does not is stack a search field beneath the title row.
 ///
-/// **The bar items are one action and one state.** Leading is `+`, which opens
-/// search through `AppRoute.search`. Trailing is the wallet badge and search
-/// lens, whose glyph IS the current context — it does not offer an action, it
-/// reports what the surface is currently showing, and tapping it opens the menu
-/// to change that.
+/// **The bar reads `[bell][lens] … [coins][search]`.** The bell and the
+/// balance are the shell's (`HeaderAccessoryHosting`); the lens and search are
+/// this screen's. The lens glyph IS the current context — it does not offer an
+/// action, it reports what the surface is currently showing, and tapping it
+/// opens the menu to change that. Search opens through `AppRoute.search`.
 ///
 /// ⚠️ **`DiscoverySource` (Trending / Recent) has no UI entry point any more.**
 /// It used to be the leading item; `+` took that slot. The ordering still
@@ -497,11 +497,29 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
 
     /// ⚠️ `[0]` IS THE SCREEN EDGE. Search keeps the corner and the wallet
     /// badge sits to its left — the same arrangement the Explore header wears
-    /// ([coins] [search]). The lens menu moved to the LEADING group, ahead of
-    /// the selector, so the header reads
-    /// `[lens][selector] … [coins][search]`.
+    /// ([coins] [search]). The lens menu is in the LEADING group, behind the
+    /// shell's bell, so the header reads `[bell][lens] … [coins][search]`.
     private func applyTrailingItems() {
         navigationItem.rightBarButtonItems = [searchItem, trailingAccessoryItem].compactMap { $0 }
+    }
+
+    /// The shell's item at the head of the leading group — the notifications
+    /// bell, the same one every root header leads with. Stored for the same
+    /// reason as the trailing one: `viewDidLoad` writes this group itself.
+    private var leadingAccessoryItem: UIBarButtonItem?
+
+    /// Installs (or clears) that item. Safe before the view loads.
+    func setLeadingAccessoryItem(_ item: UIBarButtonItem?) {
+        leadingAccessoryItem = item
+        guard isViewLoaded else { return }
+        applyLeadingItems()
+    }
+
+    /// ⚠️ `[0]` IS THE SCREEN EDGE here too: the bell takes the corner and the
+    /// lens stands inboard of it, each in its own bubble (the bell opts out of
+    /// the shared background; see `NotificationsBell`).
+    private func applyLeadingItems() {
+        navigationItem.leftBarButtonItems = [leadingAccessoryItem, contextItem].compactMap { $0 }
     }
 
     override func viewDidLoad() {
@@ -536,9 +554,10 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // screen and the chevron bare for the next one.
         navigationItem.backButtonDisplayMode = .minimal
 
-        // The bar keeps the lens glyph leading and search + wallet trailing.
-        // The centre is empty and stays empty: the selector is not in this bar.
-        navigationItem.leftBarButtonItems = [contextItem]
+        // The bar keeps the bell and the lens glyph leading and search + wallet
+        // trailing. The centre is empty and stays empty: the selector is not in
+        // this bar.
+        applyLeadingItems()
         applyTrailingItems()
 
         // ⚠️ **THE STRIP LIVES AT THE FOOT OF THE SCREEN, IN A `UITabAccessory`.**

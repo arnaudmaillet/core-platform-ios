@@ -32,18 +32,25 @@ final class RouteResolver: Router {
     private let profileFeature: () -> any ProfileFeatureBuilding
     private let feedFeature: () -> any FeedFeatureBuilding
     private let chatFeature: () -> any ChatFeatureBuilding
+    /// Puts the viewer's balance in a pushed screen's header — today, every
+    /// routed profile. A closure for the same reason the features are: the
+    /// wallet and its sheet belong to the container, which builds this
+    /// resolver before it has built either.
+    private let attachBalance: (UIViewController) -> Void
     private let logger = Logger(subsystem: "cn.wynn.core-platform-ios", category: "navigation")
 
     init(
         searchFeature: @escaping () -> any SearchFeatureBuilding,
         profileFeature: @escaping () -> any ProfileFeatureBuilding,
         feedFeature: @escaping () -> any FeedFeatureBuilding,
-        chatFeature: @escaping () -> any ChatFeatureBuilding
+        chatFeature: @escaping () -> any ChatFeatureBuilding,
+        attachBalance: @escaping (UIViewController) -> Void
     ) {
         self.searchFeature = searchFeature
         self.profileFeature = profileFeature
         self.feedFeature = feedFeature
         self.chatFeature = chatFeature
+        self.attachBalance = attachBalance
     }
 
     /// Pushes a destination, dropping any picker it is arriving *from*.
@@ -143,6 +150,10 @@ final class RouteResolver: Router {
             } else {
                 profileFeature().makeProfileViewController(for: profileID, identityStub: stub)
             }
+            // The header reads `[back][filter] … [coins]`: the balance is the
+            // viewer's, on anyone's profile. Attached BEFORE the push so the
+            // item rides the push instead of popping in after it.
+            attachBalance(profile)
             push(profile, using: navigator)
 
         case .search:

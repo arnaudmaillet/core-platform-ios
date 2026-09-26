@@ -176,6 +176,11 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     private var settingsItem: UIBarButtonItem?
     /// The own-profile switcher; taps present the profile-switcher menu.
     private var switcherItem: UIBarButtonItem?
+    /// An item the SHELL owns at the head of the leading group — the
+    /// notifications bell, on the tab root only (a pushed profile leads with
+    /// its back button). Kept as state for the same reason as the trailing
+    /// one: the leading run is rewritten in `applyNavigationState`.
+    private var leadingAccessoryItem: UIBarButtonItem?
     /// An item the SHELL owns, standing inboard of this screen's own — the
     /// viewer's point balance today, the same badge the Explore header and the
     /// post screen wear.
@@ -1595,6 +1600,14 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         applyNavigationState()
     }
 
+    /// Installs (or clears) the shell's leading accessory — the bell. Safe
+    /// before the view loads: `applyNavigationState` reads it every time.
+    func setLeadingAccessoryItem(_ item: UIBarButtonItem?) {
+        leadingAccessoryItem = item
+        guard isViewLoaded else { return }
+        applyNavigationState()
+    }
+
     #if DEBUG
     /// Recomposes the trailing run, so a test can put the screen through the
     /// rebuild an injected item has to survive without having to move the
@@ -1706,11 +1719,15 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         // large title has nowhere to go under an immersive banner.
         navigationItem.largeTitleDisplayMode = .never
 
-        // The content-source filter leads the bar on BOTH profiles:
-        //   tab root  [source][name][credits][switcher gear]
-        //   pushed    [back][source][name][Follow]
-        if navigationItem.leftBarButtonItems?.first !== sourceMenuItem {
-            navigationItem.leftBarButtonItems = [sourceMenuItem]
+        // The content-source filter leads the bar on BOTH profiles, behind
+        // the shell's bell on the tab root:
+        //   tab root  [bell][source] … [coins][switcher gear]
+        //   pushed    [back][source] … [coins]
+        // Written only when it changed — the same "say nothing" rule as the
+        // trailing run below, for the same torn-capsule reason.
+        let leading = [leadingAccessoryItem, sourceMenuItem].compactMap { $0 }
+        if !(navigationItem.leftBarButtonItems ?? []).elementsEqual(leading, by: ===) {
+            navigationItem.leftBarButtonItems = leading
         }
         // ⚠️ **WITHOUT THIS THE ITEM REPLACES THE BACK BUTTON**, and UIKit
         // disables the interactive pop along with it, silently. Harmless on the
@@ -1835,7 +1852,9 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         if let switcherItem { items.append(switcherItem) }
         // The shell's accessory LAST, which puts it furthest from the screen
         // edge: `[0]` is the corner, so the gear keeps it and the balance sits
-        // inboard — the Explore header's arrangement ([coin] [bell]).
+        // inboard — the Explore header's arrangement ([coins] [search]). On a
+        // pushed profile, which has neither the gear nor the switcher, the
+        // balance is the whole trailing run.
         if let trailingAccessoryItem { items.append(trailingAccessoryItem) }
         // The load-bearing guard. A pop's `viewWillAppear` resolves to exactly
         // the item set already on the bar, and handing that same set back is
