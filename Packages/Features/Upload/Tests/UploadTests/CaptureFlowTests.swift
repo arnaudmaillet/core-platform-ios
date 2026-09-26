@@ -365,14 +365,14 @@ struct CaptureFlowTests {
     /// meanwhile. Tapped through the bar itself.
     @Test func theCloseButtonEndsTheCameraAndAsksWhenThereAreClips() async throws {
         let empty = try await open()
-        empty.camera.debugCloseBar.debugTap(0)
+        empty.camera.debugTapClose()
         #expect(empty.camera.isClosing, "an empty camera closes at once")
         #expect(empty.camera.presentedViewController == nil, "without asking")
 
         let screen = try await open()
         try await record(screen, seconds: 0.6)
         #expect(screen.navigation.isModalInPresentation, "a take does not swipe away")
-        screen.camera.debugCloseBar.debugTap(0)
+        screen.camera.debugTapClose()
         let alert = try #require(screen.camera.presentedViewController as? UIAlertController)
         #expect(alert.actions.contains { $0.style == .destructive && $0.title == "Discard" })
         #expect(!screen.camera.isClosing, "nothing is thrown away before the answer")
@@ -655,18 +655,20 @@ struct CaptureFlowTests {
 
     /// A refused camera says so, with the way to Settings, and shoots nothing.
     /// ⚠️ With the camera refused there is nothing to choose, turn or light:
-    /// the header is empty and the toolbar holds the close button alone —
+    /// the toolbar is empty and the header holds the close button alone —
     /// the one way out.
     @Test func aRefusedCameraKeepsTheCloseButtonAlone() async throws {
         let screen = try await open(answer: .denied)
-        try await settle { screen.camera.debugNoticeIsShowing && screen.camera.toolbarItems?.count == 2 }
-        let items = try #require(screen.camera.toolbarItems)
-        #expect(items.count == 2)
-        #expect(items.last?.customView === screen.camera.debugCloseBar)
-        #expect(items.last?.identifier == CaptureViewController.closeItemID)
-        #expect(!items.contains { $0.customView === screen.camera.debugSelector }, "no options")
+        try await settle {
+            screen.camera.debugNoticeIsShowing && (screen.camera.toolbarItems?.isEmpty ?? true)
+                && screen.camera.navigationItem.rightBarButtonItems?.count == 1
+        }
+        #expect(screen.camera.toolbarItems?.isEmpty ?? true, "no options")
+        let close = try #require(screen.camera.navigationItem.rightBarButtonItems?.first)
+        #expect(close === screen.camera.debugCloseItem)
+        #expect(close.identifier == CaptureViewController.closeItemID)
         #expect(screen.camera.navigationItem.leftBarButtonItems?.isEmpty ?? true, "no flip, no flash")
-        screen.camera.debugCloseBar.debugTap(0)
+        screen.camera.debugTapClose()
         #expect(screen.camera.isClosing)
     }
 
@@ -1072,7 +1074,8 @@ struct CaptureFlowTests {
         #expect(leading.allSatisfy { $0.customView == nil && $0.image != nil }, "two plain glass items")
         let everyItem = leading + (camera.navigationItem.rightBarButtonItems ?? []) + (camera.toolbarItems ?? [])
         #expect(!everyItem.contains { $0.title == "Cancel" }, "Cancel is gone")
-        #expect(camera.navigationItem.rightBarButtonItems?.isEmpty ?? true, "nothing on the right before a clip")
+        #expect(camera.navigationItem.rightBarButtonItems?.map(\.identifier) == [CaptureViewController.closeItemID],
+                "only the close button on the right before a clip")
 
         camera.debugBeginHold()
         try await settle { camera.isRecording }
@@ -1131,63 +1134,67 @@ struct CaptureFlowTests {
         #expect(camera.debugFlashItem?.isEnabled == true)
     }
 
-    /// ⚠️ The toolbar is `[selector] ---- [close]`: the options lead at their
-    /// OWN width where the bar has room — not stretched over the rest — the
-    /// flexible space takes the slack, and the close button trails in a
-    /// bubble of its own. Fresh items under stable identifiers at every
-    /// hand-over; away (the toolbar staying up) while a clip records.
-    @Test func theToolbarIsTheSelectorThenTheCloseButton() async throws {
+    /// ⚠️ The toolbar is `---- [selector]` and the close button is the
+    /// header's trailing item (26 September 2026: "[rotation][flash] ———
+    /// [croix]" on top, the options on the right below). The options sit at
+    /// their OWN width at the toolbar's trailing end, the flexible space takes
+    /// the slack. Fresh items under stable identifiers at every hand-over;
+    /// away (the toolbar staying up) while a clip records.
+    @Test func theToolbarIsTheSelectorAndTheCloseButtonIsInTheHeader() async throws {
         let screen = try await open()
         let camera = screen.camera
-        try await settle { camera.toolbarItems?.count == 3 }
+        try await settle { camera.toolbarItems?.count == 2 }
         #expect(!screen.navigation.isToolbarHidden)
         let items = try #require(camera.toolbarItems)
-        #expect(items.count == 3)
-        #expect(items[0].customView === camera.debugSelector)
-        #expect(items[0].identifier == CaptureViewController.optionsItemID)
-        #expect(items[2].customView === camera.debugCloseBar)
-        #expect(items[2].identifier == CaptureViewController.closeItemID)
-        #expect(camera.debugCloseBar.debugSymbols == ["xmark"])
-        #expect(camera.debugSelector.hosting == .platter && camera.debugCloseBar.hosting == .platter, "the toolbar supplies the glass")
+        #expect(items.count == 2)
+        #expect(items[1].customView === camera.debugSelector)
+        #expect(items[1].identifier == CaptureViewController.optionsItemID)
+        #expect(!items.contains { $0.identifier == CaptureViewController.closeItemID }, "the close button left the toolbar")
+        let close = try #require(camera.navigationItem.rightBarButtonItems?.first)
+        #expect(close.identifier == CaptureViewController.closeItemID, "the header's trailing edge")
+        #expect(close.image == UIImage(systemName: "xmark"))
+        #expect(close.tintColor == .systemRed, "the one red control on the screen")
+        #expect(!close.sharesBackground, "a bubble of its own")
+        #expect(camera.debugSelector.hosting == .platter, "the toolbar supplies the glass")
 
         screen.window.layoutIfNeeded()
         let share = try #require(camera.debugBarShare)
         #expect(abs(share.selector - share.selectorWants) < 0.5, "the options at their own width: \(share)")
-        #expect(abs(share.close - share.closeWants) < 0.5, "the close button at its own")
-        #expect(share.available - share.selector - share.close > 1, "slack left to the flexible space: \(share)")
+        #expect(share.available - share.selector > 1, "slack left to the flexible space: \(share)")
         let selectorFrame = camera.debugSelector.convert(camera.debugSelector.bounds, to: nil)
-        let closeFrame = camera.debugCloseBar.convert(camera.debugCloseBar.bounds, to: nil)
-        #expect(selectorFrame.midX < screen.window.bounds.midX && closeFrame.midX > screen.window.bounds.midX,
-                "the options lead and the close button trails: \(selectorFrame) \(closeFrame)")
-        #expect(closeFrame.maxX <= screen.window.bounds.maxX)
+        #expect(selectorFrame.midX > screen.window.bounds.midX, "the options trail: \(selectorFrame)")
+        #expect(selectorFrame.maxX <= screen.window.bounds.maxX)
 
         camera.debugBeginHold()
         #expect(camera.toolbarItems?.isEmpty == true, "away while recording")
+        #expect(camera.navigationItem.rightBarButtonItems?.isEmpty ?? true, "the close button too")
         #expect(!screen.navigation.isToolbarHidden, "the toolbar itself stays, and the shutter with it")
         camera.debugEndHold()
         try await settle { camera.take.clips.count == 1 && !camera.isRecording }
         let back = try #require(camera.toolbarItems)
-        #expect(back.count == 3)
-        #expect(back[0] !== items[0] && back[2] !== items[2], "fresh items, never the old ones re-handed")
-        #expect(back[0].identifier == items[0].identifier && back[2].identifier == items[2].identifier)
+        #expect(back.count == 2)
+        #expect(back[1] !== items[1], "fresh items, never the old ones re-handed")
+        #expect(back[1].identifier == items[1].identifier)
+        let trailing = camera.navigationItem.rightBarButtonItems ?? []
+        // The order beside "Next" is `nextIsInTheHeaderAndUndoIsRightOfTheShutter`'s.
+        #expect(trailing.first?.identifier == CaptureViewController.closeItemID,
+                "the close button back at the edge: \(trailing.map(\.identifier))")
     }
 
     /// ⚠️ Where the bar cannot give the options their own width, they take
-    /// what the close button leaves — no more, so nothing is swept into a
-    /// `•••` — never less than one bubble, and they scroll what they cannot
-    /// show.
+    /// what the bar leaves — no more, so nothing is swept into a `•••` —
+    /// never less than one bubble, and they scroll what they cannot show.
     @Test func aNarrowBarCapsTheOptionsAndTheyScroll() async throws {
-        let screen = try await open(size: CGSize(width: 250, height: 667))
+        let screen = try await open(size: CGSize(width: 180, height: 667))
         let camera = screen.camera
-        try await settle { camera.toolbarItems?.count == 3 }
+        try await settle { camera.toolbarItems?.count == 2 }
         screen.window.layoutIfNeeded()
         let share = try #require(camera.debugBarShare)
         #expect(share.selector < share.selectorWants - 1, "capped: \(share)")
-        #expect(abs(share.selector + share.close - share.available) < 0.5, "at what the close button leaves")
+        #expect(abs(share.selector - share.available) < 0.5, "at what the bar leaves")
         #expect(share.selector >= share.floor - 0.5, "never less than one bubble")
-        #expect(abs(share.close - share.closeWants) < 0.5, "the close button keeps its own width")
-        #expect(abs(camera.debugSelector.frame.width - camera.debugHeldWidths.selector) < 0.5, "held to it")
-        #expect(camera.debugSelector.window != nil && camera.debugCloseBar.window != nil, "both on screen")
+        #expect(abs(camera.debugSelector.frame.width - camera.debugHeldSelectorWidth) < 0.5, "held to it")
+        #expect(camera.debugSelector.window != nil, "on screen")
         func scroller(in view: UIView) -> UIScrollView? {
             (view as? UIScrollView) ?? view.subviews.lazy.compactMap(scroller(in:)).first
         }
@@ -1195,14 +1202,12 @@ struct CaptureFlowTests {
         #expect(strip.contentSize.width > strip.bounds.width + 1, "the rest scrolls: \(strip.contentSize.width) in \(strip.bounds.width)")
     }
 
-    /// ⚠️ A bar that narrows keeps its own gap. At 312pt the options have
-    /// 30pt to spare, which the flexible space holds; had that slack been read
-    /// as the bar's gap, the bar would stay short by it for good, and at 282pt
-    /// — where the options just fit — they would be capped for nothing.
-    @Test func aBarThatNarrowsKeepsItsOwnGap() async throws {
+    /// A bar that narrows keeps the options at their own width while they
+    /// still fit — the close button no longer shares the toolbar with them.
+    @Test func aBarThatNarrowsKeepsTheOptionsWhole() async throws {
         let screen = try await open(size: CGSize(width: 312, height: 667))
         let camera = screen.camera
-        try await settle { camera.toolbarItems?.count == 3 }
+        try await settle { camera.toolbarItems?.count == 2 }
         screen.window.layoutIfNeeded()
         let wide = try #require(camera.debugBarShare)
         #expect(abs(wide.selector - wide.selectorWants) < 0.5, "room to spare: \(wide)")
@@ -1218,8 +1223,7 @@ struct CaptureFlowTests {
         }
         let narrow = try #require(camera.debugBarShare)
         #expect(abs(narrow.selector - narrow.selectorWants) < 0.5, "the options still at their own width: \(narrow)")
-        #expect(camera.barGeometry.gap <= ToolbarGeometry.fallback.gap + 0.5, "the gap is the bar's own: \(camera.barGeometry)")
-        #expect(camera.debugSelector.window != nil && camera.debugCloseBar.window != nil, "both on screen")
+        #expect(camera.debugSelector.window != nil, "on screen")
     }
 
     /// ⚠️ On an SE's bar the two never overrun it: at every step of a
@@ -1231,24 +1235,21 @@ struct CaptureFlowTests {
         let camera = screen.camera
         func held(_ step: String) {
             screen.window.layoutIfNeeded()
-            let widths = camera.debugHeldWidths
-            #expect(abs(camera.debugSelector.frame.width - widths.selector) < 0.5, "\(step): options \(camera.debugSelector.frame.width) vs \(widths.selector)")
-            #expect(abs(camera.debugCloseBar.frame.width - widths.close) < 0.5, "\(step): close \(camera.debugCloseBar.frame.width) vs \(widths.close)")
-            #expect(camera.debugSelector.window != nil && camera.debugCloseBar.window != nil, "\(step): both in the bar")
+            let held = camera.debugHeldSelectorWidth
+            #expect(abs(camera.debugSelector.frame.width - held) < 0.5, "\(step): options \(camera.debugSelector.frame.width) vs \(held)")
+            #expect(camera.debugSelector.window != nil, "\(step): on screen")
             // ⚠️ IN A WINDOW IS NOT ON SCREEN: a selector held 200pt too wide
             // kept both views in the window and passed. Where they stand says it.
             let options = camera.debugSelector.convert(camera.debugSelector.bounds, to: nil)
-            let close = camera.debugCloseBar.convert(camera.debugCloseBar.bounds, to: nil)
-            #expect(options.minX >= 0 && close.maxX <= screen.window.bounds.maxX, "\(step): both inside the bar: \(options) \(close)")
-            #expect(options.maxX <= close.minX, "\(step): the close button after the options, not over them: \(options) \(close)")
+            #expect(options.minX >= 0 && options.maxX <= screen.window.bounds.maxX, "\(step): the options inside the bar: \(options)")
         }
         func tap(_ item: UIBarButtonItem?) {
             item?.primaryAction?.performWithSender(nil, target: nil)
         }
-        try await settle { camera.toolbarItems?.count == 3 }
+        try await settle { camera.toolbarItems?.count == 2 }
         held("opened")
         try await record(screen, seconds: 0.6)
-        try await settle { camera.toolbarItems?.count == 3 }
+        try await settle { camera.toolbarItems?.count == 2 }
         held("after a clip")
         tap(camera.debugFlashItem)
         held("flash")
@@ -1423,7 +1424,9 @@ struct CaptureFlowTests {
         try await record(screen, seconds: 0.6)
 
         let next = try #require(screen.camera.debugNextItem)
-        #expect(screen.camera.navigationItem.rightBarButtonItems?.count == 1, "Next alone on the trailing side")
+        #expect(screen.camera.navigationItem.rightBarButtonItems?.map(\.identifier)
+                    == [CaptureViewController.closeItemID, CaptureViewController.nextItemID],
+                "the close button at the trailing edge, Next inboard of it")
         #expect(next.title == "Next")
         #expect(next.style == .done, "prominent")
         #expect(next.isEnabled)
