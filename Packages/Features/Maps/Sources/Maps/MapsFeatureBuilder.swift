@@ -206,7 +206,7 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
             // built by the Feed feature because the grid, the flight card and
             // the retarget wiring are all its internals. `mapReturn` rides
             // through so the page's own dismissal can fly home to the marker.
-            makeClusterGallery: { postIDs, place, feed, mapReturn in
+            makeClusterGallery: { postIDs, place, feed, mapReturn, markerClose in
                 feedFeature().makeClusterGallery(
                     postIDs: postIDs,
                     title: place.galleryTitle,
@@ -220,7 +220,8 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
                         toggle: { placeFollows.toggle(place.id) }
                     ),
                     feed: feed,
-                    mapReturn: mapReturn
+                    mapReturn: mapReturn,
+                    markerClose: markerClose
                 )
             },
             prewarm: { ids in await feedFeature().prewarmPosts(ids) },

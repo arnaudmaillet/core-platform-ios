@@ -148,6 +148,14 @@ public final class InteractiveSlideDismissal: NSObject {
     /// post's kind from opposite sides.
     public var arbitratesWithHeroGrab = false
 
+    /// Whether a HORIZONTAL grab asks the screen first
+    /// (`ZoomTransitionDestination.zoomHorizontalDismissalPermitted`), the way
+    /// the zoom grab always has. Opt-in, so the screens this driver has served
+    /// until now keep exactly the gate they had: the place page needs it —
+    /// a rightward drag on any tab but the first is "previous tab", and a
+    /// carousel under the finger is its own tenant.
+    public var consultsHorizontalPermission = false
+
     /// Whether the HERO grab would accept this dismissal's landing, asked so
     /// this driver can claim the drags the hero declines.
     ///
@@ -731,6 +739,11 @@ extension InteractiveSlideDismissal: UIGestureRecognizerDelegate {
         if axis == .vertical,
            let destination = feed as? any ZoomTransitionDestination,
            !destination.zoomVerticalDismissalPermitted(at: pan.location(in: view), in: view) {
+            return false
+        }
+        if axis == .horizontal, consultsHorizontalPermission,
+           let destination = feed as? any ZoomTransitionDestination,
+           !destination.zoomHorizontalDismissalPermitted(at: pan.location(in: view), in: view) {
             return false
         }
         activeAxis = axis

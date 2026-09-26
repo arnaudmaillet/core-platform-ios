@@ -97,7 +97,8 @@ final class MapsViewController: UIViewController {
     /// OWN dismissal back to the cluster marker (`makeMapReturnSource`).
     private let makeClusterGallery: (
         [PostID], MapPlace, UIViewController,
-        @escaping (@escaping () -> UIImage?) -> (any ZoomTransitionSource)?
+        @escaping (@escaping () -> UIImage?) -> (any ZoomTransitionSource)?,
+        ((UIViewController) -> RevealGeometry?)?
     ) -> UIViewController
     /// Warms the given posts into the shared cache so a tap opens instantly.
     private let prewarm: ([PostID]) async -> Void
@@ -318,7 +319,8 @@ final class MapsViewController: UIViewController {
             (UIViewController, TextRevealOrigin, (() -> Void)?) -> RevealGeometry,
         makeClusterGallery: @escaping (
             [PostID], MapPlace, UIViewController,
-        @escaping (@escaping () -> UIImage?) -> (any ZoomTransitionSource)?
+        @escaping (@escaping () -> UIImage?) -> (any ZoomTransitionSource)?,
+            ((UIViewController) -> RevealGeometry?)?
         ) -> UIViewController,
         prewarm: @escaping ([PostID]) async -> Void,
         openProfile: @escaping (ProfileID, ProfileIdentityStub?) -> Void,
@@ -1798,6 +1800,33 @@ final class MapsViewController: UIViewController {
         }
     }
 
+    /// The place page's way home as a WINDOW onto the marker — the close a
+    /// text post opened from that marker already takes (`markerRevealOrigin`).
+    ///
+    /// ⚠️ NOT THE HERO. The page used to fly home through `MapPinZoomSource`,
+    /// whose card is the MARKER's face: under a grab the page was hidden
+    /// outright and a marker-shaped sliver of it rode the finger over a black
+    /// screen (filmed, 26 September 2026). A window keeps the page itself
+    /// under the finger, shrinks it as it is dragged, and closes it onto the
+    /// marker with the reveal's crossfade — "prendre le contenu de la fenêtre
+    /// de lieu actuelle et au release faire notre hero transition habituelle".
+    ///
+    /// Asked at close time, so the marker's rect is where the map shows it
+    /// now; nil once the marker is gone, which keeps the plain slide.
+    private func makeMarkerClose(
+        for annotation: any MKAnnotation
+    ) -> (UIViewController) -> RevealGeometry? {
+        { [weak self, weak box = annotation as AnyObject] page in
+            guard let self, let box, let annotation = box as? any MKAnnotation,
+                  self.mapView.annotations.contains(where: { ($0 as AnyObject) === box })
+            else { return nil }
+            // No "will close" chrome work: unlike a feed, the place page
+            // SHOWS the dock (`concealsAppTabBar == false`), so there is
+            // nothing to hide ahead of the window and nothing to bring back.
+            return self.makeRevealGeometry(page, self.markerRevealOrigin(for: annotation), nil)
+        }
+    }
+
     // MARK: - The picture the viewer is leaving
 
     /// What a flight home to `annotation` has to dissolve away, asked when the
@@ -2523,8 +2552,9 @@ extension MapsViewController: MKMapViewDelegate {
             }
             let placePage: ((UIViewController) -> UIViewController)? = hierarchyPlace.map { place in
                 let mapReturn = makeMapReturnSource(for: annotation)
+                let markerClose = makeMarkerClose(for: annotation)
                 return { [makeClusterGallery] feed in
-                    makeClusterGallery(postIDs, place, feed, mapReturn)
+                    makeClusterGallery(postIDs, place, feed, mapReturn, markerClose)
                 }
             }
             #if DEBUG
@@ -2781,7 +2811,10 @@ extension MapsViewController: MKMapViewDelegate {
         var gallery: UIViewController?
         if let cluster = annotation as? MapComputedCluster,
            cluster.isHierarchyMarker, let place = cluster.place {
-            let built = makeClusterGallery(postIDs, place, feedVC, makeMapReturnSource(for: annotation))
+            let built = makeClusterGallery(
+                postIDs, place, feedVC, makeMapReturnSource(for: annotation),
+                makeMarkerClose(for: annotation)
+            )
             gallery = built
             if let gallerySource = built as? any ZoomTransitionSource {
                 transition.setDismissSource(gallerySource, for: built)

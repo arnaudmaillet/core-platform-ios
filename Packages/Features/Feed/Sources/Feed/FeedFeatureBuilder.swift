@@ -443,7 +443,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         rank: PlaceRankBadge?,
         following: ClusterGalleryFollowing?,
         feed: UIViewController,
-        mapReturn: @escaping (@escaping () -> UIImage?) -> (any ZoomTransitionSource)?
+        mapReturn: @escaping (@escaping () -> UIImage?) -> (any ZoomTransitionSource)?,
+        markerClose: ((UIViewController) -> RevealGeometry?)?
     ) -> UIViewController {
         let base = repository
         let engagement = engagementProvider
@@ -529,6 +530,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // The page's own way home — staged when it becomes top
         // (`installMapReturnIfTop`): hero to the marker, slide as fallback.
         gallery.mapReturn = mapReturn
+        gallery.markerClose = markerClose
         return gallery
     }
 
