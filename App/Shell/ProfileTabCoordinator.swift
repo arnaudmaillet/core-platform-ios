@@ -11,10 +11,8 @@ import UIKit
 ///
 /// - **This is the canonical entry point**, so it is built with a non-nil
 ///   `onLogout` — which is also what makes the screen carry the settings gear
-///   and Share (see `ProfileFeatureBuilding`). The profile switcher is this
-///   tab's long press (`MainTabCoordinator.profileMenuOverlay`), which is why
-///   neither the avatar's old long-press menu nor the header's old switcher
-///   button took it away.
+///   and its own profile switcher (see `ProfileFeatureBuilding`). That is why
+///   losing the avatar's long-press menu does not lose the switcher.
 /// - **It is built once and retained for the session**, where the pushed profile
 ///   is built per push and released on pop. A tab root cannot be rebuilt on
 ///   every visit without throwing away scroll position and gallery state on
@@ -65,11 +63,11 @@ final class ProfileTabCoordinator: TabCoordinator {
             trayPlacement: .aboveBottomSafeArea
         )
         navigationController.viewControllers = [profile]
-        // The header reads `[bell][filter] … [coins][share settings]`. The bell
+        // The header reads `[bell][filter] … [coins][switcher settings]`. The bell
         // leads, ahead of the source filter the screen composes itself.
         (profile as? any HeaderAccessoryHosting)?
             .setLeadingAccessoryItem(notificationsBell.makeItem())
-        // The balance, inboard of the share + settings pair — the same
+        // The balance, inboard of the switcher + settings pair — the same
         // installer every root header uses.
         //
         // ⚠️ A PUSHED PROFILE WEARS ONE TOO NOW, and did not before: the rule

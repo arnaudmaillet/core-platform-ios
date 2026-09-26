@@ -22,6 +22,9 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     /// Builds the account settings screen (own profile only, the gear's
     /// destination). Nil for other users.
     private let makeSettingsViewController: (() -> UIViewController)?
+    /// Builds the reusable profile-switcher menu (own profile only). Nil for
+    /// other users — switching is a viewer affordance.
+    private let switcherFactory: ProfileSwitcherMenuFactory?
     /// Builds the followers / following screen for a subject and a starting
     /// tab. Nil when the app wasn't wired with a relationships repository, in
     /// which case the counters stay inert rather than opening an empty screen.
@@ -167,13 +170,8 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
 
     /// The own-profile settings gear; pushes `AccountSettingsViewController`.
     private var settingsItem: UIBarButtonItem?
-    /// The own-profile share button, sharing the gear's capsule; opens the
-    /// same QR sheet as the overflow menu's Share (`presentShareSheet`).
-    ///
-    /// It took the slot the profile SWITCHER held. The switcher is not lost:
-    /// the Profile tab's long press carries the very same menu (the shell's
-    /// `profileMenuOverlay`), and the header's copy was a second door to it.
-    private var shareItem: UIBarButtonItem?
+    /// The own-profile switcher; taps present the profile-switcher menu.
+    private var switcherItem: UIBarButtonItem?
     /// An item the SHELL owns at the head of the leading group — the
     /// notifications bell, on the tab root only (a pushed profile leads with
     /// its back button). Kept as state for the same reason as the trailing
@@ -272,6 +270,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         onLogout: (() -> Void)?,
         makeEditViewController: ((UserProfile?, @escaping () -> Void) -> UIViewController)? = nil,
         makeSettingsViewController: (() -> UIViewController)? = nil,
+        switcherFactory: ProfileSwitcherMenuFactory? = nil,
         makeRelationshipsViewController: (
             (ProfileRelationshipsViewModel.Subject, RelationshipDirection) -> UIViewController
         )? = nil,
@@ -283,6 +282,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         self.onLogout = onLogout
         self.makeEditViewController = makeEditViewController
         self.makeSettingsViewController = makeSettingsViewController
+        self.switcherFactory = switcherFactory
         self.makeRelationshipsViewController = makeRelationshipsViewController
         self.imagePipeline = imagePipeline
         self.shareTargeting = shareTargeting
@@ -1730,36 +1730,22 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         )
         settings.tintColor = .label
         settings.accessibilityLabel = "Settings"
-        settings.identifier = Self.settingsItemID
         settingsItem = settings
 
-        // Share — beside the gear, in the SAME capsule: two items left to share
-        // the bar's background (the iOS 26 default) read as one pill with two
-        // glyphs, which is what makes them a pair rather than two neighbours.
-        // The same sheet the overflow menu's Share opens; before the profile
-        // has loaded there is no card to share, and `presentShareSheet` says
-        // nothing rather than opening an empty sheet.
-        let share = UIBarButtonItem(
-            image: UIImage(systemName: "square.and.arrow.up"),
-            primaryAction: UIAction { [weak self] _ in self?.presentShareSheet() }
-        )
-        share.tintColor = .label
-        share.accessibilityLabel = "Share Profile"
-        share.identifier = Self.shareItemID
-        shareItem = share
-    }
-
-    /// Stable identities for the own-profile pair, so iOS 26 carries each one
-    /// across a transition as ONE item instead of cross-fading two copies.
-    private static let settingsItemID = "profile.settings"
-    private static let shareItemID = "profile.share"
-
-    /// Installs (or clears) the shell's leading accessory — the bell. Safe
-    /// before the view loads: `applyNavigationState` reads it every time.
-    func setLeadingAccessoryItem(_ item: UIBarButtonItem?) {
-        leadingAccessoryItem = item
-        guard isViewLoaded else { return }
-        applyNavigationState()
+        // Profile switcher — the leading item, opposite the gear (see
+        // `applyNavigationState` for why the leading slot is free here).
+        // Tapping presents the shared switcher menu; the switch itself is
+        // picked up through `.activeProfileDidChange`, so this screen refreshes
+        // whichever switcher was used.
+        if switcherFactory != nil {
+            let switcher = UIBarButtonItem(image: UIImage(systemName: "person.2"), menu: UIMenu(children: []))
+            switcher.tintColor = .label
+            switcher.accessibilityLabel = "Switch Profile"
+            switcherItem = switcher
+            // Pre-load profiles + avatars, then set a SYNCHRONOUS menu — its
+            // content lands in the first frame, not popped in after the popover.
+            reloadSwitcherMenu()
+        }
     }
 
     /// Installs (or clears) the shell's trailing accessory. Safe before the
@@ -1771,12 +1757,38 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         applyNavigationState()
     }
 
+    /// Installs (or clears) the shell's leading accessory — the bell. Safe
+    /// before the view loads: `applyNavigationState` reads it every time.
+    func setLeadingAccessoryItem(_ item: UIBarButtonItem?) {
+        leadingAccessoryItem = item
+        guard isViewLoaded else { return }
+        applyNavigationState()
+    }
+
     #if DEBUG
     /// Recomposes the trailing run, so a test can put the screen through the
     /// rebuild an injected item has to survive without having to move the
     /// follow state to get there.
     func debugRebuildNavigationState() { applyNavigationState() }
     #endif
+
+    /// Pre-fetches the switcher snapshot and installs a synchronous menu on the
+    /// switcher item. Re-run after a switch so the active marker updates.
+    ///
+    /// `onSwitch` is empty on purpose. Refreshing is driven by
+    /// `.activeProfileDidChange` instead, so it happens no matter WHICH switcher
+    /// was used — this screen's own, or the Profile tab's long-press menu, which
+    /// is built by the shell and cannot call back into here.
+    private func reloadSwitcherMenu() {
+        guard let switcherFactory, let switcherItem else { return }
+        Task { [weak self] in
+            await switcherFactory.reload()
+            switcherItem.menu = switcherFactory.makeMenu(
+                onSwitch: {},
+                onAddProfile: { [weak self] in self?.presentAddProfilePlaceholder() }
+            )
+        }
+    }
 
     /// The active profile changed — from any switcher anywhere.
     ///
@@ -1802,6 +1814,9 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
             isSwitchingProfile = false
             headerView.setRedacted(true)
         }
+        // Re-read the snapshot so the menu's active marker moves to the profile
+        // just switched to.
+        reloadSwitcherMenu()
     }
 
     /// Runs `changes` as a cross-dissolve while a switch is in flight, and
@@ -1819,6 +1834,16 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
             options: [.transitionCrossDissolve, .allowUserInteraction, .beginFromCurrentState],
             animations: changes
         )
+    }
+
+    private func presentAddProfilePlaceholder() {
+        let alert = UIAlertController(
+            title: "Add Profile",
+            message: "Creating a new profile isn't available yet.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
     }
 
     private func pushSettings() {
@@ -1853,7 +1878,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
 
         // The content-source filter leads the bar on BOTH profiles, behind
         // the shell's bell on the tab root:
-        //   tab root  [bell][source] … [coins][share settings]
+        //   tab root  [bell][source] … [coins][switcher gear]
         //   pushed    [back][source] … [coins]
         // Written only when it changed — the same "say nothing" rule as the
         // trailing run below, for the same torn-capsule reason.
@@ -1944,19 +1969,49 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         // arrives, because a rebuild is keyed on it and the guard below
         // decides whether anything actually changed.
         _ = state
-        // The own profile's pair — the gear at the corner (`[0]` is the
-        // screen edge) and Share inboard of it, sharing one capsule. It is the
-        // pair the profile SWITCHER used to make with the gear; the switcher
-        // left the header for the Profile tab's long press, which carries the
-        // same menu. Only the canonical own profile builds either item (see
-        // `configureNavigationBar`), so a pushed profile contributes nothing
-        // here and its trailing run is the shell's balance alone.
+        // The switcher sits in the LEADING slot, opposite the gear.
+        //
+        // Safe here and only here: the item exists solely on the canonical own
+        // profile, which is a tab ROOT — so there is no back button to displace
+        // and no interactive pop for a leading item to interfere with. A pushed
+        // profile never has one (see `ProfileFeatureBuilding.onLogout`).
+        //
+        // Written through the same "say nothing unless it changed" guard as the
+        // trailing items: handing UIKit the identical item mid-transition is
+        // what tears a capsule down and rebuilds it empty.
+        // ⚠️ **The switcher rides TRAILING, beside the gear, and the leading
+        // group belongs to the docked selector alone.**
+        //
+        // Measured, docked own profile: with the switcher in the leading group
+        // BOTH leading platters came out 0x44 at the same x while the trailing
+        // gear sat at 46x44 — and with the switcher absent, the selector hosted
+        // correctly. Neither its empty menu (seeded with a placeholder child) nor
+        // the group being rewritten (single write, `isHidden` for visibility)
+        // accounted for it; two leading items are fine elsewhere, since For You
+        // carries a compose glyph beside its selector.
+        //
+        // So the chrome moved rather than the selector: this screen's actions all
+        // live at the trailing end now, which is also the layout every other
+        // surface wears — leading is the selector, trailing is what you can do.
+        // ⚠️ THE LEADING GROUP IS NOBODY'S NOW, and the guard that used to
+        // claim it for the docked selector had to be DELETED rather than left
+        // to evaluate: with no selector item it reduced to
+        // `leftBarButtonItems = []` on every appearance and every follow-state
+        // change — a silent eraser of any leading item an owner installs, which
+        // `configureNavigationBar` explicitly contemplates.
+
+        // Relationship action for other users; the gear for own profile (where
+        // `action` is nil).
         var items: [UIBarButtonItem] = []
         if let settingsItem { items.append(settingsItem) }
-        if let shareItem { items.append(shareItem) }
+        // The switcher, on the own profile only — see the note above for why it
+        // is not in the leading group.
+        if let switcherItem { items.append(switcherItem) }
         // The shell's accessory LAST, which puts it furthest from the screen
         // edge: `[0]` is the corner, so the gear keeps it and the balance sits
-        // inboard — the Maps header's arrangement ([coins] [search]).
+        // inboard — the Maps header's arrangement ([coins] [search]). On a
+        // pushed profile, which has neither the gear nor the switcher, the
+        // balance is the whole trailing run.
         if let trailingAccessoryItem { items.append(trailingAccessoryItem) }
         // The load-bearing guard. A pop's `viewWillAppear` resolves to exactly
         // the item set already on the bar, and handing that same set back is

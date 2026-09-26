@@ -13,7 +13,7 @@ import UIKit
 /// run — and that promise is worth pinning here, because this run is REBUILT.
 ///
 /// `applyNavigationState` composes the bar's items from scratch every time
-/// the follow state or the identity moves, and it is guarded by
+/// the follow state, the switcher or the identity moves, and it is guarded by
 /// "say nothing unless it changed" — a guard that exists because handing UIKit
 /// the same set mid-transition tears the capsule down. An item that arrives
 /// from outside has to pass through both.
@@ -105,12 +105,21 @@ struct ProfileHeaderAccessoryTests {
 
     // MARK: - The own profile's pair
 
-    /// ⚠️ THE TAB ROOT READS `[coins][share settings]`: the gear at the corner,
-    /// Share inboard of it, the balance inboard of both — and Share and the
-    /// gear SHARE one capsule (neither opts out of the bar's shared
-    /// background), while the balance, which does opt out, stands alone.
-    @Test func theOwnProfileCarriesSettingsThenShareThenTheBalance() throws {
-        let screen = ownProfile()
+    /// ⚠️ THE TAB ROOT READS `[coins][switcher settings]`: the gear at the
+    /// corner, the switcher inboard of it, the balance inboard of both — and
+    /// the switcher and the gear SHARE one capsule (neither opts out of the
+    /// bar's shared background), while the balance, which does opt out, stands
+    /// alone.
+    @Test func theOwnProfileCarriesSettingsThenTheSwitcherThenTheBalance() throws {
+        let screen = ProfileViewController(
+            viewModel: ProfileViewModel(repository: StubAccessoryProfiles()),
+            imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
+            onLogout: {},
+            switcherFactory: ProfileSwitcherMenuFactory(
+                switching: StubSwitching(), imagePipeline: ImagePipeline(fetcher: SilentFetcher())
+            ),
+            trayPlacement: .aboveBottomSafeArea
+        )
         screen.loadViewIfNeeded()
         let badge = accessory()
         badge.sharesBackground = false
@@ -118,9 +127,9 @@ struct ProfileHeaderAccessoryTests {
         screen.setTrailingAccessoryItem(badge)
 
         let items = try #require(screen.navigationItem.rightBarButtonItems)
-        #expect(items.map(\.accessibilityLabel) == ["Settings", "Share Profile", "Balance"])
+        #expect(items.map(\.accessibilityLabel) == ["Settings", "Switch Profile", "Balance"])
         #expect(items[0].sharesBackground && items[1].sharesBackground,
-                "share and settings no longer read as one capsule")
+                "the switcher and settings no longer read as one capsule")
     }
 
     /// A pushed profile — built without `onLogout` — has neither: its trailing
@@ -193,4 +202,11 @@ private struct StubAccessoryProfiles: ProfileProviding {
         displayName: String, bio: String, website: String, links: [ProfileLink]
     ) async throws -> UserProfile { throw CancellationError() }
     func changeHandle(_ newHandle: String) async throws -> UserProfile { throw CancellationError() }
+}
+
+/// No account behind it — the switcher item only has to exist.
+private struct StubSwitching: ProfileSwitching {
+    func accountProfiles() async throws -> [AccountProfile] { [] }
+    func activeProfileID() async -> ProfileID? { nil }
+    func setActiveProfile(_ id: ProfileID) async {}
 }
