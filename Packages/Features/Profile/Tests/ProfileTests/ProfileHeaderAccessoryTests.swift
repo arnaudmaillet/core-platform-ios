@@ -7,7 +7,7 @@ import UIKit
 
 /// **The header's injected trailing item — the wallet balance, from the shell.**
 ///
-/// The same number stands in the Maps header and on the post screen, so this
+/// The same number stands in the Explore header and on the post screen, so this
 /// screen does not learn what a wallet is: the shell builds one item and hands
 /// it over. What this screen promises is that the item stays in its trailing
 /// run — and that promise is worth pinning here, because this run is REBUILT.
@@ -43,8 +43,8 @@ struct ProfileHeaderAccessoryTests {
     /// ⚠️ THE BALANCE STANDS INBOARD, and the gear keeps the corner.
     ///
     /// `rightBarButtonItems[0]` is nearest the screen edge, so appending puts
-    /// the balance furthest from it — the same arrangement as the Maps header,
-    /// where the coin sits inboard of the bell.
+    /// the balance furthest from it — the same arrangement as the Explore
+    /// header, where the coin sits inboard of the bell.
     @Test func theBalanceStandsInboardOfTheScreensOwnItems() throws {
         let screen = ownProfile()
         screen.loadViewIfNeeded()

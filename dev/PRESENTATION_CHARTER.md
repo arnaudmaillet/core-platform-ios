@@ -283,7 +283,7 @@ Notifications (large spinner, table hidden), Post Detail in `.full` mode,
 Search's People results, and the share sheet's target search. Each gets
 skeleton rows from the existing components (`PersonSkeletonCell`,
 `CommentSkeletonRowView`, `RelationshipSkeletonCell`) laid out at the content's
-size. The Maps tab is exempt: the map IS its content, and its clusters arrive
+size. The Explore tab is exempt: the map IS its content, and its clusters arrive
 over a drawn map.
 
 ### PR 8 — Screens read what the previous screen had (P7) — shipped (#197)

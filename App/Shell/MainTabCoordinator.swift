@@ -14,15 +14,16 @@ import DesignSystem
 /// Tabs are set via the modern `UITabBarController.tabs` API. The trailing item
 /// is the "+" (`CreateTabItem`), a `UISearchTab`, which the system detaches to
 /// the trailing edge, producing the grouped bar
-/// `| Maps  For You  Messages  Profile |  + |` natively. It opens a menu and is
-/// never selected.
+/// `| Explore  For You  Messages  Profile |  + |` natively. It opens a menu and
+/// is never selected.
 ///
 /// Profile is a root tab, carrying the viewer's own avatar as its icon
 /// (`ProfileTabCoordinator`) — it is the canonical entry point, so it is the one
 /// place the settings gear, the profile switcher and Log Out belong. It replaced
-/// the avatar button that used to sit in the Maps nav bar; the map header now
-/// carries the notifications bell, the wallet and search. Its "+" left with
-/// #152 — making a post starts from the bar's "+" (`CreateTabItem`).
+/// the avatar button that used to sit in the map's nav bar (the Explore tab,
+/// then called Maps); the map header now carries the notifications bell, the
+/// wallet and search. Its "+" left with #152 — making a post starts from the
+/// bar's "+" (`CreateTabItem`).
 ///
 /// **Every bar button is now a tab.** Slot 1 used to be a vetoed Feed action
 /// that pushed the timeline onto whatever tab you were on; it is now the For You
@@ -163,7 +164,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
         // separates it from the other four because it is a `UISearchTab` — see
         // `CreateTabItem` for why the type, not `.pinned`, is what detaches it.
         orderedTabs = [
-            (.maps, MapsTabCoordinator(
+            (.explore, ExploreTabCoordinator(
                 container: container,
                 notificationsButtonItem: notificationsBell.makeItem()
             )),
@@ -232,10 +233,10 @@ final class MainTabCoordinator: NSObject, Coordinator {
 
         #if DEBUG
         // Dev convenience: `-select-tab N` opens directly on a tab for testing,
-        // in bar order (0 = Maps … 3 = Profile; the "+" is not a tab and has no
-        // index). Every index is a plain selection now — 1 used to trigger the
-        // feed push instead, which it no longer does; use `-open-feed` for the
-        // timeline.
+        // in bar order (0 = Explore … 3 = Profile; the "+" is not a tab and has
+        // no index). Every index is a plain selection now — 1 used to trigger
+        // the feed push instead, which it no longer does; use `-open-feed` for
+        // the timeline.
         let arguments = ProcessInfo.processInfo.arguments
         if let index = arguments.firstIndex(of: "-select-tab"), index + 1 < arguments.count,
            let tabIndex = Int(arguments[index + 1]), AppTab.allCases.indices.contains(tabIndex) {
@@ -395,7 +396,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
                 self?.selectTab(.messages)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                    self?.selectTab(.maps)
+                    self?.selectTab(.explore)
                 }
             }
         }

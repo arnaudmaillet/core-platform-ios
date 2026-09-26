@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import CoreStorage
 import DesignSystem
 import FeedInterface
 import MediaCore
@@ -36,6 +37,8 @@ import UIKit
 final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     private let viewModel: ForYouViewModel
     private let pager: ForYouPagerView
+    /// The cards' stakes — see `PostCardStaking`.
+    private let staking: PostCardStaking?
     private let makeSnapFeed: ([PostID]) -> UIViewController
     private let prewarm: ([PostID]) async -> Void
     /// Loads a post's first page of comments into the panel's synchronous
@@ -449,7 +452,8 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         prefetchTopComments: ((PostID) async -> Void)? = nil,
         router: (any Router)? = nil,
         reporting: (any ContentReporting)? = nil,
-        socialGraph: (any SocialGraphWriting)? = nil
+        socialGraph: (any SocialGraphWriting)? = nil,
+        wallet: WalletStore? = nil
     ) {
         self.viewModel = viewModel
         self.makeSnapFeed = makeSnapFeed
@@ -459,7 +463,9 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         self.reporting = reporting
         self.socialGraph = socialGraph
         pager = ForYouPagerView(imagePipeline: imagePipeline, videoPlayback: videoPlayback)
+        staking = wallet.map(PostCardStaking.init)
         super.init(nibName: nil, bundle: nil)
+        pager.staking = staking
         // NOT hidesBottomBarWhenPushed: this is a tab root, and the bar is how
         // the viewer leaves it.
     }
@@ -468,7 +474,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     /// An item the SHELL owns, standing inboard of this screen's own —
-    /// the viewer's point balance today, the same badge the Maps header and
+    /// the viewer's point balance today, the same badge the Explore header and
     /// the post screen wear.
     ///
     /// Injected rather than built here, and that is the whole design: three
@@ -490,7 +496,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     }
 
     /// ⚠️ `[0]` IS THE SCREEN EDGE. Search keeps the corner and the wallet
-    /// badge sits to its left — the same arrangement the Maps header wears
+    /// badge sits to its left — the same arrangement the Explore header wears
     /// ([coins] [search]). The lens menu is in the LEADING group, behind the
     /// shell's bell, so the header reads `[bell][lens] … [coins][search]`.
     private func applyTrailingItems() {
@@ -528,11 +534,11 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         //
         // ⚠️ **NO TITLE IN THE BAR.** "For You" was written here (the static
         // word, never the live lens name, which at "Entertainment" would have
-        // collided with the items); it went with Maps' on 2026-09-22 — the two
-        // roots' headers carry their controls and nothing else, and the tab
-        // bar already says the word. `title` still feeds nothing: the capsule
-        // in `titleView` outranks it when present, and the bar is bare when not.
-        //
+        // collided with the items); it went with the map tab's on 2026-09-22 —
+        // the two roots' headers carry their controls and nothing else, and the
+        // tab bar already says the word. `title` still feeds nothing: the
+        // capsule in `titleView` outranks it when present, and the bar is bare
+        // when not.
         // `largeTitleDisplayMode` stays `.never`: the large-title content-area
         // layout is kept out of the hero flight's path, which is a separate
         // reason and still holds.
@@ -2155,6 +2161,9 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // hero card for the whole flight. Moving it then is the jump this
         // avoids — just later in the animation.
         pager.applyPendingReveal()
+        // The screen left: what its like chips staked is final now, as a
+        // post's stakes are once the feed pages away from it.
+        staking?.endSession()
     }
 
     override func viewWillDisappear(_ animated: Bool) {

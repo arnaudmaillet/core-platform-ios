@@ -22,7 +22,8 @@ final class AccessoryCollapseUITests: XCTestCase {
 
     /// The three tabs whose root screen hosts its selector in the accessory.
     /// Indices into `AppTab.allCases` — `-select-tab` takes an INDEX, and a
-    /// name is a silent no-op that lands on Maps and fakes a missing selector.
+    /// name is a silent no-op that lands on Explore and fakes a missing
+    /// selector.
     private static let accessorySurfaces: [(name: String, tab: Int)] = [
         ("For You", 1), ("Messages", 2), ("Profile", 3),
     ]

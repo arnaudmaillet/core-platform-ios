@@ -40,6 +40,11 @@ final class ProfileGalleryGridView: UIView {
     /// own frame instead of after its own round trip (`GalleryPostProjection`).
     /// The ids are one `map` away wherever they are actually wanted.
     var onItemTapped: ((GalleryPost, _ stream: [GalleryPost]) -> Void)?
+    /// The same open, arriving with the thread up — a card's comment chip.
+    /// Nil falls back to `onItemTapped`, so the chip is never a dead control.
+    var onItemCommentsTapped: ((GalleryPost, _ stream: [GalleryPost]) -> Void)?
+    /// What the cards' like chips stake with — see `PostCardStaking`.
+    var staking: PostCardStaking?
     /// How many posts to hand the feed. Enough to swipe through without
     /// serialising an entire gallery into a route.
     private static let streamWindow = 30
@@ -415,6 +420,15 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
             // See `ForYouGridPage`: repost has no action yet and is drawn
             // anyway; save toggles the shared pile and reads its answer back.
             cell.onRepostTapped = { [weak self] in self?.onRepostRequested?(post) }
+            // The like chip stakes — see `PostCardStaking`.
+            staking?.bind(cell, to: post.id)
+            // The comment chip opens the post at its thread, resolved through
+            // the CELL's index path: the row can have moved under the finger.
+            cell.onCommentsTapped = { [weak self, weak cell] in
+                guard let self, let cell,
+                      let path = self.collectionView.indexPath(for: cell) else { return }
+                self.open(at: path, showingComments: true)
+            }
             if let bookmarks {
                 cell.isBookmarked = bookmarks.isSaved(post.id.rawValue)
                 cell.onBookmarkTapped = { [weak cell] in
@@ -891,16 +905,25 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        open(at: indexPath, showingComments: false)
+    }
+
+    /// Both ways into a post — the card, and its comment chip.
+    private func open(at indexPath: IndexPath, showingComments: Bool) {
         guard !showsSkeleton, posts.indices.contains(indexPath.item) else { return }
         // Same contract as the For You grids: the flight leaves from where
         // the tile IS, and the reveal waits until the post has covered this
         // page (`applyPendingReveal`). Moving the grid under the thumb at tap
         // time is a jump the viewer is looking straight at.
-        pendingRevealPostID = posts[indexPath.item].id
-        onItemTapped?(
-            posts[indexPath.item],
-            Array(posts[indexPath.item...].prefix(Self.streamWindow))
-        )
+        let post = posts[indexPath.item]
+        pendingRevealPostID = post.id
+        let stream = Array(posts[indexPath.item...].prefix(Self.streamWindow))
+        // ⚠️ A TEXT POST'S COMMENTS ARE ITS PAGE — see `ForYouGridPage.open`.
+        if showingComments, post.kind != .text, let openComments = onItemCommentsTapped {
+            openComments(post, stream)
+        } else {
+            onItemTapped?(post, stream)
+        }
     }
 }
 

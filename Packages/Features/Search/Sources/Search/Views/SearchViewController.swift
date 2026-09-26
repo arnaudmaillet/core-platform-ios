@@ -38,7 +38,7 @@ final class SearchViewController: UIViewController {
     /// alternative is a back chevron beside a Cancel, two ways out of the same
     /// screen sitting next to each other.
     enum Mode {
-        /// Pushed from the Maps or For You header. Submitting pushes the
+        /// Pushed from the Explore or For You header. Submitting pushes the
         /// answer; Cancel pops back to where the magnifier was tapped.
         case origin
         /// Pushed from the ANSWER, to ask again. Submitting pops back onto the
@@ -108,9 +108,9 @@ final class SearchViewController: UIViewController {
         // that same push — set there it is a coin toss whether the bar goes.
         //
         // This screen is a destination now, not a tab root: it is pushed from
-        // the Maps and For You headers, and the bar it would sit under belongs
-        // to the screen it came from. UIKit puts that bar back on the pop; the
-        // fade below is only about HOW it leaves and returns.
+        // the Explore and For You headers, and the bar it would sit under
+        // belongs to the screen it came from. UIKit puts that bar back on the
+        // pop; the fade below is only about HOW it leaves and returns.
         hidesBottomBarWhenPushed = true
         #if DEBUG
         installKeyboardTraceIfRequested()
@@ -187,7 +187,7 @@ final class SearchViewController: UIViewController {
     /// that tab existed to show hidden before they had done anything.
     ///
     /// This is not a tab any more. It is reached by tapping a magnifier in the
-    /// Maps or For You header — a gesture that already says "I want to
+    /// Explore or For You header — a gesture that already says "I want to
     /// search" — so opening in the state that gesture asked for costs nothing
     /// and saves a tap. The suggestions are one keyboard-dismiss away, which is
     /// the opposite of the old trade rather than a repeat of it.
@@ -402,7 +402,7 @@ final class SearchViewController: UIViewController {
     /// and dissolving between a resting magnifier and a searching field. This
     /// screen went one step further and has no resting state at all: it IS the
     /// search, so the field is simply always there. The magnifier that opens it
-    /// lives on the Maps and For You headers, which is where the choice to
+    /// lives on the Explore and For You headers, which is where the choice to
     /// search is actually made.
     ///
     /// The closing animation that took a dozen attempts to tame therefore does

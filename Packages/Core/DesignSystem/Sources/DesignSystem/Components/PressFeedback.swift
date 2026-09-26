@@ -172,6 +172,12 @@ public final class PressFeedback {
     /// Whether a finger is pressing, as far as this feedback knows.
     public private(set) var isPressed = false
 
+    /// Told when a press starts (true) and ends (false) — for a host that
+    /// dresses the press further, e.g. `ActionAffordance`'s contrast step, so
+    /// the extra layer follows the SAME finger decisions as the scale rather
+    /// than a second opinion on them.
+    public var onPressChanged: ((Bool) -> Void)?
+
     public let style: Style
 
     /// What moves — the control itself, or a view it stands for.
@@ -304,6 +310,7 @@ public final class PressFeedback {
     public func press() {
         guard !isPressed, let target else { return }
         isPressed = true
+        onPressChanged?(true)
         // The dim is not motion: it stays under Reduce Motion, like the sound.
         if dims {
             isDimmed = true
@@ -339,6 +346,7 @@ public final class PressFeedback {
         let held = scale
         isPressed = false
         scale = 1
+        if wasPressed { onPressChanged?(false) }
         if isDimmed, let layer = target?.layer {
             isDimmed = false
             layer.removeAnimation(forKey: Self.dimKey)

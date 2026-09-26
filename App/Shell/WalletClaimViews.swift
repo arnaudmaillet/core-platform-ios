@@ -6,17 +6,38 @@ import UIKit
 
 // The pieces of the wallet sheet (`WalletClaimViewController`): the summary at
 // its head — the two currencies side by side over the streak and today's
-// earnings — the stake rows under it, their section headers, and the compact
-// bar the summary collapses into on scroll.
+// earnings — the stake rows under it, their section headers, the compact bar
+// the summary collapses into on scroll, and the blurs the list passes under.
+//
+// ⚠️ **CARDS ONLY FOR WHAT CAN BE PRESSED** (26 September 2026). The summary
+// used to sit in three filled cards — two balances and a streak card — and a
+// card is the app's promise that a thing can be pressed: nothing in the summary
+// can. So the summary is BARE, big numbers straight on the page with hairlines
+// between them, and the only cards on the sheet are the stake rows, which open
+// their post. The page itself is the grouped grey with white cards on it —
+// For You's and Profile's surface (`Surface`).
 
 // MARK: - Shared
 
 enum WalletSheetMetrics {
     static let sideMargin: CGFloat = Spacing.lg
-    static let cardCorner: CGFloat = 18
-    static let rowCorner: CGFloat = 16
+    static let rowCorner: CGFloat = 18
     static let claimHeight: CGFloat = 52
     static let thumbnail: CGFloat = 48
+    /// The balances: the sheet's main information, so its biggest type.
+    static let balanceSize: CGFloat = 40
+}
+
+/// A number followed by its currency's glyph — "20 ♥", "+10 💎" — the ONE order
+/// every amount on the sheet is written in.
+func walletAmount(
+    _ text: String, glyph: UIImage?, font: UIFont, color: UIColor = .label
+) -> NSAttributedString {
+    let result = NSMutableAttributedString(string: text + " ", attributes: [
+        .font: font, .foregroundColor: color,
+    ])
+    result.append(walletGlyph(glyph, font: font))
+    return result
 }
 
 /// A glyph inline in a line of type — the currencies' icons beside their
@@ -47,7 +68,8 @@ func walletAgoText(since date: Date, now: Date) -> String {
 
 // MARK: - Summary
 
-/// One currency: its token, its name, its balance, and a word for what it is.
+/// One currency: its token, its name, its balance, and a word for what it is —
+/// on the page itself, no card (see the file's note).
 final class WalletBalanceTile: UIView {
     private let iconView = UIImageView()
     private let nameLabel = UILabel()
@@ -56,40 +78,43 @@ final class WalletBalanceTile: UIView {
 
     init(icon: UIImage?, name: String, note: String) {
         super.init(frame: .zero)
-        backgroundColor = .secondarySystemBackground
-        layer.cornerRadius = WalletSheetMetrics.cardCorner
-        layer.cornerCurve = .continuous
-
         iconView.image = icon
         iconView.contentMode = .scaleAspectFit
         nameLabel.text = name
         nameLabel.font = .systemFont(ofSize: 13, weight: .semibold)
         nameLabel.textColor = .secondaryLabel
-        valueLabel.font = .monospacedDigitSystemFont(ofSize: 30, weight: .bold)
+        // Rounded and monospaced: a balance is a figure that changes under
+        // the viewer's eyes, and its digits must not jostle when it does.
+        let base = UIFont.monospacedDigitSystemFont(ofSize: WalletSheetMetrics.balanceSize, weight: .bold)
+        valueLabel.font = base.fontDescriptor.withDesign(.rounded).map { UIFont(descriptor: $0, size: 0) } ?? base
         valueLabel.textColor = .label
+        valueLabel.textAlignment = .center
         valueLabel.adjustsFontSizeToFitWidth = true
-        valueLabel.minimumScaleFactor = 0.6
+        valueLabel.minimumScaleFactor = 0.5
         noteLabel.text = note
         noteLabel.font = .systemFont(ofSize: 12, weight: .regular)
         noteLabel.textColor = .tertiaryLabel
+        noteLabel.textAlignment = .center
 
         let top = UIStackView(arrangedSubviews: [iconView, nameLabel])
         top.spacing = Spacing.xs
         top.alignment = .center
         let column = UIStackView(arrangedSubviews: [top, valueLabel, noteLabel])
         column.axis = .vertical
-        column.alignment = .leading
-        column.spacing = 2
+        column.alignment = .center
+        column.spacing = 0
         column.setCustomSpacing(Spacing.xs, after: top)
         column.translatesAutoresizingMaskIntoConstraints = false
         addSubview(column)
         NSLayoutConstraint.activate([
-            iconView.widthAnchor.constraint(equalToConstant: 20),
-            iconView.heightAnchor.constraint(equalToConstant: 20),
-            column.topAnchor.constraint(equalTo: topAnchor, constant: Spacing.md),
-            column.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Spacing.md),
-            column.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -Spacing.md),
-            column.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Spacing.md),
+            iconView.widthAnchor.constraint(equalToConstant: 18),
+            iconView.heightAnchor.constraint(equalToConstant: 18),
+            column.topAnchor.constraint(equalTo: topAnchor, constant: Spacing.sm),
+            column.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor),
+            column.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
+            column.centerXAnchor.constraint(equalTo: centerXAnchor),
+            column.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Spacing.sm),
+            valueLabel.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor),
         ])
         isAccessibilityElement = true
         accessibilityLabel = name
@@ -114,13 +139,20 @@ final class WalletBalanceTile: UIView {
     }
 }
 
-/// The head of the sheet: Points and Gems side by side, then ONE compact card
-/// split in two — the streak on the left, today's earnings on the right.
+/// The head of the sheet: Points and Gems side by side, a hairline, then the
+/// streak on the left and today's earnings on the right.
 ///
-/// ⚠️ **ONE CARD, NOT TWO BLOCKS.** The streak card and the earnings bar used
-/// to stack as two full-width sections under a centred balance; with two
-/// currencies to show and a stake list below, the head has to fit the info
-/// detent on its own, so the pair shares one row.
+/// ```
+///        ♥ Points      │      💎 Gems
+///          250         │         37
+///     To stake on posts│ Earned by your stakes
+///   ─────────────────────────────────────────
+///   🔥 3-day streak    │  Earned today  25 / 200
+///      Kept for today  │  ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬
+/// ```
+///
+/// Bare, on the page: nothing here can be pressed, so nothing here wears a
+/// card. The balances get the height — they are what the sheet is for.
 final class WalletSummaryView: UIView {
     let pointsTile = WalletBalanceTile(
         icon: UIImage(
@@ -130,7 +162,7 @@ final class WalletSummaryView: UIView {
         name: "Points", note: "To stake on posts"
     )
     let gemsTile = WalletBalanceTile(
-        icon: GemSymbol.glyphImage(UIImage.SymbolConfiguration(pointSize: 17, weight: .semibold)),
+        icon: GemSymbol.glyphImage(UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)),
         name: GemSymbol.name, note: "Earned by your stakes"
     )
 
@@ -146,14 +178,10 @@ final class WalletSummaryView: UIView {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        let tiles = UIStackView(arrangedSubviews: [pointsTile, gemsTile])
-        tiles.distribution = .fillEqually
-        tiles.spacing = Spacing.sm
-
-        let card = UIView()
-        card.backgroundColor = .secondarySystemBackground
-        card.layer.cornerRadius = WalletSheetMetrics.cardCorner
-        card.layer.cornerCurve = .continuous
+        let balancesDivider = Self.hairline()
+        let balances = UIStackView(arrangedSubviews: [pointsTile, balancesDivider, gemsTile])
+        balances.alignment = .center
+        balances.spacing = Spacing.sm
 
         // — Streak, left half —
         streakDisc.layer.cornerRadius = 16
@@ -178,7 +206,7 @@ final class WalletSummaryView: UIView {
         earnedTitle.textColor = .secondaryLabel
         earnedValue.font = .monospacedDigitSystemFont(ofSize: 15, weight: .semibold)
         earnedValue.textColor = .label
-        progressTrack.backgroundColor = .quaternarySystemFill
+        progressTrack.backgroundColor = .tertiarySystemFill
         progressTrack.layer.cornerRadius = 2
         progressFill.backgroundColor = PointsSymbol.tint
         progressFill.layer.cornerRadius = 2
@@ -189,35 +217,34 @@ final class WalletSummaryView: UIView {
         earned.spacing = 3
         earned.setCustomSpacing(Spacing.xs, after: earnedValue)
 
-        let divider = UIView()
-        divider.backgroundColor = .separator
-        let halves = UIStackView(arrangedSubviews: [streak, divider, earned])
+        let halvesDivider = Self.hairline()
+        let halves = UIStackView(arrangedSubviews: [streak, halvesDivider, earned])
         halves.alignment = .center
         halves.spacing = Spacing.md
-        halves.translatesAutoresizingMaskIntoConstraints = false
-        card.addSubview(halves)
 
-        let column = UIStackView(arrangedSubviews: [tiles, card])
+        let rule = UIView()
+        rule.backgroundColor = .separator
+
+        let column = UIStackView(arrangedSubviews: [balances, rule, halves])
         column.axis = .vertical
-        column.spacing = Spacing.sm
+        column.spacing = Spacing.md
         column.translatesAutoresizingMaskIntoConstraints = false
         addSubview(column)
         NSLayoutConstraint.activate([
             column.topAnchor.constraint(equalTo: topAnchor),
             column.leadingAnchor.constraint(equalTo: leadingAnchor),
             column.trailingAnchor.constraint(equalTo: trailingAnchor),
-            column.bottomAnchor.constraint(equalTo: bottomAnchor),
-            halves.topAnchor.constraint(equalTo: card.topAnchor, constant: Spacing.md),
-            halves.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: Spacing.md),
-            halves.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -Spacing.md),
-            halves.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -Spacing.md),
+            column.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Spacing.sm),
+            // The two balances share the width evenly, the hairline between.
+            gemsTile.widthAnchor.constraint(equalTo: pointsTile.widthAnchor),
+            balancesDivider.heightAnchor.constraint(equalTo: balances.heightAnchor, multiplier: 0.7),
+            rule.heightAnchor.constraint(equalToConstant: 0.5),
             streakDisc.widthAnchor.constraint(equalToConstant: 32),
             streakDisc.heightAnchor.constraint(equalToConstant: 32),
             streakIcon.centerXAnchor.constraint(equalTo: streakDisc.centerXAnchor),
             streakIcon.centerYAnchor.constraint(equalTo: streakDisc.centerYAnchor),
-            divider.widthAnchor.constraint(equalToConstant: 0.5),
-            divider.heightAnchor.constraint(equalTo: halves.heightAnchor),
-            // The two halves share the card evenly (the divider between).
+            halvesDivider.heightAnchor.constraint(equalTo: halves.heightAnchor),
+            // The two halves share the row evenly too.
             earned.widthAnchor.constraint(equalTo: streak.widthAnchor),
             progressTrack.heightAnchor.constraint(equalToConstant: 4),
             progressTrack.widthAnchor.constraint(equalTo: earned.widthAnchor),
@@ -225,6 +252,15 @@ final class WalletSummaryView: UIView {
             progressFill.topAnchor.constraint(equalTo: progressTrack.topAnchor),
             progressFill.bottomAnchor.constraint(equalTo: progressTrack.bottomAnchor),
         ])
+    }
+
+    /// A vertical hairline between two halves.
+    private static func hairline() -> UIView {
+        let line = UIView()
+        line.backgroundColor = .separator
+        line.translatesAutoresizingMaskIntoConstraints = false
+        line.widthAnchor.constraint(equalToConstant: 0.5).isActive = true
+        return line
     }
 
     @available(*, unavailable)
@@ -300,9 +336,12 @@ final class WalletStakeCell: UICollectionViewCell {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        contentView.backgroundColor = .secondarySystemBackground
+        // A white card on the grouped page — the one thing on the sheet that
+        // can be pressed (it opens the post).
+        contentView.backgroundColor = Surface.card
         contentView.layer.cornerRadius = WalletSheetMetrics.rowCorner
         contentView.layer.cornerCurve = .continuous
+        Surface.applyCardEdge(to: contentView)
 
         thumbnail.contentMode = .scaleAspectFill
         thumbnail.clipsToBounds = true
@@ -383,16 +422,12 @@ final class WalletStakeCell: UICollectionViewCell {
         let result = NSMutableAttributedString()
         switch stake.outcome {
         case nil:
-            result.append(walletGlyph(PointsSymbol.glyphImage(), font: resultFont))
-            result.append(NSAttributedString(string: " \(stake.amount)", attributes: [
-                .font: resultFont, .foregroundColor: UIColor.label,
-            ]))
+            result.append(walletAmount("\(stake.amount)", glyph: PointsSymbol.glyphImage(), font: resultFont))
             detailLabel.text = "Settles in \(walletRemainingText(until: stake.settlesAt, now: now))"
         case .gems(let earned):
-            result.append(NSAttributedString(string: "+\(earned) ", attributes: [
-                .font: resultFont, .foregroundColor: GemSymbol.tint,
-            ]))
-            result.append(walletGlyph(GemSymbol.glyphImage(), font: resultFont))
+            result.append(walletAmount(
+                "+\(earned)", glyph: GemSymbol.glyphImage(), font: resultFont, color: GemSymbol.tint
+            ))
             detailLabel.text = "\(stake.amount) staked · \(walletAgoText(since: stake.settlesAt, now: now))"
         case .noReward:
             result.append(NSAttributedString(string: "No reward", attributes: [
@@ -438,9 +473,10 @@ final class WalletStakeCell: UICollectionViewCell {
 final class WalletEmptyStakesCell: UICollectionViewCell {
     override init(frame: CGRect) {
         super.init(frame: frame)
-        contentView.backgroundColor = .secondarySystemBackground
+        contentView.backgroundColor = Surface.card
         contentView.layer.cornerRadius = WalletSheetMetrics.rowCorner
         contentView.layer.cornerCurve = .continuous
+        Surface.applyCardEdge(to: contentView)
         let title = UILabel()
         title.text = "No active stakes"
         title.font = .systemFont(ofSize: 15, weight: .semibold)
@@ -503,42 +539,139 @@ final class WalletSectionHeader: UICollectionReusableView {
 // MARK: - Compact bar
 
 /// What the summary collapses into once it has scrolled away: both balances
-/// on one line, pinned under the grabber, so the list below is never read
-/// without them.
+/// on one line, pinned under the grabber over a blur that dissolves downward,
+/// so the list passes BEHIND it and is never read without the balances.
+///
+/// ⚠️ **THE BLUR FADES IN BY SCRUBBING ITS EFFECT, NOT ITS ALPHA.** Alpha on a
+/// visual-effect view (or any ancestor of one) is unsupported and renders
+/// wrong; a paused property animator over `effect` is the native way to show
+/// part of a material, and `progress` sets its fraction.
 final class WalletCompactBar: UIView {
     private let label = UILabel()
-    private let hairline = UIView()
+    private let blur = WalletEdgeBlurView(edge: .top)
+    private var blurAnimator: UIViewPropertyAnimator?
+    private var pendingProgress: CGFloat = 0
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        backgroundColor = .systemBackground
+        isUserInteractionEnabled = false
         label.textAlignment = .center
-        hairline.backgroundColor = .separator
-        for view in [label, hairline] {
+        label.alpha = 0
+        for view in [blur, label] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
         NSLayoutConstraint.activate([
+            blur.topAnchor.constraint(equalTo: topAnchor),
+            blur.leadingAnchor.constraint(equalTo: leadingAnchor),
+            blur.trailingAnchor.constraint(equalTo: trailingAnchor),
+            // The ramp runs past the bar, so the list dissolves into it
+            // rather than meeting an edge under the balances.
+            blur.bottomAnchor.constraint(equalTo: bottomAnchor, constant: Spacing.xl),
             label.centerXAnchor.constraint(equalTo: centerXAnchor),
             label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Spacing.sm),
-            hairline.leadingAnchor.constraint(equalTo: leadingAnchor),
-            hairline.trailingAnchor.constraint(equalTo: trailingAnchor),
-            hairline.bottomAnchor.constraint(equalTo: bottomAnchor),
-            hairline.heightAnchor.constraint(equalToConstant: 0.5),
         ])
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        guard window != nil, blurAnimator == nil else { return }
+        // Built on attach, like every material in the app (headless CI).
+        let animator = UIViewPropertyAnimator(duration: 1, curve: .linear) { [blur] in
+            blur.effect = UIBlurEffect(style: .systemThinMaterial)
+        }
+        animator.pausesOnCompletion = true
+        animator.fractionComplete = pendingProgress
+        blurAnimator = animator
+    }
+
+    /// 0 at rest (nothing under the grabber, no blur), 1 once the summary has
+    /// gone beneath it.
+    var progress: CGFloat = 0 {
+        didSet {
+            guard progress != oldValue else { return }
+            label.alpha = progress
+            pendingProgress = progress
+            blurAnimator?.fractionComplete = progress
+        }
+    }
+
     func configure(points: Int, gems: Int) {
         let font = UIFont.monospacedDigitSystemFont(ofSize: 15, weight: .semibold)
         let text = NSMutableAttributedString()
-        text.append(walletGlyph(PointsSymbol.glyphImage(), font: font))
-        text.append(NSAttributedString(string: " \(points.formatted())     ", attributes: [.font: font]))
-        text.append(walletGlyph(GemSymbol.glyphImage(), font: font))
-        text.append(NSAttributedString(string: " \(gems.formatted())", attributes: [.font: font]))
+        text.append(walletAmount(points.formatted(), glyph: PointsSymbol.glyphImage(), font: font))
+        text.append(NSAttributedString(string: "      ", attributes: [.font: font]))
+        text.append(walletAmount(gems.formatted(), glyph: GemSymbol.glyphImage(), font: font))
         label.attributedText = text
         accessibilityLabel = "\(points) points, \(gems) gems"
+    }
+
+    deinit {
+        MainActor.assumeIsolated { blurAnimator?.stopAnimation(true) }
+    }
+}
+
+// MARK: - Edge blur
+
+/// A blur that dissolves along its length instead of ending on an edge — the
+/// list passes under the compact bar and the Claim button and simply loses
+/// definition there.
+///
+/// The masked-effect pair is the native way to build a blur gradient: UIKit
+/// has no gradient-blur type and alpha on an effect view is unsupported, so
+/// the material is the system's own and a gradient MASK decides where it
+/// lands. Upload's `ProgressiveBlurView` is the same recipe; features cannot
+/// import one another, and the App target cannot reach it either.
+///
+/// ⚠️ The mask is a view assigned to `mask`, never a layer on `layer`, and
+/// its frame is re-bound every layout pass. The effect is set by the owner
+/// (`WalletCompactBar` scrubs it) or on window attach, never in `init`.
+final class WalletEdgeBlurView: UIVisualEffectView {
+    enum Edge { case top, bottom }
+
+    private let ramp: RampView
+    private let setsOwnEffect: Bool
+
+    init(edge: Edge, setsOwnEffect: Bool = false) {
+        ramp = RampView(edge: edge)
+        self.setsOwnEffect = setsOwnEffect
+        super.init(effect: nil)
+        isUserInteractionEnabled = false
+        mask = ramp
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        guard setsOwnEffect, window != nil, effect == nil else { return }
+        effect = UIBlurEffect(style: .systemThinMaterial)
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        ramp.frame = bounds
+    }
+
+    /// Opaque at the edge the chrome sits on, clear toward the list.
+    private final class RampView: UIView {
+        override class var layerClass: AnyClass { CAGradientLayer.self }
+
+        init(edge: Edge) {
+            super.init(frame: .zero)
+            guard let gradient = layer as? CAGradientLayer else { return }
+            let opaque = UIColor.black.cgColor, clear = UIColor.clear.cgColor
+            gradient.colors = edge == .top ? [opaque, opaque, clear] : [clear, opaque, opaque]
+            gradient.locations = edge == .top ? [0, 0.55, 1] : [0, 0.45, 1]
+            gradient.startPoint = CGPoint(x: 0.5, y: 0)
+            gradient.endPoint = CGPoint(x: 0.5, y: 1)
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
     }
 }

@@ -15,8 +15,9 @@ public extension UIScrollView {
     /// (2026-09-22, after both were tried and filmed) is that no header wears
     /// any material at all: the content shows through and the pills are the
     /// only chrome. Hidden is the same on both systems, which a style never
-    /// was. (The Maps tab keeps a light gradient under its status bar; that
-    /// is MapKit's own edge effect, private and unswitchable, not this app's.)
+    /// was. (The Explore tab's map keeps a light gradient under its status
+    /// bar; that is MapKit's own edge effect, private and unswitchable, not
+    /// this app's.)
     ///
     /// ## ⚠️ A pager needs it as well as its pages
     ///

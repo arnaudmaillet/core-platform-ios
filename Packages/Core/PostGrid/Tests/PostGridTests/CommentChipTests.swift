@@ -36,22 +36,15 @@ struct CommentChipTests {
         return cell
     }
 
-    /// ⚠️ A MEDIA CARD'S COUNT IS A CONTROL; A TEXT CARD'S IS NOT — and the
-    /// pill is drawn identically either way.
+    /// ⚠️ EVERY CARD'S COUNT IS A CONTROL, TEXT POSTS INCLUDED.
     ///
-    /// The shortcut exists because a media post opens onto its PHOTOGRAPH and
-    /// its thread is a second surface, so pressing the count is the only way to
-    /// ask for the thread directly. A text post's page IS its thread: tapping
-    /// anywhere on the card already arrives there, by its own reveal. A chip
-    /// promising a shortcut to where the card goes anyway is a second control
-    /// for one destination — and it took the wrong route to get there, the
-    /// media flight instead of the text reveal.
-    ///
-    /// Both shapes are asserted together because the two pairs of counters live
-    /// on every row — the media overlay's and the closing line's — and which is
-    /// shown is decided several levels up. A rule applied to one of them is
-    /// half a rule.
-    @Test func onlyAMediaCardsCountIsAControl() {
+    /// A text card's chip used to be switched off — its page IS its thread,
+    /// so the chip was left drawn and dead — and that was reported from a
+    /// device as a button that "does not work": the same capsule shrank under
+    /// the finger on a media card and did nothing on a text card. The chip now
+    /// always presses; where a text post's comments are is the HOST's answer
+    /// (`ForYouGridPage.open` sends it down the card's own reveal).
+    @Test func everyCardsCountIsAControl() {
         var media = 0, text = 0
 
         let withPhoto = row(kind: .photo)
@@ -60,28 +53,22 @@ struct CommentChipTests {
 
         let withoutPhoto = row(kind: .text)
         withoutPhoto.onCommentsTapped = { text += 1 }
-        #expect(withoutPhoto.debugTapCommentsChip() == false)
+        #expect(withoutPhoto.debugTapCommentsChip())
 
         #expect(media == 1)
-        #expect(text == 0)
+        #expect(text == 1)
     }
 
-    /// ⚠️ AND IT IS TURNED OFF, NOT HIDDEN. The touch has to reach the row.
-    ///
-    /// A chip that stayed interactive and did nothing would swallow the tap and
-    /// leave the card unopenable at that spot — worse than either behaviour it
-    /// sits between. Asserted on `isUserInteractionEnabled`, which is what
-    /// decides whether the touch falls through.
-    ///
-    /// Scoped to the pills the viewer can actually SEE: a text row still
-    /// carries the media card's chips, hidden, and a hidden view takes no
-    /// touches whatever its flags say.
-    @Test func aTextCardsCountLetsTheTouchThrough() {
+    /// And it TAKES the touch on a text card too — a chip that presses must
+    /// own its finger, or the row under it would open the post as well.
+    @Test func aTextCardsCountTakesTheTouch() {
         let cell = row(kind: .text)
-        let live = pills(in: cell).filter { $0.superviewChainIsVisible }
+        let comments = pills(in: cell).filter {
+            $0.superviewChainIsVisible && $0.accessibilityLabel == "Comments"
+        }
 
-        #expect(live.isEmpty == false)
-        #expect(live.allSatisfy { $0.isUserInteractionEnabled == false })
+        #expect(comments.count == 1)
+        #expect(comments.allSatisfy { $0.isUserInteractionEnabled })
     }
 
     /// ⚠️ AND IT IS NOT THE ROW'S OWN TAP.

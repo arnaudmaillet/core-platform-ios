@@ -25,7 +25,6 @@ final class SuggestionsViewController: UIViewController {
         table.showsHorizontalScrollIndicator = false
         return table
     }()
-    private let refreshControl = UIRefreshControl()
     private let skeletonView = ConversationListSkeletonView()
     private let statusView = InboxStatusView()
 
@@ -76,8 +75,10 @@ final class SuggestionsViewController: UIViewController {
         tableView.estimatedRowHeight = 76
         tableView.pin(to: view)
 
-        refreshControl.addAction(UIAction { [weak self] _ in self?.viewModel.refresh() }, for: .valueChanged)
-        tableView.refreshControl = refreshControl
+        // ⚠️ NO REFRESH CONTROL. Pulling this list down opens search now —
+        // see `InboxPullToSearch`. The pull was this page's ONLY refresh, so
+        // `surfaceDidBecomeActive` refreshes it instead, every time the page
+        // comes to the front.
 
         dataSource = UITableViewDiffableDataSource(tableView: tableView) {
             [weak self] tableView, indexPath, id in
@@ -112,7 +113,6 @@ final class SuggestionsViewController: UIViewController {
             tableView.isHidden = true
             statusView.isHidden = true
         case .content(let models):
-            refreshControl.endRefreshing()
             statusView.isHidden = true
             var snapshot = NSDiffableDataSourceSnapshot<Section, ProfileID>()
             snapshot.appendSections([.main])
@@ -127,7 +127,6 @@ final class SuggestionsViewController: UIViewController {
             hasRenderedContent = true
             revealContent()
         case .empty:
-            refreshControl.endRefreshing()
             skeletonView.isHidden = true
             tableView.isHidden = true
             statusView.configure(
@@ -137,7 +136,6 @@ final class SuggestionsViewController: UIViewController {
             )
             statusView.isHidden = false
         case .failed(let message):
-            refreshControl.endRefreshing()
             skeletonView.isHidden = true
             tableView.isHidden = true
             statusView.configure(symbol: "exclamationmark.triangle", title: "Something went wrong", message: message)
@@ -222,7 +220,15 @@ extension SuggestionsViewController: UITableViewDelegate {
 extension SuggestionsViewController: InboxSurface {
     var category: MessagesCategory { .suggestions }
 
+    /// Loads on first arrival, and refreshes on every one after it.
+    ///
+    /// ⚠️ It used to load ONCE and leave the rest to pull-to-refresh, which
+    /// was the only way this page ever re-read its suggestions. The pull opens
+    /// search now, so the refresh moved here: coming back to the page is the
+    /// moment someone would have pulled. `refresh()` no-ops while a load is in
+    /// flight, so the first arrival's load is not doubled.
     func surfaceDidBecomeActive() {
         viewModel.loadIfNeeded()
+        viewModel.refresh()
     }
 }

@@ -32,6 +32,12 @@ final class ProfileGalleryPagerView: UIView {
     let pageOrder: [ProfileTab]
 
     var onItemTapped: ((GalleryPost, _ stream: [GalleryPost]) -> Void)?
+    /// A card's comment chip — see `ProfileGalleryGridView.onItemCommentsTapped`.
+    var onItemCommentsTapped: ((GalleryPost, _ stream: [GalleryPost]) -> Void)?
+    /// Handed to every page — one screen, one undo window.
+    var staking: PostCardStaking? {
+        didSet { pages.forEach { $0.staking = staking } }
+    }
     /// Fired when a swipe settles on a page (not for programmatic paging) —
     /// the selector mirrors it.
     var onPageSettled: ((ProfileTab) -> Void)?
@@ -144,6 +150,10 @@ final class ProfileGalleryPagerView: UIView {
             ])
             leading = page.trailingAnchor
             page.onItemTapped = { [weak self] post, stream in self?.onItemTapped?(post, stream) }
+            page.onItemCommentsTapped = { [weak self] post, stream in
+                guard let self else { return }
+                if let onItemCommentsTapped { onItemCommentsTapped(post, stream) } else { onItemTapped?(post, stream) }
+            }
             page.onVerticalScroll = { [weak self] offset in
                 guard let self, page === pages[activeIndex] else { return }
                 onVerticalScroll?(offset)

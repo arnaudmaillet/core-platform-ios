@@ -102,6 +102,11 @@ final class ForYouPagerView: UIView {
         return pages[index]
     }
 
+    /// Handed to every page — one surface, one undo window.
+    var staking: PostCardStaking? {
+        didSet { pages.forEach { $0.staking = staking } }
+    }
+
     init(imagePipeline: ImagePipeline, videoPlayback: VideoPlaybackController? = nil) {
         pages = Self.pageOrder.map { format in
             ForYouGridPage(

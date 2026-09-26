@@ -5,9 +5,10 @@ import UIKit
 /// Owns the Profile tab: the signed-in viewer's own profile as a root
 /// destination, on its own navigation stack.
 ///
-/// This replaced the avatar button in the Maps navigation bar, which pushed the
-/// same screen onto the Maps stack. Being a *tab root* rather than a pushed
-/// screen changes two things that are easy to miss:
+/// This replaced the avatar button in the map's navigation bar (the Explore
+/// tab, then called Maps), which pushed the same screen onto that stack.
+/// Being a *tab root* rather than a pushed screen changes two things that are
+/// easy to miss:
 ///
 /// - **This is the canonical entry point**, so it is built with a non-nil
 ///   `onLogout` — which is also what makes the screen carry the settings gear
