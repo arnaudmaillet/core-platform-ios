@@ -322,41 +322,37 @@ final class DebugMediaLibrary: MediaLibraryReading {
         let seconds: Int
     }
 
-    /// ⚠️ **URLS COPIED FROM `MockMediaFixtures`, NOT IMPORTED FROM IT — AND
-    /// THAT IS DELIBERATE.** They live in `CoreNetworkingMocks`, a product this
-    /// feature's target does not depend on and should not: SwiftPM has no
-    /// per-configuration dependencies, so declaring it would link a mocks
-    /// library into the Release app to serve a file that is `#if DEBUG` from top
-    /// to bottom. `MockMediaFixtures` stays the canonical catalogue — it records
-    /// the `ffprobe`-read dimensions, the verification dates and the
-    /// `deadSources` list — and anything added here should be added there first.
+    /// ⚠️ **THIS LIST IS ITS OWN CATALOGUE.** The mock feed's public video
+    /// fixtures these URLs were first copied from are gone (the mock corpus
+    /// plays only its bundled clips, `MockClipCatalog`); what is left here
+    /// serves only this opt-in DEBUG picker. It is not imported from
+    /// `CoreNetworkingMocks` on purpose: SwiftPM has no per-configuration
+    /// dependencies, so declaring it would link a mocks library into the
+    /// Release app to serve a file that is `#if DEBUG` from top to bottom.
     ///
-    /// ⚠️ **ALL LANDSCAPE, AND THAT IS NOT AN OVERSIGHT.** `MockMediaFixtures`
-    /// explains why: the commonly cited portrait buckets are dead, and declaring
-    /// a portrait size for a landscape encode mis-drives pre-layout and crops
-    /// the subject. It happens to fit here — every video item lands on an odd
-    /// index, which `isPortrait` already draws 4:3 — but a portrait fixture
-    /// added later must not be assigned to an even one.
+    /// ⚠️ **ALL LANDSCAPE, AND THAT IS NOT AN OVERSIGHT.** The commonly cited
+    /// portrait test buckets are dead, and declaring a portrait size for a
+    /// landscape encode mis-drives pre-layout and crops the subject. It happens
+    /// to fit here — every video item lands on an odd index, which `isPortrait`
+    /// already draws 4:3 — but a portrait fixture added later must not be
+    /// assigned to an even one.
     ///
-    /// ⚠️ **NO TEN-MINUTE FIXTURE.** `MockMediaFixtures.longRunning` is right
-    /// for a playhead-continuity test and wrong here: a picker stand-in that
-    /// takes minutes to export teaches nothing the 52-second one does not.
+    /// ⚠️ **NO TEN-MINUTE FIXTURE.** A ten-minute film is right for a
+    /// playhead-continuity test and wrong here: a picker stand-in that takes
+    /// minutes to export teaches nothing the 52-second one does not.
     ///
     /// Verified with a ranged GET on 2026-09-15 — all 206, `video/mp4`. When one
-    /// goes quiet, check it the way that file prescribes:
+    /// goes quiet, check it with a ranged GET rather than a browser:
     /// `curl -o /dev/null -w '%{http_code}' -r 0-1023 <url>`.
     static let realClips = [
-        // 1280x720, ~1 MB. `MockMediaFixtures.bigBuckBunny720`.
+        // 1280x720, ~1 MB.
         RealClip(
             url: "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/720/Big_Buck_Bunny_720_10s_1MB.mp4",
             seconds: 10
         ),
         // 854x480, the long one — enough to make an export take real time.
-        // `MockMediaFixtures.sintelTrailer`.
         RealClip(url: "https://media.w3.org/2010/05/sintel/trailer.mp4", seconds: 52),
-        // 640x360, ~1 MB. `MockMediaFixtures.mapPreviewLoop`, without its
-        // `mock-kind=video` marker — that exists to let the map's repository
-        // recognise a video pin by URL shape, and nothing here reads it.
+        // 640x360, ~1 MB.
         RealClip(
             url: "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_1MB.mp4",
             seconds: 10

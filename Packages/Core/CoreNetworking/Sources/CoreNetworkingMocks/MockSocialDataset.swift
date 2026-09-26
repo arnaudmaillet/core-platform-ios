@@ -12,11 +12,12 @@ public struct MockSocialDataset: Sendable {
     /// which is what keeps the unit suite, SwiftUI previews, and CI free of any
     /// network dependency.
     ///
-    /// `.realAssets` swaps in the verified public fixtures in
-    /// `MockMediaFixtures` — real HLS ladders, progressive MP4s, and real
-    /// photographs at exact dimensions — for driving the app by hand against
-    /// realistic decode and streaming behaviour. Opt in with `-rich-media`.
-    /// Never select it from a test.
+    /// `.realAssets` swaps the synthesized photographs for real ones at exact
+    /// dimensions (`MockMediaFixtures.imageURL`) and the avatars with them,
+    /// for driving the app by hand against real image decode. Opt in with
+    /// `-rich-media`. VIDEO is the same in both catalogs: the corpus's own
+    /// bundled clips (`syntheticVideo`, `MockClipCatalog`), never a public
+    /// fixture.
     public enum MediaCatalog: Sendable {
         case synthetic
         case realAssets
@@ -122,9 +123,14 @@ public struct MockSocialDataset: Sendable {
     /// they were and the text/media split is untouched.
     static let mediaIsAlwaysVideo = false
 
-    /// A video under the synthetic catalog: one of the REAL clips when the
+    /// A video post's media, in EITHER catalog: one of the REAL clips when the
     /// bundle carries them (`MockClipCatalog` — footage with its own sound),
     /// the synthesized placeholder at `shape` otherwise.
+    ///
+    /// ⚠️ `-rich-media` asks here too. It used to seed public films and HLS
+    /// ladders instead, and the product plays only the real clips; the two
+    /// catalogs now differ in their photographs alone, and a video post is the
+    /// same clip at the same slot whichever one is selected.
     ///
     /// Slots spread the corpus across the catalog: the main timeline takes
     /// 0..<40, the viewer's, the just-arrived and the collection pages take
@@ -159,18 +165,13 @@ public struct MockSocialDataset: Sendable {
             let media: (url: String, width: Int, height: Int)? = switch (hasMedia, mediaCatalog) {
             case (false, _):
                 nil
+            case (true, _) where isVideo:
+                Self.syntheticVideo(slot: 40 + index, fallback: "mock://video/me\(index)", shape: shape)
             case (true, .synthetic):
-                isVideo
-                    ? Self.syntheticVideo(slot: 40 + index, fallback: "mock://video/me\(index)", shape: shape)
-                    : ("mock://media/me\(index)?w=\(shape.0)&h=\(shape.1)", shape.0, shape.1)
+                ("mock://media/me\(index)?w=\(shape.0)&h=\(shape.1)", shape.0, shape.1)
             case (true, .realAssets):
-                if isVideo {
-                    { let fixture = MockMediaFixtures.videos[index % MockMediaFixtures.videos.count]
-                      return (fixture.url, fixture.width, fixture.height) }()
-                } else {
-                    (MockMediaFixtures.imageURL(index: 900 + index, width: shape.0, height: shape.1),
-                     shape.0, shape.1)
-                }
+                (MockMediaFixtures.imageURL(index: 900 + index, width: shape.0, height: shape.1),
+                 shape.0, shape.1)
             }
             return PostRecord(
                 postID: String(format: "post-me-%02d", index),
@@ -270,15 +271,14 @@ public struct MockSocialDataset: Sendable {
         //   0  image  4:5    the portrait CAP, the shape drawn uncropped
         //   1  video  16:9   the landscape end
         //   2  —             text-only, so this entry is never read
-        //   3  video  9:16   a vertical VIDEO (synthetic catalog only, below)
+        //   3  video  9:16   a vertical VIDEO (the placeholder's shape, below)
         //   4  image  9:16   a vertical PHOTO, in both catalogs
         //
-        // ⚠️ Index 3 is vertical only WITHOUT `-rich-media`. Under the real-asset
-        // catalog a video takes its dimensions from the fixture, and every
-        // fixture is landscape: no stable public source vends portrait test
-        // video, and declaring a landscape encode as 9:16 is the pre-layout
-        // defect `MockMediaFixtures` was cleaned up to stop. Vertical photos
-        // work in both catalogs, because Picsum returns exactly the size asked.
+        // ⚠️ A video's shape here is only the PLACEHOLDER's. When the bundle
+        // carries the real clips (it does, in both catalogs) a video takes its
+        // dimensions from its clip, because declaring a size the file does not
+        // have is the pre-layout crop. Photos take these shapes in both
+        // catalogs, because Picsum returns exactly the size asked.
         let shapes: [(Int, Int)] = [
             (1080, 1350), (1600, 900), (1080, 1080), (900, 1600), (1080, 1920)
         ]
@@ -292,10 +292,11 @@ public struct MockSocialDataset: Sendable {
             // The pool carries `capacity` players — six — and every limit this
             // seed exercises so far sits UNDER that number, so nothing here
             // ever showed what a gallery does when it asks for more than the
-            // pool can hold. This one holds seven clips, one per distinct
-            // fixture in the catalog: one more than the budget, which is the
-            // smallest number that makes the retention window refuse something
-            // and therefore the easiest to reason about when it misbehaves.
+            // pool can hold. It was meant to hold seven clips — one more than
+            // the budget, the smallest number that makes the retention window
+            // refuse something. ⚠️ It holds THREE (see where its pages are
+            // built): the list it was sized from never had seven playable
+            // entries.
             //
             // Its own page is a PHOTOGRAPH, like every other collection here —
             // page one decides the post's kind, and a clip there would make
@@ -311,27 +312,20 @@ public struct MockSocialDataset: Sendable {
             let hasMedia = !isAdjacentTextPair && (isOverCapacityGallery || index % 3 != 2)
             let shape = isOverCapacityGallery ? (1600, 900) : shapes[index % shapes.count]
             let isVideo = !isOverCapacityGallery && index % 2 == 1
-            let host = isVideo ? "video" : "media"
-            // Same branch as the main corpus, and the same reason for the
-            // asymmetry inside it: a real video's declared size must come FROM
-            // the fixture, because the client pre-layouts from it and a wrong
-            // number shows up as a crop. Images keep `shapes` — Picsum returns
-            // exactly the size asked for.
+            // Same branch as the main corpus: a video is a real clip in both
+            // catalogs, declaring the CLIP's size because the client
+            // pre-layouts from it and a wrong number shows up as a crop. Images
+            // keep `shapes` — Picsum returns exactly the size asked for.
             let media: (url: String, width: Int, height: Int)? = switch (hasMedia, mediaCatalog) {
             case (false, _):
                 nil
+            case (true, _) where isVideo:
+                Self.syntheticVideo(slot: 44 + index, fallback: "mock://video/new-\(index)", shape: shape)
             case (true, .synthetic):
-                isVideo
-                    ? Self.syntheticVideo(slot: 44 + index, fallback: "mock://video/new-\(index)", shape: shape)
-                    : ("mock://\(host)/new-\(index)?w=\(shape.0)&h=\(shape.1)", shape.0, shape.1)
+                ("mock://media/new-\(index)?w=\(shape.0)&h=\(shape.1)", shape.0, shape.1)
             case (true, .realAssets):
-                if isVideo {
-                    { let fixture = MockMediaFixtures.videos[index % MockMediaFixtures.videos.count]
-                      return (fixture.url, fixture.width, fixture.height) }()
-                } else {
-                    (MockMediaFixtures.imageURL(index: index, width: shape.0, height: shape.1),
-                     shape.0, shape.1)
-                }
+                (MockMediaFixtures.imageURL(index: index, width: shape.0, height: shape.1),
+                 shape.0, shape.1)
             }
             // ARRIVAL 4 IS A COLLECTION — four photos behind the one the card
             // opens on.
@@ -362,9 +356,9 @@ public struct MockSocialDataset: Sendable {
             //
             // Shapes deliberately disagree with page one. A carousel takes its
             // box from the first page and aspect-fills the rest, so a run of
-            // identical ratios would never exercise the crop. The video keeps
-            // its fixture's OWN dimensions under the real catalog — the video
-            // catalog cannot serve an arbitrary size the way Picsum can, and
+            // identical ratios would never exercise the crop. A video page keeps
+            // its clip's OWN dimensions — a clip cannot be served at an
+            // arbitrary size the way Picsum can, and
             // declaring one it does not have is how a page ends up cropped
             // against a ratio nothing in the file matches.
             let collectionShapes: [(Int, Int)] = [(1600, 900), (1080, 1080), (900, 1600)]
@@ -431,53 +425,38 @@ public struct MockSocialDataset: Sendable {
             let isFirstInFeed = caption == "Golden hour over the harbour."
             let extraMedia: [(url: String, width: Int, height: Int)] =
                 isOverCapacityGallery
-                // ⚠️ ONE PER DISTINCT PLAYABLE FIXTURE, and both words are
-                // load-bearing.
+                // ⚠️ ONE CLIP PER PAGE, each on its OWN slot: the pool keeps
+                // one player per ASSET, so pages sharing a file would be fewer
+                // players than pages and would prove nothing about a budget.
                 //
-                // DISTINCT, because the pool keeps one player per ASSET: seven
-                // pages sharing three files would be three players and would
-                // prove nothing about a budget of six.
+                // THREE pages, which is what this gallery has always carried in
+                // practice. It was built from the public-fixture list (two
+                // remote films plus the map's preview loop) while its note
+                // above promised seven; those fixtures are gone and the count
+                // is stated here instead of inherited from a list's length.
                 //
-                // PLAYABLE, because `videos` includes a synthetic `mock://`
-                // entry that exists to cover an aspect ratio no public asset
-                // has — under the real catalog it never plays, so a gallery
-                // built from the array as it stands offers six real clips,
-                // which is the budget exactly rather than one over. The
-                // remote ones plus `mapPreviewLoop`, which is a real asset the
-                // array leaves out, are seven.
-                //
-                // Each keeps its fixture's own dimensions for the reason the
-                // notes above give: the client pre-layouts from the declared
-                // size, and a number the file does not have shows up as a crop.
-                ? (MockMediaFixtures.videos.filter(\.isRemote)
-                    + [MockMediaFixtures.mapPreviewLoop]
-                  ).enumerated().map { position, fixture in
-                    switch mediaCatalog {
-                    case .synthetic:
-                        Self.syntheticVideo(slot: 46 + position, fallback: "mock://video/cap-\(position)",
-                                            shape: (1600, 900))
-                    case .realAssets:
-                        (fixture.url, fixture.width, fixture.height)
-                    }
+                // Each keeps its clip's own dimensions for the reason the notes
+                // above give: the client pre-layouts from the declared size,
+                // and a number the file does not have shows up as a crop.
+                ? (0..<3).map { position in
+                    Self.syntheticVideo(slot: 46 + position, fallback: "mock://video/cap-\(position)",
+                                        shape: (1600, 900))
                 }
                 : isFirstInFeed
                 ? bigShapes.enumerated().map { position, shape in
                     switch (mediaCatalog, bigVideoPositions.contains(position)) {
-                    case (.synthetic, false):
-                        ("mock://media/new-0-\(position)?w=\(shape.0)&h=\(shape.1)", shape.0, shape.1)
-                    case (.synthetic, true):
-                        Self.syntheticVideo(slot: 30 + position, fallback: "mock://video/new-0-\(position)",
-                                            shape: shape)
-                    case (.realAssets, false):
-                        (MockMediaFixtures.imageURL(index: 60 + position, width: shape.0, height: shape.1),
-                         shape.0, shape.1)
-                    case (.realAssets, true):
-                        // Distinct clips again, and distinct from the small
+                    case (_, true):
+                        // Distinct clips, and distinct from the small
                         // gallery's: two posts sharing a file is its own test
                         // (see `PlaybackScopeTests`) and must not be smuggled in
                         // here by accident.
-                        { let fixture = MockMediaFixtures.videos[position % MockMediaFixtures.videos.count]
-                          return (fixture.url, fixture.width, fixture.height) }()
+                        Self.syntheticVideo(slot: 30 + position, fallback: "mock://video/new-0-\(position)",
+                                            shape: shape)
+                    case (.synthetic, false):
+                        ("mock://media/new-0-\(position)?w=\(shape.0)&h=\(shape.1)", shape.0, shape.1)
+                    case (.realAssets, false):
+                        (MockMediaFixtures.imageURL(index: 60 + position, width: shape.0, height: shape.1),
+                         shape.0, shape.1)
                     }
                 }
                 : index == 1
@@ -493,22 +472,19 @@ public struct MockSocialDataset: Sendable {
                 : index == 4
                 ? collectionShapes.enumerated().map { position, shape in
                     switch (mediaCatalog, videoPagePositions.contains(position)) {
-                    case (.synthetic, false):
-                        ("mock://media/new-4-\(position)?w=\(shape.0)&h=\(shape.1)", shape.0, shape.1)
-                    case (.synthetic, true):
+                    case (_, true):
                         // `mock://video/…` is what `MockMediaFixtures.isVideoURL`
                         // routes on, so the attachment declares a video MIME and
-                        // the client's own rule does the rest.
+                        // the client's own rule does the rest. A DIFFERENT clip
+                        // per page (one slot each): two pages on one asset would
+                        // hide the very duplication this exists to catch.
                         Self.syntheticVideo(slot: 36 + position, fallback: "mock://video/new-4-\(position)",
                                             shape: shape)
+                    case (.synthetic, false):
+                        ("mock://media/new-4-\(position)?w=\(shape.0)&h=\(shape.1)", shape.0, shape.1)
                     case (.realAssets, false):
                         (MockMediaFixtures.imageURL(index: 40 + position, width: shape.0, height: shape.1),
                          shape.0, shape.1)
-                    case (.realAssets, true):
-                        // A DIFFERENT clip per page: two pages on one asset
-                        // would hide the very duplication this exists to catch.
-                        { let fixture = MockMediaFixtures.videos[position]
-                          return (fixture.url, fixture.width, fixture.height) }()
                     }
                 }
                 : []
@@ -612,24 +588,22 @@ public struct MockSocialDataset: Sendable {
                   MockMediaFixtures.isVideoURL(media.url),
                   let index = Self.numericSuffix(of: post.postID)
             else { return }
-            // ⚠️ NIL IS AN ANSWER. A fixture with no baked sheet gets NONE, and
+            // ⚠️ NIL IS AN ANSWER. A video with no baked sheet gets NONE, and
             // the marker falls back to its cover — which is the ladder. Handing
-            // it an arbitrary clip was the defect a viewer reported: five of the
-            // seven fixtures had no sheet of their own and every one of them
-            // wore somebody else's footage.
+            // it an arbitrary clip was the defect a viewer reported: most of
+            // the old public fixtures had no sheet of their own and every one
+            // of them wore somebody else's footage.
             result[post.postID] = Self.previewSheet(for: media.url, in: catalogue, index: index)
         }
     }
 
     /// The sheet baked from THIS post's clip when one exists.
     ///
-    /// The catalogue's ids are `<clip>-<segment>` and the fixtures' URLs carry
-    /// the clip's name, so most video posts can wear a preview of their own
-    /// footage rather than of an arbitrary one. Not all of them: the baked set
-    /// covers four clips and the fixture table lists seven, so the remainder
-    /// still falls back to a deterministic pick — a marker that previews the
-    /// wrong clip is a mock-fidelity gap, where a photograph that previews ANY
-    /// clip was a lie about what the post is.
+    /// The catalogue's ids are `<clip>-<segment>` and a clip's URL names the
+    /// clip (`mock://video/clip-NN`), so every video post wears a preview of
+    /// its own footage. A URL that names no baked clip (the synthesized
+    /// placeholder) gets none.
+    ///
     /// ⚠️ THE OPENING SEGMENT, NOT ONE PICKED BY POST INDEX.
     ///
     /// Spreading posts across a clip's segments made the map look varied and
@@ -640,9 +614,8 @@ public struct MockSocialDataset: Sendable {
     /// over a post whose flight animated a forest.
     ///
     /// The cost is real and deliberate: every post of the same clip now
-    /// previews the same footage. The invariant is worth more than the variety
-    /// — and the variety was fictional anyway, since two clips carry the whole
-    /// corpus.
+    /// previews the same footage. The invariant is worth more than the variety,
+    /// and each clip is baked with one segment anyway.
     ///
     /// `index` is kept for the signature's callers and no longer read.
     static func previewSheet(for url: String, in catalogue: [String], index: Int) -> String? {
@@ -813,26 +786,21 @@ public struct MockSocialDataset: Sendable {
             // a mix that exercises all three snap-feed cell paths.
             let hasMedia = index % 3 != 2
             let isVideo = Self.mediaIsAlwaysVideo || index % 3 == 0
-            let mediaHost = isVideo ? "video" : "media"
             let shape = mediaShapes[index % mediaShapes.count]
-            // Under `.realAssets` a video post takes its dimensions FROM the
-            // fixture rather than from `mediaShapes`: the declared size has to
-            // match the real encode or pre-layout crops it. Image posts keep
-            // `mediaShapes`, because Picsum returns exactly the size asked for.
+            // A video post is a real clip in BOTH catalogs and takes its
+            // dimensions FROM the clip rather than from `mediaShapes`: the
+            // declared size has to match the encode or pre-layout crops it.
+            // Image posts keep `mediaShapes`, because the placeholder renders
+            // and Picsum returns exactly the size asked for.
             let media: (url: String, width: Int, height: Int)? = switch (hasMedia, mediaCatalog) {
             case (false, _):
                 nil
+            case (true, _) where isVideo:
+                Self.syntheticVideo(slot: index / 3, fallback: "mock://video/\(index)", shape: shape)
             case (true, .synthetic):
-                isVideo
-                    ? Self.syntheticVideo(slot: index / 3, fallback: "mock://video/\(index)", shape: shape)
-                    : ("mock://\(mediaHost)/\(index)?w=\(shape.0)&h=\(shape.1)", shape.0, shape.1)
+                ("mock://media/\(index)?w=\(shape.0)&h=\(shape.1)", shape.0, shape.1)
             case (true, .realAssets):
-                if isVideo {
-                    { let fixture = MockMediaFixtures.videos[(index / 3) % MockMediaFixtures.videos.count]
-                      return (fixture.url, fixture.width, fixture.height) }()
-                } else {
-                    (MockMediaFixtures.imageURL(index: index, width: shape.0, height: shape.1), shape.0, shape.1)
-                }
+                (MockMediaFixtures.imageURL(index: index, width: shape.0, height: shape.1), shape.0, shape.1)
             }
             // Every fifth post is a repost of the previous same-slot post.
             // Per author that lands on one residue mod 40 → three reposts

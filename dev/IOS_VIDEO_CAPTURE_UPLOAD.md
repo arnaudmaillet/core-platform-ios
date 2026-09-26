@@ -155,7 +155,7 @@ Library pick (§2.A) needs no permissions and is the MVP. Recording:
   it is no longer a reason.
 
   **`-rich-media` puts REAL encodes behind the picker** — Big Buck Bunny and the
-  Sintel trailer, from `MockMediaFixtures`' verified catalogue, downloaded once
+  Sintel trailer (`DebugMediaLibrary.realClips`), downloaded once
   and cached by `PlaceholderVideoFetcher`. Opt-in, and deliberately the same
   flag the fixtures themselves obey: the default mock mode is offline, and the
   unit suite and CI must stay that way. Real encodes immediately earned their
