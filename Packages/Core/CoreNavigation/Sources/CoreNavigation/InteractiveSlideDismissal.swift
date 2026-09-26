@@ -741,9 +741,19 @@ extension InteractiveSlideDismissal: UIGestureRecognizerDelegate {
            !destination.zoomVerticalDismissalPermitted(at: pan.location(in: view), in: view) {
             return false
         }
+        // ⚠️ The gesture's ORIGIN, not where the finger is now — the trap
+        // `ZoomDismissInteractionController` already measured: this callback
+        // fires once the pan has travelled its slop, so a swipe that began
+        // in the leading strip was read tens of points past it and refused
+        // on every tab but the first. The pager had yielded the same drag, so
+        // nobody took it.
+        let origin = CGPoint(
+            x: pan.location(in: view).x - pan.translation(in: view).x,
+            y: pan.location(in: view).y - pan.translation(in: view).y
+        )
         if axis == .horizontal, consultsHorizontalPermission,
            let destination = feed as? any ZoomTransitionDestination,
-           !destination.zoomHorizontalDismissalPermitted(at: pan.location(in: view), in: view) {
+           !destination.zoomHorizontalDismissalPermitted(at: origin, in: view) {
             return false
         }
         activeAxis = axis

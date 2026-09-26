@@ -5334,7 +5334,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
 
     /// The system's back-gesture strip. Matched to `HorizontalPagerScrollView`'s
     /// own, which yields the same zone to the same gesture for the same reason.
-    private static let backEdgeZone: CGFloat = 20
+    private static var backEdgeZone: CGFloat { PagedScreenDismissalPolicy.edgeZone }
 
     public func setContentScrollEnabled(_ enabled: Bool) {
         // Through a lock that RESTORES rather than an assignment that enables.

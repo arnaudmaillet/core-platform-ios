@@ -414,9 +414,14 @@ public final class HorizontalPagerScrollView: UIScrollView {
     private static var popEdgeZone: CGFloat { PagedScreenDismissalPolicy.edgeZone }
 
     override public func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        if let pan = gestureRecognizer as? UIPanGestureRecognizer, pan === panGestureRecognizer,
-           shouldYield(at: pan.location(in: self), velocity: pan.velocity(in: self)) {
-            return false
+        // ⚠️ Asked at the drag's ORIGIN: by this callback the pan has already
+        // travelled its slop, and the finger is well past the leading strip
+        // it started in.
+        if let pan = gestureRecognizer as? UIPanGestureRecognizer, pan === panGestureRecognizer {
+            let location = pan.location(in: self)
+            let translation = pan.translation(in: self)
+            let origin = CGPoint(x: location.x - translation.x, y: location.y - translation.y)
+            if shouldYield(at: origin, velocity: pan.velocity(in: self)) { return false }
         }
         return super.gestureRecognizerShouldBegin(gestureRecognizer)
     }

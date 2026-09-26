@@ -22,10 +22,20 @@ import CoreGraphics
 /// gestures a thumb reaches, it is invisible at every call site, and the
 /// constant behind it had already been written down three times.
 public enum PagedScreenDismissalPolicy {
-    /// The leading strip a navigation stack's interactive pop owns, matching
-    /// the system's. ONE definition: two surfaces disagreeing about where the
-    /// edge ends is a band where each believes the other has the drag.
-    public static let edgeZone: CGFloat = 20
+    /// The leading strip a navigation stack's interactive pop owns. ONE
+    /// definition: two surfaces disagreeing about where the edge ends is a
+    /// band where each believes the other has the drag.
+    ///
+    /// Wider than the system's ~20pt on purpose: a thumb swiping "from the
+    /// edge" past a rounded bezel or a case touches down 20–25pt in, and a
+    /// strip that misses it hands the drag to the tab pager — the opposite
+    /// of what the swipe meant. Still narrow enough that a tab swipe, which
+    /// starts on the content, never lands in it.
+    ///
+    /// ⚠️ Measured at the drag's ORIGIN (location minus translation) by every
+    /// caller: `gestureRecognizerShouldBegin` fires after the slop, when the
+    /// finger is already tens of points past this strip.
+    public static let edgeZone: CGFloat = 28
 
     /// Whether a drag beginning at `x` (in the screen's own coordinates) may
     /// dismiss, given which tab is up.
