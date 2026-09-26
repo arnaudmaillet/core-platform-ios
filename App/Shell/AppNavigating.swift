@@ -3,9 +3,9 @@ import UIKit
 /// The places of the app shell's bar, in bar order.
 ///
 /// The bar shows a fifth item, DETACHED at the trailing edge — the "+"
-/// (`CreateTabItem`) — giving `| Maps  For You  Messages  Profile |  + |` with
-/// no custom bar. It is deliberately NOT a case here: it opens a menu and is
-/// never selected, so nothing can route to it and `-select-tab` has no index
+/// (`CreateTabItem`) — giving `| Explore  For You  Messages  Profile |  + |`
+/// with no custom bar. It is deliberately NOT a case here: it opens a menu and
+/// is never selected, so nothing can route to it and `-select-tab` has no index
 /// for it.
 ///
 /// **Every case here is now a real selectable root.** Slot 1 used to be `.feed`,
@@ -20,8 +20,13 @@ import UIKit
 /// ⚠️ Declaration order IS bar order, and `-select-tab <n>` indexes
 /// `allCases` — indices are unchanged by the Feed→For You swap (both sit at 1),
 /// but `-select-tab 1` now SELECTS a tab where it used to trigger a push.
+///
+/// `.explore` was `.maps` until 2026-09-26 (the tab is named for the job, the
+/// Maps feature behind it kept its name). Same slot, so `-select-tab 0` still
+/// opens it; the raw value moved with the case, so the one place a NAME is
+/// typed — `-nav-stress <cycles> <tab>` — now takes `explore`.
 enum AppTab: String, CaseIterable {
-    case maps
+    case explore
     case forYou
     case messages
     case profile

@@ -470,7 +470,7 @@ final class SnapRailBoostButton: UIButton {
         // a session spend to take back. A static menu would freeze the
         // first launch's answer.
         menu = UIMenu(
-            title: "Boost this post",
+            title: StakeMenu.title,
             children: [
                 UIDeferredMenuElement.uncached { [weak self] completion in
                     completion(self?.currentMenuActions() ?? [])
@@ -498,46 +498,25 @@ final class SnapRailBoostButton: UIButton {
         isEnabled = undoableAmount > 0 || (remaining > 0 && availableBalance >= tapCost)
     }
 
-    /// The menu, top to bottom: **Max** (what a fill-up would actually
-    /// spend — the cap's remainder bounded by the balance), the fixed
-    /// denomination(s), and Undo while the session holds something.
+    /// The menu — `StakeMenu`'s, the SAME one every card's like chip raises,
+    /// so the two doors to one spend can never offer different things.
     ///
     /// Internal, not private: the menu is a deferred element resolved only
     /// at present time, which a unit test can't trigger — so the builder is
     /// the testable seam.
     func currentMenuActions() -> [UIMenuElement] {
-        let remaining = max(0, WalletStore.Policy.perTargetBoostCap - spentTotal)
-        let maxAmount = min(remaining, availableBalance)
-        var actions: [UIMenuElement] = []
-
-        // The label names the REAL spend when one is possible; disabled it
-        // still names the door (the remainder, or the cap on a full post).
-        let shownMax = maxAmount > 0
-            ? maxAmount
-            : (remaining > 0 ? remaining : WalletStore.Policy.perTargetBoostCap)
-        let maxAction = UIAction(
-            title: "Max (\(shownMax) points)",
-            image: UIImage(systemName: PointsSymbol.glyph)
-        ) { [weak self] _ in self?.onBoost?(maxAmount) }
-        if maxAmount <= 0 { maxAction.attributes = .disabled }
-        actions.append(maxAction)
-
-        for amount in WalletStore.Policy.boostDenominations.reversed() {
-            let action = UIAction(
-                title: "\(amount) points",
-                image: UIImage(systemName: PointsSymbol.glyph)
-            ) { [weak self] _ in self?.onBoost?(amount) }
-            if amount > availableBalance || amount > remaining { action.attributes = .disabled }
-            actions.append(action)
-        }
-        if undoableAmount > 0 {
-            actions.append(UIAction(
-                title: "Undo boosts (\(undoableAmount))",
-                image: UIImage(systemName: "arrow.uturn.backward"),
-                attributes: .destructive
-            ) { [weak self] _ in self?.onUndo?() })
-        }
-        return actions
+        StakeMenu.elements(
+            for: StakeMenu.State(
+                balance: availableBalance,
+                stakedOnTarget: spentTotal,
+                undoable: undoableAmount,
+                perTargetCap: WalletStore.Policy.perTargetBoostCap,
+                denominations: WalletStore.Policy.boostDenominations,
+                tapAmount: WalletStore.Policy.tapBoostAmount
+            ),
+            stake: { [weak self] amount in self?.onBoost?(amount) },
+            undo: { [weak self] in self?.onUndo?() }
+        )
     }
 
     @available(*, unavailable)

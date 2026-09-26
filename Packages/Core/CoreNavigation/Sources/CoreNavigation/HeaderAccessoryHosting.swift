@@ -2,10 +2,11 @@ import UIKit
 
 /// A root screen that will carry ONE bar item it did not build.
 ///
-/// The viewer's point balance stands in four headers — Maps, For You, Profile
-/// and the post screen — and it is the same number in all of them: one wallet,
-/// one claim countdown, one sheet. Rather than teach four screens what a wallet
-/// is, the shell owns that object and hands each screen an item to wear.
+/// The viewer's point balance stands in four headers — Explore, For You,
+/// Profile and the post screen — and it is the same number in all of them: one
+/// wallet, one claim countdown, one sheet. Rather than teach four screens what
+/// a wallet is, the shell owns that object and hands each screen an item to
+/// wear.
 ///
 /// The item cannot simply be written onto a `navigationItem` from outside,
 /// which is why this exists: these screens COMPOSE their trailing run — For You

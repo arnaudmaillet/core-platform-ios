@@ -255,8 +255,8 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         // The feed hides for the flight — the card is its stand-in. The
         // navigation bar needs no such care under a push: it belongs to the
         // navigation controller, above this container, and UIKit cross-fades
-        // its items ("Maps" → back + author capsule) natively alongside this
-        // animator. The card flies beneath it.
+        // its items (the map's → back + author capsule) natively alongside
+        // this animator. The card flies beneath it.
         destination?.setZoomContentHidden(true)
 
         let flight = ZoomFlight.build(

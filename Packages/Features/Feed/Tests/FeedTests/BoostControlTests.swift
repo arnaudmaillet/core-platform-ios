@@ -75,7 +75,7 @@ struct BoostControlTests {
         let actions = button.currentMenuActions().compactMap { $0 as? UIAction }
         #expect(actions.first?.attributes.contains(.disabled) == true)
         #expect(actions.first { $0.title == "100 points" }?.attributes.contains(.disabled) == true)
-        #expect(actions.last?.title == "Undo boosts (30)")
+        #expect(actions.last?.title == "Undo stakes (30)")
     }
 
     // MARK: - Affordability & session undo
@@ -114,7 +114,7 @@ struct BoostControlTests {
         #expect(byTitle("Max (60 points)")?.attributes.contains(.disabled) == false)
         #expect(byTitle("100 points")?.attributes.contains(.disabled) == true)
 
-        let undo = try #require(byTitle("Undo boosts (20)"))
+        let undo = try #require(byTitle("Undo stakes (20)"))
         undo.performWithSender(nil, target: nil)
         #expect(undone)
 
@@ -137,7 +137,7 @@ struct BoostControlTests {
         var undone = false
         bar.onBoostUndo = { undone = true }
         let actions = bar.currentBoostMenuActions().compactMap { $0 as? UIAction }
-        let undo = try #require(actions.first { $0.title == "Undo boosts (50)" })
+        let undo = try #require(actions.first { $0.title == "Undo stakes (50)" })
         undo.performWithSender(nil, target: nil)
         #expect(undone)
     }

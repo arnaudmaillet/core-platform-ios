@@ -16,6 +16,15 @@ import UIKit
 ///   that is what they are becoming. See `PostMetaPillView.font`.
 public final class PostMetricLabel: UIView {
     private let label = UILabel()
+    /// The glyph, so a stake can re-ink it and pop it.
+    let icon: UIImageView
+    private var value: Int64?
+    /// Whether an absent value still shows the glyph — a counter that is also
+    /// a CONTROL (the like chip, which stakes) must keep its door open when
+    /// the post carries no number yet.
+    var keepsGlyphWhenEmpty = false {
+        didSet { applyValue() }
+    }
 
     /// - Parameter iconColor: the glyph's colour, defaulting to the text's.
     ///
@@ -29,8 +38,8 @@ public final class PostMetricLabel: UIView {
         symbol: String, font: UIFont, color: UIColor,
         iconColor: UIColor? = nil, shadowed: Bool = false
     ) {
+        icon = UIImageView(image: UIImage(systemName: symbol))
         super.init(frame: .zero)
-        let icon = UIImageView(image: UIImage(systemName: symbol))
         icon.preferredSymbolConfiguration = UIImage.SymbolConfiguration(font: font, scale: .small)
         icon.tintColor = iconColor ?? color
         icon.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -69,8 +78,21 @@ public final class PostMetricLabel: UIView {
     public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     public func set(_ value: Int64?) {
-        isHidden = value == nil
+        self.value = value
+        applyValue()
+    }
+
+    private func applyValue() {
+        isHidden = value == nil && !keepsGlyphWhenEmpty
         label.text = value.map(PostMetadata.count)
+        label.isHidden = value == nil
+    }
+
+    /// Re-inks the glyph — the like chip's heart fills in the points' red once
+    /// the viewer has a stake on the post.
+    func setGlyph(systemName: String, color: UIColor) {
+        icon.image = UIImage(systemName: systemName)
+        icon.tintColor = color
     }
 }
 

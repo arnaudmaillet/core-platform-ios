@@ -5,7 +5,7 @@ which the contract already carries.
 
 ## Why
 
-The iOS client has one global search screen, reached from the Maps and For You
+The iOS client has one global search screen, reached from the Explore and For You
 headers. The product asks it for a filter tray with three dimensions:
 
 1. **Order** — trending, publication date, most liked (points), most commented
