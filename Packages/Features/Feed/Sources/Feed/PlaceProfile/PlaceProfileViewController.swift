@@ -556,6 +556,9 @@ final class PlaceProfileViewController: UIViewController {
             imagePipeline: imagePipeline, style: .list, videoPlayback: videoPlayback
         )
         super.init(nibName: nil, bundle: nil)
+        // The Activity list draws the same cards For You does, and its like
+        // chips stake the same way.
+        activityPage.staking = wallet.map(PostCardStaking.init)
     }
 
     @available(*, unavailable)

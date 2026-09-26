@@ -209,7 +209,10 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             // row, so a composition root that supplies neither gets a grid with
             // no overflow control rather than one that offers dead actions.
             reporting: reporting,
-            socialGraph: socialGraph
+            socialGraph: socialGraph,
+            // The cards' like chips stake from the SAME wallet the badge and
+            // the feed's rail spend from — one instance app-wide.
+            wallet: wallet
         )
         forYou.onTabPresentationChange = onTabPresentationChange
         return forYou

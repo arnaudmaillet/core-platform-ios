@@ -146,6 +146,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             trayPlacement: trayPlacement
         )
         controller.feedHero = openFeedHero
+        controller.staking = wallet.map(PostCardStaking.init)
         return controller
     }
 
@@ -160,6 +161,9 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     public var mapPinning: (any MapProfilePinning)?
     public var videoPlayback: VideoPlaybackController?
     public var openFeedHero: (([PostID], UIViewController, SnapFeedHeroOrigin) -> Void)?
+    /// The wallet the gallery cards' like chips stake from — the app's one
+    /// instance. Nil leaves the chips counters.
+    public var wallet: WalletStore?
 
     public func makeProfileViewController(for profileID: ProfileID, identityStub: ProfileIdentityStub?) -> UIViewController {
         let controller = ProfileViewController(
@@ -181,6 +185,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             identityStub: identityStub
         )
         controller.feedHero = openFeedHero
+        controller.staking = wallet.map(PostCardStaking.init)
         return controller
     }
 
