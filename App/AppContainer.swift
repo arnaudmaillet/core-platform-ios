@@ -67,14 +67,15 @@ final class AppContainer {
     static let seedsMapPlaces =
         !ProcessInfo.processInfo.arguments.contains("-maps-mock-no-places")
 
-    /// `-rich-media`: seed the mock dataset from `MockMediaFixtures` — real HLS
-    /// ladders, progressive MP4s, and real photographs at exact dimensions —
-    /// instead of the synthesized `mock://` assets.
+    /// `-rich-media`: seed the mock dataset's photographs and avatars from
+    /// `MockMediaFixtures` — real photographs at exact dimensions — instead of
+    /// the synthesized `mock://` pictures. Videos are the corpus's own bundled
+    /// clips either way (`MockClipCatalog`).
     ///
     /// Opt-in on purpose. The default mock mode is offline and deterministic,
     /// which is what the unit suite and CI depend on; this flag trades that for
-    /// realism (real decode cost, ABR, range requests) when driving the app by
-    /// hand. It requires network.
+    /// realism (real image decode cost) when driving the app by hand. It
+    /// requires network.
     static let usesRichMedia = ProcessInfo.processInfo.arguments.contains("-rich-media")
 
     private(set) lazy var mockRealtimeServer = MockRealtimeServer()
@@ -164,8 +165,8 @@ final class AppContainer {
         else {
             // Kept: a miss here is silent otherwise, and the page simply shows
             // black — which reads as a slow video rather than as a poster that
-            // never resolved. Verified resolving: `bigbuckbunny-0` and
-            // `sinteltrailer-0`, 172x172 each.
+            // never resolved. Sheets are 172x172 cells, one per clip
+            // (`clip-01-0` for `mock://preview/clip-01`).
             #if DEBUG
             print("[poster] MISS clip=\(clip) ids=\(mapPreviewCatalog.ids.count)")
             #endif

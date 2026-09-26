@@ -60,8 +60,8 @@ mkdir -p "$CACHE"
 # ── The public encodes ────────────────────────────────────────────────────────
 # The same three `DebugMediaLibrary.realClips` uses, so the mock library and the
 # device library show the same films and a difference between them is a
-# difference in the CODE rather than in the fixture. `MockMediaFixtures` is the
-# canonical catalogue and records the ffprobe dimensions and the dead sources.
+# difference in the CODE rather than in the fixture. `DebugMediaLibrary.realClips`
+# is the canonical list (the mock feed no longer plays any public film).
 fetch() {
   local name="$1" url="$2"
   if [ -s "${CACHE}/${name}" ]; then

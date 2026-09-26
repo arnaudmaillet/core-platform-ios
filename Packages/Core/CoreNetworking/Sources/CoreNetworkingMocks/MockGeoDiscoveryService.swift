@@ -281,17 +281,14 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
     /// `RadarPin` has exactly one URL and no media kind, which is the gap
     /// `dev/issues/BACKEND_MEDIA_PREVIEW_RENDITIONS.md` §C exists to close: a
     /// video pin has nowhere to say "this is a video, here is a cheap loop".
-    /// The client therefore renders every pin through the image pipeline unless
-    /// `-maps-force-video` is on, so this has to follow the same rule:
-    ///
-    /// - Default — a **still**. Under `.realAssets` a video post's media URL is
-    ///   an HLS manifest or an MP4, which the image pipeline cannot decode, so
-    ///   it is swapped for a real photograph. Handing the raw video URL over
-    ///   here renders a blank pin, which is a fixture bug, not a finding.
-    /// - Under `-maps-force-video` — the lightweight **preview loop**, never
-    ///   the full stream. A pin must not be able to open an HLS ladder mid-pan,
-    ///   which is the whole point of the contract ask. Its `mock-kind=video`
-    ///   marker is what `GeoDiscoveryRepository.kind(for:)` matches on.
+    /// The client renders every pin through the image pipeline, so a video
+    /// post's pin is always a **still of its own clip**: its baked sheet's
+    /// cell 0 (`mock://preview/<clip>`) when one exists, the clip's decoded
+    /// first frame (`mock://frame0/`) otherwise — never the raw video URL,
+    /// which an image pipeline renders as a blank pin, and never a photograph
+    /// of something else. Under `.realAssets` it carries the `mock-kind=video`
+    /// stamp that `GeoDiscoveryRepository.kind(for:)` matches on. A photo
+    /// post's URL passes through untouched.
     static func pinURL(forMediaURL url: String, catalog: MockSocialDataset.MediaCatalog) -> String {
         // ⚠️ A VIDEO POST'S MARKER SHOWS ITS OWN CLIP'S FIRST FRAME, and this
         // is the line that used to make that false.
@@ -333,8 +330,8 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
         // video over posts that are stills, which is not a thing the product can
         // ever do.
         //
-        // So the flag now only changes WHAT A VIDEO POST'S PIN PLAYS, never
-        // which posts are video. A photo post is returned untouched.
+        // So the flag never changes which posts are video. A photo post is
+        // returned untouched.
         guard MockMediaFixtures.isVideoURL(url) else { return url }
         // ⚠️ AN ANNOTATION NEVER HOLDS A PLAYER — sprite sheet, gif, lottie or
         // still, and nothing else.
@@ -348,53 +345,31 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
         // the product does not have. A marker's motion comes from a BAKED
         // SHEET; a player on one is a defect however it got there.
         //
-        // So the flag now only decides which posts a pin can be seen as, never
-        // what it plays: every video pin gets the stamped still, and its motion
-        // comes from `previewSheetID` like it does in a release build.
-        let neverPlayable = true
-        guard forcesMapVideo, !neverPlayable else {
-            // A still, because handing a raw video URL to an image view renders
-            // a blank pin — but STAMPED, so the pin can say what its post is.
-            //
-            // ⚠️ Without the stamp the map has no video pins at all. `RadarPin`
-            // carries no media kind (`media.v1.MediaKind media_kind = 5` is not
-            // published to BSR, `dev/BACKEND_GAPS.md` §15), so every media pin
-            // classified as `.photo` and the corpus's honest thirds — 40 video,
-            // 40 photo, 40 text — reached the map as two thirds photo and no
-            // video whatsoever. The play badge and the preview path could only
-            // ever be seen under `-maps-force-video`, which makes EVERY pin a
-            // video and is therefore no better a picture of the product.
-            //
-            // A query item the origin ignores, mirroring the discriminator
-            // below. It is a mock standing in for field 5, and it disappears the
-            // day field 5 ships.
-            // No baked sheet for this clip — so the frame comes from the clip
-            // itself. Still the post's own first frame, never a photograph of
-            // somewhere else, and still something the image pipeline can
-            // render, which is what a pin's single URL has to be.
-            return "\(MockMediaFixtures.frameZeroURL(for: url))&\(Self.videoKindMarker)"
-        }
-        // ⚠️ ONE FIXTURE, DISTINCT URLS — and the distinctness is the fixture's
-        // whole job now.
+        // So the flag decides nothing here: every video pin gets the stamped
+        // still of its OWN clip, and its motion comes from `previewSheetID`
+        // like it does in a release build. (A branch used to hand a shared
+        // public "preview loop" film to video pins under the flag; it was
+        // unreachable, and it named footage that was no post's own.)
         //
-        // Every video pin used to get the identical `mapPreviewLoop` url. The
-        // pool shares one player when the asset AND the scope match, the map
-        // passed no scope, so `nil == nil` and three markers joined ONE player:
-        // three surfaces drawing one decoder on one clock. Any reading of
-        // "three concurrent videos" taken against that fixture was a reading of
-        // one video, and the cap it justified was never exercised.
+        // A still, because handing a raw video URL to an image view renders a
+        // blank pin — but STAMPED, so the pin can say what its post is.
         //
-        // The discriminator is a query item the origin ignores (verified 206),
-        // so this is the SAME 320x176 clip decoded N times — which is what a
-        // concurrency test needs. Rotating real files instead would vary
-        // resolution and bitrate and measure those rather than concurrency.
-        let discriminator = url.reduce(into: UInt64(5381)) { $0 = $0 &* 33 &+ UInt64($1.asciiValue ?? 0) }
-        return "\(MockMediaFixtures.mapPreviewLoop.url)&pin=\(discriminator % 9973)"
+        // ⚠️ Without the stamp the map has no video pins at all. `RadarPin`
+        // carries no media kind (`media.v1.MediaKind media_kind = 5` is not
+        // published to BSR, `dev/BACKEND_GAPS.md` §15), so every media pin
+        // classified as `.photo` and the corpus's honest thirds — 40 video,
+        // 40 photo, 40 text — reached the map as two thirds photo and no
+        // video whatsoever. The stamp is a query item nothing fetches; it is a
+        // mock standing in for field 5, and it disappears the day field 5
+        // ships.
+        //
+        // No baked sheet for this clip (only the synthesized placeholder, when
+        // the bundle has no clips) — so the frame comes from the clip itself.
+        // Still the post's own first frame, never a photograph of somewhere
+        // else, and still something the image pipeline can render, which is
+        // what a pin's single URL has to be.
+        return "\(MockMediaFixtures.frameZeroURL(for: url))&\(Self.videoKindMarker)"
     }
-
-    /// Mirrors the Maps feature's own DEBUG launch argument. Read here so the
-    /// fixture a pin carries matches how the client will classify it.
-    static let forcesMapVideo = ProcessInfo.processInfo.arguments.contains("-maps-force-video")
 
     /// The mock's stand-in for `media.v1.MediaKind`, read by
     /// `GeoDiscoveryRepository.kind(for:)` in DEBUG builds only.

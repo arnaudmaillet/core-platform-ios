@@ -195,14 +195,14 @@ public final class MockSocialServices: @unchecked Sendable {
         var attachment = Post_V1_MediaAttachmentView()
         attachment.cdnURL = url
         // The snap feed routes on MIME, so this is what decides whether a post
-        // plays. HLS fixtures declare the manifest type, not a `video/*` one.
+        // plays. An HLS manifest would declare the manifest type, not a
+        // `video/*` one.
         attachment.mimeType = MockMediaFixtures.mimeType(for: url)
         attachment.width = UInt32(width)
         attachment.height = UInt32(height)
         // A still poster for video, mirroring what `thumbnail_url` means on the
-        // wire. Under the real catalog an HLS manifest is useless as a
-        // thumbnail, so video posts get a real photo at the clip's aspect
-        // instead of pointing the image pipeline at a manifest.
+        // wire — never the video URL itself, which an image pipeline cannot
+        // decode.
         // ⚠️ A CLIP'S POSTER IS ITS OWN FIRST FRAME, when we have one.
         //
         // This used to hand every video post a picsum photograph, because an
