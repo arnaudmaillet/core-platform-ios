@@ -627,6 +627,8 @@ final class AppContainer {
         // The same pool every other surface draws on, so a profile's video
         // competes for the same slots rather than opening a second one.
         builder.videoPlayback = videoPlayback
+        // The gallery cards' like chips stake from the app's one wallet.
+        builder.wallet = walletStore
         builder.openFeedHero = { [weak self] postIDs, presenter, origin in
             self?.feedFeature.presentSnapFeedHero(
                 postIDs: postIDs, from: presenter, origin: origin

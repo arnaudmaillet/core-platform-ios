@@ -192,43 +192,38 @@ public class PostMetaPillView: UIVisualEffectView {
 
     /// Makes the pill a control, or furniture again with nil.
     ///
-    /// ⚠️ `cancelsTouchesInView`, and it is the whole reason this is a
-    /// recognizer rather than a `point(inside:)` trick. The row's own tap opens
-    /// the post; without swallowing the touch, pressing a chip would open the
-    /// post AND do the chip's job — both, in an order nobody chose.
+    /// ⚠️ **THE CARD'S ONE ACTION COMPONENT, NOT THIS CHIP'S OWN.** The chip
+    /// used to wire a tap recogniser and a press of its own, and the comment
+    /// chip of a TEXT post was left with neither — reported from a device as
+    /// a button that "does nothing". `ActionAffordance` is the shared answer
+    /// for every chip on a card: the press, a contrast step inside the
+    /// capsule, a hold that freezes the screen until the lift, and — through
+    /// `setMenuProvider` — a menu. Its tap swallows the touch, so pressing a
+    /// chip never also opens the post under it.
     ///
     /// The chip is 32pt tall and `point(inside:)` already grows its target to
     /// 44, so this inherits a finger-sized region without the capsule growing
     /// to match.
     public func setTapHandler(_ handler: (() -> Void)?) {
         tapHandler = handler
+        if handler != nil {
+            ActionAffordance.attach(to: self, washingIn: contentView) { [weak self] in
+                self?.tapHandler?()
+            }
+        }
+        // After the attach, which turns interaction on: a chip with nothing
+        // to do is furniture again, and its recognisers go dormant with it.
         isUserInteractionEnabled = handler != nil
-        guard handler != nil, tap == nil else { return }
-        let recognizer = UITapGestureRecognizer(target: self, action: #selector(handleTap))
-        recognizer.cancelsTouchesInView = true
-        addGestureRecognizer(recognizer)
-        tap = recognizer
-        // A press response, because the capsule is the app's own statement that
-        // what is in one can be pressed — and a control that answers a finger
-        // with nothing until its screen changes reads as a miss.
-        //
-        // ⚠️ **THE APP'S ONE PRESS, NOT THIS CHIP'S OWN.** It had its own — a
-        // 0.9 scale on a bouncy spring — while the page indicator beside it
-        // SWELLED under the finger and the profile's capsules only dimmed:
-        // three answers to one gesture on one screen, reported from a device
-        // as "incohérent". `PressFeedback` is the shared one (a light shrink
-        // and a slight fade); silent here, the chip's action is the feedback.
-        // The fade is an opacity step, not a darker fill: a material darkened
-        // stops looking like one.
-        PressFeedback.attach(toView: self, sound: nil, dims: true)
+        isAccessibilityElement = handler != nil
+    }
+
+    /// A menu raised by holding the chip — nil for none. Only meaningful on a
+    /// chip that is a control (`setTapHandler`).
+    public func setMenuProvider(_ provider: (() -> UIMenu?)?) {
+        ActionAffordance.attached(to: self)?.menuProvider = provider
     }
 
     private var tapHandler: (() -> Void)?
-    private weak var tap: UITapGestureRecognizer?
-
-    @objc private func handleTap() {
-        tapHandler?()
-    }
 
     #if DEBUG
     /// Fires whatever the chip is wired to, for a simulator that injects no
@@ -459,11 +454,22 @@ public final class PostActionPillView: PostCardPillView {
     /// A capsule around exactly one glyph control.
     public convenience init(control: UIView) {
         self.init(contents: [control], spacing: 0, insets: Self.glyphInsets)
-        // The app's one press (see `setTapHandler`), on the whole pill: the
-        // button inside answers its own events, and its system highlight is
-        // the glyph's dim — so the pill only gives.
+        // ⚠️ THE PILL IS THE CONTROL NOW, the glyph inside is its face.
+        //
+        // The button used to answer its own events with the pill giving
+        // around it, while the counter chips beside it ran a different
+        // recogniser and a different press. Every chip on the card goes
+        // through `ActionAffordance` instead (see `setTapHandler`), so this
+        // one forwards its tap to the button's own actions — the host's
+        // target-action wiring is untouched — and the button stops taking
+        // touches, so there is exactly one owner of the finger.
         if let control = control as? UIControl {
-            PressFeedback.attach(to: control, moving: self, sound: nil)
+            control.isUserInteractionEnabled = false
+            isAccessibilityElement = true
+            accessibilityLabel = control.accessibilityLabel
+            ActionAffordance.attach(to: self, washingIn: contentView) { [weak control] in
+                control?.sendActions(for: .touchUpInside)
+            }
         }
     }
 

@@ -876,6 +876,11 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         }
         return false
     }
+
+    /// Presses the like chip — a stake of the tap amount, when wired.
+    public func debugTapLikesChip() -> Bool {
+        closingLikesPill.debugTap()
+    }
     #endif
 
     /// Moves this row's carousel, e.g. to follow the page an opened post is on.
@@ -1388,6 +1393,134 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
             bookmarkPill.isHidden = onBookmarkTapped == nil
             syncClosingLine()
         }
+    }
+
+    /// The like chip's STAKE — a tap spends the default amount through this,
+    /// a menu pick spends its amount. Nil leaves the chip a counter.
+    ///
+    /// Likes and points are one thing (the A/B economy, charter V5.3): liking
+    /// a post IS staking on it, so the chip that counts likes is the chip
+    /// that spends. The cell never touches a wallet — it reports amounts and
+    /// renders what the host answers (`setViewerStake`,
+    /// `playStakeConfirmation`, `playStakeDenied`).
+    public var onStake: ((Int) -> Void)? {
+        didSet { applyStakeWiring() }
+    }
+
+    /// The amount a plain tap on the like chip stakes. Set with `onStake`.
+    public var stakeTapAmount = 10
+
+    /// The menu a held like chip raises (`StakeMenu`), built when raised.
+    public var stakeMenu: (() -> UIMenu?)? {
+        didSet { closingLikesPill.setMenuProvider(stakeMenu) }
+    }
+
+    /// What the VIEWER has staked on this post: the heart turns the points'
+    /// red once there is any.
+    ///
+    /// ⚠️ **THE COUNT STAYS THE POST'S.** Adding the viewer's stake to it was
+    /// the first version, and it put two numbers on one post: the card said
+    /// 301 while the post page it opens — and the flight card between them —
+    /// said 271, because the feed shows the viewer's stake on its own anchor
+    /// (the rail's red count) rather than inside the likes. The card follows
+    /// the feed instead: the receipt is the red heart and a "+10" rising off
+    /// the chip, the rail's own receipt.
+    public func setViewerStake(_ total: Int) {
+        guard total != viewerStake else { return }
+        viewerStake = total
+        applyReactionCount()
+    }
+
+    /// The stake landed: "+N" rises off the chip in the points' red and the
+    /// heart pops — the rail's confirmation, on a card.
+    public func playStakeConfirmation(amount: Int) {
+        floatReceipt("+\(amount)", color: PointsSymbol.tint, rising: true)
+        guard !UIAccessibility.isReduceMotionEnabled else { return }
+        let icon = reactions.icon
+        icon.transform = CGAffineTransform(scaleX: 1.35, y: 1.35)
+        UIView.animate(
+            withDuration: 0.45, delay: 0, usingSpringWithDamping: 0.5, initialSpringVelocity: 0,
+            options: [.allowUserInteraction]
+        ) {
+            icon.transform = .identity
+        }
+    }
+
+    /// An undo's receipt: "−N" sinking, in grey — an undo is not a payout.
+    public func playStakeRefund(amount: Int) {
+        floatReceipt("−\(amount)", color: .secondaryLabel, rising: false)
+    }
+
+    /// A number floating off the like chip, then dissolving. Drawn in the
+    /// cell's content view rather than in the chip, which clips to its
+    /// capsule. Pure theatre over state the wallet already changed, so it can
+    /// be dropped (hidden chip, mid-reuse) without anything going wrong.
+    private func floatReceipt(_ text: String, color: UIColor, rising: Bool) {
+        guard !closingLikesPill.isHidden, closingLikesPill.window != nil else { return }
+        let label = UILabel()
+        label.text = text
+        label.font = .monospacedDigitSystemFont(ofSize: 15, weight: .heavy)
+        label.textColor = color
+        label.sizeToFit()
+        let chip = closingLikesPill.convert(closingLikesPill.bounds, to: contentView)
+        label.center = CGPoint(x: chip.midX, y: rising ? chip.minY - 4 : chip.maxY + 4)
+        label.alpha = 0
+        label.isUserInteractionEnabled = false
+        contentView.addSubview(label)
+        let step: CGFloat = rising ? -1 : 1
+        let moves = !UIAccessibility.isReduceMotionEnabled
+        UIView.animateKeyframes(withDuration: 0.9, delay: 0, options: [.calculationModeCubic]) {
+            UIView.addKeyframe(withRelativeStartTime: 0, relativeDuration: 0.2) {
+                label.alpha = 1
+                if moves { label.center.y += step * 14 }
+            }
+            UIView.addKeyframe(withRelativeStartTime: 0.2, relativeDuration: 0.55) {
+                if moves { label.center.y += step * 18 }
+            }
+            UIView.addKeyframe(withRelativeStartTime: 0.55, relativeDuration: 0.45) {
+                label.alpha = 0
+            }
+        } completion: { _ in
+            label.removeFromSuperview()
+        }
+    }
+
+    /// The wallet refused (balance, or the post's cap): the chip shakes its
+    /// head. Additive, so it composes with the press still springing back.
+    public func playStakeDenied() {
+        let shake = CAKeyframeAnimation(keyPath: "transform.translation.x")
+        shake.isAdditive = true
+        shake.values = [0, -6, 6, -4, 4, 0]
+        shake.duration = 0.35
+        shake.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        closingLikesPill.layer.add(shake, forKey: "stakeDenied")
+    }
+
+    private var baseReactionCount: Int64?
+    private var viewerStake = 0
+
+    private func applyStakeWiring() {
+        let stakes = onStake != nil
+        reactions.keepsGlyphWhenEmpty = stakes
+        closingLikesPill.syncVisibilityToContents()
+        closingLikesPill.setTapHandler(stakes ? { [weak self] in
+            guard let self else { return }
+            onStake?(stakeTapAmount)
+        } : nil)
+        closingLikesPill.accessibilityLabel = stakes ? "Like, stakes \(stakeTapAmount) points" : nil
+        applyReactionCount()
+    }
+
+    /// The post's own count, and the heart inked by whether the viewer has a
+    /// stake on it.
+    private func applyReactionCount() {
+        reactions.set(baseReactionCount)
+        reactions.setGlyph(
+            systemName: viewerStake > 0 ? PointsSymbol.glyph : "heart",
+            color: viewerStake > 0 ? PointsSymbol.tint : PostMetaPillView.glyphForeground
+        )
+        closingLikesPill.accessibilityValue = baseReactionCount.map(PostMetadata.count)
+        closingLikesPill.syncVisibilityToContents()
     }
 
     /// Whether this post is saved. Set by the host from whatever owns the pile;
@@ -1946,6 +2079,11 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         onRepostTapped = nil
         onBookmarkTapped = nil
         isBookmarked = false
+        // The stake captures its post too, and the viewer's stake on the
+        // previous post must not tint the next one's heart.
+        onStake = nil
+        stakeMenu = nil
+        viewerStake = 0
         // Concealment is per-FLIGHT state and must not ride a recycled cell to
         // whatever post it is bound to next — see `setHeroConcealed`.
         card.alpha = 1
@@ -2052,31 +2190,26 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         NSLayoutConstraint.deactivate(hasMedia ? [] : mediaConstraints)
         NSLayoutConstraint.activate(hasMedia ? mediaConstraints : [])
 
-        reactions.set(post.reactionCount)
+        baseReactionCount = post.reactionCount
+        applyReactionCount()
         comments.set(post.commentCount)
         // A number the post does not have leaves an empty capsule on the card,
         // exactly as it would on a photograph.
         closingLikesPill.syncVisibilityToContents()
         closingCommentsPill.syncVisibilityToContents()
-        // ⚠️ ON A TEXT POST THE COUNT IS NOT A CONTROL, and the pill stays
-        // exactly as it is drawn.
+        // ⚠️ THE COUNT IS A CONTROL ON EVERY CARD, TEXT POSTS INCLUDED.
         //
-        // The shortcut exists because a media post opens onto its PHOTOGRAPH
-        // and its thread is a second surface — pressing the count is the only
-        // way to ask for the thread directly. A text post's page IS its thread:
-        // tapping anywhere on the card already arrives there, by its own
-        // reveal. A chip promising a shortcut to where the card goes anyway is
-        // a second control for one destination, and it took the wrong route to
-        // get there — the media flight instead of the text reveal.
-        //
-        // Turned off rather than hidden: the touch then falls through to the
-        // row, which opens the post the way it always did. A dead control that
-        // swallows the touch would be worse than either.
-        let opensThread = post.kind != .text
-        let openComments: (() -> Void)? = opensThread
-            ? { [weak self] in self?.onCommentsTapped?() }
-            : nil
-        closingCommentsPill.setTapHandler(openComments)
+        // It used to be switched off on a text post, on the argument that its
+        // page IS its thread and tapping anywhere on the card already arrives
+        // there — so the chip stayed drawn and did nothing. Reported from a
+        // device as exactly that: the same capsule shrank under the finger on
+        // a media card and was dead on a text card, "as if the button did not
+        // work". One affordance, one answer: the chip always presses, and the
+        // HOST decides where a text post's comments are — its own page, by
+        // its own reveal, which is the route the argument was protecting.
+        closingCommentsPill.setTapHandler { [weak self] in self?.onCommentsTapped?() }
+        closingCommentsPill.accessibilityLabel = "Comments"
+        closingCommentsPill.accessibilityValue = post.commentCount.map(PostMetadata.count)
         // ⚠️ AFTER the indicator has been configured below, since it is on the
         // line too — see the end of this method.
 
