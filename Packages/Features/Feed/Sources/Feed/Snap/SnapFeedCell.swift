@@ -82,6 +82,12 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     private var playsVideo: Bool { activeVideoURL != nil }
     /// The clip on the page under the finger — a collection's current page.
     var currentClipURL: URL? { activeVideoURL }
+    /// Whether the clip under the finger is actually running — the cover's
+    /// record turns exactly while it is.
+    var isClipAdvancing: Bool {
+        guard let videoPlayback, let surface = audibleSurface else { return false }
+        return videoPlayback.isAdvancing(in: surface)
+    }
     /// Paused by `setCoveredBySheet`, and owed a resume by it.
     private var isSheetPaused = false
 
