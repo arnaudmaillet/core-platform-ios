@@ -294,8 +294,13 @@ final class AppContainer {
     func makeWalletSheet() -> UIViewController {
         WalletClaimViewController(
             wallet: walletStore,
-            lookUpPosts: { [unowned self] ids in await self.feedFeature.postEntries(ids) },
-            imagePipeline: imagePipeline
+            lookUpPosts: { [unowned self] ids in await self.feedFeature.galleryPosts(ids) },
+            imagePipeline: imagePipeline,
+            // A stake row opens its post the way a For You or Profile card
+            // does — the same flight, owned by Feed.
+            openFeedHero: { [unowned self] ids, presenter, origin in
+                self.feedFeature.presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)
+            }
         )
     }
 

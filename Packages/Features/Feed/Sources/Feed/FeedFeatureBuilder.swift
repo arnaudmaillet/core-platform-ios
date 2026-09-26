@@ -124,7 +124,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         )
     }
 
-    public func postEntries(_ ids: [PostID]) async -> [PostID: FeedEntry] {
+    public func galleryPosts(_ ids: [PostID]) async -> [PostID: GalleryPost] {
         var found: [PostID: FeedEntry] = [:]
         var missing: [PostID] = []
         for id in ids {
@@ -139,7 +139,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 if let entry { found[id] = entry }
             }
         }
-        return found
+        return found.mapValues(ForYouRepository.galleryPost(from:))
     }
 
     public func prewarmPosts(_ ids: [PostID]) async {

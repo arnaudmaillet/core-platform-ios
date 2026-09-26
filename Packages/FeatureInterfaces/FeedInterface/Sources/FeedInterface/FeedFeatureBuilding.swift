@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import PostGrid
 import UIKit
 
 /// How the post-detail screen presents.
@@ -266,7 +267,12 @@ public protocol FeedFeatureBuilding: ConversationThreadScreenBuilding, TextPostS
     /// being a feed — the wallet's stakes. Cached entries answer at once; the
     /// rest are fetched together. A post that cannot be loaded is simply
     /// absent from the answer.
-    func postEntries(_ ids: [PostID]) async -> [PostID: FeedEntry]
+    ///
+    /// As GRID posts — For You's own projection — because the surface also
+    /// flies them into the feed (`presentSnapFeedHero` takes a `GalleryPost`),
+    /// and a row drawn from one model and flown as another is how a card and
+    /// its page come to disagree.
+    func galleryPosts(_ ids: [PostID]) async -> [PostID: GalleryPost]
 
     func makeClusterGallery(
         postIDs: [PostID],
