@@ -60,6 +60,10 @@ public struct HoldToArm: Equatable, Sendable {
         /// The finger drifted off. Nothing will fire for this press, whatever
         /// it does next; the press still has to END before a new one starts.
         case abandoned
+        /// Fired the moment the gauge filled (`firesWhenFull`), finger still
+        /// down. The press is spent: nothing it does next fires again, and it
+        /// still has to END before a new one starts.
+        case spent
     }
 
     /// What a call changed, for the owner to show.
@@ -68,7 +72,8 @@ public struct HoldToArm: Equatable, Sendable {
         case revealed
         /// The gauge filled: say so (the "ready" pop, a haptic).
         case armed
-        /// Let go while armed: do the thing.
+        /// Do the thing: let go while armed — or, with `firesWhenFull`, the
+        /// moment the gauge filled.
         case fired
         /// Let go too early, or cancelled by the system: put the gauge away.
         case retracted
@@ -79,14 +84,24 @@ public struct HoldToArm: Equatable, Sendable {
     public private(set) var phase: Phase = .idle
     public let fillDuration: TimeInterval
     public let abandonDistance: CGFloat
+    /// Fire the moment the gauge fills rather than on the lift that follows.
+    ///
+    /// ⚠️ The "+"'s camera shortcut (26 September 2026: "ouvrir l'écran de
+    /// caméra dès que la progress bar est remplie, pas attendre que
+    /// l'utilisateur relâche"). A full gauge IS the decision there — the
+    /// finger has already held for the whole of it — and making the viewer
+    /// also lift turned a completed gesture into a second one.
+    public let firesWhenFull: Bool
     private var origin: CGPoint = .zero
 
     public init(
         fillDuration: TimeInterval = Metrics.fillDuration,
-        abandonDistance: CGFloat = Metrics.abandonDistance
+        abandonDistance: CGFloat = Metrics.abandonDistance,
+        firesWhenFull: Bool = false
     ) {
         self.fillDuration = fillDuration
         self.abandonDistance = abandonDistance
+        self.firesWhenFull = firesWhenFull
     }
 
     /// Whether a press is being tracked — anything but `.idle`.
@@ -98,7 +113,7 @@ public struct HoldToArm: Equatable, Sendable {
         switch phase {
         case .idle, .abandoned:
             return 0
-        case .armed:
+        case .armed, .spent:
             return 1
         case .filling(let since):
             guard fillDuration > 0 else { return 1 }
@@ -115,9 +130,14 @@ public struct HoldToArm: Equatable, Sendable {
         return .revealed
     }
 
-    /// Advances the clock. Arms once the gauge is full.
+    /// Advances the clock. Arms once the gauge is full — or fires there and
+    /// then, with `firesWhenFull`.
     public mutating func tick(at now: TimeInterval) -> Transition? {
         guard case .filling = phase, progress(at: now) >= 1 else { return nil }
+        if firesWhenFull {
+            phase = .spent
+            return .fired
+        }
         phase = .armed
         return .armed
     }
@@ -133,7 +153,7 @@ public struct HoldToArm: Equatable, Sendable {
                 return .abandoned
             }
             return tick(at: now)
-        case .idle, .abandoned:
+        case .idle, .abandoned, .spent:
             return nil
         }
     }
@@ -147,7 +167,7 @@ public struct HoldToArm: Equatable, Sendable {
         switch was {
         case .armed: return .fired
         case .filling: return .retracted
-        case .idle, .abandoned: return nil
+        case .idle, .abandoned, .spent: return nil
         }
     }
 
@@ -158,7 +178,7 @@ public struct HoldToArm: Equatable, Sendable {
         phase = .idle
         switch was {
         case .filling, .armed: return .retracted
-        case .idle, .abandoned: return nil
+        case .idle, .abandoned, .spent: return nil
         }
     }
 }

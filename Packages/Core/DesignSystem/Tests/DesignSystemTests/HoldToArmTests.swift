@@ -151,4 +151,27 @@ struct HoldRingDiscViewTests {
         #expect(disc.superview == nil)
         #expect(completions == 1)
     }
+
+    /// With `firesWhenFull` the gauge filling IS the decision: it fires there
+    /// and then, and the lift that follows does nothing.
+    @Test func firesTheMomentItFillsWhenAsked() {
+        var hold = HoldToArm(fillDuration: 0.6, firesWhenFull: true)
+        #expect(hold.begin(at: 0, location: .zero) == .revealed)
+        #expect(hold.tick(at: 0.3) == nil)
+        #expect(hold.tick(at: 0.6) == .fired)
+        #expect(hold.phase == .spent)
+        #expect(hold.progress(at: 0.7) == 1)
+        // Spent: moving far, ticking or lifting fire nothing more.
+        #expect(hold.move(to: CGPoint(x: 500, y: 0), at: 0.8) == nil)
+        #expect(hold.tick(at: 0.9) == nil)
+        #expect(hold.end(at: 1.0) == nil)
+        #expect(hold.phase == .idle)
+    }
+
+    /// A lift before the gauge fills still retracts.
+    @Test func anEarlyLiftStillRetractsWhenFiringOnFull() {
+        var hold = HoldToArm(fillDuration: 0.6, firesWhenFull: true)
+        _ = hold.begin(at: 0, location: .zero)
+        #expect(hold.end(at: 0.3) == .retracted)
+    }
 }
