@@ -41,6 +41,41 @@ extension VideoPlaybackController {
         return true
     }
 
+    /// Makes whatever plays in `view` the one clip the viewer hears, and
+    /// silences the one heard before; nil silences it and hears nothing.
+    ///
+    /// A SURFACE, not a player, because the feed knows which page owns the
+    /// screen and never which player is behind it: players are lent, parked,
+    /// joined and handed between surfaces, and a fresh bind starts muted.
+    /// Whatever arrives in `view` later is made audible as it is bound.
+    ///
+    /// ⚠️ **UNDER THE APP'S `.ambient` SESSION, ON PURPOSE.** Unlike
+    /// `setMuted`, this never switches the session to `.playback`: a feed that
+    /// starts talking on its own respects the ring switch and mixes with the
+    /// music the viewer already has on. `setMuted` is for sound somebody asked
+    /// for — an author auditioning the song they just picked.
+    public func setAudibleSurface(_ view: VideoRenderView?) {
+        audibleSurface = view
+        refreshAudibleSurface()
+    }
+
+    /// The surface `setAudibleSurface` last named, if it is still alive.
+    public var currentAudibleSurface: VideoRenderView? { audibleSurface }
+
+    /// Re-applies the audible surface to the player behind it now. Called by
+    /// `setAudibleSurface` and by every bind to that surface.
+    func refreshAudibleSurface() {
+        let target = audibleSurface.flatMap { watchedPlayer(in: $0) }
+        // The one heard before goes quiet — unless somebody asked for it by
+        // name (`setMuted`), which this does not get to overrule.
+        if let previous = surfaceHeardPlayer, previous !== target,
+           !audiblePlayers.contains(ObjectIdentifier(previous)) {
+            previous.isMuted = true
+        }
+        target?.isMuted = false
+        surfaceHeardPlayer = target
+    }
+
     /// Whether the clip in `view` is silenced; nil when nothing is bound.
     public func isMuted(in view: VideoRenderView) -> Bool? {
         watchedPlayer(in: view)?.isMuted
@@ -88,6 +123,7 @@ extension VideoPlaybackController {
         let key = ObjectIdentifier(player)
         soundBindings.removeValue(forKey: key)
         player.isMuted = true
+        if surfaceHeardPlayer === player { surfaceHeardPlayer = nil }
         if audiblePlayers.remove(key) != nil {
             settleAudioSession()
         }

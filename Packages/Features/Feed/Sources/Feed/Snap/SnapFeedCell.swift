@@ -81,6 +81,13 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// `mediaKind == .video` gates.
     private var playsVideo: Bool { activeVideoURL != nil }
 
+    /// The surface the viewer should HEAR when this page owns the screen: the
+    /// clip on the page under the finger, nil on a photograph or a text page.
+    var audibleSurface: VideoRenderView? {
+        guard playsVideo else { return nil }
+        return mediaCard.showsCollection ? mediaCard.currentPageSurface : mediaCard.renderView
+    }
+
     /// Reconciles playback with the page the viewer is now on.
     ///
     /// This is the carousel's autoplay: a clip starts when its page arrives and

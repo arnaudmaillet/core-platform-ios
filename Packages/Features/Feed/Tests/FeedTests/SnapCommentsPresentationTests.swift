@@ -1109,15 +1109,15 @@ struct SnapCommentsPresentationTests {
     @Test func theToolbarsTrailingRunIsTwoPlatters() {
         let (_, feed) = Self.chromeHost()
         let items = feed.toolbarItems ?? []
-        // [attribution][flexible space][🔖 ⇄][fixed space][⋯]
+        // [attribution][mute][flexible space][🔖 ⇄][fixed space][⋯]
         //
         // It was one platter holding all three for a while, to save a glass
         // host on the hero flight's push. The arms were then measured and the
         // saving was ~2 ms — inside the noise — so the grouping went back to
         // being a design question. `SnapToolbarCompositionTests` owns the
         // reason; this pins the shape.
-        #expect(items.count == 5)
-        #expect((items.dropFirst(2).first?.customView as? UIStackView)?.arrangedSubviews.count == 2)
+        #expect(items.count == 6)
+        #expect((items.dropFirst(3).first?.customView as? UIStackView)?.arrangedSubviews.count == 2)
         #expect(items.last?.customView is UIButton)
     }
 
