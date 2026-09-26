@@ -140,7 +140,6 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                     { AccountSettingsViewController(account: account, onLogout: onLogout) }
                 }
             },
-            switcherFactory: onLogout == nil ? nil : makeSwitcherFactory(),
             makeRelationshipsViewController: makeRelationshipsFactory(),
             identityStub: identityStub,
             trayPlacement: trayPlacement

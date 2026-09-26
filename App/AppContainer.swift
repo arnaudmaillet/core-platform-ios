@@ -766,7 +766,17 @@ final class AppContainer {
         searchFeature: { [unowned self] in self.searchFeature },
         profileFeature: { [unowned self] in self.profileFeature },
         feedFeature: { [unowned self] in self.feedFeature },
-        chatFeature: { [unowned self] in self.chatFeature }
+        chatFeature: { [unowned self] in self.chatFeature },
+        // The pushed profile's balance: the same store and the same sheet as
+        // every root header's, on an installer that lives as long as the
+        // screen it is attached to.
+        attachBalance: { [unowned self] screen in
+            WalletBadgeInstaller.attach(
+                to: screen,
+                wallet: self.walletStore,
+                makeSheet: { [unowned self] in self.makeWalletSheet() }
+            )
+        }
     )
 
     var router: any Router { routeResolver }

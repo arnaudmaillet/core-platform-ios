@@ -12,8 +12,8 @@ import UIKit
 /// it over. What this screen promises is that the item stays in its trailing
 /// run — and that promise is worth pinning here, because this run is REBUILT.
 ///
-/// `applyNavigationState` composes the trailing items from scratch every time
-/// the follow state, the switcher or the identity moves, and it is guarded by
+/// `applyNavigationState` composes the bar's items from scratch every time
+/// the follow state or the identity moves, and it is guarded by
 /// "say nothing unless it changed" — a guard that exists because handing UIKit
 /// the same set mid-transition tears the capsule down. An item that arrives
 /// from outside has to pass through both.
@@ -101,6 +101,84 @@ struct ProfileHeaderAccessoryTests {
         screen.setTrailingAccessoryItem(nil)
 
         #expect(screen.navigationItem.rightBarButtonItems?.count == before)
+    }
+
+    // MARK: - The own profile's pair
+
+    /// ⚠️ THE TAB ROOT READS `[coins][share settings]`: the gear at the corner,
+    /// Share inboard of it, the balance inboard of both — and Share and the
+    /// gear SHARE one capsule (neither opts out of the bar's shared
+    /// background), while the balance, which does opt out, stands alone.
+    @Test func theOwnProfileCarriesSettingsThenShareThenTheBalance() throws {
+        let screen = ownProfile()
+        screen.loadViewIfNeeded()
+        let badge = accessory()
+        badge.sharesBackground = false
+
+        screen.setTrailingAccessoryItem(badge)
+
+        let items = try #require(screen.navigationItem.rightBarButtonItems)
+        #expect(items.map(\.accessibilityLabel) == ["Settings", "Share Profile", "Balance"])
+        #expect(items[0].sharesBackground && items[1].sharesBackground,
+                "share and settings no longer read as one capsule")
+    }
+
+    /// A pushed profile — built without `onLogout` — has neither: its trailing
+    /// run is whatever the shell hands in, the balance alone.
+    @Test func aPushedProfileCarriesOnlyTheBalance() throws {
+        let screen = ProfileViewController(
+            viewModel: ProfileViewModel(repository: StubAccessoryProfiles()),
+            imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
+            onLogout: nil
+        )
+        screen.loadViewIfNeeded()
+        let badge = accessory()
+
+        screen.setTrailingAccessoryItem(badge)
+
+        let items = try #require(screen.navigationItem.rightBarButtonItems)
+        #expect(items.count == 1)
+        #expect(items.first === badge)
+    }
+
+    // MARK: - The leading item (the shell's bell)
+
+    /// ⚠️ THE BELL LEADS, AHEAD OF THE SOURCE FILTER: `[bell][filter]`.
+    @Test func theInjectedBellLeadsAheadOfTheSourceFilter() throws {
+        let screen = ownProfile()
+        screen.loadViewIfNeeded()
+        let bell = accessory()
+
+        screen.setLeadingAccessoryItem(bell)
+
+        let items = try #require(screen.navigationItem.leftBarButtonItems)
+        #expect(items.count == 2)
+        #expect(items.first === bell, "the filter took the corner from the bell")
+        #expect(items.last?.accessibilityLabel == "Content source")
+    }
+
+    /// And, like the balance, it survives a rebuild of the bar.
+    @Test func theBellSurvivesARebuild() throws {
+        let screen = ownProfile()
+        let bell = accessory()
+        screen.setLeadingAccessoryItem(bell)
+        screen.loadViewIfNeeded()
+
+        screen.debugRebuildNavigationState()
+
+        let items = try #require(screen.navigationItem.leftBarButtonItems)
+        #expect(items.first === bell, "a rebuild dropped the bell")
+    }
+
+    /// Clearing it leaves the filter alone in the leading group.
+    @Test func clearingTheBellLeavesTheFilter() {
+        let screen = ownProfile()
+        screen.loadViewIfNeeded()
+
+        screen.setLeadingAccessoryItem(accessory())
+        screen.setLeadingAccessoryItem(nil)
+
+        #expect(screen.navigationItem.leftBarButtonItems?.count == 1)
     }
 }
 

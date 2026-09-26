@@ -11,8 +11,10 @@ import UIKit
 ///
 /// - **This is the canonical entry point**, so it is built with a non-nil
 ///   `onLogout` — which is also what makes the screen carry the settings gear
-///   and its own profile switcher (see `ProfileFeatureBuilding`). That is why
-///   losing the avatar's long-press menu does not lose the switcher.
+///   and Share (see `ProfileFeatureBuilding`). The profile switcher is this
+///   tab's long press (`MainTabCoordinator.profileMenuOverlay`), which is why
+///   neither the avatar's old long-press menu nor the header's old switcher
+///   button took it away.
 /// - **It is built once and retained for the session**, where the pushed profile
 ///   is built per push and released on pop. A tab root cannot be rebuilt on
 ///   every visit without throwing away scroll position and gallery state on
@@ -24,6 +26,9 @@ final class ProfileTabCoordinator: TabCoordinator {
     let navigationController = UINavigationController()
 
     private let container: AppContainer
+    /// The shell's bell, minted into this header's leading edge — the ROOT's
+    /// only: a pushed profile leads with its back button.
+    private let notificationsBell: NotificationsBell
     private let onLogout: () -> Void
 
     private(set) lazy var tab = UITab(
@@ -34,8 +39,13 @@ final class ProfileTabCoordinator: TabCoordinator {
 
     private static let placeholder = UIImage(systemName: "person.crop.circle")
 
-    init(container: AppContainer, onLogout: @escaping () -> Void) {
+    init(
+        container: AppContainer,
+        notificationsBell: NotificationsBell,
+        onLogout: @escaping () -> Void
+    ) {
         self.container = container
+        self.notificationsBell = notificationsBell
         self.onLogout = onLogout
     }
 
@@ -55,9 +65,20 @@ final class ProfileTabCoordinator: TabCoordinator {
             trayPlacement: .aboveBottomSafeArea
         )
         navigationController.viewControllers = [profile]
-        // The balance, inboard of the gear — the same installer the Maps and
-        // For You headers use. ⚠️ THE TAB ROOT ONLY: a pushed profile is
-        // someone else's, and a viewer's balance has no business on it.
+        // The header reads `[bell][filter] … [coins][share settings]`. The bell
+        // leads, ahead of the source filter the screen composes itself.
+        (profile as? any HeaderAccessoryHosting)?
+            .setLeadingAccessoryItem(notificationsBell.makeItem())
+        // The balance, inboard of the share + settings pair — the same
+        // installer every root header uses.
+        //
+        // ⚠️ A PUSHED PROFILE WEARS ONE TOO NOW, and did not before: the rule
+        // was "a pushed profile is someone else's, and a viewer's balance has
+        // no business on it". The balance is the viewer's wherever they stand
+        // — the post screen and the search results already said so — and the
+        // header was asked to carry it everywhere. A pushed profile has no
+        // coordinator, so its installer hangs on the screen itself; see
+        // `RouteResolver`'s `.profile` case and `WalletBadgeInstaller.attach`.
         walletBadge = WalletBadgeInstaller(
             wallet: container.walletStore,
             presenter: navigationController,

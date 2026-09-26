@@ -34,8 +34,9 @@ public protocol ProfileFeatureBuilding {
     ///
     /// **`onLogout` doubles as the account-chrome switch.** Non-nil is the
     /// canonical entry point (the Profile tab root): the screen carries the
-    /// settings gear and the profile switcher, and Log Out means what the shell
-    /// says it means. Nil is a *routed* arrival — the "(Me)" row in a
+    /// settings gear and Share, and Log Out means what the shell says it means.
+    /// (The profile switcher is the Profile tab's long press, built by the
+    /// shell from `makeProfileSwitcher`.) Nil is a *routed* arrival — the "(Me)" row in a
     /// relationship list, a deep link — where the screen is the same profile but
     /// the account actions are withheld: switching accounts or logging out from
     /// inside a deep stack strands every screen below it on an identity that no
