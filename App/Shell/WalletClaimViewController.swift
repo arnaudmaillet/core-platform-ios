@@ -341,6 +341,8 @@ final class WalletClaimViewController: UIViewController {
     /// edge effect behind them (`UIScrollEdgeElementContainerInteraction`).
     private func buildChrome() {
         collectionView.topEdgeEffect.style = .soft
+        // Hidden at rest; `updateCompactBar` shows it with the bar.
+        collectionView.topEdgeEffect.isHidden = true
         collectionView.bottomEdgeEffect.style = .soft
 
         compactBar.translatesAutoresizingMaskIntoConstraints = false
@@ -450,6 +452,18 @@ final class WalletClaimViewController: UIViewController {
         let visibleBottom = summary.frame.maxY - collectionView.contentOffset.y
         let progress = min(1, max(0, (Self.compactBarHeight + Spacing.lg - visibleBottom) / Spacing.lg))
         compactBar.progress = progress
+        // ⚠️ THE TOP EDGE EFFECT ONLY WHILE THE BAR IS THERE. The compact bar
+        // is registered with the list's top edge and spans the first 44pt of
+        // the sheet — which, at rest, is where the summary's "Points" and
+        // "Gems" labels sit. The system shows the effect once the list has
+        // scrolled at all and keeps it on the way back up, so after one
+        // round trip the labels rested under a blur (device screenshots,
+        // 26 September 2026). With nothing collapsed there is nothing for the
+        // blur to separate.
+        let hidesTopEdge = progress == 0
+        if collectionView.topEdgeEffect.isHidden != hidesTopEdge {
+            collectionView.topEdgeEffect.isHidden = hidesTopEdge
+        }
     }
 
     // MARK: - State
