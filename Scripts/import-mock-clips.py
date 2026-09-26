@@ -17,9 +17,13 @@ Pairing:
   by DURATION: a sound is the video's audio, within a few tenths of a second.
 - Anything left without a partner is reported and skipped.
 
-⚠️ The output is committed (no Git LFS here), so the budget is the point:
-HEVC at 540p capped at 25 s and ~380 kb/s, sounds AAC 64 kb/s capped at 30 s.
-Measured on the first import: ~70 MB for 50 clips.
+⚠️ The output is committed (no Git LFS here), so the budget is the point —
+and the first import spent it too hard. HEVC at 540p and ~380 kb/s was 2–4x
+fewer bits than the sources (H.264, ~1.3 Mb/s on average, up to 2.9 Mb/s at
+720p), and it showed on every shot that moves. Now: the source's own
+resolution up to 720p on the short side, HEVC CRF 24 capped at ~1 Mb/s —
+close to the originals to the eye, ~140 MB for 53 clips. Sounds stay AAC
+64 kb/s capped at 30 s; clips at 25 s.
 """
 
 import json
@@ -175,14 +179,16 @@ def main():
         clip_id = f"clip-{number:02d}"
         outputs = [OUT / f"{clip_id}.mp4", OUT / f"{clip_id}-sound.m4a", OUT / f"{clip_id}.jpg"]
         encode = not all(p.exists() for p in outputs)
-        # Short side 540, long side proportional (even), whatever the aspect.
-        scale = "scale='if(gt(iw,ih),-2,540)':'if(gt(iw,ih),540,-2)'"
+        # The source's own size, unless its short side is over 720 — then 720,
+        # long side proportional (even), whatever the aspect.
+        # (`\\,`: a bare comma would end the filter inside the expression.)
+        scale = "scale='if(gt(iw,ih),-2,min(iw\\,720))':'if(gt(iw,ih),min(ih\\,720),-2)'"
         # ⚠️ -fpsmax 30: a 120 fps source encoded as HEVC 540p is a stream
         # AVFoundation refuses to decode (-11821 / -12911), measured on one of
         # the first import's clips — and the player would have refused it too.
         if encode: run(["-i", str(video), "-t", str(VIDEO_SECONDS), "-vf", scale, "-fpsmax", "30",
-             "-c:v", "libx265", "-preset", "medium", "-crf", "30",
-             "-x265-params", "vbv-maxrate=380:vbv-bufsize=760:log-level=error",
+             "-c:v", "libx265", "-preset", "medium", "-crf", "24",
+             "-x265-params", "vbv-maxrate=1000:vbv-bufsize=2000:log-level=error",
              "-tag:v", "hvc1", "-pix_fmt", "yuv420p",
              "-c:a", "aac", "-b:a", "64k", "-ac", "2",
              "-movflags", "+faststart", str(OUT / f"{clip_id}.mp4")])

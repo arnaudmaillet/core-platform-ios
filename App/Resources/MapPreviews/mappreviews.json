@@ -73,7 +73,7 @@
  },
  {
   "asset": "clip-01-0.heic",
-  "bytes": 143193,
+  "bytes": 146973,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -85,7 +85,7 @@
  },
  {
   "asset": "clip-02-0.heic",
-  "bytes": 178382,
+  "bytes": 190864,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -97,7 +97,7 @@
  },
  {
   "asset": "clip-03-0.heic",
-  "bytes": 216326,
+  "bytes": 237435,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -109,7 +109,7 @@
  },
  {
   "asset": "clip-04-0.heic",
-  "bytes": 263613,
+  "bytes": 299942,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -121,7 +121,7 @@
  },
  {
   "asset": "clip-05-0.heic",
-  "bytes": 275690,
+  "bytes": 233090,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -133,7 +133,7 @@
  },
  {
   "asset": "clip-06-0.heic",
-  "bytes": 243399,
+  "bytes": 268841,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -145,7 +145,7 @@
  },
  {
   "asset": "clip-07-0.heic",
-  "bytes": 262522,
+  "bytes": 272094,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -157,7 +157,7 @@
  },
  {
   "asset": "clip-08-0.heic",
-  "bytes": 152993,
+  "bytes": 157301,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -169,7 +169,7 @@
  },
  {
   "asset": "clip-09-0.heic",
-  "bytes": 219702,
+  "bytes": 229981,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -181,7 +181,7 @@
  },
  {
   "asset": "clip-10-0.heic",
-  "bytes": 286766,
+  "bytes": 304275,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -193,7 +193,7 @@
  },
  {
   "asset": "clip-11-0.heic",
-  "bytes": 250361,
+  "bytes": 260032,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -205,7 +205,7 @@
  },
  {
   "asset": "clip-12-0.heic",
-  "bytes": 236932,
+  "bytes": 245413,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -217,7 +217,7 @@
  },
  {
   "asset": "clip-13-0.heic",
-  "bytes": 126318,
+  "bytes": 129317,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -229,7 +229,7 @@
  },
  {
   "asset": "clip-14-0.heic",
-  "bytes": 251806,
+  "bytes": 261308,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -241,7 +241,7 @@
  },
  {
   "asset": "clip-15-0.heic",
-  "bytes": 140458,
+  "bytes": 148200,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -253,7 +253,7 @@
  },
  {
   "asset": "clip-16-0.heic",
-  "bytes": 160415,
+  "bytes": 164568,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -265,7 +265,7 @@
  },
  {
   "asset": "clip-17-0.heic",
-  "bytes": 199462,
+  "bytes": 209201,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -277,7 +277,7 @@
  },
  {
   "asset": "clip-18-0.heic",
-  "bytes": 195828,
+  "bytes": 169685,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -289,7 +289,7 @@
  },
  {
   "asset": "clip-19-0.heic",
-  "bytes": 287431,
+  "bytes": 303136,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -301,7 +301,7 @@
  },
  {
   "asset": "clip-20-0.heic",
-  "bytes": 141486,
+  "bytes": 144155,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -313,7 +313,7 @@
  },
  {
   "asset": "clip-21-0.heic",
-  "bytes": 190966,
+  "bytes": 197253,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -325,7 +325,7 @@
  },
  {
   "asset": "clip-22-0.heic",
-  "bytes": 242346,
+  "bytes": 246072,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -337,7 +337,7 @@
  },
  {
   "asset": "clip-23-0.heic",
-  "bytes": 271380,
+  "bytes": 250912,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -349,7 +349,7 @@
  },
  {
   "asset": "clip-24-0.heic",
-  "bytes": 166211,
+  "bytes": 168904,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -361,7 +361,7 @@
  },
  {
   "asset": "clip-25-0.heic",
-  "bytes": 182589,
+  "bytes": 191128,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -373,7 +373,7 @@
  },
  {
   "asset": "clip-26-0.heic",
-  "bytes": 216875,
+  "bytes": 220332,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -385,7 +385,7 @@
  },
  {
   "asset": "clip-27-0.heic",
-  "bytes": 211168,
+  "bytes": 220997,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -397,7 +397,7 @@
  },
  {
   "asset": "clip-28-0.heic",
-  "bytes": 146572,
+  "bytes": 150777,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -409,7 +409,7 @@
  },
  {
   "asset": "clip-29-0.heic",
-  "bytes": 123519,
+  "bytes": 126903,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -421,7 +421,7 @@
  },
  {
   "asset": "clip-30-0.heic",
-  "bytes": 201173,
+  "bytes": 205727,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -433,7 +433,7 @@
  },
  {
   "asset": "clip-31-0.heic",
-  "bytes": 237846,
+  "bytes": 216289,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -445,7 +445,7 @@
  },
  {
   "asset": "clip-32-0.heic",
-  "bytes": 218909,
+  "bytes": 222033,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -457,7 +457,7 @@
  },
  {
   "asset": "clip-33-0.heic",
-  "bytes": 241060,
+  "bytes": 252597,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -469,7 +469,7 @@
  },
  {
   "asset": "clip-34-0.heic",
-  "bytes": 210573,
+  "bytes": 217824,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -481,7 +481,7 @@
  },
  {
   "asset": "clip-35-0.heic",
-  "bytes": 153571,
+  "bytes": 157096,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -493,7 +493,7 @@
  },
  {
   "asset": "clip-36-0.heic",
-  "bytes": 258037,
+  "bytes": 274432,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -505,7 +505,7 @@
  },
  {
   "asset": "clip-37-0.heic",
-  "bytes": 153703,
+  "bytes": 157608,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -517,7 +517,7 @@
  },
  {
   "asset": "clip-38-0.heic",
-  "bytes": 217935,
+  "bytes": 260229,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -529,7 +529,7 @@
  },
  {
   "asset": "clip-39-0.heic",
-  "bytes": 207629,
+  "bytes": 212764,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -541,7 +541,7 @@
  },
  {
   "asset": "clip-40-0.heic",
-  "bytes": 117433,
+  "bytes": 119491,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -553,7 +553,7 @@
  },
  {
   "asset": "clip-41-0.heic",
-  "bytes": 220380,
+  "bytes": 246207,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -565,7 +565,7 @@
  },
  {
   "asset": "clip-42-0.heic",
-  "bytes": 255062,
+  "bytes": 268417,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -577,7 +577,7 @@
  },
  {
   "asset": "clip-43-0.heic",
-  "bytes": 248526,
+  "bytes": 259011,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -589,7 +589,7 @@
  },
  {
   "asset": "clip-44-0.heic",
-  "bytes": 139132,
+  "bytes": 141202,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -601,7 +601,7 @@
  },
  {
   "asset": "clip-45-0.heic",
-  "bytes": 280892,
+  "bytes": 294785,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -613,7 +613,7 @@
  },
  {
   "asset": "clip-46-0.heic",
-  "bytes": 131419,
+  "bytes": 140426,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -625,7 +625,7 @@
  },
  {
   "asset": "clip-47-0.heic",
-  "bytes": 218079,
+  "bytes": 228484,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -637,7 +637,7 @@
  },
  {
   "asset": "clip-48-0.heic",
-  "bytes": 178649,
+  "bytes": 184747,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -649,7 +649,7 @@
  },
  {
   "asset": "clip-49-0.heic",
-  "bytes": 148702,
+  "bytes": 141931,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -661,7 +661,7 @@
  },
  {
   "asset": "clip-50-0.heic",
-  "bytes": 210540,
+  "bytes": 229278,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -673,7 +673,7 @@
  },
  {
   "asset": "clip-51-0.heic",
-  "bytes": 163811,
+  "bytes": 181706,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -685,7 +685,7 @@
  },
  {
   "asset": "clip-52-0.heic",
-  "bytes": 212741,
+  "bytes": 220476,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
@@ -697,7 +697,7 @@
  },
  {
   "asset": "clip-53-0.heic",
-  "bytes": 186290,
+  "bytes": 192081,
   "cellPX": 172,
   "columns": 4,
   "frameCount": 24,
