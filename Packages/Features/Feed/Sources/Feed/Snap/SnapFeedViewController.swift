@@ -3896,7 +3896,12 @@ final class SnapFeedViewController: UIViewController {
     /// was dropped.
     func warmContent(at items: [Int]) {
         let ids = items.compactMap { orderedIDs.indices.contains($0) ? orderedIDs[$0] : nil }
-        let urls = ids.compactMap { modelsByID[$0] }.flatMap { [$0.avatarURL, $0.mediaURL] }
+        // ⚠️ THE POSTER TOO. A media page falls back on its poster whenever it
+        // is not decoding — before its first frame and after its last — so an
+        // uncached poster is a black page until an async hop lands it
+        // (measured ~350ms of black on arrival, ~150ms with it warmed).
+        let urls = ids.compactMap { modelsByID[$0] }
+            .flatMap { [$0.avatarURL, $0.mediaURL, $0.thumbnailURL] }
             .compactMap(\.self)
         let pipeline = imagePipeline
         Task { await pipeline.prefetch(urls) }
@@ -3960,7 +3965,8 @@ final class SnapFeedViewController: UIViewController {
 
     private func prefetchURLs(for indexPaths: [IndexPath]) -> [URL] {
         indexPaths.compactMap { orderedIDs.indices.contains($0.item) ? modelsByID[orderedIDs[$0.item]] : nil }
-            .flatMap { [$0.avatarURL, $0.mediaURL] }
+            // The poster as well — see `warmContent`.
+            .flatMap { [$0.avatarURL, $0.mediaURL, $0.thumbnailURL] }
             .compactMap(\.self)
     }
 }

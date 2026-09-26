@@ -181,9 +181,12 @@ struct MediaMetaPillPlacementTests {
             publishedAtMS: ninetyMinutesAgo
         )
         // Narrow enough that five dots no longer fit beside two six-figure
-        // counts, wide enough that two still do.
+        // counts, wide enough that two still do. (286, not 262: the
+        // counters' glyphs grew to the controls' size on 2026-09-26, which
+        // takes ~16pt more of the line — still far narrower than any phone,
+        // an iPhone SE's card is ~343.)
         let narrow = row(
-            kind: .photo, reactions: 1_600_000, comments: 128_000, pages: 12, width: 262,
+            kind: .photo, reactions: 1_600_000, comments: 128_000, pages: 12, width: 286,
             publishedAtMS: ninetyMinutesAgo
         )
         func indicator(_ cell: PostGridListRowCell) -> MediaPageIndicatorView? {

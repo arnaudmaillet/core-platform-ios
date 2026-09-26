@@ -1633,11 +1633,13 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// same two buttons.
     private let reactions = PostMetricLabel(
         symbol: "heart", font: PostMetaPillView.font,
-        color: PostMetaPillView.foreground, iconColor: PostMetaPillView.glyphForeground
+        color: PostMetaPillView.foreground, iconColor: PostMetaPillView.glyphForeground,
+        glyphPointSize: PostActionPillView.glyphPointSize
     )
     private let comments = PostMetricLabel(
         symbol: "bubble.right", font: PostMetaPillView.font,
-        color: PostMetaPillView.foreground, iconColor: PostMetaPillView.glyphForeground
+        color: PostMetaPillView.foreground, iconColor: PostMetaPillView.glyphForeground,
+        glyphPointSize: PostActionPillView.glyphPointSize
     )
     private var closingLikesPill: PostCardPillView!
     private var closingCommentsPill: PostCardPillView!
