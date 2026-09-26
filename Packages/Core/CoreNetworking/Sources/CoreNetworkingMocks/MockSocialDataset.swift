@@ -122,6 +122,22 @@ public struct MockSocialDataset: Sendable {
     /// they were and the text/media split is untouched.
     static let mediaIsAlwaysVideo = false
 
+    /// A video under the synthetic catalog: one of the REAL clips when the
+    /// bundle carries them (`MockClipCatalog` — footage with its own sound),
+    /// the synthesized placeholder at `shape` otherwise.
+    ///
+    /// Slots spread the corpus across the catalog: the main timeline takes
+    /// 0..<40, the viewer's, the just-arrived and the collection pages take
+    /// the ones after, so a clip does not show up twice on one screen. The
+    /// declared size is the CLIP's, never `shape`: pre-layout trusts it, and
+    /// a size the file does not have shows up as a crop.
+    static func syntheticVideo(
+        slot: Int, fallback: String, shape: (Int, Int)
+    ) -> (url: String, width: Int, height: Int) {
+        MockClipCatalog.shared.media(forSlot: slot)
+            ?? ("\(fallback)?w=\(shape.0)&h=\(shape.1)", shape.0, shape.1)
+    }
+
     static func viewerRecords(mediaCatalog: MediaCatalog, after count: Int) -> [PostRecord] {
         let captions = [
             "Testing in production is fine if production is your simulator.",
@@ -144,8 +160,9 @@ public struct MockSocialDataset: Sendable {
             case (false, _):
                 nil
             case (true, .synthetic):
-                ("mock://\(isVideo ? "video" : "media")/me\(index)?w=\(shape.0)&h=\(shape.1)",
-                 shape.0, shape.1)
+                isVideo
+                    ? Self.syntheticVideo(slot: 40 + index, fallback: "mock://video/me\(index)", shape: shape)
+                    : ("mock://media/me\(index)?w=\(shape.0)&h=\(shape.1)", shape.0, shape.1)
             case (true, .realAssets):
                 if isVideo {
                     { let fixture = MockMediaFixtures.videos[index % MockMediaFixtures.videos.count]
@@ -304,7 +321,9 @@ public struct MockSocialDataset: Sendable {
             case (false, _):
                 nil
             case (true, .synthetic):
-                ("mock://\(host)/new-\(index)?w=\(shape.0)&h=\(shape.1)", shape.0, shape.1)
+                isVideo
+                    ? Self.syntheticVideo(slot: 44 + index, fallback: "mock://video/new-\(index)", shape: shape)
+                    : ("mock://\(host)/new-\(index)?w=\(shape.0)&h=\(shape.1)", shape.0, shape.1)
             case (true, .realAssets):
                 if isVideo {
                     { let fixture = MockMediaFixtures.videos[index % MockMediaFixtures.videos.count]
@@ -435,7 +454,8 @@ public struct MockSocialDataset: Sendable {
                   ).enumerated().map { position, fixture in
                     switch mediaCatalog {
                     case .synthetic:
-                        ("mock://video/cap-\(position)?w=1600&h=900", 1600, 900)
+                        Self.syntheticVideo(slot: 46 + position, fallback: "mock://video/cap-\(position)",
+                                            shape: (1600, 900))
                     case .realAssets:
                         (fixture.url, fixture.width, fixture.height)
                     }
@@ -446,7 +466,8 @@ public struct MockSocialDataset: Sendable {
                     case (.synthetic, false):
                         ("mock://media/new-0-\(position)?w=\(shape.0)&h=\(shape.1)", shape.0, shape.1)
                     case (.synthetic, true):
-                        ("mock://video/new-0-\(position)?w=\(shape.0)&h=\(shape.1)", shape.0, shape.1)
+                        Self.syntheticVideo(slot: 30 + position, fallback: "mock://video/new-0-\(position)",
+                                            shape: shape)
                     case (.realAssets, false):
                         (MockMediaFixtures.imageURL(index: 60 + position, width: shape.0, height: shape.1),
                          shape.0, shape.1)
@@ -478,7 +499,8 @@ public struct MockSocialDataset: Sendable {
                         // `mock://video/…` is what `MockMediaFixtures.isVideoURL`
                         // routes on, so the attachment declares a video MIME and
                         // the client's own rule does the rest.
-                        ("mock://video/new-4-\(position)?w=\(shape.0)&h=\(shape.1)", shape.0, shape.1)
+                        Self.syntheticVideo(slot: 36 + position, fallback: "mock://video/new-4-\(position)",
+                                            shape: shape)
                     case (.realAssets, false):
                         (MockMediaFixtures.imageURL(index: 40 + position, width: shape.0, height: shape.1),
                          shape.0, shape.1)
@@ -801,7 +823,9 @@ public struct MockSocialDataset: Sendable {
             case (false, _):
                 nil
             case (true, .synthetic):
-                ("mock://\(mediaHost)/\(index)?w=\(shape.0)&h=\(shape.1)", shape.0, shape.1)
+                isVideo
+                    ? Self.syntheticVideo(slot: index / 3, fallback: "mock://video/\(index)", shape: shape)
+                    : ("mock://\(mediaHost)/\(index)?w=\(shape.0)&h=\(shape.1)", shape.0, shape.1)
             case (true, .realAssets):
                 if isVideo {
                     { let fixture = MockMediaFixtures.videos[(index / 3) % MockMediaFixtures.videos.count]

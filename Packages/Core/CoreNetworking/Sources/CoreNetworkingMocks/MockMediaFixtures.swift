@@ -313,7 +313,9 @@ public enum MockMediaFixtures {
         switch url {
         case bigBuckBunny720.url, longRunning.url, mapPreviewLoop.url: "bigbuckbunny"
         case sintelTrailer.url: "sinteltrailer"
-        default: nil
+        // A real clip is baked under its own id (`Scripts/import-mock-clips.py`),
+        // so its marker previews and its poster are its own footage.
+        default: URL(string: url).flatMap { MockClipCatalog.shared.clip(for: $0)?.id }
         }
     }
 

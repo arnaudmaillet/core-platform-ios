@@ -215,7 +215,7 @@ final class AppContainer {
 
     private(set) lazy var videoPlayback: VideoPlaybackController = {
         let source: any VideoSource = switch environment {
-        case .mock: PlaceholderVideoFetcher()
+        case .mock: PlaceholderVideoFetcher(bundledClip: { MockClipCatalog.shared.fileURL(forVideo: $0) })
         case .localFleet: PassthroughVideoSource()
         }
         return VideoPlaybackController(source: source)
@@ -419,7 +419,7 @@ final class AppContainer {
 
     private lazy var mapsVideoPlayback: VideoPlaybackController = {
         let source: any VideoSource = switch environment {
-        case .mock: PlaceholderVideoFetcher()
+        case .mock: PlaceholderVideoFetcher(bundledClip: { MockClipCatalog.shared.fileURL(forVideo: $0) })
         case .localFleet: PassthroughVideoSource()
         }
         return VideoPlaybackController(source: source)
