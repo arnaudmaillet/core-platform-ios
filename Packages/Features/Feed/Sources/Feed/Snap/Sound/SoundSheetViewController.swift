@@ -132,13 +132,9 @@ final class SoundSheetViewController: UIViewController {
         measureCollapsedHeight()
     }
 
-    override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
-        if let sheet = sheetPresentationController {
-            let radius = ScreenGeometry.cornerRadius(behind: view)
-            if radius > 0 { sheet.preferredCornerRadius = radius }
-        }
-    }
+    // ⚠️ NO `preferredCornerRadius`: UIKit's own. Setting the device's radius
+    // once the sheet had appeared made the corners pop from one value to the
+    // other as it rose.
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)

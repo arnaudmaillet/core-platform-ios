@@ -129,7 +129,9 @@ final class WalletClaimViewController: UIViewController {
             sheet.selectedDetentIdentifier = Self.smallDetent
             sheet.prefersGrabberVisible = true
             sheet.prefersScrollingExpandsWhenScrolledToEdge = true
-            sheet.preferredCornerRadius = WalletSheetMetrics.claimHeight / 2 + WalletSheetMetrics.sideMargin
+            // ⚠️ NO `preferredCornerRadius`: UIKit's own. A radius set here and
+            // then corrected to the device's on the first layout visibly
+            // popped from one to the other as the sheet rose.
         }
     }
 
@@ -232,7 +234,7 @@ final class WalletClaimViewController: UIViewController {
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        applyDeviceCornerRadius()
+        applyButtonMargins()
         updateSmallDetent()
         updateCompactBar()
     }
@@ -395,16 +397,16 @@ final class WalletClaimViewController: UIViewController {
         collectionView.verticalScrollIndicatorInsets.bottom = collectionView.contentInset.bottom
     }
 
-    /// Gives the sheet THE DEVICE'S own corner radius and nests the button in
-    /// it: margin = device radius − capsule radius on all three edges, so the
-    /// pill stays concentric with the sheet's corners on every screen.
-    private func applyDeviceCornerRadius() {
-        guard view.window != nil, let sheet = sheetPresentationController else { return }
+    /// Nests the button in the screen's bottom corners — which the sheet's
+    /// bottom edge follows whatever its own radius: margin = device radius −
+    /// capsule radius on all three edges, so the pill stays concentric with
+    /// the corners on every screen. The sheet keeps UIKit's radius (see init).
+    private func applyButtonMargins() {
+        guard view.window != nil else { return }
         let device = ScreenGeometry.cornerRadius(behind: view)
         guard device > 0, abs(device - appliedSheetRadius) > 0.5 else { return }
         appliedSheetRadius = device
         buttonMargin = max(WalletSheetMetrics.sideMargin, device - WalletSheetMetrics.claimHeight / 2)
-        sheet.preferredCornerRadius = device
         buttonLeading?.constant = buttonMargin
         buttonTrailing?.constant = -buttonMargin
         buttonBottom?.constant = -buttonMargin
