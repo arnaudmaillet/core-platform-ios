@@ -784,8 +784,11 @@ struct CarouselChipsAreFixedTests {
     @Test func theCountersAreNeverSqueezedAndTheIndicatorYields() throws {
         let roomy = spaciousRow()
         // Narrow enough that five dots no longer fit beside two six-figure
-        // counts and the date, wide enough that two still do.
-        let tight = spaciousRow(width: 262)
+        // counts and the date, wide enough that two still do. (286, not 262: the
+        // counters' glyphs grew to the controls' size on 2026-09-26, which
+        // takes ~16pt more of the line — still far narrower than any phone,
+        // an iPhone SE's card is ~343.)
+        let tight = spaciousRow(width: 286)
         for cell in [roomy, tight] {
             let line = counterPills(in: cell)
             #expect(line.count == 2)
