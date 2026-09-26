@@ -7,10 +7,10 @@ import UIKit
 /// interactive pop driver — scoped strictly to the map↔feed pair, so any
 /// other push on this stack (e.g. the comments detail) stays native.
 ///
-/// A push means ONE `UINavigationBar` owns the header: UIKit cross-fades
-/// "Maps" into the back item + author capsule natively, coordinated (and,
-/// for interactive pops, scrubbed) with our transition. The modal era's two
-/// overlapping bars — the frame-0 pop-in over the map's own title — are
+/// A push means ONE `UINavigationBar` owns the header: UIKit cross-fades the
+/// map's items into the back item + author capsule natively, coordinated
+/// (and, for interactive pops, scrubbed) with our transition. The modal era's
+/// two overlapping bars — the frame-0 pop-in over the map's own title — are
 /// structurally impossible here.
 ///
 /// Owned (retained) by the map VC for the lifetime of the push.

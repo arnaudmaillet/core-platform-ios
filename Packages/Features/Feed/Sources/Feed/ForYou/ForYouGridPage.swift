@@ -52,6 +52,10 @@ final class ForYouGridPage: UIView {
     /// screens nobody thought about.
     var onItemCommentsTapped: ((Int) -> Void)?
 
+    /// What the cards' like chips stake with — nil leaves the chip a counter
+    /// (a host with no wallet, a test). Shared by every row this page draws.
+    var staking: PostCardStaking?
+
     /// The posts whose cards are ON SCREEN and worth warming — their first page
     /// of comments, and anything else a host wants ready before a tap.
     ///
@@ -2630,6 +2634,8 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
             // reads it (the profile's Posts/Reposts split), but `PostComposer`
             // takes no parent, so there is no client path that publishes one.
             cell.onRepostTapped = { [weak self] in self?.onRepostRequested?(post) }
+            // The like chip stakes — see `PostCardStaking`.
+            staking?.bind(cell, to: post.id)
             cell.isBookmarked = bookmarks.isSaved(post.id.rawValue)
             cell.onBookmarkTapped = { [weak self, weak cell] in
                 guard let self else { return }
@@ -2737,7 +2743,11 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         // keeps asking (see `ZoomFlight`'s live-media retry).
         playback?.focus(posts[index].id)
         updateAutoplay()
-        if showingComments, let openComments = onItemCommentsTapped {
+        // ⚠️ A TEXT POST'S COMMENTS ARE ITS PAGE. Its comment chip presses
+        // like any other (the card has one affordance), and lands where the
+        // card itself lands — by the text reveal, never the media flight the
+        // comments route would pick for a post with no media to fly.
+        if showingComments, posts[index].kind != .text, let openComments = onItemCommentsTapped {
             openComments(index)
         } else {
             onItemTapped?(index)

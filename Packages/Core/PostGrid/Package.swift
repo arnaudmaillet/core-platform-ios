@@ -17,15 +17,19 @@ let package = Package(
         // the transition vocabulary it satisfies lives in CoreNavigation.
         // CoreNavigation depends on CoreModels alone, so this adds an edge and
         // no cycle.
-        .package(path: "../CoreNavigation")
+        .package(path: "../CoreNavigation"),
+        // For `PostCardStaking`: a card's like chip STAKES, and the wallet is
+        // the store it spends from. CoreStorage depends on CoreModels alone.
+        .package(path: "../CoreStorage")
     ],
     targets: [
         .target(
             name: "PostGrid",
             dependencies: [
-                "CoreModels", "MediaCore", "MediaPlayback", "DesignSystem", "CoreNavigation"
+                "CoreModels", "MediaCore", "MediaPlayback", "DesignSystem", "CoreNavigation",
+                "CoreStorage"
             ]
         ),
-        .testTarget(name: "PostGridTests", dependencies: ["PostGrid"])
+        .testTarget(name: "PostGridTests", dependencies: ["PostGrid", "CoreStorage"])
     ]
 )

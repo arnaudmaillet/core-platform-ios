@@ -4,22 +4,45 @@ import DesignSystem
 import MapsInterface
 import UIKit
 
-/// Owns the Maps tab: the map surface vended by the Maps feature behind the
+/// Owns the Explore tab: the map surface vended by the Maps feature behind the
 /// `MapsFeatureBuilding` seam, on its own navigation stack (Step B pushes/
 /// presents the vertical snap feed here).
+///
+/// **The TAB is "Explore"; the FEATURE is still Maps.** The tab was called
+/// "Maps" until 2026-09-26, which named the instrument rather than the job: the
+/// screen is where you search and explore posts laid out on a map, not a
+/// directions app. Only the shell's words changed — the `Maps` package,
+/// `MapsViewController`, `MapsFeatureBuilding` and every `-maps-*` DEBUG launch
+/// argument keep their names, because inside the feature it IS a map.
 @MainActor
-final class MapsTabCoordinator: TabCoordinator {
+final class ExploreTabCoordinator: TabCoordinator {
     var childCoordinators: [Coordinator] = []
     let navigationController = UINavigationController()
 
     private let container: AppContainer
     private let notificationsButtonItem: UIBarButtonItem
 
-    private(set) lazy var tab = UITab(
-        title: "Maps",
-        image: UIImage(systemName: "map"),
-        identifier: AppTab.maps.rawValue
-    ) { [navigationController] _ in navigationController }
+    /// A compass: exploring, not route-finding.
+    ///
+    /// ⚠️ **NOT `safari`**, although it is the better-drawn compass. SF Symbols
+    /// restricts `safari`/`safari.fill` ("may only be used to refer to Apple's
+    /// Safari browser" — `symbol_restrictions.strings` in CoreGlyphs), so a tab
+    /// wearing it would read as a link to the browser and break the symbol's
+    /// terms. `location.north.circle` is the unrestricted compass needle.
+    ///
+    /// No separate selected glyph: measured on the iOS 27 simulator, the bar
+    /// fills a symbol in EVERY state anyway (the other tabs pass outlines —
+    /// `message`, `sparkles` — and show filled glyphs whether selected or
+    /// not). ⚠️ And `UITab.selectedImage` does not exist in CI's Xcode 26.6
+    /// SDK — it failed the build there even behind `#available`.
+    private(set) lazy var tab: UITab = {
+        let tab = UITab(
+            title: "Explore",
+            image: UIImage(systemName: "location.north.circle"),
+            identifier: AppTab.explore.rawValue
+        ) { [navigationController] _ in navigationController }
+        return tab
+    }()
 
     /// Search, at the very edge of the trailing group.
     ///
@@ -71,11 +94,11 @@ final class MapsTabCoordinator: TabCoordinator {
         // compose screen it opened has been removed from the product. The
         // header now reads `[bell] … [coins][search]`.
         mapViewController.navigationItem.leftBarButtonItem = notificationsButtonItem
-        // ⚠️ NO TITLE IN THE BAR. "Maps" was written here for a while (the
-        // controller is navigation-agnostic, so the coordinator was the one
-        // place to write it); it went with For You's on 2026-09-22 — the two
-        // roots' headers carry their controls and nothing else, and the tab
-        // bar already says the word.
+        // ⚠️ NO TITLE IN THE BAR. "Maps" (the tab's name then; "Explore" now)
+        // was written here for a while (the controller is navigation-agnostic,
+        // so the coordinator was the one place to write it); it went with For
+        // You's on 2026-09-22 — the two roots' headers carry their controls and
+        // nothing else, and the tab bar already says the word.
         // The chevron on every screen pushed from here stays bare — see the
         // same line on the other roots for the widths it protects.
         mapViewController.navigationItem.backButtonDisplayMode = .minimal

@@ -193,7 +193,7 @@ final class CommentsInputBar: UIView {
         // arrive disabled and the Undo entry exists exactly while a session
         // spend is takeable.
         boostButton.menu = UIMenu(
-            title: "Boost this post",
+            title: StakeMenu.title,
             children: [
                 UIDeferredMenuElement.uncached { [weak self] completion in
                     completion(self?.currentBoostMenuActions() ?? [])
@@ -670,40 +670,22 @@ final class CommentsInputBar: UIView {
 
     /// Internal, not private: the deferred menu resolves only at present
     /// time, which a unit test can't trigger — the builder is the seam.
+    ///
+    /// `StakeMenu`'s — the rail's and every card's like chip's, one menu for
+    /// one spend.
     func currentBoostMenuActions() -> [UIMenuElement] {
-        // The rail anchor's exact menu: Max (the cap's remainder bounded by
-        // the balance), the fixed denomination(s), Undo while the session
-        // holds something.
-        let remaining = max(0, WalletStore.Policy.perTargetBoostCap - boostSpentTotal)
-        let maxAmount = min(remaining, boostBalance)
-        var actions: [UIMenuElement] = []
-
-        let shownMax = maxAmount > 0
-            ? maxAmount
-            : (remaining > 0 ? remaining : WalletStore.Policy.perTargetBoostCap)
-        let maxAction = UIAction(
-            title: "Max (\(shownMax) points)",
-            image: UIImage(systemName: PointsSymbol.glyph)
-        ) { [weak self] _ in self?.onBoost?(maxAmount) }
-        if maxAmount <= 0 { maxAction.attributes = .disabled }
-        actions.append(maxAction)
-
-        for amount in WalletStore.Policy.boostDenominations.reversed() {
-            let action = UIAction(
-                title: "\(amount) points",
-                image: UIImage(systemName: PointsSymbol.glyph)
-            ) { [weak self] _ in self?.onBoost?(amount) }
-            if amount > boostBalance || amount > remaining { action.attributes = .disabled }
-            actions.append(action)
-        }
-        if boostUndoableAmount > 0 {
-            actions.append(UIAction(
-                title: "Undo boosts (\(boostUndoableAmount))",
-                image: UIImage(systemName: "arrow.uturn.backward"),
-                attributes: .destructive
-            ) { [weak self] _ in self?.onBoostUndo?() })
-        }
-        return actions
+        StakeMenu.elements(
+            for: StakeMenu.State(
+                balance: boostBalance,
+                stakedOnTarget: boostSpentTotal,
+                undoable: boostUndoableAmount,
+                perTargetCap: WalletStore.Policy.perTargetBoostCap,
+                denominations: WalletStore.Policy.boostDenominations,
+                tapAmount: WalletStore.Policy.tapBoostAmount
+            ),
+            stake: { [weak self] amount in self?.onBoost?(amount) },
+            undo: { [weak self] in self?.onBoostUndo?() }
+        )
     }
 
     /// The refund's receipt: the confirmation float mirrored — a cool "−N"

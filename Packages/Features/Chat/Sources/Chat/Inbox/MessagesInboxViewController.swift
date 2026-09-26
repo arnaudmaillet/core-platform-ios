@@ -111,10 +111,10 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     override func viewDidLoad() {
         super.viewDidLoad()
         // ⚠️ NO TITLE. "Messages" sat here for a while (the tab bar says the
-        // word already); it went on 2026-09-22 with Maps' and For You's. The
-        // pinned section pill ("New", "Recent") stays IN THE LIST, under the
-        // bar, as on the search screen — a leading bar item was tried in its
-        // place and taken out again the same day.
+        // word already); it went on 2026-09-22 with the map tab's and For
+        // You's. The pinned section pill ("New", "Recent") stays IN THE LIST,
+        // under the bar, as on the search screen — a leading bar item was tried
+        // in its place and taken out again the same day.
         navigationItem.largeTitleDisplayMode = .never
         // ⚠️ **AND THE CHEVRON KEEPS ITS SILENCE.** A titled root gives every
         // screen pushed from it a WORDED back button, and two pushed bars were
@@ -666,7 +666,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     // the argument that result rows sliding behind the field are noise.
     //
     // What it actually did was give this one state a flat slab where every
-    // other header in the app — this same bar at rest, the Maps and For You
+    // other header in the app — this same bar at rest, the Explore and For You
     // headers, the global search screen — is the system's glass. The rows are
     // no less legible through it, and the app is one header again.
     //

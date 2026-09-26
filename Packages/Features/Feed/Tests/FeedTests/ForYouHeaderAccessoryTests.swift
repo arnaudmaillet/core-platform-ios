@@ -7,10 +7,10 @@ import UIKit
 
 /// **The header's injected trailing item — the wallet badge, from out here.**
 ///
-/// The balance already stands in the Maps header and on the post screen. It is
-/// the same number in all three places, so the screens do not each learn what a
-/// wallet is: the shell builds ONE item and hands it over, and this screen only
-/// promises to keep it in its trailing run.
+/// The balance already stands in the Explore header and on the post screen. It
+/// is the same number in all three places, so the screens do not each learn
+/// what a wallet is: the shell builds ONE item and hands it over, and this
+/// screen only promises to keep it in its trailing run.
 ///
 /// That promise is the thing worth testing, because the run is rebuilt: the
 /// screen writes its own items at load, and an item installed from outside has
@@ -51,7 +51,7 @@ struct ForYouHeaderAccessoryTests {
     ///
     /// `rightBarButtonItems[0]` is the one nearest the screen edge, so the
     /// lens menu keeps the corner and the balance sits to its left — the
-    /// arrangement the Maps header already wears ([coin] [bell]).
+    /// arrangement the Explore header already wears ([coin] [bell]).
     @Test func theInjectedBadgeStandsInboardOfTheLensMenu() throws {
         let screen = screen()
         screen.loadViewIfNeeded()
