@@ -7,32 +7,32 @@ import MediaCore
 import UIKit
 
 /// The sound a post is set to, opened from the attribution at the foot of
-/// the feed: what it is, a listen, "Use this sound", and the other videos
-/// made with it.
+/// the feed: what it is, a listen, "Use this sound", and the other posts set
+/// to it.
 ///
 /// ```
 ///  ┌──────────────────────────────────────┐
 ///  │ ▔▔                                   │
-///  │ ┌──────┐  Veridis Quo                │  artwork = play/pause
-///  │ │  ▶︎   │  Daft Punk                  │
-///  │ └──────┘  0:30 · 3 videos            │
-///  │ [ ♫ Use this sound ]           (↑)   │  ← collapsed detent ends
-///  │ Videos                               │     a row's peek below
-///  │ ▢ ▢ ▢                                │
-///  │ ▢ ▢ ▢                                │  large: the whole grid
+///  │  ╭────╮  Veridis Quo                 │  the round artwork = play/pause
+///  │  │ ▶︎  │  Daft Punk                   │  (it turns while the sound plays)
+///  │  ╰────╯  0:30 · 3 posts              │
+///  │ [ ♫ Use this sound ]           (↑)   │
+///  │ ⌃ Posts with this sound              │  ← collapsed detent ends here
+///  ├──────────────────────────────────────┤
+///  │ ▢ ▢ ▢                                │  large: the grid
 ///  └──────────────────────────────────────┘
 /// ```
 ///
 /// **THE FEED STAYS ALIVE UNDER THE COLLAPSED SHEET.** Two detents: the
-/// collapsed one shows the sound and its actions while the clip keeps playing
-/// above; the large one is a page of its own, and the clip behind pauses
+/// collapsed one is the sound and its actions — the grid stays below the fold,
+/// announced by its title and a chevron — while the clip keeps playing above;
+/// the large one is a page of its own, and the clip behind pauses
 /// (`onCoverChanged`).
 ///
-/// ⚠️ **FROM LARGE, A DRAG DOWN CLOSES — IT DOES NOT STOP AT COLLAPSED.**
-/// UIKit walks a sheet down through every detent. Once the sheet reaches
-/// large its detents shrink to `[large]`, so the next drag down can only
-/// dismiss, and the clip resumes on the way out. The collapsed detent is only
-/// how the sheet OPENS.
+/// **FROM LARGE, A DRAG DOWN COMES BACK TO COLLAPSED**, and the clip behind
+/// plays again; a second one closes. (It closed straight from large for a
+/// while; walking back through collapsed is the platform's own gesture and
+/// what the viewer asked for.)
 ///
 /// ⚠️ **THE PREVIEW PAUSES THE CLIP.** Two sounds at once is noise; listening
 /// to the sound is a choice the viewer just made, so the clip gives way until
@@ -58,9 +58,6 @@ final class SoundSheetViewController: UIViewController {
 
     private static let collapsedDetent = UISheetPresentationController.Detent.Identifier("sound.collapsed")
     private static let topInset: CGFloat = 24
-    /// How much of the grid's first row the collapsed sheet shows: enough to
-    /// say "there is more below", not a row you could mistake for the page.
-    private static let gridPeek: CGFloat = 56
 
     private let sound: PostSound
     private let authorHandle: String
@@ -229,6 +226,8 @@ final class SoundSheetViewController: UIViewController {
         header.onTogglePreview = { [weak self] in self?.togglePreview() }
         header.onUse = { [weak self] in self?.useSound() }
         header.onShare = { [weak self] in self?.share() }
+        header.onToggleExpanded = { [weak self] in self?.toggleExpanded() }
+        header.setExpanded(isExpanded)
         if let url = sound.artworkURL ?? fallbackArtworkURL {
             Task { [weak header, pipeline = imagePipeline] in
                 header?.setArtwork(await Self.image(at: url, pipeline: pipeline))
@@ -257,7 +256,7 @@ final class SoundSheetViewController: UIViewController {
         // adds it back (see the wallet sheet's note).
         let window = view.window ?? presentingViewController?.view.window
         let bottomInset = window?.safeAreaInsets.bottom ?? 0
-        collapsedHeight = (Self.topInset + size.height + Self.gridPeek - bottomInset).rounded()
+        collapsedHeight = (Self.topInset + size.height - bottomInset).rounded()
     }
 
     /// A local file is read as it is; anything else goes through the app's
@@ -283,6 +282,15 @@ final class SoundSheetViewController: UIViewController {
     static func clock(_ seconds: TimeInterval) -> String {
         let whole = Int(seconds.rounded())
         return String(format: "%d:%02d", whole / 60, whole % 60)
+    }
+
+    /// The grid's title is also its door: up to the grid, and back down.
+    private func toggleExpanded() {
+        guard let sheet = sheetPresentationController else { return }
+        let target: UISheetPresentationController.Detent.Identifier = isExpanded ? Self.collapsedDetent : .large
+        sheet.animateChanges { sheet.selectedDetentIdentifier = target }
+        // A programmatic change is not reported to the delegate.
+        detentChanged(to: target)
     }
 
     // MARK: - Cover
@@ -377,15 +385,17 @@ extension SoundSheetViewController: UISheetPresentationControllerDelegate {
     func sheetPresentationControllerDidChangeSelectedDetentIdentifier(
         _ sheet: UISheetPresentationController
     ) {
-        let expanded = sheet.selectedDetentIdentifier == .large
+        detentChanged(to: sheet.selectedDetentIdentifier)
+    }
+
+    /// The one place a detent change is acted on — a drag reports it through
+    /// the delegate, a tap on the grid's title does not report it at all.
+    fileprivate func detentChanged(to identifier: UISheetPresentationController.Detent.Identifier?) {
+        let expanded = identifier == .large
         guard expanded != isExpanded else { return }
         isExpanded = expanded
+        header?.setExpanded(expanded)
         refreshCover()
-        guard expanded else { return }
-        // See the type's note: from large, down means closed.
-        sheet.animateChanges {
-            sheet.detents = [.large()]
-        }
     }
 }
 
