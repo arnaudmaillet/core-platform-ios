@@ -3,14 +3,14 @@ import UIKit
 
 /// Hold the bar's "+" to go straight to the camera: a glass disc rises over
 /// the bubble with a camera in it, a ring round it fills while the finger
-/// stays down, and letting go once it is full opens the camera — the same
+/// stays down, and the moment it is full the camera opens — the same
 /// screen, by the same road, as the Create menu's Camera row. Letting go
 /// before it is full, or sliding away, puts the disc back and does nothing.
 ///
 /// ```
-///   touch ─ 0.22s ─▶ disc rises (light tick) ─ 0.6s fill ─▶ armed (medium tick, pop)
-///     │                   │                                   │
-///     └ lifted: a TAP,    └ lifted / slid off: disc           └ lifted: camera
+///   touch ─ 0.22s ─▶ disc rises (light tick) ─ 0.6s fill ─▶ camera opens (medium tick)
+///     │                   │
+///     └ lifted: a TAP,    └ lifted / slid off: disc
 ///       the menu opens      shrinks back, nothing opens
 /// ```
 ///
@@ -75,13 +75,18 @@ final class CreateHoldShortcut: NSObject {
         /// would arrive within the same gesture's last turns; half a second
         /// is ample and still far shorter than a second, deliberate tap.
         static let selectionLockout: TimeInterval = 0.5
+        /// The end bubble's inset from the bar's edge, for when the bar's own
+        /// answer cannot be trusted (see `plusFrame`). Measured on iOS 27:
+        /// the collapsed "+" sits 16 pt in from the trailing edge.
+        static let trailingBubbleInset: CGFloat = 16
     }
 
     private let tab: UITab
     private weak var tabBarController: UITabBarController?
     private let fire: @MainActor () -> Void
     private let recognizer = UILongPressGestureRecognizer()
-    private var hold = HoldToArm()
+    /// Fires the moment the ring fills — see `HoldToArm.firesWhenFull`.
+    private var hold = HoldToArm(firesWhenFull: true)
     private var disc: HoldRingDiscView?
     private var displayLink: CADisplayLink?
     private let revealHaptic = UIImpactFeedbackGenerator(style: .light)
@@ -193,6 +198,10 @@ final class CreateHoldShortcut: NSObject {
             armHaptic.impactOccurred()
         case .fired:
             stopClock()
+            // The ready beat and the launch in one: the ring just filled
+            // under a finger that is still down, so this is the "armed"
+            // haptic as much as the "go".
+            armHaptic.impactOccurred()
             disc?.dismiss(.launch)
             disc = nil
             fire()
@@ -217,7 +226,7 @@ final class CreateHoldShortcut: NSObject {
     /// and above the tab accessory too, when one is showing over the "+"'s
     /// side of the bar, so the disc never sits glass-on-glass over it.
     private func discFrame(in host: UIView) -> CGRect? {
-        guard let bubble = tab.frame(in: host), !bubble.isEmpty else { return nil }
+        guard let bubble = plusFrame(in: host) else { return nil }
         let side = HoldRingDiscView.Metrics.diameter
         let bounds = host.bounds
         let margin = Metrics.edgeMargin + side / 2
@@ -230,6 +239,37 @@ final class CreateHoldShortcut: NSObject {
             if frame.intersects(footprint), frame.minY < ceiling { ceiling = frame.minY }
         }
         return CGRect(x: midX - side / 2, y: ceiling - Metrics.gap - side, width: side, height: side)
+    }
+
+    /// Where the "+" is, in `space`.
+    ///
+    /// ⚠️ **`UITab.frame(in:)` LIES WHILE THE BAR IS MINIMISED.** Scrolled
+    /// down, the bar collapses to the selected tab's bubble on one side and
+    /// the "+" on the other — and asked for the "+", iOS 27 answers with the
+    /// OTHER bubble's rect (logged: `(28, 7, 48, 48)` for a "+" drawn at
+    /// x≈349). So the hold never received a touch on the collapsed bar, and a
+    /// long press fell through to the bar's own tap: the Create menu (device
+    /// report, 26 September 2026).
+    ///
+    /// The "+" is always the bar's TRAILING bubble (leading in right-to-left)
+    /// — a `UISearchTab` is laid out at the end, expanded or not. So a rect
+    /// whose centre is not in that end third is rejected, and the end bubble
+    /// is used instead, at the height and size the bar reported.
+    private func plusFrame(in space: UIView) -> CGRect? {
+        guard let bar = tabBarController?.tabBar,
+              let reported = tab.frame(in: bar), !reported.isEmpty else { return nil }
+        let isRTL = bar.effectiveUserInterfaceLayoutDirection == .rightToLeft
+        let width = bar.bounds.width
+        let plausible = isRTL ? reported.midX < width / 3 : reported.midX > width * 2 / 3
+        var frame = reported
+        if !plausible {
+            let side = reported.height
+            let x = isRTL
+                ? bar.bounds.minX + Metrics.trailingBubbleInset
+                : bar.bounds.maxX - Metrics.trailingBubbleInset - side
+            frame = CGRect(x: x, y: reported.minY, width: side, height: side)
+        }
+        return bar.convert(frame, to: space)
     }
 
     // MARK: - The clock
@@ -266,7 +306,7 @@ extension CreateHoldShortcut: UIGestureRecognizerDelegate {
         consumesSelection = false
         guard let bar = gestureRecognizer.view, let controller = tabBarController,
               controller.presentedViewController == nil,
-              let bubble = tab.frame(in: bar), !bubble.isEmpty else { return false }
+              let bubble = plusFrame(in: bar) else { return false }
         return bubble.contains(touch.location(in: bar))
     }
 }
@@ -282,7 +322,7 @@ extension CreateHoldShortcut {
 
     /// The "+"'s centre in the bar, when the bar has placed it.
     var debugBubbleCentre: CGPoint? {
-        guard let bar = tabBarController?.tabBar, let frame = tab.frame(in: bar), !frame.isEmpty else { return nil }
+        guard let bar = tabBarController?.tabBar, let frame = plusFrame(in: bar) else { return nil }
         return CGPoint(x: frame.midX, y: frame.midY)
     }
 
