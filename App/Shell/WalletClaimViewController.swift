@@ -26,17 +26,26 @@ import UIKit
 ///     settles;
 ///   • SETTLED — each post and what it earned in gems, or "No reward";
 ///   • the CLAIM button, pinned to the sheet's bottom whatever is scrolled,
-///     over a blur the list passes under.
+///     with the list dissolving under it.
 ///
-/// # Small first, then large, then gone
+/// # Small, then large — a native sheet
 /// The sheet opens SMALL: the summary and the first two stakes at most — the
 /// glance-and-claim surface. Scrolling the list up grows it to LARGE (the
-/// sheet's own `prefersScrollingExpandsWhenScrolledToEdge`). And once large it
-/// FORGETS the small detent: a drag down from the top closes the sheet in one
-/// motion rather than parking it halfway (26 September 2026: "elle ne repasse
-/// pas par le state petit, elle se ferme directement"). Once the summary has
-/// scrolled away it collapses into a compact bar under the grabber
-/// (`WalletCompactBar`), so the list is never read without the balances.
+/// sheet's own `prefersScrollingExpandsWhenScrolledToEdge`), and a drag down
+/// from large comes back to SMALL before it closes (26 September 2026 — the
+/// earlier "forget small once large" rule was reversed the same day). Its
+/// ground is the SYSTEM's: glass while small, opaque once large, exactly as a
+/// native sheet (the profile's QR sheet) behaves — so the view is clear and
+/// paints nothing of its own. Once the summary has scrolled away it collapses
+/// into a compact bar under the grabber (`WalletCompactBar`), so the list is
+/// never read without the balances.
+///
+/// # The edges
+/// The list passes under the compact bar and the Claim button through the
+/// system's own SOFT scroll-edge effect — a blur that ramps in strength rather
+/// than a material faded by a mask. The hand-built material blurs this
+/// replaced read as two frosted slabs: "beaucoup trop opaque, on n'aperçoit
+/// pas la collection view".
 ///
 /// Everything derives from one `WalletSnapshot` and one `stakes()` reading per
 /// refresh; the only per-second work is the claim countdown and the active
@@ -67,12 +76,9 @@ final class WalletClaimViewController: UIViewController {
     private weak var summaryCell: WalletSummaryCell?
     private let compactBar = WalletCompactBar()
     private let claimButton = UIButton(configuration: .prominentGlass())
-    /// The blur the list passes under at the foot of the sheet, behind the
-    /// button. ⚠️ Not an opaque band: the glass button samples what lies
-    /// beneath it straight through an opaque sibling (measured with a red
-    /// band — the rows sat on top), so the list is DESIGNED to be there, and
-    /// dissolves on its way under.
-    private let bottomBlur = WalletEdgeBlurView(edge: .bottom, setsOwnEffect: true)
+    /// The Claim button's container, registered with the list's BOTTOM scroll
+    /// edge so the system's soft edge effect grows to sit behind it.
+    private let claimBar = UIView()
 
     private var snapshot: WalletSnapshot
     private var stakes: [WalletStake] = []
@@ -124,7 +130,6 @@ final class WalletClaimViewController: UIViewController {
             sheet.prefersGrabberVisible = true
             sheet.prefersScrollingExpandsWhenScrolledToEdge = true
             sheet.preferredCornerRadius = WalletSheetMetrics.claimHeight / 2 + WalletSheetMetrics.sideMargin
-            sheet.delegate = self
         }
     }
 
@@ -137,7 +142,10 @@ final class WalletClaimViewController: UIViewController {
         super.viewDidLoad()
         // The grouped page — For You's and Profile's — so the stake cards are
         // white ON it rather than grey on white.
-        view.backgroundColor = Surface.page
+        // ⚠️ CLEAR: the sheet's own ground is the surface — glass while
+        // small, opaque once large. Any colour here sits over the glass and
+        // defeats it (the QR sheet's note says the same).
+        view.backgroundColor = .clear
         buildCollection()
         buildChrome()
 
@@ -175,8 +183,6 @@ final class WalletClaimViewController: UIViewController {
             QAWait.until("-wallet-sheet-large", landed) { [weak self] in
                 guard let sheet = self?.sheetPresentationController else { return }
                 sheet.animateChanges { sheet.selectedDetentIdentifier = .large }
-                // The delegate is not told about a programmatic change.
-                self?.forgetSmallDetentOnceLarge()
             }
         }
         // `-wallet-open-stake <n>`: opens the n-th stake row's post (0-based,
@@ -330,18 +336,32 @@ final class WalletClaimViewController: UIViewController {
         }
     }
 
-    /// The compact bar, the bottom blur and the Claim button, above the list.
+    /// The compact bar and the Claim button, above the list — each registered
+    /// with the list's scroll edge on its side, so the system draws the soft
+    /// edge effect behind them (`UIScrollEdgeElementContainerInteraction`).
     private func buildChrome() {
-        bottomBlur.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(bottomBlur)
+        collectionView.topEdgeEffect.style = .soft
+        collectionView.bottomEdgeEffect.style = .soft
+
         compactBar.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(compactBar)
+        let topEdge = UIScrollEdgeElementContainerInteraction()
+        topEdge.scrollView = collectionView
+        topEdge.edge = .top
+        compactBar.addInteraction(topEdge)
+
+        claimBar.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(claimBar)
+        let bottomEdge = UIScrollEdgeElementContainerInteraction()
+        bottomEdge.scrollView = collectionView
+        bottomEdge.edge = .bottom
+        claimBar.addInteraction(bottomEdge)
 
         claimButton.configuration?.cornerStyle = .capsule
         claimButton.addAction(UIAction { [weak self] _ in self?.claimTapped() }, for: .primaryActionTriggered)
         PressFeedback.attach(to: claimButton, sound: nil)
         claimButton.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(claimButton)
+        claimBar.addSubview(claimButton)
 
         let margin = WalletSheetMetrics.sideMargin
         let leading = claimButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: margin)
@@ -354,12 +374,12 @@ final class WalletClaimViewController: UIViewController {
             compactBar.heightAnchor.constraint(equalToConstant: Self.compactBarHeight),
             claimButton.heightAnchor.constraint(equalToConstant: WalletSheetMetrics.claimHeight),
             leading, trailing, bottom,
-            // From a little above the button to the foot: the ramp is clear
-            // at its top, so rows dissolve on their way under.
-            bottomBlur.topAnchor.constraint(equalTo: claimButton.topAnchor, constant: -Spacing.xl),
-            bottomBlur.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            bottomBlur.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            bottomBlur.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            // The container spans from just above the button to the foot —
+            // the extent the edge effect covers.
+            claimBar.topAnchor.constraint(equalTo: claimButton.topAnchor, constant: -Spacing.sm),
+            claimBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            claimBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            claimBar.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
         buttonLeading = leading
         buttonTrailing = trailing
@@ -419,14 +439,6 @@ final class WalletClaimViewController: UIViewController {
         guard abs(height - smallDetentHeight) > 0.5 else { return }
         smallDetentHeight = height
         sheet.invalidateDetents()
-    }
-
-    /// Once LARGE, the small detent is dropped: a drag down from the top then
-    /// closes the sheet in one motion instead of parking it halfway.
-    private func forgetSmallDetentOnceLarge() {
-        guard let sheet = sheetPresentationController, sheet.selectedDetentIdentifier == .large,
-              sheet.detents.count > 1 else { return }
-        sheet.detents = [.large()]
     }
 
     /// The summary collapses into the compact bar as it scrolls under the
@@ -612,7 +624,10 @@ final class WalletClaimViewController: UIViewController {
             stream: stream,
             hasHero: flies,
             cover: cover,
-            style: .tile,
+            // `.listMedia`: no counter chips riding the card (a tile's
+            // furniture flashed over the 48pt thumbnail on landing), and the
+            // same 12pt corner the thumbnail wears.
+            style: .listMedia,
             frame: { [weak self] space in self?.stakeFrame(for: id, card: false, in: space) },
             isOnScreen: { [weak self] in
                 guard let self else { return false }
@@ -621,7 +636,8 @@ final class WalletClaimViewController: UIViewController {
             setConcealed: { [weak self] concealed in
                 self?.stakeCell(for: id)?.setHeroConcealed(concealed, wholeCard: false)
             },
-            depthView: { [weak self] in self?.collectionView },
+            // No depth cue for the FLIGHT: the list it would recede is the
+            // very surface the landing is measured on (see the PR).
             textReveal: flies ? nil : TextRevealOrigin(
                 rowFrame: { [weak self] space in self?.stakeFrame(for: id, card: true, in: space) },
                 captionEnd: nil,
@@ -677,14 +693,6 @@ final class WalletClaimViewController: UIViewController {
             return "\(remaining / 3600)h \((remaining % 3600) / 60)m"
         }
         return String(format: "%d:%02d", remaining / 60, remaining % 60)
-    }
-}
-
-extension WalletClaimViewController: UISheetPresentationControllerDelegate {
-    func sheetPresentationControllerDidChangeSelectedDetentIdentifier(
-        _ sheetPresentationController: UISheetPresentationController
-    ) {
-        forgetSmallDetentOnceLarge()
     }
 }
 
