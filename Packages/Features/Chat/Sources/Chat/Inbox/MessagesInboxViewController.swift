@@ -734,16 +734,21 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     }
 
     #if DEBUG
-    /// `-messages-pull-demo [short|hold]` drives the pull the way a finger
-    /// would — the active list's offset, frame by frame, with the gesture
-    /// marked as tracking — and then lets go, through the same release path a
-    /// lifted finger takes. The simulator injects no pans, so this is the only
-    /// headless way to see the capsule arrive, arm and open search.
+    /// `-messages-pull-demo [short|peek|hold|sweep]` drives the pull the way a
+    /// finger would — the active list's offset, frame by frame, with the
+    /// gesture marked as tracking — and then lets go, through the same release
+    /// path a lifted finger takes. The simulator injects no pans, so this is
+    /// the only headless way to see the capsule arrive, arm and open search.
     ///
     /// - default: pulls past the line and releases → search must open.
     /// - `short`: stops short of the line and releases → nothing must open.
+    /// - `peek`: stops short of the line and STAYS there (for a screenshot of
+    ///   the in-between capsule, its meter part-filled); nothing is released.
     /// - `hold`: pulls past the line and STAYS there (for a screenshot of the
     ///   armed capsule); nothing is released.
+    /// - `sweep`: slowly past the line, back above it (past the hysteresis),
+    ///   past it again, then releases → search must open. For a screen
+    ///   recording of the arming AND the disarming motion, both directions.
     ///
     /// Waits for a settled, on-screen, populated list rather than a clock, and
     /// prints `[qa] GAVE UP` if that never comes.
@@ -762,14 +767,33 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
                 print("[pull-search] before: offsetY=\(Int(list.contentOffset.y)) "
                     + "restY=\(Int(-list.adjustedContentInset.top))")
             }
-            let target = mode == "short"
-                ? InboxPullToSearch.threshold * 0.6
-                : InboxPullToSearch.threshold + 24
-            pull.debugPull(to: target, duration: 0.6) { [weak self] in
-                guard let self, let pull = pullToSearch else { return }
-                print("[pull-search] pulled=\(Int(pull.pullDistance)) armed=\(pull.isArmed) "
+            let line = InboxPullToSearch.threshold
+            let short = mode == "short" || mode == "peek"
+            let target = short ? line * 0.6 : line + 24
+            // Each leg reports what the capsule shows once it lands, so a run
+            // is judged on the arming state, not on a screenshot alone.
+            let report: @MainActor (String) -> Void = { [weak self] leg in
+                guard let pull = self?.pullToSearch else { return }
+                print("[pull-search] \(leg): pulled=\(Int(pull.pullDistance)) armed=\(pull.isArmed) "
+                    + "ring=\(String(format: "%.2f", pull.indicator.debugRingProgress)) "
                     + "label=\(pull.indicator.debugLabelText ?? "-")")
-                guard mode != "hold" else { return }
+            }
+            // `sweep` goes out, back and out again before the common release;
+            // every other mode goes straight out.
+            let legs: [(name: String, distance: CGFloat, duration: TimeInterval)] = mode == "sweep"
+                ? [("out", line + 24, 1.2), ("back", line * 0.55, 1.2), ("again", line + 24, 1.2)]
+                : [("pulled", target, 0.6)]
+            @MainActor func run(_ index: Int, then finish: @escaping @MainActor () -> Void) {
+                guard index < legs.count, let pull = pullToSearch else { return finish() }
+                let leg = legs[index]
+                pull.debugPull(to: leg.distance, duration: leg.duration) {
+                    report(leg.name)
+                    run(index + 1, then: finish)
+                }
+            }
+            run(0) { [weak self] in
+                guard let self, let pull = pullToSearch else { return }
+                guard mode != "hold", mode != "peek" else { return }
                 pull.debugRelease()
                 if mode == "short" {
                     // Nothing may open — an absence, which no wait can detect,
