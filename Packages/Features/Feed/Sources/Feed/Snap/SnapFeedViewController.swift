@@ -262,6 +262,7 @@ final class SnapFeedViewController: UIViewController {
     /// The surface THIS screen last made audible, so leaving only clears its own.
     private weak var ownAudibleSurface: VideoRenderView?
     private var isAudioYielded = false
+    private let songPlayer = FeedSongPlayer()
     private var isForeground = true
     /// The inert page-chrome replica riding in the hero transition's flying
     /// card. Held weakly for the duration of a flight so a post that hydrates
@@ -480,6 +481,13 @@ final class SnapFeedViewController: UIViewController {
     private var didStartLoading = false
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        // The attribution takes what the toolbar can spare, never more — see
+        // `SnapMediaAttributionView.barReserve`.
+        if view.bounds.width > 0 {
+            mediaAttributionView.setMaximumWidth(
+                max(100, view.bounds.width - SnapMediaAttributionView.barReserve)
+            )
+        }
         // A material arrives through `effect` and cannot be built without a
         // window. This pass runs inside the present animator's own
         // `layoutIfNeeded`, which is the first moment there is one — and still
@@ -3754,7 +3762,9 @@ final class SnapFeedViewController: UIViewController {
         guard orderedIDs.indices.contains(index),
               let model = modelsByID[orderedIDs[index]] else { return }
         authorIdentityView.setAuthor(model, pipeline: imagePipeline)
-        mediaAttributionView.setPost(model, soundLine: soundLine(for: model), pipeline: imagePipeline)
+        mediaAttributionView.setPost(
+            model, sound: soundLine(for: model).map { .sound($0) } ?? .none, pipeline: imagePipeline
+        )
         // The bars float over the PAGE, so their text has to know what kind
         // of ground it is floating over. A media page is arbitrary and dark
         // enough to want white-and-shadowed; a text page follows the system
@@ -3770,8 +3780,7 @@ final class SnapFeedViewController: UIViewController {
         refreshBookmarkGlyph(for: model.id)
         // The sound bubble is for posts that HAVE a sound: a clip, or a
         // collection with one. A photograph or a text page has nothing to mute.
-        let hasSound = model.mediaKind == .video || model.extraMedia.contains { $0.videoURL != nil }
-        soundItem.isHidden = !hasSound
+        soundItem.isHidden = sound(for: model) == nil
     }
 
     // MARK: - Sound
@@ -3786,6 +3795,7 @@ final class SnapFeedViewController: UIViewController {
     /// - Parameter ownerCell: the owner's cell when the caller holds it — a
     ///   cell being displayed is not yet one the collection view hands back.
     private func refreshAudibleSurface(ownerCell: SnapFeedCell? = nil) {
+        refreshSong()
         guard let videoPlayback else { return }
         var surface: VideoRenderView?
         if FeedSound.isOn, isOnScreen, isForeground, !isAudioYielded, let owner = playbackOwner,
@@ -3800,6 +3810,20 @@ final class SnapFeedViewController: UIViewController {
         }
         ownAudibleSurface = surface
         videoPlayback.setAudibleSurface(surface)
+    }
+
+    /// The sound of a page with no clip — a photograph, a collection of
+    /// them, a text post — played while that page owns the screen, under the
+    /// same rules as a clip's (see `FeedSongPlayer`).
+    private func refreshSong() {
+        var song: URL?
+        if FeedSound.isOn, isOnScreen, isForeground, !isAudioYielded,
+           let owner = playbackOwner, orderedIDs.indices.contains(owner),
+           let model = modelsByID[orderedIDs[owner]],
+           !(model.mediaKind == .video || model.extraMedia.contains { $0.videoURL != nil }) {
+            song = sound(for: model)?.previewURL
+        }
+        songPlayer.play(song)
     }
 
     private func toggleSound() {
@@ -3837,8 +3861,9 @@ final class SnapFeedViewController: UIViewController {
     /// ask — the clip's own "original sound", played from the clip itself
     /// when a player can open it.
     private func sound(for model: FeedItemDisplayModel) -> PostSound? {
-        guard let url = soundVideoURL(of: model) else { return nil }
-        if let known = soundProvider?.sound(forVideo: url) { return known }
+        let clip = soundVideoURL(of: model)
+        if let known = soundProvider?.sound(forPost: model.id, clip: clip) { return known }
+        guard let url = clip else { return nil }
         let playable = url.isFileURL || ["http", "https"].contains(url.scheme?.lowercased() ?? "")
         return PostSound(
             id: "original-\(model.id.rawValue)", title: nil, artist: nil,
@@ -3850,7 +3875,9 @@ final class SnapFeedViewController: UIViewController {
     /// sound. Nil for a post with nothing to hear.
     private func soundLine(for model: FeedItemDisplayModel) -> String? {
         guard let sound = sound(for: model) else { return nil }
-        guard let title = sound.title else { return model.audioText }
+        guard let title = sound.title else {
+            return "Original sound · \(sound.artist ?? "@\(Self.handle(of: model))")"
+        }
         return [title, sound.artist].compactMap { $0 }.joined(separator: " · ")
     }
 
@@ -3871,13 +3898,17 @@ final class SnapFeedViewController: UIViewController {
         let ids = [model.id] + using.filter { $0 != model.id && modelsByID[$0] != nil }
         let tiles = ids.map { id in
             SoundSheetViewController.Tile(
-                postID: id, thumbnailURL: modelsByID[id]?.thumbnailURL, isCurrent: id == model.id
+                postID: id, thumbnailURL: modelsByID[id]?.thumbnailURL,
+                caption: modelsByID[id]?.caption, isCurrent: id == model.id
             )
         }
         let sheet = SoundSheetViewController(
             sound: sound,
             authorHandle: Self.handle(of: model),
-            fallbackArtworkURL: model.thumbnailURL ?? model.avatarURL,
+            // An original sound stands for the post it came from; a named song
+            // with no artwork keeps the sheet's neutral note rather than
+            // borrowing somebody's photo.
+            fallbackArtworkURL: sound.isOriginal ? (model.thumbnailURL ?? model.avatarURL) : nil,
             tiles: tiles,
             imagePipeline: imagePipeline
         )

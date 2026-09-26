@@ -41,6 +41,8 @@ final class SoundSheetViewController: UIViewController {
     struct Tile: Hashable, Sendable {
         let postID: PostID
         let thumbnailURL: URL?
+        /// What a text post shows in its tile, having no picture.
+        let caption: String?
         let isCurrent: Bool
     }
 
@@ -219,7 +221,7 @@ final class SoundSheetViewController: UIViewController {
         header.configure(
             title: sound.title ?? "Original sound",
             subtitle: sound.artist ?? "@\(authorHandle)",
-            meta: Self.meta(duration: sound.duration, videos: tiles.count),
+            meta: Self.meta(duration: sound.duration, posts: tiles.count),
             canPreview: sound.previewURL != nil,
             canUse: onUseSound != nil
         )
@@ -244,7 +246,7 @@ final class SoundSheetViewController: UIViewController {
         let probe = SoundSheetHeaderView()
         probe.configure(
             title: sound.title ?? "Original sound", subtitle: sound.artist ?? "@\(authorHandle)",
-            meta: Self.meta(duration: sound.duration, videos: tiles.count),
+            meta: Self.meta(duration: sound.duration, posts: tiles.count),
             canPreview: sound.previewURL != nil, canUse: true
         )
         let size = probe.systemLayoutSizeFitting(
@@ -270,8 +272,10 @@ final class SoundSheetViewController: UIViewController {
         return try? await pipeline.image(for: url)
     }
 
-    static func meta(duration: TimeInterval?, videos: Int) -> String {
-        let count = videos == 1 ? "1 video" : "\(videos) videos"
+    /// "0:30 · 3 posts" — POSTS, not videos: a photograph or a text post can
+    /// be set to a sound too.
+    static func meta(duration: TimeInterval?, posts: Int) -> String {
+        let count = posts == 1 ? "1 post" : "\(posts) posts"
         guard let duration, duration > 0 else { return count }
         return "\(Self.clock(duration)) · \(count)"
     }
@@ -341,7 +345,7 @@ final class SoundSheetViewController: UIViewController {
         }
         isPreviewing = false
         header?.setPlaying(false)
-        header?.setMeta(Self.meta(duration: sound.duration, videos: tiles.count))
+        header?.setMeta(Self.meta(duration: sound.duration, posts: tiles.count))
         refreshCover()
     }
 

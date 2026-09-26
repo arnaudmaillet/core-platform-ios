@@ -18,7 +18,9 @@ struct SoundSheetTests {
             authorHandle: "ava",
             fallbackArtworkURL: nil,
             tiles: (0..<tiles).map {
-                SoundSheetViewController.Tile(postID: PostID("p\($0)"), thumbnailURL: nil, isCurrent: $0 == 0)
+                SoundSheetViewController.Tile(
+                    postID: PostID("p\($0)"), thumbnailURL: nil, caption: nil, isCurrent: $0 == 0
+                )
             },
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
         )
@@ -60,8 +62,8 @@ struct SoundSheetTests {
     }
 
     @Test func theMetaLineIsDurationAndCount() {
-        #expect(SoundSheetViewController.meta(duration: 30, videos: 1) == "0:30 · 1 video")
-        #expect(SoundSheetViewController.meta(duration: 75.4, videos: 3) == "1:15 · 3 videos")
-        #expect(SoundSheetViewController.meta(duration: nil, videos: 2) == "2 videos")
+        #expect(SoundSheetViewController.meta(duration: 30, posts: 1) == "0:30 · 1 post")
+        #expect(SoundSheetViewController.meta(duration: 75.4, posts: 3) == "1:15 · 3 posts")
+        #expect(SoundSheetViewController.meta(duration: nil, posts: 2) == "2 posts")
     }
 }

@@ -23,6 +23,7 @@ final class SoundSheetHeaderView: UICollectionReusableView {
     private let shareButton = UIButton(configuration: .glass())
     private let gridTitle = UILabel()
     private let actionsFiller = UIView()
+    private let artworkBackdrop = UIView()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -31,10 +32,24 @@ final class SoundSheetHeaderView: UICollectionReusableView {
         artwork.clipsToBounds = true
         artwork.layer.cornerRadius = 14
         artwork.layer.cornerCurve = .continuous
-        artwork.backgroundColor = .tertiarySystemFill
+        artwork.backgroundColor = .clear
         artwork.isUserInteractionEnabled = true
         artwork.accessibilityIgnoresInvertColors = true
         artwork.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(togglePreview)))
+        // Under the picture, for a sound that has none.
+        let note = UIImageView(image: UIImage(systemName: "music.note"))
+        note.tintColor = .tertiaryLabel
+        note.preferredSymbolConfiguration = .init(pointSize: 34, weight: .medium)
+        note.translatesAutoresizingMaskIntoConstraints = false
+        artworkBackdrop.backgroundColor = .tertiarySystemFill
+        artworkBackdrop.layer.cornerRadius = 14
+        artworkBackdrop.layer.cornerCurve = .continuous
+        artworkBackdrop.translatesAutoresizingMaskIntoConstraints = false
+        artworkBackdrop.addSubview(note)
+        NSLayoutConstraint.activate([
+            note.centerXAnchor.constraint(equalTo: artworkBackdrop.centerXAnchor),
+            note.centerYAnchor.constraint(equalTo: artworkBackdrop.centerYAnchor, constant: -Spacing.sm),
+        ])
 
         playButton.configuration?.cornerStyle = .capsule
         playButton.configuration?.baseForegroundColor = .white
@@ -64,6 +79,13 @@ final class SoundSheetHeaderView: UICollectionReusableView {
         labels.spacing = 2
         labels.setCustomSpacing(Spacing.xs, after: subtitleLabel)
 
+        artwork.insertSubview(artworkBackdrop, at: 0)
+        NSLayoutConstraint.activate([
+            artworkBackdrop.topAnchor.constraint(equalTo: artwork.topAnchor),
+            artworkBackdrop.leadingAnchor.constraint(equalTo: artwork.leadingAnchor),
+            artworkBackdrop.trailingAnchor.constraint(equalTo: artwork.trailingAnchor),
+            artworkBackdrop.bottomAnchor.constraint(equalTo: artwork.bottomAnchor),
+        ])
         let identity = UIStackView(arrangedSubviews: [artwork, labels])
         identity.spacing = Spacing.lg
         identity.alignment = .center
@@ -87,7 +109,7 @@ final class SoundSheetHeaderView: UICollectionReusableView {
         actions.spacing = Spacing.sm
 
         gridTitle.font = .preferredFont(forTextStyle: .headline)
-        gridTitle.text = "Videos with this sound"
+        gridTitle.text = "Posts with this sound"
         gridTitle.adjustsFontForContentSizeCategory = true
 
         let column = UIStackView(arrangedSubviews: [identity, actions, gridTitle])
@@ -129,6 +151,7 @@ final class SoundSheetHeaderView: UICollectionReusableView {
     func setArtwork(_ image: UIImage?) {
         UIView.transition(with: artwork, duration: 0.2, options: .transitionCrossDissolve) {
             self.artwork.image = image
+            self.artworkBackdrop.isHidden = image != nil
         }
     }
 
