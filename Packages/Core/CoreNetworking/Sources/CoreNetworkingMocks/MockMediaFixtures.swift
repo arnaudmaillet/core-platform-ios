@@ -8,26 +8,30 @@ import Foundation
 /// render locally), because the unit suite, previews, and CI all run against
 /// `MockBackend()` and must not depend on the network. The real-asset catalog
 /// is selected explicitly via `MockSocialDataset.MediaCatalog.realAssets`
-/// (launch argument `-rich-media`) and swaps the synthesized PHOTOGRAPHS for
-/// real ones at exact dimensions (Picsum).
+/// (launch argument `-rich-media`) and swaps the synthesized AVATARS for real
+/// photographs at exact dimensions (Picsum).
 ///
-/// ⚠️ THERE ARE NO PUBLIC VIDEO FIXTURES. Video posts in BOTH catalogs are the
-/// corpus's own bundled clips (`MockClipCatalog`, addressed as
-/// `mock://video/clip-NN?w=&h=`), so a mock video is always real footage with
-/// its own sound and its own baked map preview. The royalty-free films and HLS
-/// ladders this file used to list, and their preview sheets, were removed on
-/// purpose: the product plays only the real clips.
+/// ⚠️ THERE ARE NO PUBLIC POST MEDIA. Posts in BOTH catalogs carry the
+/// corpus's own bundled files: clips (`MockClipCatalog`,
+/// `mock://video/clip-NN?w=&h=`), each with its own sound and baked map
+/// preview, and photo galleries (`MockPhotoCatalog`,
+/// `mock://photo/gallery-N-MM?w=&h=`). The royalty-free films, HLS ladders and
+/// Picsum post photographs this file used to supply were removed on purpose.
 public enum MockMediaFixtures {
 
-    // MARK: - Images
+    // MARK: - Avatars
 
     /// Picsum ids verified to resolve. Picsum serves a real photograph at an
-    /// exact requested size, so the image fixtures cover every aspect ratio
-    /// honestly — the returned pixels really are the dimensions we declare.
+    /// exact requested size, so an avatar can take any aspect honestly — the
+    /// returned pixels really are the dimensions we declare.
+    ///
+    /// ⚠️ AVATARS ONLY. Post photographs come from `MockPhotoCatalog`; these
+    /// stay because the product wants the avatars exactly as they are.
     static let picsumIDs = [1015, 1025, 1039, 1043, 1050, 237, 433, 866, 1074, 1084]
 
-    /// A real photograph at exactly `width`×`height`. Deterministic: the same
-    /// `index` always yields the same photo, so runs stay comparable.
+    /// A real photograph at exactly `width`×`height`, for an author avatar
+    /// under `-rich-media`. Deterministic: the same `index` always yields the
+    /// same photo, so runs stay comparable.
     public static func imageURL(index: Int, width: Int, height: Int) -> String {
         let id = picsumIDs[abs(index) % picsumIDs.count]
         return "https://picsum.photos/id/\(id)/\(width)/\(height)"
@@ -134,6 +138,8 @@ public enum MockMediaFixtures {
         // reading the answer off the subject rather than off the request is how
         // a still gets classified as a video.
         if url.hasPrefix(previewPosterScheme) || url.hasPrefix(frameZeroScheme) { return "image/png" }
+        // The bundled galleries are JPEG files, and the attachment says so.
+        if url.hasPrefix(MockPhotoCatalog.scheme) { return "image/jpeg" }
         let path = URLComponents(string: url)?.path.lowercased() ?? url.lowercased()
         if path.hasSuffix(".m3u8") { return "application/vnd.apple.mpegurl" }
         if isVideoURL(url) { return "video/mp4" }

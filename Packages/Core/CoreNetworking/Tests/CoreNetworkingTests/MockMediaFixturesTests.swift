@@ -32,9 +32,11 @@ struct MockMediaFixturesTests {
         #expect(MockMediaFixtures.isVideoURL("https://example.com/clips/intro.mp4?mock-kind=video"))
     }
 
-    @Test func doesNotMistakeImagesForVideo() {
+    @Test func doesNotMistakeImagesForVideo() throws {
         #expect(!MockMediaFixtures.isVideoURL("mock://media/3?w=1080&h=1080"))
         #expect(!MockMediaFixtures.isVideoURL(MockMediaFixtures.imageURL(index: 0, width: 100, height: 100)))
+        let photo = try #require(MockPhotoCatalog.shared.photo(forSlot: 0), "the bundle carries no photos")
+        #expect(!MockMediaFixtures.isVideoURL(photo.media.url))
     }
 
     /// HLS must declare the manifest type rather than a `video/*` one, so the
@@ -53,6 +55,9 @@ struct MockMediaFixturesTests {
         #expect(MockMediaFixtures.mimeType(for: clip.url) == "video/mp4")
         #expect(MockMediaFixtures.mimeType(for: "mock://media/1?w=10&h=10") == "image/png")
         #expect(MockMediaFixtures.mimeType(for: "https://picsum.photos/id/1/10/10") == "image/jpeg")
+        // The bundled galleries are JPEG files.
+        let photo = try #require(MockPhotoCatalog.shared.photo(forSlot: 0), "the bundle carries no photos")
+        #expect(MockMediaFixtures.mimeType(for: photo.media.url) == "image/jpeg")
     }
 
     // MARK: - The clip catalog
@@ -100,46 +105,48 @@ struct MockMediaFixturesTests {
         #expect(checked > 0, "no video landed in the real-asset corpus")
     }
 
-    /// No public video survives anywhere in either catalog: a remote URL is a
-    /// photograph, never a film or a manifest.
-    @Test func noCatalogSeedsARemoteVideo() {
+    /// No public media survives anywhere in either catalog: every post's media
+    /// is a bundled file, never a film, a manifest or a stock photograph.
+    @Test func noCatalogSeedsRemotePostMedia() {
         for dataset in [MockSocialDataset(), MockSocialDataset(mediaCatalog: .realAssets)] {
             for post in dataset.posts {
-                for media in allMedia(of: post) where media.url.hasPrefix("https://") {
-                    #expect(!MockMediaFixtures.isVideoURL(media.url),
-                            "\(post.postID) seeds a remote video: \(media.url)")
+                for media in allMedia(of: post) {
+                    #expect(!media.url.hasPrefix("http"), "\(post.postID) seeds remote media: \(media.url)")
                 }
             }
         }
     }
 
-    /// The two catalogs differ in their PHOTOGRAPHS only: a video is the same
-    /// clip at the same slot whichever is selected, pages included.
-    @Test func bothCatalogsSeedTheSameVideos() {
+    /// The two catalogs differ in their AVATARS only: every post's media is the
+    /// same clip or photo at the same slot whichever is selected, pages
+    /// included.
+    @Test func bothCatalogsSeedTheSamePostMedia() {
         let synthetic = MockSocialDataset()
         let real = MockSocialDataset(mediaCatalog: .realAssets)
         for (lhs, rhs) in zip(synthetic.posts, real.posts) {
-            let lhsVideos = allMedia(of: lhs).filter { MockMediaFixtures.isVideoURL($0.url) }.map(\.url)
-            let rhsVideos = allMedia(of: rhs).filter { MockMediaFixtures.isVideoURL($0.url) }.map(\.url)
-            #expect(lhsVideos == rhsVideos, "\(lhs.postID) plays different videos per catalog")
+            #expect(allMedia(of: lhs).map(\.url) == allMedia(of: rhs).map(\.url),
+                    "\(lhs.postID) carries different media per catalog")
         }
     }
 
-    /// Under `.realAssets`, every media piece is either a real photograph or a
-    /// bundled clip — no seed group may invent its own.
+    /// Every media piece is either a bundled photograph or a bundled clip, in
+    /// both catalogs — no seed group may invent its own.
     ///
     /// The "just arrived" group once seeded `mock://media/new-N`
     /// unconditionally, so the newest posts — the first pages the feed opens
     /// on — kept their synthesized placeholders under the flag. Reported as
     /// "some posts render as a plain solid colour with `-rich-media`".
-    @Test func everyRealAssetPostDrawsItsMediaFromTheCatalog() throws {
+    @Test func everyPostDrawsItsMediaFromTheBundledCatalogs() throws {
         try #require(!clips.clips.isEmpty, "the bundle carries no clips")
-        let dataset = MockSocialDataset(mediaCatalog: .realAssets)
-        for post in dataset.posts {
-            for media in allMedia(of: post) {
-                let isPhoto = media.url.hasPrefix("https://picsum.photos/")
-                let isClip = URL(string: media.url).flatMap { clips.clip(for: $0) } != nil
-                #expect(isPhoto || isClip, "\(post.postID) bypasses the catalog: \(media.url)")
+        try #require(!MockPhotoCatalog.shared.photos.isEmpty, "the bundle carries no photos")
+        for dataset in [MockSocialDataset(), MockSocialDataset(mediaCatalog: .realAssets)] {
+            for post in dataset.posts {
+                for media in allMedia(of: post) {
+                    let url = URL(string: media.url)
+                    let isPhoto = url.flatMap { MockPhotoCatalog.shared.photo(for: $0) } != nil
+                    let isClip = url.flatMap { clips.clip(for: $0) } != nil
+                    #expect(isPhoto || isClip, "\(post.postID) bypasses the catalogs: \(media.url)")
+                }
             }
         }
     }
@@ -224,15 +231,36 @@ struct MockMediaFixturesTests {
         #expect(dataset.authors[3].avatarURL.isEmpty)
     }
 
-    @Test func realAssetCatalogSeedsRemotePhotosAndClips() {
+    /// `-rich-media` still means real AVATARS — the one thing it swaps — and
+    /// the corpus still carries both kinds of post media.
+    @Test func realAssetCatalogSeedsRemoteAvatarsOverBundledMedia() {
         let dataset = MockSocialDataset(mediaCatalog: .realAssets)
         #expect(dataset.mediaCatalog == .realAssets)
         #expect(dataset.authors.allSatisfy { $0.avatarURL.isEmpty || $0.avatarURL.hasPrefix("https://") })
         #expect(dataset.authors.contains { $0.avatarURL.hasPrefix("https://") })
 
-        let remoteMedia = dataset.posts.compactMap(\.media).filter { $0.url.hasPrefix("https://") }
-        #expect(!remoteMedia.isEmpty)
         #expect(dataset.posts.contains { $0.media.map { MockMediaFixtures.isVideoURL($0.url) } ?? false })
+        #expect(dataset.posts.contains { $0.media?.url.hasPrefix(MockPhotoCatalog.scheme) == true })
+    }
+
+    /// ⚠️ THE AVATARS ARE EXACTLY WHAT THEY WERE — the product asked for them
+    /// kept while every post picture changed. Pinned URL for URL, in both
+    /// catalogs, so a later media change cannot take them along by accident.
+    @Test func avatarsAreUnchanged() {
+        let synthetic = MockSocialDataset()
+        let real = MockSocialDataset(mediaCatalog: .realAssets)
+        for index in synthetic.authors.indices {
+            guard let shape = MockSocialDataset.avatarShape(index: index) else {
+                #expect(synthetic.authors[index].avatarURL.isEmpty)
+                #expect(real.authors[index].avatarURL.isEmpty)
+                continue
+            }
+            #expect(synthetic.authors[index].avatarURL == "mock://avatar/\(index)?w=\(shape.0)&h=\(shape.1)")
+            #expect(real.authors[index].avatarURL
+                == MockMediaFixtures.imageURL(index: index, width: shape.0, height: shape.1))
+        }
+        #expect(MockMediaFixtures.imageURL(index: 0, width: 1600, height: 900)
+            == "https://picsum.photos/id/1015/1600/900")
     }
 
     /// A video's declared size must equal its clip's true encoded size, in the
@@ -257,8 +285,8 @@ struct MockMediaFixturesTests {
     }
 
     /// Both catalogs must keep the same post/author/text skeleton — only the
-    /// media URLs differ — so a bug can't hide behind a different corpus.
-    @Test func catalogsDifferOnlyInMedia() {
+    /// avatar URLs differ — so a bug can't hide behind a different corpus.
+    @Test func catalogsDifferOnlyInAvatars() {
         let synthetic = MockSocialDataset()
         let real = MockSocialDataset(mediaCatalog: .realAssets)
         #expect(synthetic.posts.count == real.posts.count)

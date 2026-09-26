@@ -67,10 +67,10 @@ final class AppContainer {
     static let seedsMapPlaces =
         !ProcessInfo.processInfo.arguments.contains("-maps-mock-no-places")
 
-    /// `-rich-media`: seed the mock dataset's photographs and avatars from
-    /// `MockMediaFixtures` — real photographs at exact dimensions — instead of
-    /// the synthesized `mock://` pictures. Videos are the corpus's own bundled
-    /// clips either way (`MockClipCatalog`).
+    /// `-rich-media`: seed the mock dataset's AVATARS from `MockMediaFixtures`
+    /// — real photographs at exact dimensions — instead of the synthesized
+    /// `mock://` pictures. Post media is the corpus's own bundled clips and
+    /// photo galleries either way (`MockClipCatalog`, `MockPhotoCatalog`).
     ///
     /// Opt-in on purpose. The default mock mode is offline and deterministic,
     /// which is what the unit suite and CI depend on; this flag trades that for
@@ -110,16 +110,20 @@ final class AppContainer {
 
     // MARK: - Media
 
-    /// Mock mode renders deterministic placeholder images for `mock://` URLs;
+    /// Mock mode serves the corpus's bundled photos for `mock://photo/…` URLs
+    /// and deterministic placeholder images for any other `mock://` URL;
     /// fleet mode fetches real images over HTTP, rewriting the fleet's
     /// Docker-internal minio host to the published one.
     private(set) lazy var imagePipeline: ImagePipeline = {
         let fetcher: any ImageFetching = switch environment {
         case .mock:
             // Scheme-routing, not plain placeholder: under `-rich-media` the
-            // dataset mixes real `https://` photographs with synthesized
-            // `mock://` assets, and each has to reach the right fetcher.
-            SchemeRoutingImageFetcher(preferred: Self.bakedPreviewPoster)
+            // avatars are real `https://` photographs beside the `mock://`
+            // assets, and each has to reach the right fetcher.
+            SchemeRoutingImageFetcher(
+                placeholder: PlaceholderImageFetcher(bundledPhoto: { MockPhotoCatalog.shared.fileURL(forPhoto: $0) }),
+                preferred: Self.bakedPreviewPoster
+            )
         case .localFleet:
             URLSessionImageFetcher(hostRewrite: HostRewrite(from: "minio:9000", to: "localhost:9000"))
         }

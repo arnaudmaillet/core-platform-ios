@@ -150,14 +150,24 @@ public struct SchemeRoutingImageFetcher: ImageFetching {
     #endif
 }
 
-/// Deterministic offline fetcher for mock mode: renders a solid-color image
-/// derived from the URL, honoring `w`/`h` query parameters. Keeps the entire
-/// media pipeline exercised (decode, downsample, cache, prefetch) with zero
-/// network.
+/// Deterministic offline fetcher for mock mode: serves the bundled photo
+/// behind a `mock://` URL when there is one, and otherwise renders a
+/// solid-color image derived from the URL, honoring `w`/`h` query parameters.
+/// Keeps the entire media pipeline exercised (decode, downsample, cache,
+/// prefetch) with zero network.
 public struct PlaceholderImageFetcher: ImageFetching {
-    public init() {}
+    private let bundledPhoto: (@Sendable (URL) -> URL?)?
+
+    /// - Parameter bundledPhoto: the real file behind a `mock://` URL, when the
+    ///   app carries one (the mock corpus's photo galleries). Asked before
+    ///   anything is synthesized; nil keeps every `mock://` synthetic. The
+    ///   mirror of `PlaceholderVideoFetcher(bundledClip:)`.
+    public init(bundledPhoto: (@Sendable (URL) -> URL?)? = nil) {
+        self.bundledPhoto = bundledPhoto
+    }
 
     public func fetchImageData(for url: URL) async throws -> Data {
+        if let file = bundledPhoto?(url), let data = try? Data(contentsOf: file) { return data }
         let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
         let width = components?.queryItems?.first { $0.name == "w" }.flatMap { Int($0.value ?? "") } ?? 256
         let height = components?.queryItems?.first { $0.name == "h" }.flatMap { Int($0.value ?? "") } ?? 256
