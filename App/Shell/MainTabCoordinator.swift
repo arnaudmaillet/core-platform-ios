@@ -1,4 +1,6 @@
 import CoreNavigation
+import FeedInterface
+import MediaPlayback
 import NotificationsInterface
 import ProfileInterface
 import UIKit
@@ -141,6 +143,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
     }
 
     func start() {
+        container.onUseSound = { [weak self] sound in self?.openCamera(with: sound) }
         // A switch broadcasts this; reload the avatar so the Profile tab's icon
         // reflects whoever is now active.
         NotificationCenter.default.addObserver(
@@ -697,6 +700,16 @@ extension MainTabCoordinator {
     ///
     /// PRESENTED over the shell, not pushed onto the current tab: making a
     /// post belongs to no tab, and is finished or abandoned as a whole.
+    /// "Use this sound" on a post: the camera, with the sound already chosen.
+    fileprivate func openCamera(with sound: PostSound) {
+        guard tabBarController.presentedViewController == nil,
+              let file = sound.previewURL, file.isFileURL else { return }
+        let soundtrack = VideoSoundtrack(fileURL: file, title: sound.title ?? "Original sound")
+        tabBarController.present(
+            container.uploadFeature.makeCameraViewController(soundtrack: soundtrack), animated: true
+        )
+    }
+
     fileprivate func openCreate(_ destination: CreateTabItem.Destination) {
         // A second presentation would be refused. The bar cannot be tapped
         // under one, so this only ever turns away the debug hook.

@@ -3881,7 +3881,12 @@ final class SnapFeedViewController: UIViewController {
             tiles: tiles,
             imagePipeline: imagePipeline
         )
-        sheet.onUseSound = useSound.map { use in { sound in use(sound) } }
+        // Only a sound the device HOLDS can go under a new clip: the editor
+        // lays it from a file. A clip's own sound streamed from the fleet is
+        // not one yet, and the button is not offered for it.
+        if sound.previewURL?.isFileURL == true, let useSound {
+            sheet.onUseSound = { sound in useSound(sound) }
+        }
         // The cell that is covered now is the one to uncover, whatever the
         // feed does meanwhile.
         weak var covered = activeSnapCell

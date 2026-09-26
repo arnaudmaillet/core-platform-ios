@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import FeedInterface
 import Foundation
 import MediaPlayback
@@ -617,6 +618,21 @@ struct CaptureFlowTests {
         let picker = try #require(navigation.viewControllers.last as? MediaPickerViewController)
         #expect(navigation.viewControllers.count == 2)
         #expect(picker.navigationItem.leftBarButtonItems?.isEmpty ?? true, "no Cancel over the back chevron")
+    }
+
+    /// "Use this sound": the camera names the sound it was opened with, and
+    /// shows nothing when it was opened plainly.
+    @Test func theCameraNamesTheSoundItWasOpenedWith() throws {
+        let builder = UploadFeatureBuilder(composer: RecordingComposer(), textPostScreens: { NoTextPosts() })
+        let song = VideoSoundtrack(fileURL: URL(fileURLWithPath: "/tmp/song.m4a"), title: "Veridis Quo")
+        let navigation = try #require(builder.makeCameraViewController(soundtrack: song) as? UINavigationController)
+        let camera = try #require(navigation.viewControllers.first as? CaptureViewController)
+        #expect(camera.presetSoundTitle == "Veridis Quo")
+        #expect((camera.navigationItem.titleView as? SoundPillView)?.debugTitle == "Veridis Quo")
+
+        let plain = try #require(builder.makeCameraViewController() as? UINavigationController)
+        let plainCamera = try #require(plain.viewControllers.first as? CaptureViewController)
+        #expect(plainCamera.navigationItem.titleView == nil)
     }
 
     /// ⚠️ The shortcut is always offered — with the newest picture as its face

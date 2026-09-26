@@ -387,8 +387,14 @@ final class AppContainer {
         // The sound sheet's answers. Mock mode knows each clip's full sound;
         // the fleet's post contract carries no audio yet, so there every clip
         // is its own original sound (the feed's fallback).
-        soundProvider: postSoundProvider
+        soundProvider: postSoundProvider,
+        // "Use this sound": the shell opens its camera with it. Read at the
+        // tap, because the shell sets it after this builder exists.
+        useSound: { [unowned self] sound in self.onUseSound?(sound) }
     )
+
+    /// Set by the shell, which owns the presentation of the camera.
+    var onUseSound: (@MainActor (PostSound) -> Void)?
 
     private var postSoundProvider: (any PostSoundProviding)? {
         switch environment {
