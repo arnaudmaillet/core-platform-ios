@@ -509,9 +509,9 @@ public final class SelectorAccessoryHost: UIView {
 /// screen's control installed there outlives the screen. Measured, not
 /// reasoned: with the accessory left up, `hidesBottomBarWhenPushed` takes the
 /// tab bar away and leaves the strip floating over the pushed profile, and
-/// switching to Maps shows it over the map. The screen that installs it is the
-/// screen that takes it down, one line each, and every hazard that comes from
-/// it being shell-lifetime state goes away with the bracket.
+/// switching to Explore shows it over the map. The screen that installs it is
+/// the screen that takes it down, one line each, and every hazard that comes
+/// from it being shell-lifetime state goes away with the bracket.
 /// The shell's own minimize behaviour, remembered once per tab bar controller
 /// for as long as ANY accessory has it armed.
 ///

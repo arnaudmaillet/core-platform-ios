@@ -2,7 +2,7 @@
 
 **Service:** `geo_discovery.v1` · **Status:** proposal — the fields exist on the
 wire, but on the wrong message
-**Client:** iOS Maps tab (every marker, at every zoom, on every pan)
+**Client:** iOS Explore (map) tab (every marker, at every zoom, on every pan)
 **Related:** `dev/BACKEND_GAPS.md` §15 (`RadarPin` renditions), §18 (semantic
 clusters), `dev/issues/BACKEND_CLUSTER_TYPES.md`
 

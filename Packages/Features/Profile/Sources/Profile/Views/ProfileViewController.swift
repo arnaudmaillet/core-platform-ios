@@ -173,7 +173,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     /// The own-profile switcher; taps present the profile-switcher menu.
     private var switcherItem: UIBarButtonItem?
     /// An item the SHELL owns, standing inboard of this screen's own — the
-    /// viewer's point balance today, the same badge the Maps header and the
+    /// viewer's point balance today, the same badge the Explore header and the
     /// post screen wear.
     ///
     /// Injected rather than built here, and that is the design: three screens
@@ -1992,7 +1992,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         if let switcherItem { items.append(switcherItem) }
         // The shell's accessory LAST, which puts it furthest from the screen
         // edge: `[0]` is the corner, so the gear keeps it and the balance sits
-        // inboard — the Maps header's arrangement ([coin] [bell]).
+        // inboard — the Explore header's arrangement ([coin] [bell]).
         if let trailingAccessoryItem { items.append(trailingAccessoryItem) }
         // The load-bearing guard. A pop's `viewWillAppear` resolves to exactly
         // the item set already on the bar, and handing that same set back is

@@ -3,7 +3,7 @@
 **Service:** `geo_discovery.v1` · **Status:** aligned architecture (supersedes the
 zoom-band half of `BACKEND_CLUSTER_TYPES.md`; the `GeoCluster`/`QueryClusterPosts`
 shapes there still stand)
-**Client:** iOS Maps tab — hierarchical clusters, dynamic banding, camera fits
+**Client:** iOS Explore (map) tab — hierarchical clusters, dynamic banding, camera fits
 **Related:** `dev/BACKEND_GAPS.md` §18 · `dev/issues/BACKEND_MEDIA_PREVIEW_RENDITIONS.md` §C
 
 ## Summary
