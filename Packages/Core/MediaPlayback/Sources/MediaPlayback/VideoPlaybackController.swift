@@ -184,6 +184,10 @@ public final class VideoPlaybackController {
     /// PLAYER and emptied by `retire` like every other per-player table here.
     var soundBindings: [ObjectIdentifier: SoundBinding] = [:]
     var audiblePlayers: Set<ObjectIdentifier> = []
+    /// The one surface a viewer is listening to, and the player last made
+    /// heard for it — see `setAudibleSurface`.
+    weak var audibleSurface: VideoRenderView?
+    weak var surfaceHeardPlayer: AVPlayer?
 
     /// How many players may be bound to surfaces at once.
     ///
@@ -1656,6 +1660,9 @@ public final class VideoPlaybackController {
     /// surface-set insertion in sample-buffer mode.
     private func bind(_ player: AVPlayer, to view: VideoRenderView) {
         view.attach(player, renderer: renderer(for: player))
+        // Every route that puts a player behind a surface ends here, so this is
+        // where the audible surface learns that its player changed.
+        if view === audibleSurface { refreshAudibleSurface() }
     }
 
     private func detach(key: ObjectIdentifier, view: VideoRenderView) {

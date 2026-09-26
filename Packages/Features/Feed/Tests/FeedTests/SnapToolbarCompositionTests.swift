@@ -14,7 +14,7 @@ import UIKit
 /// edits the builder next.
 ///
 /// ```
-///  [♫ attribution] ———————————————— [🔖 ⇄] [⋯]
+///  [♫ attribution 🔊] ————————————— [🔖 ⇄] [⋯]
 ///                                            ├ Share
 ///                                            ├ Not interested
 ///                                            └ Report            (destructive)
@@ -45,9 +45,10 @@ struct SnapToolbarCompositionTests {
         return controller
     }
 
-    /// Every button the toolbar draws, in bar order.
+    /// Every button the toolbar draws, in bar order — hidden items draw nothing.
     private func toolbarButtons(_ feed: SnapFeedViewController) -> [UIButton] {
         (feed.toolbarItems ?? [])
+            .filter { !$0.isHidden }
             .compactMap(\.customView)
             .flatMap { view -> [UIButton] in
                 if let button = view as? UIButton { return [button] }
@@ -89,15 +90,24 @@ struct SnapToolbarCompositionTests {
         let items = try #require(feed().toolbarItems)
 
         #expect(items.first?.customView is SnapMediaAttributionView)
+        // The mute shares the credit's platter: adjacent, no space between.
+        let mute = try #require(items.dropFirst().first?.customView as? UIButton)
+        #expect(mute.accessibilityLabel == "Mute" || mute.accessibilityLabel == "Unmute")
         // The spaces are system items with no custom view of their own — which
         // is exactly how a space reads from out here.
-        let space = try #require(items.dropFirst().first)
+        let space = try #require(items.dropFirst(2).first)
         #expect(space.customView == nil, "no dynamic space after the credit")
-        // ⚠️ FIVE, because ⋯ HAS ITS OWN BUBBLE: [credit][flex][actions]
+        // ⚠️ SIX, because ⋯ HAS ITS OWN BUBBLE: [credit][mute][flex][actions]
         // [fixed][⋯]. iOS 26 fuses adjacent bar items into one platter, so the
         // fixed space between the last two IS the separation — see
         // `theMenuStandsInItsOwnPlatter`.
-        #expect(items.count == 5, "the bar is [credit][flex][actions][fixed][⋯]: \(items.count)")
+        #expect(items.count == 6, "the bar is [credit][mute][flex][actions][fixed][⋯]: \(items.count)")
+    }
+
+    /// ⚠️ A PHOTOGRAPH HAS NOTHING TO MUTE: the sound's button is for clips.
+    @Test func theMuteIsHiddenOnAPhotograph() throws {
+        let items = try #require(feed().toolbarItems)
+        #expect(items.dropFirst().first?.isHidden == true)
     }
 
     /// ⚠️ THE ⋯ STANDS APART, in a platter of its own.
@@ -110,9 +120,9 @@ struct SnapToolbarCompositionTests {
     @Test func theMenuStandsInItsOwnPlatter() throws {
         let items = try #require(feed().toolbarItems)
 
-        let actions = try #require(items.dropFirst(2).first?.customView as? UIStackView)
+        let actions = try #require(items.dropFirst(3).first?.customView as? UIStackView)
         #expect(actions.arrangedSubviews.count == 2, "the capsule is not [save, repost]")
-        #expect(items.dropFirst(3).first?.customView == nil, "no separator before the ⋯")
+        #expect(items.dropFirst(4).first?.customView == nil, "no separator before the ⋯")
         let more = try #require(items.last?.customView as? UIButton)
         #expect(more.accessibilityLabel == "More actions")
     }

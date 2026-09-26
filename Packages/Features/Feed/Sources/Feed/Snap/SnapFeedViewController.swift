@@ -31,6 +31,21 @@ final class SnapFeedViewController: UIViewController {
     /// native bottom toolbar's leading item. Same stable-custom-view contract
     /// as the identity pill: installed once, content follows the active page.
     private let mediaAttributionView = SnapMediaAttributionView()
+    /// Mutes and unmutes the feed for the session (`FeedSound`), shown on
+    /// clips only. It sits in the ATTRIBUTION'S capsule, on purpose: adjacent
+    /// items share one platter on iOS 26, so the sound reads as one thing —
+    /// what is playing, and whether you hear it.
+    ///
+    /// ⚠️ NOT ITS OWN BUBBLE. With a fixed space before it (a fourth platter)
+    /// the toolbar silently stopped rendering the [🔖 ⇄] capsule: no overflow,
+    /// no warning, the bookmark just gone. Measured on iOS 27.
+    private let soundButton = SnapNavControls.makeToolbarActionButton(systemName: "speaker.wave.2.fill")
+    private lazy var soundItem: UIBarButtonItem = {
+        let item = UIBarButtonItem(customView: soundButton)
+        // Hidden until a page with a clip settles (`updateBarChrome`).
+        item.isHidden = true
+        return item
+    }()
     /// The navigation controller whose toolbar this feed is showing — held
     /// weakly across its own pop, when `navigationController` is already nil
     /// but the toolbar bookkeeping must still be settled (`viewDidDisappear`).
@@ -244,6 +259,9 @@ final class SnapFeedViewController: UIViewController {
     private var donatedLiveView: VideoRenderView?
     /// The two facts whose AND is the surface's visibility.
     private var isOnScreen = false
+    /// The surface THIS screen last made audible, so leaving only clears its own.
+    private weak var ownAudibleSurface: VideoRenderView?
+    private var isAudioYielded = false
     private var isForeground = true
     /// The inert page-chrome replica riding in the hero transition's flying
     /// card. Held weakly for the duration of a flight so a post that hydrates
@@ -1067,6 +1085,9 @@ final class SnapFeedViewController: UIViewController {
                 // the feed — see `onMediaPageChanged`.
                 cell.onMediaPageChanged = { [weak self] page in
                     self?.onMediaPageChanged?(id, page)
+                    // A collection's pages are clips and photographs: turning
+                    // one changes what there is to hear.
+                    self?.refreshAudibleSurface()
                 }
                 // ⚠️ THE DISMISSAL STANDS DOWN FOR A SCRUB.
                 //
@@ -1611,8 +1632,11 @@ final class SnapFeedViewController: UIViewController {
         //
         // The sort selector is not here either — it moved to the nav bar
         // beside the author pill (`setEngagedChrome`).
+        soundButton.addAction(UIAction { [weak self] _ in self?.toggleSound() }, for: .primaryActionTriggered)
+        refreshSoundButton()
         let leading: [UIBarButtonItem] = [
             UIBarButtonItem(customView: mediaAttributionView),
+            soundItem,
             .flexibleSpace(),
         ]
         #if DEBUG
@@ -3529,6 +3553,7 @@ final class SnapFeedViewController: UIViewController {
 
     private func refreshVisibility() {
         apply(lifecycle.setVisible(isOnScreen && isForeground))
+        refreshAudibleSurface()
     }
 
     /// The page playback follows: the one covering most of the screen.
@@ -3559,6 +3584,7 @@ final class SnapFeedViewController: UIViewController {
         if let owner {
             (lifecycleCell(at: owner) as? SnapFeedCell)?.setOwnsViewport(true)
         }
+        refreshAudibleSurface()
     }
 
     #if DEBUG
@@ -3730,6 +3756,58 @@ final class SnapFeedViewController: UIViewController {
         authorIdentityView.setOverMedia(overMedia)
         mediaAttributionView.setOverMedia(overMedia)
         refreshBookmarkGlyph(for: model.id)
+        // The sound bubble is for posts that HAVE a sound: a clip, or a
+        // collection with one. A photograph or a text page has nothing to mute.
+        let hasSound = model.mediaKind == .video || model.extraMedia.contains { $0.videoURL != nil }
+        soundItem.isHidden = !hasSound
+    }
+
+    // MARK: - Sound
+
+    /// Hears the page that owns the screen — or nothing, when the feed is
+    /// muted, covered, or in the background.
+    ///
+    /// Asked on every change of any of those: the owner moving (a scroll), a
+    /// carousel turning its page, the screen appearing or leaving, the app
+    /// going to the background, and the viewer's toggle.
+    ///
+    /// - Parameter ownerCell: the owner's cell when the caller holds it — a
+    ///   cell being displayed is not yet one the collection view hands back.
+    private func refreshAudibleSurface(ownerCell: SnapFeedCell? = nil) {
+        guard let videoPlayback else { return }
+        var surface: VideoRenderView?
+        if FeedSound.isOn, isOnScreen, isForeground, !isAudioYielded, let owner = playbackOwner,
+           let cell = ownerCell ?? lifecycleCell(at: owner) as? SnapFeedCell {
+            surface = cell.audibleSurface
+        }
+        // Only ever CLEARS what this screen set: another feed pushed on top
+        // owns the sound now, and this one leaving must not silence it.
+        if surface == nil, videoPlayback.currentAudibleSurface !== ownAudibleSurface {
+            ownAudibleSurface = nil
+            return
+        }
+        ownAudibleSurface = surface
+        videoPlayback.setAudibleSurface(surface)
+    }
+
+    private func toggleSound() {
+        FeedSound.toggle()
+        refreshSoundButton()
+        refreshAudibleSurface()
+    }
+
+    private func refreshSoundButton() {
+        let on = FeedSound.isOn
+        soundButton.configuration?.image = UIImage(systemName: on ? "speaker.wave.2.fill" : "speaker.slash.fill")?
+            .withConfiguration(UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold))
+        soundButton.accessibilityLabel = on ? "Mute" : "Unmute"
+    }
+
+    /// Silences this screen's sound while something else is heard over it —
+    /// a sound's preview in the sheet above — and gives it back after.
+    func yieldAudio(_ yielded: Bool) {
+        isAudioYielded = yielded
+        refreshAudibleSurface()
     }
 
     /// Puts the SCREEN's bars on the page's theme.
@@ -3994,6 +4072,8 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         // page that owns the viewport is a fact about the SCROLL, so it is
         // re-stated to every cell as it appears.
         (cell as? SnapFeedCell)?.setOwnsViewport(playbackOwner == indexPath.item)
+        // And the sound follows the picture's owner, for the same reason.
+        if playbackOwner == indexPath.item { refreshAudibleSurface(ownerCell: cell as? SnapFeedCell) }
         if lifecycle.activeIndex == indexPath.item {
             // ⚠️ THE HOLD, TOO, IS STAMPED HERE — `zoomTransitionWillBegin`
             // held `activeSnapCell`, and on a finger's tap that cell does not

@@ -26,7 +26,12 @@ final class SnapMediaAttributionView: UIView {
     private static let height: CGFloat = 36
     /// Long author names truncate here rather than crowding the share/more
     /// bubbles across the flexible space.
-    private static let maxWidth: CGFloat = 240
+    ///
+    /// ⚠️ 180, down from 240, since the mute button shares its capsule: sized
+    /// for the narrowest phone, 375 − 2×16 margins − 36 (mute) − 72 (🔖 ⇄)
+    /// − 8 − 36 (⋯) leaves ~191, and a bar short of room drops whole items
+    /// rather than truncating anything.
+    private static let maxWidth: CGFloat = 180
 
     private let coverView = AvatarImageView()
     private let titleLabel = UILabel()
