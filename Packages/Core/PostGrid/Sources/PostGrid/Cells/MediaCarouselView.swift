@@ -191,6 +191,17 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
             && !hasTravel(towardsPageDelta: -1)
     }
 
+    /// How each page draws its cover. Fill, which is what every carousel has
+    /// always done; a host that letterboxes its pictures (the fitted post
+    /// page) sets `.scaleAspectFit`. Applied to the pages already built and to
+    /// every page built after, so a host may set it at any time.
+    public var pageContentMode: UIView.ContentMode = .scaleAspectFill {
+        didSet {
+            guard pageContentMode != oldValue else { return }
+            pageViews.forEach { $0.cover.contentMode = pageContentMode }
+        }
+    }
+
     /// The image the CURRENT page is showing — what a hero flight departs with.
     /// A carousel's cover is not the post's first attachment once the viewer
     /// has moved.
@@ -469,6 +480,7 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
         loadedPages = []
         pageViews = pages.map { page in
             let view = CarouselPageView()
+            view.cover.contentMode = pageContentMode
             // ⚠️ A page knows whether it is PLAYABLE, and it is per page.
             //
             // Nothing in `post.v1` says a carousel's attachments agree about

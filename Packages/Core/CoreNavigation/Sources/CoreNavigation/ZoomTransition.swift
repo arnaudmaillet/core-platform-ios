@@ -352,6 +352,31 @@ public protocol ZoomTransitionDestination: AnyObject {
     /// in `container`'s coordinate space — the active page's bounds.
     func zoomTargetFrame(in container: UICoordinateSpace) -> CGRect
 
+    /// Where the active page's PICTURE is inside `zoomTargetFrame`, when the
+    /// page does not draw it edge to edge — a letterboxed (aspect-fit) page.
+    ///
+    /// Nil means "the picture fills the page", which is what every destination
+    /// drew before this existed and still draws by default: the card lands on
+    /// the page rect and its aspect-fill IS the page's crop.
+    ///
+    /// A fitted page breaks that equation. The card's picture is an
+    /// aspect-FILL of its own bounds (it is the source's tile face), so landing
+    /// it on the page rect shows a crop the page does not show, and the
+    /// hand-over snaps to the uncropped picture. Landing it on THIS rect
+    /// instead — the media's own aspect — makes aspect-fill the identity, so
+    /// every piece of cover math the flight already has lands exactly without
+    /// learning a second rule. The page rect keeps driving everything that is
+    /// the PAGE rather than its picture (the chrome replica, the dim that
+    /// paints the bands). See `ZoomFlight.build(mediaFrame:)`.
+    ///
+    /// ⚠️ A REQUIREMENT, not an extension-only member: every driver holds the
+    /// destination as `any ZoomTransitionDestination`, and a defaulted member
+    /// with no requirement behind it dispatches STATICALLY through that
+    /// existential — the conformer's answer invisible, the default's nil the
+    /// only one anyone gets (the trap `ZoomFlightCard.setZoomContentBlend`
+    /// records; `ZoomExistentialDispatchTests` guards it).
+    func zoomTargetMediaFrame(in container: UICoordinateSpace) -> CGRect?
+
     /// A fresh, *inert*, full-bleed replica of the active page's chrome
     /// (scrim, caption, engagement rail — page content only, never navigation
     /// bar chrome, which stays real and static above the flight), configured
@@ -521,6 +546,7 @@ public extension ZoomTransitionDestination {
     var zoomOwnsInteractiveDismissal: Bool { true }
     var concealsAppTabBar: Bool { true }
     var zoomDestinationMediaIsRendering: Bool { true }
+    func zoomTargetMediaFrame(in container: UICoordinateSpace) -> CGRect? { nil }
     func zoomVerticalDismissalPermitted(at location: CGPoint, in view: UIView) -> Bool { true }
     func zoomHorizontalDismissalPermitted(at location: CGPoint, in view: UIView) -> Bool { true }
     func zoomMirrorLiveMedia(onto surface: UIView) -> Bool { false }

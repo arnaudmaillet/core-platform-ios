@@ -54,7 +54,31 @@ final class SnapMediaCardView: UIView {
             guard oldValue !== renderView else { return }
             oldValue.onPictureAvailabilityChange = nil
             renderView.onPictureAvailabilityChange = onPictureAvailabilityChange
+            // Whatever surface this card is handed — a landing's, a reclaimed
+            // donation, a page's — draws the way THIS card draws.
+            applyMediaFit(to: renderView)
         }
+    }
+
+    /// Whether this card draws its media ASPECT-FIT (letterboxed on its black
+    /// ground) rather than aspect-fill — `SnapFeedViewController.fitsMedia`,
+    /// captured once at construction.
+    ///
+    /// ⚠️ IT TRAVELS WITH THE CARD, NOT WITH THE SURFACE. A `VideoRenderView`
+    /// is not this card's for life: a landing adopts a grid tile's, and a
+    /// dismissal donates one back to a grid that FILLS. So the gravity is
+    /// stamped on every surface as it arrives here (`applyMediaFit`), and the
+    /// cell hands one back at fill on its way out (`SnapFeedCell
+    /// .donateLiveRenderView`) — a letterboxed video in a mosaic tile is what
+    /// forgetting either half looks like.
+    let fitsMedia: Bool
+
+    /// Stamps this card's framing on a playback surface. A no-op when the card
+    /// fills: a surface arriving from a grid is already `.resizeAspectFill`,
+    /// and a flag that is off must not write anything at all.
+    private func applyMediaFit(to view: VideoRenderView) {
+        guard fitsMedia else { return }
+        view.videoGravity = .resizeAspect
     }
 
     /// "There is a picture on the surface now" — **held by the CARD**, and that
@@ -77,13 +101,18 @@ final class SnapMediaCardView: UIView {
         didSet { renderView.onPictureAvailabilityChange = onPictureAvailabilityChange }
     }
 
-    init() {
+    init(fitsMedia: Bool = SnapFeedViewController.fitsMedia) {
+        self.fitsMedia = fitsMedia
         super.init(frame: .zero)
         // ⚠️ CLEAR UNTIL THERE IS MEDIA — see `configure(kind:)`. A text page
         // is a LIGHT page and this card is in its hierarchy with both surfaces
         // hidden, so an unconditional ground here paints the text page black.
         backgroundColor = .clear
-        imageView.contentMode = .scaleAspectFill
+        // Fit leaves bands, and they are this card's black ground
+        // (`configure(kind:)`) — the same black a hero's dim paints them on
+        // its way in, so the landing hands over band for band.
+        imageView.contentMode = fitsMedia ? .scaleAspectFit : .scaleAspectFill
+        applyMediaFit(to: renderView)
         imageView.clipsToBounds = true
         imageView.pin(to: self)
         renderView.pin(to: self)
@@ -103,6 +132,10 @@ final class SnapMediaCardView: UIView {
         // it to the card would put a full-bleed video over the carousel, which
         // is right for a single attachment and wrong for every page of a
         // collection but the one being watched.
+        // Stamped here as well as in `renderView`'s observer, because a surface
+        // that comes back to the card it left fires no `didSet` — and it may
+        // have been flown at fill in between.
+        applyMediaFit(to: view)
         if showsCollection {
             if view !== renderView {
                 renderView.detachForReplacement()
@@ -469,6 +502,27 @@ final class SnapMediaCardView: UIView {
         showsCollection ? carousel?.currentPageVideoURL : nil
     }
 
+    /// The PIXEL shape of the picture this card is drawing right now, read off
+    /// what is actually on screen — the aspect a fitted page letterboxes to,
+    /// and so the aspect a hero must land on (`SnapFeedViewController
+    /// .zoomTargetMediaFrame`).
+    ///
+    /// Nil when nothing drawn says yet (a clip whose item has not resolved its
+    /// size, a photo still downloading); the caller then falls back to the
+    /// model's declared aspect. What is drawn wins over what is declared
+    /// because it is what the fit is actually computed from.
+    var drawnMediaAspect: CGSize? {
+        func valid(_ size: CGSize?) -> CGSize? {
+            guard let size, size.width > 0, size.height > 0 else { return nil }
+            return size
+        }
+        if showsCollection {
+            return valid(currentPageSurface?.nativeVideoSize) ?? valid(carousel?.renderedCover?.size)
+        }
+        if !renderView.isHidden, let video = valid(renderView.nativeVideoSize) { return video }
+        return valid(imageView.image?.size)
+    }
+
     /// How many pages the collection has.
     var pageCount: Int { showsCollection ? (carousel?.pageCount ?? 0) : 0 }
 
@@ -549,6 +603,7 @@ final class SnapMediaCardView: UIView {
         // returns to it, page identity says nothing about who holds what.
         let claimed = pageSurfaces.values.contains { $0 === renderView }
         let view = claimed ? VideoRenderView() : renderView
+        applyMediaFit(to: view)
         #if DEBUG
         view.debugLabel = "feed-p\(page)"
         #endif
@@ -658,6 +713,9 @@ final class SnapMediaCardView: UIView {
 
     private func makeCarousel() -> MediaCarouselView {
         let view = MediaCarouselView(style: .page)
+        // The pages' covers follow the card; the grid's `.card` carousels
+        // never hear of it.
+        if fitsMedia { view.pageContentMode = .scaleAspectFit }
         view.onPageChanged = { [weak self] page in self?.onPageChanged?(page) }
         view.onScrollPosition = { [weak self] position in self?.onScrollPosition?(position) }
         // Below nothing — it is the media, and everything else on the page is

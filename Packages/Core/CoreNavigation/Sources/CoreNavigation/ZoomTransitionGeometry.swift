@@ -54,6 +54,85 @@ public enum ZoomTransitionGeometry {
         return max(size.width / surface.width, size.height / surface.height)
     }
 
+    // MARK: - Letterboxed pages
+
+    /// Where a picture of `aspect` sits when a page draws it aspect-FIT into
+    /// `page`: centred, as large as fits, bands on the other axis — the rect
+    /// `AVMakeRect(aspectRatio:insideRect:)` answers, and the one
+    /// `UIImageView.scaleAspectFit` and `.resizeAspect` both draw into.
+    ///
+    /// Nil for a degenerate aspect or page: there is no picture to place, and
+    /// a caller must fall back to the page rect rather than fly to a point.
+    public static func fittedMediaRect(aspect: CGSize, in page: CGRect) -> CGRect? {
+        guard aspect.width > 0, aspect.height > 0, page.width > 0, page.height > 0,
+              aspect.width.isFinite, aspect.height.isFinite
+        else { return nil }
+        let scale = min(page.width / aspect.width, page.height / aspect.height)
+        let size = CGSize(width: aspect.width * scale, height: aspect.height * scale)
+        return CGRect(
+            x: page.midX - size.width / 2, y: page.midY - size.height / 2,
+            width: size.width, height: size.height
+        )
+    }
+
+    /// The media rect a flight should actually letterbox to, or nil when it
+    /// should fly exactly as it always has.
+    ///
+    /// ⚠️ NIL IS THE COMMON ANSWER, deliberately. A rect that is (within half
+    /// a point) the page itself is a picture that fills the page — the same
+    /// aspect, or a destination that fills — and the flight that already
+    /// exists is exact for it. Wrapping it anyway would change nothing on
+    /// screen and everything in the view tree, which is not a trade to make
+    /// for a rounding error. A rect that spills OUTSIDE the page, or has no
+    /// area, is not a letterbox of it and is refused rather than trusted.
+    public static func letterboxedMediaRect(
+        _ media: CGRect?, in page: CGRect, tolerance: CGFloat = 0.5
+    ) -> CGRect? {
+        guard let media, media.width > 0, media.height > 0,
+              page.width > 0, page.height > 0,
+              media.minX >= page.minX - tolerance, media.minY >= page.minY - tolerance,
+              media.maxX <= page.maxX + tolerance, media.maxY <= page.maxY + tolerance
+        else { return nil }
+        let samePage = abs(media.minX - page.minX) <= tolerance
+            && abs(media.minY - page.minY) <= tolerance
+            && abs(media.width - page.width) <= tolerance
+            && abs(media.height - page.height) <= tolerance
+        return samePage ? nil : media
+    }
+
+    /// The PAGE-shaped box around a media rect: where the letterboxed page
+    /// would be if its picture sat at `rect`.
+    ///
+    /// A letterboxed flight moves two things on one channel — the picture and
+    /// the page chrome around it — and this is the one mapping between them:
+    /// per axis, `rect` is to the returned box what `media` is to `page`.
+    /// Identity at the page end (`rect == media` answers `page`); at the tile
+    /// end it is the tile grown by the band on each side, so the chrome that
+    /// fades in around the card is always laid out against a page, never
+    /// squeezed into the picture.
+    public static func letterboxCardFrame(forMedia rect: CGRect, page: CGRect, media: CGRect) -> CGRect {
+        guard media.width > 0, media.height > 0 else { return rect }
+        let width = rect.width * page.width / media.width
+        let height = rect.height * page.height / media.height
+        return CGRect(
+            x: rect.minX - (media.minX - page.minX) / page.width * width,
+            y: rect.minY - (media.minY - page.minY) / page.height * height,
+            width: width, height: height
+        )
+    }
+
+    /// The inverse: where the picture sits inside a page-shaped box of `size`,
+    /// in that box's own coordinates.
+    public static func letterboxMediaFrame(inCardOfSize size: CGSize, page: CGRect, media: CGRect) -> CGRect {
+        guard page.width > 0, page.height > 0 else { return CGRect(origin: .zero, size: size) }
+        return CGRect(
+            x: (media.minX - page.minX) / page.width * size.width,
+            y: (media.minY - page.minY) / page.height * size.height,
+            width: media.width / page.width * size.width,
+            height: media.height / page.height * size.height
+        )
+    }
+
     public static func centeredFallback(in bounds: CGRect, side: CGFloat = 56) -> CGRect {
         CGRect(
             x: bounds.midX - side / 2,

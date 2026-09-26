@@ -103,7 +103,10 @@ enum GalleryPostProjection {
             // landed, seconds later. Reported as "the indicator arrives well
             // after". The card already holds every page; dropping them here was
             // free to fix and expensive to leave.
-            extraMedia: Array(post.pages.dropFirst())
+            extraMedia: Array(post.pages.dropFirst()),
+            // The tile's own shape — what a fitted page lands a hero on before
+            // it has downloaded a picture to measure.
+            headAspectRatio: post.pages.first?.aspectRatio
         )
     }
 }

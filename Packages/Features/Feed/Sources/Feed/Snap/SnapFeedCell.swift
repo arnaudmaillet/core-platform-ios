@@ -2336,6 +2336,13 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // surface is gone, or it refuses to take the same one back at landing.
         mediaCard.releaseRenderViewFromPages()
         view.removeFromSuperview()
+        // ⚠️ BACK TO FILL ON ITS WAY OUT. This very view is about to be a grid
+        // tile's (the dismissal adopts it at the landing), and grids fill. The
+        // flight lays it out at the picture's own aspect, where fit and fill
+        // draw the same pixels, so the switch is invisible here and saves a
+        // letterboxed clip in a mosaic later. A no-op when the page fills. (The
+        // sample-buffer branch above donates a fresh view, which is born fill.)
+        if mediaCard.fitsMedia { view.videoGravity = .resizeAspectFill }
         return view
     }
 
@@ -2742,6 +2749,12 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// "leave the row alone".
     var currentMediaPage: Int? {
         mediaCard.showsCollection ? mediaCard.currentPage : nil
+    }
+
+    /// The pixel shape of the picture this page is drawing, when what is drawn
+    /// can say — see `SnapMediaCardView.drawnMediaAspect`. Nil for a text page.
+    var drawnMediaAspect: CGSize? {
+        pageHasMedia ? mediaCard.drawnMediaAspect : nil
     }
 
     #if DEBUG
