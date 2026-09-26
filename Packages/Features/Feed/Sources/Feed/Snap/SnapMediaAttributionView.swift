@@ -27,11 +27,19 @@ final class SnapMediaAttributionView: UIView {
     /// Long author names truncate here rather than crowding the share/more
     /// bubbles across the flexible space.
     ///
-    /// ⚠️ 180, down from 240, since the mute button shares its capsule: sized
-    /// for the narrowest phone, 375 − 2×16 margins − 36 (mute) − 72 (🔖 ⇄)
-    /// − 8 − 36 (⋯) leaves ~191, and a bar short of room drops whole items
-    /// rather than truncating anything.
-    private static let maxWidth: CGFloat = 180
+    /// ⚠️ A BAR SHORT OF ROOM FOLDS ITS TRAILING ITEMS INTO UIKit's OWN
+    /// "•••", it does not truncate anything: with a long sound line the
+    /// [🔖 ⇄] capsule and ⋯ were replaced by a system overflow button that
+    /// looked exactly like ⋯ — the bookmark simply gone. So the cap is the
+    /// room the bar actually has, read off the bar's own frames on iOS 27
+    /// (iPhone 18 Pro, `-dump-bars`): 28pt margins each side, this capsule's
+    /// glass +10 around the pill and the mute's 48pt platter, the [🔖 ⇄]
+    /// capsule 86pt, ⋯ 48pt, two 8pt gaps — and 12pt of slack, because the
+    /// fold is silent and one point short is the whole capsule. A fixed 180
+    /// folded it on a 402pt screen; the host sets it (`setMaximumWidth`).
+    static let barReserve: CGFloat = 28 + 10 + 48 + 8 + 86 + 8 + 48 + 28 + 16
+    private static let defaultMaxWidth: CGFloat = 120
+    private var maxWidthConstraint: NSLayoutConstraint?
 
     /// A tap on the pill — the feed opens the sound sheet. Nil keeps it a label.
     var onTap: (() -> Void)?
@@ -46,6 +54,7 @@ final class SnapMediaAttributionView: UIView {
     /// What is actually on screen, so a repeat call can tell "same page again"
     /// from "same page, better data".
     private var renderedModel: FeedItemDisplayModel?
+    private var renderedSound: SoundCredit = .unresolved
     private var renderedSoundLine: String?
     private var coverTask: Task<Void, Never>?
 
@@ -96,7 +105,9 @@ final class SnapMediaAttributionView: UIView {
         let height = heightAnchor.constraint(equalToConstant: Self.height)
         height.priority = UILayoutPriority(999)
         height.isActive = true
-        widthAnchor.constraint(lessThanOrEqualToConstant: Self.maxWidth).isActive = true
+        let maxWidth = widthAnchor.constraint(lessThanOrEqualToConstant: Self.defaultMaxWidth)
+        maxWidth.isActive = true
+        maxWidthConstraint = maxWidth
 
         let press = UILongPressGestureRecognizer(target: self, action: #selector(pressed(_:)))
         press.minimumPressDuration = 0
@@ -134,6 +145,13 @@ final class SnapMediaAttributionView: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    /// The widest the pill may be — the bar's own room, see `barReserve`.
+    func setMaximumWidth(_ width: CGFloat) {
+        guard let maxWidthConstraint, abs(maxWidthConstraint.constant - width) > 0.5 else { return }
+        maxWidthConstraint.constant = width
+        animateBarRemeasure()
+    }
+
     /// The SHADOW only — the identity pill's rule, for the same reason: the
     /// colours are semantic and come from the toolbar's theme.
     func setOverMedia(_ overMedia: Bool) {
@@ -156,10 +174,27 @@ final class SnapMediaAttributionView: UIView {
     /// purpose of the guard is unharmed: a re-settle on an unchanged page still
     /// skips the cross-dissolve and the cover refetch, because an unchanged page
     /// has an unchanged model.
-    func setPost(_ model: FeedItemDisplayModel, soundLine: String? = nil, pipeline: ImagePipeline) {
-        guard model != renderedModel || soundLine != renderedSoundLine else { return }
+    /// What the second line says about the post's sound.
+    enum SoundCredit: Equatable {
+        /// Nobody asked: the model's own derived line, or its meta line.
+        case unresolved
+        /// The post plays this — a tap opens it.
+        case sound(String)
+        /// The post plays nothing, and the line says so.
+        case none
+    }
+
+    func setPost(_ model: FeedItemDisplayModel, sound: SoundCredit = .unresolved, pipeline: ImagePipeline) {
+        let soundLine: String? = if case .sound(let line) = sound { line } else { nil }
+        guard model != renderedModel || sound != renderedSound else { return }
         renderedModel = model
+        renderedSound = sound
         renderedSoundLine = soundLine
+        let line = switch sound {
+        case .sound(let line): line
+        case .none: "No audio"
+        case .unresolved: model.audioText ?? model.metaText
+        }
         postID = model.id
         defer { animateBarRemeasure() }
 
@@ -168,8 +203,8 @@ final class SnapMediaAttributionView: UIView {
             self.titleLabel.text = model.authorName
             // Derived attribution until the BFF carries track metadata;
             // non-audio posts fall back to the handle/time meta line.
-            self.trackLabel.text = soundLine ?? model.audioText ?? model.metaText
-            self.accessibilityLabel = "\(model.authorName), \(soundLine ?? model.audioText ?? model.metaText)"
+            self.trackLabel.text = line
+            self.accessibilityLabel = "\(model.authorName), \(line)"
             self.accessibilityHint = soundLine == nil ? nil : "Opens the sound"
 
             self.coverView.image = nil

@@ -42,7 +42,7 @@ let package = Package(
             // The real clips and sounds the mock corpus plays (see
             // `MockClipCatalog`). A folder reference, so the manifest keeps
             // its file names.
-            resources: [.copy("Resources/MockClips")]
+            resources: [.copy("Resources/MockClips"), .copy("Resources/MockSongs")]
         ),
         .testTarget(
             name: "CoreNetworkingTests",
