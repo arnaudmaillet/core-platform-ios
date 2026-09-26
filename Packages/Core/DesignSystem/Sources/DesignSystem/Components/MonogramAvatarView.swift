@@ -56,6 +56,19 @@ public final class MonogramAvatarView: UIView {
         layer.cornerRadius = min(bounds.width, bounds.height) / 2
     }
 
+    /// Initials on the app's rule: the display name when there is one, the
+    /// handle when there is not — the first letter of the first two words,
+    /// "?" when there is nothing to read.
+    nonisolated public static func monogram(name: String, handle: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let source = trimmed.isEmpty ? handle.trimmingCharacters(in: CharacterSet(charactersIn: "@ ")) : trimmed
+        let initials = source
+            .split(separator: " ")
+            .prefix(2)
+            .compactMap { $0.first.map { String($0).uppercased() } }
+        return initials.isEmpty ? "?" : initials.joined()
+    }
+
     public func setMonogram(_ monogram: String) {
         label.text = monogram
     }
