@@ -40,9 +40,14 @@ let package = Package(
                 .product(name: "SwiftProtobuf", package: "swift-protobuf")
             ],
             // The real clips and sounds the mock corpus plays (see
-            // `MockClipCatalog`). A folder reference, so the manifest keeps
-            // its file names.
-            resources: [.copy("Resources/MockClips"), .copy("Resources/MockSongs")]
+            // `MockClipCatalog`) and the photo galleries it shows
+            // (`MockPhotoCatalog`). Folder references, so the manifests keep
+            // their file names.
+            resources: [
+                .copy("Resources/MockClips"),
+                .copy("Resources/MockSongs"),
+                .copy("Resources/MockPhotos")
+            ]
         ),
         .testTarget(
             name: "CoreNetworkingTests",
