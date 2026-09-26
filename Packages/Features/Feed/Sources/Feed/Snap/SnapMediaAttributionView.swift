@@ -33,6 +33,9 @@ final class SnapMediaAttributionView: UIView {
     /// rather than truncating anything.
     private static let maxWidth: CGFloat = 180
 
+    /// A tap on the pill — the feed opens the sound sheet. Nil keeps it a label.
+    var onTap: (() -> Void)?
+
     private let coverView = AvatarImageView()
     private let titleLabel = UILabel()
     private let trackLabel = UILabel()
@@ -43,6 +46,7 @@ final class SnapMediaAttributionView: UIView {
     /// What is actually on screen, so a repeat call can tell "same page again"
     /// from "same page, better data".
     private var renderedModel: FeedItemDisplayModel?
+    private var renderedSoundLine: String?
     private var coverTask: Task<Void, Never>?
 
     init() {
@@ -93,6 +97,38 @@ final class SnapMediaAttributionView: UIView {
         height.priority = UILayoutPriority(999)
         height.isActive = true
         widthAnchor.constraint(lessThanOrEqualToConstant: Self.maxWidth).isActive = true
+
+        let press = UILongPressGestureRecognizer(target: self, action: #selector(pressed(_:)))
+        press.minimumPressDuration = 0
+        press.cancelsTouchesInView = false
+        addGestureRecognizer(press)
+        isAccessibilityElement = true
+        accessibilityTraits = .button
+    }
+
+    /// The app's one press: shrink and dim while held, act on a lift inside.
+    @objc private func pressed(_ gesture: UILongPressGestureRecognizer) {
+        // Only a post with a sound opens anything.
+        guard onTap != nil, renderedSoundLine != nil else { return setPressed(false) }
+        let inside = bounds.insetBy(dx: -12, dy: -12).contains(gesture.location(in: self))
+        switch gesture.state {
+        case .began, .changed:
+            setPressed(inside)
+        case .ended:
+            setPressed(false)
+            if inside { onTap?() }
+        default:
+            setPressed(false)
+        }
+    }
+
+    private func setPressed(_ pressed: Bool) {
+        UIView.animate(withDuration: pressed ? 0.12 : 0.22, delay: 0,
+                       usingSpringWithDamping: 0.8, initialSpringVelocity: 0,
+                       options: [.allowUserInteraction, .beginFromCurrentState]) {
+            self.transform = pressed ? CGAffineTransform(scaleX: 0.95, y: 0.95) : .identity
+            self.alpha = pressed ? 0.7 : 1
+        }
     }
 
     @available(*, unavailable)
@@ -120,9 +156,10 @@ final class SnapMediaAttributionView: UIView {
     /// purpose of the guard is unharmed: a re-settle on an unchanged page still
     /// skips the cross-dissolve and the cover refetch, because an unchanged page
     /// has an unchanged model.
-    func setPost(_ model: FeedItemDisplayModel, pipeline: ImagePipeline) {
-        guard model != renderedModel else { return }
+    func setPost(_ model: FeedItemDisplayModel, soundLine: String? = nil, pipeline: ImagePipeline) {
+        guard model != renderedModel || soundLine != renderedSoundLine else { return }
         renderedModel = model
+        renderedSoundLine = soundLine
         postID = model.id
         defer { animateBarRemeasure() }
 
@@ -131,7 +168,10 @@ final class SnapMediaAttributionView: UIView {
             self.titleLabel.text = model.authorName
             // Derived attribution until the BFF carries track metadata;
             // non-audio posts fall back to the handle/time meta line.
-            self.trackLabel.text = model.audioText ?? model.metaText
+            self.trackLabel.text = soundLine ?? model.audioText ?? model.metaText
+            self.accessibilityLabel = "\(model.authorName), \(soundLine ?? model.audioText ?? model.metaText)"
+            self.accessibilityHint = soundLine == nil ? nil : "Opens the sound"
+
             self.coverView.image = nil
         }
 

@@ -83,7 +83,7 @@ enum GalleryPostProjection {
             mediaKind: post.kind == .video ? .video : .image,
             thumbnailURL: post.thumbnailURL,
             audioText: post.kind == .video && !handle.isEmpty
-                ? "Original audio · \(handle)" : nil,
+                ? "Original sound · \(handle)" : nil,
             likeCount: post.reactionCount ?? 0,
             timestampText: PostMetadata.compactAge(ofMillis: post.publishedAtMS, now: now),
             // Passed through as OPTIONALS, not collapsed to zero: this is the

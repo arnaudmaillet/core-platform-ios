@@ -383,8 +383,19 @@ final class AppContainer {
         // likes only, and a card's counter chip shows VIEWS — without this it
         // has nothing to say and hides itself, which is what it did.
         counterClient: Counter_V1_CounterServiceClient(client: authenticatedRPCClient),
-        postDrafts: postDraftStore
+        postDrafts: postDraftStore,
+        // The sound sheet's answers. Mock mode knows each clip's full sound;
+        // the fleet's post contract carries no audio yet, so there every clip
+        // is its own original sound (the feed's fallback).
+        soundProvider: postSoundProvider
     )
+
+    private var postSoundProvider: (any PostSoundProviding)? {
+        switch environment {
+        case .mock: MockPostSoundProvider(dataset: mockBackend.dataset)
+        case .localFleet: nil
+        }
+    }
 
     // MARK: - Maps
 
