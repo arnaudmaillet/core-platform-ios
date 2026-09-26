@@ -54,6 +54,12 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     /// Nil is the fallback for a caller that has neither, and it costs a file
     /// read on every composer — which is why the app never leaves it nil.
     private let postDrafts: PostDraftStore?
+    /// Which sound a clip is set to, for the sound sheet. Nil: every clip is
+    /// its own "original sound", played straight from the clip.
+    private let soundProvider: (any PostSoundProviding)?
+    /// "Use this sound" — the shell opens its camera with it. Nil hides the
+    /// button: an action that cannot act is not offered.
+    private let useSound: (@MainActor (PostSound) -> Void)?
     public init(
         repository: any FeedProviding,
         engagementProvider: (any EngagementProviding)? = nil,
@@ -72,9 +78,13 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         /// reach. Optional: without it the cards simply hide their counter,
         /// which is what they did before.
         counterClient: (any Counter_V1_CounterServiceClientInterface)? = nil,
-        postDrafts: PostDraftStore? = nil
+        postDrafts: PostDraftStore? = nil,
+        soundProvider: (any PostSoundProviding)? = nil,
+        useSound: (@MainActor (PostSound) -> Void)? = nil
     ) {
         self.postDrafts = postDrafts
+        self.soundProvider = soundProvider
+        self.useSound = useSound
         self.counterClient = counterClient
         self.reporting = reporting
         self.socialGraph = socialGraph
@@ -1148,7 +1158,9 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             makeWalletSheet: makeWalletSheet,
             // For the ⋯ menu's Report row, which withholds itself when there is
             // nobody to file with — the same rule the grid's card menu follows.
-            reporting: reporting
+            reporting: reporting,
+            soundProvider: soundProvider,
+            useSound: useSound
         )
     }
 

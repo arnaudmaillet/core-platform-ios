@@ -203,7 +203,7 @@ struct SnapCommentsPresentationTests {
                 mediaURL: media ? URL(string: "mock://media/0.jpg") : nil,
                 mediaKind: .image,
                 thumbnailURL: nil,
-                audioText: media ? "Original audio · @ava" : nil,
+                audioText: media ? "Original sound · @ava" : nil,
                 likeCount: 0,
                 timestampText: "5 days"
             ),
@@ -656,7 +656,7 @@ struct SnapCommentsPresentationTests {
                 mediaURL: URL(string: "mock://media/0.mp4"),
                 mediaKind: .video,
                 thumbnailURL: nil,
-                audioText: "Original audio · @ava"
+                audioText: "Original sound · @ava"
             ),
             pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             videoPlayback: nil

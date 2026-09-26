@@ -80,6 +80,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// Whether there is anything to play at all — the replacement for the
     /// `mediaKind == .video` gates.
     private var playsVideo: Bool { activeVideoURL != nil }
+    /// The clip on the page under the finger — a collection's current page.
+    var currentClipURL: URL? { activeVideoURL }
+    /// Paused by `setCoveredBySheet`, and owed a resume by it.
+    private var isSheetPaused = false
 
     /// The surface the viewer should HEAR when this page owns the screen: the
     /// clip on the page under the finger, nil on a photograph or a text page.
@@ -2516,6 +2520,20 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         guard videoPlayback.isAdvancing(in: mediaCard.renderView) else { return }
         isHeldPaused = videoPlayback.setPaused(true, in: mediaCard.renderView)
         traceViewerPlayback("hold", paused: isHeldPaused)
+    }
+
+    /// Pauses the clip while a sheet covers it — the sound sheet expanded, or
+    /// its preview playing — and resumes it after, but only if it was running
+    /// when covered: a clip the viewer had paused stays paused.
+    func setCoveredBySheet(_ covered: Bool) {
+        guard let videoPlayback, let surface = audibleSurface else { return }
+        if covered {
+            guard !isSheetPaused, videoPlayback.isAdvancing(in: surface) else { return }
+            isSheetPaused = videoPlayback.setPaused(true, in: surface)
+        } else if isSheetPaused {
+            isSheetPaused = false
+            videoPlayback.setPaused(false, in: surface)
+        }
     }
 
     func endMediaHold() {

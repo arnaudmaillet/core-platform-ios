@@ -92,11 +92,11 @@ struct SnapChromeRefreshTests {
         pill.setPost(model(author: "", meta: "75d"), pipeline: pipeline)
 
         pill.setPost(
-            model(author: "Demo Viewer", meta: "@you · 75d", audio: "Original audio · @you"),
+            model(author: "Demo Viewer", meta: "@you · 75d", audio: "Original sound · @you"),
             pipeline: pipeline
         )
 
-        #expect(labels(in: pill).contains("Original audio · @you"))
+        #expect(labels(in: pill).contains("Original sound · @you"))
     }
 
     // MARK: - The author capsule

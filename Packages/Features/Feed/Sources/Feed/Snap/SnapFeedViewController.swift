@@ -394,6 +394,9 @@ final class SnapFeedViewController: UIViewController {
     /// Files a post's Report. Nil withholds the row entirely: an action that
     /// cannot act is not offered — the grid's card menu follows the same rule.
     private let reporting: (any ContentReporting)?
+    /// See `FeedFeatureBuilder.soundProvider` / `useSound`.
+    private let soundProvider: (any PostSoundProviding)?
+    private let useSound: (@MainActor (PostSound) -> Void)?
 
     init(
         viewModel: FeedViewModel,
@@ -403,8 +406,12 @@ final class SnapFeedViewController: UIViewController {
         makeRestingCommentsPanelContent: ((PostID) -> UIViewController)? = nil,
         wallet: WalletStore? = nil,
         makeWalletSheet: (@MainActor () -> UIViewController)? = nil,
-        reporting: (any ContentReporting)? = nil
+        reporting: (any ContentReporting)? = nil,
+        soundProvider: (any PostSoundProviding)? = nil,
+        useSound: (@MainActor (PostSound) -> Void)? = nil
     ) {
+        self.soundProvider = soundProvider
+        self.useSound = useSound
         self.viewModel = viewModel
         self.imagePipeline = imagePipeline
         self.videoPlayback = videoPlayback
@@ -1086,8 +1093,12 @@ final class SnapFeedViewController: UIViewController {
                 cell.onMediaPageChanged = { [weak self] page in
                     self?.onMediaPageChanged?(id, page)
                     // A collection's pages are clips and photographs: turning
-                    // one changes what there is to hear.
+                    // one changes what there is to hear, and what it is called.
                     self?.refreshAudibleSurface()
+                    if let self, let index = self.lifecycle.activeIndex,
+                       self.orderedIDs.indices.contains(index), self.orderedIDs[index] == id {
+                        self.updateBarChrome(at: index)
+                    }
                 }
                 // ⚠️ THE DISMISSAL STANDS DOWN FOR A SCRUB.
                 //
@@ -1633,6 +1644,7 @@ final class SnapFeedViewController: UIViewController {
         // The sort selector is not here either — it moved to the nav bar
         // beside the author pill (`setEngagedChrome`).
         soundButton.addAction(UIAction { [weak self] _ in self?.toggleSound() }, for: .primaryActionTriggered)
+        mediaAttributionView.onTap = { [weak self] in self?.presentSoundSheet() }
         refreshSoundButton()
         let leading: [UIBarButtonItem] = [
             UIBarButtonItem(customView: mediaAttributionView),
@@ -3742,7 +3754,7 @@ final class SnapFeedViewController: UIViewController {
         guard orderedIDs.indices.contains(index),
               let model = modelsByID[orderedIDs[index]] else { return }
         authorIdentityView.setAuthor(model, pipeline: imagePipeline)
-        mediaAttributionView.setPost(model, pipeline: imagePipeline)
+        mediaAttributionView.setPost(model, soundLine: soundLine(for: model), pipeline: imagePipeline)
         // The bars float over the PAGE, so their text has to know what kind
         // of ground it is floating over. A media page is arbitrary and dark
         // enough to want white-and-shadowed; a text page follows the system
@@ -3804,10 +3816,95 @@ final class SnapFeedViewController: UIViewController {
     }
 
     /// Silences this screen's sound while something else is heard over it —
-    /// a sound's preview in the sheet above — and gives it back after.
+    /// the sound sheet covering the page — and gives it back after.
     func yieldAudio(_ yielded: Bool) {
         isAudioYielded = yielded
         refreshAudibleSurface()
+    }
+
+    // MARK: - Sound sheet
+
+    /// The clip a post's sound belongs to: the one on screen when this is the
+    /// active page (a collection's pages are different clips, with different
+    /// sounds), else its head, or its first clip page.
+    private func soundVideoURL(of model: FeedItemDisplayModel) -> URL? {
+        if model.id == activeModel?.id, let playing = activeSnapCell?.currentClipURL { return playing }
+        if model.mediaKind == .video, let url = model.mediaURL { return url }
+        return model.extraMedia.first { $0.videoURL != nil }?.videoURL
+    }
+
+    /// The sound `model` is set to: the provider's answer, or — with nobody to
+    /// ask — the clip's own "original sound", played from the clip itself
+    /// when a player can open it.
+    private func sound(for model: FeedItemDisplayModel) -> PostSound? {
+        guard let url = soundVideoURL(of: model) else { return nil }
+        if let known = soundProvider?.sound(forVideo: url) { return known }
+        let playable = url.isFileURL || ["http", "https"].contains(url.scheme?.lowercased() ?? "")
+        return PostSound(
+            id: "original-\(model.id.rawValue)", title: nil, artist: nil,
+            previewURL: playable ? url : nil, artworkURL: model.thumbnailURL, duration: nil
+        )
+    }
+
+    /// The attribution's second line: the track, or the author's original
+    /// sound. Nil for a post with nothing to hear.
+    private func soundLine(for model: FeedItemDisplayModel) -> String? {
+        guard let sound = sound(for: model) else { return nil }
+        guard let title = sound.title else { return model.audioText }
+        return [title, sound.artist].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    /// "@handle" off the meta line ("@handle · 3m"), the author's name
+    /// otherwise.
+    private static func handle(of model: FeedItemDisplayModel) -> String {
+        let first = model.metaText.components(separatedBy: " · ").first ?? ""
+        return first.hasPrefix("@") ? String(first.dropFirst()) : model.authorName
+    }
+
+    /// The attribution's tap: the sound the page is set to, in a sheet.
+    private func presentSoundSheet() {
+        guard presentedViewController == nil, let model = activeModel,
+              let sound = sound(for: model) else { return }
+        // The grid lists the posts set to this sound that THIS feed can show,
+        // so every tile leads somewhere; the page it was opened from first.
+        let using = soundProvider?.postIDs(using: sound) ?? []
+        let ids = [model.id] + using.filter { $0 != model.id && modelsByID[$0] != nil }
+        let tiles = ids.map { id in
+            SoundSheetViewController.Tile(
+                postID: id, thumbnailURL: modelsByID[id]?.thumbnailURL, isCurrent: id == model.id
+            )
+        }
+        let sheet = SoundSheetViewController(
+            sound: sound,
+            authorHandle: Self.handle(of: model),
+            fallbackArtworkURL: model.thumbnailURL ?? model.avatarURL,
+            tiles: tiles,
+            imagePipeline: imagePipeline
+        )
+        sheet.onUseSound = useSound.map { use in { sound in use(sound) } }
+        // The cell that is covered now is the one to uncover, whatever the
+        // feed does meanwhile.
+        weak var covered = activeSnapCell
+        sheet.onCoverChanged = { [weak self] covering in
+            covered?.setCoveredBySheet(covering)
+            self?.yieldAudio(covering)
+        }
+        sheet.onDismissed = { [weak self] in
+            covered?.setCoveredBySheet(false)
+            self?.yieldAudio(false)
+        }
+        sheet.onSelectPost = { [weak self] id in self?.showPost(id) }
+        present(sheet, animated: true)
+    }
+
+    /// Brings `id` to the screen — a tile of the sound sheet.
+    private func showPost(_ id: PostID) {
+        guard let index = orderedIDs.firstIndex(of: id), index != lifecycle.activeIndex else { return }
+        UIView.transition(with: collectionView, duration: 0.25, options: .transitionCrossDissolve) {
+            self.collectionView.scrollToItem(at: IndexPath(item: index, section: 0), at: .top, animated: false)
+        }
+        updateActiveItem()
+        updateViewportPlayback()
     }
 
     /// Puts the SCREEN's bars on the page's theme.

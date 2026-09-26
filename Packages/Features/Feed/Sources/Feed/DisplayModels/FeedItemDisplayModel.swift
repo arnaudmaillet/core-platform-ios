@@ -35,7 +35,7 @@ public struct FeedItemDisplayModel: Identifiable, Sendable, Equatable {
     /// Poster/thumbnail; for a video it's shown under the player until the first
     /// frame is ready.
     let thumbnailURL: URL?
-    /// The media toolbar's audio attribution line ("Original audio · @handle").
+    /// The media toolbar's audio attribution line ("Original sound · @handle").
     /// Derived — the BFF exposes no track metadata yet; swap for the real
     /// track title/artist once the post proto carries audio. Nil for
     /// non-video posts (the toolbar falls back to `metaText`).
@@ -140,7 +140,7 @@ public struct FeedDisplayModelBuilder: Sendable {
             mediaKind: mediaKind,
             thumbnailURL: attachment?.thumbnailURL,
             audioText: (attachment != nil && mediaKind == .video)
-                ? "Original audio · @\(entry.author.handle)" : nil,
+                ? "Original sound · @\(entry.author.handle)" : nil,
             likeCount: entry.likeCount,
             timestampText: Self.readableTimestamp(from: entry.post.publishedAt, to: now),
             // Everything after the head. `attachments` is a repeated field and
