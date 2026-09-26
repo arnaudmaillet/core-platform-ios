@@ -655,6 +655,36 @@ final class MapsViewController: UIViewController {
         barsBottomConstraint.constant = target
     }
 
+    /// Ends every animation left frozen at `speed == 0` on `view` and its
+    /// subviews, landing each on its model value.
+    ///
+    /// ⚠️ A FINGER-DRIVEN CLOSE LEFT THE WHOLE MAP DEAD TO TOUCH. A custom
+    /// interactive pop runs UIKit's coordinated changes (the tab bar coming
+    /// back, the safe area moving with it) inside a PAUSED animation context,
+    /// and MapKit answers the inset change by adding its own
+    /// `__mapkit_edgeInsetsSentinel` to the map's layer with those paused
+    /// settings. UIKit resumes the animations it tracks when the transition
+    /// finishes; this one it never resumes. A view with a UIKit animation in
+    /// flight is not hit-tested into, so every touch on the map stopped at
+    /// `MKMapView` itself and was never delivered — markers, pans, pinches,
+    /// all of it, until relaunch. The chevron's pop is not interactive, its
+    /// sentinel runs at speed 1 and is gone in 0.2 s, which is why only the
+    /// grab broke the map. Measured 2026-09-26: speed 0, `fillMode` both,
+    /// still attached seconds after `viewDidAppear`.
+    ///
+    /// Removing an animation reports it stopped to its delegate, which is what
+    /// hands the map its touches back. Every transition is over by
+    /// `viewDidAppear`, so nothing legitimately paused can be caught here.
+    private static func releaseFrozenAnimations(in view: UIView) {
+        let layer = view.layer
+        for key in layer.animationKeys() ?? [] where layer.animation(forKey: key)?.speed == 0 {
+            layer.removeAnimation(forKey: key)
+        }
+        for subview in view.subviews {
+            releaseFrozenAnimations(in: subview)
+        }
+    }
+
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         // Kick the first query; coalesces with any region-settle callback.
@@ -670,6 +700,7 @@ final class MapsViewController: UIViewController {
         for annotation in mapView.annotations {
             mapView.view(for: annotation)?.isHidden = false
         }
+        Self.releaseFrozenAnimations(in: mapView)
         // ⚠️ AND THE GATE, for the same reason and in the same place: every
         // transition is over by here. It is the backstop for endings nobody
         // wired — a place page popping home, a multi-pop, a cross-tab return —
