@@ -25,6 +25,9 @@ final class ProfileTabCoordinator: TabCoordinator {
     let navigationController = UINavigationController()
 
     private let container: AppContainer
+    /// The shell's bell, minted into this header's leading edge — the ROOT's
+    /// only: a pushed profile leads with its back button.
+    private let notificationsBell: NotificationsBell
     private let onLogout: () -> Void
 
     private(set) lazy var tab = UITab(
@@ -35,8 +38,13 @@ final class ProfileTabCoordinator: TabCoordinator {
 
     private static let placeholder = UIImage(systemName: "person.crop.circle")
 
-    init(container: AppContainer, onLogout: @escaping () -> Void) {
+    init(
+        container: AppContainer,
+        notificationsBell: NotificationsBell,
+        onLogout: @escaping () -> Void
+    ) {
         self.container = container
+        self.notificationsBell = notificationsBell
         self.onLogout = onLogout
     }
 
@@ -56,9 +64,20 @@ final class ProfileTabCoordinator: TabCoordinator {
             trayPlacement: .aboveBottomSafeArea
         )
         navigationController.viewControllers = [profile]
-        // The balance, inboard of the gear — the same installer the Explore and
-        // For You headers use. ⚠️ THE TAB ROOT ONLY: a pushed profile is
-        // someone else's, and a viewer's balance has no business on it.
+        // The header reads `[bell][filter] … [coins][switcher settings]`. The bell
+        // leads, ahead of the source filter the screen composes itself.
+        (profile as? any HeaderAccessoryHosting)?
+            .setLeadingAccessoryItem(notificationsBell.makeItem())
+        // The balance, inboard of the switcher + settings pair — the same
+        // installer every root header uses.
+        //
+        // ⚠️ A PUSHED PROFILE WEARS ONE TOO NOW, and did not before: the rule
+        // was "a pushed profile is someone else's, and a viewer's balance has
+        // no business on it". The balance is the viewer's wherever they stand
+        // — the post screen and the search results already said so — and the
+        // header was asked to carry it everywhere. A pushed profile has no
+        // coordinator, so its installer hangs on the screen itself; see
+        // `RouteResolver`'s `.profile` case and `WalletBadgeInstaller.attach`.
         walletBadge = WalletBadgeInstaller(
             wallet: container.walletStore,
             presenter: navigationController,

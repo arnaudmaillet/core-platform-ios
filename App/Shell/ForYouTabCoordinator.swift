@@ -21,6 +21,8 @@ final class ForYouTabCoordinator: TabCoordinator {
     let navigationController = UINavigationController()
 
     private let container: AppContainer
+    /// The shell's bell, minted into this header's leading edge.
+    private let notificationsBell: NotificationsBell
 
     private(set) lazy var tab = UITab(
         title: "For You",
@@ -28,8 +30,9 @@ final class ForYouTabCoordinator: TabCoordinator {
         identifier: AppTab.forYou.rawValue
     ) { [navigationController] _ in navigationController }
 
-    init(container: AppContainer) {
+    init(container: AppContainer, notificationsBell: NotificationsBell) {
         self.container = container
+        self.notificationsBell = notificationsBell
     }
 
     /// The header's balance badge — the same object the Explore header wears,
@@ -42,6 +45,11 @@ final class ForYouTabCoordinator: TabCoordinator {
             self?.apply(presentation)
         }
         navigationController.viewControllers = [forYou]
+        // The header reads `[bell][lens] … [coins][search]`: the bell leads,
+        // ahead of the lens the screen composes itself, and — like the balance
+        // — reaches it through the screen for the reason given just below.
+        (forYou as? any HeaderAccessoryHosting)?
+            .setLeadingAccessoryItem(notificationsBell.makeItem())
         // ⚠️ Installed through the SCREEN, not onto its `navigationItem`: For
         // You composes its own trailing run at `viewDidLoad`, so an item
         // written from out here would be erased by it.

@@ -23,7 +23,6 @@ final class MessageRequestsViewController: UIViewController {
         table.showsHorizontalScrollIndicator = false
         return table
     }()
-    private let refreshControl = UIRefreshControl()
     private let skeletonView = ConversationListSkeletonView()
     private let statusView = InboxStatusView()
 
@@ -111,8 +110,10 @@ final class MessageRequestsViewController: UIViewController {
         tableView.estimatedRowHeight = 84
         tableView.pin(to: view)
 
-        refreshControl.addAction(UIAction { [weak self] _ in self?.viewModel.refresh() }, for: .valueChanged)
-        tableView.refreshControl = refreshControl
+        // ⚠️ NO REFRESH CONTROL. Pulling this list down opens search now —
+        // see `InboxPullToSearch`. The requests come from the same catalog as
+        // All, which reloads whenever the inbox appears, and this page asks
+        // for a refresh every time it becomes active.
 
         dataSource = SectionedConversationDataSource(tableView: tableView) {
             [weak self] tableView, indexPath, id in
@@ -149,7 +150,6 @@ final class MessageRequestsViewController: UIViewController {
             tableView.isHidden = true
             statusView.isHidden = true
         case .content(let sections):
-            refreshControl.endRefreshing()
             statusView.isHidden = true
             var snapshot = NSDiffableDataSourceSnapshot<InboxListSection, ConversationID>()
             if !sections.new.isEmpty {
@@ -172,7 +172,6 @@ final class MessageRequestsViewController: UIViewController {
             hasRenderedContent = true
             revealContent()
         case .empty:
-            refreshControl.endRefreshing()
             skeletonView.isHidden = true
             tableView.isHidden = true
             statusView.configure(
@@ -182,7 +181,6 @@ final class MessageRequestsViewController: UIViewController {
             )
             statusView.isHidden = false
         case .failed(let message):
-            refreshControl.endRefreshing()
             skeletonView.isHidden = true
             tableView.isHidden = true
             statusView.configure(symbol: "exclamationmark.triangle", title: "Something went wrong", message: message)

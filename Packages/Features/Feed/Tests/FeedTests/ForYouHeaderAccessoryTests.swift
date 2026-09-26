@@ -107,6 +107,48 @@ struct ForYouHeaderAccessoryTests {
 
         #expect(screen.navigationItem.rightBarButtonItems?.count == 1)
     }
+
+    // MARK: - The leading item (the shell's bell)
+
+    /// ⚠️ THE BELL TAKES THE LEADING CORNER, and the lens stands inboard of it.
+    ///
+    /// `leftBarButtonItems[0]` is the item nearest the LEADING screen edge, so
+    /// the header reads `[bell][lens] … [coins][search]`.
+    @Test func theInjectedBellLeadsAheadOfTheLens() throws {
+        let screen = screen()
+        screen.loadViewIfNeeded()
+        let bell = accessory()
+
+        screen.setLeadingAccessoryItem(bell)
+
+        let items = try #require(screen.navigationItem.leftBarButtonItems)
+        #expect(items.count == 2)
+        #expect(items.first === bell, "the lens took the corner from the bell")
+    }
+
+    /// Injected before the view loads — the order the shell actually uses —
+    /// it survives the screen's own write of the leading group at load.
+    @Test func aBellInjectedBeforeTheViewLoadsSurvives() throws {
+        let screen = screen()
+        let bell = accessory()
+
+        screen.setLeadingAccessoryItem(bell)
+        screen.loadViewIfNeeded()
+
+        let items = try #require(screen.navigationItem.leftBarButtonItems)
+        #expect(items.first === bell, "the header's own write erased the bell")
+    }
+
+    /// Clearing it leaves the lens alone in the leading group.
+    @Test func clearingTheBellLeavesTheLens() {
+        let screen = screen()
+        screen.loadViewIfNeeded()
+
+        screen.setLeadingAccessoryItem(accessory())
+        screen.setLeadingAccessoryItem(nil)
+
+        #expect(screen.navigationItem.leftBarButtonItems?.count == 1)
+    }
 }
 
 private final class StubHeaderProvider: ForYouProviding, @unchecked Sendable {

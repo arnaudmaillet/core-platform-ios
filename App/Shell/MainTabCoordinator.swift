@@ -39,30 +39,12 @@ final class MainTabCoordinator: NSObject, Coordinator {
 
     private let container: AppContainer
     private let onLogout: () -> Void
-    /// The Notifications entry point: a plain bar item like the map's "+", tinted
-    /// `.label` so it renders dark in the glass bubble (not system blue). The
-    /// unread badge is a clean image swap — `bell` ↔ `bell.badge` (a red badge
-    /// dot) — driven by `refreshUnreadBadge`, no custom view needed.
-    private lazy var notificationsBarItem: UIBarButtonItem = {
-        let item = UIBarButtonItem(
-            image: Self.bellImage(unread: false),
-            primaryAction: UIAction { [weak self] _ in self?.pushNotifications() }
-        )
-        item.tintColor = .label
-        item.accessibilityLabel = "Notifications"
-        return item
-    }()
-
-    /// The bell glyph for the current unread state. When unread, a palette
-    /// `bell.badge` (bell in `.label`, badge in red) rendered `.alwaysOriginal`
-    /// so the item's `.label` tint can't flatten the badge; otherwise a plain
-    /// template `bell` that the tint draws dark. Both keep dynamic colors, so
-    /// they adapt to light/dark on their own.
-    private static func bellImage(unread: Bool) -> UIImage? {
-        guard unread else { return UIImage(systemName: "bell") }
-        let config = UIImage.SymbolConfiguration(paletteColors: [.label, .systemRed])
-        return UIImage(systemName: "bell.badge", withConfiguration: config)?
-            .withRenderingMode(.alwaysOriginal)
+    /// The Notifications entry point, as every root header wears it: the unread
+    /// state and the tap live here once, and each header is handed a FRESH item
+    /// bound to them (`NotificationsBell`) — a bar item lives in one bar, so the
+    /// single item this used to be could only ever lead the map's.
+    private lazy var notificationsBell = NotificationsBell { [weak self] in
+        self?.pushNotifications()
     }
     private var feedFlow: FeedFlowCoordinator?
     /// The Profile root. Held so the viewer's avatar can be pushed onto its tab
@@ -171,9 +153,11 @@ final class MainTabCoordinator: NSObject, Coordinator {
         addChild(feedFlow)
         self.feedFlow = feedFlow
 
-        let profileTab = ProfileTabCoordinator(container: container, onLogout: onLogout)
+        let profileTab = ProfileTabCoordinator(
+            container: container, notificationsBell: notificationsBell, onLogout: onLogout
+        )
         self.profileTab = profileTab
-        let forYouTab = ForYouTabCoordinator(container: container)
+        let forYouTab = ForYouTabCoordinator(container: container, notificationsBell: notificationsBell)
         self.forYouTab = forYouTab
         // Bar order: the four places, then the "+". The "+" is not a place, so
         // it is not in `orderedTabs` and nothing can route to it. UIKit
@@ -182,10 +166,12 @@ final class MainTabCoordinator: NSObject, Coordinator {
         orderedTabs = [
             (.explore, ExploreTabCoordinator(
                 container: container,
-                notificationsButtonItem: notificationsBarItem
+                notificationsButtonItem: notificationsBell.makeItem()
             )),
             (.forYou, forYouTab),
-            (.messages, MessagesTabCoordinator(container: container)),
+            (.messages, MessagesTabCoordinator(
+                container: container, notificationsBell: notificationsBell
+            )),
             (.profile, profileTab)
         ]
         for (_, tab) in orderedTabs {
@@ -415,7 +401,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
             }
         }
         // `-open-notifications` pushes the notifications feed on launch — the
-        // map bell's exact code path — so it's screenshottable without a tap
+        // bells' exact code path — so it's screenshottable without a tap
         // (the sim injects none). Deferred a tick, as above.
         if arguments.contains("-open-notifications") {
             DispatchQueue.main.async { [weak self] in self?.pushNotifications() }
@@ -476,19 +462,19 @@ final class MainTabCoordinator: NSObject, Coordinator {
         #endif
     }
 
-    /// The Explore tab's navigation stack — where notifications (the bell's
-    /// destination) are pushed. Resolved from `orderedTabs` so it tracks the
-    /// one `ExploreTabCoordinator` the shell built.
-    private var exploreNavigationController: UINavigationController? {
-        orderedTabs.first(where: { $0.0 == .explore })?.1.navigationController
-    }
-
-    /// Pushes Notifications onto the Explore stack — the bell's action (the
-    /// bell only shows on the Explore root). Rooted at the map so back returns
-    /// there; reading clears the badge server-side, and `refreshUnreadBadge`
-    /// reconciles on return. Shared with the `-open-notifications` debug hook.
+    /// Pushes Notifications onto the SELECTED tab's stack — the bell's action.
+    ///
+    /// It used to be the Maps stack, always, because the map was the only
+    /// header with a bell. Every root header leads with one now, and a bell only
+    /// ever stands on a tab ROOT with nothing presented over it, so the selected
+    /// stack is by construction the one whose bell was pressed: back returns to
+    /// the header the viewer tapped. Reading clears the badge server-side, and
+    /// `refreshUnreadBadge` reconciles on the next tab switch. Shared with the
+    /// `-open-notifications` debug hook, which therefore pushes onto whichever
+    /// tab `-select-tab` chose.
     private func pushNotifications() {
-        guard let navigationController = exploreNavigationController else { return }
+        guard let navigationController = tabBarController.selectedViewController
+            as? UINavigationController else { return }
         navigationController.pushViewController(
             container.notificationsFeature.makeNotificationsViewController(),
             animated: true
@@ -542,7 +528,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
         }.withRenderingMode(.alwaysOriginal)
     }
 
-    /// Mirrors the unread notifications count onto the bell (a `bell` ↔
+    /// Mirrors the unread notifications count onto every bell (a `bell` ↔
     /// `bell.badge` image swap). Best-effort and idempotent — called on start,
     /// on every tab switch, and when a notifications-bearing surface (Profile /
     /// the pushed feed) is left.
@@ -550,7 +536,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
         Task { [weak self] in
             guard let self else { return }
             let count = await container.notificationsFeature.unreadCount()
-            notificationsBarItem.image = Self.bellImage(unread: count > 0)
+            notificationsBell.setUnread(count > 0)
         }
     }
 }
