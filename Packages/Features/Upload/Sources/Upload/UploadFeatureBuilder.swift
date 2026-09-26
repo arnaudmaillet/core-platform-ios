@@ -1,4 +1,5 @@
 import FeedInterface
+import MediaPlayback
 import UIKit
 
 /// The screens behind the tab bar's "+" menu that belong to this package:
@@ -99,7 +100,12 @@ public struct UploadFeatureBuilder {
     /// shutter opens the ordinary picker, whose editor reads the device's
     /// library as it always has. Handing either the other's library would ask
     /// it for items it never registered.
-    public func makeCameraViewController() -> UIViewController {
+    ///
+    /// - Parameter soundtrack: a sound chosen before the camera opened — "Use
+    ///   this sound" on a post. Named at the top of the camera, and laid under
+    ///   every clip the author takes, in the editor they land on; they can
+    ///   still change or remove it there.
+    public func makeCameraViewController(soundtrack: VideoSoundtrack? = nil) -> UIViewController {
         let draft = PostDraft()
         // Captures left by a process that died with a camera sheet up — this
         // draft's own folder is already registered, so it is spared.
@@ -122,6 +128,14 @@ public struct UploadFeatureBuilder {
                 return picker
             }
         ) { items, initialEdits in
+            var initialEdits = initialEdits
+            if let soundtrack {
+                for item in items where item.isVideo {
+                    var edits = initialEdits[item.id] ?? .untouched
+                    edits.soundtrack = soundtrack
+                    initialEdits[item.id] = edits
+                }
+            }
             let editor = MediaEditorViewController(
                 items: items, library: captures,
                 soundtracks: SystemSoundtrackSource(files: draft.soundtrackFiles),
@@ -140,6 +154,7 @@ public struct UploadFeatureBuilder {
             captures.hold(items, by: editor)
             return editor
         }
+        camera.presetSoundTitle = soundtrack?.title
         let navigation = UploadNavigationController(rootViewController: camera)
         navigation.modalPresentationStyle = .pageSheet
         if let sheet = navigation.sheetPresentationController {

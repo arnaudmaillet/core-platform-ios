@@ -328,6 +328,19 @@ final class CaptureViewController: UIViewController {
 
     // MARK: - Bars
 
+    /// The sound the camera was opened with ("Use this sound"), named at the
+    /// top of the screen so the author knows what their clip will be set to.
+    /// Nil shows nothing; the editor is where a sound is chosen otherwise.
+    var presetSoundTitle: String? {
+        didSet {
+            navigationItem.titleView = presetSoundTitle.map { title in
+                let pill = SoundPillView(title: title)
+                pill.accessibilityLabel = "Sound: \(title)"
+                return pill
+            }
+        }
+    }
+
     private func configureBars() {
         // The flip and the flash, where Cancel was; the close button is at
         // the toolbar's trailing end.
