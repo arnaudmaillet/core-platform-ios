@@ -81,6 +81,11 @@ final class SnapAuthorIdentityView: UIView {
     /// Called when the follow icon is tapped, with the shown author.
     var onFollowTapped: ((ProfileID) -> Void)?
 
+    /// The author's INITIALS, always drawn — the app's avatar contract:
+    /// initials first, the picture hydrates in front of them. It used to be a
+    /// grey disc for anyone without a picture, the one place in the app a
+    /// person was faceless.
+    private let monogramView = MonogramAvatarView(diameter: AvatarImageView.barDiameter)
     private let avatarView = AvatarImageView()
     private let nameLabel = UILabel()
     private let metaLabel = UILabel()
@@ -111,9 +116,9 @@ final class SnapAuthorIdentityView: UIView {
         // Size and circle geometry come from the shared component: the same
         // diameter as the Maps toolbar's profile avatar, and a radius bound
         // to the bounds each layout pass — a perfect circle by construction.
-        avatarView.backgroundColor = .darkGray
-        avatarView.widthAnchor.constraint(equalToConstant: AvatarImageView.barDiameter).isActive = true
-        avatarView.heightAnchor.constraint(equalToConstant: AvatarImageView.barDiameter).isActive = true
+        // Clear: with no picture (yet) the initials behind show through.
+        avatarView.backgroundColor = .clear
+        avatarView.pin(to: monogramView)
 
         nameLabel.font = UIFont.preferredFont(forTextStyle: .footnote).withWeight(.semibold)
         nameLabel.textColor = .label
@@ -156,7 +161,7 @@ final class SnapAuthorIdentityView: UIView {
         labelsStack.alignment = .leading
         setRedacted(true)
 
-        let row = UIStackView(arrangedSubviews: [avatarView, labelsStack, followButton])
+        let row = UIStackView(arrangedSubviews: [monogramView, labelsStack, followButton])
         row.axis = .horizontal
         row.spacing = Spacing.sm
         row.alignment = .center
@@ -246,6 +251,9 @@ final class SnapAuthorIdentityView: UIView {
             self.nameLabel.text = model.authorName
             self.metaLabel.text = model.metaText
             self.avatarView.image = nil
+            self.monogramView.setMonogram(MonogramAvatarView.monogram(
+                name: model.authorName, handle: Self.handle(fromMeta: model.metaText)
+            ))
         }
 
         avatarTask?.cancel()
@@ -278,6 +286,9 @@ final class SnapAuthorIdentityView: UIView {
             self.nameLabel.text = name
             self.metaLabel.text = meta
             if faceChanged { self.avatarView.image = nil }
+            self.monogramView.setMonogram(MonogramAvatarView.monogram(
+                name: name, handle: Self.handle(fromMeta: meta)
+            ))
         }
 
         guard faceChanged else { return }
@@ -290,6 +301,12 @@ final class SnapAuthorIdentityView: UIView {
                 self.avatarView.image = image
             }
         }
+    }
+
+    /// "@handle" off a meta line ("@handle · 3m"); empty when it carries none.
+    private static func handle(fromMeta meta: String) -> String {
+        let first = meta.components(separatedBy: " · ").first ?? ""
+        return first.hasPrefix("@") ? String(first.dropFirst()) : ""
     }
 
     /// The face `setPerson` last asked for — the arrival guard for its fetch.
