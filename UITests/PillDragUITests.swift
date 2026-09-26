@@ -18,7 +18,7 @@ final class PillDragUITests: XCTestCase {
 
     /// For You: three tabs in the bottom accessory, indices into `AppTab`.
     /// ⚠️ `-select-tab` takes an INDEX; a name is a silent no-op that lands on
-    /// Maps and fakes a missing selector.
+    /// Explore and fakes a missing selector.
     private static let forYou = "1"
 
     func testTheFingerOnThePillPagesAndTheFingerBesideItDoesNot() {

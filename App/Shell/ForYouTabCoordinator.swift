@@ -32,9 +32,9 @@ final class ForYouTabCoordinator: TabCoordinator {
         self.container = container
     }
 
-    /// The header's balance badge — the same object the Maps header wears, so
-    /// the number, the claim countdown and the sheet cannot drift between the
-    /// two. Held for the coordinator's life, which is the process's.
+    /// The header's balance badge — the same object the Explore header wears,
+    /// so the number, the claim countdown and the sheet cannot drift between
+    /// the two. Held for the coordinator's life, which is the process's.
     private var walletBadge: WalletBadgeInstaller?
 
     func start() {

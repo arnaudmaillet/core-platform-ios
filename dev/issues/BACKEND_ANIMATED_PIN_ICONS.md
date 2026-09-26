@@ -2,7 +2,7 @@
 
 **Service:** `geo_discovery.v1` (+ a new catalog RPC; `chat.v1` optional)
 · **Status:** proposal — no field exists yet, so the wire shape is still ours to choose
-**Client:** iOS Maps tab (every text marker, every zoom, every pan) and the chat transcript
+**Client:** iOS Explore (map) tab (every text marker, every zoom, every pan) and the chat transcript
 **Related:** `dev/BACKEND_GAPS.md` §15 (`RadarPin` renditions), §18 (semantic
 clusters), `dev/issues/BACKEND_MAP_PIN_AUTHOR.md` (same marker slot),
 `dev/issues/BACKEND_MEDIA_PREVIEW_RENDITIONS.md` (§C, and a client guarantee
