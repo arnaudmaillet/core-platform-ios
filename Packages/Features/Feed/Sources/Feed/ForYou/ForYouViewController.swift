@@ -474,7 +474,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     /// An item the SHELL owns, standing inboard of this screen's own —
-    /// the viewer's point balance today, the same badge the Maps header and
+    /// the viewer's point balance today, the same badge the Explore header and
     /// the post screen wear.
     ///
     /// Injected rather than built here, and that is the whole design: three
@@ -496,7 +496,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     }
 
     /// ⚠️ `[0]` IS THE SCREEN EDGE. Search keeps the corner and the wallet
-    /// badge sits to its left — the same arrangement the Maps header wears
+    /// badge sits to its left — the same arrangement the Explore header wears
     /// ([coins] [search]). The lens menu moved to the LEADING group, ahead of
     /// the selector, so the header reads
     /// `[lens][selector] … [coins][search]`.
@@ -516,11 +516,11 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         //
         // ⚠️ **NO TITLE IN THE BAR.** "For You" was written here (the static
         // word, never the live lens name, which at "Entertainment" would have
-        // collided with the items); it went with Maps' on 2026-09-22 — the two
-        // roots' headers carry their controls and nothing else, and the tab
-        // bar already says the word. `title` still feeds nothing: the capsule
-        // in `titleView` outranks it when present, and the bar is bare when not.
-        //
+        // collided with the items); it went with the map tab's on 2026-09-22 —
+        // the two roots' headers carry their controls and nothing else, and the
+        // tab bar already says the word. `title` still feeds nothing: the
+        // capsule in `titleView` outranks it when present, and the bar is bare
+        // when not.
         // `largeTitleDisplayMode` stays `.never`: the large-title content-area
         // layout is kept out of the hero flight's path, which is a separate
         // reason and still holds.

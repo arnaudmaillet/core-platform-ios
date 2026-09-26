@@ -11,8 +11,8 @@ import UIKit
 /// the tap-to-feed hand-off is wired inside the feature.
 @MainActor
 public protocol MapsFeatureBuilding {
-    /// The map surface for the Maps tab: an `MKMapView` rendering post pins in
-    /// the current viewport, re-queried on pan/zoom settle.
+    /// The map surface for the Explore tab: an `MKMapView` rendering post pins
+    /// in the current viewport, re-queried on pan/zoom settle.
     func makeMapViewController() -> UIViewController
 
     /// Curating the map's pinned people, for surfaces outside Maps — today the

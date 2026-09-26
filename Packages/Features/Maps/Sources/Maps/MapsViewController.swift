@@ -8,9 +8,9 @@ import MediaCore
 import MediaPlayback
 import UIKit
 
-/// The Maps tab surface: a full-bleed `MKMapView` that re-queries lightweight
-/// pins whenever the user settles a pan/zoom, and applies the result as a
-/// minimal identity diff so untouched markers never flicker.
+/// The Explore tab's surface: a full-bleed `MKMapView` that re-queries
+/// lightweight pins whenever the user settles a pan/zoom, and applies the
+/// result as a minimal identity diff so untouched markers never flicker.
 ///
 /// This VC is a thin MapKit dispatcher — the query, cancellation, and diffing
 /// live in `MapsViewModel`; the region→viewport math lives in `MapViewport`.
@@ -359,7 +359,7 @@ final class MapsViewController: UIViewController {
         // No title, deliberately: the map is the tab's whole surface and
         // names itself; the header band belongs to its controls — the
         // compose "+", the wallet badge, the bell. (The tab bar still says
-        // "Maps"; that label lives on `UITab`, not here.)
+        // "Explore"; that label lives on `UITab`, not here.)
         // ⚠️ THE BAR WEARS A TRANSPARENT APPEARANCE, STATED. Every other
         // screen keeps UIKit's default and is bare because its list hides the
         // top edge effect (`prefersClearTopEdge`). This screen has no scroll
@@ -2760,9 +2760,10 @@ extension MapsViewController: MKMapViewDelegate {
             }
         )
         // A *push*, not a modal: the feed joins this tab's stack, so the one
-        // navigation bar cross-fades "Maps" into the feed's back item + author
-        // capsule natively — no second bar to pop in over the first. The
-        // transition object is the stack's delegate for the feed's lifetime.
+        // navigation bar cross-fades the map's items into the feed's back item
+        // + author capsule natively — no second bar to pop in over the first.
+        // The transition object is the stack's delegate for the feed's
+        // lifetime.
         guard openGate.openBegan(.hero) else { return }
         let transition = ZoomTransitionController(source: source, destination: destination)
         activeTransition = transition

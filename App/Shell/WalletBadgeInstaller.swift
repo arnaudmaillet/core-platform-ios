@@ -4,7 +4,7 @@ import UIKit
 
 /// The wallet's toolbar face, and everything that keeps it true.
 ///
-/// The balance stands in four headers now — Maps, For You, Profile, and the
+/// The balance stands in four headers now — Explore, For You, Profile, and the
 /// post screen — and each of them needs the same four things around it: a badge
 /// whose count is current, a wake-up for the moment the hourly claim unlocks
 /// (the one state change that arrives by CLOCK, so no notification announces

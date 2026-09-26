@@ -1,7 +1,7 @@
 # Backend: semantic geo clusters (city / country / region) for the map
 
 **Service:** `geo_discovery.v1` · **Status:** proposal — nothing on the wire today
-**Client:** iOS Maps tab (pin/cluster tap → feed → cluster gallery)
+**Client:** iOS Explore (map) tab (pin/cluster tap → feed → cluster gallery)
 **Product update 2026-08-31:** the REGION level was cut from the product — the
 client hierarchy is **country → city** only. Keep `CLUSTER_KIND_REGION = 3`
 reserved in the enum (no renumbering), but the server should not emit it and
