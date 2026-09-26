@@ -7,16 +7,17 @@ import UIKit
 
 // The pieces of the wallet sheet (`WalletClaimViewController`): the summary at
 // its head — the two currencies side by side over the streak and today's
-// earnings — the stake rows under it, their section headers, the compact bar
-// the summary collapses into on scroll, and the blurs the list passes under.
+// earnings — the stake rows under it, their section headers, and the compact
+// bar the summary collapses into on scroll.
 //
 // ⚠️ **CARDS ONLY FOR WHAT CAN BE PRESSED** (26 September 2026). The summary
 // used to sit in three filled cards — two balances and a streak card — and a
 // card is the app's promise that a thing can be pressed: nothing in the summary
-// can. So the summary is BARE, big numbers straight on the page with hairlines
-// between them, and the only cards on the sheet are the stake rows, which open
-// their post. The page itself is the grouped grey with white cards on it —
-// For You's and Profile's surface (`Surface`).
+// can. So the summary is BARE, big numbers straight on the sheet with
+// hairlines between them, and the only cards on the sheet are the stake rows,
+// which open their post. The sheet's ground is the SYSTEM's (glass while
+// small, opaque once large), so the rows wear a translucent fill that reads
+// on both.
 
 // MARK: - Shared
 
@@ -27,6 +28,8 @@ enum WalletSheetMetrics {
     static let thumbnail: CGFloat = 48
     /// The balances: the sheet's main information, so its biggest type.
     static let balanceSize: CGFloat = 40
+    /// The stake rows' ground — see `WalletStakeCell`.
+    static let cardFill: UIColor = .tertiarySystemFill
 }
 
 /// A number followed by its currency's glyph — "20 ♥", "+10 💎" — the ONE order
@@ -341,9 +344,15 @@ final class WalletStakeCell: UICollectionViewCell {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        // A white card on the grouped page — the one thing on the sheet that
-        // can be pressed (it opens the post).
-        contentView.backgroundColor = Surface.card
+        // A card the sheet's OWN ground can carry in both of its states —
+        // the one thing on the sheet that can be pressed (it opens the post).
+        //
+        // ⚠️ A system FILL, not `Surface.card`. The sheet's ground is the
+        // system's now (glass while small, opaque white once large), and a
+        // white card vanished on the large sheet — only the thumbnails were
+        // left, floating (filmed, 26 September 2026). A translucent fill
+        // stands off both grounds by the same amount.
+        contentView.backgroundColor = WalletSheetMetrics.cardFill
         contentView.layer.cornerRadius = WalletSheetMetrics.rowCorner
         contentView.layer.cornerCurve = .continuous
         Surface.applyCardEdge(to: contentView)
@@ -352,7 +361,9 @@ final class WalletStakeCell: UICollectionViewCell {
 
         thumbnail.contentMode = .scaleAspectFill
         thumbnail.clipsToBounds = true
-        thumbnail.layer.cornerRadius = 10
+        // The flight card's own corner (`.listMedia`), so a post flying home
+        // lands on exactly the shape it left.
+        thumbnail.layer.cornerRadius = PostGridListRowCell.mediaCornerRadius
         thumbnail.layer.cornerCurve = .continuous
         thumbnail.backgroundColor = .tertiarySystemFill
         thumbnail.tintColor = .secondaryLabel
@@ -516,7 +527,7 @@ final class WalletStakeCell: UICollectionViewCell {
 final class WalletEmptyStakesCell: UICollectionViewCell {
     override init(frame: CGRect) {
         super.init(frame: frame)
-        contentView.backgroundColor = Surface.card
+        contentView.backgroundColor = WalletSheetMetrics.cardFill
         contentView.layer.cornerRadius = WalletSheetMetrics.rowCorner
         contentView.layer.cornerCurve = .continuous
         Surface.applyCardEdge(to: contentView)
@@ -582,35 +593,21 @@ final class WalletSectionHeader: UICollectionReusableView {
 // MARK: - Compact bar
 
 /// What the summary collapses into once it has scrolled away: both balances
-/// on one line, pinned under the grabber over a blur that dissolves downward,
-/// so the list passes BEHIND it and is never read without the balances.
-///
-/// ⚠️ **THE BLUR FADES IN BY SCRUBBING ITS EFFECT, NOT ITS ALPHA.** Alpha on a
-/// visual-effect view (or any ancestor of one) is unsupported and renders
-/// wrong; a paused property animator over `effect` is the native way to show
-/// part of a material, and `progress` sets its fraction.
+/// on one line, pinned under the grabber, so the list below is never read
+/// without them. The list passing under it is blurred by the system's soft
+/// scroll-edge effect (the sheet registers this bar with the list's top edge);
+/// the bar itself draws nothing but the line.
 final class WalletCompactBar: UIView {
     private let label = UILabel()
-    private let blur = WalletEdgeBlurView(edge: .top)
-    private var blurAnimator: UIViewPropertyAnimator?
-    private var pendingProgress: CGFloat = 0
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         isUserInteractionEnabled = false
         label.textAlignment = .center
         label.alpha = 0
-        for view in [blur, label] {
-            view.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(view)
-        }
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
         NSLayoutConstraint.activate([
-            blur.topAnchor.constraint(equalTo: topAnchor),
-            blur.leadingAnchor.constraint(equalTo: leadingAnchor),
-            blur.trailingAnchor.constraint(equalTo: trailingAnchor),
-            // The ramp runs past the bar, so the list dissolves into it
-            // rather than meeting an edge under the balances.
-            blur.bottomAnchor.constraint(equalTo: bottomAnchor, constant: Spacing.xl),
             label.centerXAnchor.constraint(equalTo: centerXAnchor),
             label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Spacing.sm),
         ])
@@ -619,26 +616,11 @@ final class WalletCompactBar: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    override func didMoveToWindow() {
-        super.didMoveToWindow()
-        guard window != nil, blurAnimator == nil else { return }
-        // Built on attach, like every material in the app (headless CI).
-        let animator = UIViewPropertyAnimator(duration: 1, curve: .linear) { [blur] in
-            blur.effect = UIBlurEffect(style: .systemThinMaterial)
-        }
-        animator.pausesOnCompletion = true
-        animator.fractionComplete = pendingProgress
-        blurAnimator = animator
-    }
-
-    /// 0 at rest (nothing under the grabber, no blur), 1 once the summary has
-    /// gone beneath it.
+    /// 0 at rest, 1 once the summary has gone beneath the bar.
     var progress: CGFloat = 0 {
         didSet {
             guard progress != oldValue else { return }
             label.alpha = progress
-            pendingProgress = progress
-            blurAnimator?.fractionComplete = progress
         }
     }
 
@@ -650,71 +632,5 @@ final class WalletCompactBar: UIView {
         text.append(walletAmount(gems.formatted(), glyph: GemSymbol.glyphImage(), font: font))
         label.attributedText = text
         accessibilityLabel = "\(points) points, \(gems) gems"
-    }
-
-    deinit {
-        MainActor.assumeIsolated { blurAnimator?.stopAnimation(true) }
-    }
-}
-
-// MARK: - Edge blur
-
-/// A blur that dissolves along its length instead of ending on an edge — the
-/// list passes under the compact bar and the Claim button and simply loses
-/// definition there.
-///
-/// The masked-effect pair is the native way to build a blur gradient: UIKit
-/// has no gradient-blur type and alpha on an effect view is unsupported, so
-/// the material is the system's own and a gradient MASK decides where it
-/// lands. Upload's `ProgressiveBlurView` is the same recipe; features cannot
-/// import one another, and the App target cannot reach it either.
-///
-/// ⚠️ The mask is a view assigned to `mask`, never a layer on `layer`, and
-/// its frame is re-bound every layout pass. The effect is set by the owner
-/// (`WalletCompactBar` scrubs it) or on window attach, never in `init`.
-final class WalletEdgeBlurView: UIVisualEffectView {
-    enum Edge { case top, bottom }
-
-    private let ramp: RampView
-    private let setsOwnEffect: Bool
-
-    init(edge: Edge, setsOwnEffect: Bool = false) {
-        ramp = RampView(edge: edge)
-        self.setsOwnEffect = setsOwnEffect
-        super.init(effect: nil)
-        isUserInteractionEnabled = false
-        mask = ramp
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    override func didMoveToWindow() {
-        super.didMoveToWindow()
-        guard setsOwnEffect, window != nil, effect == nil else { return }
-        effect = UIBlurEffect(style: .systemThinMaterial)
-    }
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        ramp.frame = bounds
-    }
-
-    /// Opaque at the edge the chrome sits on, clear toward the list.
-    private final class RampView: UIView {
-        override class var layerClass: AnyClass { CAGradientLayer.self }
-
-        init(edge: Edge) {
-            super.init(frame: .zero)
-            guard let gradient = layer as? CAGradientLayer else { return }
-            let opaque = UIColor.black.cgColor, clear = UIColor.clear.cgColor
-            gradient.colors = edge == .top ? [opaque, opaque, clear] : [clear, opaque, opaque]
-            gradient.locations = edge == .top ? [0, 0.55, 1] : [0, 0.45, 1]
-            gradient.startPoint = CGPoint(x: 0.5, y: 0)
-            gradient.endPoint = CGPoint(x: 0.5, y: 1)
-        }
-
-        @available(*, unavailable)
-        required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
     }
 }
