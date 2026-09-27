@@ -62,6 +62,23 @@ final class ExploreTabCoordinator: TabCoordinator {
         return item
     }()
 
+    /// The countries shop's globe, inboard of the points badge:
+    /// `[bell] ——— [globe][points][search]`. Only on a map that sells
+    /// countries (`MapCountryShopHosting.sellsCountries`); it was a floating
+    /// glass button on the map until 2026-09-27, over the compass's corner.
+    private lazy var globeButtonItem: UIBarButtonItem = {
+        let item = UIBarButtonItem(
+            image: UIImage(systemName: "globe.europe.africa.fill"),
+            primaryAction: UIAction { [weak self] _ in
+                (self?.mapViewController as? any MapCountryShopHosting)?.presentCountryShop()
+            }
+        )
+        item.accessibilityLabel = "Countries"
+        // Its own bubble, like the badge and search beside it.
+        item.sharesBackground = false
+        return item
+    }()
+
     /// The wallet's toolbar face: coin + balance, pulsing while a claim waits.
     /// Everything around it — the store observation, the claim wake-up, the
     /// width-change reinstall, the sheet — lives in `WalletBadgeInstaller`,
@@ -114,8 +131,12 @@ final class ExploreTabCoordinator: TabCoordinator {
             guard let self else { return }
             // ⚠️ `[0]` IS THE SCREEN EDGE: search takes the corner the bell
             // used to hold, and the wallet badge stays inboard of it.
-            self.mapViewController?.navigationItem.rightBarButtonItems =
-                [self.searchButtonItem, item]
+            // `[0]` is the screen edge: [globe][points][search] reads
+            // right to left here.
+            let sellsCountries = (self.mapViewController as? any MapCountryShopHosting)?.sellsCountries ?? false
+            self.mapViewController?.navigationItem.rightBarButtonItems = sellsCountries
+                ? [self.searchButtonItem, item, self.globeButtonItem]
+                : [self.searchButtonItem, item]
         }
 
         #if DEBUG

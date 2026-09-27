@@ -534,6 +534,37 @@ final class SnapFeedViewController: UIViewController {
     /// True when this feed was opened *onto* another surface — pushed above
     /// the map, or presented — rather than being a tab root. That's the case
     /// that owns a back item and can be closed.
+    /// Whether this feed has been on screen before — what tells a RETURN to
+    /// it from its first arrival.
+    private var hasAppeared = false
+
+    /// ⚠️ **A VERTICAL FEED NEVER STANDS OVER THE TAB BAR.**
+    ///
+    /// Filmed on a device, reproduced on the simulator with chevrons alone:
+    /// map → post → its author's profile → one of their posts → back → back.
+    /// The feed hides the dock BY HAND (not `hidesBottomBarWhenPushed`, whose
+    /// choreography does not scrub with its custom pop), so when the pushed
+    /// profile, which does set that flag, is popped, UIKit hands the dock
+    /// back to the screen beneath as if it wanted one — and the FIRST feed
+    /// stood under the bar with nothing to take it away.
+    /// Rather than teach every path that can raise the dock where it is going,
+    /// the feed asserts the invariant itself whenever it comes back: the bar
+    /// leaves with the transition (scrubbed with an interactive pop, and put
+    /// back if the pop is cancelled, since the screen that stays owns it).
+    private func retireTabBarOnReturn() {
+        guard isClosable, let tabBarController, !tabBarController.isTabBarHidden else { return }
+        guard let coordinator = transitionCoordinator else {
+            tabBarController.setTabBarHidden(true, animated: false)
+            return
+        }
+        coordinator.animate(alongsideTransition: { _ in
+            tabBarController.setTabBarHidden(true, animated: false)
+        }, completion: { context in
+            guard context.isCancelled else { return }
+            tabBarController.setTabBarHidden(false, animated: false)
+        })
+    }
+
     private var isClosable: Bool {
         if presentingViewController != nil { return true }
         guard let nav = navigationController else { return false }
@@ -565,6 +596,10 @@ final class SnapFeedViewController: UIViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        // A RETURN (a pop back from a profile, a sheet gone), never the first
+        // arrival: that one is the opening flight's, which fades the dock
+        // under the growing page and retires it at landing.
+        if hasAppeared { retireTabBarOnReturn() }
         // The back item exists only when there is somewhere to go back to — a
         // map-opened feed, not the Timeline tab root — and the stack/
         // presentation relationship is known only here, not at viewDidLoad.
@@ -636,6 +671,12 @@ final class SnapFeedViewController: UIViewController {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        // The backstop, on a return only: whatever a transition left, a feed
+        // on screen has no dock under it.
+        if hasAppeared, isClosable, let tabBarController, !tabBarController.isTabBarHidden {
+            tabBarController.setTabBarHidden(true, animated: false)
+        }
+        hasAppeared = true
         // The willAppear reconciliation's landing half — by now the bar's
         // containers are in the window and the walk-up reaches them.
         syncEngagementAfterAppearance()
