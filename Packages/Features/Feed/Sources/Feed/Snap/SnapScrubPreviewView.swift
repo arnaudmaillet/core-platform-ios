@@ -57,7 +57,10 @@ final class SnapScrubPreviewView: UIView {
         plate.layer.cornerRadius = 10
         plate.clipsToBounds = true
 
-        picture.contentMode = .scaleAspectFill
+        // The preview frames the clip the way the page does: whole and
+        // letterboxed on its dark plate when the page fits
+        // (`SnapFeedViewController.fitsMedia`), cropped to fill otherwise.
+        picture.contentMode = SnapFeedViewController.fitsMedia ? .scaleAspectFit : .scaleAspectFill
         picture.clipsToBounds = true
         picture.backgroundColor = UIColor.white.withAlphaComponent(0.08)
 

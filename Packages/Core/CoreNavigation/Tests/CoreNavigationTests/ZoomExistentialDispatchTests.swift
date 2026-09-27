@@ -45,7 +45,7 @@ struct ZoomExistentialDispatchTests {
         ])
     }
 
-    // MARK: - Destination (15 defaulted members)
+    // MARK: - Destination (16 defaulted members)
 
     @Test func everyDefaultedDestinationMemberDispatchesDynamically() {
         let spy = SpyDestination()
@@ -69,11 +69,13 @@ struct ZoomExistentialDispatchTests {
             progress: 0.5, card: .zero, cornerRadius: 1, isSettling: false
         ))
         #expect(destination.zoomParkLiveMediaForHandoff())
+        #expect(destination.zoomTargetMediaFrame(in: probe) == spy.mediaFrame)
 
         #expect(spy.calls == [
             "kind", "contentReady", "ownsDismissal", "concealsTabBar", "mediaRendering",
             "verticalPermitted", "horizontalPermitted", "mirror", "donate",
             "reclaim", "adopt", "willBegin", "prepareForPresentation", "dismissState", "park",
+            "mediaFrame",
         ])
     }
 
@@ -170,6 +172,10 @@ private final class SpyDestination: NSObject, ZoomTransitionDestination {
     func zoomPrepareForPresentation(in bounds: CGRect) { calls.append("prepareForPresentation") }
     func setZoomDismissState(_ state: ZoomDismissState) { calls.append("dismissState") }
     func zoomParkLiveMediaForHandoff() -> Bool { calls.append("park"); return true }
+    let mediaFrame = CGRect(x: 0, y: 80, width: 402, height: 715)
+    func zoomTargetMediaFrame(in container: UICoordinateSpace) -> CGRect? {
+        calls.append("mediaFrame"); return mediaFrame
+    }
 }
 
 private final class SpyCard: UIView, ZoomFlightCard {

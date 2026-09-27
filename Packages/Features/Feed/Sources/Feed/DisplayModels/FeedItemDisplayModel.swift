@@ -69,6 +69,17 @@ public struct FeedItemDisplayModel: Identifiable, Sendable, Equatable {
     /// and `main_video`: a page carries one video surface, and a collection of
     /// clips would need one per page plus a playback owner per page.
     let extraMedia: [GalleryPost.MediaPage]
+    /// The head attachment's declared width / height, nil when the contract
+    /// carried no dimensions.
+    ///
+    /// ⚠️ NOT FOLDED INTO `mediaPages`' head page, whose aspect stays the
+    /// historical 1. A carousel rebuilds whenever its pages stop comparing
+    /// equal, and a seeded model and a hydrated one computing this from two
+    /// different sources could disagree in the last bit — resetting a viewer's
+    /// carousel to page one mid-open. Only the fitted page's hero landing reads
+    /// this (`SnapFeedViewController.zoomTargetMediaFrame`), and only before the
+    /// page has a picture of its own to measure.
+    let headAspectRatio: Double?
 
     init(
         id: PostID,
@@ -84,8 +95,10 @@ public struct FeedItemDisplayModel: Identifiable, Sendable, Equatable {
         likeCount: Int64 = 0,
         timestampText: String = "",
         cardMetrics: PostCardMetrics? = nil,
-        extraMedia: [GalleryPost.MediaPage] = []
+        extraMedia: [GalleryPost.MediaPage] = [],
+        headAspectRatio: Double? = nil
     ) {
+        self.headAspectRatio = headAspectRatio.flatMap { $0 > 0 && $0.isFinite ? $0 : nil }
         self.id = id
         self.authorID = authorID
         self.authorName = authorName
@@ -165,6 +178,12 @@ public struct FeedDisplayModelBuilder: Sendable {
                         ? attachment.url : nil,
                     aspectRatio: attachment.aspectRatio
                 )
+            },
+            // Nil for missing dimensions rather than `aspectRatio`'s 1: a
+            // square is a claim, and a letterbox built on a guessed square is
+            // a landing that snaps once the real picture arrives.
+            headAspectRatio: attachment.flatMap {
+                $0.pixelWidth > 0 && $0.pixelHeight > 0 ? $0.aspectRatio : nil
             }
         )
     }

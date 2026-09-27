@@ -251,6 +251,10 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
 
         let sourceFrame = source.zoomHeroFrame(in: container)
         let pageFrame = destination?.zoomTargetFrame(in: container) ?? container.bounds
+        // Asked AFTER the layout above, like the page rect: a letterboxing
+        // destination answers from its realised page, and before that pass
+        // there is no page to answer from.
+        let mediaFrame = destination?.zoomTargetMediaFrame(in: container)
 
         // The feed hides for the flight — the card is its stand-in. The
         // navigation bar needs no such care under a push: it belongs to the
@@ -261,10 +265,14 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
 
         let flight = ZoomFlight.build(
             source: source, destination: destination, sourceFrame: sourceFrame,
-            pageFrame: pageFrame, presents: true
+            pageFrame: pageFrame, mediaFrame: mediaFrame, presents: true
         )
         stagedFlightCard = flight.card
-        stagedFlightEndpoints = (start: sourceFrame, end: pageFrame)
+        // The CARD's endpoints — what a mid-air catch measures the card's
+        // presented size against. A letterboxed card is a page-shaped box at
+        // both ends, so its tile end is the tile grown by the bands, not the
+        // tile; the identity otherwise.
+        stagedFlightEndpoints = (start: flight.cardFrame(forMedia: sourceFrame), end: pageFrame)
         container.insertSubview(flight.card, belowSubview: toView)
         container.insertSubview(flight.shadow, belowSubview: flight.card)
         // Resolve the chrome replica's full-screen layout (safe areas, text
@@ -342,7 +350,12 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         // difference between a hero that shows video and one that shows a
         // poster is often a hundred milliseconds nobody can schedule around.
         // Retained by its own display link; it stops itself.
-        ZoomLiveMediaRetry.arm(card: flight.card, pageSize: flight.pageFrame.size, source: source)
+        //
+        // The MEDIA card and the MEDIA rect, both times: the retry poses the
+        // surface it adopts against its card's bounds, and under a letterbox
+        // that is the inner card — the box around it is page-shaped, and a
+        // surface covering the box would overhang the picture into the bands.
+        ZoomLiveMediaRetry.arm(card: flight.mediaCard, pageSize: flight.mediaFrame.size, source: source)
         // …and when the departing side has no player to be late WITH, the
         // arriving one does. A marker flies a sprite sheet, so the page it
         // opens is the only surface this post can be decoding on — and it is
@@ -356,14 +369,14 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         let arrivingMedia: ZoomLiveMediaRetry? =
             if !source.zoomFlightCarriesLivePlayer, let destination {
                 ZoomLiveMediaRetry.arm(
-                    card: flight.card, pageSize: flight.pageFrame.size, mirroring: destination
+                    card: flight.mediaCard, pageSize: flight.mediaFrame.size, mirroring: destination
                 )
             } else {
                 nil
             }
 
         #if DEBUG
-        Self.debugTrackFlightGeometry(card: flight.card)
+        Self.debugTrackFlightGeometry(card: flight.mediaCard)
         #endif
         // One property animator, so the push can be caught mid-air and scrubbed.
         // Card and the map's depth ride ONE spring, so the lift-off and the
@@ -388,7 +401,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             return true
         }
         #if DEBUG
-        ZoomGeometrySampler.shared.start(card: flight.card, label: "present")
+        ZoomGeometrySampler.shared.start(card: flight.mediaCard, label: "present")
         animator.addCompletion { _ in
             MainActor.assumeIsolated { ZoomGeometrySampler.shared.stop() }
         }
@@ -498,6 +511,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
                         cover.isUserInteractionEnabled = false
                         cover.frame = host.bounds
                         cover.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+                        (cover as? ZoomLetterboxCard)?.becomeLandingCover()
                         host.addSubview(cover)
                     } else {
                         cover.removeFromSuperview()
@@ -546,21 +560,46 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
                                  ZoomFlightProfiler.shared.elapsedMilliseconds))
                 }
                 #endif
-                for action in ZoomPresentSettlement.whenDestinationReady(
-                    cardHasLiveSurface: cover.zoomLiveMediaSurface != nil
-                ) {
-                    switch action {
-                    case .adoptSurfaceToDestination:
-                        if let surface = cover.zoomLiveMediaSurface {
-                            destination?.zoomAdoptLiveMediaView(surface)
+                let settle = {
+                    for action in ZoomPresentSettlement.whenDestinationReady(
+                        cardHasLiveSurface: cover.zoomLiveMediaSurface != nil
+                    ) {
+                        switch action {
+                        case .adoptSurfaceToDestination:
+                            if let surface = cover.zoomLiveMediaSurface {
+                                destination?.zoomAdoptLiveMediaView(surface)
+                            }
+                        case .dropCover:
+                            cover.removeFromSuperview()
+                        default:
+                            break // the scheduled phase's business, above
                         }
-                    case .dropCover:
-                        cover.removeFromSuperview()
-                    default:
-                        break // the scheduled phase's business, above
                     }
+                    withExtendedLifetime(coverToken) {}
                 }
-                withExtendedLifetime(coverToken) {}
+                // A destination that letterboxes but could not say where when
+                // the flight was staged (a cold open: no post yet) can say now
+                // — its content is what this gate waited for. The cover is
+                // carried onto that rect on the flight's own spring before it
+                // goes, instead of being dropped as a full-screen crop over the
+                // fitted page (`ZoomFlight.poseLateLetterbox`). Nil for every
+                // destination that fills, which settles exactly as before.
+                if !flight.isLetterboxed, let host = cover.superview,
+                   let late = ZoomTransitionGeometry.letterboxedMediaRect(
+                       destination?.zoomTargetMediaFrame(in: host), in: host.bounds
+                   ) {
+                    UIView.animate(
+                        withDuration: ZoomFlight.springDuration, delay: 0,
+                        usingSpringWithDamping: ZoomFlight.springDamping,
+                        initialSpringVelocity: 0, options: [.allowUserInteraction]
+                    ) {
+                        flight.poseLateLetterbox(late, in: host.bounds)
+                    } completion: { _ in
+                        settle()
+                    }
+                } else {
+                    settle()
+                }
             }
         }
         return animator
@@ -971,6 +1010,9 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         // strictly better than zero.
         let measuredPage = destination?.zoomTargetFrame(in: container) ?? .zero
         let pageFrame = measuredPage.isEmpty ? container.bounds : measuredPage
+        // Only against a measured page: a letterbox of the fallback rect would
+        // describe a page the destination never laid out.
+        let mediaFrame = measuredPage.isEmpty ? nil : destination?.zoomTargetMediaFrame(in: container)
         source.zoomSourceWillStageDismissal()
         let sourceFrame = source.zoomHeroFrame(in: container)
 
@@ -981,10 +1023,11 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         container.insertSubview(dim, belowSubview: fromView)
 
         let flight = ZoomFlight.build(
-            source: source, destination: destination, sourceFrame: sourceFrame, pageFrame: pageFrame
+            source: source, destination: destination, sourceFrame: sourceFrame,
+            pageFrame: pageFrame, mediaFrame: mediaFrame
         )
         stagedFlightCard = flight.card
-        stagedFlightEndpoints = (start: pageFrame, end: sourceFrame)
+        stagedFlightEndpoints = (start: pageFrame, end: flight.cardFrame(forMedia: sourceFrame))
         // The card now renders the destination's player. Hand that player over
         // to whoever plays the same asset next — the source it is flying home
         // to — so the landing adopts a running item instead of starting a fresh
@@ -995,11 +1038,18 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         // pure geometry. The card keeps flying its chrome; the two ride the
         // same spring and stay aligned because they are posed from the same
         // rects.
+        //
+        // At the MEDIA rect, with the MEDIA's corner: the hoisted surface is
+        // the picture, and under a letterbox the picture does not fill the
+        // page. Hoisted at the page rect it would take off as a full-screen
+        // crop of a page that was showing the whole, letterboxed frame.
         var hoisted = false
         if let surface = flight.card.zoomLiveMediaSurface {
             hoisted = source.zoomHoistLiveMedia(
-                surface, at: pageFrame, in: container,
-                cornerRadius: ZoomFlight.screenCornerRadius(behind: container)
+                surface, at: flight.mediaFrame, in: container,
+                cornerRadius: flight.mediaCornerRadius(
+                    forPage: ZoomFlight.screenCornerRadius(behind: container)
+                )
             )
         }
         if flight.card.zoomLiveMediaSurface != nil || hoisted {
@@ -1089,6 +1139,15 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             initialVelocity: CGVector(dx: 0, dy: ZoomFlight.springVelocity)
         )
         let animator = UIViewPropertyAnimator(duration: duration, timingParameters: spring)
+        #if DEBUG
+        // The tap-back had no per-frame sampler, only the present and the
+        // grab did — so its take-off, the frame a donated surface is most
+        // likely to be drawn somewhere its card is not, was unmeasured.
+        ZoomGeometrySampler.shared.start(card: flight.mediaCard, label: "dismiss")
+        animator.addCompletion { _ in
+            MainActor.assumeIsolated { ZoomGeometrySampler.shared.stop() }
+        }
+        #endif
         animator.addAnimations {
             flight.poseAtSource()
             if hoisted {

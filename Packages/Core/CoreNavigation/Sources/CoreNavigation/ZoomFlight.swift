@@ -211,7 +211,17 @@ final class ZoomGeometrySampler {
 
 @MainActor
 struct ZoomFlight {
+    /// What the drivers MOVE: its frame, centre, transform and bounds are the
+    /// flight's position and size channels, and removing it ends the flight.
+    ///
+    /// The source's own card, except under a letterboxed destination, where it
+    /// is the page-shaped `ZoomLetterboxCard` carrying that card inside it.
     let card: any ZoomFlightCard
+    /// What draws the PICTURE — the card the source made. Every pose rounds,
+    /// blends and scales the live surface against THIS card, because the
+    /// surface lives in its coordinates. Identical to `card` unless the flight
+    /// is letterboxed.
+    let mediaCard: any ZoomFlightCard
     /// The destination's chrome replica, riding inside the card.
     let chrome: UIView?
     /// Stand-in for the source's drop shadow (the card clips, so it can't cast
@@ -220,11 +230,36 @@ struct ZoomFlight {
     let shadow: UIView
     let sourceFrame: CGRect
     let pageFrame: CGRect
+    /// Where the picture lands inside `pageFrame`: the page itself unless the
+    /// destination letterboxes (`zoomTargetMediaFrame`). Always the rect the
+    /// MEDIA card is posed at on the page end; `pageFrame` stays the chrome's.
+    let mediaFrame: CGRect
     /// The size the live surface is actually laid out at — native aspect when
     /// the card knows it, the page viewport otherwise. Every pose scales
     /// against this, NOT against `pageFrame`, or the cover math would describe
     /// a surface that does not exist.
     let liveMediaSize: CGSize
+
+    /// Whether the picture lands on a letterboxed rect inside the page rather
+    /// than on the page — i.e. whether `card` is a box around `mediaCard`.
+    var isLetterboxed: Bool { card !== mediaCard }
+
+    /// The rect `card` must take for the PICTURE to sit at `media` — every
+    /// driver that computes a landing for the picture (the source's tile) and
+    /// then watches or scrubs the card needs the card's rect, not the
+    /// picture's. The identity, returned untouched, when not letterboxed.
+    func cardFrame(forMedia media: CGRect) -> CGRect {
+        guard let box = card as? ZoomLetterboxCard else { return media }
+        return box.cardFrame(forMedia: media)
+    }
+
+    /// The corner a page-end pose gives the PICTURE. A letterboxed picture's
+    /// corners sit in the middle of the screen, away from the display's own
+    /// curve, and the fitted page draws them square — so the card must too,
+    /// or it lands rounded and snaps sharp. The page's radius otherwise.
+    func mediaCornerRadius(forPage radius: CGFloat) -> CGFloat {
+        isLetterboxed ? 0 : radius
+    }
 
     /// How far the presenting screen recedes behind a flight (depth cue).
     static let presenterDepthScale: CGFloat = 0.95
@@ -262,15 +297,30 @@ struct ZoomFlight {
     ///   how media taken from the DESTINATION appears. On a present that media
     ///   is the arrival, so it comes up over the card's own picture; on a
     ///   dismissal it is the departing page itself and simply replaces it.
+    /// - Parameter mediaFrame: where the destination draws its picture inside
+    ///   `pageFrame`, when it letterboxes (`zoomTargetMediaFrame`). Nil — or a
+    ///   rect that is the page itself — builds exactly the flight that existed
+    ///   before letterboxing did: one card, flown to the page. Otherwise the
+    ///   source's card is carried inside a page-shaped `ZoomLetterboxCard` and
+    ///   lands on this rect, where its aspect-fill is the page's aspect-fit.
     static func build(
         source: any ZoomTransitionSource,
         destination: (any ZoomTransitionDestination)?,
         sourceFrame: CGRect,
         pageFrame: CGRect,
+        mediaFrame: CGRect? = nil,
         presents: Bool = false
     ) -> ZoomFlight {
-        let card = source.makeZoomFlightCard()
-        card.frame = pageFrame
+        let mediaCard = source.makeZoomFlightCard()
+        let letterbox = ZoomTransitionGeometry.letterboxedMediaRect(mediaFrame, in: pageFrame)
+        let card: any ZoomFlightCard
+        if let letterbox {
+            mediaCard.isUserInteractionEnabled = false
+            card = ZoomLetterboxCard(media: mediaCard, page: pageFrame, mediaRect: letterbox)
+        } else {
+            mediaCard.frame = pageFrame
+            card = mediaCard
+        }
         card.isUserInteractionEnabled = false
         // Live media, either direction: the source may already have mirrored a
         // live-previewing thumbnail inside `makeZoomFlightCard` (present leg);
@@ -284,12 +334,12 @@ struct ZoomFlight {
         // flight. Moving the view that is already rendering has no such window;
         // mirroring stays as the fallback for sources that cannot give theirs
         // up.
-        if card.zoomLiveMediaSurface == nil, let destination,
+        if mediaCard.zoomLiveMediaSurface == nil, let destination,
            let donated = destination.zoomDonateLiveMediaView() {
-            card.adoptZoomLiveMediaView(donated)
+            mediaCard.adoptZoomLiveMediaView(donated)
         }
-        if card.zoomLiveMediaSurface == nil, let destination {
-            card.adoptZoomLiveMedia { surface in destination.zoomMirrorLiveMedia(onto: surface) }
+        if mediaCard.zoomLiveMediaSurface == nil, let destination {
+            mediaCard.adoptZoomLiveMedia { surface in destination.zoomMirrorLiveMedia(onto: surface) }
             // ⚠️ THE SAME DOOR THE RETRY GOES THROUGH NEEDS THE SAME MANNERS.
             //
             // A present that gets its picture HERE rather than mid-flight is
@@ -303,8 +353,8 @@ struct ZoomFlight {
             // Unreachable today (the page's playback has not registered by the
             // time this asks), and one timing change away from being reachable
             // — which is exactly when a hole like this ships.
-            if presents, card.zoomLiveMediaSurface != nil {
-                card.fadeInAdoptedLiveMedia(over: Self.springDuration)
+            if presents, mediaCard.zoomLiveMediaSurface != nil {
+                mediaCard.fadeInAdoptedLiveMedia(over: Self.springDuration)
             }
         }
         // The native aspect is read AFTER the card has its surface, and the
@@ -316,14 +366,20 @@ struct ZoomFlight {
         // tile's true crop at the end: the double-crop mismatch the note on
         // `liveMediaLayoutSize` describes, reintroduced by an ordering change
         // and measured on device as the landing zoom snap.
-        let liveMediaSize = Self.liveMediaLayoutSize(native: card.zoomLiveMediaNativeSize,
-                                                     page: pageFrame.size)
-        if card.zoomLiveMediaSurface != nil {
-            card.prepareZoomLiveMediaForFlight(destinationSize: liveMediaSize)
+        //
+        // Sized to cover the MEDIA rect, which is the page unless the flight
+        // is letterboxed. At a letterbox the media rect already has the
+        // picture's own aspect, so this answers that rect exactly and the
+        // page end is the surface at scale 1 — a fit, drawn by fill math.
+        let liveMediaSize = Self.liveMediaLayoutSize(native: mediaCard.zoomLiveMediaNativeSize,
+                                                     page: (letterbox ?? pageFrame).size)
+        if mediaCard.zoomLiveMediaSurface != nil {
+            mediaCard.prepareZoomLiveMediaForFlight(destinationSize: liveMediaSize)
         }
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
-            print("[zoom-live] build live=\(card.zoomLiveMediaSurface != nil) destination=\(destination != nil)")
+            print("[zoom-live] build live=\(mediaCard.zoomLiveMediaSurface != nil) destination=\(destination != nil)"
+                  + " letterbox=\(letterbox.map { NSCoder.string(for: $0) } ?? "no")")
         }
         #endif
 
@@ -334,7 +390,16 @@ struct ZoomFlight {
             chrome.center = CGPoint(x: pageFrame.width / 2, y: pageFrame.height / 2)
             // Below the resting chrome: at the source end that furniture must
             // read as the source's own, over everything.
-            if let resting = card.zoomRestingChrome {
+            //
+            // A letterbox box is the exception, and cannot follow the rule: the
+            // resting chrome lives inside the picture's card, and the replica
+            // has to reach past that card into the bands. So it rides over the
+            // picture in the box. The two are never both opaque — the replica
+            // is at zero wherever the resting chrome is at one — so the order
+            // only decides which of two half-faded layers is on top mid-flight.
+            if letterbox != nil {
+                card.addSubview(chrome)
+            } else if let resting = card.zoomRestingChrome {
                 card.insertSubview(chrome, belowSubview: resting)
             } else {
                 card.addSubview(chrome)
@@ -373,16 +438,17 @@ struct ZoomFlight {
         let shadow = UIView(frame: sourceFrame)
         shadow.backgroundColor = .clear
         shadow.isUserInteractionEnabled = false
-        card.applyZoomRestingShadow(to: shadow.layer)
+        mediaCard.applyZoomRestingShadow(to: shadow.layer)
         // A clear view casts nothing on its own; the explicit path draws the
         // source's silhouette. Harmless when the card declined to set a shadow.
         shadow.layer.shadowPath = UIBezierPath(
             roundedRect: CGRect(origin: .zero, size: sourceFrame.size),
-            cornerRadius: card.zoomRestingCornerRadius
+            cornerRadius: mediaCard.zoomRestingCornerRadius
         ).cgPath
         return ZoomFlight(
-            card: card, chrome: chrome, shadow: shadow,
+            card: card, mediaCard: mediaCard, chrome: chrome, shadow: shadow,
             sourceFrame: sourceFrame, pageFrame: pageFrame,
+            mediaFrame: letterbox ?? pageFrame,
             liveMediaSize: liveMediaSize
         )
     }
@@ -403,29 +469,39 @@ struct ZoomFlight {
     /// (repositioned here at whatever alpha it has; callers animate only its
     /// alpha).
     func poseAtSource(at landing: CGRect) {
-        card.frame = landing
-        card.setZoomCornerRadius(card.zoomRestingCornerRadius)
+        // `landing` is where the PICTURE goes. Letterboxed, the box around it
+        // takes the page-shaped rect that puts it there, and the picture is
+        // placed inside the box in the same block so both ride one curve.
+        let box = cardFrame(forMedia: landing)
+        card.frame = box
+        // Through the box's own mapping, like every other pose, so the picture
+        // is placed by ONE rule wherever it is placed from. Only poses place
+        // it — `ZoomLetterboxCard` records what a second writer cost.
+        if let letterbox = card as? ZoomLetterboxCard {
+            mediaCard.frame = letterbox.mediaFrame(inCardOfSize: box.size)
+        }
+        mediaCard.setZoomCornerRadius(mediaCard.zoomRestingCornerRadius)
         // The thumbnail end is the source's OWN picture, whole. Set
         // unconditionally, like every other channel in this pose, so a flight
         // that was caught and released mid-blend still lands on the exact twin
         // the handshake depends on rather than on whatever fraction it was
         // holding.
-        card.setZoomContentBlend(1)
-        card.zoomRestingChrome?.alpha = 1
+        mediaCard.setZoomContentBlend(1)
+        mediaCard.zoomRestingChrome?.alpha = 1
         shadow.frame = CGRect(origin: landing.origin, size: shadow.frame.size)
         shadow.alpha = 1
         let center = CGPoint(x: landing.width / 2, y: landing.height / 2)
-        if let surface = card.zoomLiveMediaSurface, !card.zoomLiveMediaTracksCardBounds {
+        if let surface = mediaCard.zoomLiveMediaSurface, !mediaCard.zoomLiveMediaTracksCardBounds {
             let scale = Self.liveMediaScale(covering: landing.size, surface: liveMediaSize)
             surface.transform = CGAffineTransform(scaleX: scale, y: scale)
             surface.center = center
         }
         if let chrome {
             chrome.transform = CGAffineTransform(
-                scaleX: landing.width / pageFrame.width,
-                y: landing.height / pageFrame.height
+                scaleX: box.width / pageFrame.width,
+                y: box.height / pageFrame.height
             )
-            chrome.center = center
+            chrome.center = CGPoint(x: box.width / 2, y: box.height / 2)
             chrome.alpha = 0
         }
     }
@@ -434,17 +510,20 @@ struct ZoomFlight {
     /// resting chrome gone, page chrome fully readable.
     func poseAsPage(cornerRadius: CGFloat) {
         card.frame = pageFrame
-        card.setZoomCornerRadius(cornerRadius)
+        if let letterbox = card as? ZoomLetterboxCard {
+            mediaCard.frame = letterbox.mediaFrame(inCardOfSize: pageFrame.size)
+        }
+        mediaCard.setZoomCornerRadius(mediaCornerRadius(forPage: cornerRadius))
         // The full-screen end is the PAGE's picture — the one the card was
         // handed as its departure operand. A card with no second picture reads
         // this as the no-op it is.
-        card.setZoomContentBlend(0)
-        card.zoomRestingChrome?.alpha = 0
+        mediaCard.setZoomContentBlend(0)
+        mediaCard.zoomRestingChrome?.alpha = 0
         shadow.alpha = 0
         let center = CGPoint(x: pageFrame.width / 2, y: pageFrame.height / 2)
-        if let surface = card.zoomLiveMediaSurface, !card.zoomLiveMediaTracksCardBounds {
+        if let surface = mediaCard.zoomLiveMediaSurface, !mediaCard.zoomLiveMediaTracksCardBounds {
             surface.transform = .identity
-            surface.center = center
+            surface.center = CGPoint(x: mediaFrame.width / 2, y: mediaFrame.height / 2)
         }
         if let chrome {
             chrome.transform = .identity
@@ -461,9 +540,41 @@ struct ZoomFlight {
                          CACurrentMediaTime(), NSCoder.string(for: card.bounds),
                          pres.map { NSCoder.string(for: $0) } ?? "nil",
                          card.layer.animationKeys()?.joined(separator: ",") ?? "-",
-                         card.zoomLiveMediaDebugState))
+                         mediaCard.zoomLiveMediaDebugState))
         }
         #endif
+    }
+
+    /// The LANDED card, carried onto a letterbox the destination could only
+    /// name after the flight had left — `media` and `page` in the card's
+    /// superview's space (the landing cover's host).
+    ///
+    /// ⚠️ THE COLD OPEN'S LANDING. A feed pushed before its post is cached has
+    /// no model at staging, so it cannot say where its picture will be, and
+    /// the flight lands on the page like a filling one. The page then fits the
+    /// picture the moment it arrives, and dropping the cover over that is a
+    /// cut from a full-screen crop to the whole picture. Posed on the flight's
+    /// spring instead, this is the same crop morph the flight is made of —
+    /// the card's aspect-fill of a rect of the picture's own aspect is the
+    /// fit — and the chrome replica, held still in screen space, is clipped
+    /// away over the page's identical chrome as the card narrows.
+    ///
+    /// A no-op for a flight that was letterboxed from the start.
+    func poseLateLetterbox(_ media: CGRect, in page: CGRect) {
+        guard !isLetterboxed else { return }
+        card.frame = media
+        mediaCard.setZoomCornerRadius(0)
+        // Re-poses a departure picture to the new bounds, as every pose does.
+        mediaCard.setZoomContentBlend(0)
+        if let surface = mediaCard.zoomLiveMediaSurface, !mediaCard.zoomLiveMediaTracksCardBounds {
+            let scale = Self.liveMediaScale(covering: media.size, surface: liveMediaSize)
+            surface.transform = CGAffineTransform(scaleX: scale, y: scale)
+            surface.center = CGPoint(x: media.width / 2, y: media.height / 2)
+        }
+        if let chrome {
+            chrome.transform = .identity
+            chrome.center = CGPoint(x: page.midX - media.minX, y: page.midY - media.minY)
+        }
     }
 
     /// The floating card, *position excluded*: page content scaled about the
@@ -476,7 +587,10 @@ struct ZoomFlight {
             origin: .zero,
             size: CGSize(width: pageFrame.width * scale, height: pageFrame.height * scale)
         )
-        card.setZoomCornerRadius(cornerRadius)
+        if let box = card as? ZoomLetterboxCard {
+            mediaCard.frame = box.mediaFrame(inCardOfSize: card.bounds.size)
+        }
+        mediaCard.setZoomCornerRadius(mediaCornerRadius(forPage: cornerRadius))
         // Still the page, so still the page's picture. A held card is the thing
         // being decided about rather than a thing on its way home — the same
         // reasoning that keeps the page's ASPECT here instead of morphing it
@@ -484,10 +598,13 @@ struct ZoomFlight {
         // the outcome is known. Stated rather than left implicit: this pose is
         // re-applied on every pan event, and a channel it does not name is a
         // channel that can carry a stale value into a whole grab.
-        card.setZoomContentBlend(0)
-        card.zoomRestingChrome?.alpha = 0
+        mediaCard.setZoomContentBlend(0)
+        mediaCard.zoomRestingChrome?.alpha = 0
         shadow.alpha = 0
         let center = CGPoint(x: card.bounds.width / 2, y: card.bounds.height / 2)
+        // The picture's own centre — the same point as `center` unless the
+        // flight is letterboxed, where the surface lives in the inner card.
+        let mediaCenter = CGPoint(x: mediaCard.bounds.width / 2, y: mediaCard.bounds.height / 2)
         // ⚠️ THE SAME GUARD THE OTHER FOUR POSES HAVE, and its absence here was
         // a live defect the moment a card started tracking its own bounds.
         //
@@ -496,9 +613,9 @@ struct ZoomFlight {
         // a surface anchored at its top-left it puts the picture's CORNER at
         // the card's centre — filmed on the dismiss as a second, differently
         // cropped rectangle inset into the bottom-right quadrant.
-        if let surface = card.zoomLiveMediaSurface, !card.zoomLiveMediaTracksCardBounds {
+        if let surface = mediaCard.zoomLiveMediaSurface, !mediaCard.zoomLiveMediaTracksCardBounds {
             surface.transform = CGAffineTransform(scaleX: scale, y: scale)
-            surface.center = center
+            surface.center = mediaCenter
         }
         if let chrome {
             chrome.transform = CGAffineTransform(scaleX: scale, y: scale)
@@ -534,7 +651,7 @@ struct ZoomFlight {
                          CACurrentMediaTime(), scale,
                          NSCoder.string(for: card.bounds),
                          cardPres.map { NSCoder.string(for: $0) } ?? "nil",
-                         cardKeys, card.zoomLiveMediaDebugState))
+                         cardKeys, mediaCard.zoomLiveMediaDebugState))
         }
         #endif
     }
@@ -573,25 +690,33 @@ struct ZoomFlight {
         _ progress: CGFloat, from startSize: CGSize, to landing: CGRect, startCornerRadius: CGFloat
     ) {
         let t = min(max(progress, 0), 1)
+        // The PICTURE's size: `startSize` and `landing` describe the picture,
+        // and a letterbox box is derived from it rather than interpolated on
+        // its own, so the two cannot drift apart mid-drag.
         let size = CGSize(
             width: startSize.width + (landing.width - startSize.width) * t,
             height: startSize.height + (landing.height - startSize.height) * t
         )
-        card.bounds = CGRect(origin: .zero, size: size)
-        card.setZoomCornerRadius(
-            startCornerRadius + (card.zoomRestingCornerRadius - startCornerRadius) * t
+        let boxSize = cardFrame(forMedia: CGRect(origin: .zero, size: size)).size
+        card.bounds = CGRect(origin: .zero, size: boxSize)
+        if let box = card as? ZoomLetterboxCard {
+            mediaCard.frame = box.mediaFrame(inCardOfSize: boxSize)
+        }
+        let startRadius = mediaCornerRadius(forPage: startCornerRadius)
+        mediaCard.setZoomCornerRadius(
+            startRadius + (mediaCard.zoomRestingCornerRadius - startRadius) * t
         )
         // Ahead of the live-surface block below, which returns early for cards
         // that size their own surface — the blend belongs to every card, not
         // only to the ones that fall through.
-        card.setZoomContentBlend(t)
+        mediaCard.setZoomContentBlend(t)
         let center = CGPoint(x: size.width / 2, y: size.height / 2)
         // ⚠️ THE CONDITION IS ON THE SURFACE BLOCK, NOT ON THE FUNCTION. It was
         // a `guard … else { return }` inside this block, so a tracking card
         // carrying live media returned here and never posed its CHROME for the
         // whole interpolation — the card's furniture frozen at its last value
         // while the card morphed under it.
-        if let surface = card.zoomLiveMediaSurface, !card.zoomLiveMediaTracksCardBounds {
+        if let surface = mediaCard.zoomLiveMediaSurface, !mediaCard.zoomLiveMediaTracksCardBounds {
             // Interpolate the SCALE between the two endpoint scales, rather
             // than recomputing a cover scale from the interpolated size.
             //
@@ -616,9 +741,9 @@ struct ZoomFlight {
         }
         if let chrome {
             chrome.transform = CGAffineTransform(
-                scaleX: size.width / pageFrame.width, y: size.height / pageFrame.height
+                scaleX: boxSize.width / pageFrame.width, y: boxSize.height / pageFrame.height
             )
-            chrome.center = center
+            chrome.center = CGPoint(x: boxSize.width / 2, y: boxSize.height / 2)
         }
     }
 

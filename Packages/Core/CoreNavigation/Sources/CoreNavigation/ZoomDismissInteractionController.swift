@@ -288,7 +288,8 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         container.insertSubview(dim, belowSubview: fromView)
 
         let flight = ZoomFlight.build(
-            source: source, destination: destination, sourceFrame: sourceFrame, pageFrame: pageFrame
+            source: source, destination: destination, sourceFrame: sourceFrame, pageFrame: pageFrame,
+            mediaFrame: destination?.zoomTargetMediaFrame(in: container)
         )
         container.insertSubview(flight.card, belowSubview: fromView)
         container.insertSubview(flight.shadow, belowSubview: flight.card)
@@ -336,7 +337,7 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // `flight == nil` and recorded not one frame, with no error and a log
         // that looked exactly like a passing one. The staging is what makes a
         // card exist, so the arming belongs where the card is assigned.
-        ZoomGeometrySampler.shared.start(card: flight.card, label: "grab")
+        ZoomGeometrySampler.shared.start(card: flight.mediaCard, label: "grab")
         #endif
         if let nav = context.viewController(forKey: .from)?.navigationController,
            !nav.isToolbarHidden {
@@ -724,7 +725,10 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
             // teardown expects: there is no frame where the two disagree.
             self.destination?.setZoomDismissState(ZoomDismissState(
                 progress: commit ? 1 : 0,
-                card: commit ? landing : flight.pageFrame,
+                // The card's rect, as on every pan event before this one —
+                // under a letterbox that is the box around the picture, so the
+                // follower lands where the card does rather than on the tile.
+                card: commit ? flight.cardFrame(forMedia: landing) : flight.pageFrame,
                 cornerRadius: commit ? flight.card.zoomRestingCornerRadius : screenRadius,
                 isSettling: true
             ))
@@ -762,9 +766,14 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // either way (measured). So this watches the card's PRESENTATION
         // instead, which is on whatever clock the animation is actually on, and
         // keeps a wall-clock ceiling as the backstop the old timer was.
+        //
+        // The CARD's rect, which is what is watched: `landing` is where the
+        // picture goes, and a letterboxed card is the page-shaped box around
+        // it — it never reaches the tile's rect and the watch would only ever
+        // end on its ceiling.
         whenViewSettles(
             flight.card,
-            settlingAt: commit ? landing : flight.pageFrame,
+            settlingAt: commit ? flight.cardFrame(forMedia: landing) : flight.pageFrame,
             ceiling: viewSettleCeiling
         ) { [weak self] in
             self?.finishTransition(cancelled: !commit)
