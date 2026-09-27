@@ -250,7 +250,7 @@ final class SnapAuthorIdentityView: UIView {
             self.setRedacted(false)
             self.nameLabel.text = model.authorName
             self.metaLabel.text = model.metaText
-            self.avatarView.image = nil
+            self.showFace(nil)
             self.monogramView.setMonogram(MonogramAvatarView.monogram(
                 name: model.authorName, handle: Self.handle(fromMeta: model.metaText)
             ))
@@ -262,9 +262,7 @@ final class SnapAuthorIdentityView: UIView {
         avatarTask = Task { [weak self] in
             guard let image = try? await pipeline.image(for: url) else { return }
             guard let self, self.authorID == id else { return }
-            UIView.transition(with: self.avatarView, duration: 0.15, options: [.transitionCrossDissolve]) {
-                self.avatarView.image = image
-            }
+            self.showFace(image)
         }
     }
 
@@ -285,7 +283,7 @@ final class SnapAuthorIdentityView: UIView {
             self.setRedacted(false)
             self.nameLabel.text = name
             self.metaLabel.text = meta
-            if faceChanged { self.avatarView.image = nil }
+            if faceChanged { self.showFace(nil) }
             self.monogramView.setMonogram(MonogramAvatarView.monogram(
                 name: name, handle: Self.handle(fromMeta: meta)
             ))
@@ -297,9 +295,26 @@ final class SnapAuthorIdentityView: UIView {
         avatarTask = Task { [weak self] in
             guard let image = try? await pipeline.image(for: url) else { return }
             guard let self, self.personAvatarURL == url else { return }
-            UIView.transition(with: self.avatarView, duration: 0.15, options: [.transitionCrossDissolve]) {
-                self.avatarView.image = image
-            }
+            self.showFace(image)
+        }
+    }
+
+    /// Puts a picture on the disc, or takes it off.
+    ///
+    /// With a picture the avatar is the picture ALONE: the initials plate is
+    /// covered once the picture has faded in (not before, or the disc would
+    /// be empty for the fade). Without one, the initials show on their round
+    /// plate.
+    private func showFace(_ image: UIImage?) {
+        guard let image else {
+            avatarView.image = nil
+            monogramView.isCovered = false
+            return
+        }
+        UIView.transition(with: avatarView, duration: 0.15, options: [.transitionCrossDissolve]) {
+            self.avatarView.image = image
+        } completion: { _ in
+            self.monogramView.isCovered = self.avatarView.image != nil
         }
     }
 
