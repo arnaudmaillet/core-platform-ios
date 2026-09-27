@@ -1309,6 +1309,7 @@ public final class VideoPlaybackController {
         let key = ObjectIdentifier(player)
         guard let wanted = chased.removeValue(forKey: key) else {
             seeking.remove(key)
+            settle(key)
             return
         }
         seeking.insert(key)
@@ -1324,15 +1325,51 @@ public final class VideoPlaybackController {
                 // own seek has landed. It speaks for a clock that is gone, and
                 // letting it clear `seeking` would let a second seek start while
                 // the new item's first is still in flight.
-                guard player.currentItem.map(ObjectIdentifier.init) == item else { return }
+                guard player.currentItem.map(ObjectIdentifier.init) == item else {
+                    // Nobody waiting on this clock is waiting on anything real
+                    // any more; leaving them parked would strand them for good.
+                    self.settle(key)
+                    return
+                }
                 if finished { self.seeksLanded += 1 } else { self.seeksCancelled += 1 }
                 if self.chased[key] == nil {
                     self.seeking.remove(key)
+                    self.settle(key)
                 } else {
                     self.chase(player)
                 }
             }
         }
+    }
+
+    /// Runs `body` once the clip in `view` has no seek in flight and none
+    /// waiting — at once when it has none now, or when there is no player.
+    ///
+    /// ⚠️ **THE RELEASE OF A SCRUB WAITS ON THIS, NOT ON A TIMER.** Resuming
+    /// while the last seek is still decoding plays from wherever the player
+    /// happens to be, and `setPaused(false)` then finds the pause anchor (which
+    /// the seek moved) a long way off and seeks AGAIN — a second hop the viewer
+    /// sees as the picture snapping back and forth at the moment they let go.
+    /// Resumed after the landing, the anchor and the playhead agree and the
+    /// clip simply carries on from under the thumb.
+    public func whenSeeksSettle(in view: VideoRenderView, _ body: @escaping @MainActor () -> Void) {
+        guard let player = watchedPlayer(in: view) else {
+            body()
+            return
+        }
+        let key = ObjectIdentifier(player)
+        guard seeking.contains(key) || chased[key] != nil else {
+            body()
+            return
+        }
+        settleWaiters[key, default: []].append(body)
+    }
+
+    private var settleWaiters: [ObjectIdentifier: [@MainActor () -> Void]] = [:]
+
+    private func settle(_ key: ObjectIdentifier) {
+        guard let waiters = settleWaiters.removeValue(forKey: key) else { return }
+        for waiter in waiters { waiter() }
     }
 
     /// Whether the clip in `view` is stopped. Nil when nothing is bound — which

@@ -505,6 +505,109 @@ struct SnapMediaPageBarTests {
         #expect(abs((seeks.first ?? 0) - 0.75) < 0.02)
     }
 
+    // MARK: - The thumb is the clock while it drags
+
+    /// How far along its bar the played part reaches, 0…1.
+    private func drawnFill(_ view: SnapMediaPageBarView, page: Int) -> Double? {
+        guard let fill = view.debugFillFrame(page), let bar = view.debugSegmentFrame(page),
+              bar.width > 0 else { return nil }
+        return Double(fill.width / bar.width)
+    }
+
+    /// ⚠️ THE FILL FOLLOWS THE FINGER, NOT THE PLAYER. A playhead fed during
+    /// the drag is the player's time — standing still while a seek decodes,
+    /// then jumping — and drawing it is what made the bar stutter behind the
+    /// thumb.
+    @Test func whileDraggingTheFillIsTheFingersAndIgnoresTheFeed() throws {
+        let view = clipBar(pages: 1, current: 0, clips: [0], playhead: 0.5)
+        let barWidth = try #require(view.debugSegmentFrame(0)?.width)
+        view.debugScrub(.began, atX: 100)
+        view.debugScrub(.changed, atX: 100 + barWidth * 0.2)
+        #expect(abs((drawnFill(view, page: 0) ?? 0) - 0.7) < 0.01)
+        // The player has not moved yet; the bar must not go back to it.
+        view.setPlayhead(0.5)
+        #expect(abs((drawnFill(view, page: 0) ?? 0) - 0.7) < 0.01)
+        view.debugScrub(.changed, atX: 100 + barWidth * 0.3)
+        #expect(abs((drawnFill(view, page: 0) ?? 0) - 0.8) < 0.01)
+    }
+
+    /// The host hears ONE start and ONE end per drag — it stops the clip on
+    /// the first and lands on the second — and the end carries where it let go.
+    @Test func aDragTellsTheHostWhenItTakesAndLetsGoOfThePlayhead() throws {
+        let view = clipBar(pages: 1, current: 0, clips: [0], playhead: 0.5)
+        var began = 0
+        var ended: [Double?] = []
+        view.onScrubBegan = { began += 1 }
+        view.onScrubEnded = { ended.append($0) }
+        let barWidth = try #require(view.debugSegmentFrame(0)?.width)
+        view.debugScrub(.began, atX: 100)
+        #expect(began == 0, "a touch that has not travelled is still a tap")
+        view.debugScrub(.changed, atX: 100 + barWidth * 0.1)
+        view.debugScrub(.changed, atX: 100 + barWidth * 0.2)
+        view.debugScrub(.ended, atX: 100 + barWidth * 0.2)
+        #expect(began == 1)
+        #expect(ended.count == 1)
+        #expect(abs(((ended.first ?? nil) ?? 0) - 0.7) < 0.01)
+    }
+
+    /// ⚠️ AFTER THE RELEASE THE BAR STAYS WHERE THE THUMB LEFT IT until the
+    /// player gets there — then, and only then, the player draws it again.
+    /// Handed back at once, it snapped to the old position and forward again.
+    @Test func theReleaseHoldsUntilThePlayerArrives() throws {
+        let view = clipBar(pages: 1, current: 0, clips: [0], playhead: 0.5)
+        let barWidth = try #require(view.debugSegmentFrame(0)?.width)
+        view.debugScrub(.began, atX: 100)
+        view.debugScrub(.changed, atX: 100 + barWidth * 0.3)
+        view.debugScrub(.ended, atX: 100 + barWidth * 0.3)
+        view.setPlayhead(0.52)
+        #expect(abs((drawnFill(view, page: 0) ?? 0) - 0.8) < 0.01, "snapped back to the player")
+        view.setPlayhead(0.801)
+        #expect(view.debugHeldPlayhead == nil, "the player arrived and did not get the bar back")
+        view.setPlayhead(0.81)
+        #expect(abs((drawnFill(view, page: 0) ?? 0) - 0.81) < 0.01)
+    }
+
+    /// A player that never arrives (a failed seek) gets the bar back anyway.
+    @Test func aHoldThePlayerNeverReachesGivesUp() throws {
+        let view = clipBar(pages: 1, current: 0, clips: [0], playhead: 0.5)
+        let barWidth = try #require(view.debugSegmentFrame(0)?.width)
+        view.debugScrub(.began, atX: 100)
+        view.debugScrub(.changed, atX: 100 + barWidth * 0.3)
+        view.debugScrub(.ended, atX: 100 + barWidth * 0.3)
+        view.debugElapseHandover()
+        view.setPlayhead(0.5)
+        #expect(view.debugHeldPlayhead == nil)
+        #expect(abs((drawnFill(view, page: 0) ?? 0) - 0.5) < 0.01)
+    }
+
+    /// A cancelled drag lands nowhere: the host is told so, and the bar is the
+    /// player's again at once.
+    @Test func aCancelledDragGivesTheBarBack() throws {
+        let view = clipBar(pages: 1, current: 0, clips: [0], playhead: 0.5)
+        var ended: [Double?] = []
+        view.onScrubEnded = { ended.append($0) }
+        let barWidth = try #require(view.debugSegmentFrame(0)?.width)
+        view.debugScrub(.began, atX: 100)
+        view.debugScrub(.changed, atX: 100 + barWidth * 0.3)
+        view.debugScrub(.cancelled, atX: 100 + barWidth * 0.3)
+        #expect(ended == [nil])
+        #expect(view.debugHeldPlayhead == nil)
+        #expect(abs((drawnFill(view, page: 0) ?? 0) - 0.5) < 0.01)
+    }
+
+    /// A tap on the bar draws where it landed on the spot, like a release.
+    @Test func aTapOnTheBarDrawsWhereItLandedAtOnce() throws {
+        let view = clipBar(pages: 1, current: 0, clips: [0], playhead: 0.1)
+        var seeks: [Double] = []
+        view.onSeekRequested = { seeks.append($0) }
+        let bar = try #require(view.debugSegmentFrame(0))
+        view.debugTap(atX: bar.minX + bar.width * 0.6)
+        #expect(abs((seeks.first ?? 0) - 0.6) < 0.01)
+        #expect(abs((drawnFill(view, page: 0) ?? 0) - 0.6) < 0.01)
+        view.setPlayhead(0.1)
+        #expect(abs((drawnFill(view, page: 0) ?? 0) - 0.6) < 0.01)
+    }
+
     /// And it clamps rather than running off either end of the clip.
     @Test func seekingPastTheEndsOfAClipClamps() {
         let view = clipBar(pages: 5, current: 2, clips: [2], playhead: 0.5)
