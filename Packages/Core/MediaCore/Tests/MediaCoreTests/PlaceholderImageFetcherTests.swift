@@ -42,4 +42,12 @@ struct PlaceholderImageFetcherTests {
         let data = try await fetcher.fetchImageData(for: try #require(URL(string: "mock://photo/x?w=8&h=8")))
         #expect(!data.isEmpty)
     }
+
+    /// The colour is the same on every launch: pinned to a value computed
+    /// outside the process, which a per-process seeded hash can never match
+    /// twice (`mock://avatar/7` has the path "/7").
+    @Test func theHueIsTheSameOnEveryLaunch() {
+        #expect(PlaceholderImageFetcher.hue(forPath: "/7") == 131.0 / 360)
+        #expect(PlaceholderImageFetcher.hue(forPath: "/7") != PlaceholderImageFetcher.hue(forPath: "/8"))
+    }
 }
