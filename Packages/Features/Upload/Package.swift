@@ -22,6 +22,8 @@ let package = Package(
         // The stickers the editor lays over a picture — the catalogue Chat's
         // strip plays, moved where two features can share it.
         .package(path: "../../Core/StickerKit"),
+        // The caption field's emote panel and `:query` suggestions.
+        .package(path: "../../Core/EmoteKit"),
         .package(path: "../../Core/CoreNetworking")
     ],
     targets: [
@@ -35,7 +37,8 @@ let package = Package(
                 "DesignSystem",
                 "MediaCore",
                 "MediaPlayback",
-                "StickerKit"
+                "StickerKit",
+                "EmoteKit"
             ],
             // The photograph a VIDEO's look cards are drawn from, read back
             // through `Bundle.module` by `MediaLookReference`.

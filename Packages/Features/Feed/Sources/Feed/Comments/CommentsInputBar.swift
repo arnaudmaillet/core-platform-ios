@@ -1,5 +1,6 @@
 import CoreStorage
 import DesignSystem
+import EmoteKit
 import MediaCore
 import UIKit
 
@@ -84,6 +85,8 @@ final class CommentsInputBar: UIView {
     private enum Metrics {
         static let maxLines: CGFloat = 4
         static let controlSize: CGFloat = 38
+        /// The emote toggle inside the field: a 30pt target on the 38pt line.
+        static let emoteToggleWidth: CGFloat = 30
         /// The face FILLS its 38pt bubble, edge to edge — the bubble's own
         /// capsule clip is the disc's circle. It used to sit inset at 30pt so
         /// the glass read as a rim around it; that ring of glass read as a
@@ -119,6 +122,9 @@ final class CommentsInputBar: UIView {
     private let field = UIVisualEffectView(effect: nil)
     private let textView = UITextView()
     private let placeholderLabel = UILabel()
+    /// The emote panel and the inline `:query` strip for this field; its
+    /// smiley sits at the field's trailing end, where iMessage keeps its own.
+    private lazy var emotes = EmoteKeyboard(textView: textView)
     private let boostButton = UIButton(configuration: .glass())
     /// The boost's slot, on a post that does not exist yet: who will see it.
     /// See `visibilityMenu`.
@@ -155,7 +161,26 @@ final class CommentsInputBar: UIView {
         textView.isScrollEnabled = false
         textView.textContainerInset = UIEdgeInsets(top: Spacing.sm, left: Spacing.sm, bottom: Spacing.sm, right: Spacing.sm)
         textView.delegate = self
-        textView.pin(to: field.contentView)
+        // The field's trailing end holds the emote toggle; the text stops
+        // short of it, and the toggle holds the last line's station as the
+        // field grows (bottom-anchored, like the round controls around it).
+        let emoteToggle = emotes.toggleButton
+        emotes.suggestionAnchor = field
+        emoteToggle.tintColor = .secondaryLabel
+        textView.translatesAutoresizingMaskIntoConstraints = false
+        emoteToggle.translatesAutoresizingMaskIntoConstraints = false
+        field.contentView.addSubview(textView)
+        field.contentView.addSubview(emoteToggle)
+        NSLayoutConstraint.activate([
+            textView.leadingAnchor.constraint(equalTo: field.contentView.leadingAnchor),
+            textView.topAnchor.constraint(equalTo: field.contentView.topAnchor),
+            textView.bottomAnchor.constraint(equalTo: field.contentView.bottomAnchor),
+            textView.trailingAnchor.constraint(equalTo: emoteToggle.leadingAnchor),
+            emoteToggle.trailingAnchor.constraint(equalTo: field.contentView.trailingAnchor, constant: -Spacing.xs),
+            emoteToggle.bottomAnchor.constraint(equalTo: field.contentView.bottomAnchor),
+            emoteToggle.widthAnchor.constraint(equalToConstant: Metrics.emoteToggleWidth),
+            emoteToggle.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
+        ])
 
         placeholderLabel.text = "Add a comment…"
         placeholderLabel.font = textView.font
@@ -167,6 +192,8 @@ final class CommentsInputBar: UIView {
                 constant: Spacing.sm + textView.textContainer.lineFragmentPadding
             )
             placeholderLabel.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
+            // Short of the emote toggle: "Comment as …" runs under it otherwise.
+            placeholderLabel.trailingAnchor.constraint(lessThanOrEqualTo: emotes.toggleButton.leadingAnchor)
         }
 
         // The native bubble-glass token (the chat bar's exact contract):
