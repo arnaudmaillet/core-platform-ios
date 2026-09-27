@@ -24,9 +24,13 @@ final class SnapFeedViewController: UIViewController {
     private var dataSource: UICollectionViewDiffableDataSource<Section, PostID>!
     private let statusLabel = UILabel()
     /// The author identity, hosted as the trailing bar item's custom view —
-    /// content-hugging, so the system glass pill wraps it flush. Content
-    /// follows the active page via the lifecycle seam.
-    private let authorIdentityView = SnapAuthorIdentityView()
+    /// content-hugging, so the system glass pill wraps it flush.
+    ///
+    /// ⚠️ NOT ONE VIEW FOR THE SCREEN'S LIFE. A new author gets a NEW pill in a
+    /// NEW item under that author's own `identifier` (`installAuthorPill`),
+    /// because that is the only change the bar animates: a view mutated in
+    /// place gives it nothing to transition between.
+    private var authorIdentityView = SnapAuthorIdentityView()
     /// The media attribution (cover + author + audio line), hosted as the
     /// native bottom toolbar's leading item. Same stable-custom-view contract
     /// as the identity pill: installed once, content follows the active page.
@@ -67,6 +71,21 @@ final class SnapFeedViewController: UIViewController {
     /// sort selector beside the author pill and take it away again.
     private var authorItem = UIBarButtonItem()
     private var sortItem = UIBarButtonItem()
+    /// The author item's identifier: one PER AUTHOR, and both halves of that
+    /// are measured behaviour (iPhone 18 Pro, iOS 27), not taste.
+    ///
+    /// iOS 26 treats two items with one identifier as ONE item. Swapping in a
+    /// new item under the SAME identifier — even through
+    /// `setRightBarButtonItems(_:animated: true)` — therefore swaps the content
+    /// in a single frame: to the bar nothing was replaced. Under a DIFFERENT
+    /// identifier the bar runs its own transition (the glass morphs between
+    /// the two widths while the old content blurs out and the new blurs in).
+    /// So a new AUTHOR changes the identifier, and a fresh item for the same
+    /// author (the landing install, a better projection) keeps it and lands
+    /// without a flicker.
+    static func authorItemIdentifier(for author: ProfileID?) -> String {
+        "feed.snap.author-pill." + (author?.rawValue ?? "none")
+    }
     /// The viewer's balance, closing the trailing run on its left —
     /// [‹ back] … [🪙 solde] [author pill] — so a spend made on this very
     /// screen is visibly paid for. DISPLAY-ONLY here: the map's badge is
@@ -551,18 +570,51 @@ final class SnapFeedViewController: UIViewController {
     /// the feed asserts the invariant itself whenever it comes back: the bar
     /// leaves with the transition (scrubbed with an interactive pop, and put
     /// back if the pop is cancelled, since the screen that stays owns it).
+    ///
+    /// ⚠️ **"CANCELLED" MEANS TWO OPPOSITE THINGS HERE.** UIKit calls this
+    /// screen's `viewWillAppear` both when a pop TO it begins (a profile above
+    /// it leaving) and when a pop OF it is abandoned (a grab-down released under
+    /// the threshold — the feed springs back and "re-appears"). The same
+    /// cancelled flag then says "the feed did not come back" in the first case
+    /// and "the feed never left" in the second. Reading it as the first in both
+    /// is what put the dock back over a feed whose own dismissal had been
+    /// abandoned (filmed on a device: page onto a text post, grab down, let go).
+    /// So the bar goes back only when the abandoned transition was ARRIVING here.
     private func retireTabBarOnReturn() {
         guard isClosable, let tabBarController, !tabBarController.isTabBarHidden else { return }
         guard let coordinator = transitionCoordinator else {
             tabBarController.setTabBarHidden(true, animated: false)
             return
         }
+        let arriving = coordinator.viewController(forKey: .to) === self
+            || coordinator.viewController(forKey: .to) === navigationController
         coordinator.animate(alongsideTransition: { _ in
             tabBarController.setTabBarHidden(true, animated: false)
         }, completion: { context in
-            guard context.isCancelled else { return }
+            // A return TO the feed that was abandoned: the screen that stays
+            // owns the bar. Anything else leaves the feed on screen, bar-less.
+            guard context.isCancelled, arriving else { return }
             tabBarController.setTabBarHidden(false, animated: false)
         })
+    }
+
+    /// The last word after an ABANDONED dismissal of this feed: once every
+    /// party's completion has run (one turn later — theirs are registered on
+    /// the same coordinator and can reveal the dock for the screen they
+    /// expected to land on), a feed still on top and on screen has no dock.
+    private func assertNoTabBarAfterAbandonedDismissal() {
+        guard let coordinator = transitionCoordinator,
+              coordinator.viewController(forKey: .from) === self
+                || coordinator.viewController(forKey: .from) === navigationController else { return }
+        coordinator.animate(alongsideTransition: nil) { [weak self] context in
+            guard context.isCancelled else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, isClosable, view.window != nil,
+                      navigationController?.topViewController === self,
+                      let tabBarController, !tabBarController.isTabBarHidden else { return }
+                tabBarController.setTabBarHidden(true, animated: false)
+            }
+        }
     }
 
     private var isClosable: Bool {
@@ -630,6 +682,13 @@ final class SnapFeedViewController: UIViewController {
         syncEngagementAfterAppearance()
         isOnScreen = true
         refreshVisibility()
+        authorPillAwaitsLandingInstall = true
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-pill-probe") {
+            authorIdentityView.debugProbe("willAppear")
+            DispatchQueue.main.async { [weak self] in self?.authorIdentityView.debugProbe("willAppear+turn") }
+        }
+        #endif
     }
 
     /// Reconciles VC-side engagement state with cell-side reality after
@@ -676,6 +735,9 @@ final class SnapFeedViewController: UIViewController {
         if hasAppeared, isClosable, let tabBarController, !tabBarController.isTabBarHidden {
             tabBarController.setTabBarHidden(true, animated: false)
         }
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-pill-probe") { authorIdentityView.debugProbe("didAppear") }
+        #endif
         hasAppeared = true
         // The willAppear reconciliation's landing half — by now the bar's
         // containers are in the window and the walk-up reaches them.
@@ -697,6 +759,9 @@ final class SnapFeedViewController: UIViewController {
             // the flight, unseen behind the replica: it enters now.
             activeSnapCell?.replayCommentBandEntrance()
         }
+        // A zoom flight lands in `zoomTransitionDidEnd`; this is every other
+        // path's landing (the guard inside waits for the flight).
+        installAuthorPillAfterLanding()
         if !isAwaitingZoomPresentation { applyPendingComments(animated: true) }
         #if DEBUG
         runDebugAppearanceHooks()
@@ -953,6 +1018,7 @@ final class SnapFeedViewController: UIViewController {
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        assertNoTabBarAfterAbandonedDismissal()
         setNativePopSuppressed(false)
         // A grab-to-dismiss or a pop is under way: the landing's warm must not
         // build ~100 ms of panel inside it. A cancelled grab lands again, and
@@ -1511,6 +1577,113 @@ final class SnapFeedViewController: UIViewController {
         navigationItem.setRightBarButtonItems(items, animated: animated)
     }
 
+    // MARK: - Author pill
+
+    private func makeAuthorItem(_ pill: SnapAuthorIdentityView) -> UIBarButtonItem {
+        let item = UIBarButtonItem(customView: pill)
+        item.identifier = Self.authorItemIdentifier(for: pill.shownAuthor?.authorID)
+        return item
+    }
+
+    /// Puts `model`'s author in the bar.
+    ///
+    /// ⚠️ A NEW AUTHOR IS A NEW ITEM, and that is the whole mechanism. The pill
+    /// used to be one view for the screen's life, rewritten in place under its
+    /// own cross-dissolve — and the bar never animated an author change, because
+    /// from the bar's side nothing had changed: same item, same view. A fresh
+    /// pill in a fresh item under the new author's `identifier`, set through
+    /// `setRightBarButtonItems(_:animated:)`, is a replacement the bar animates
+    /// with its own item transition (see `authorItemIdentifier(for:)`).
+    ///
+    /// Paging between two posts by the same person moves only the post's age,
+    /// in place: there is no new identity to announce.
+    ///
+    /// Internal, not private, so the item contract is testable without a
+    /// populated feed.
+    func showAuthor(_ model: FeedItemDisplayModel) {
+        if authorIdentityView.showsSameFace(as: model) {
+            authorIdentityView.setAuthor(model, pipeline: imagePipeline)
+            return
+        }
+        installAuthorPill(for: model, animated: canAnimateBarItems)
+    }
+
+    /// Whether a bar-item change may animate now: on screen, and not inside a
+    /// presentation's transition, whose own bar animation already owns the
+    /// items (a morph started under it lands in the flight's first frames).
+    private var canAnimateBarItems: Bool {
+        view.window != nil && transitionCoordinator == nil && !isAwaitingAnyFlight
+    }
+
+    /// Replaces the pill with a fresh one showing `model` (or, with nil, the
+    /// same author the current one shows), in a fresh item under the author's
+    /// identifier. The fresh pill inherits every host decision — width cap,
+    /// shadow, callbacks — from the one it replaces.
+    ///
+    /// Swapped into the trailing run only when the run is WEARING the pill: with
+    /// a media post's thread open the ✕ holds the slot, and the new item simply
+    /// waits in `authorItem` for the run to be rebuilt.
+    ///
+    /// Nothing piles up however fast the feed is paged: the bar holds the one
+    /// installed item, and this controller holds the one current pill.
+    private func installAuthorPill(for model: FeedItemDisplayModel?, animated: Bool) {
+        let previous = authorIdentityView
+        let fresh = SnapAuthorIdentityView()
+        fresh.inheritChrome(from: previous)
+        if let model = model ?? previous.shownAuthor {
+            fresh.setAuthor(model, pipeline: imagePipeline, animated: false)
+        }
+        authorIdentityView = fresh
+        let previousItem = authorItem
+        authorItem = makeAuthorItem(fresh)
+        // The engaged fit reads the PILL's own handle width; the fresh pill has
+        // a different handle.
+        if commentsEngagedID != nil { applyEngagedTrailingRunFit() }
+        guard var items = navigationItem.rightBarButtonItems,
+              let index = items.firstIndex(of: previousItem) else { return }
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-pill-probe") {
+            print("[pill-probe] install \(fresh.shownAuthor?.authorName ?? "-") animated=\(animated)"
+                  + " window=\(view.window != nil) coordinator=\(transitionCoordinator != nil) flight=\(isAwaitingAnyFlight)")
+        }
+        #endif
+        items[index] = authorItem
+        navigationItem.setRightBarButtonItems(items, animated: animated)
+    }
+
+    /// Set by an appearance, spent once the screen has LANDED: the pill that
+    /// rode the presentation in is replaced by a fresh item.
+    ///
+    /// ⚠️ THE SQUARE PLATE. A post opened by a flight showed the pill's initials
+    /// plate as a rounded SQUARE (filmed on a device; reproduced on the iPhone
+    /// 18 Pro simulator with an author who has no picture — with a picture the
+    /// plate is covered within 0.15s, which is why quick screenshots missed
+    /// it). The item had first materialised inside the push's bar transition,
+    /// and there the plate's system-fill background was drawn with the bar's
+    /// own corner, ignoring the view's radius and its oval mask; re-installing
+    /// the item (opening and closing the comments) drew a disc.
+    ///
+    /// The cause is fixed at the plate (`MonogramAvatarView.drawPlate`: an oval
+    /// path, no fill background). This install is the second guard, and costs
+    /// one item swap per appearance: every entry path ends the way the
+    /// comments round trip did, with an item installed on a settled screen.
+    /// Same author, same identifier — the swap is not animated and not seen.
+    private var authorPillAwaitsLandingInstall = false
+
+    private func installAuthorPillAfterLanding() {
+        guard authorPillAwaitsLandingInstall, !isAwaitingAnyFlight else { return }
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-pill-no-landing-install") { return }
+        #endif
+        authorPillAwaitsLandingInstall = false
+        // One turn later: out of the transition's completion and whatever
+        // animation context it closes in.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.view.window != nil else { return }
+            self.installAuthorPill(for: nil, animated: false)
+        }
+    }
+
 
     private func configureNavigationItem() {
         // Fully transparent bar over the full-bleed media, identical for every
@@ -1524,14 +1697,14 @@ final class SnapFeedViewController: UIViewController {
         navigationItem.compactAppearance = appearance
 
         // The author identity rides the *trailing* bar item (right-aligned,
-        // like a system floating action), not the centered titleView. One
-        // stable custom view, installed exactly once: author changes
-        // cross-fade inside it, never re-negotiating bar layout. The run is
-        // closed on its left by the wallet badge (when a wallet is wired) —
-        // the feed's chrome stays identical on every entry path (menu push
-        // and pin flight), so nothing else may install items, here or from
-        // outside.
-        authorItem = UIBarButtonItem(customView: authorIdentityView)
+        // like a system floating action), not the centered titleView. An
+        // author change installs a fresh pill in a fresh item under that
+        // author's identifier (`installAuthorPill`), so the bar runs its own
+        // item transition between them. The run is closed on its left by the
+        // wallet badge (when a wallet is wired) — the feed's chrome stays
+        // identical on every entry path (menu push and pin flight), so
+        // nothing else may install items, here or from outside.
+        authorItem = makeAuthorItem(authorIdentityView)
         sortItem = UIBarButtonItem(customView: commentSortButton)
         if wallet != nil {
             // Tappable exactly when a sheet is wired: the badge opens the
@@ -1606,6 +1779,8 @@ final class SnapFeedViewController: UIViewController {
         close.accessibilityLabel = "Close comments"
         close.addAction(UIAction { [weak self] _ in self?.dismissComments() }, for: .primaryActionTriggered)
         closeCommentsItem = UIBarButtonItem(customView: close)
+        // Set once, on the first pill; every fresh pill inherits them
+        // (`SnapAuthorIdentityView.inheritChrome`).
         authorIdentityView.onAuthorTapped = { [weak self] id in self?.viewModel.didTapAuthor(id) }
         // The feed layer has no follow API (follow state/toggling lives in the
         // Profile feature), so the follow affordance routes to the author's
@@ -3811,7 +3986,18 @@ final class SnapFeedViewController: UIViewController {
     private func updateBarChrome(at index: Int) {
         guard orderedIDs.indices.contains(index),
               let model = modelsByID[orderedIDs[index]] else { return }
-        authorIdentityView.setAuthor(model, pipeline: imagePipeline)
+        showAuthor(model)
+        // The neighbours' faces, so the pill paged to next arrives wearing one.
+        for neighbour in [index - 1, index + 1] where orderedIDs.indices.contains(neighbour) {
+            if let url = modelsByID[orderedIDs[neighbour]]?.avatarURL {
+                SnapAuthorIdentityView.warmFace(url, pipeline: imagePipeline)
+            }
+        }
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-pill-probe") {
+            authorIdentityView.debugProbe("setAuthor \(model.authorName)")
+        }
+        #endif
         // The cover is the SOUND's: its artwork, a note for a song that has
         // none, and the post's own picture only for a sound with neither.
         let postSound = sound(for: model)
@@ -5433,8 +5619,19 @@ extension SnapFeedViewController: ZoomTransitionDestination {
                   + " | insets page=\(activeSnapCell?.debugChromeInsets ?? .zero) replica=\(replica.layoutMargins)")
         }
         #endif
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-pill-probe") {
+            authorIdentityView.debugProbe("landed")
+            for delay in [0.016, 0.05, 0.1, 0.2, 0.4, 0.8, 1.6] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                    self?.authorIdentityView.debugProbe("landed+\(delay)")
+                }
+            }
+        }
+        #endif
         flightChrome = nil
         isAwaitingZoomPresentation = false
+        installAuthorPillAfterLanding()
         // Back to the conservative reading for whatever presents next: this
         // controller outlives the flight that set it.
         flightCarriesActivePlayer = true
