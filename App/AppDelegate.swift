@@ -26,6 +26,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
             setvbuf(stdout, nil, _IONBF, 0)
         }
         #endif
+        AppContainer.configureEmotes()
         return true
     }
 

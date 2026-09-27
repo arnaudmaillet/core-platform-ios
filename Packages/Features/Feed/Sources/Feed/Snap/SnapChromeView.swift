@@ -1,5 +1,6 @@
 import CoreModels
 import DesignSystem
+import EmoteKit
 import MediaCore
 import PostGrid
 import UIKit
@@ -28,7 +29,9 @@ final class SnapChromeView: UIView {
         locations: [0, 0.55, 1]
     )
 
-    private let captionLabel = UILabel()
+    /// An `EmoteLabel`: the caption's emoji and `:code:` emotes animate in
+    /// place, at the caption's own size (`composedCaption` marks them).
+    private let captionLabel = EmoteLabel()
 
     /// The danmaku band, floating over the media directly above the caption.
     /// Content reaches it only through `updateCommentStreams` — never through
@@ -679,8 +682,13 @@ final class SnapChromeView: UIView {
     ///
     /// With no timestamp (or an unmeasured zero width) it returns the bare
     /// caption — the label's own `numberOfLines`/truncation then applies.
+    ///
+    /// Emotes are marked BEFORE anything is measured (`EmoteText`): a `:code:`
+    /// is already the one emoji glyph it draws as, so every measurement below
+    /// sees the final line, and Case C's bisection — which counts graphemes —
+    /// can never cut an emote in half.
     static func composedCaption(_ caption: String, timestamp: String?, width: CGFloat) -> NSAttributedString {
-        let captionString = NSAttributedString(string: caption, attributes: captionAttributes(secondary: false))
+        let captionString = EmoteText.attributedString(caption, attributes: captionAttributes(secondary: false))
         guard let timestamp, !timestamp.isEmpty, width > 0 else { return captionString }
 
         let timestampString = NSAttributedString(string: timestamp, attributes: captionAttributes(secondary: true))
@@ -704,13 +712,17 @@ final class SnapChromeView: UIView {
         // ellipsis + timestamp inside two lines (prefix length grows the
         // line count monotonically, so the largest fitting prefix is the
         // truncation point).
-        let characters = Array(caption)
+        let characters = Array(captionString.string)
         func candidate(prefixLength: Int) -> NSAttributedString {
+            // Cut from the MARKED string, so the emotes a prefix keeps keep
+            // their marks.
             let prefix = String(characters[0..<prefixLength])
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let out = NSMutableAttributedString(
-                string: prefix + "… ", attributes: captionAttributes(secondary: false)
-            )
+            let trimmed = prefix.trimmingCharacters(in: .whitespacesAndNewlines)
+            let out = NSMutableAttributedString()
+            if !trimmed.isEmpty, let range = prefix.range(of: trimmed) {
+                out.append(captionString.attributedSubstring(from: NSRange(range, in: prefix)))
+            }
+            out.append(NSAttributedString(string: "… ", attributes: captionAttributes(secondary: false)))
             out.append(timestampString)
             return out
         }

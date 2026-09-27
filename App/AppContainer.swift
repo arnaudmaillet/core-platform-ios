@@ -14,6 +14,7 @@ import CoreNetworkingMocks
 import CoreRealtime
 import CoreRealtimeMocks
 import CoreStorage
+import EmoteKit
 import Feed
 import FeedInterface
 import AVFoundation
@@ -569,6 +570,16 @@ final class AppContainer {
     /// GIFs, every step an integer multiple of a 30 fps base so the whole
     /// catalogue changes on ONE grid.
     private static let mapIconCatalog = AnimatedIconCatalog(manifest: "mapicons")
+
+    /// Hands the map's baked icon catalogue to EmoteKit, for the house emotes
+    /// drawn from it (`:lol:`, `:blush:`). The map's own catalogue, so nothing
+    /// is bundled twice; EmoteKit keeps a matted copy of each sheet it uses
+    /// (`EmoteIconMatte` lifts the white paper off). Until this runs those
+    /// emotes stay on their stand-in emoji.
+    @MainActor
+    static func configureEmotes() {
+        EmoteEngine.shared.iconCatalog = mapIconCatalog
+    }
 
     /// Which mock post wears which icon. Text-only posts, half of them.
     private static func mockAnimatedIcons(

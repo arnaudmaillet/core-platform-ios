@@ -245,7 +245,10 @@ public struct MockSocialDataset: Sendable {
             ships as-is and the polish lands next week. Anyone who needs the \
             old behaviour can keep it behind the flag until the end of the month.
             """,
-            "Refactor landed and the office survived it.",
+            // Arrivals 1 and 5 carry EMOTES — Unicode emoji and house
+            // `:code:`s — so EmoteKit's animated caption shows in mock mode.
+            // Neither `lmao` nor `lol` is in any context lexicon.
+            "Refactor landed and the office survived it. 🎉 :lmao:",
             """
             Shipping the new build tonight. The changelog is longer than I \
             expected: two crashes that only reproduced on a cold launch, a \
@@ -257,7 +260,7 @@ public struct MockSocialDataset: Sendable {
             """,
             "Quiet morning, notes and a long walk before anything else.",
             "Golden hour over the harbour.",
-            "Every clip from the trip, back to back.",
+            "Every clip from the trip, back to back 🔥😂 :lol: ❤️",
             // ⚠️ TWO TEXT ARRIVALS IN A ROW, AND THAT IS THE WHOLE POINT.
             //
             // The corpus makes every third post text-only, so two text posts
@@ -789,7 +792,7 @@ public struct MockSocialDataset: Sendable {
         let captionBank = [
             "Golden hour at the pier.",
             "Shipped a thing today. Small, but mine.",
-            "Coffee count: unreasonable. Progress: acceptable. The refactor is finally starting to pay for itself and the test suite agrees.",
+            "Coffee count: unreasonable ☕😂 Progress: acceptable :lol: The refactor is finally starting to pay for itself and the test suite agrees 🔥",
             "No caption needed.",
             "Weekend build log: rebuilt the pipeline end to end, found two race conditions that only reproduce on cold caches, and learned more about backpressure than I ever wanted to. Writing it up properly this week — the short version is that the queue was never the problem, the clock was.",
             "New city, same habits.",
