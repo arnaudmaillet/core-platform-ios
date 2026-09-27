@@ -1,5 +1,6 @@
 import CoreModels
 import DesignSystem
+import EmoteKit
 import MediaCore
 import UIKit
 
@@ -40,7 +41,7 @@ final class MessageRequestCell: UITableViewCell {
     /// Guards a late fetch against cell reuse — see `ConversationCell`.
     private var avatarPeerID: ProfileID?
     private let nameLabel = UILabel()
-    private let previewLabel = UILabel()
+    private let previewLabel = EmoteLabel()
     private let timeLabel = UILabel()
     private let acceptButton = UIButton(type: .system)
     private let dismissButton = UIButton(type: .system)

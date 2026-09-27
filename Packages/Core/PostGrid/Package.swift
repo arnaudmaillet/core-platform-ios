@@ -20,16 +20,18 @@ let package = Package(
         .package(path: "../CoreNavigation"),
         // For `PostCardStaking`: a card's like chip STAKES, and the wallet is
         // the store it spends from. CoreStorage depends on CoreModels alone.
-        .package(path: "../CoreStorage")
+        .package(path: "../CoreStorage"),
+        // Captions and text-post bodies animate their emotes.
+        .package(path: "../EmoteKit")
     ],
     targets: [
         .target(
             name: "PostGrid",
             dependencies: [
                 "CoreModels", "MediaCore", "MediaPlayback", "DesignSystem", "CoreNavigation",
-                "CoreStorage"
+                "CoreStorage", "EmoteKit"
             ]
         ),
-        .testTarget(name: "PostGridTests", dependencies: ["PostGrid", "CoreStorage"])
+        .testTarget(name: "PostGridTests", dependencies: ["PostGrid", "CoreStorage", "EmoteKit"])
     ]
 )

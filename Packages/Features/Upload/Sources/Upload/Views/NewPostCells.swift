@@ -1,4 +1,5 @@
 import DesignSystem
+import EmoteKit
 // `VideoRenderView` — the surface the cover's clip plays in, over its own tile.
 import MediaPlayback
 import UIKit
@@ -926,10 +927,14 @@ final class NewPostCaptionCell: UICollectionViewListCell {
     private enum Metrics {
         static let minimumHeight: CGFloat = 96
         static let maximumHeight: CGFloat = 220
+        static let emoteToggleSide: CGFloat = 30
     }
 
     private let field = UITextView()
     private let placeholder = UILabel()
+    /// The emote panel and the inline `:query` strip. Its smiley sits in the
+    /// caption's bottom trailing corner; the text wraps short of it.
+    private lazy var emotes = EmoteKeyboard(textView: field)
     private var heightConstraint: NSLayoutConstraint!
     private var onChange: ((String) -> Void)?
 
@@ -964,6 +969,16 @@ final class NewPostCaptionCell: UICollectionViewListCell {
         }
         heightConstraint = field.heightAnchor.constraint(equalToConstant: Metrics.minimumHeight)
         heightConstraint.isActive = true
+
+        let toggle = emotes.toggleButton
+        toggle.tintColor = .secondaryLabel
+        field.textContainerInset.right = Metrics.emoteToggleSide
+        toggle.constrain(in: contentView) { _ in
+            toggle.trailingAnchor.constraint(equalTo: field.trailingAnchor)
+            toggle.bottomAnchor.constraint(equalTo: field.bottomAnchor)
+            toggle.widthAnchor.constraint(equalToConstant: Metrics.emoteToggleSide)
+            toggle.heightAnchor.constraint(equalToConstant: Metrics.emoteToggleSide)
+        }
     }
 
     @available(*, unavailable)

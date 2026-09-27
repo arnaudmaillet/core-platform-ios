@@ -716,7 +716,7 @@ public struct MockSocialDataset: Sendable {
             ("zed.aldrin", "Zed Aldrin", "", "https://zed.example"),
             ("nina.varga", "Nina Varga", "Ceramics, badly. Improving.", ""),
             ("olu.adeyemi", "Olu Adeyemi", "Backend by day, bread by night.", "https://olu.example"),
-            ("priya.raman", "Priya Raman", "Long runs and longer playlists.", ""),
+            ("priya.raman", "Priya Raman", "Long runs and longer playlists 🎶🔥 :lol:", ""),
             ("quentin.dubois", "Quentin Dubois", "", ""),
             ("rosa.iglesias", "Rosa Iglesias", "Archivist. Ask me about microfilm.", ""),
             ("sam.whitfield", "Sam Whitfield", "Boats, mostly small ones.", "https://sam.example"),
