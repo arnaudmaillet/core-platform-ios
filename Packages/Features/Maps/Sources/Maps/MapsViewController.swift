@@ -197,6 +197,14 @@ final class MapsViewController: UIViewController {
     /// The country each pin stands in, looked up once per post: the atlas
     /// test is point-in-polygon, and the reconcile runs on every settle.
     private var pinCountries: [PostID: String] = [:]
+    /// A pick waiting to become a flight and an offer (`mapTapped`).
+    private var pendingOffer: DispatchWorkItem?
+    /// The open offer, if any.
+    private weak var offerSheet: CountryUnlockSheetViewController?
+    /// Where the map was before the offer flew it to its country.
+    private var offerCamera: MKMapCamera?
+    /// Whether closing the offer flies the map back to `offerCamera`.
+    private var offerReturns = true
     /// The top-trailing column: the countries shop's globe over the compass.
     /// Built only when countries are sold; otherwise MapKit's own compass.
     private let mapControls = UIStackView()
@@ -867,11 +875,14 @@ final class MapsViewController: UIViewController {
 
     // MARK: - Countries
 
-    /// The world's borders, and picking a country: a tap lifts it above the
-    /// others; a second tap, or one at sea, lowers it.
+    /// The world's borders, and picking a LOCKED country: a tap lifts it at
+    /// once, then the map flies to it and its offer rises. An unlocked
+    /// country does nothing under a tap — the map stays the map.
     private func configureCountries() {
         countryLayer.access = countryAccess
-        countryLayer.onCountryTapped = { [weak self] country in self?.countryTapped(country) }
+        countryLayer.onMapTapped = { [weak self] country in self?.mapTapped(country) }
+        countryLayer.onTouchDown = { [weak self] in self?.cancelPendingOffer() }
+        countryLayer.onMapGesture = { [weak self] in self?.mapMovedByUser() }
         countryLayer.onLockedBadgeTapped = { [weak self] country in self?.offer(country) }
         countryLayer.install(on: mapView)
         NotificationCenter.default.addObserver(
@@ -982,30 +993,100 @@ final class MapsViewController: UIViewController {
         mapView.setVisibleMapRect(visible, animated: true)
     }
 
-    /// A tap on a country: a locked one is offered (lifted, with its sheet);
-    /// an open one is lifted, and lowered by a second tap.
-    private func countryTapped(_ country: CountryAtlas.Country) {
-        if let countryAccess, !countryAccess.isUnlocked(country.code) {
-            offer(country)
+    /// A tap on the map, not on a marker.
+    ///
+    /// - With an offer open, the tap closes it and the map goes back to where
+    ///   it was: tapping away is "no thanks".
+    /// - On a locked country: it lifts NOW, like a marker's selection, and the
+    ///   flight and the offer follow `offerDelay` later unless another finger
+    ///   lands first (`cancelPendingOffer`): the second tap of a double-tap
+    ///   zoom, or the start of a pan, undoes the pick.
+    /// - Anywhere else: whatever is lifted lowers.
+    private func mapTapped(_ country: CountryAtlas.Country?) {
+        if offerSheet != nil {
+            closeOffer(returning: true)
             return
         }
-        countryLayer.select(countryLayer.selectedCode == country.code ? nil : country.code)
+        guard let country, let countryAccess, !countryAccess.isUnlocked(country.code) else {
+            countryLayer.select(nil)
+            return
+        }
+        countryLayer.select(country.code)
+        let pending = DispatchWorkItem { [weak self] in
+            self?.pendingOffer = nil
+            self?.offer(country)
+        }
+        pendingOffer = pending
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.offerDelay, execute: pending)
     }
 
-    /// Lifts a locked country and presents what unlocking it would open.
+    /// Long enough for a double tap's second touch to land, short enough to
+    /// read as one gesture: the lift is instant, the flight follows.
+    private static let offerDelay: TimeInterval = 0.3
+
+    /// A finger landed while a pick waited for its flight: it was the start
+    /// of something else (a double-tap zoom, a pan). The pick is undone.
+    private func cancelPendingOffer() {
+        guard let pendingOffer else { return }
+        pendingOffer.cancel()
+        self.pendingOffer = nil
+        countryLayer.select(nil)
+    }
+
+    /// The user moved the map. A waiting pick is dropped, and an open offer
+    /// closes WHERE THE USER TOOK THE MAP: no flight back to the camera it
+    /// left from, since the user has just chosen another place to look.
+    private func mapMovedByUser() {
+        cancelPendingOffer()
+        if offerSheet != nil { closeOffer(returning: false) }
+    }
+
+    /// Lifts a locked country, flies the map to it above its sheet, and
+    /// presents what unlocking it would open. The camera it left from is kept:
+    /// closing the offer flies back to it.
     private func offer(_ country: CountryAtlas.Country) {
         guard let countryAccess, presentedViewController == nil else { return }
+        if offerCamera == nil { offerCamera = mapView.camera.copy() as? MKMapCamera }
         countryLayer.select(country.code)
         let sheet = CountryUnlockSheetViewController(country: country, access: countryAccess)
         // The country being sold stands ABOVE the sheet, not under it.
         sheet.loadViewIfNeeded()
         frame(country, bottomInset: sheet.contentHeight + view.safeAreaInsets.bottom)
-        sheet.onDismissed = { [weak self] in
-            // Still lifted if it was just unlocked: the reveal is the reward.
-            guard let self, !(self.countryAccess?.isUnlocked(country.code) ?? false) else { return }
-            self.countryLayer.select(nil)
-        }
+        sheet.onDismissed = { [weak self] in self?.offerDidClose(country) }
+        offerSheet = sheet
         present(sheet, animated: true)
+    }
+
+    /// Closes the open offer. `returning`: whether the map flies back to the
+    /// camera it had before the offer.
+    private func closeOffer(returning: Bool) {
+        guard let offerSheet else { return }
+        offerReturns = returning
+        offerSheet.dismiss(animated: true)
+    }
+
+    /// The offer is gone — closed by the user, by a tap or a pan on the map,
+    /// or by an unlock.
+    ///
+    /// - Unlocked: the map stays on the country, whose posts are the reward,
+    ///   and the lift fades once they have had a moment on screen.
+    /// - Otherwise the country lowers, and the map flies back to where it was
+    ///   (unless the user moved it away from the offer themselves).
+    private func offerDidClose(_ country: CountryAtlas.Country) {
+        let camera = offerCamera
+        let returning = offerReturns
+        offerSheet = nil
+        offerCamera = nil
+        offerReturns = true
+        if countryAccess?.isUnlocked(country.code) ?? false {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+                guard self?.countryLayer.selectedCode == country.code else { return }
+                self?.countryLayer.select(nil)
+            }
+            return
+        }
+        countryLayer.select(nil)
+        if returning, let camera { mapView.setCamera(camera, animated: true) }
     }
 
     @objc private func countryAccessChanged() {

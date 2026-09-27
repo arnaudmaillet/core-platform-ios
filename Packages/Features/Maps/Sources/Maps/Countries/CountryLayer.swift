@@ -29,14 +29,23 @@ final class CountryShape: MKMultiPolygon {
 }
 
 /// Draws a country: a border, a shade when locked, and — for the lifted copy
-/// of the selected one — a raised look: a brighter fill, a white rim and a
-/// drop shadow.
+/// of the selected one — a raised look: a brighter fill, a fine white rim and
+/// a drop shadow, all faded in by `lift`.
 ///
 /// ⚠️ **THE SHADOW IS SCALED BY THE ZOOM.** A renderer draws in map points,
 /// and a shadow offset or blur given in screen points would shrink to nothing
 /// at a continent's zoom and swallow the country at a street's.
 final class CountryRenderer: MKMultiPolygonRenderer {
     var style: CountryStyle = .unlocked { didSet { if style != oldValue { applyStyle() } } }
+    /// How far the lifted copy has risen, 0...1: its opacity, and how far its
+    /// shadow has spread. Stepped by `CountryLayer` to fade a pick in and out.
+    var lift: CGFloat = 1 {
+        didSet {
+            guard lift != oldValue else { return }
+            alpha = lift
+            setNeedsDisplay()
+        }
+    }
     private let isLifted: Bool
 
     convenience init(shape: CountryShape) {
@@ -55,9 +64,10 @@ final class CountryRenderer: MKMultiPolygonRenderer {
 
     private func applyStyle() {
         if isLifted {
-            fillColor = UIColor.white.withAlphaComponent(style == .locked ? 0.22 : 0.12)
+            fillColor = UIColor.white.withAlphaComponent(style == .locked ? 0.2 : 0.12)
             strokeColor = .white
-            lineWidth = 3
+            // Fine: a rim, not a marker stroke ("trop grossier" at 3).
+            lineWidth = 1.5
         } else {
             switch style {
             case .unlocked:
@@ -76,10 +86,11 @@ final class CountryRenderer: MKMultiPolygonRenderer {
     override func draw(_ mapRect: MKMapRect, zoomScale: MKZoomScale, in context: CGContext) {
         guard isLifted else { return super.draw(mapRect, zoomScale: zoomScale, in: context) }
         context.saveGState()
+        // The shadow grows with the lift: the country rises off the map.
         context.setShadow(
-            offset: CGSize(width: 0, height: 6 / zoomScale),
-            blur: 18 / zoomScale,
-            color: UIColor.black.withAlphaComponent(0.45).cgColor
+            offset: CGSize(width: 0, height: 6 * lift / zoomScale),
+            blur: 18 * lift / zoomScale,
+            color: UIColor.black.withAlphaComponent(0.4).cgColor
         )
         super.draw(mapRect, zoomScale: zoomScale, in: context)
         context.restoreGState()
@@ -91,17 +102,27 @@ final class CountryRenderer: MKMultiPolygonRenderer {
 /// Owns the overlays and their renderers, the tap that picks a country, and
 /// the selected one's lifted copy. The map view controller installs it and
 /// forwards `rendererFor` and `viewFor`; which countries are open comes from
-/// `access`, and what a tap on one DOES is the host's (`onCountryTapped`,
+/// `access`, and what a tap on one DOES is the host's (`onMapTapped`,
 /// `onLockedBadgeTapped`). Locked countries also wear a badge at their centre
-/// (`LockedCountryAnnotation`) with their rank and likes.
+/// (`LockedCountryAnnotation`) with their rank.
 ///
 /// ⚠️ **A TAP ON A MARKER IS THE MARKER'S.** The country tap runs alongside
 /// the map's own recognisers and stands down when the touch landed on an
 /// annotation view, so opening a post never also picks the country under it.
+///
+/// ⚠️ **A PICK IS INSTANT, LIKE A MARKER'S.** The tap no longer waits for a
+/// double tap to fail (~0.3 s, felt as lag). It fires on the first touch-up,
+/// and the host undoes it if another touch follows (`onTouchDown`): the second
+/// tap of a double-tap zoom, or the start of a pan.
 @MainActor
 final class CountryLayer: NSObject {
-    /// A country was tapped (not a marker on it).
-    var onCountryTapped: ((CountryAtlas.Country) -> Void)?
+    /// The map was tapped (not a marker): the country under the finger, or
+    /// nil at sea.
+    var onMapTapped: ((CountryAtlas.Country?) -> Void)?
+    /// A finger came down on the map (not on a marker).
+    var onTouchDown: (() -> Void)?
+    /// The user started moving the map: a pan, a pinch or a rotation.
+    var onMapGesture: (() -> Void)?
 
     /// A locked country's badge was tapped.
     var onLockedBadgeTapped: ((CountryAtlas.Country) -> Void)?
@@ -114,6 +135,10 @@ final class CountryLayer: NSObject {
     private var shapes: [String: CountryShape] = [:]
     private var renderers: [String: CountryRenderer] = [:]
     private var lifted: (shape: CountryShape, renderer: CountryRenderer?)?
+    /// The lifts being faded, in or out (`LiftFade`).
+    private var fades: [LiftFade] = []
+    private var fadeLink: CADisplayLink?
+    private weak var tap: UITapGestureRecognizer?
     private(set) var selectedCode: String?
     /// Whether the borders are on the map (the atlas decodes off main first).
     var hasBorders: Bool { !shapes.isEmpty }
@@ -134,18 +159,21 @@ final class CountryLayer: NSObject {
         let tap = UITapGestureRecognizer(target: self, action: #selector(tapped(_:)))
         tap.delegate = self
         tap.cancelsTouchesInView = false
-        // ⚠️ A DOUBLE TAP ZOOMS, it does not pick. Without this the first tap
-        // of a double-tap zoom lifted (or offered) the country under it. The
-        // twin recognises alongside MapKit's own double tap and does nothing;
-        // the pick waits for it to fail (~0.25s, the platform's own delay).
-        let doubleTap = UITapGestureRecognizer()
-        doubleTap.numberOfTapsRequired = 2
-        doubleTap.cancelsTouchesInView = false
-        doubleTap.delaysTouchesEnded = false
-        doubleTap.delegate = self
-        tap.require(toFail: doubleTap)
-        mapView.addGestureRecognizer(doubleTap)
         mapView.addGestureRecognizer(tap)
+        self.tap = tap
+        // Watchers for the map being MOVED, alongside MapKit's own gestures:
+        // they never take a touch, they only say it began.
+        let watchers: [UIGestureRecognizer] = [
+            UIPanGestureRecognizer(target: self, action: #selector(moved(_:))),
+            UIPinchGestureRecognizer(target: self, action: #selector(moved(_:))),
+            UIRotationGestureRecognizer(target: self, action: #selector(moved(_:))),
+        ]
+        for watcher in watchers {
+            watcher.delegate = self
+            watcher.cancelsTouchesInView = false
+            watcher.delaysTouchesEnded = false
+            mapView.addGestureRecognizer(watcher)
+        }
         Task { [weak self] in
             let countries = await Task.detached(priority: .userInitiated) { CountryAtlas.shared.countries }.value
             self?.addBorders(for: countries)
@@ -206,7 +234,12 @@ final class CountryLayer: NSObject {
         let renderer = CountryRenderer(shape: shape)
         renderer.style = style(for: shape.code)
         if shape.isLifted {
-            lifted?.renderer = renderer
+            if lifted?.shape === shape { lifted?.renderer = renderer }
+            if let index = fades.firstIndex(where: { $0.shape === shape }) {
+                // Born at the fade's start: a pick fades in from nothing.
+                renderer.lift = fades[index].from
+                fades[index].renderer = renderer
+            }
         } else {
             renderers[shape.code] = renderer
         }
@@ -220,27 +253,102 @@ final class CountryLayer: NSObject {
         refreshBadges()
     }
 
-    /// Lifts `code` above the others, or lowers the one lifted (nil).
-    func select(_ code: String?) {
+    /// Lifts `code` above the others, or lowers the one lifted (nil). The
+    /// lift fades in (and out): the rim, the fill and the shadow rise
+    /// together over `LiftFade.rise`, an ease-out, so a pick reads as the
+    /// country coming up to the finger rather than a stamp.
+    func select(_ code: String?, animated: Bool = true) {
         guard code != selectedCode, let mapView else { return }
-        if let lifted { mapView.removeOverlay(lifted.shape) }
+        if let lifted {
+            // A copy MapKit has not drawn yet has nothing to fade: it just goes.
+            if animated, let renderer = lifted.renderer {
+                fade(lifted.shape, renderer: renderer, from: renderer.lift, to: 0)
+            } else {
+                fades.removeAll { $0.shape === lifted.shape }
+                mapView.removeOverlay(lifted.shape)
+            }
+        }
         lifted = nil
         selectedCode = code
         guard let code, let country = atlas.country(code: code) else { return }
         let shape = CountryShape(country: country, lifted: true)
         lifted = (shape, nil)
+        if animated { fade(shape, renderer: nil, from: 0, to: 1) }
         mapView.addOverlay(shape, level: .aboveLabels)
     }
+
+    // MARK: - Fading a lift
+
+    /// One lift fading in or out. The clock starts when the renderer exists —
+    /// MapKit asks for it a turn after the overlay is added.
+    private struct LiftFade {
+        static let rise: CFTimeInterval = 0.24
+        static let fall: CFTimeInterval = 0.18
+        let shape: CountryShape
+        var renderer: CountryRenderer?
+        let from: CGFloat
+        let to: CGFloat
+        var start: CFTimeInterval?
+    }
+
+    private func fade(_ shape: CountryShape, renderer: CountryRenderer?, from: CGFloat, to: CGFloat) {
+        fades.removeAll { $0.shape === shape }
+        fades.append(LiftFade(shape: shape, renderer: renderer, from: from, to: to, start: nil))
+        renderer?.lift = from
+        guard fadeLink == nil else { return }
+        let link = CADisplayLink(target: FadeTicker(self), selector: #selector(FadeTicker.tick(_:)))
+        link.add(to: .main, forMode: .common)
+        fadeLink = link
+    }
+
+    fileprivate func stepFades(at now: CFTimeInterval) {
+        var finished: [CountryShape] = []
+        for index in fades.indices {
+            guard let renderer = fades[index].renderer else { continue }
+            let start = fades[index].start ?? now
+            fades[index].start = start
+            let rising = fades[index].to > fades[index].from
+            let duration = rising ? LiftFade.rise : LiftFade.fall
+            let progress = min(1, (now - start) / duration)
+            let eased = 1 - pow(1 - progress, 3)
+            renderer.lift = fades[index].from + (fades[index].to - fades[index].from) * eased
+            if progress >= 1 { finished.append(fades[index].shape) }
+        }
+        for shape in finished {
+            guard let index = fades.firstIndex(where: { $0.shape === shape }) else { continue }
+            let fade = fades.remove(at: index)
+            // Faded out: the copy leaves the map.
+            if fade.to == 0 { mapView?.removeOverlay(shape) }
+        }
+        if fades.isEmpty {
+            fadeLink?.invalidate()
+            fadeLink = nil
+        }
+    }
+
+    // MARK: - Touches
 
     @objc private func tapped(_ gesture: UITapGestureRecognizer) {
         guard gesture.state == .ended, let mapView else { return }
         let point = gesture.location(in: mapView)
         let coordinate = mapView.convert(point, toCoordinateFrom: mapView)
-        guard let country = atlas.country(containing: coordinate) else {
-            select(nil)
-            return
-        }
-        onCountryTapped?(country)
+        onMapTapped?(atlas.country(containing: coordinate))
+    }
+
+    @objc private func moved(_ gesture: UIGestureRecognizer) {
+        guard gesture.state == .began else { return }
+        onMapGesture?()
+    }
+}
+
+/// A display link's target that does not retain the layer.
+private final class FadeTicker: NSObject {
+    weak var layer: CountryLayer?
+    init(_ layer: CountryLayer) { self.layer = layer }
+
+    @MainActor @objc func tick(_ link: CADisplayLink) {
+        guard let layer else { return link.invalidate() }
+        layer.stepFades(at: link.targetTimestamp)
     }
 }
 
@@ -259,6 +367,8 @@ extension CountryLayer: UIGestureRecognizerDelegate {
             if current === mapView { break }
             view = current.superview
         }
+        // Every finger that lands on the map, told once (by the tap).
+        if gestureRecognizer === tap { onTouchDown?() }
         return true
     }
 }
