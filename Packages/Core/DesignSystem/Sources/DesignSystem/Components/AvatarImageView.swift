@@ -17,6 +17,10 @@ public final class AvatarImageView: UIImageView {
         super.init(frame: .zero)
         contentMode = .scaleAspectFill
         clipsToBounds = true
+        layer.cornerCurve = .circular
+        // The bar diameter until a layout pass says otherwise, so a copy taken
+        // before one (a flight's chrome) is already a disc.
+        layer.cornerRadius = Self.barDiameter / 2
     }
 
     @available(*, unavailable)
@@ -24,6 +28,8 @@ public final class AvatarImageView: UIImageView {
 
     public override func layoutSubviews() {
         super.layoutSubviews()
-        layer.cornerRadius = min(bounds.width, bounds.height) / 2
+        // Never to zero: a pass before the view has a size would draw a square.
+        let side = min(bounds.width, bounds.height)
+        if side > 0 { layer.cornerRadius = side / 2 }
     }
 }

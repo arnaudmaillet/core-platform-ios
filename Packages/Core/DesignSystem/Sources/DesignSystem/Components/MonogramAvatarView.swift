@@ -33,6 +33,18 @@ public final class MonogramAvatarView: UIView {
         widthConstraint = widthAnchor.constraint(equalToConstant: diameter)
         heightConstraint = heightAnchor.constraint(equalToConstant: diameter)
         NSLayoutConstraint.activate([widthConstraint, heightConstraint])
+        setRound(diameter)
+    }
+
+    /// ⚠️ ROUND FROM BIRTH, not from the first layout pass. The diameter is
+    /// known here, and a disc whose radius waits for `layoutSubviews` is a
+    /// SQUARE wherever it is drawn before one runs — a copy of the bars taken
+    /// for a flight, a bar item's first frame on a device. Reported as "a kind
+    /// of square" in the feed's author pill, where every other avatar was
+    /// round.
+    private func setRound(_ diameter: CGFloat) {
+        layer.cornerRadius = diameter / 2
+        layer.cornerCurve = .circular
     }
 
     /// Resizes the disc, initials included — for a row whose disc is sized
@@ -42,6 +54,7 @@ public final class MonogramAvatarView: UIView {
         widthConstraint.constant = diameter
         heightConstraint.constant = diameter
         label.font = Self.monogramFont(diameter)
+        setRound(diameter)
     }
 
     private static func monogramFont(_ diameter: CGFloat) -> UIFont {
@@ -53,7 +66,10 @@ public final class MonogramAvatarView: UIView {
 
     public override func layoutSubviews() {
         super.layoutSubviews()
-        layer.cornerRadius = min(bounds.width, bounds.height) / 2
+        // Still refreshed from the bounds, for a host that sizes the disc
+        // itself — never to zero, which is how the square got drawn.
+        let side = min(bounds.width, bounds.height)
+        if side > 0 { layer.cornerRadius = side / 2 }
     }
 
     /// Initials on the app's rule: the display name when there is one, the
