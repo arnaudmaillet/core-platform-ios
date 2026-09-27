@@ -772,7 +772,7 @@ public struct MockSocialDataset: Sendable {
         func avatarURL(index: Int) -> String {
             guard let shape = Self.avatarShape(index: index) else { return "" }
             switch mediaCatalog {
-            case .synthetic: return "mock://avatar/\(index)?w=\(shape.0)&h=\(shape.1)"
+            case .synthetic: return Self.syntheticAvatarURL(index: index)
             case .realAssets: return MockMediaFixtures.imageURL(index: index, width: shape.0, height: shape.1)
             }
         }
@@ -952,6 +952,37 @@ public struct MockSocialDataset: Sendable {
     /// The shape of an author's avatar — and so of their banner — or nil for
     /// an author with no picture. Landscape on even indices, portrait on odd,
     /// none on every fourth: `prof-0` band, `prof-1` poster, `prof-3` bare.
+    /// An author's avatar in the default (offline) catalogue: one of the
+    /// bundled REAL photographs, with its own encoded size.
+    ///
+    /// ⚠️ NEVER A FLAT COLOUR. It was `mock://avatar/<n>`, which the
+    /// placeholder fetcher renders as a solid colour, so three authors in four
+    /// wore a plain coloured disc and a plain coloured banner (2026-09-28: "on
+    /// ne devrait avoir aucun avatar de couleur unie"). An author has a real
+    /// picture or none (`avatarShape` nil → initials, no banner). A stride of
+    /// 7 over the catalogue spreads neighbours across shoots; the banner takes
+    /// its shape from the photo, so most are posters.
+    public static func syntheticAvatarURL(index: Int) -> String {
+        let photos = MockPhotoCatalog.shared.photos
+        guard !photos.isEmpty else { return "" }
+        // The landscape AVATARS (`avatarShape` even) take the catalogue's
+        // landscape photographs in turn, so the corpus keeps band banners;
+        // the rest spread over every photo.
+        let landscape = photos.filter { $0.width > $0.height }
+        if let shape = avatarShape(index: index), shape.0 > shape.1, !landscape.isEmpty, index % 4 == 0 {
+            return landscape[(index / 4) % landscape.count].media.url
+        }
+        return photos[(index * 7 + 3) % photos.count].media.url
+    }
+
+    /// The viewer's avatar in the default catalogue: a LANDSCAPE photograph,
+    /// so the viewer's own profile wears a band.
+    public static var syntheticViewerAvatarURL: String {
+        let catalog = MockPhotoCatalog.shared
+        let landscape = catalog.photos.first { $0.width > $0.height }
+        return (landscape ?? catalog.photos.first)?.media.url ?? ""
+    }
+
     public static func avatarShape(index: Int) -> (Int, Int)? {
         if index % 4 == 3 { return nil }
         return index % 2 == 0 ? (1600, 900) : (900, 1600)

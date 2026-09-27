@@ -226,8 +226,12 @@ struct MockMediaFixturesTests {
         #expect(MockSocialDataset.avatarShape(index: 0)?.0 == 1600)
         #expect(MockSocialDataset.avatarShape(index: 1)?.1 == 1600)
         #expect(MockSocialDataset.avatarShape(index: 3) == nil)
-        // And the URL says the shape it was given.
-        #expect(dataset.authors[0].avatarURL.hasSuffix("w=1600&h=900"))
+        // The default catalogue's avatars are real photographs, and the
+        // banners take their shape from them: a band, posters, and none.
+        let pictures = dataset.authors.compactMap { URL(string: $0.avatarURL) }
+            .compactMap { MockPhotoCatalog.shared.photo(for: $0) }
+        #expect(pictures.contains { $0.width > $0.height }, "no band banner left")
+        #expect(pictures.contains { $0.width <= $0.height }, "no poster banner left")
         #expect(dataset.authors[3].avatarURL.isEmpty)
     }
 
@@ -243,9 +247,10 @@ struct MockMediaFixturesTests {
         #expect(dataset.posts.contains { $0.media?.url.hasPrefix(MockPhotoCatalog.scheme) == true })
     }
 
-    /// ⚠️ THE AVATARS ARE EXACTLY WHAT THEY WERE — the product asked for them
-    /// kept while every post picture changed. Pinned URL for URL, in both
-    /// catalogs, so a later media change cannot take them along by accident.
+    /// ⚠️ THE `-rich-media` AVATARS ARE EXACTLY WHAT THEY WERE — the product
+    /// asked for them kept while every post picture changed. The default
+    /// catalogue's are REAL bundled photographs, never a synthesized colour:
+    /// an author has a picture or none.
     @Test func avatarsAreUnchanged() {
         let synthetic = MockSocialDataset()
         let real = MockSocialDataset(mediaCatalog: .realAssets)
@@ -255,7 +260,9 @@ struct MockMediaFixturesTests {
                 #expect(real.authors[index].avatarURL.isEmpty)
                 continue
             }
-            #expect(synthetic.authors[index].avatarURL == "mock://avatar/\(index)?w=\(shape.0)&h=\(shape.1)")
+            let avatar = try? #require(URL(string: synthetic.authors[index].avatarURL))
+            #expect(avatar.flatMap { MockPhotoCatalog.shared.fileURL(forPhoto: $0) } != nil,
+                    "author \(index) wears \(synthetic.authors[index].avatarURL), not a bundled photo")
             #expect(real.authors[index].avatarURL
                 == MockMediaFixtures.imageURL(index: index, width: shape.0, height: shape.1))
         }
