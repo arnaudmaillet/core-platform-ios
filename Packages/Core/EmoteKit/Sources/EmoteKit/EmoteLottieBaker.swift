@@ -1,215 +1,355 @@
 import Lottie
-import MediaCore
-import UIKit
+import QuartzCore
+import Synchronization
 
-/// One Lottie being rasterised into ONE sprite sheet, a frame at a time.
+/// Bakes Lottie emotes into sprite sheets OFF THE MAIN THREAD, one at a time.
 ///
-/// ⚠️ **ONE CONTEXT, NO PER-FRAME IMAGES.** Every frame is drawn straight into
-/// its cell of a single bitmap context, which becomes the sheet with one
-/// `makeImage()`. A bake allocates the sheet and nothing else of its size.
+/// ## Why not the main thread
 ///
-/// ⚠️ **A FRAME COSTS WHAT THE ANIMATION HOLDS, NOT WHAT IT MEASURES.**
-/// Measured on the iOS 27 simulator: 😂 and 😭 cost ~10 ms a frame at 32, 64
-/// and 128 px alike, 👍 ~5 ms, ❤️ under 1 ms — the time is Lottie walking its
-/// layer tree, and pixels are nearly free. That is why a bake never runs on a
-/// schedule of its own: `EmoteIdleBaker` draws frames only while the main run
-/// loop is idle.
-@MainActor
-final class EmoteBakeJob {
-    let plan: EmoteBakePlan
-    private let context: CGContext
-    private let drawer: EmoteFrameDrawer
-    private(set) var drawnFrames = 0
-    /// Time spent drawing, summed over frames — the main-thread cost.
-    private(set) var drawingTime = Duration.zero
-    /// Idle turns this job took.
-    private(set) var turns = 0
+/// Some Noto frames cost tens of milliseconds to draw (🥶, 🤔, 🥹, 🥳, 🌞, 😩),
+/// and a frame is never split. Drawn on the main thread — even only in idle
+/// turns — every heavy frame was a turn in which a touch waited: the
+/// fullscreen feed fell to ~7 fps for seconds while 🥶 baked. Here the main
+/// thread only hands a job over and takes a finished sheet back.
+///
+/// ## Why this is safe
+///
+/// Lottie's main-thread engine is main-thread by NAME: its layers are plain
+/// `CALayer`s (not main-actor-isolated), and the one place it checks the
+/// thread is `display()`, which does nothing off the main thread. The baker
+/// never goes through `display()`: it sets the frame and calls
+/// `forceDisplayUpdate()`, which updates the same tree synchronously. Each job
+/// owns its own layer tree, never attached to a window. The `LottieAnimation`
+/// is shared, and Lottie declares it `Sendable` (an immutable model; the
+/// per-frame state lives in the tree's nodes).
+///
+/// ⚠️ **ONE THING DOES REACH THE MAIN THREAD, AND IS WAITED OUT.** Building a
+/// `LottieAnimationLayer` sets its first frame through a `CATransaction`
+/// whose completion block — `forceDisplayUpdate()` on the new tree — Core
+/// Animation runs on the MAIN thread. Drawing while it runs is a data race on
+/// the tree's nodes (Thread Sanitizer names it) and, in pixels, a wrong frame
+/// in nearly every bake that overlaps it: 😂's face orange (its inverted matte
+/// cut nothing out). So a job builds the tree, lets the main thread run that
+/// one redraw and commit it (`EmoteMainCommit`), and only then draws — on
+/// the queue, alone. The main thread's share is that one small redraw.
+///
+/// ⚠️ **ONE JOB AT A TIME, AT UTILITY QoS.** A bake is invisible work: the
+/// label shows the system glyph until its sheet lands. One serial queue keeps
+/// the drawing to one core and below everything the user is waiting on.
+final class EmoteBakeQueue: Sendable {
+    static let shared = EmoteBakeQueue()
 
-    var isFinished: Bool { drawnFrames >= plan.frameCount }
+    private let queue = DispatchQueue(label: "EmoteKit.bake", qos: .utility)
+    private let queued = Atomic<Int>(0)
+    private let drawing = Atomic<Int>(0)
 
-    init?(animation: LottieAnimation, plan: EmoteBakePlan) {
-        guard let context = CGContext(
-            data: nil, width: plan.pixelWidth, height: plan.pixelHeight,
-            bitsPerComponent: 8, bytesPerRow: 0,
-            space: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
-            // BGRA, premultiplied: the layout Core Animation uploads without a
-            // conversion pass.
-            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
-        ) else { return nil }
-        // UIKit's orientation: origin top-left, y down — what `layer.render`
-        // assumes, and what makes row 0 the TOP row `frameRects` expects.
-        context.translateBy(x: 0, y: CGFloat(plan.pixelHeight))
-        context.scaleBy(x: 1, y: -1)
-        self.plan = plan
-        self.context = context
-        self.drawer = EmoteFrameDrawer(animation: animation, side: plan.side)
+    /// Jobs queued or drawing — a test seam.
+    var pendingJobs: Int { queued.load(ordering: .relaxed) }
+    /// Jobs drawing their frames right now — a test seam.
+    var drawingJobs: Int { drawing.load(ordering: .relaxed) }
+
+    /// Draws `plan`'s frames of `animation` into one sheet. Nil when the
+    /// calling task was cancelled first (the job stops at its next frame), or
+    /// when the animation cannot be drawn.
+    func bake(_ animation: LottieAnimation, plan: EmoteBakePlan) async -> EmoteBakeResult? {
+        let cancellation = EmoteBakeCancellation()
+        queued.add(1, ordering: .relaxed)
+        defer { queued.subtract(1, ordering: .relaxed) }
+        return await withTaskCancellationHandler {
+            guard let session = await onQueue({ EmoteBakeSession(animation: animation, plan: plan) }) else {
+                return nil
+            }
+            await session.waitForBirthRedraw()
+            return await onQueue {
+                self.drawing.add(1, ordering: .relaxed)
+                defer { self.drawing.subtract(1, ordering: .relaxed) }
+                return session.render(cancellation: cancellation)
+            }
+        } onCancel: {
+            cancellation.cancel()
+        }
     }
 
-    /// Draws frames until `budget` is spent — always at least one.
-    func drawFrames(budget: Duration) {
-        guard !isFinished else { return }
-        let clock = ContinuousClock()
-        let started = clock.now
-        turns += 1
-        repeat {
-            let origin = plan.origin(ofFrame: drawnFrames)
-            context.saveGState()
-            context.translateBy(x: CGFloat(origin.x), y: CGFloat(origin.y))
-            drawer.draw(atSeconds: plan.time(ofFrame: drawnFrames), in: context)
-            context.restoreGState()
-            drawnFrames += 1
-        } while !isFinished && clock.now - started < budget
-        drawingTime += clock.now - started
-    }
-
-    /// The finished sheet.
-    func makeArt() -> AnimatedIconArt? {
-        guard isFinished, let image = context.makeImage() else { return nil }
-        return .sheet(AnimatedIconSheet(
-            sheet: UIImage(cgImage: image), frameCount: plan.frameCount, columns: plan.columns,
-            frameDuration: plan.frameDuration, gutterPX: plan.gutter
-        ))
+    private func onQueue<T: Sendable>(_ body: @escaping @Sendable () -> T) async -> T {
+        await withCheckedContinuation { continuation in
+            queue.async { continuation.resume(returning: body()) }
+        }
     }
 }
 
-/// Runs bake jobs ONLY WHILE THE MAIN RUN LOOP IS IDLE — and never while a
-/// finger is down or a scroll view is decelerating.
+/// A finished sheet, and what drawing it cost (on the bake queue).
+struct EmoteBakeResult: Sendable {
+    let image: CGImage
+    let drawingTime: Duration
+}
+
+/// Set from any thread when nobody waits for a job any more.
+final class EmoteBakeCancellation: Sendable {
+    private let flag = Atomic<Bool>(false)
+    var isCancelled: Bool { flag.load(ordering: .relaxed) }
+    func cancel() { flag.store(true, ordering: .relaxed) }
+}
+
+/// One bake's tree and sheet, handed between the bake queue and the main
+/// thread — never used by both at once.
 ///
-/// A run-loop observer on `.beforeWaiting`, registered for the DEFAULT mode
-/// alone and ordered after Core Animation's commit: it fires only when the main
-/// thread has finished a turn, committed its frame and is about to sleep with
-/// nothing left to do. Tracking and deceleration run the loop in
-/// `UITrackingRunLoopMode`, where this observer does not exist, so a scroll
-/// never waits on a bake. Each idle turn draws for at most `budget` (one frame
-/// at least) and wakes the loop again if work remains, so a touch arriving
-/// mid-bake is handled after one frame, not after the bake.
-@MainActor
-final class EmoteIdleBaker {
-    static let shared = EmoteIdleBaker()
+/// `@unchecked Sendable` because its layers are not: the queue builds it,
+/// the main thread only reads one reference count while the queue waits, and
+/// the queue draws after the main thread is done — each hand-off a
+/// continuation, so each step happens-after the last.
+final class EmoteBakeSession: @unchecked Sendable {
+    private let drawer: EmoteFrameDrawer
+    private let plan: EmoteBakePlan
 
-    /// How long one idle turn may draw — half a 60 Hz frame. A single frame
-    /// can exceed it; it is never split.
-    static let budget = Duration.milliseconds(8)
+    init?(animation: LottieAnimation, plan: EmoteBakePlan) {
+        guard let drawer = EmoteFrameDrawer(animation: animation, side: plan.side) else { return nil }
+        self.drawer = drawer
+        self.plan = plan
+    }
 
-    /// One queued job; also the handle that cancels it.
+    /// Returns once the main thread has run the tree's birth redraw AND
+    /// committed what it changed: the first main-run-loop commit after which
+    /// the redraw is seen done, plus one more.
     @MainActor
-    final class Entry {
-        let job: EmoteBakeJob
-        fileprivate var completion: (@MainActor (Bool) -> Void)?
-        init(job: EmoteBakeJob, completion: @escaping @MainActor (Bool) -> Void) {
-            self.job = job
-            self.completion = completion
-        }
-
-        fileprivate func finish(_ finished: Bool) {
-            let completion = self.completion
-            self.completion = nil
-            completion?(finished)
+    func waitForBirthRedraw() async {
+        var ran = false
+        // 600 commits: ten seconds of a live main thread. A main thread that
+        // never turns stalls the bake; it never corrupts it.
+        for _ in 0..<600 {
+            await EmoteMainCommit.next()
+            if ran { return }
+            ran = drawer.birthRedrawHasRun()
         }
     }
 
-    private var queue: [Entry] = []
-    private var observer: CFRunLoopObserver?
-
-    /// Draws `job` to its end over idle turns. False when the calling task was
-    /// cancelled first; the job is then dropped where it stood.
-    func run(_ job: EmoteBakeJob) async -> Bool {
-        let handle = EntryHandle()
-        return await withTaskCancellationHandler {
-            await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
-                if Task.isCancelled {
-                    continuation.resume(returning: false)
-                    return
-                }
-                handle.entry = enqueue(job) { continuation.resume(returning: $0) }
+    /// Draws every frame on the calling thread (the bake queue).
+    func render(cancellation: EmoteBakeCancellation) -> EmoteBakeResult? {
+        defer { drawer.close() }
+        guard !cancellation.isCancelled,
+              let sheet = EmoteCanvas.make(width: plan.pixelWidth, height: plan.pixelHeight)
+        else { return nil }
+        let clock = ContinuousClock()
+        let started = clock.now
+        drawer.open()
+        for index in 0..<plan.frameCount {
+            if cancellation.isCancelled { return nil }
+            autoreleasepool {
+                let frame = drawer.draw(atSeconds: plan.time(ofFrame: index))
+                let origin = plan.origin(ofFrame: index)
+                EmoteCanvas.copy(frame, into: sheet, x: origin.x, y: origin.y)
             }
-        } onCancel: {
-            Task { @MainActor in handle.entry.map { EmoteIdleBaker.shared.drop($0) } }
         }
+        guard let image = sheet.makeImage() else { return nil }
+        return EmoteBakeResult(image: image, drawingTime: clock.now - started)
     }
+}
 
-    /// Queues `job`; `completion` runs once, with true when the job finished
-    /// and false when it was dropped.
-    @discardableResult
-    func enqueue(_ job: EmoteBakeJob, completion: @escaping @MainActor (Bool) -> Void) -> Entry {
-        let entry = Entry(job: job, completion: completion)
-        queue.append(entry)
-        installObserverIfNeeded()
-        CFRunLoopWakeUp(CFRunLoopGetMain())
-        return entry
-    }
-
-    func drop(_ entry: Entry) {
-        guard let index = queue.firstIndex(where: { $0 === entry }) else { return }
-        queue.remove(at: index).finish(false)
-    }
-
-    private func installObserverIfNeeded() {
-        guard observer == nil else { return }
-        // After Core Animation's commit observer (2,000,000): the turn's frame
-        // is already on its way to the render server when drawing starts.
-        let observer = CFRunLoopObserverCreateWithHandler(
-            kCFAllocatorDefault, CFRunLoopActivity.beforeWaiting.rawValue, true, 2_000_100
-        ) { _, _ in
-            MainActor.assumeIsolated { EmoteIdleBaker.shared.idleTurn() }
-        }
-        CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .defaultMode)
-        self.observer = observer
-    }
-
-    private func idleTurn() {
-        guard let entry = queue.first else { return }
-        entry.job.drawFrames(budget: Self.budget)
-        if entry.job.isFinished {
-            queue.removeFirst()
-            entry.finish(true)
-        }
-        if !queue.isEmpty {
-            // Come round again: the loop was about to sleep.
+/// The main run loop's Core Animation commits, as something to await.
+@MainActor
+enum EmoteMainCommit {
+    /// Resumes right after the main run loop's next commit: a one-shot
+    /// `beforeWaiting` observer in the COMMON modes (a scroll does not hold
+    /// it back), ordered after Core Animation's own (2,000,000).
+    static func next() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let observer = CFRunLoopObserverCreateWithHandler(
+                kCFAllocatorDefault, CFRunLoopActivity.beforeWaiting.rawValue, false, 2_000_100
+            ) { _, _ in
+                continuation.resume()
+            }
+            CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
             CFRunLoopWakeUp(CFRunLoopGetMain())
         }
     }
-
-    var pendingJobs: Int { queue.count }
 }
 
-/// Carries the queued entry from `run`'s body to its cancellation handler.
-@MainActor
-private final class EntryHandle {
-    var entry: EmoteIdleBaker.Entry?
-}
-
-/// A `.mainThread` Lottie view that draws one animation at chosen times.
+/// A detached `.mainThread`-engine Lottie layer tree that draws one animation
+/// at chosen times — on one thread at a time.
 ///
-/// ⚠️ **THE MAIN THREAD ENGINE, DELIBERATELY, AND ONLY FOR DRAWING.** It draws
-/// each frame into its own layers, which `render(in:)` can capture; the Core
-/// Animation engine expresses frames as `CAAnimation`s that an offscreen
-/// snapshot does not see (StickerKit's `StickerFrameDrawer` measured this).
+/// ⚠️ **THE MAIN THREAD ENGINE, DELIBERATELY.** It draws each frame into its
+/// own layers, which `render(in:)` can capture; the Core Animation engine
+/// expresses frames as `CAAnimation`s that an offscreen snapshot does not see
+/// (StickerKit's `StickerFrameDrawer` measured this).
 ///
-/// ⚠️ **NO `forceDisplayUpdate()`.** Setting the time and displaying what is
-/// dirty draws the same pixels (measured: 20 frames of 😂 and 😭 identical
-/// byte for byte) in ~10 ms a frame instead of ~18.
-@MainActor
+/// ⚠️ **BACKING STORES AT 4× THE CELL, NOT AT THE COMPOSITION'S SIZE.** Noto
+/// is authored on a 1024-point canvas, and Lottie draws gradients, inverted
+/// mattes and some shapes into backing stores of their own — at that size, at
+/// `contentsScale` 1 (3 under a `LottieAnimationView` on a 3x screen: 3072²).
+/// Filling those, not walking the layer tree, was most of a heavy frame. Every
+/// layer is given `supersampling × cell / canvas` instead. Measured at 64 px,
+/// off the main thread, Debug, iOS 27 simulator: 🥶 35.8 → 3.9 ms a frame,
+/// 😂 20.2 → 4.5, 🤔 21.9 → 5.6, 🥹 18.3 → 2.9, 😩 19.7 → 4.0; light emoji
+/// unchanged. The pixels move by at most 16/255 (42 on 🔥's one-pixel sparks)
+/// — invisible at text size. At 2× they moved by up to 108.
+///
+/// ⚠️ **ONE TRANSACTION FOR THE WHOLE DRAWING, STORES DRAWN BY HAND.** A queue
+/// thread has no run loop to commit an implicit transaction, and a commit
+/// mid-bake is what would draw the backing stores — at a moment of Core
+/// Animation's choosing. Instead the drawing runs in one explicit transaction
+/// (`open()` … `close()`), and before each render every self-drawing layer is
+/// displayed by hand, inputs first (an inverted matte renders another layer's
+/// store from inside its own `display`).
 final class EmoteFrameDrawer {
-    private let view: LottieAnimationView
+    /// How many times finer than the cell a backing store is drawn.
+    static let supersampling: CGFloat = 4
 
-    init(animation: LottieAnimation, side: Int) {
-        view = LottieAnimationView(
-            animation: animation,
-            configuration: LottieConfiguration(renderingEngine: .mainThread)
-        )
-        view.contentMode = .scaleAspectFit
-        // Points, drawn into a context that is 1 pixel a point: the view's size
-        // IS the cell's size in pixels.
-        view.frame = CGRect(x: 0, y: 0, width: side, height: side)
-        view.layoutIfNeeded()
+    private var layer: LottieAnimationLayer
+    private let root: CALayer
+    private let animation: LottieAnimation
+    private let side: Int
+    /// Every layer of the tree, each after everything it may render.
+    private let layers: [CALayer]
+    /// The layers that draw their own backing store (Lottie's `draw(in:)`
+    /// overrides: gradients, inverted mattes, shapes drawn in context, text),
+    /// in the same order.
+    private let selfDrawing: [CALayer]
+    private let invertedMatteTotal: Int
+    private let canvas: CGContext
+    private var isOpen = false
+
+    /// Nil when the tree cannot be driven frame by frame (no main-thread
+    /// root, or a Lottie whose root no longer has `currentFrame`).
+    init?(animation: LottieAnimation, side: Int) {
+        guard let canvas = EmoteCanvas.make(width: side, height: side) else { return nil }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
+        let made = LottieAnimationLayer(animation: animation, configuration: LottieConfiguration(renderingEngine: .mainThread))
+        // The root's `currentFrame` is an `@NSManaged` Core Animation property:
+        // set by key, it moves the tree without `LottieAnimationLayer`'s own
+        // setter, which would schedule another main-thread redraw each time.
+        guard let root = made.animationLayer, root.responds(to: NSSelectorFromString("setCurrentFrame:")) else {
+            return nil
+        }
+        layer = made
+        self.root = root
+        self.animation = animation
+        self.side = side
+        self.canvas = canvas
+        var layers: [CALayer] = []
+        Self.collect(root, into: &layers)
+        self.layers = layers
+        selfDrawing = layers.filter(Self.drawsItself)
+        invertedMatteTotal = layers.filter { Self.matteInput(of: $0) != nil }.count
+        // Before the commit, so the main thread's birth redraw already draws
+        // small stores.
+        let scale = Self.supersampling * CGFloat(side) / max(animation.bounds.width, animation.bounds.height, 1)
+        for layer in layers { layer.contentsScale = scale }
     }
 
-    func draw(atSeconds seconds: Double, in context: CGContext) {
-        view.currentTime = seconds
-        view.layer.displayIfNeeded()
-        view.layer.sublayers?.forEach { $0.displayIfNeeded() }
-        view.layer.render(in: context)
+    deinit { close() }
+
+    /// Whether the redraw `LottieAnimationLayer` scheduled at birth has run:
+    /// that block holds the layer strongly until it has.
+    func birthRedrawHasRun() -> Bool {
+        isKnownUniquelyReferenced(&layer)
+    }
+
+    /// Opens the transaction the frames are drawn in.
+    func open() {
+        guard !isOpen else { return }
+        isOpen = true
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+    }
+
+    /// Commits the drawing transaction, if open. Idempotent.
+    func close() {
+        guard isOpen else { return }
+        isOpen = false
+        CATransaction.commit()
+    }
+
+    /// Draws the frame at `seconds`, aspect-fit in a `side`-pixel square, and
+    /// returns the canvas holding it — valid until the next call.
+    func draw(atSeconds seconds: Double) -> CGContext {
+        root.setValue(animation.frameTime(forTime: seconds), forKey: Self.frameKey)
+        layer.forceDisplayUpdate()
+        EmoteCanvas.clear(canvas)
+        for store in selfDrawing {
+            store.setNeedsDisplay()
+            store.displayIfNeeded()
+        }
+        let bounds = animation.bounds
+        let side = CGFloat(self.side)
+        let scale = side / max(bounds.width, bounds.height, 1)
+        canvas.saveGState()
+        canvas.translateBy(x: (side - bounds.width * scale) / 2, y: (side - bounds.height * scale) / 2)
+        canvas.scaleBy(x: scale, y: scale)
+        root.render(in: canvas)
+        canvas.restoreGState()
+        return canvas
+    }
+
+    // MARK: - The tree
+
+    private static let frameKey = "currentFrame"
+    /// `InvertedMatteLayer.inputMatte`: the layer an inverted matte renders,
+    /// held by that property alone (it is in no layer's `sublayers`).
+    private static let matteInputKey = "inputMatte"
+
+    private static func matteInput(of layer: CALayer) -> CALayer? {
+        Mirror(reflecting: layer).children.first { $0.label == matteInputKey }?.value as? CALayer
+    }
+
+    /// Whether `layer` is one of Lottie's own layers that draws its contents
+    /// (`draw(in:)` overridden) — never Core Animation's own classes, and
+    /// never a layer holding an image it was given.
+    private static func drawsItself(_ layer: CALayer) -> Bool {
+        let type: AnyClass = Swift.type(of: layer)
+        guard String(reflecting: type).hasPrefix("Lottie.") else { return false }
+        let draw = #selector(CALayer.draw(in:))
+        return class_getMethodImplementation(type, draw) != class_getMethodImplementation(CALayer.self, draw)
+    }
+
+    /// Post-order over sublayers, masks and inverted-matte inputs: every
+    /// layer after everything it may render.
+    private static func collect(_ layer: CALayer, into list: inout [CALayer]) {
+        if let input = matteInput(of: layer) { collect(input, into: &list) }
+        layer.sublayers?.forEach { collect($0, into: &list) }
+        if let mask = layer.mask { collect(mask, into: &list) }
+        list.append(layer)
+    }
+
+    // MARK: - Test seams
+
+    var layerCount: Int { layers.count }
+    var invertedMatteCount: Int { invertedMatteTotal }
+    var selfDrawingCount: Int { selfDrawing.count }
+    var backingStoreScales: Set<CGFloat> { Set(layers.map(\.contentsScale)) }
+}
+
+/// The bitmaps a bake draws into: BGRA, premultiplied (what Core Animation
+/// uploads without a conversion pass), flipped to UIKit's orientation — origin
+/// top-left, y down, which is what `layer.render` assumes and what makes
+/// memory row 0 the TOP row `frameRects` expects.
+enum EmoteCanvas {
+    static func make(width: Int, height: Int) -> CGContext? {
+        guard let context = CGContext(
+            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+        ) else { return nil }
+        context.translateBy(x: 0, y: CGFloat(height))
+        context.scaleBy(x: 1, y: -1)
+        return context
+    }
+
+    static func clear(_ context: CGContext) {
+        guard let data = context.data else { return }
+        memset(data, 0, context.bytesPerRow * context.height)
+    }
+
+    /// Copies `cell` into `sheet` with its top-left at pixel (`x`, `y`) from
+    /// the sheet's top-left — exact bytes, no resampling.
+    static func copy(_ cell: CGContext, into sheet: CGContext, x: Int, y: Int) {
+        guard let source = cell.data, let target = sheet.data,
+              x >= 0, y >= 0, x + cell.width <= sheet.width, y + cell.height <= sheet.height
+        else { return }
+        let rowBytes = cell.width * 4
+        for row in 0..<cell.height {
+            memcpy(target + (y + row) * sheet.bytesPerRow + x * 4, source + row * cell.bytesPerRow, rowBytes)
+        }
     }
 }
 
