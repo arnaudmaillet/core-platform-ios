@@ -62,18 +62,19 @@ final class ExploreTabCoordinator: TabCoordinator {
         return item
     }()
 
-    /// The countries shop's globe, inboard of the points badge:
-    /// `[bell] ——— [globe][points][search]`. Only on a map that sells
+    /// The shop's door, inboard of the points badge:
+    /// `[bell] ——— [shop][points][search]`. Only on a map that sells
     /// countries (`MapCountryShopHosting.sellsCountries`); it was a floating
-    /// glass button on the map until 2026-09-27, over the compass's corner.
-    private lazy var globeButtonItem: UIBarButtonItem = {
+    /// glass button on the map until 2026-09-27, over the compass's corner,
+    /// then a globe until the shop took its name (`CountryShopEntry`).
+    private lazy var shopButtonItem: UIBarButtonItem = {
         let item = UIBarButtonItem(
-            image: UIImage(systemName: "globe.europe.africa.fill"),
+            image: UIImage(systemName: CountryShopEntry.symbolName),
             primaryAction: UIAction { [weak self] _ in
                 (self?.mapViewController as? any MapCountryShopHosting)?.presentCountryShop()
             }
         )
-        item.accessibilityLabel = "Countries"
+        item.accessibilityLabel = CountryShopEntry.title
         // Its own bubble, like the badge and search beside it.
         item.sharesBackground = false
         return item
@@ -131,11 +132,11 @@ final class ExploreTabCoordinator: TabCoordinator {
             guard let self else { return }
             // ⚠️ `[0]` IS THE SCREEN EDGE: search takes the corner the bell
             // used to hold, and the wallet badge stays inboard of it.
-            // `[0]` is the screen edge: [globe][points][search] reads
+            // `[0]` is the screen edge: [shop][points][search] reads
             // right to left here.
             let sellsCountries = (self.mapViewController as? any MapCountryShopHosting)?.sellsCountries ?? false
             self.mapViewController?.navigationItem.rightBarButtonItems = sellsCountries
-                ? [self.searchButtonItem, item, self.globeButtonItem]
+                ? [self.searchButtonItem, item, self.shopButtonItem]
                 : [self.searchButtonItem, item]
         }
 

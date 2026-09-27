@@ -1,6 +1,7 @@
 import CoreModels
 import CoreStorage
 import DesignSystem
+import MapsInterface
 import MediaCore
 import PostGrid
 import UIKit
@@ -637,14 +638,17 @@ final class WalletCompactBar: UIView {
 
 // MARK: - Countries
 
-/// The door to the countries shop, under the balances: what the gems buy.
+/// The door to the Shop, under the balances: what the gems buy.
 ///
 /// ```
 ///  ┌──────────────────────────────────────┐
 ///  │ (🌍)  Countries                   ›  │
-///  │       3 of 237 unlocked on your map  │
+///  │       3 of 237 unlocked · Shop       │
 ///  └──────────────────────────────────────┘
 /// ```
+///
+/// The card keeps the countries' name and globe — it is what the gems buy —
+/// and names the screen it opens, the Shop (`CountryShopEntry.title`).
 final class WalletCountriesCell: UICollectionViewCell {
     private let subtitleLabel = UILabel()
 
@@ -700,7 +704,8 @@ final class WalletCountriesCell: UICollectionViewCell {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     func configure(owned: Int, total: Int) {
-        subtitleLabel.text = "\(owned) of \(total) unlocked on your map"
+        subtitleLabel.text = "\(owned) of \(total) unlocked · \(CountryShopEntry.title)"
         accessibilityLabel = "Countries, \(owned) of \(total) unlocked"
+        accessibilityHint = "Opens the \(CountryShopEntry.title)"
     }
 }

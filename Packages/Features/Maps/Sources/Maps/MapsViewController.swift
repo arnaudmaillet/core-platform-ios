@@ -910,11 +910,11 @@ final class MapsViewController: UIViewController {
         #endif
     }
 
-    /// Whether this map sells countries — the Explore header shows its globe
-    /// only then.
+    /// Whether this map sells countries — the Explore header shows the shop's
+    /// door only then.
     var sellsCountries: Bool { countryAccess != nil }
 
-    /// The countries shop, over the map — opened by the Explore header's globe
+    /// The Shop, over the map — opened by the Explore header's storefront
     /// (`MapCountryShopHosting`). A row takes you to its country.
     func presentCountryShop() {
         guard let countryAccess, presentedViewController == nil else { return }
