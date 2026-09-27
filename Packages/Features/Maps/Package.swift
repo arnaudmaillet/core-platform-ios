@@ -30,7 +30,10 @@ let package = Package(
                 "DesignSystem",
                 "MediaCore",
                 "MediaPlayback"
-            ]
+            ],
+            // The world's borders (`CountryAtlas`), imported from Natural
+            // Earth by `Scripts/import-country-borders.py`.
+            resources: [.copy("Resources/countries.json")]
         ),
         .testTarget(
             name: "MapsTests",

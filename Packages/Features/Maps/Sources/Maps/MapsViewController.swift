@@ -188,6 +188,8 @@ final class MapsViewController: UIViewController {
     #endif
 
     private let mapView = MKMapView()
+    /// The world's country borders and the chosen one — see `CountryLayer`.
+    private let countryLayer = CountryLayer()
     /// The filter-pill carousel floating above the tab bar. The map's first
     /// bottom overlay: pinned to the safe area (the map itself is full-bleed
     /// and draws under the floating tab bar).
@@ -846,6 +848,20 @@ final class MapsViewController: UIViewController {
         installChromeTrace()
         #endif
         configureFilterBar()
+        configureCountries()
+    }
+
+    // MARK: - Countries
+
+    /// The world's borders, and picking a country: a tap lifts it above the
+    /// others; a second tap, or one at sea, lowers it.
+    private func configureCountries() {
+        countryLayer.onCountryTapped = { [weak self] country in
+            guard let self else { return }
+            let layer = self.countryLayer
+            layer.select(layer.selectedCode == country.code ? nil : country.code)
+        }
+        countryLayer.install(on: mapView)
     }
 
     private func configureFilterBar() {
@@ -2250,6 +2266,10 @@ final class MapsViewController: UIViewController {
 // MARK: - MKMapViewDelegate
 
 extension MapsViewController: MKMapViewDelegate {
+    func mapView(_ mapView: MKMapView, rendererFor overlay: any MKOverlay) -> MKOverlayRenderer {
+        countryLayer.renderer(for: overlay) ?? MKOverlayRenderer(overlay: overlay)
+    }
+
     func mapView(_ mapView: MKMapView, regionWillChangeAnimated animated: Bool) {
         // A zoom/pan started: hold annotation mutations until it settles.
         isRegionTransitioning = true
