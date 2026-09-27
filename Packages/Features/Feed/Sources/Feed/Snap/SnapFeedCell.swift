@@ -2380,6 +2380,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// separate `play` to blank the screen.
     func adoptLiveRenderView(_ view: VideoRenderView) {
         defersPlaybackForFlight = false
+        // Read BEFORE the restore: it is the surface the restore throws away,
+        // and under N-surface it is the one holding this page's pool loan.
+        let replaced = mediaCard.renderView
         mediaCard.restoreRenderView(view)
         // ⚠️ RE-ASKED, because the adopted surface's announcement is IN THE
         // PAST. It arrives already rendering — that is the point of adopting it
@@ -2396,7 +2399,20 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // and 0 in 5 when the grace was widened to 3s so the re-check happened
         // to land after the adoption.
         refreshMediaLoader()
-        guard let url = activeVideoURL, let videoPlayback else { return }
+        guard let videoPlayback else { return }
+        if VideoRenderFlags.usesSampleBufferLayer {
+            // ⚠️ THE LOAN MOVES WITH THE SURFACE. Nothing is parked under
+            // N-surface, so the unpark below claims nothing here — and the
+            // adopted view arrives JOINED to the page's player, while the loan
+            // stays filed under the view the restore just discarded. The pool
+            // then retires that player at its next dead-surface sweep, under
+            // this page and under any card a grab has joined to it: the
+            // early-grab stall, a black page after the cancel, and a refused
+            // second donation. See `VideoPlaybackController.adoptSurface`.
+            videoPlayback.adoptSurface(view, replacing: replaced)
+            return
+        }
+        guard let url = activeVideoURL else { return }
         videoPlayback.unparkPlayback(to: view, mediaURL: url)
     }
 
