@@ -2584,6 +2584,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             stopPlayheadFeed()
             return
         }
+        // The same question, the same answer: the page on screen, watching a
+        // clip. The card narrows it to a single fitted-blurred one.
+        mediaCard.setLiveBackdropActive(true)
         publishPlayhead()
         guard playheadLink == nil else { return }
         let link = CADisplayLink(target: self, selector: #selector(publishPlayhead))
@@ -2602,6 +2605,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         playheadLink?.invalidate()
         playheadLink = nil
         chrome.setMediaPlayhead(nil)
+        mediaCard.setLiveBackdropActive(false)
     }
 
     private var playheadLink: CADisplayLink?

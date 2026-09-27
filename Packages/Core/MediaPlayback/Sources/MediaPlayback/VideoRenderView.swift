@@ -245,6 +245,19 @@ public final class VideoRenderView: UIView {
         return posterView.image
     }
 
+    /// The decoded buffer this surface is showing, as the decoder handed it
+    /// over: no copy, no conversion. Nil under `-avplayer-render`, which has
+    /// no renderer, and before the first frame.
+    ///
+    /// ⚠️ BORROWED FROM THE PLAYER'S POOL. Hold it for as long as one
+    /// conversion takes and no longer: a buffer kept is a buffer the decoder
+    /// has to allocate around (see `VideoFrameRenderer`'s ownership rule).
+    ///
+    /// ⚠️ AS DECODED, which is also as DRAWN: the sample-buffer path does not
+    /// apply the track's `preferredTransform`, so a reader that wants to match
+    /// the picture on screen must not rotate this either.
+    public var currentFrameBuffer: CVPixelBuffer? { renderer?.currentFrameBuffer }
+
     public func setPoster(_ image: UIImage?) {
         posterView.image = image
         updatePosterVisibility(ready: isReadyForDisplay)
