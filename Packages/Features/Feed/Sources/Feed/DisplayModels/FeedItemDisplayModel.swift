@@ -76,9 +76,10 @@ public struct FeedItemDisplayModel: Identifiable, Sendable, Equatable {
     /// historical 1. A carousel rebuilds whenever its pages stop comparing
     /// equal, and a seeded model and a hydrated one computing this from two
     /// different sources could disagree in the last bit — resetting a viewer's
-    /// carousel to page one mid-open. Only the fitted page's hero landing reads
-    /// this (`SnapFeedViewController.zoomTargetMediaFrame`), and only before the
-    /// page has a picture of its own to measure.
+    /// carousel to page one mid-open. The page frames a single picture by this
+    /// (`SnapMediaCardView.setDeclaredAspect`) until the picture can be
+    /// measured, and a hero composes with it on a cold open
+    /// (`SnapFeedViewController.zoomPageFraming`).
     let headAspectRatio: Double?
 
     init(

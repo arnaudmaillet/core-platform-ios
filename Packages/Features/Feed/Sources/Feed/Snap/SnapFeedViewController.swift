@@ -190,33 +190,6 @@ final class SnapFeedViewController: UIViewController {
         #endif
     }
 
-    /// `-snap-media-fit` (DEBUG): this screen draws a post's media ASPECT-FIT —
-    /// the whole picture, letterboxed on black — instead of aspect-fill.
-    ///
-    /// ⚠️ THIS SCREEN ONLY. Grids, cards, markers and every other surface keep
-    /// filling; the flag is read by the page's own views (`SnapMediaCardView`,
-    /// its `.page` carousel, the scrub preview) and by this controller's
-    /// `zoomTargetMediaFrame`, which is what lets a hero land its fill-cropped
-    /// tile on the fitted picture instead of on the page. Off, every one of
-    /// those answers exactly what it answered before the flag existed.
-    ///
-    /// Read once per view at construction: a launch argument cannot change
-    /// under a running process, and a cell that changed its mind mid-life
-    /// would letterbox half a flight.
-    static var fitsMedia: Bool {
-        #if DEBUG
-        fitsMediaOverride ?? ProcessInfo.processInfo.arguments.contains("-snap-media-fit")
-        #else
-        false
-        #endif
-    }
-
-    #if DEBUG
-    /// Lets a spec turn the flag on without a launch argument. Nil defers to
-    /// the argument.
-    static var fitsMediaOverride: Bool?
-    #endif
-
     /// The page whose panel is waiting for the flight to land.
     private var deferredResting: (id: PostID, cell: SnapFeedCell, placeholder: RestingCommentsPlaceholderView)?
 
@@ -4547,36 +4520,61 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         view.convert(view.bounds, to: container)
     }
 
-    /// Where the active page's picture sits when this screen letterboxes
-    /// (`fitsMedia`) — the rect a hero lands its tile on and takes off from.
+    /// How the active page frames its picture (`SnapMediaAspect`) — what a
+    /// hero must fly for the page to be its own composition at both ends.
     ///
-    /// Nil with the flag off, for a text page and for a post with no shape to
-    /// fit, and each nil flies the page-sized hero this screen always had.
+    /// Nil for a page that FILLS (9:16, 2:3 and taller), for a text page and
+    /// for a post with no shape anyone can name, and each nil flies the
+    /// page-sized hero this screen always had.
     ///
-    /// ⚠️ THE ASPECT IS THE ONE BEING DRAWN, and it has to be the CURRENT
-    /// page's: a collection's pages need not agree about their shape, and a
-    /// dismissal leaves from whichever the viewer is on. What the surface
-    /// measures wins (`drawnMediaAspect`); the model's declared aspect answers
-    /// only while nothing is drawn yet — a cold open, where the landing will
-    /// fit the picture to exactly those declared pixels once it arrives.
-    public func zoomTargetMediaFrame(in container: UICoordinateSpace) -> CGRect? {
-        guard Self.fitsMedia else { return nil }
+    /// ⚠️ THE CURRENT PAGE'S PICTURE, AS DRAWN, whenever the page can say: a
+    /// collection's pages need not agree about their shape, and a dismissal
+    /// leaves from whichever the viewer is on. The page's own framing and its
+    /// own backdrop are handed over as they are, so the flight's window and the
+    /// page are the same pixels at the hand-over. Before the page has a
+    /// picture (a cold open), the model's DECLARED shape decides, and the
+    /// flying card's own still — the tile's cover, the same picture — makes
+    /// the backdrop until the page renders its own. Its SHAPE is never used:
+    /// see the note where the declared shape is read.
+    public func zoomPageFraming(sourcePicture: UIImage?) -> ZoomPageFraming? {
         let index = lifecycle.activeIndex ?? settledPageIndex
         guard orderedIDs.indices.contains(index),
               let model = modelsByID[orderedIDs[index]], model.mediaURL != nil
         else { return nil }
         let cell = collectionView.cellForItem(at: IndexPath(item: index, section: 0)) as? SnapFeedCell
-        let declared: CGSize? = {
-            let pages = model.mediaPages
-            if let page = cell?.currentMediaPage, pages.indices.contains(page), page > 0 {
-                return CGSize(width: pages[page].aspectRatio, height: 1)
-            }
-            return model.headAspectRatio.map { CGSize(width: $0, height: 1) }
-        }()
-        guard let aspect = cell?.drawnMediaAspect ?? declared else { return nil }
-        return ZoomTransitionGeometry.fittedMediaRect(
-            aspect: aspect, in: zoomTargetFrame(in: container)
-        )
+        let drawn = cell?.pictureFraming
+        let framing: MediaFraming
+        let aspect: CGSize
+        if let drawn, let measured = drawn.aspect {
+            framing = drawn.framing
+            aspect = measured
+        } else {
+            let declared: CGSize? = {
+                let pages = model.mediaPages
+                if let page = cell?.currentMediaPage, pages.indices.contains(page), page > 0 {
+                    return CGSize(width: pages[page].aspectRatio, height: 1)
+                }
+                return model.headAspectRatio.map { CGSize(width: $0, height: 1) }
+            }()
+            // ⚠️ NOT the source picture's size: a tile's cover is a thumbnail,
+            // and thumbnails are cropped (168×168 squares for 9:16 clips in
+            // the mock corpus). No shape anyone can vouch for flies the
+            // filling hero, which is at worst the flight that always existed.
+            guard let shape = declared else { return nil }
+            framing = SnapMediaAspect.presentation(for: shape)
+            aspect = shape
+        }
+        switch framing {
+        case .fill:
+            return nil
+        case .fitBlack:
+            return ZoomPageFraming(mediaAspect: aspect, backdrop: .black)
+        case .fitBlurred:
+            let backdrop = drawn?.backdrop ?? sourcePicture.flatMap(MediaBackdrop.blurred)
+            return ZoomPageFraming(
+                mediaAspect: aspect, backdrop: backdrop.map { .picture($0) } ?? .black
+            )
+        }
     }
 
     /// A fresh inert replica of the active page's chrome for the flying card —
