@@ -3,8 +3,7 @@ import MapKit
 import UIKit
 
 /// A country the account has not unlocked, standing at the country's centre
-/// with what it would open: its rank among the world's countries and the
-/// likes on its posts.
+/// with its rank among the world's countries.
 final class LockedCountryAnnotation: NSObject, MKAnnotation {
     let code: String
     let flag: String
@@ -22,32 +21,43 @@ final class LockedCountryAnnotation: NSObject, MKAnnotation {
 /// The locked country's badge:
 ///
 /// ```
-///  ╭──────────────────────────╮
-///  │ 🇪🇸  #4 · ♥ 12.4K   🔒   │
-///  ╰──────────────────────────╯
+///   ⬤─────────────╮
+///  (🔒) 🇪🇸  #4    │
+///   ⬤─────────────╯
 /// ```
 ///
-/// A compact capsule on the map's own material, the flag first so the
-/// country reads before the numbers; the heart is red, the app's colour for
-/// likes; the lock says what a tap will offer.
+/// The flag and the rank on the map's own material, and the lock in a small
+/// dark bubble riding the capsule's LEFT edge: what the country is, then what
+/// a tap offers. The likes live in the offer's sheet, not here — on a map of
+/// two hundred badges they were a column of numbers nobody compared.
 ///
 /// ⚠️ **BELOW THE POSTS, AND IT GIVES WAY — THE BUSIEST FIRST.**
-/// `displayPriority` is under `.defaultLow` and the collision rectangle is the
-/// capsule, so at a continent's zoom MapKit hides the badges that would
-/// overlap instead of stacking them, and a post's marker always wins its
-/// place. Among badges the priority follows the RANK: at one flat priority
-/// MapKit kept Monaco and Vatican City and hid Germany, Spain and Italy.
+/// `displayPriority` is under `.defaultLow` and follows the RANK (at one flat
+/// priority MapKit kept Monaco and hid Germany), so a post's marker always
+/// wins its place and among badges the busiest country does.
+///
+/// ⚠️ **THE VIEW IS BIGGER THAN THE BADGE.** MapKit collides annotation
+/// FRAMES, so the view carries a transparent margin (`collisionMargin`) around
+/// the capsule: two badges now need that much room between them, which is
+/// what thins a continent from a wall of badges to a scatter. Only the
+/// capsule and its bubble take touches (`point(inside:)`).
 final class LockedCountryAnnotationView: MKAnnotationView {
     static let reuseIdentifier = "LockedCountryAnnotationView"
+    /// The empty room around the badge that another badge may not enter.
+    static let collisionMargin = CGSize(width: 34, height: 26)
+    private static let bubbleDiameter: CGFloat = 22
 
     /// A tap on the badge — the host offers the country.
     var onSelect: (() -> Void)?
 
+    /// The capsule's shadow, its material, and the lock bubble.
+    private let body = UIView()
     private let capsule = UIVisualEffectView(effect: UIBlurEffect(style: .systemThickMaterial))
+    private let bubble = UIView()
     private let flagLabel = UILabel()
     private let rankLabel = UILabel()
-    private let likesLabel = UILabel()
     private let lockView = UIImageView(image: UIImage(systemName: "lock.fill"))
+    private let row = UIStackView()
 
     override init(annotation: (any MKAnnotation)?, reuseIdentifier: String?) {
         super.init(annotation: annotation, reuseIdentifier: reuseIdentifier)
@@ -55,34 +65,33 @@ final class LockedCountryAnnotationView: MKAnnotationView {
         collisionMode = .rectangle
         canShowCallout = false
 
+        body.layer.shadowColor = UIColor.black.cgColor
+        body.layer.shadowOpacity = 0.18
+        body.layer.shadowRadius = 6
+        body.layer.shadowOffset = CGSize(width: 0, height: 2)
         capsule.clipsToBounds = true
-        capsule.layer.cornerCurve = .continuous
-        layer.shadowColor = UIColor.black.cgColor
-        layer.shadowOpacity = 0.18
-        layer.shadowRadius = 6
-        layer.shadowOffset = CGSize(width: 0, height: 2)
+        capsule.layer.cornerCurve = .circular
+
+        bubble.backgroundColor = UIColor(white: 0.1, alpha: 0.92)
+        bubble.layer.cornerRadius = Self.bubbleDiameter / 2
+        bubble.layer.borderWidth = 1.5
+        bubble.layer.borderColor = UIColor.white.withAlphaComponent(0.9).cgColor
+        lockView.tintColor = .white
+        lockView.preferredSymbolConfiguration = .init(pointSize: 9, weight: .bold)
+        lockView.contentMode = .center
+        bubble.addSubview(lockView)
 
         flagLabel.font = .systemFont(ofSize: 17)
-        rankLabel.font = .systemFont(ofSize: 13, weight: .bold)
+        rankLabel.font = .monospacedDigitSystemFont(ofSize: 13, weight: .bold)
         rankLabel.textColor = .label
-        likesLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
-        likesLabel.textColor = .secondaryLabel
-        lockView.tintColor = .secondaryLabel
-        lockView.preferredSymbolConfiguration = .init(pointSize: 10, weight: .bold)
-
-        let row = UIStackView(arrangedSubviews: [flagLabel, rankLabel, likesLabel, lockView])
+        row.addArrangedSubview(flagLabel)
+        row.addArrangedSubview(rankLabel)
         row.spacing = 5
         row.alignment = .center
-        row.setCustomSpacing(8, after: likesLabel)
-        row.translatesAutoresizingMaskIntoConstraints = false
         capsule.contentView.addSubview(row)
-        addSubview(capsule)
-        NSLayoutConstraint.activate([
-            row.leadingAnchor.constraint(equalTo: capsule.contentView.leadingAnchor, constant: 8),
-            row.trailingAnchor.constraint(equalTo: capsule.contentView.trailingAnchor, constant: -9),
-            row.topAnchor.constraint(equalTo: capsule.contentView.topAnchor, constant: 4),
-            row.bottomAnchor.constraint(equalTo: capsule.contentView.bottomAnchor, constant: -4),
-        ])
+        body.addSubview(capsule)
+        body.addSubview(bubble)
+        addSubview(body)
         addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(tapped)))
         isAccessibilityElement = true
         accessibilityTraits = .button
@@ -100,29 +109,40 @@ final class LockedCountryAnnotationView: MKAnnotationView {
         onSelect = nil
     }
 
+    /// Only the badge itself: the collision margin around it is empty map.
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        body.frame.insetBy(dx: -4, dy: -4).contains(point)
+    }
+
     private func configure() {
         guard let country = annotation as? LockedCountryAnnotation else { return }
         flagLabel.text = country.flag
         rankLabel.text = "#\(country.standing.rank)"
         displayPriority = MKFeatureDisplayPriority(rawValue: Float(max(10, 249 - country.standing.rank)))
-        let likes = NSMutableAttributedString(
-            attachment: NSTextAttachment(image: UIImage(systemName: "heart.fill")!
-                .applyingSymbolConfiguration(.init(pointSize: 10, weight: .bold))!
-                .withTintColor(.systemRed, renderingMode: .alwaysOriginal))
-        )
-        likes.append(NSAttributedString(string: " " + Self.compact(country.standing.likes)))
-        likesLabel.attributedText = likes
-        accessibilityLabel = "Locked country, rank \(country.standing.rank), "
-            + "\(country.standing.likes) likes"
+        accessibilityLabel = "Locked country, rank \(country.standing.rank)"
         accessibilityHint = "Shows how to unlock it"
-        let size = capsule.contentView.subviews.first?.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
-            ?? CGSize(width: 110, height: 22)
-        let bounds = CGRect(x: 0, y: 0, width: ceil(size.width) + 17, height: ceil(size.height) + 8)
-        frame.size = bounds.size
-        capsule.frame = bounds
-        capsule.layer.cornerRadius = bounds.height / 2
-        layer.shadowPath = UIBezierPath(roundedRect: bounds, cornerRadius: bounds.height / 2).cgPath
-        centerOffset = .zero
+
+        // The capsule: the row, with room on the left for the bubble's half.
+        let content = row.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
+        let height = max(ceil(content.height) + 6, 26)
+        let leading = Self.bubbleDiameter / 2 + 5
+        let capsuleSize = CGSize(width: leading + ceil(content.width) + 10, height: height)
+        // The bubble's centre sits ON the capsule's left edge.
+        let bodySize = CGSize(width: capsuleSize.width + Self.bubbleDiameter / 2, height: height)
+        let margin = Self.collisionMargin
+        frame.size = CGSize(width: bodySize.width + 2 * margin.width, height: bodySize.height + 2 * margin.height)
+        body.frame = CGRect(origin: CGPoint(x: margin.width, y: margin.height), size: bodySize)
+        capsule.frame = CGRect(x: Self.bubbleDiameter / 2, y: 0, width: capsuleSize.width, height: height)
+        capsule.layer.cornerRadius = height / 2
+        row.frame = CGRect(x: leading, y: (height - ceil(content.height)) / 2,
+                           width: ceil(content.width), height: ceil(content.height))
+        bubble.frame = CGRect(x: 0, y: (height - Self.bubbleDiameter) / 2,
+                              width: Self.bubbleDiameter, height: Self.bubbleDiameter)
+        lockView.frame = bubble.bounds
+        body.layer.shadowPath = UIBezierPath(roundedRect: capsule.frame, cornerRadius: height / 2).cgPath
+        // Centred on the country's label point, the capsule rather than the
+        // bubble: shift left by half the bubble's overhang.
+        centerOffset = CGPoint(x: -Self.bubbleDiameter / 4, y: 0)
     }
 
     /// "12.4K", "3.1M", "860".
