@@ -36,13 +36,14 @@ struct WalletStakesTests {
         #expect(active.count == 1)
         #expect(active.first?.isSettled == false, "settled at once — the charter defers it")
         #expect(active.first?.settlesAt == Self.epoch.addingTimeInterval(Self.delay))
-        #expect(store.snapshot().gems == 0)
+        // Only the seeded gems: an active stake has earned nothing yet.
+        #expect(store.snapshot().gems == WalletStore.Policy.seededGems)
 
         clock.advance(by: Self.delay)
         let settled = store.stakes()
         #expect(settled.first?.isSettled == true)
         #expect(settled.first?.outcome == WalletStore.Policy.mockOutcome(targetID: "post-1", amount: 10))
-        #expect(store.snapshot().gems == settled.first?.gems)
+        #expect(store.snapshot().gems == WalletStore.Policy.seededGems + (settled.first?.gems ?? 0))
     }
 
     /// Adding to a stake does not restart its clock.

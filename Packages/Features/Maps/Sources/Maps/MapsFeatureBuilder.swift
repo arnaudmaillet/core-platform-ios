@@ -53,6 +53,8 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
     ///   so the pins that arrive and the ladders they wear always agree;
     ///   the false default keeps any other construction identity-clean.
     ///   Release builds ignore it — the catalog does not exist there.
+    private let countryAccess: (any CountryAccess)?
+
     public init(
         repository: any GeoDiscoveryProviding,
         favoritesRepository: any MapFavoritesProviding,
@@ -73,8 +75,12 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
         /// Baked preview sheets, keyed by post id — MEDIA posts only.
         mockPreviewSheets: [PostID: String] = [:],
         iconCatalog: AnimatedIconCatalog? = nil,
-        previewCatalog: AnimatedIconCatalog? = nil
+        previewCatalog: AnimatedIconCatalog? = nil,
+        /// Which countries the account has unlocked — see `CountryAccess`.
+        /// Nil opens every country and sells none.
+        countryAccess: (any CountryAccess)? = nil
     ) {
+        self.countryAccess = countryAccess
         self.iconCatalog = iconCatalog
         self.previewCatalog = previewCatalog
         self.repository = repository
@@ -226,7 +232,8 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
             },
             prewarm: { ids in await feedFeature().prewarmPosts(ids) },
             openProfile: openProfile,
-            openConversation: openConversation
+            openConversation: openConversation,
+            countryAccess: countryAccess
         )
     }
 }
