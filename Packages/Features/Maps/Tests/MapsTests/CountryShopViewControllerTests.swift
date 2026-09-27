@@ -168,6 +168,19 @@ struct CountryShopViewControllerTests {
         #expect(shop.navigationItem.preferredSearchBarPlacement == .stacked)
     }
 
+    /// A row's heart is an image view in its own red: the medium sheet is
+    /// glass, and glass greys a label's attachments.
+    @Test func aRowDrawsItsHeartAsAnImageView() throws {
+        let shop = makeShop()
+        shop.view.frame = CGRect(x: 0, y: 0, width: 402, height: 800)
+        shop.view.layoutIfNeeded()
+        let path = try #require(shop.dataSource.indexPath(for: .country("FR")))
+        let row = try #require(shop.collectionView.cellForItem(at: path) as? CountryShopRowCell)
+        #expect(row.nameLabel.text == "France")
+        #expect(row.heartView.image?.renderingMode == .alwaysOriginal)
+        #expect(row.nameLabel.attributedText?.containsAttachments(in: NSRange(location: 0, length: 6)) == false)
+    }
+
     /// The Explore header's door: an existing, unrestricted symbol.
     @Test func theShopDoorIsAStorefront() {
         #expect(CountryShopEntry.symbolName == "storefront")

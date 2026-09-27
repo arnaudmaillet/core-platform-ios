@@ -138,7 +138,7 @@ public final class CountryShopViewController: UIViewController {
             let (owned, total) = ownedAndTotal()
             cell.configure(owned: owned, total: total, animated: false)
         }
-        let countryRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, String> {
+        let countryRegistration = UICollectionView.CellRegistration<CountryShopRowCell, String> {
             [weak self] cell, _, code in self?.configure(cell, code: code)
         }
         dataSource = UICollectionViewDiffableDataSource(collectionView: collectionView) { view, path, item in
@@ -261,30 +261,13 @@ public final class CountryShopViewController: UIViewController {
         header.contentConfiguration = content
     }
 
-    private func configure(_ cell: UICollectionViewListCell, code: String) {
+    private func configure(_ cell: CountryShopRowCell, code: String) {
         guard let country = atlas.country(code: code), let standing = access.standing(of: code) else { return }
-        var content = UIListContentConfiguration.subtitleCell()
-        content.text = country.name
-        content.textProperties.font = .preferredFont(forTextStyle: .body)
-        content.image = flag(for: country)
-        content.imageProperties.reservedLayoutSize = CGSize(width: 34, height: 34)
-        let details = NSMutableAttributedString(string: "#\(standing.rank)  ·  ")
-        details.append(NSAttributedString(attachment: NSTextAttachment(
-            image: UIImage(systemName: "heart.fill")!
-                .applyingSymbolConfiguration(.init(pointSize: 10, weight: .bold))!
-                .withTintColor(.systemRed, renderingMode: .alwaysOriginal)
-        )))
-        details.append(NSAttributedString(
-            string: " \(LockedCountryAnnotationView.compact(standing.likes))  ·  "
-                + "\(LockedCountryAnnotationView.compact(Int64(standing.posts))) posts"
-        ))
-        content.secondaryAttributedText = details
-        content.secondaryTextProperties.color = .secondaryLabel
-        content.secondaryTextProperties.font = .monospacedDigitSystemFont(
-            ofSize: UIFont.preferredFont(forTextStyle: .footnote).pointSize, weight: .regular
+        cell.configure(
+            flag: flag(for: country), name: country.name, rank: standing.rank,
+            likes: LockedCountryAnnotationView.compact(standing.likes),
+            posts: LockedCountryAnnotationView.compact(Int64(standing.posts))
         )
-        content.textToSecondaryTextVerticalPadding = 3
-        cell.contentConfiguration = content
 
         let trailing: UIView
         if access.isUnlocked(code) {
@@ -362,6 +345,9 @@ public final class CountryShopViewController: UIViewController {
     /// is active, the search controller is the shop's presented controller,
     /// and presenting from under it fails ("already presenting").
     private func offer(_ country: CountryAtlas.Country) {
+        // The search keeps its results but lets the keyboard go: it would
+        // stand over the offer's button.
+        navigationItem.searchController?.searchBar.resignFirstResponder()
         var presenter: UIViewController = navigationController ?? self
         while let next = presenter.presentedViewController, !next.isBeingDismissed { presenter = next }
         guard !(presenter is CountryUnlockSheetViewController) else { return }
@@ -467,6 +453,74 @@ extension CountryShopViewController: UISearchResultsUpdating, UISearchController
         guard let sheet = navigationController?.sheetPresentationController,
               sheet.selectedDetentIdentifier != .large else { return }
         sheet.animateChanges { sheet.selectedDetentIdentifier = .large }
+    }
+}
+
+/// A country's row: flag, name, and "#rank · ♥ likes · posts" under it; the
+/// trailing price / Unlocked / Home is the cell's accessory.
+///
+/// ⚠️ THE HEART IS AN IMAGE VIEW, NOT A TEXT ATTACHMENT. At the medium detent
+/// the sheet is glass, and glass draws a label's attachments vibrant: the red
+/// heart of a list configuration's secondary text came out grey there (and
+/// red again at large, once the sheet turns opaque). An image view keeps its
+/// colour, like the flags and the price capsules beside it.
+final class CountryShopRowCell: UICollectionViewListCell {
+    private let flagView = UIImageView()
+    let nameLabel = UILabel()
+    private let rankLabel = UILabel()
+    let heartView = UIImageView(image: UIImage(systemName: "heart.fill")?
+        .applyingSymbolConfiguration(.init(pointSize: 10, weight: .bold))?
+        .withTintColor(.systemRed, renderingMode: .alwaysOriginal))
+    private let statsLabel = UILabel()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        flagView.contentMode = .center
+        nameLabel.font = .preferredFont(forTextStyle: .body)
+        nameLabel.adjustsFontForContentSizeCategory = true
+        let detailFont = UIFont.monospacedDigitSystemFont(
+            ofSize: UIFont.preferredFont(forTextStyle: .footnote).pointSize, weight: .regular
+        )
+        for label in [rankLabel, statsLabel] {
+            label.font = detailFont
+            label.textColor = .secondaryLabel
+        }
+        heartView.tintColor = .systemRed
+        heartView.setContentHuggingPriority(.required, for: .horizontal)
+        rankLabel.setContentHuggingPriority(.required, for: .horizontal)
+
+        let details = UIStackView(arrangedSubviews: [rankLabel, heartView, statsLabel])
+        details.alignment = .center
+        details.spacing = 3
+        let column = UIStackView(arrangedSubviews: [nameLabel, details])
+        column.axis = .vertical
+        column.alignment = .leading
+        column.spacing = 3
+        let row = UIStackView(arrangedSubviews: [flagView, column])
+        row.alignment = .center
+        row.spacing = Spacing.lg
+        row.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(row)
+        NSLayoutConstraint.activate([
+            flagView.widthAnchor.constraint(equalToConstant: 34),
+            flagView.heightAnchor.constraint(equalToConstant: 34),
+            row.topAnchor.constraint(equalTo: contentView.layoutMarginsGuide.topAnchor),
+            row.leadingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.leadingAnchor),
+            row.trailingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.trailingAnchor),
+            row.bottomAnchor.constraint(equalTo: contentView.layoutMarginsGuide.bottomAnchor),
+            // The separator starts under the name, as a list configuration's does.
+            separatorLayoutGuide.leadingAnchor.constraint(equalTo: nameLabel.leadingAnchor),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    func configure(flag: UIImage, name: String, rank: Int, likes: String, posts: String) {
+        flagView.image = flag
+        nameLabel.text = name
+        rankLabel.text = "#\(rank)  ·  "
+        statsLabel.text = "\(likes)  ·  \(posts) posts"
     }
 }
 
