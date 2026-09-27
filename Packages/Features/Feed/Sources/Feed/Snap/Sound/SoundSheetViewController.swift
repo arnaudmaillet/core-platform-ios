@@ -4,6 +4,7 @@ import CoreNavigation
 import DesignSystem
 import FeedInterface
 import MediaCore
+import PostGrid
 import UIKit
 
 /// The sound a post is set to, opened from the attribution at the foot of
@@ -51,6 +52,15 @@ final class SoundSheetViewController: UIViewController {
     var onCoverChanged: ((Bool) -> Void)?
     /// A tile was chosen; the sheet is already on its way out.
     var onSelectPost: ((PostID) -> Void)?
+    /// Opens a NEW feed of the posts with this sound, flying out of the tapped
+    /// tile — the app's own zoom hero. The feed is pushed onto a stack
+    /// presented over this sheet (`OverSheetFeedHost`), so the sheet stays
+    /// where it is and a dismissal flies back into the tile. Nil falls back to
+    /// `onSelectPost`.
+    var openFeedHero: ((_ postIDs: [PostID], _ host: UIViewController, _ origin: SnapFeedHeroOrigin) -> Void)?
+    /// The tiles' posts as the grid knows them — what the hero flies and the
+    /// new feed is seeded with.
+    var galleryPost: ((PostID) -> GalleryPost?)?
     /// "Use this sound"; the sheet is already on its way out. Nil hides it.
     var onUseSound: ((PostSound) -> Void)?
     /// The sheet is gone, however it went.
@@ -298,7 +308,65 @@ final class SoundSheetViewController: UIViewController {
     }
 
     private func refreshCover() {
-        setCovering(isExpanded || isPreviewing)
+        setCovering(isExpanded || isPreviewing || isShowingFeed)
+    }
+
+    /// A feed opened from a tile covers everything, the page behind the sheet
+    /// included: that page pauses for the trip and plays again on the return.
+    private var isShowingFeed = false
+
+    /// The tapped tile's posts, from it on, as a new vertical feed with the
+    /// hero. Falls back to scrolling the feed behind (`onSelectPost`) when the
+    /// host did not hand over a way to open one.
+    private func openFeed(at indexPath: IndexPath) -> Bool {
+        guard let openFeedHero, let galleryPost, presentedViewController == nil,
+              let tile = dataSource.itemIdentifier(for: indexPath),
+              let post = galleryPost(tile.postID)
+        else { return false }
+        let ordered = tiles.compactMap { galleryPost($0.postID) }
+        guard let start = ordered.firstIndex(where: { $0.id == post.id }) else { return false }
+        let stream = Array(ordered[start...])
+        let id = tile.postID
+        let cover = (collectionView.cellForItem(at: indexPath) as? SoundSheetTileCell)?.cover
+        let origin = SnapFeedHeroOrigin(
+            post: post,
+            stream: stream,
+            // A text post has no picture to fly: it opens with the plain push.
+            hasHero: post.kind != .text && cover != nil,
+            cover: cover,
+            style: .tile,
+            frame: { [weak self] space in self?.tileFrame(for: id, in: space) },
+            isOnScreen: { [weak self] in
+                guard let self else { return false }
+                return tileFrame(for: id, in: view) != nil
+            },
+            setConcealed: { [weak self] concealed in self?.tileCell(for: id)?.setConcealed(concealed) }
+        )
+        stopPreview()
+        isShowingFeed = true
+        refreshCover()
+        OverSheetFeedHost.present(over: self, onFinished: { [weak self] in
+            self?.isShowingFeed = false
+            self?.refreshCover()
+        }) { host in
+            openFeedHero(stream.map(\.id), host, origin)
+        }
+        return true
+    }
+
+    private func tileCell(for id: PostID) -> SoundSheetTileCell? {
+        guard let path = dataSource.snapshot().itemIdentifiers.firstIndex(where: { $0.postID == id })
+            .map({ IndexPath(item: $0, section: 0) }) else { return nil }
+        return collectionView.cellForItem(at: path) as? SoundSheetTileCell
+    }
+
+    /// The tile's rect in `space` while it is on screen — nil once it has
+    /// scrolled out, so the hero falls back instead of flying to nowhere.
+    private func tileFrame(for id: PostID, in space: UICoordinateSpace) -> CGRect? {
+        guard let cell = tileCell(for: id) else { return nil }
+        let visible = collectionView.bounds.inset(by: collectionView.adjustedContentInset)
+        guard visible.intersects(cell.frame) else { return nil }
+        return cell.convert(cell.bounds, to: space)
     }
 
     // MARK: - Preview
@@ -401,6 +469,7 @@ extension SoundSheetViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         guard let tile = dataSource.itemIdentifier(for: indexPath) else { return }
         collectionView.deselectItem(at: indexPath, animated: true)
+        if openFeed(at: indexPath) { return }
         let select = onSelectPost
         dismiss(animated: true) { select?(tile.postID) }
     }
