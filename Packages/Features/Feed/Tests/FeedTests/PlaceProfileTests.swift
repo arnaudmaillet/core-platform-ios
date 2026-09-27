@@ -50,6 +50,25 @@ struct PlaceProfileTests {
         )
     }
 
+    // MARK: - The landing card
+
+    /// A first vertical grab builds its card before this page (inserted under
+    /// the feed that same frame) has loaded a single tile picture. The card
+    /// must still draw something: the picture the viewer is leaving. Without
+    /// it the grab held the feed up over an emptied video surface (a black
+    /// page) and then showed an empty window over the place page.
+    @Test func aCardWithNoTilePictureYetWearsThePictureBeingLeft() throws {
+        let profile = makeProfile(posts: [post("p1"), post("p2")])
+        let leaving = UIGraphicsImageRenderer(size: CGSize(width: 9, height: 16)).image { context in
+            UIColor.red.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 9, height: 16))
+        }
+        profile.activeCover = { leaving }
+        let card = profile.makeZoomFlightCard()
+        let cover = try #require(card.zoomCoverSurface as? UIImageView)
+        #expect(cover.image === leaving)
+    }
+
     // MARK: - The banner
 
     /// Laid out at a real viewport, so the fraction has something to be a
