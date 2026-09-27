@@ -414,6 +414,17 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
         return max(1, min(value, 40))
     }()
 
+    /// Where every post of the corpus stands — the same placement the tiles
+    /// answer with (a venue's shared address, or the post's own scatter). For
+    /// the mock's per-country standings, which the backend will own.
+    public func placements() -> [(postID: String, latitude: Double, longitude: Double)] {
+        dataset.posts.enumerated().map { index, post in
+            let (lat, lng) = venues[post.postID].map { ($0.lat, $0.lng) }
+                ?? coordinate(forIndex: index, postID: post.postID)
+            return (post.postID, lat, lng)
+        }
+    }
+
     public func register(on bff: MockBFF) {
         bff.register(path: "/geo_discovery.v1.GeoDiscoveryService/QueryTile") { [self] (request: GeoDiscovery_V1_QueryTileRequest, headers: Headers) in
             queryTile(request, filter: headers[Self.filterHeader]?.first)

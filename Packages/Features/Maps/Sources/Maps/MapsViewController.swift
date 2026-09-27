@@ -190,6 +190,13 @@ final class MapsViewController: UIViewController {
     private let mapView = MKMapView()
     /// The world's country borders and the chosen one — see `CountryLayer`.
     private let countryLayer = CountryLayer()
+    /// Which countries this account has unlocked — only their posts are on
+    /// the map. Nil: every country is open (the fleet, until the backend
+    /// carries unlocks).
+    private let countryAccess: (any CountryAccess)?
+    /// The country each pin stands in, looked up once per post: the atlas
+    /// test is point-in-polygon, and the reconcile runs on every settle.
+    private var pinCountries: [PostID: String] = [:]
     /// The filter-pill carousel floating above the tab bar. The map's first
     /// bottom overlay: pinned to the safe area (the map itself is full-bleed
     /// and draws under the floating tab bar).
@@ -326,8 +333,10 @@ final class MapsViewController: UIViewController {
         ) -> UIViewController,
         prewarm: @escaping ([PostID]) async -> Void,
         openProfile: @escaping (ProfileID, ProfileIdentityStub?) -> Void,
-        openConversation: @escaping (ProfileID) -> Void
+        openConversation: @escaping (ProfileID) -> Void,
+        countryAccess: (any CountryAccess)? = nil
     ) {
+        self.countryAccess = countryAccess
         self.viewModel = viewModel
         self.favoritesRepository = favoritesRepository
         self.pinService = pinService
@@ -856,12 +865,56 @@ final class MapsViewController: UIViewController {
     /// The world's borders, and picking a country: a tap lifts it above the
     /// others; a second tap, or one at sea, lowers it.
     private func configureCountries() {
-        countryLayer.onCountryTapped = { [weak self] country in
-            guard let self else { return }
-            let layer = self.countryLayer
-            layer.select(layer.selectedCode == country.code ? nil : country.code)
-        }
+        countryLayer.access = countryAccess
+        countryLayer.onCountryTapped = { [weak self] country in self?.countryTapped(country) }
+        countryLayer.onLockedBadgeTapped = { [weak self] country in self?.offer(country) }
         countryLayer.install(on: mapView)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(countryAccessChanged), name: .countryAccessDidChange, object: nil
+        )
+    }
+
+    /// A tap on a country: a locked one is offered (lifted, with its sheet);
+    /// an open one is lifted, and lowered by a second tap.
+    private func countryTapped(_ country: CountryAtlas.Country) {
+        if let countryAccess, !countryAccess.isUnlocked(country.code) {
+            offer(country)
+            return
+        }
+        countryLayer.select(countryLayer.selectedCode == country.code ? nil : country.code)
+    }
+
+    /// Lifts a locked country and presents what unlocking it would open.
+    private func offer(_ country: CountryAtlas.Country) {
+        guard let countryAccess, presentedViewController == nil else { return }
+        countryLayer.select(country.code)
+        let sheet = CountryUnlockSheetViewController(country: country, access: countryAccess)
+        sheet.onDismissed = { [weak self] in
+            // Still lifted if it was just unlocked: the reveal is the reward.
+            guard let self, !(self.countryAccess?.isUnlocked(country.code) ?? false) else { return }
+            self.countryLayer.select(nil)
+        }
+        present(sheet, animated: true)
+    }
+
+    @objc private func countryAccessChanged() {
+        countryLayer.refreshStyles()
+        reconcileClusters()
+    }
+
+    /// Whether `pin`'s post is on the map: its country is unlocked (or there
+    /// is nothing locked at all). A pin at sea is shown.
+    private func isInUnlockedCountry(_ pin: MapPin) -> Bool {
+        guard let countryAccess else { return true }
+        let code: String
+        if let cached = pinCountries[pin.postID] {
+            code = cached
+        } else {
+            let coordinate = CLLocationCoordinate2D(latitude: pin.latitude, longitude: pin.longitude)
+            code = CountryAtlas.shared.country(containing: coordinate)?.code ?? ""
+            pinCountries[pin.postID] = code
+        }
+        return code.isEmpty || countryAccess.isUnlocked(code)
     }
 
     private func configureFilterBar() {
@@ -1667,7 +1720,9 @@ final class MapsViewController: UIViewController {
         // `collide`). A dictionary's values re-order whenever it is mutated, and
         // every return to this screen re-queries — so the markers moved on a map
         // nobody had panned.
-        let ordered = pins.values.sorted { $0.postID.rawValue < $1.postID.rawValue }
+        // Only the unlocked countries' posts: the rest of the world is sold
+        // by its country's badge (`CountryLayer`), not shown.
+        let ordered = pins.values.filter(isInUnlockedCountry).sorted { $0.postID.rawValue < $1.postID.rawValue }
         // Singles go through the SAME reconciliation below, so what the flag
         // measures is the real marker lifecycle and not a parallel code path
         // that happens to look similar.
@@ -2530,6 +2585,9 @@ extension MapsViewController: MKMapViewDelegate {
         #if DEBUG
         MapChurnCounters.viewFor += 1
         #endif
+        if let badge = annotation as? LockedCountryAnnotation {
+            return countryLayer.view(for: badge, in: mapView)
+        }
         if let cluster = annotation as? MapComputedCluster {
             let view = mapView.dequeueReusableAnnotationView(
                 withIdentifier: MapClusterAnnotationView.reuseIdentifier,

@@ -90,21 +90,27 @@ final class CountryRenderer: MKMultiPolygonRenderer {
 ///
 /// Owns the overlays and their renderers, the tap that picks a country, and
 /// the selected one's lifted copy. The map view controller installs it and
-/// forwards `rendererFor`; what a country's STYLE is (locked or not) and what
-/// a tap on one DOES are the host's, through `styleFor` and `onCountryTapped`.
+/// forwards `rendererFor` and `viewFor`; which countries are open comes from
+/// `access`, and what a tap on one DOES is the host's (`onCountryTapped`,
+/// `onLockedBadgeTapped`). Locked countries also wear a badge at their centre
+/// (`LockedCountryAnnotation`) with their rank and likes.
 ///
 /// ⚠️ **A TAP ON A MARKER IS THE MARKER'S.** The country tap runs alongside
 /// the map's own recognisers and stands down when the touch landed on an
 /// annotation view, so opening a post never also picks the country under it.
 @MainActor
 final class CountryLayer: NSObject {
-    /// The style of the country `code`. Asked when the borders are drawn and
-    /// on `refreshStyles()`.
-    var styleFor: (String) -> CountryStyle = { _ in .unlocked }
     /// A country was tapped (not a marker on it).
     var onCountryTapped: ((CountryAtlas.Country) -> Void)?
 
+    /// A locked country's badge was tapped.
+    var onLockedBadgeTapped: ((CountryAtlas.Country) -> Void)?
+    /// Which countries are open, and their standings. Nil: every country is
+    /// open and nothing is sold (the fleet, until the backend carries it).
+    var access: (any CountryAccess)?
+
     private weak var mapView: MKMapView?
+    private var badges: [String: LockedCountryAnnotation] = [:]
     private var shapes: [String: CountryShape] = [:]
     private var renderers: [String: CountryRenderer] = [:]
     private var lifted: (shape: CountryShape, renderer: CountryRenderer?)?
@@ -119,6 +125,10 @@ final class CountryLayer: NSObject {
     /// first; the borders appear when it is ready.
     func install(on mapView: MKMapView) {
         self.mapView = mapView
+        mapView.register(
+            LockedCountryAnnotationView.self,
+            forAnnotationViewWithReuseIdentifier: LockedCountryAnnotationView.reuseIdentifier
+        )
         let tap = UITapGestureRecognizer(target: self, action: #selector(tapped(_:)))
         tap.delegate = self
         tap.cancelsTouchesInView = false
@@ -145,12 +155,54 @@ final class CountryLayer: NSObject {
         let shapes = countries.map { CountryShape(country: $0) }
         self.shapes = Dictionary(uniqueKeysWithValues: shapes.map { ($0.code, $0) })
         mapView.addOverlays(shapes, level: .aboveRoads)
+        refreshBadges()
+    }
+
+    /// The style `code` is drawn in: open, or locked.
+    func style(for code: String) -> CountryStyle {
+        guard let access else { return .unlocked }
+        return access.isUnlocked(code) ? .unlocked : .locked
+    }
+
+    /// Puts a badge on every locked country that has a standing, and takes
+    /// it off every unlocked one.
+    func refreshBadges() {
+        guard let mapView, !shapes.isEmpty else { return }
+        var wanted: [String: LockedCountryAnnotation] = [:]
+        if let access {
+            for country in atlas.countries where !access.isUnlocked(country.code) {
+                guard let standing = access.standing(of: country.code) else { continue }
+                wanted[country.code] = badges[country.code]?.standing == standing
+                    ? badges[country.code]
+                    : LockedCountryAnnotation(country: country, standing: standing)
+            }
+        }
+        let gone = badges.filter { wanted[$0.key] !== $0.value }.map(\.value)
+        let new = wanted.filter { badges[$0.key] !== $0.value }.map(\.value)
+        if !gone.isEmpty { mapView.removeAnnotations(gone) }
+        if !new.isEmpty { mapView.addAnnotations(new) }
+        badges = wanted
+    }
+
+    /// The badge view for a locked country.
+    func view(for badge: LockedCountryAnnotation, in mapView: MKMapView) -> MKAnnotationView {
+        let view = mapView.dequeueReusableAnnotationView(
+            withIdentifier: LockedCountryAnnotationView.reuseIdentifier, for: badge
+        ) as? LockedCountryAnnotationView ?? LockedCountryAnnotationView(
+            annotation: badge, reuseIdentifier: LockedCountryAnnotationView.reuseIdentifier
+        )
+        view.annotation = badge
+        view.onSelect = { [weak self] in
+            guard let self, let country = self.atlas.country(code: badge.code) else { return }
+            self.onLockedBadgeTapped?(country)
+        }
+        return view
     }
 
     func renderer(for overlay: any MKOverlay) -> MKOverlayRenderer? {
         guard let shape = overlay as? CountryShape else { return nil }
         let renderer = CountryRenderer(shape: shape)
-        renderer.style = styleFor(shape.code)
+        renderer.style = style(for: shape.code)
         if shape.isLifted {
             lifted?.renderer = renderer
         } else {
@@ -161,8 +213,9 @@ final class CountryLayer: NSObject {
 
     /// Re-asks every country's style — after an unlock.
     func refreshStyles() {
-        for (code, renderer) in renderers { renderer.style = styleFor(code) }
-        lifted?.renderer?.style = styleFor(lifted?.shape.code ?? "")
+        for (code, renderer) in renderers { renderer.style = style(for: code) }
+        lifted?.renderer?.style = style(for: lifted?.shape.code ?? "")
+        refreshBadges()
     }
 
     /// Lifts `code` above the others, or lowers the one lifted (nil).
