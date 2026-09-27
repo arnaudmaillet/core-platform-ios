@@ -91,31 +91,64 @@ public final class MockCommentService: @unchecked Sendable {
     /// filters (over-length, embedded newline, semantic phrase past the word
     /// cap) so mock mode also proves the filtering; the qualifying remainder
     /// stays well above the band's minimum gate.
+    ///
+    /// ⚠️ EVERY ENTRY BUT 20–22 MUST STAY A REACTION: at most
+    /// `CommentTickerBuilder.maxCharacterCount` (20) GRAPHEMES — Swift's
+    /// `count`, so an emoji is one and a `:code:` is its full spelling — and
+    /// unique ignoring case. Lengthening one past 20 moves it to the subtitle
+    /// zone and breaks `denselySeededPostFeedsBothSurfaces`. Entry 22 stays
+    /// emoji-free: an emoji would make it reaction-shaped, and it is the one
+    /// proving the word cap.
+    ///
+    /// Emoji are all from EmoteKit's bundled Noto subset, so they animate;
+    /// two entries are a chat-spam run (5 and 7).
     private static let denseCommentBank: [String] = [
         "GG 🔥🔥",
         "W",
         "no way 😭",
-        "so clean",
-        "POV: perfection",
-        "goated 🐐",
+        "so clean ✨",
+        "POV: perfection 🥹",
+        "goated 👑",
         "🔥🔥🔥",
         "LFG :lol:",
         "😭😭😭",
-        "certified banger",
-        "sheesh 💀",
-        "the colors!!",
+        "certified banger 🎶",
+        "sheesh 💀 :lmao:",
+        "the colors!! 🌈",
         "frame it.",
         "chef's kiss 🤌",
         "unreal 🔥",
-        "instant follow",
+        "instant follow 🫡",
         "this goes hard",
-        "sound ON 🔊",
-        "🐐🐐🐐🐐",
+        "sound ON 🎶🔥",
+        "😂😂😂😂😂😂😂",
         "im crying 😭😭",
-        "Honestly, a whole documentary could be made about this clip :blush:",
+        "Honestly, a whole documentary could be made about this clip :blush: 🍿🍿",
         "no\nway",
         "how is this so good",
         "10/10 🍿",
+    ]
+
+    /// The sparse two-comment seed every other post carries, picked by the
+    /// post's number so the feed does not repeat one conversation 120 times.
+    /// Two comments are under the band's gate whatever their shape, so these
+    /// all speak in the subtitle zone.
+    ///
+    /// ⚠️ ENTRY 1 IS THE ORIGINAL PAIR, and post-0001 — the post the
+    /// repository tests load — lands on it. A post id with no numeric suffix
+    /// (the arrivals, the viewer's own) takes entry 0.
+    private static let sparsePairs: [(String, String)] = [
+        ("okay this is gorgeous 😍", "Need to know where this is :blush:"),
+        ("Love this shot 🔥", "Where was this taken?"),
+        ("The colours 🥹🥹", "Saving this for later"),
+        ("Great shot.", "How long did this take you?"),
+        ("haha :lol:", "Wait, is this the new place?"),
+        ("Stunning ✨", "You always find the best light"),
+        ("🔥🔥🔥🔥🔥🔥", "Take me with you next time"),
+        ("This is so good", "Instantly my favourite post today 💯"),
+        ("Obsessed 😍😍", "Need this as a wallpaper"),
+        ("Beautiful.", "Such a vibe, honestly"),
+        ("😂😂😂", "The second one :lmao:"),
     ]
 
     /// Semantic bodies for the subtitle zone's dense seed — full sentences
@@ -123,12 +156,12 @@ public final class MockCommentService: @unchecked Sendable {
     /// builder's semantic shape (≥ 4 words), so the two surfaces partition
     /// the dense posts' comments deterministically.
     private static let semanticCommentBank: [String] = [
-        "The light in this is absolutely something else.",
-        "I have rewatched this more times than I want to admit.",
-        "Whoever did the edit understood the assignment completely.",
+        "The light in this is absolutely something else ✨",
+        "I have rewatched this more times than I want to admit 😭😭",
+        "Whoever did the edit understood the assignment completely 👏👏👏",
         "This is exactly why I keep coming back to this app 😂",
         "The pacing on that last cut is genuinely perfect.",
-        "Feels like a memory I never actually had, somehow.",
+        "Feels like a memory I never actually had, somehow 🥹",
     ]
 
     /// Level-2 seeds for the dense posts: a couple of replies under the
@@ -164,9 +197,9 @@ public final class MockCommentService: @unchecked Sendable {
             // reactions in the ticker band — the partition stays exact.
             semParent: [
                 reply(semParent, 0, "So true, the framing carries it.", ageMs: 6 * 60_000),
-                reply(semParent, 1, "came here to say exactly this", ageMs: 4 * 60_000),
+                reply(semParent, 1, "came here to say exactly this :lol:", ageMs: 4 * 60_000),
                 reply(semParent, 2, "this.", ageMs: 3 * 60_000),
-                reply(semParent, 3, "so real", ageMs: 2 * 60_000),
+                reply(semParent, 3, "so real 😭", ageMs: 2 * 60_000),
                 reply(semParent, 4, "💯💯", ageMs: 90_000),
                 reply(semParent, 5, "not wrong", ageMs: 60_000),
             ],
@@ -225,9 +258,10 @@ public final class MockCommentService: @unchecked Sendable {
             }
             raw = reactions + subtitles
         } else {
+            let pair = Self.sparsePairs[(Int(postID.suffix(4)) ?? 0) % Self.sparsePairs.count]
             raw = [
-                makeComment(id: "\(postID)-c0", postID: postID, author: authors[1].profileID, body: "Love this shot 🔥", ageMs: 20 * 60_000),
-                makeComment(id: "\(postID)-c1", postID: postID, author: authors[2].profileID, body: "Where was this taken?", ageMs: 5 * 60_000)
+                makeComment(id: "\(postID)-c0", postID: postID, author: authors[1].profileID, body: pair.0, ageMs: 20 * 60_000),
+                makeComment(id: "\(postID)-c1", postID: postID, author: authors[2].profileID, body: pair.1, ageMs: 5 * 60_000)
             ]
         }
         return raw.map {
