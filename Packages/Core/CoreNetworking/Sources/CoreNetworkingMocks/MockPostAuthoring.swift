@@ -48,7 +48,7 @@ public final class MockPostStore: @unchecked Sendable {
         displayName: "Demo Viewer",
         // Landscape, so the viewer's own profile wears a band.
         avatarURL: "mock://avatar/viewer?w=1600&h=900",
-        bio: "Kicking the tires. Everything here is mock data.",
+        bio: "Kicking the tires. Everything here is mock data. 🤖",
         websiteURL: "https://www.example.com/demo/"
     )
 
