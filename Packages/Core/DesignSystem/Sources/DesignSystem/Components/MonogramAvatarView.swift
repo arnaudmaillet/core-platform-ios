@@ -24,7 +24,7 @@ public final class MonogramAvatarView: UIView {
 
     public init(diameter: CGFloat = MonogramAvatarView.rowDiameter) {
         super.init(frame: .zero)
-        backgroundColor = .tertiarySystemFill
+        backgroundColor = Self.plateColor
         clipsToBounds = true
         label.font = Self.monogramFont(diameter)
         label.textColor = .secondaryLabel
@@ -70,7 +70,22 @@ public final class MonogramAvatarView: UIView {
         // itself — never to zero, which is how the square got drawn.
         let side = min(bounds.width, bounds.height)
         if side > 0 { layer.cornerRadius = side / 2 }
+        CircleMask.apply(to: self)
     }
+
+    /// Whether a picture covers the disc. A covered disc draws NOTHING, no
+    /// plate and no initials: an avatar is the picture alone. Where a
+    /// container reshaped the plate, it showed around the picture as a grey
+    /// rim (seen on a device in the feed's author pill).
+    public var isCovered = false {
+        didSet {
+            guard isCovered != oldValue else { return }
+            backgroundColor = isCovered ? .clear : Self.plateColor
+            label.isHidden = isCovered
+        }
+    }
+
+    private static let plateColor = UIColor.tertiarySystemFill
 
     /// Initials on the app's rule: the display name when there is one, the
     /// handle when there is not — the first letter of the first two words,
