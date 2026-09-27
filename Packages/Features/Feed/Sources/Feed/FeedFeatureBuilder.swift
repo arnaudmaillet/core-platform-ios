@@ -1160,7 +1160,13 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             // nobody to file with — the same rule the grid's card menu follows.
             reporting: reporting,
             soundProvider: soundProvider,
-            useSound: useSound
+            useSound: useSound,
+            // The sound sheet's grid opens a NEW feed of the posts with that
+            // sound, with the same hero every grid in the app flies.
+            openFeedHero: { [self] ids, presenter, origin in
+                presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)
+            },
+            galleryPost: { id in repository.peekPost(id).map(ForYouRepository.galleryPost(from:)) }
         )
     }
 

@@ -399,6 +399,9 @@ final class SnapFeedViewController: UIViewController {
     /// See `FeedFeatureBuilder.soundProvider` / `useSound`.
     private let soundProvider: (any PostSoundProviding)?
     private let useSound: (@MainActor (PostSound) -> Void)?
+    /// Opens a new feed with the hero — the sound sheet's grid uses it.
+    private let openFeedHero: (@MainActor ([PostID], UIViewController, SnapFeedHeroOrigin) -> Void)?
+    private let galleryPost: (@MainActor (PostID) -> GalleryPost?)?
 
     init(
         viewModel: FeedViewModel,
@@ -410,10 +413,14 @@ final class SnapFeedViewController: UIViewController {
         makeWalletSheet: (@MainActor () -> UIViewController)? = nil,
         reporting: (any ContentReporting)? = nil,
         soundProvider: (any PostSoundProviding)? = nil,
-        useSound: (@MainActor (PostSound) -> Void)? = nil
+        useSound: (@MainActor (PostSound) -> Void)? = nil,
+        openFeedHero: (@MainActor ([PostID], UIViewController, SnapFeedHeroOrigin) -> Void)? = nil,
+        galleryPost: (@MainActor (PostID) -> GalleryPost?)? = nil
     ) {
         self.soundProvider = soundProvider
         self.useSound = useSound
+        self.openFeedHero = openFeedHero
+        self.galleryPost = galleryPost
         self.viewModel = viewModel
         self.imagePipeline = imagePipeline
         self.videoPlayback = videoPlayback
@@ -3964,6 +3971,8 @@ final class SnapFeedViewController: UIViewController {
             self?.yieldAudio(false)
         }
         sheet.onSelectPost = { [weak self] id in self?.showPost(id) }
+        sheet.openFeedHero = openFeedHero
+        sheet.galleryPost = galleryPost
         present(sheet, animated: true)
     }
 
