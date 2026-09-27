@@ -50,16 +50,16 @@ public final class MockChatService: @unchecked Sendable {
     /// request the same age the list is one undivided block, and the split that
     /// the badge is supposed to describe has nothing to describe.
     private static let requests: [(id: String, opener: String, closer: String, minutesAgo: Int64)] = [
-        ("conv-req-0", "Hi! Loved your shot of the pier — any chance you sell prints?",
+        ("conv-req-0", "Hi! Loved your shot of the pier 😍 any chance you sell prints?",
          "No pressure either way 🙂", justArrived),
         ("conv-req-1", "Hey, we're putting together a small show next month and I'd love to include your work.",
          "Happy to send over the details.", justArrived + 1),
         ("conv-req-2", "Following you from the print fair — your process posts are great.",
-         "Do you ever run workshops?", 3 * 60),
+         "Do you ever run workshops? 👀", 3 * 60),
         ("conv-req-3", "We're commissioning covers for a short story collection.",
          "Budget is modest but the brief is open.", 26 * 60),
         ("conv-req-4", "Quick one — what film stock was the harbour series shot on?",
-         "Asking for a very jealous friend.", 4 * 24 * 60)
+         "Asking for a very jealous friend :blush:", 4 * 24 * 60)
     ]
 
     private static let requestIDs = requests.map(\.id)
@@ -198,9 +198,9 @@ public final class MockChatService: @unchecked Sendable {
         }
         if conversationID == "conv-2" {
             let inbound: [(String, String, Int64)] = [
-                (viewer, "Sent you the venue list", 200),
+                (viewer, "Sent you the venue list ✅", 200),
                 (other, "Perfect, thanks! One more thing —", Self.justArrived + 1),
-                (other, "can you make Thursday instead?", Self.justArrived)
+                (other, "can you make Thursday instead? 🥺🙏", Self.justArrived)
             ]
             return inbound.enumerated().map { index, spec in
                 var view = Chat_V1_MessageView()
@@ -217,20 +217,20 @@ public final class MockChatService: @unchecked Sendable {
         if let index = Int(conversationID.dropFirst("conv-".count)), index >= 3 {
             let answered = index >= 12
             let openers = [
-                "Are we still on for Thursday?",
+                "Are we still on for Thursday? 🤞",
                 "Sent you the files 👍 :lol:",
                 "That place you mentioned — what was it called?",
-                "Congrats on the launch!",
+                "Congrats on the launch!! 🎉🎉🎉🥳🎊",
                 "Any chance you're free later this week?",
-                "Just saw your post, that light is unreal",
-                "Thanks again for yesterday"
+                "Just saw your post, that light is unreal 😍",
+                "Thanks again for yesterday 🙏✨"
             ]
             let replies = [
                 "Yep, works for me",
-                "Got them, thanks!",
+                "Got them, thanks! 🙌",
                 "I'll dig out the link",
                 "Appreciate it 🙏",
-                "Let me check and come back to you"
+                "Let me check and come back to you 🫡"
             ]
             // Staggered so the inbox (and Recent) has a real recency order
             // rather than a block of identical timestamps.
@@ -243,7 +243,15 @@ public final class MockChatService: @unchecked Sendable {
                 // `conv-3` lands its reply as a live arrival; the rest sit in
                 // the past. Three arrivals total, so the All badge reads "3"
                 // out of the box and the rows under it say which three.
-                thread.append((other, "👍", index == 3 ? Self.justArrived : base))
+                //
+                // The closing line varies by thread, so the inbox's previews
+                // are not a column of identical thumbs: most carry emotes, one
+                // a run, a couple plain text.
+                let closers = [
+                    "👍", "haha perfect :lmao:", "😂😂😂😂😂", "ok deal", "sounds good",
+                    "🔥🔥", "love that 🥰", "see you there", "yesss"
+                ]
+                thread.append((other, closers[index % closers.count], index == 3 ? Self.justArrived : base))
             }
             // `conv-4` is the BURST: one peer talking into the silence, which
             // is the only seeded state that pushes a row's unread count into
@@ -252,11 +260,11 @@ public final class MockChatService: @unchecked Sendable {
             // circle — goes unexercised.
             if index == 4 {
                 let burst = [
-                    "Actually, one more thing", "Sorry, several more things",
-                    "The venue wants a deposit by Friday", "And a rider",
-                    "Do we have a rider?", "I'll assume no",
-                    "Also parking is a nightmare", "Bring cash for it",
-                    "Load-in is 4pm sharp", "They were very firm about that"
+                    "Actually, one more thing 😅", "Sorry, several more things",
+                    "The venue wants a deposit by Friday :money:", "And a rider",
+                    "Do we have a rider? 🤔", "I'll assume no 😂😂😂😂😂😂",
+                    "Also parking is a nightmare 😩", "Bring cash for it",
+                    "Load-in is 4pm sharp ⏰", "They were very firm about that 💀"
                 ]
                 for (offset, body) in burst.enumerated() {
                     thread.append((other, body, base - Int64(offset) - 1))
@@ -273,26 +281,26 @@ public final class MockChatService: @unchecked Sendable {
         }
         let specs: [(String, String, Int64)] = conversationID == "conv-0"
             ? [
-                (other, "Morning! Standup moved to 9:30 today", morning),
+                (other, "Morning! Standup moved to 9:30 today ☕", morning),
                 (other, "Room 4 this time", morning - 1),
-                (other, "And bring the tab bar demo if it's ready", morning - 2),
+                (other, "And bring the tab bar demo if it's ready 🙏", morning - 2),
                 (viewer, "👍 on my way", morning - 4),
                 (viewer, "Demo's ready — pushed the branch last night", morning - 5),
                 (other, "Saw it. The thread screen rebuild is next, right? The list one is starting to feel very 2015.", midday),
                 (viewer, "Yep, Telegram-style bubbles, day chips, glass input bar — the works. Native UIKit only though, no custom layout engine.", midday - 10),
-                (other, "Bold claim 😄", midday - 11),
-                (viewer, "Watch me", midday - 15),
-                (other, "Hey! Did you see the new build?", 60),
+                (other, "Bold claim 😂😂😂😂😂😂", midday - 11),
+                (viewer, "Watch me 😎", midday - 15),
+                (other, "Hey! Did you see the new build? 👀", 60),
                 (viewer, "Yeah, shipping it today 🚀", 58),
                 (viewer, "Just cleaning up the last QA notes", 57),
                 (other, "Nice — ping me when it's live", 55),
-                (other, "No rush, I'm in reviews all morning anyway", 54),
+                (other, "No rush, I'm in reviews all morning anyway :lol:", 54),
                 (viewer, "Will do", 12)
             ]
             : [
-                (other, "Hey! Did you see the new build?", 60),
+                (other, "Hey! Did you see the new build? 👀", 60),
                 (viewer, "Yeah, shipping it today 🚀", 58),
-                (other, "Nice — ping me when it's live", Self.justArrived)
+                (other, "Nice — ping me when it's live 🎉", Self.justArrived)
             ]
         // Seeded threaded replies (message index → the index it answers), so
         // the quoted-reply rendering is present in the dense demo thread
