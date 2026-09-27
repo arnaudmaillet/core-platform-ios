@@ -101,6 +101,9 @@ final class VideoFrameRenderer {
         // A new item's last frame is the OLD item's content; priming a joining
         // surface with it would show the wrong video.
         lastFrame = nil
+        // Frames pulled ahead from the old item are the old item's too.
+        held.removeAll()
+        isLeading = false
         lastItemTime = .invalid
         lastDispatchHostTime = 0
         updateClockRegistration()
@@ -201,6 +204,8 @@ final class VideoFrameRenderer {
             + surfaces.allObjects.map { $0.debugLabelOrAnonymous }.sorted().joined(separator: ","))
         for surface in surfaces.allObjects { surface.detachFromRenderer() }
         surfaces.removeAllObjects()
+        held.removeAll()
+        isLeading = false
         source.setItem(nil)
         updateClockRegistration()
     }
@@ -221,7 +226,10 @@ final class VideoFrameRenderer {
 
     // MARK: - The tick
 
-    func render(atHostTime hostTime: CFTimeInterval) {
+    /// One refresh. `hostTime` is when the refresh being prepared reaches the
+    /// display (the link's `targetTimestamp`), `refreshInterval` how long a
+    /// refresh lasts right now.
+    func render(atHostTime hostTime: CFTimeInterval, refreshInterval: CFTimeInterval = 1.0 / 60) {
         let targets = surfaces.allObjects
         guard !targets.isEmpty else { return }
         // Sampled BEFORE the "no new frame" return, deliberately. A renderer
@@ -233,18 +241,84 @@ final class VideoFrameRenderer {
         // Before the "no new frame" return, for the same reason as the line
         // above: a probe that goes quiet when its subject stalls is worthless.
         sampleDispatchRate(atHostTime: hostTime)
-        let frame = source.copyFrame(atHostTime: hostTime)
+
+        // ⚠️ LEADING — see `VideoFrameCompanion`. While a drawing surface has a
+        // companion that asks, frames are pulled a refresh or two AHEAD and
+        // held, so the companion can make what it draws from a frame before
+        // that frame is shown, and show it in the turn the frame is enqueued.
+        let companions = targets.compactMap { surface -> (any VideoFrameCompanion)? in
+            guard surface.window != nil, let companion = surface.frameCompanion,
+                  companion.wantsFramesAhead else { return nil }
+            return companion
+        }
+        let leads = !companions.isEmpty
+
+        // What goes on screen at THIS refresh.
+        let frame: (buffer: CVPixelBuffer, itemTime: CMTime, id: VideoFrameID?)?
+        if leads, isLeading {
+            // Only what was pulled ahead for it. A just-in-time pull here would
+            // take the frame from under the companion — on a clock that is not
+            // moving (a scrub) it is the very frame just pulled ahead.
+            frame = held.takeDue(at: hostTime).map { ($0.buffer, $0.itemTime, $0.id) }
+        } else if let entry = held.takeAll() {
+            // Leading just stopped: what is held goes now, and nothing is kept.
+            frame = (entry.buffer, entry.itemTime, entry.id)
+        } else {
+            // Just in time — and on the refresh leading starts, which has
+            // nothing held yet.
+            frame = source.copyFrame(atHostTime: hostTime).map { ($0.buffer, $0.itemTime, nil) }
+        }
+        if let frame {
+            dispatch(frame.buffer, itemTime: frame.itemTime, id: frame.id, to: targets, hostTime: hostTime)
+        }
+        if leads {
+            pullAhead(atHostTime: hostTime, refreshInterval: refreshInterval, for: companions)
+        }
+        isLeading = leads
         // Told on every tick, including the ones that produce nothing — a drain
         // IS a run of ticks that produce nothing, so a state set only when a
         // frame arrives could never describe it.
         for surface in targets {
             surface.setCatchingUp(source.isCatchingUp)
         }
-        guard let frame else { return }
-        noteDispatch(itemTime: frame.itemTime, hostTime: hostTime)
-        guard let format = formatDescription(matching: frame.buffer) else { return }
+    }
 
-        lastFrame = frame
+    /// Frames pulled ahead and not yet shown — empty unless leading.
+    ///
+    /// ⚠️ THE SECOND EXCEPTION TO "HOLD NO FRAME BETWEEN TICKS", bounded like
+    /// the first (`LeadingFrameQueue.capacity`, a frame or two in practice) and
+    /// only ever on the one renderer whose page has a companion asking.
+    private var held = LeadingFrameQueue()
+    private var isLeading = false
+
+    private func pullAhead(
+        atHostTime hostTime: CFTimeInterval, refreshInterval: CFTimeInterval,
+        for companions: [any VideoFrameCompanion]
+    ) {
+        guard !held.isFull else { return }
+        let requested = hostTime + LeadingFrameQueue.lead(refreshInterval: refreshInterval)
+        guard let pulled = source.copyFrame(atHostTime: requested) else { return }
+        let clock = source.lastClockTime
+        let behind = clock.isValid && pulled.itemTime.isValid ? (clock - pulled.itemTime).seconds : 0
+        let due = LeadingFrameQueue.due(
+            hostTime: hostTime, refreshInterval: refreshInterval,
+            requestedHostTime: requested, behind: behind, rate: Double(player.rate)
+        )
+        let id = held.hold(pulled.buffer, itemTime: pulled.itemTime, due: due)
+        for companion in companions {
+            companion.prepare(pulled.buffer, as: id)
+        }
+    }
+
+    /// Puts one frame on every drawing surface, and tells their companions.
+    private func dispatch(
+        _ buffer: CVPixelBuffer, itemTime: CMTime, id: VideoFrameID?,
+        to targets: [VideoRenderView], hostTime: CFTimeInterval
+    ) {
+        noteDispatch(itemTime: itemTime, hostTime: hostTime)
+        guard let format = formatDescription(matching: buffer) else { return }
+
+        lastFrame = (buffer, itemTime)
         var drawn = 0
         for surface in targets {
             // A surface outside the window hierarchy cannot be seen, and a
@@ -259,12 +333,15 @@ final class VideoFrameRenderer {
             // buffer nothing else holds, and no question about two renderers
             // racing on one buffer's attachments.
             guard let sample = Self.makeSampleBuffer(
-                imageBuffer: frame.buffer,
+                imageBuffer: buffer,
                 format: format,
-                presentationTime: frame.itemTime
+                presentationTime: itemTime
             ) else { continue }
             verifyDisplayImmediately(on: sample)
-            surface.enqueue(sample)
+            // In the same turn as the enqueue — see `VideoFrameCompanion` — and
+            // only if the layer took the frame: a companion must not change
+            // for a picture that did not.
+            if surface.enqueue(sample), let id { surface.frameCompanion?.present(id) }
         }
         drawnSurfaceCount = drawn
         dispatchedFrameCount += 1

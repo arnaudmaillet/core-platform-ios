@@ -81,9 +81,13 @@ final class VideoFrameClock {
         }
         lastTickTimestamp = link.timestamp
         #endif
+        // How long this refresh lasts — what a renderer leading for a companion
+        // pulls ahead by (`VideoFrameCompanion`). Floored so a link that reports
+        // a degenerate pair cannot make it pull for "now".
+        let refreshInterval = max(link.targetTimestamp - link.timestamp, 1.0 / 240)
         var live = 0
         for renderer in renderers.allObjects {
-            renderer.render(atHostTime: hostTime)
+            renderer.render(atHostTime: hostTime, refreshInterval: refreshInterval)
             live += 1
         }
         // A renderer deallocated between registration and now leaves the table

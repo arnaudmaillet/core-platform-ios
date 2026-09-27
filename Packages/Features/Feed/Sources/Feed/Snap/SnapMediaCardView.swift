@@ -55,6 +55,9 @@ final class SnapMediaCardView: UIView {
             guard oldValue !== renderView else { return }
             oldValue.onPictureAvailabilityChange = nil
             installPictureObserver(on: renderView)
+            // The band follows whichever surface this card draws with.
+            if oldValue.frameCompanion === liveBackdrop { oldValue.frameCompanion = nil }
+            renderView.frameCompanion = liveBackdrop
             // Whatever surface this card is handed — a landing's, a reclaimed
             // donation, a page's — draws the way THIS card draws.
             applyFraming()
@@ -102,8 +105,9 @@ final class SnapMediaCardView: UIView {
     private let backdropView = UIImageView()
 
     /// The band's live half — see `LiveMediaBackdrop` for the design and its
-    /// numbers. Its source is the CARD (below), not a surface, because the
-    /// surface this card draws with is re-pointed at every hero seam.
+    /// numbers. It is the companion of whichever surface the card draws with
+    /// (`renderView`, re-pointed at every hero seam), and its source is the
+    /// CARD (below), which knows whether that surface is still its own.
     private lazy var liveBackdrop: LiveMediaBackdrop = {
         let live = LiveMediaBackdrop(target: backdropView)
         live.source = self
@@ -256,7 +260,12 @@ final class SnapMediaCardView: UIView {
     private func installPictureObserver(on view: VideoRenderView) {
         view.onPictureAvailabilityChange = { [weak self] ready in
             guard let self else { return }
-            if ready { self.applyFraming() }
+            if ready {
+                self.applyFraming()
+            } else {
+                // The surface is back on its poster: so is a playing band.
+                self.liveBackdrop.sourceStoppedDrawing()
+            }
             self.onPictureAvailabilityChange?(ready)
         }
     }
@@ -297,6 +306,7 @@ final class SnapMediaCardView: UIView {
         backdropView.pin(to: self)
         imageView.contentMode = .scaleAspectFill
         installPictureObserver(on: renderView)
+        renderView.frameCompanion = liveBackdrop
         imageView.clipsToBounds = true
         imageView.pin(to: self)
         renderView.pin(to: self)
@@ -990,13 +1000,12 @@ final class SnapMediaCardView: UIView {
     // the whole story.
 }
 
-/// The live band reads its frames through the CARD, which adds the one thing a
-/// surface cannot know: that it is still this card's. A surface donated to a
-/// hero flight is in a window and drawing, and a band that went on sampling it
-/// would be redrawing a page nobody is looking at from a layer that has left.
+/// The live band asks the CARD whether it may follow its surface, which adds
+/// the one thing a surface cannot know: that it is still this card's. A
+/// surface donated to a hero flight is in a window and drawing, and a band that
+/// went on following it would be redrawing a page nobody is looking at from a
+/// layer that has left — and holding that surface's frames a refresh early.
 extension SnapMediaCardView: LiveBackdropFrameSource {
-    var liveFrameToken: CFTimeInterval { renderView.liveFrameToken }
-    var liveFrameBuffer: CVPixelBuffer? { renderView.liveFrameBuffer }
     var isShowingLiveFrames: Bool {
         renderView.superview === self && renderView.isShowingLiveFrames
     }
