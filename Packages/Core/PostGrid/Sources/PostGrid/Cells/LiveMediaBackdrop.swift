@@ -278,6 +278,12 @@ public final class LiveMediaBackdrop: VideoFrameCompanion {
             CATransaction.setDisableActions(true)
             target.image = image
             CATransaction.commit()
+            // ⚠️ AND OUT NOW, not at the end of the run-loop turn. The frame
+            // this band belongs to was enqueued a moment ago and reaches the
+            // render server on its own path; a commit left for the end of the
+            // turn waits behind whatever else the turn runs, and on the
+            // recording that was the band a refresh late on 2 cuts in 13.
+            CATransaction.flush()
             return
         }
         // A cross-dissolve of the layer's contents, composited by the render
