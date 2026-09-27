@@ -205,9 +205,6 @@ final class MapsViewController: UIViewController {
     private var offerCamera: MKMapCamera?
     /// Whether closing the offer flies the map back to `offerCamera`.
     private var offerReturns = true
-    /// The top-trailing column: the countries shop's globe over the compass.
-    /// Built only when countries are sold; otherwise MapKit's own compass.
-    private let mapControls = UIStackView()
     /// The filter-pill carousel floating above the tab bar. The map's first
     /// bottom overlay: pinned to the safe area (the map itself is full-bleed
     /// and draws under the floating tab bar).
@@ -854,9 +851,7 @@ final class MapsViewController: UIViewController {
     private func configureMapView() {
         mapView.delegate = self
         mapView.pointOfInterestFilter = .excludingAll
-        // The compass moves into `mapControls` when the globe stands there,
-        // so the two stack instead of overlapping.
-        mapView.showsCompass = countryAccess == nil
+        mapView.showsCompass = true
         mapView.register(
             MapAnnotationView.self,
             forAnnotationViewWithReuseIdentifier: MapAnnotationView.reuseIdentifier
@@ -913,33 +908,14 @@ final class MapsViewController: UIViewController {
             }
         }
         #endif
-        guard countryAccess != nil else { return }
-
-        var globe = UIButton.Configuration.glass()
-        globe.image = UIImage(systemName: "globe.europe.africa.fill")?
-            .applyingSymbolConfiguration(.init(pointSize: 19, weight: .medium))
-        globe.cornerStyle = .capsule
-        let shopButton = UIButton(configuration: globe)
-        shopButton.accessibilityLabel = "Countries"
-        shopButton.addAction(UIAction { [weak self] _ in self?.presentCountryShop() }, for: .primaryActionTriggered)
-        let compass = MKCompassButton(mapView: mapView)
-        compass.compassVisibility = .adaptive
-        mapControls.axis = .vertical
-        mapControls.alignment = .center
-        mapControls.spacing = Spacing.sm
-        mapControls.addArrangedSubview(shopButton)
-        mapControls.addArrangedSubview(compass)
-        mapControls.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(mapControls)
-        NSLayoutConstraint.activate([
-            shopButton.widthAnchor.constraint(equalToConstant: 48),
-            shopButton.heightAnchor.constraint(equalToConstant: 48),
-            mapControls.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: Spacing.sm),
-            mapControls.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -Spacing.lg),
-        ])
     }
 
-    /// The countries shop, over the map. A row takes you to its country.
+    /// Whether this map sells countries — the Explore header shows its globe
+    /// only then.
+    var sellsCountries: Bool { countryAccess != nil }
+
+    /// The countries shop, over the map — opened by the Explore header's globe
+    /// (`MapCountryShopHosting`). A row takes you to its country.
     func presentCountryShop() {
         guard let countryAccess, presentedViewController == nil else { return }
         let shop = CountryShopViewController.sheet(access: countryAccess) { [weak self] code in
@@ -1640,9 +1616,8 @@ final class MapsViewController: UIViewController {
     /// flying hero card read as debris. Mirrors the manual tab-bar
     /// choreography (hide at lift-off, restore only on the completed pop).
     private func setFilterBar(hidden: Bool) {
-        UIView.animate(withDuration: 0.2) { [barsStack, mapControls] in
+        UIView.animate(withDuration: 0.2) { [barsStack] in
             barsStack.alpha = hidden ? 0 : 1
-            mapControls.alpha = hidden ? 0 : 1
         }
     }
 
@@ -1692,7 +1667,6 @@ final class MapsViewController: UIViewController {
     /// view and therefore renders above the dim, needs driving by hand.
     private func restoreBottomChromeForReturn(alpha: CGFloat) {
         barsStack.alpha = 1
-        mapControls.alpha = 1
         guard let tabBarController else { return }
         tabBarController.tabBar.alpha = alpha
         guard tabBarController.isTabBarHidden else { return }
@@ -3171,7 +3145,6 @@ extension MapsViewController: MKMapViewDelegate {
                 self.activeTransition = nil
                 self.openGate.dismissedToIntermediate()
                 self.barsStack.alpha = 1
-                self.mapControls.alpha = 1
                 // The present flight hid the tapped marker; nothing on the
                 // gallery path would ever restore it.
                 source.setZoomSourceHidden(false)
@@ -3250,7 +3223,6 @@ extension MapsViewController: MKMapViewDelegate {
             self?.tabBarController?.setTabBarHidden(true, animated: false)
             self?.tabBarController?.tabBar.alpha = 1
             self?.barsStack.alpha = 0
-            self?.mapControls.alpha = 0
             // ⚠️ THE UNDO IS NOW A REMOVAL, and it used to be an insertion.
             //
             // With the page off the stack at rest, an abandoned VERTICAL grab
@@ -3677,3 +3649,5 @@ private final class MapsChromeTraceProxy {
     }
 }
 #endif
+
+extension MapsViewController: MapCountryShopHosting {}
