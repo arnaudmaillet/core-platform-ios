@@ -223,46 +223,98 @@ final class SnapAuthorIdentityView: UIView {
     /// posts by the same author only refreshes the per-post meta line, with no
     /// fade. The view is content-sized, so a new author re-negotiates the bar
     /// item's width — a settle-time event by construction.
-    func setAuthor(_ model: FeedItemDisplayModel, pipeline: ImagePipeline) {
+    ///
+    /// `animated: false` is for a pill that is not on screen yet: a FRESH
+    /// pill built for a new bar item (the snap feed's author change), where
+    /// the bar's own item transition is the animation and anything the pill
+    /// animated inside itself would play under it, twice.
+    func setAuthor(_ model: FeedItemDisplayModel, pipeline: ImagePipeline, animated: Bool = true) {
         guard model != renderedModel else { return }
         // The fast path is for PAGING between posts by one person: the face and
         // the name are already right, so only the time moves and there is no
         // reason to cross-dissolve or refetch an avatar.
-        //
-        // ⚠️ It has to check what is DRAWN, not just who it belongs to. A page
-        // is configured twice from one id — the grid's projection, then the real
-        // entry — and those can carry the same author with a better name and an
-        // avatar the projection had no URL for. Keyed on `authorID` alone, the
-        // second call took this path and the capsule kept a blank face.
-        let sameFace = model.authorID == authorID
-            && model.authorName == renderedModel?.authorName
-            && model.avatarURL == renderedModel?.avatarURL
+        let sameFace = showsSameFace(as: model)
         renderedModel = model
         authorID = model.authorID
         guard !sameFace else {
             metaLabel.text = model.metaText
             return
         }
-        defer { animateBarRemeasure() }
-
-        UIView.transition(with: self, duration: 0.18,
-                          options: [.transitionCrossDissolve, .allowUserInteraction]) {
+        let cached = model.avatarURL.flatMap(SnapAuthorFaceCache.face(for:))
+        let apply = {
             self.setRedacted(false)
             self.nameLabel.text = model.authorName
             self.metaLabel.text = model.metaText
-            self.showFace(nil)
+            self.showFace(cached, animated: false)
             self.monogramView.setMonogram(MonogramAvatarView.monogram(
                 name: model.authorName, handle: Self.handle(fromMeta: model.metaText)
             ))
         }
+        if animated {
+            defer { animateBarRemeasure() }
+            UIView.transition(with: self, duration: 0.18,
+                              options: [.transitionCrossDissolve, .allowUserInteraction], animations: apply)
+        } else {
+            apply()
+        }
 
         avatarTask?.cancel()
-        guard let url = model.avatarURL else { return }
+        avatarTask = nil
+        // A face already in hand is drawn above, in the same pass as the name:
+        // nothing to fetch, and nothing to fade in after the pill appears.
+        guard cached == nil, let url = model.avatarURL else { return }
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-pill-no-face") { return }
+        #endif
         let id = model.authorID
         avatarTask = Task { [weak self] in
             guard let image = try? await pipeline.image(for: url) else { return }
+            SnapAuthorFaceCache.store(image, for: url)
             guard let self, self.authorID == id else { return }
             self.showFace(image)
+        }
+    }
+
+    /// Whether `model` would draw the same face and name this pill draws now —
+    /// so only its meta line (the post's age) differs.
+    ///
+    /// ⚠️ It has to check what is DRAWN, not just who it belongs to. A page
+    /// is configured twice from one id — the grid's projection, then the real
+    /// entry — and those can carry the same author with a better name and an
+    /// avatar the projection had no URL for. Keyed on `authorID` alone, the
+    /// second call took the fast path and the capsule kept a blank face.
+    func showsSameFace(as model: FeedItemDisplayModel) -> Bool {
+        model.authorID == authorID
+            && model.authorName == renderedModel?.authorName
+            && model.avatarURL == renderedModel?.avatarURL
+    }
+
+    /// The author on the pill, if one has been set with `setAuthor`.
+    var shownAuthor: FeedItemDisplayModel? { renderedModel }
+
+    /// Takes on everything the HOST decided about `other` — its width cap,
+    /// compactness, shadow, follow button and tap handlers — but not its
+    /// author. For a fresh pill replacing `other` in the bar.
+    func inheritChrome(from other: SnapAuthorIdentityView) {
+        onAuthorTapped = other.onAuthorTapped
+        onFollowTapped = other.onFollowTapped
+        followButton.isHidden = other.followButton.isHidden
+        isCompact = other.isCompact
+        applyLabelVisibility()
+        maxWidthConstraint?.constant = other.maxWidthConstraint?.constant ?? Self.maxWidth
+        minWidthConstraint?.isActive = other.minWidthConstraint?.isActive ?? true
+        for (mine, theirs) in zip([nameLabel, metaLabel], [other.nameLabel, other.metaLabel]) {
+            mine.layer.shadowOpacity = theirs.layer.shadowOpacity
+        }
+    }
+
+    /// Fetches `url`'s face into the pill's cache ahead of need — the next
+    /// page's author — so a fresh pill for them is drawn with it.
+    static func warmFace(_ url: URL, pipeline: ImagePipeline) {
+        guard SnapAuthorFaceCache.face(for: url) == nil else { return }
+        Task { @MainActor in
+            guard let image = try? await pipeline.image(for: url) else { return }
+            SnapAuthorFaceCache.store(image, for: url)
         }
     }
 
@@ -305,10 +357,15 @@ final class SnapAuthorIdentityView: UIView {
     /// covered once the picture has faded in (not before, or the disc would
     /// be empty for the fade). Without one, the initials show on their round
     /// plate.
-    private func showFace(_ image: UIImage?) {
+    private func showFace(_ image: UIImage?, animated: Bool = true) {
         guard let image else {
             avatarView.image = nil
             monogramView.isCovered = false
+            return
+        }
+        guard animated else {
+            avatarView.image = image
+            monogramView.isCovered = true
             return
         }
         UIView.transition(with: avatarView, duration: 0.15, options: [.transitionCrossDissolve]) {
@@ -485,3 +542,107 @@ enum SnapNavControls {
         return button
     }
 }
+
+/// The faces the author pill has drawn lately, readable SYNCHRONOUSLY.
+///
+/// The image pipeline is an actor, so its cache answers only across an await —
+/// too late for a pill built to go into the bar on this turn: it would appear
+/// with its initials and swap to the picture a frame later, under the bar's
+/// own item transition. A handful of decoded faces on the main actor is what
+/// lets a fresh pill arrive already wearing the right one.
+@MainActor
+enum SnapAuthorFaceCache {
+    /// A few pages either way is all paging ever asks for.
+    static let capacity = 24
+    private static var faces: [URL: UIImage] = [:]
+    /// Least recently stored first.
+    private static var order: [URL] = []
+
+    static func face(for url: URL) -> UIImage? { faces[url] }
+
+    static func store(_ image: UIImage, for url: URL) {
+        if faces.updateValue(image, forKey: url) != nil {
+            order.removeAll { $0 == url }
+        }
+        order.append(url)
+        while order.count > capacity {
+            faces[order.removeFirst()] = nil
+        }
+    }
+
+    static func removeAll() {
+        faces.removeAll()
+        order.removeAll()
+    }
+}
+
+#if DEBUG
+extension SnapAuthorIdentityView {
+    /// `-pill-probe`: what the pill's disc actually is at this instant — its
+    /// frame in the window, its corner and mask, every transformed ancestor up
+    /// to the bar, and any OTHER view in the window drawing the same initials.
+    func debugProbe(_ tag: String) {
+        guard let window else { print("[pill-probe] \(tag) pill=\(ObjectIdentifier(self)) NO WINDOW"); return }
+        let disc = monogramView
+        let frame = disc.convert(disc.bounds, to: window)
+        let presentation = disc.layer.presentation()
+        let maskPath = (disc.layer.mask as? CAShapeLayer)?.path?.boundingBox
+        let pres = presentation.map {
+            String(format: "%.1fx%.1f r=%.1f", $0.bounds.width, $0.bounds.height, $0.cornerRadius)
+        } ?? "nil"
+        let mask = maskPath.map { String(format: "%.1fx%.1f", $0.width, $0.height) } ?? "NONE"
+        var line = String(format: "[pill-probe] %@ pill=%.1fx%.1f disc@win=(%.1f,%.1f %.1fx%.1f) r=%.1f",
+                          tag, bounds.width, bounds.height, frame.minX, frame.minY, frame.width, frame.height,
+                          disc.layer.cornerRadius)
+        line += " pres=\(pres) mask=\(mask) curve=\(disc.layer.cornerCurve.rawValue)"
+            + " clips=\(disc.layer.masksToBounds) bg=\(disc.layer.backgroundColor.map { String(format: "%.2f", $0.alpha) } ?? "nil")"
+            + " sublayers=\((disc.layer.sublayers ?? []).map { "\(type(of: $0))" })"
+        var chain: [String] = []
+        var view: UIView? = self
+        while let current = view, !(current is UIWindow) {
+            let t = current.layer.presentation()?.transform ?? current.layer.transform
+            var entry = "\(type(of: current))[\(Int(current.bounds.width))x\(Int(current.bounds.height))"
+            if !CATransform3DIsIdentity(t) { entry += String(format: " s=%.3f", t.m11) }
+            if current.alpha < 1 { entry += String(format: " a=%.2f", current.alpha) }
+            if current.layer.cornerRadius > 0 { entry += String(format: " r=%.1f", current.layer.cornerRadius) }
+            if current.layer.mask != nil { entry += " MASK" }
+            chain.append(entry + "]")
+            if current is UINavigationBar { break }
+            view = current.superview
+        }
+        line += " chain=" + chain.joined(separator: " < ")
+        // Copies: any other label in the window reading the same initials,
+        // and any portal/snapshot in the bar band.
+        let initials = disc.debugMonogramText
+        var copies: [String] = []
+        func scan(_ root: UIView) {
+            for sub in root.subviews {
+                if let label = sub as? UILabel, label.text == initials, label.superview !== disc {
+                    let f = label.convert(label.bounds, to: window)
+                    copies.append(String(format: "label(%.1f,%.1f %.1fx%.1f)", f.minX, f.minY, f.width, f.height))
+                }
+                let name = String(describing: type(of: sub))
+                // Anything painting a background over the disc: the plate's
+                // square has to be drawn by SOMETHING.
+                let over = sub.convert(sub.bounds, to: window)
+                if sub !== disc, over.intersects(frame.insetBy(dx: 4, dy: 4)), over.width < 80,
+                   let bg = sub.layer.backgroundColor, bg.alpha > 0 {
+                    copies.append(String(format: "BG %@(%.1f,%.1f %.1fx%.1f r=%.1f %@%@)", name, over.minX, over.minY,
+                                         over.width, over.height, sub.layer.cornerRadius,
+                                         sub.layer.cornerCurve.rawValue, sub.layer.mask == nil ? "" : " MASK"))
+                }
+                if name.contains("Portal") || name.contains("Snapshot") || name.contains("Replica") {
+                    let f = sub.convert(sub.bounds, to: window)
+                    if f.minY < 140 {
+                        copies.append(String(format: "%@(%.1f,%.1f %.1fx%.1f)", name, f.minX, f.minY, f.width, f.height))
+                    }
+                }
+                scan(sub)
+            }
+        }
+        scan(window)
+        line += " copies=\(copies)"
+        print(line)
+    }
+}
+#endif
