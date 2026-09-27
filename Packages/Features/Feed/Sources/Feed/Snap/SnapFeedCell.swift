@@ -1601,6 +1601,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // The media card selects its surface for the kind and clears any
         // prior frame; a text post's surface simply never receives content.
         mediaCard.configure(kind: hasMedia ? model.mediaKind : .image, hasMedia: hasMedia)
+        // The shape the post declares, which frames the page (`SnapMediaAspect`)
+        // until the picture arrives and can be measured — and which is all a
+        // hero has to compose with on a cold open.
+        mediaCard.setDeclaredAspect(model.headAspectRatio.map { CGSize(width: $0, height: 1) })
         // ⚠️ ARMED HERE, ABOVE THE COLLECTION'S EARLY RETURN.
         //
         // It was armed after the single-media loads at the bottom, and a
@@ -1632,7 +1636,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // carousel has just hidden, and the work would be a download per page
         // that nothing draws.
         if model.isCollection {
-            mediaCard.showCollection(model.mediaPages, imagePipeline: pipeline)
+            mediaCard.showCollection(
+                model.mediaPages, imagePipeline: pipeline,
+                headAspect: model.headAspectRatio.map { CGSize(width: $0, height: 1) }
+            )
             // Without animation: this is where the page OPENS, not a move the
             // viewer made, and an animated jump would read as the carousel
             // scrolling by itself the moment the flight lands.
@@ -2342,7 +2349,12 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // draw the same pixels, so the switch is invisible here and saves a
         // letterboxed clip in a mosaic later. A no-op when the page fills. (The
         // sample-buffer branch above donates a fresh view, which is born fill.)
-        if mediaCard.fitsMedia { view.videoGravity = .resizeAspectFill }
+        // Unconditional: whether THIS page fitted is the page's business, and
+        // a grid wants fill either way. Its ground goes back on with it, if the
+        // page took it off for a fitted clip's bands.
+        view.videoGravity = .resizeAspectFill
+        view.posterAspect = nil
+        mediaCard.restoreGround(of: view)
         return view
     }
 
@@ -2751,10 +2763,13 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         mediaCard.showsCollection ? mediaCard.currentPage : nil
     }
 
-    /// The pixel shape of the picture this page is drawing, when what is drawn
-    /// can say — see `SnapMediaCardView.drawnMediaAspect`. Nil for a text page.
-    var drawnMediaAspect: CGSize? {
-        pageHasMedia ? mediaCard.drawnMediaAspect : nil
+    /// How the picture in front of the viewer is framed, the shape that
+    /// decided it, and the backdrop drawn around it — what a hero flying to or
+    /// from this page composes (`SnapFeedViewController.zoomPageFraming`). Nil
+    /// for a text page, which has no picture.
+    var pictureFraming: (framing: MediaFraming, aspect: CGSize?, backdrop: UIImage?)? {
+        guard pageHasMedia else { return nil }
+        return (mediaCard.currentFraming, mediaCard.currentFramingAspect, mediaCard.currentBackdrop)
     }
 
     #if DEBUG

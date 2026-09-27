@@ -87,6 +87,12 @@ public enum WalletClaimOutcome: Equatable, Sendable {
 
 /// What a boost spend did (the backend spec's `BoostOutcome`, minus the
 /// server-only cases a local ledger cannot produce).
+/// What a gems spend did.
+public enum WalletGemSpend: Equatable, Sendable {
+    case spent(remaining: Int)
+    case insufficient(gems: Int)
+}
+
 public enum WalletBoostOutcome: Equatable, Sendable {
     /// `spent` is what actually left the wallet — a request that would
     /// overshoot the per-target cap is CLAMPED to the cap's remainder, and
@@ -147,6 +153,10 @@ public final class WalletStore: @unchecked Sendable {
         /// that cannot show whether they work. Mock-only; the real wallet
         /// provisions at 0.
         public static let seededBalance = 250
+        /// Gems a fresh install starts with — enough to unlock a few countries
+        /// on the map (15–50 each), which is the one thing gems buy today.
+        /// Mock-only, like `seededBalance`; the real wallet provisions at 0.
+        public static let seededGems = 100
         /// How long a stake stays ACTIVE before it settles (charter §33's
         /// deferred settlement) — a mock value until a service decides.
         public static let settlementDelay: TimeInterval = 6 * 60 * 60
@@ -182,6 +192,10 @@ public final class WalletStore: @unchecked Sendable {
         static let stakedAt = "wallet.stakedAt"
         static let seeded = "wallet.seeded"
         static let demoStakesSeeded = "wallet.demoStakesSeeded"
+        /// Gems granted outside stakes (the seed, a debug grant) and gems
+        /// spent. Gems EARNED stay derived from the settled stakes.
+        static let gemsGranted = "wallet.gemsGranted"
+        static let gemsSpent = "wallet.gemsSpent"
     }
 
     /// Fired after every balance-affecting change, on whatever thread made
@@ -211,7 +225,7 @@ public final class WalletStore: @unchecked Sendable {
         if arguments.contains("-wallet-reset") {
             for key in [Key.balance, Key.lifetimeEarned, Key.lifetimeSpent, Key.lastClaimAt,
                         Key.claimedToday, Key.claimedTodayDay, Key.streakDays, Key.boostTotals,
-                        Key.stakedAt, Key.seeded, Key.demoStakesSeeded] {
+                        Key.stakedAt, Key.seeded, Key.demoStakesSeeded, Key.gemsGranted, Key.gemsSpent] {
                 defaults.removeObject(forKey: key)
             }
         }
@@ -239,7 +253,17 @@ public final class WalletStore: @unchecked Sendable {
             let yesterday = Self.utcCalendar.date(byAdding: .day, value: -1, to: now())!
             defaults.set(yesterday.timeIntervalSince1970, forKey: Key.lastClaimAt)
         }
+        // `-wallet-gems N`: exactly N gems to spend, whatever was earned.
+        if let index = arguments.firstIndex(of: "-wallet-gems"),
+           index + 1 < arguments.count, let gems = Int(arguments[index + 1]) {
+            defaults.set(0, forKey: Key.gemsSpent)
+            defaults.set(gems - stakesLocked(at: now()).reduce(0) { $0 + $1.gems }, forKey: Key.gemsGranted)
+        }
         #endif
+        // The seeded gems, once — also for an install that predates them.
+        if defaults.object(forKey: Key.gemsGranted) == nil {
+            defaults.set(Policy.seededGems, forKey: Key.gemsGranted)
+        }
         // First run: seed the spendable starting balance, exactly once.
         if !defaults.bool(forKey: Key.seeded) {
             defaults.set(Policy.seededBalance, forKey: Key.balance)
@@ -450,8 +474,26 @@ public final class WalletStore: @unchecked Sendable {
             claimedToday: claimedToday,
             dailyClaimCap: Policy.dailyClaimCap,
             streakDays: displayStreakLocked(today: today),
-            gems: stakesLocked(at: moment).reduce(0) { $0 + $1.gems }
+            gems: gemsLocked(at: moment)
         )
+    }
+
+    /// Gems to spend: earned by settled stakes, plus granted, minus spent.
+    private func gemsLocked(at moment: Date) -> Int {
+        let earned = stakesLocked(at: moment).reduce(0) { $0 + $1.gems }
+        return max(0, earned + defaults.integer(forKey: Key.gemsGranted) - defaults.integer(forKey: Key.gemsSpent))
+    }
+
+    /// Spends `amount` gems, all or nothing.
+    public func spendGems(_ amount: Int) -> WalletGemSpend {
+        let outcome: WalletGemSpend = lock.withLock {
+            let gems = gemsLocked(at: now())
+            guard amount > 0, gems >= amount else { return .insufficient(gems: gems) }
+            defaults.set(defaults.integer(forKey: Key.gemsSpent) + amount, forKey: Key.gemsSpent)
+            return .spent(remaining: gems - amount)
+        }
+        if case .spent = outcome { postDidChange() }
+        return outcome
     }
 
     private func stakesLocked(at moment: Date) -> [WalletStake] {

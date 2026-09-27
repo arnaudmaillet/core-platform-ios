@@ -305,7 +305,8 @@ final class AppContainer {
             // does — the same flight, owned by Feed.
             openFeedHero: { [unowned self] ids, presenter, origin in
                 self.feedFeature.presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)
-            }
+            },
+            countries: countryAccess
         )
     }
 
@@ -447,6 +448,22 @@ final class AppContainer {
         return VideoPlaybackController(source: source)
     }()
 
+    /// The account's unlocked countries — the map shows only their posts.
+    /// Mock mode only: the fleet carries no unlocks yet
+    /// (`dev/issues/BACKEND_COUNTRY_UNLOCKS.md`), and a map that hid every
+    /// post until then would be broken, not locked.
+    private(set) lazy var countryAccess: CountryAccessService? = {
+        guard environment == .mock else { return nil }
+        return CountryAccessService(
+            accountID: MockAuthService.accountID,
+            // The account's own country. The mock account lives in Paris.
+            homeCountry: "FR",
+            wallet: walletStore,
+            unlocks: CountryUnlockStore(),
+            activity: CountryAccessService.mockActivity(in: mockBackend)
+        )
+    }()
+
     private(set) lazy var mapsFeature: any MapsFeatureBuilding = MapsFeatureBuilder(
         repository: mapsRepository,
         favoritesRepository: mapsFavoritesRepository,
@@ -500,7 +517,8 @@ final class AppContainer {
         // which is exactly a fleet build, an evicted asset, or a decode that
         // failed.
         iconCatalog: Self.iconsUnavailable ? Self.unavailableIconCatalog : Self.mapIconCatalog,
-        previewCatalog: Self.previewsUnavailable ? Self.unavailableIconCatalog : Self.mapPreviewCatalog
+        previewCatalog: Self.previewsUnavailable ? Self.unavailableIconCatalog : Self.mapPreviewCatalog,
+        countryAccess: countryAccess
     )
 
     #if DEBUG

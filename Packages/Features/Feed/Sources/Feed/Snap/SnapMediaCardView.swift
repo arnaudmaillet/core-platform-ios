@@ -53,32 +53,177 @@ final class SnapMediaCardView: UIView {
         didSet {
             guard oldValue !== renderView else { return }
             oldValue.onPictureAvailabilityChange = nil
-            renderView.onPictureAvailabilityChange = onPictureAvailabilityChange
+            installPictureObserver(on: renderView)
             // Whatever surface this card is handed — a landing's, a reclaimed
             // donation, a page's — draws the way THIS card draws.
-            applyMediaFit(to: renderView)
+            applyFraming()
         }
     }
 
-    /// Whether this card draws its media ASPECT-FIT (letterboxed on its black
-    /// ground) rather than aspect-fill — `SnapFeedViewController.fitsMedia`,
-    /// captured once at construction.
+    // MARK: - Framing
+
+    /// How this card draws a SINGLE picture — fill, fit on its blurred
+    /// extension, or fit on black — decided by `SnapMediaAspect` on the
+    /// picture's shape. A collection's pages decide their own
+    /// (`MediaCarouselView.pageFraming`).
     ///
     /// ⚠️ IT TRAVELS WITH THE CARD, NOT WITH THE SURFACE. A `VideoRenderView`
     /// is not this card's for life: a landing adopts a grid tile's, and a
     /// dismissal donates one back to a grid that FILLS. So the gravity is
-    /// stamped on every surface as it arrives here (`applyMediaFit`), and the
+    /// stamped on every surface as it arrives here (`applyFraming`), and the
     /// cell hands one back at fill on its way out (`SnapFeedCell
     /// .donateLiveRenderView`) — a letterboxed video in a mosaic tile is what
     /// forgetting either half looks like.
-    let fitsMedia: Bool
+    private(set) var framing: MediaFraming = .fill
 
-    /// Stamps this card's framing on a playback surface. A no-op when the card
-    /// fills: a surface arriving from a grid is already `.resizeAspectFill`,
-    /// and a flag that is off must not write anything at all.
-    private func applyMediaFit(to view: VideoRenderView) {
-        guard fitsMedia else { return }
-        view.videoGravity = .resizeAspect
+    /// The shape the post DECLARED for this picture, until the picture can say
+    /// for itself — see `setDeclaredAspect`.
+    private var declaredAspect: CGSize?
+
+    /// The poster handed to the playback surface, kept because the surface
+    /// does not say which picture it was given and a video page's backdrop is
+    /// made from it.
+    private var posterImage: UIImage?
+
+    /// The blurred extension of the picture a `.fitBlurred` card draws in the
+    /// bands — below both surfaces, full-bleed, hidden otherwise.
+    ///
+    /// ⚠️ A STILL, FOR VIDEO TOO. The live alternative — a second surface on
+    /// the same player (`VideoPlaybackController.attachSurface(_:alongside
+    /// Surface:)`) under a blur — was weighed and declined on cost:
+    ///
+    /// - a system blur over a moving picture is a full-screen blur pass on
+    ///   EVERY composited frame for as long as the clip plays, where a still
+    ///   is one static texture;
+    /// - under the player-layer backing (`-avplayer-render`) a second surface
+    ///   STEALS the render slot, which would black the picture itself — the
+    ///   feature would need a second code path per backing;
+    /// - the hero donates, adopts and reclaims ONE surface per page at every
+    ///   seam; a second one riding along is a second hand-over to get right
+    ///   at each of them, for a layer nobody can see detail in.
+    ///
+    /// At this blur strength (`MediaBackdrop`: the picture reduced to a few
+    /// dozen pixels) a clip's motion reads as a slow drift of colour, which a
+    /// blurred poster conveys nearly as well. Revisit if clips whose colours
+    /// change a lot scene to scene look wrong against their bands.
+    private let backdropView = UIImageView()
+
+    /// The picture's shape as far as anything can tell right now: what is
+    /// drawn (a clip's natural size, a photo's pixels), else what was
+    /// declared, else — last — the poster's pixels.
+    ///
+    /// ⚠️ THE POSTER COMES AFTER THE DECLARED SHAPE, never before it. A clip's
+    /// poster is a THUMBNAIL, and thumbnails are routinely cropped: the mock
+    /// corpus serves 168×168 squares for 9:16 clips. Trusted first, it framed
+    /// every portrait clip as a square (`.fitBlurred`) until the first frame
+    /// said otherwise — and flew its hero as a square page window.
+    var framingAspect: CGSize? {
+        func valid(_ size: CGSize?) -> CGSize? {
+            guard let size, size.width > 0, size.height > 0 else { return nil }
+            return size
+        }
+        if !renderView.isHidden, let video = valid(renderView.nativeVideoSize) { return video }
+        return valid(imageView.image?.size) ?? declaredAspect ?? valid(posterImage?.size)
+    }
+
+    /// The backdrop being drawn, nil when there is none.
+    var backdropImage: UIImage? { backdropView.isHidden ? nil : backdropView.image }
+
+    /// The declared shape (the attachment's wire dimensions, or a grid tile's
+    /// own), used until the picture can be measured. Nil when nothing was
+    /// declared: a guessed square would pick a framing the picture may undo.
+    func setDeclaredAspect(_ aspect: CGSize?) {
+        declaredAspect = aspect.flatMap { $0.width > 0 && $0.height > 0 ? $0 : nil }
+        applyFraming()
+    }
+
+    /// Re-decides the framing from what the card has now, and draws it.
+    ///
+    /// Cheap and idempotent — every input that can change the answer calls it
+    /// (a picture, a poster, a declared shape, a surface, a first frame).
+    private func applyFraming() {
+        // ⚠️ A COLLECTION'S PAGES OWN THEIR FRAMING, surface gravity included
+        // (`CarouselPageView.applyFraming`). The watched page's surface IS
+        // `renderView`, so stamping the card's single-picture answer on it here
+        // would fight the page that hosts it.
+        guard !showsCollection else {
+            backdropView.image = nil
+            backdropView.isHidden = true
+            // Its pages re-decide instead — a first frame is when a clip page
+            // learns its natural size.
+            carousel?.refreshFraming()
+            return
+        }
+        framing = framingAspect.map(SnapMediaAspect.presentation(for:)) ?? .fill
+        imageView.contentMode = framing.contentMode
+        renderView.videoGravity = framing.videoGravity
+        // A clip's poster is framed to the clip's own rect, not fitted on its
+        // own (cropped) shape — see `VideoRenderView.posterAspect`.
+        renderView.posterAspect = framing.fits ? framingAspect : nil
+        applyGround(to: renderView)
+        if framing == .fitBlurred, let still = imageView.image ?? posterImage {
+            backdropView.image = MediaBackdrop.blurred(still)
+            backdropView.isHidden = false
+        } else {
+            backdropView.image = nil
+            backdropView.isHidden = true
+        }
+    }
+
+    /// The surface whose opaque ground this card switched off, if any — so it
+    /// is the only one ever switched back on.
+    private weak var groundClearedSurface: VideoRenderView?
+
+    /// ⚠️ A FITTED CLIP'S BANDS ARE THE BACKDROP'S, not the surface's. A
+    /// playback surface paints an opaque black ground behind its layer
+    /// (`VideoRenderView.paintsOpaqueGround`), and it is full-bleed over the
+    /// backdrop — so a fitted clip showed black bands over a perfectly good
+    /// blur, filmed as the flight landing blurred and the page cutting to
+    /// black. Cleared while the card fits; put back only on a surface this
+    /// card cleared, so a filling page — and a flight card's surface, which
+    /// arrives with its ground already off — is left exactly as it came.
+    private func applyGround(to view: VideoRenderView) {
+        if framing.fits {
+            view.paintsOpaqueGround = false
+            groundClearedSurface = view
+        } else if groundClearedSurface === view {
+            restoreGround(of: view)
+        }
+    }
+
+    /// Puts back a ground this card switched off — for a surface leaving the
+    /// page for a grid that fills (`SnapFeedCell.donateLiveRenderView`).
+    func restoreGround(of view: VideoRenderView) {
+        guard groundClearedSurface === view else { return }
+        view.paintsOpaqueGround = true
+        groundClearedSurface = nil
+    }
+
+    /// The framing the picture in front of the viewer is drawn with — the
+    /// current page's for a collection. What a hero composes.
+    var currentFraming: MediaFraming {
+        showsCollection ? (carousel?.currentPageFraming ?? .fill) : framing
+    }
+
+    /// The shape `currentFraming` was decided on, nil when there was none.
+    var currentFramingAspect: CGSize? {
+        showsCollection ? carousel?.currentPageAspect : framingAspect
+    }
+
+    /// The backdrop drawn around the picture in front of the viewer, if any.
+    var currentBackdrop: UIImage? {
+        showsCollection ? carousel?.currentPageBackdrop : backdropImage
+    }
+
+    /// The surface's picture signal, routed through the card: the first frame
+    /// is also the first moment a clip's natural size is known, and the card's
+    /// framing may depend on it.
+    private func installPictureObserver(on view: VideoRenderView) {
+        view.onPictureAvailabilityChange = { [weak self] ready in
+            guard let self else { return }
+            if ready { self.applyFraming() }
+            self.onPictureAvailabilityChange?(ready)
+        }
     }
 
     /// "There is a picture on the surface now" — **held by the CARD**, and that
@@ -97,22 +242,26 @@ final class SnapMediaCardView: UIView {
     /// surface printed no readiness line at all while a differently-labelled
     /// adopted one printed its first frame with `super=SnapMediaCardView`.
     /// Correlation with the retirement was perfect in both directions.
-    var onPictureAvailabilityChange: ((Bool) -> Void)? {
-        didSet { renderView.onPictureAvailabilityChange = onPictureAvailabilityChange }
-    }
+    ///
+    /// The surface's own callback is the card's (`installPictureObserver`),
+    /// which forwards here — the card needs the same edge for its framing.
+    var onPictureAvailabilityChange: ((Bool) -> Void)?
 
-    init(fitsMedia: Bool = SnapFeedViewController.fitsMedia) {
-        self.fitsMedia = fitsMedia
+    init() {
         super.init(frame: .zero)
         // ⚠️ CLEAR UNTIL THERE IS MEDIA — see `configure(kind:)`. A text page
         // is a LIGHT page and this card is in its hierarchy with both surfaces
         // hidden, so an unconditional ground here paints the text page black.
         backgroundColor = .clear
-        // Fit leaves bands, and they are this card's black ground
-        // (`configure(kind:)`) — the same black a hero's dim paints them on
-        // its way in, so the landing hands over band for band.
-        imageView.contentMode = fitsMedia ? .scaleAspectFit : .scaleAspectFill
-        applyMediaFit(to: renderView)
+        // A fitted picture leaves bands, and on `.fitBlack` they are this
+        // card's black ground (`configure(kind:)`); on `.fitBlurred` they are
+        // the backdrop, first in the stack.
+        backdropView.contentMode = .scaleAspectFill
+        backdropView.clipsToBounds = true
+        backdropView.isHidden = true
+        backdropView.pin(to: self)
+        imageView.contentMode = .scaleAspectFill
+        installPictureObserver(on: renderView)
         imageView.clipsToBounds = true
         imageView.pin(to: self)
         renderView.pin(to: self)
@@ -132,10 +281,6 @@ final class SnapMediaCardView: UIView {
         // it to the card would put a full-bleed video over the carousel, which
         // is right for a single attachment and wrong for every page of a
         // collection but the one being watched.
-        // Stamped here as well as in `renderView`'s observer, because a surface
-        // that comes back to the card it left fires no `didSet` — and it may
-        // have been flown at fill in between.
-        applyMediaFit(to: view)
         if showsCollection {
             if view !== renderView {
                 renderView.detachForReplacement()
@@ -176,6 +321,11 @@ final class SnapMediaCardView: UIView {
         view.frame = bounds
         view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         insertSubview(view, aboveSubview: imageView)
+        // Stamped here as well as in `renderView`'s observer, because a surface
+        // that comes back to the card it left fires no `didSet` — and it was
+        // flown in between, where gravity is nobody's business but may have
+        // been set by the grid it passed through.
+        applyFraming()
     }
 
     @available(*, unavailable)
@@ -216,11 +366,17 @@ final class SnapMediaCardView: UIView {
         imageView.image = nil
         imageView.transform = .identity
         renderView.setPoster(nil)
+        posterImage = nil
+        // A recycled card must not frame a new post by the last one's shape;
+        // the cell declares this post's right after (`setDeclaredAspect`).
+        declaredAspect = nil
+        applyFraming()
         logMediaState("configure(kind: \(kind))")
     }
 
     func setImage(_ image: UIImage?) {
         imageView.image = image
+        applyFraming()
         logMediaState(image == nil ? "setImage(nil)" : "setImage(image)")
     }
 
@@ -343,16 +499,27 @@ final class SnapMediaCardView: UIView {
     /// drift target and the hero landing's surface, and both of those reach for
     /// it by identity — a collection is a different presentation of the media,
     /// not a different card.
-    func showCollection(_ pages: [GalleryPost.MediaPage], imagePipeline: ImagePipeline) {
+    /// - Parameter headAspect: the head page's declared shape
+    ///   (`FeedItemDisplayModel.headAspectRatio`); every later page declares
+    ///   its own `aspectRatio`, which the wire fills from its dimensions. The
+    ///   head's `MediaPage.aspectRatio` is the historical 1 and is not read.
+    func showCollection(_ pages: [GalleryPost.MediaPage], imagePipeline: ImagePipeline,
+                        headAspect: CGSize? = nil) {
         let carousel = carousel ?? makeCarousel()
         carousel.isHidden = false
         carousel.configure(with: pages, imagePipeline: imagePipeline)
+        carousel.setDeclaredAspects(pages.indices.map { index in
+            index == 0
+                ? headAspect
+                : (pages[index].aspectRatio > 0 ? CGSize(width: pages[index].aspectRatio, height: 1) : nil)
+        })
         // A recycled carousel keeps whatever the last post left lit, and these
         // are different pictures entirely.
         carousel.clearLoaders()
         loadingPage = nil
         imageView.isHidden = true
         renderView.isHidden = true
+        applyFraming()
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-carousel-audit") {
             print("[audit] hide by showCollection")
@@ -383,6 +550,7 @@ final class SnapMediaCardView: UIView {
             renderView.removeFromSuperview()
             renderView.pin(to: self)
         }
+        applyFraming()
     }
 
     /// The stopped mark for a SINGLE attachment — one picture, one mark.
@@ -502,27 +670,6 @@ final class SnapMediaCardView: UIView {
         showsCollection ? carousel?.currentPageVideoURL : nil
     }
 
-    /// The PIXEL shape of the picture this card is drawing right now, read off
-    /// what is actually on screen — the aspect a fitted page letterboxes to,
-    /// and so the aspect a hero must land on (`SnapFeedViewController
-    /// .zoomTargetMediaFrame`).
-    ///
-    /// Nil when nothing drawn says yet (a clip whose item has not resolved its
-    /// size, a photo still downloading); the caller then falls back to the
-    /// model's declared aspect. What is drawn wins over what is declared
-    /// because it is what the fit is actually computed from.
-    var drawnMediaAspect: CGSize? {
-        func valid(_ size: CGSize?) -> CGSize? {
-            guard let size, size.width > 0, size.height > 0 else { return nil }
-            return size
-        }
-        if showsCollection {
-            return valid(currentPageSurface?.nativeVideoSize) ?? valid(carousel?.renderedCover?.size)
-        }
-        if !renderView.isHidden, let video = valid(renderView.nativeVideoSize) { return video }
-        return valid(imageView.image?.size)
-    }
-
     /// How many pages the collection has.
     var pageCount: Int { showsCollection ? (carousel?.pageCount ?? 0) : 0 }
 
@@ -603,7 +750,6 @@ final class SnapMediaCardView: UIView {
         // returns to it, page identity says nothing about who holds what.
         let claimed = pageSurfaces.values.contains { $0 === renderView }
         let view = claimed ? VideoRenderView() : renderView
-        applyMediaFit(to: view)
         #if DEBUG
         view.debugLabel = "feed-p\(page)"
         #endif
@@ -713,9 +859,9 @@ final class SnapMediaCardView: UIView {
 
     private func makeCarousel() -> MediaCarouselView {
         let view = MediaCarouselView(style: .page)
-        // The pages' covers follow the card; the grid's `.card` carousels
-        // never hear of it.
-        if fitsMedia { view.pageContentMode = .scaleAspectFit }
+        // Each page frames itself by the same rule as a single picture; the
+        // grid's `.card` carousels never hear of it and keep filling.
+        view.pageFraming = SnapMediaAspect.presentation(for:)
         view.onPageChanged = { [weak self] page in self?.onPageChanged?(page) }
         view.onScrollPosition = { [weak self] position in self?.onScrollPosition?(position) }
         // Below nothing — it is the media, and everything else on the page is
@@ -730,6 +876,8 @@ final class SnapMediaCardView: UIView {
 
     func setPoster(_ image: UIImage?) {
         renderView.setPoster(image)
+        posterImage = image
+        applyFraming()
         logMediaState(image == nil ? "setPoster(nil)" : "setPoster(image)")
     }
 
@@ -744,10 +892,13 @@ final class SnapMediaCardView: UIView {
     private func logMediaState(_ event: String) {
         #if DEBUG
         guard ProcessInfo.processInfo.arguments.contains("-media-log") else { return }
-        print(String(format: "[media] %.3f %-22@ image=%@ imageHidden=%@ | render %@",
+        print(String(format: "[media] %.3f %-22@ image=%@ imageHidden=%@ framing=%@ aspect=%@ backdrop=%@ | render %@",
                      CACurrentMediaTime(), event,
                      imageView.image == nil ? "nil" : "set",
                      imageView.isHidden ? "Y" : "N",
+                     String(describing: currentFraming),
+                     currentFramingAspect.map { NSCoder.string(for: $0) } ?? "-",
+                     currentBackdrop == nil ? "none" : "drawn",
                      renderView.debugSurfaceState))
         #endif
     }

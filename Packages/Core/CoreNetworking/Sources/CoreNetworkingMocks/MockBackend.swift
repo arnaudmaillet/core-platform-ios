@@ -9,6 +9,8 @@ import Foundation
 /// hand-picked subset.
 public struct MockBackend: Sendable {
     public let dataset: MockSocialDataset
+    /// The map's mock — also asked where each post stands.
+    public let geoDiscovery: MockGeoDiscoveryService
     public let counterStore: MockCounterStore
     public let blobStore: MockBlobStore
     public let postStore: MockPostStore
@@ -51,11 +53,12 @@ public struct MockBackend: Sendable {
         MockCommentService(dataset: dataset, postStore: postStore).register(on: bff)
         MockChatService(dataset: dataset).register(on: bff)
         MockSocialGraphService(dataset: dataset).register(on: bff)
-        MockGeoDiscoveryService(dataset: dataset, spreadsHierarchy: seedsMapHierarchy)
-            .register(on: bff)
+        let geoDiscovery = MockGeoDiscoveryService(dataset: dataset, spreadsHierarchy: seedsMapHierarchy)
+        geoDiscovery.register(on: bff)
         moderationService.register(on: bff)
 
         self.dataset = dataset
+        self.geoDiscovery = geoDiscovery
         self.counterStore = counterStore
         self.blobStore = blobStore
         self.postStore = postStore

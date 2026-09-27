@@ -162,8 +162,48 @@ public final class VideoRenderView: UIView {
             guard videoGravity != oldValue else { return }
             sampleBufferLayer?.videoGravity = videoGravity
             playerLayer?.videoGravity = videoGravity
-            posterView.contentMode =
-                videoGravity == .resizeAspect ? .scaleAspectFit : .scaleAspectFill
+            layoutPoster()
+        }
+    }
+
+    /// The clip's shape, for a surface that FITS it (`.resizeAspect`): the
+    /// poster is then framed to the rect the video itself will be drawn in,
+    /// and FILLS that rect, instead of being fitted to the surface on its own
+    /// terms.
+    ///
+    /// ⚠️ A POSTER IS A THUMBNAIL, AND THUMBNAILS ARE CROPPED. The mock corpus
+    /// serves 168×168 squares for 4:5 and 9:16 clips. Fitted to the surface on
+    /// its own shape, that square sat inset in a 4:5 clip's rect — and a hero
+    /// landing on the page, which flies the same thumbnail FILLING the clip's
+    /// rect, visibly shrank at the hand-over. Filling the clip's rect is what
+    /// the flight draws, what a filling page always drew, and what the first
+    /// frame replaces without moving.
+    ///
+    /// Nil (the default), or any gravity but `.resizeAspect`: the poster
+    /// covers the surface under the surface's own gravity, as it always has.
+    public var posterAspect: CGSize? {
+        didSet {
+            guard posterAspect != oldValue else { return }
+            layoutPoster()
+        }
+    }
+
+    public override func layoutSubviews() {
+        super.layoutSubviews()
+        layoutPoster()
+    }
+
+    /// Places the poster — see `posterAspect`.
+    private func layoutPoster() {
+        if videoGravity == .resizeAspect, let aspect = posterAspect,
+           aspect.width > 0, aspect.height > 0, bounds.width > 0, bounds.height > 0 {
+            posterView.autoresizingMask = []
+            posterView.frame = AVMakeRect(aspectRatio: aspect, insideRect: bounds)
+            posterView.contentMode = .scaleAspectFill
+        } else {
+            posterView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            posterView.frame = bounds
+            posterView.contentMode = videoGravity == .resizeAspect ? .scaleAspectFit : .scaleAspectFill
         }
     }
 
