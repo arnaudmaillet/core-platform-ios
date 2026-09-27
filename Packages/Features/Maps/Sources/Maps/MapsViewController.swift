@@ -197,6 +197,9 @@ final class MapsViewController: UIViewController {
     /// The country each pin stands in, looked up once per post: the atlas
     /// test is point-in-polygon, and the reconcile runs on every settle.
     private var pinCountries: [PostID: String] = [:]
+    /// The top-trailing column: the countries shop's globe over the compass.
+    /// Built only when countries are sold; otherwise MapKit's own compass.
+    private let mapControls = UIStackView()
     /// The filter-pill carousel floating above the tab bar. The map's first
     /// bottom overlay: pinned to the safe area (the map itself is full-bleed
     /// and draws under the floating tab bar).
@@ -843,7 +846,9 @@ final class MapsViewController: UIViewController {
     private func configureMapView() {
         mapView.delegate = self
         mapView.pointOfInterestFilter = .excludingAll
-        mapView.showsCompass = true
+        // The compass moves into `mapControls` when the globe stands there,
+        // so the two stack instead of overlapping.
+        mapView.showsCompass = countryAccess == nil
         mapView.register(
             MapAnnotationView.self,
             forAnnotationViewWithReuseIdentifier: MapAnnotationView.reuseIdentifier
@@ -872,6 +877,83 @@ final class MapsViewController: UIViewController {
         NotificationCenter.default.addObserver(
             self, selector: #selector(countryAccessChanged), name: .countryAccessDidChange, object: nil
         )
+        #if DEBUG
+        // `-open-country-shop` / `-offer-country XX` / `-show-country XX`: the
+        // shop, a locked country's offer, or the shop's "go to" — once the map
+        // is on screen and the borders are in (a tap the sim can't place).
+        let arguments = ProcessInfo.processInfo.arguments
+        let code = { (flag: String) in
+            arguments.firstIndex(of: flag).flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil }
+        }
+        if countryAccess != nil, arguments.contains("-open-country-shop") || code("-offer-country") != nil
+            || code("-show-country") != nil {
+            QAWait.until("country QA hook", timeout: 20, { [weak self] in
+                guard let self else { return true }
+                return view.window != nil && countryLayer.hasBorders && presentedViewController == nil
+            }) { [weak self] in
+                guard let self else { return }
+                if let shown = code("-show-country") {
+                    showCountry(shown.uppercased())
+                } else if let offered = code("-offer-country"), let country = CountryAtlas.shared.country(code: offered) {
+                    offer(country)
+                } else {
+                    presentCountryShop()
+                }
+            }
+        }
+        #endif
+        guard countryAccess != nil else { return }
+
+        var globe = UIButton.Configuration.glass()
+        globe.image = UIImage(systemName: "globe.europe.africa.fill")?
+            .applyingSymbolConfiguration(.init(pointSize: 19, weight: .medium))
+        globe.cornerStyle = .capsule
+        let shopButton = UIButton(configuration: globe)
+        shopButton.accessibilityLabel = "Countries"
+        shopButton.addAction(UIAction { [weak self] _ in self?.presentCountryShop() }, for: .primaryActionTriggered)
+        let compass = MKCompassButton(mapView: mapView)
+        compass.compassVisibility = .adaptive
+        mapControls.axis = .vertical
+        mapControls.alignment = .center
+        mapControls.spacing = Spacing.sm
+        mapControls.addArrangedSubview(shopButton)
+        mapControls.addArrangedSubview(compass)
+        mapControls.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(mapControls)
+        NSLayoutConstraint.activate([
+            shopButton.widthAnchor.constraint(equalToConstant: 48),
+            shopButton.heightAnchor.constraint(equalToConstant: 48),
+            mapControls.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: Spacing.sm),
+            mapControls.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -Spacing.lg),
+        ])
+    }
+
+    /// The countries shop, over the map. A row takes you to its country.
+    func presentCountryShop() {
+        guard let countryAccess, presentedViewController == nil else { return }
+        let shop = CountryShopViewController.sheet(access: countryAccess) { [weak self] code in
+            self?.dismiss(animated: true) { self?.showCountry(code) }
+        }
+        present(shop, animated: true)
+    }
+
+    /// Frames a country's mainland and lifts it; a locked one then makes its
+    /// offer, lifted, once the map has arrived.
+    private func showCountry(_ code: String) {
+        guard let country = CountryAtlas.shared.country(code: code) else { return }
+        let box = country.mainlandBounds
+        let region = MKCoordinateRegion(
+            center: CLLocationCoordinate2D(latitude: (box.minLat + box.maxLat) / 2, longitude: (box.minLon + box.maxLon) / 2),
+            span: MKCoordinateSpan(
+                latitudeDelta: min((box.maxLat - box.minLat) * 1.4, 150),
+                longitudeDelta: min((box.maxLon - box.minLon) * 1.4, 300)
+            )
+        )
+        countryLayer.select(code)
+        mapView.setRegion(mapView.regionThatFits(region), animated: true)
+        guard let countryAccess, !countryAccess.isUnlocked(code) else { return }
+        // After the camera move, so the offer rises over the country it sells.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.offer(country) }
     }
 
     /// A tap on a country: a locked one is offered (lifted, with its sheet);
@@ -1447,8 +1529,9 @@ final class MapsViewController: UIViewController {
     /// flying hero card read as debris. Mirrors the manual tab-bar
     /// choreography (hide at lift-off, restore only on the completed pop).
     private func setFilterBar(hidden: Bool) {
-        UIView.animate(withDuration: 0.2) { [barsStack] in
+        UIView.animate(withDuration: 0.2) { [barsStack, mapControls] in
             barsStack.alpha = hidden ? 0 : 1
+            mapControls.alpha = hidden ? 0 : 1
         }
     }
 
@@ -1498,6 +1581,7 @@ final class MapsViewController: UIViewController {
     /// view and therefore renders above the dim, needs driving by hand.
     private func restoreBottomChromeForReturn(alpha: CGFloat) {
         barsStack.alpha = 1
+        mapControls.alpha = 1
         guard let tabBarController else { return }
         tabBarController.tabBar.alpha = alpha
         guard tabBarController.isTabBarHidden else { return }
@@ -2976,6 +3060,7 @@ extension MapsViewController: MKMapViewDelegate {
                 self.activeTransition = nil
                 self.openGate.dismissedToIntermediate()
                 self.barsStack.alpha = 1
+                self.mapControls.alpha = 1
                 // The present flight hid the tapped marker; nothing on the
                 // gallery path would ever restore it.
                 source.setZoomSourceHidden(false)
@@ -3054,6 +3139,7 @@ extension MapsViewController: MKMapViewDelegate {
             self?.tabBarController?.setTabBarHidden(true, animated: false)
             self?.tabBarController?.tabBar.alpha = 1
             self?.barsStack.alpha = 0
+            self?.mapControls.alpha = 0
             // ⚠️ THE UNDO IS NOW A REMOVAL, and it used to be an insertion.
             //
             // With the page off the stack at rest, an abandoned VERTICAL grab

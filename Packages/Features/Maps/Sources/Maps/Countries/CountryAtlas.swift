@@ -52,6 +52,23 @@ public final class CountryAtlas: Sendable {
             return false
         }
 
+        /// The bounds of the piece the label stands in: the mainland, without
+        /// the overseas territories — France without Guiana and Réunion, which
+        /// would frame half the planet. Falls back to the widest piece.
+        public var mainlandBounds: (minLon: Double, minLat: Double, maxLon: Double, maxLat: Double) {
+            let outlines = polygons.compactMap(\.first)
+            let box = { (ring: [CLLocationCoordinate2D]) in
+                (minLon: ring.map(\.longitude).min() ?? 0, minLat: ring.map(\.latitude).min() ?? 0,
+                 maxLon: ring.map(\.longitude).max() ?? 0, maxLat: ring.map(\.latitude).max() ?? 0)
+            }
+            let home = outlines.first { Self.ring($0, contains: label.longitude, label.latitude) }
+                ?? outlines.max { lhs, rhs in
+                    let (a, b) = (box(lhs), box(rhs))
+                    return (a.maxLon - a.minLon) * (a.maxLat - a.minLat) < (b.maxLon - b.minLon) * (b.maxLat - b.minLat)
+                }
+            return home.map(box) ?? bounds
+        }
+
         private static func ring(_ ring: [CLLocationCoordinate2D], contains x: Double, _ y: Double) -> Bool {
             var inside = false
             var j = ring.count - 1

@@ -36,6 +36,16 @@ struct CountryAtlasTests {
         #expect(outside.isEmpty, "label points outside their country: \(outside)")
     }
 
+    /// "Show on map" frames the mainland: France's overseas pieces (Guiana,
+    /// Réunion) would frame half the planet.
+    @Test func theMainlandLeavesTheOverseasPiecesOut() throws {
+        let france = try #require(atlas.country(code: "FR"))
+        #expect(france.bounds.minLon < -50, "the atlas's France should carry Guiana")
+        let mainland = france.mainlandBounds
+        #expect(mainland.minLon > -6 && mainland.maxLon < 10, "\(mainland)")
+        #expect(mainland.minLat > 41 && mainland.maxLat < 52, "\(mainland)")
+    }
+
     @Test func aFlagIsTheRegionalIndicatorPair() {
         #expect(atlas.country(code: "FR")?.flag == "🇫🇷")
     }

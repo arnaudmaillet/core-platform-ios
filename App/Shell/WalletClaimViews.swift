@@ -634,3 +634,73 @@ final class WalletCompactBar: UIView {
         accessibilityLabel = "\(points) points, \(gems) gems"
     }
 }
+
+// MARK: - Countries
+
+/// The door to the countries shop, under the balances: what the gems buy.
+///
+/// ```
+///  ┌──────────────────────────────────────┐
+///  │ (🌍)  Countries                   ›  │
+///  │       3 of 237 on your map           │
+///  └──────────────────────────────────────┘
+/// ```
+final class WalletCountriesCell: UICollectionViewCell {
+    private let subtitleLabel = UILabel()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        contentView.backgroundColor = WalletSheetMetrics.cardFill
+        contentView.layer.cornerRadius = WalletSheetMetrics.rowCorner
+        contentView.layer.cornerCurve = .continuous
+        Surface.applyCardEdge(to: contentView)
+        PressFeedback.attach(toView: contentView, sound: nil)
+
+        let disc = UIImageView(image: UIImage(systemName: "globe.europe.africa.fill")?
+            .applyingSymbolConfiguration(.init(pointSize: 20, weight: .medium)))
+        disc.tintColor = .white
+        disc.contentMode = .center
+        disc.backgroundColor = GemSymbol.tint
+        disc.layer.cornerRadius = WalletSheetMetrics.thumbnail / 2
+        disc.layer.cornerCurve = .circular
+        disc.clipsToBounds = true
+
+        let title = UILabel()
+        title.text = "Countries"
+        title.font = .systemFont(ofSize: 15, weight: .semibold)
+        subtitleLabel.font = .systemFont(ofSize: 13)
+        subtitleLabel.textColor = .secondaryLabel
+        let column = UIStackView(arrangedSubviews: [title, subtitleLabel])
+        column.axis = .vertical
+        column.spacing = 2
+
+        let chevron = UIImageView(image: UIImage(systemName: "chevron.right")?
+            .applyingSymbolConfiguration(.init(pointSize: 13, weight: .semibold)))
+        chevron.tintColor = .tertiaryLabel
+        chevron.setContentHuggingPriority(.required, for: .horizontal)
+
+        let row = UIStackView(arrangedSubviews: [disc, column, chevron])
+        row.alignment = .center
+        row.spacing = Spacing.md
+        row.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(row)
+        NSLayoutConstraint.activate([
+            disc.widthAnchor.constraint(equalToConstant: WalletSheetMetrics.thumbnail),
+            disc.heightAnchor.constraint(equalToConstant: WalletSheetMetrics.thumbnail),
+            row.topAnchor.constraint(equalTo: contentView.topAnchor, constant: Spacing.md),
+            row.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: Spacing.md),
+            row.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -Spacing.md),
+            row.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -Spacing.md),
+        ])
+        isAccessibilityElement = true
+        accessibilityTraits = .button
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    func configure(owned: Int, total: Int) {
+        subtitleLabel.text = "\(owned) of \(total) on your map · unlock more with gems"
+        accessibilityLabel = "Countries, \(owned) of \(total) unlocked"
+    }
+}

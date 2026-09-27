@@ -305,7 +305,8 @@ final class AppContainer {
             // does — the same flight, owned by Feed.
             openFeedHero: { [unowned self] ids, presenter, origin in
                 self.feedFeature.presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)
-            }
+            },
+            countries: countryAccess
         )
     }
 

@@ -31,6 +31,7 @@ full functionality.
 | 21 | `CreatePost` carries no title | New Post "title" field (drawn, kept on the device only) | Medium |
 | 22 | `CreatePost` carries no post-level policy, and no AI disclosure | New Post's six settings toggles (drawn, honoured by the screen alone) | Medium |
 | 23 | Video publishes as an IMAGE asset: no `MEDIA_KIND_POST_VIDEO`, no `asset_id` on `MediaAttachmentInput`, and `ResolveDelivery` polled synchronously | Publishing a video against a real fleet (works in mock mode only) | **High** |
+| 24 | No country entitlements, standings or gem purchases; `RadarPin` has no country | Map country unlocks + Countries shop (mock only; fleet shows every country) | Medium |
 
 ---
 
@@ -896,6 +897,31 @@ poster should win — a client frame-zero is a stand-in, not the contract.
 
 **What ships meanwhile.** The whole path is real and exercised in mock mode, and
 `.mock` is the default environment. Nothing is drawn that does not work there.
+
+---
+
+## 24. No country entitlements, standings or gem purchases — the map's country unlocks are mock-only
+
+**Status: client built 2026-09-27; no backend.** The map draws every country's
+border. It shows posts only in the countries the ACCOUNT has unlocked (home
+country free). A locked country wears its rank and likes, and is bought with
+gems (50 / 30 / 15 by rank tier). None of that has a server side:
+
+- the unlocks are a device store keyed by account id;
+- the gems are the device wallet's ledger;
+- the ranks are made up from the mock corpus;
+- `RadarPin` carries no country.
+
+Against the fleet the client wires no `CountryAccess`, so every country is
+open and nothing is sold.
+→ **Needs:**
+- `GetCountryAccess` / `UnlockCountry` (atomic gem spend, idempotent,
+  price-checked);
+- `GetCountryStandings`;
+- `QueryTile` filtered by entitlement, or at least `RadarPin.country_code`;
+- a country code stored per post at publish time.
+
+Full proposal: `dev/issues/BACKEND_COUNTRY_UNLOCKS.md`.
 
 ---
 
