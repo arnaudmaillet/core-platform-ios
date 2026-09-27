@@ -114,6 +114,17 @@ final class CountryLayer: NSObject {
         let tap = UITapGestureRecognizer(target: self, action: #selector(tapped(_:)))
         tap.delegate = self
         tap.cancelsTouchesInView = false
+        // ⚠️ A DOUBLE TAP ZOOMS, it does not pick. Without this the first tap
+        // of a double-tap zoom lifted (or offered) the country under it. The
+        // twin recognises alongside MapKit's own double tap and does nothing;
+        // the pick waits for it to fail (~0.25s, the platform's own delay).
+        let doubleTap = UITapGestureRecognizer()
+        doubleTap.numberOfTapsRequired = 2
+        doubleTap.cancelsTouchesInView = false
+        doubleTap.delaysTouchesEnded = false
+        doubleTap.delegate = self
+        tap.require(toFail: doubleTap)
+        mapView.addGestureRecognizer(doubleTap)
         mapView.addGestureRecognizer(tap)
         Task { [weak self] in
             let countries = await Task.detached(priority: .userInitiated) { CountryAtlas.shared.countries }.value
