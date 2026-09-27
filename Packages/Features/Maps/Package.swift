@@ -39,6 +39,8 @@ let package = Package(
             name: "MapsTests",
             dependencies: [
                 "Maps",
+                "MapsInterface",
+                "DesignSystem",
                 "CoreModels",
                 "CoreNetworking",
                 .product(name: "CoreNetworkingMocks", package: "CoreNetworking")
