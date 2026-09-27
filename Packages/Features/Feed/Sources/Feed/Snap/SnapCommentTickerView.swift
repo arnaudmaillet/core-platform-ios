@@ -1,4 +1,5 @@
 import DesignSystem
+import EmoteKit
 import MediaCore
 import UIKit
 
@@ -144,8 +145,11 @@ final class SnapCommentTickerView: UIView {
     /// must know a bubble's width before deciding whether it is even on
     /// screen (the avatar column is a fixed addend, added in
     /// `measuredBubbleWidth`).
+    ///
+    /// An `EmoteLabel` like the bubbles', so a `:code:` is measured as the
+    /// one glyph it draws as, not as its letters.
     private let measuringLabel: UILabel = {
-        let label = UILabel()
+        let label = EmoteLabel()
         label.font = TickerBubbleView.font
         return label
     }()
@@ -1089,7 +1093,9 @@ private final class TickerBubbleView: UIView {
     static let font = UIFont.preferredFont(forTextStyle: .caption1).withWeight(.semibold)
 
     private let avatarView = AvatarImageView()
-    private let label = UILabel()
+    /// Emotes ride the band: the players are subviews of the label, so they
+    /// travel with the bubble's own flight and cost nothing per frame.
+    private let label = EmoteLabel()
     private var avatarTask: Task<Void, Never>?
 
     init() {

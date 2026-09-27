@@ -1,0 +1,2385 @@
+[
+ {
+  "glyph": "😂",
+  "codepoint": "1f602",
+  "name": "joy",
+  "keywords": [
+   "joy"
+  ],
+  "section": "smileys",
+  "seconds": 1.967
+ },
+ {
+  "glyph": "❤️",
+  "codepoint": "2764_fe0f",
+  "name": "red heart",
+  "keywords": [
+   "heart",
+   "red"
+  ],
+  "section": "smileys",
+  "seconds": 1.833
+ },
+ {
+  "glyph": "🤣",
+  "codepoint": "1f923",
+  "name": "rofl",
+  "keywords": [
+   "rofl"
+  ],
+  "section": "smileys",
+  "seconds": 1.0
+ },
+ {
+  "glyph": "👍",
+  "codepoint": "1f44d",
+  "name": "thumbs up",
+  "keywords": [
+   "+1",
+   "thumbs",
+   "up"
+  ],
+  "section": "smileys",
+  "seconds": 1.2
+ },
+ {
+  "glyph": "😭",
+  "codepoint": "1f62d",
+  "name": "loudly crying",
+  "keywords": [
+   "crying",
+   "loudly"
+  ],
+  "section": "smileys",
+  "seconds": 2.0
+ },
+ {
+  "glyph": "🙏",
+  "codepoint": "1f64f",
+  "name": "folded hands",
+  "keywords": [
+   "five",
+   "folded",
+   "hands",
+   "high",
+   "hope",
+   "please",
+   "pray",
+   "thank",
+   "wish",
+   "you"
+  ],
+  "section": "smileys",
+  "seconds": 2.0
+ },
+ {
+  "glyph": "😘",
+  "codepoint": "1f618",
+  "name": "kissing heart",
+  "keywords": [
+   "heart",
+   "kissing"
+  ],
+  "section": "smileys",
+  "seconds": 1.75
+ },
+ {
+  "glyph": "🥰",
+  "codepoint": "1f970",
+  "name": "heart face",
+  "keywords": [
+   "3",
+   "face",
+   "heart",
+   "hearts"
+  ],
+  "section": "smileys",
+  "seconds": 1.633
+ },
+ {
+  "glyph": "😍",
+  "codepoint": "1f60d",
+  "name": "heart eyes",
+  "keywords": [
+   "eyes",
+   "heart"
+  ],
+  "section": "smileys",
+  "seconds": 1.717
+ },
+ {
+  "glyph": "😊",
+  "codepoint": "1f60a",
+  "name": "blush",
+  "keywords": [
+   "blush"
+  ],
+  "section": "smileys",
+  "seconds": 2.65
+ },
+ {
+  "glyph": "🎉",
+  "codepoint": "1f389",
+  "name": "party popper",
+  "keywords": [
+   "party",
+   "popper"
+  ],
+  "section": "smileys",
+  "seconds": 1.533
+ },
+ {
+  "glyph": "😁",
+  "codepoint": "1f601",
+  "name": "grinning",
+  "keywords": [
+   "grinning"
+  ],
+  "section": "smileys",
+  "seconds": 2.717
+ },
+ {
+  "glyph": "💕",
+  "codepoint": "1f495",
+  "name": "two hearts",
+  "keywords": [
+   "hearts",
+   "two"
+  ],
+  "section": "smileys",
+  "seconds": 1.233
+ },
+ {
+  "glyph": "🥺",
+  "codepoint": "1f97a",
+  "name": "pleading",
+  "keywords": [
+   "pleading"
+  ],
+  "section": "smileys",
+  "seconds": 3.433
+ },
+ {
+  "glyph": "😅",
+  "codepoint": "1f605",
+  "name": "grin sweat",
+  "keywords": [
+   "grin",
+   "sweat"
+  ],
+  "section": "smileys",
+  "seconds": 2.0
+ },
+ {
+  "glyph": "🔥",
+  "codepoint": "1f525",
+  "name": "fire",
+  "keywords": [
+   "burn",
+   "fire",
+   "lit"
+  ],
+  "section": "smileys",
+  "seconds": 1.083
+ },
+ {
+  "glyph": "☺️",
+  "codepoint": "263a_fe0f",
+  "name": "warm smile",
+  "keywords": [
+   "smile",
+   "warm"
+  ],
+  "section": "smileys",
+  "seconds": 2.2
+ },
+ {
+  "glyph": "♥️",
+  "codepoint": "2665_fe0f",
+  "name": "heart",
+  "keywords": [
+   "heart"
+  ],
+  "section": "smileys",
+  "seconds": 2.167
+ },
+ {
+  "glyph": "🙄",
+  "codepoint": "1f644",
+  "name": "rolling eyes",
+  "keywords": [
+   "eyes",
+   "rolling"
+  ],
+  "section": "smileys",
+  "seconds": 3.267
+ },
+ {
+  "glyph": "😆",
+  "codepoint": "1f606",
+  "name": "laughing",
+  "keywords": [
+   "laughing"
+  ],
+  "section": "smileys",
+  "seconds": 3.083
+ },
+ {
+  "glyph": "🤗",
+  "codepoint": "1f917",
+  "name": "hug face",
+  "keywords": [
+   "face",
+   "hug"
+  ],
+  "section": "smileys",
+  "seconds": 2.0
+ },
+ {
+  "glyph": "😉",
+  "codepoint": "1f609",
+  "name": "wink",
+  "keywords": [
+   "wink"
+  ],
+  "section": "smileys",
+  "seconds": 2.5
+ },
+ {
+  "glyph": "🎂",
+  "codepoint": "1f382",
+  "name": "birthday cake",
+  "keywords": [
+   "birthday",
+   "cake"
+  ],
+  "section": "activities",
+  "seconds": 2.633
+ },
+ {
+  "glyph": "🤔",
+  "codepoint": "1f914",
+  "name": "thinking face",
+  "keywords": [
+   "face",
+   "thinking"
+  ],
+  "section": "smileys",
+  "seconds": 2.0
+ },
+ {
+  "glyph": "👏",
+  "codepoint": "1f44f",
+  "name": "clap",
+  "keywords": [
+   "clap"
+  ],
+  "section": "smileys",
+  "seconds": 0.733
+ },
+ {
+  "glyph": "🙂",
+  "codepoint": "1f642",
+  "name": "slightly happy",
+  "keywords": [
+   "happy",
+   "slightly"
+  ],
+  "section": "smileys",
+  "seconds": 3.333
+ },
+ {
+  "glyph": "😳",
+  "codepoint": "1f633",
+  "name": "flushed",
+  "keywords": [
+   "flushed"
+  ],
+  "section": "smileys",
+  "seconds": 2.0
+ },
+ {
+  "glyph": "🥳",
+  "codepoint": "1f973",
+  "name": "partying face",
+  "keywords": [
+   "face",
+   "partying"
+  ],
+  "section": "smileys",
+  "seconds": 1.8
+ },
+ {
+  "glyph": "😎",
+  "codepoint": "1f60e",
+  "name": "sunglasses face",
+  "keywords": [
+   "face",
+   "sunglasses"
+  ],
+  "section": "smileys",
+  "seconds": 2.417
+ },
+ {
+  "glyph": "👌",
+  "codepoint": "1f44c",
+  "name": "ok",
+  "keywords": [
+   "ok"
+  ],
+  "section": "smileys",
+  "seconds": 1.167
+ },
+ {
+  "glyph": "💜",
+  "codepoint": "1f49c",
+  "name": "purple heart",
+  "keywords": [
+   "heart",
+   "purple"
+  ],
+  "section": "smileys",
+  "seconds": 1.833
+ },
+ {
+  "glyph": "😔",
+  "codepoint": "1f614",
+  "name": "pensive",
+  "keywords": [
+   "pensive"
+  ],
+  "section": "smileys",
+  "seconds": 2.633
+ },
+ {
+  "glyph": "💪",
+  "codepoint": "1f4aa",
+  "name": "muscle",
+  "keywords": [
+   "bicep",
+   "flex",
+   "muscle",
+   "strong"
+  ],
+  "section": "smileys",
+  "seconds": 1.567
+ },
+ {
+  "glyph": "✨",
+  "codepoint": "2728",
+  "name": "sparkles",
+  "keywords": [
+   "sparkles"
+  ],
+  "section": "smileys",
+  "seconds": 2.033
+ },
+ {
+  "glyph": "💖",
+  "codepoint": "1f496",
+  "name": "sparkling heart",
+  "keywords": [
+   "heart",
+   "sparkling"
+  ],
+  "section": "smileys",
+  "seconds": 1.0
+ },
+ {
+  "glyph": "👀",
+  "codepoint": "1f440",
+  "name": "eyes",
+  "keywords": [
+   "eyes"
+  ],
+  "section": "smileys",
+  "seconds": 2.0
+ },
+ {
+  "glyph": "😋",
+  "codepoint": "1f60b",
+  "name": "yum",
+  "keywords": [
+   "yum"
+  ],
+  "section": "smileys",
+  "seconds": 1.417
+ },
+ {
+  "glyph": "😏",
+  "codepoint": "1f60f",
+  "name": "smirk",
+  "keywords": [
+   "smirk"
+  ],
+  "section": "smileys",
+  "seconds": 2.0
+ },
+ {
+  "glyph": "😢",
+  "codepoint": "1f622",
+  "name": "cry",
+  "keywords": [
+   "cry"
+  ],
+  "section": "smileys",
+  "seconds": 1.833
+ },
+ {
+  "glyph": "👉",
+  "codepoint": "1f449",
+  "name": "point right",
+  "keywords": [
+   "point",
+   "right"
+  ],
+  "section": "smileys",
+  "seconds": 1.767
+ },
+ {
+  "glyph": "💗",
+  "codepoint": "1f497",
+  "name": "heart grow",
+  "keywords": [
+   "grow",
+   "heart"
+  ],
+  "section": "smileys",
+  "seconds": 1.833
+ },
+ {
+  "glyph": "😩",
+  "codepoint": "1f629",
+  "name": "weary",
+  "keywords": [
+   "weary"
+  ],
+  "section": "smileys",
+  "seconds": 1.717
+ },
+ {
+  "glyph": "💯",
+  "codepoint": "1f4af",
+  "name": "100",
+  "keywords": [
+   "100",
+   "hundred",
+   "one",
+   "points"
+  ],
+  "section": "smileys",
+  "seconds": 2.25
+ },
+ {
+  "glyph": "🌹",
+  "codepoint": "1f339",
+  "name": "rose",
+  "keywords": [
+   "rose"
+  ],
+  "section": "nature",
+  "seconds": 2.4
+ },
+ {
+  "glyph": "💞",
+  "codepoint": "1f49e",
+  "name": "revolving hearts",
+  "keywords": [
+   "hearts",
+   "revolving"
+  ],
+  "section": "smileys",
+  "seconds": 1.0
+ },
+ {
+  "glyph": "🎈",
+  "codepoint": "1f388",
+  "name": "balloon",
+  "keywords": [
+   "balloon"
+  ],
+  "section": "activities",
+  "seconds": 1.6
+ },
+ {
+  "glyph": "💙",
+  "codepoint": "1f499",
+  "name": "blue heart",
+  "keywords": [
+   "blue",
+   "heart"
+  ],
+  "section": "smileys",
+  "seconds": 1.833
+ },
+ {
+  "glyph": "😃",
+  "codepoint": "1f603",
+  "name": "smile with big eyes",
+  "keywords": [
+   "big",
+   "eyes",
+   "smile",
+   "with"
+  ],
+  "section": "smileys",
+  "seconds": 2.667
+ },
+ {
+  "glyph": "😡",
+  "codepoint": "1f621",
+  "name": "rage",
+  "keywords": [
+   "rage"
+  ],
+  "section": "smileys",
+  "seconds": 3.0
+ },
+ {
+  "glyph": "💐",
+  "codepoint": "1f490",
+  "name": "bouquet",
+  "keywords": [
+   "bouquet",
+   "flowers"
+  ],
+  "section": "nature",
+  "seconds": 2.233
+ },
+ {
+  "glyph": "😜",
+  "codepoint": "1f61c",
+  "name": "winky tongue",
+  "keywords": [
+   "tongue",
+   "winky"
+  ],
+  "section": "smileys",
+  "seconds": 1.583
+ },
+ {
+  "glyph": "🙈",
+  "codepoint": "1f648",
+  "name": "see no evil monkey",
+  "keywords": [
+   "evil",
+   "monkey",
+   "no",
+   "see"
+  ],
+  "section": "smileys",
+  "seconds": 2.383
+ },
+ {
+  "glyph": "🤞",
+  "codepoint": "1f91e",
+  "name": "crossed fingers",
+  "keywords": [
+   "crossed",
+   "fingers"
+  ],
+  "section": "smileys",
+  "seconds": 1.867
+ },
+ {
+  "glyph": "😄",
+  "codepoint": "1f604",
+  "name": "grin",
+  "keywords": [
+   "grin"
+  ],
+  "section": "smileys",
+  "seconds": 2.333
+ },
+ {
+  "glyph": "🤤",
+  "codepoint": "1f924",
+  "name": "drool",
+  "keywords": [
+   "drool"
+  ],
+  "section": "smileys",
+  "seconds": 2.167
+ },
+ {
+  "glyph": "🙌",
+  "codepoint": "1f64c",
+  "name": "raising hands",
+  "keywords": [
+   "hands",
+   "hooray",
+   "raising"
+  ],
+  "section": "smileys",
+  "seconds": 1.833
+ },
+ {
+  "glyph": "🤪",
+  "codepoint": "1f92a",
+  "name": "zany face",
+  "keywords": [
+   "face",
+   "zany"
+  ],
+  "section": "smileys",
+  "seconds": 1.833
+ },
+ {
+  "glyph": "❣️",
+  "codepoint": "2763_fe0f",
+  "name": "heart exclamation point",
+  "keywords": [
+   "exclamation",
+   "heart",
+   "point"
+  ],
+  "section": "smileys",
+  "seconds": 2.15
+ },
+ {
+  "glyph": "😀",
+  "codepoint": "1f600",
+  "name": "smile",
+  "keywords": [
+   "smile"
+  ],
+  "section": "smileys",
+  "seconds": 2.333
+ },
+ {
+  "glyph": "💋",
+  "codepoint": "1f48b",
+  "name": "kiss",
+  "keywords": [
+   "kiss"
+  ],
+  "section": "smileys",
+  "seconds": 2.0
+ },
+ {
+  "glyph": "💀",
+  "codepoint": "1f480",
+  "name": "skull",
+  "keywords": [
+   "skull"
+  ],
+  "section": "smileys",
+  "seconds": 5.0
+ },
+ {
+  "glyph": "👇",
+  "codepoint": "1f447",
+  "name": "point down",
+  "keywords": [
+   "down",
+   "point"
+  ],
+  "section": "smileys",
+  "seconds": 1.767
+ },
+ {
+  "glyph": "💔",
+  "codepoint": "1f494",
+  "name": "broken heart",
+  "keywords": [
+   "broken",
+   "heart"
+  ],
+  "section": "smileys",
+  "seconds": 3.3
+ },
+ {
+  "glyph": "😌",
+  "codepoint": "1f60c",
+  "name": "relieved",
+  "keywords": [
+   "relieved"
+  ],
+  "section": "smileys",
+  "seconds": 2.9
+ },
+ {
+  "glyph": "💓",
+  "codepoint": "1f493",
+  "name": "beating heart",
+  "keywords": [
+   "beating",
+   "heart"
+  ],
+  "section": "smileys",
+  "seconds": 0.8
+ },
+ {
+  "glyph": "🤩",
+  "codepoint": "1f929",
+  "name": "star struck",
+  "keywords": [
+   "star",
+   "struck"
+  ],
+  "section": "smileys",
+  "seconds": 2.0
+ },
+ {
+  "glyph": "🙃",
+  "codepoint": "1f643",
+  "name": "upside down face",
+  "keywords": [
+   "down",
+   "face",
+   "upside"
+  ],
+  "section": "smileys",
+  "seconds": 1.75
+ },
+ {
+  "glyph": "😬",
+  "codepoint": "1f62c",
+  "name": "grimacing",
+  "keywords": [
+   "grimacing"
+  ],
+  "section": "smileys",
+  "seconds": 2.95
+ },
+ {
+  "glyph": "😱",
+  "codepoint": "1f631",
+  "name": "screaming",
+  "keywords": [
+   "screaming"
+  ],
+  "section": "smileys",
+  "seconds": 1.7
+ },
+ {
+  "glyph": "😴",
+  "codepoint": "1f634",
+  "name": "sleep",
+  "keywords": [
+   "sleep"
+  ],
+  "section": "smileys",
+  "seconds": 2.0
+ },
+ {
+  "glyph": "🤭",
+  "codepoint": "1f92d",
+  "name": "smiling eyes with hand over mouth",
+  "keywords": [
+   "chuckling",
+   "eyes",
+   "hand",
+   "mouth",
+   "over",
+   "smiling",
+   "with"
+  ],
+  "section": "smileys",
+  "seconds": 1.8
+ },
+ {
+  "glyph": "😐",
+  "codepoint": "1f610",
+  "name": "neutral face",
+  "keywords": [
+   "face",
+   "neutral"
+  ],
+  "section": "smileys",
+  "seconds": 3.333
+ },
+ {
+  "glyph": "🌞",
+  "codepoint": "1f31e",
+  "name": "sun with face",
+  "keywords": [
+   "face",
+   "sun",
+   "with"
+  ],
+  "section": "smileys",
+  "seconds": 1.867
+ },
+ {
+  "glyph": "😒",
+  "codepoint": "1f612",
+  "name": "unamused",
+  "keywords": [
+   "unamused"
+  ],
+  "section": "smileys",
+  "seconds": 3.2
+ },
+ {
+  "glyph": "😇",
+  "codepoint": "1f607",
+  "name": "halo",
+  "keywords": [
+   "halo",
+   "innocent"
+  ],
+  "section": "smileys",
+  "seconds": 3.417
+ },
+ {
+  "glyph": "🌸",
+  "codepoint": "1f338",
+  "name": "cherry blossom",
+  "keywords": [
+   "blossom",
+   "cherry"
+  ],
+  "section": "nature",
+  "seconds": 3.567
+ },
+ {
+  "glyph": "😈",
+  "codepoint": "1f608",
+  "name": "imp smile",
+  "keywords": [
+   "imp",
+   "smile"
+  ],
+  "section": "smileys",
+  "seconds": 3.5
+ },
+ {
+  "glyph": "🎶",
+  "codepoint": "1f3b6",
+  "name": "musical notes",
+  "keywords": [
+   "musical",
+   "notes"
+  ],
+  "section": "symbols",
+  "seconds": 1.0
+ },
+ {
+  "glyph": "✌️",
+  "codepoint": "270c_fe0f",
+  "name": "victory",
+  "keywords": [
+   "hand",
+   "peace",
+   "v",
+   "victory"
+  ],
+  "section": "smileys",
+  "seconds": 1.883
+ },
+ {
+  "glyph": "🎊",
+  "codepoint": "1f38a",
+  "name": "confetti ball",
+  "keywords": [
+   "ball",
+   "confetti"
+  ],
+  "section": "smileys",
+  "seconds": 2.4
+ },
+ {
+  "glyph": "🥵",
+  "codepoint": "1f975",
+  "name": "hot face",
+  "keywords": [
+   "face",
+   "hot",
+   "sweat"
+  ],
+  "section": "smileys",
+  "seconds": 1.4
+ },
+ {
+  "glyph": "😞",
+  "codepoint": "1f61e",
+  "name": "sad",
+  "keywords": [
+   "sad"
+  ],
+  "section": "smileys",
+  "seconds": 3.0
+ },
+ {
+  "glyph": "💚",
+  "codepoint": "1f49a",
+  "name": "green heart",
+  "keywords": [
+   "green",
+   "heart"
+  ],
+  "section": "smileys",
+  "seconds": 1.833
+ },
+ {
+  "glyph": "🖤",
+  "codepoint": "1f5a4",
+  "name": "black heart",
+  "keywords": [
+   "black",
+   "heart"
+  ],
+  "section": "smileys",
+  "seconds": 1.833
+ },
+ {
+  "glyph": "😚",
+  "codepoint": "1f61a",
+  "name": "kissing closed eyes",
+  "keywords": [
+   "closed",
+   "eyes",
+   "kissing"
+  ],
+  "section": "smileys",
+  "seconds": 1.467
+ },
+ {
+  "glyph": "👑",
+  "codepoint": "1f451",
+  "name": "crown",
+  "keywords": [
+   "crown"
+  ],
+  "section": "objects",
+  "seconds": 1.9
+ },
+ {
+  "glyph": "🎁",
+  "codepoint": "1f381",
+  "name": "wrapped gift",
+  "keywords": [
+   "gift",
+   "wrapped"
+  ],
+  "section": "activities",
+  "seconds": 2.4
+ },
+ {
+  "glyph": "💥",
+  "codepoint": "1f4a5",
+  "name": "collision",
+  "keywords": [
+   "collision"
+  ],
+  "section": "smileys",
+  "seconds": 1.267
+ },
+ {
+  "glyph": "☹️",
+  "codepoint": "2639_fe0f",
+  "name": "big frown",
+  "keywords": [
+   "big",
+   "frown"
+  ],
+  "section": "smileys",
+  "seconds": 2.0
+ },
+ {
+  "glyph": "😑",
+  "codepoint": "1f611",
+  "name": "expressionless",
+  "keywords": [
+   "expressionless"
+  ],
+  "section": "smileys",
+  "seconds": 2.5
+ },
+ {
+  "glyph": "🥴",
+  "codepoint": "1f974",
+  "name": "woozy",
+  "keywords": [
+   "woozy"
+  ],
+  "section": "smileys",
+  "seconds": 1.8
+ },
+ {
+  "glyph": "👈",
+  "codepoint": "1f448",
+  "name": "point left",
+  "keywords": [
+   "left",
+   "point"
+  ],
+  "section": "smileys",
+  "seconds": 1.767
+ },
+ {
+  "glyph": "💩",
+  "codepoint": "1f4a9",
+  "name": "poop",
+  "keywords": [
+   "poop"
+  ],
+  "section": "smileys",
+  "seconds": 2.4
+ },
+ {
+  "glyph": "✅",
+  "codepoint": "2705",
+  "name": "check mark",
+  "keywords": [
+   "check",
+   "green",
+   "mark"
+  ],
+  "section": "symbols",
+  "seconds": 1.667
+ },
+ {
+  "glyph": "👋",
+  "codepoint": "1f44b",
+  "name": "wave",
+  "keywords": [
+   "wave"
+  ],
+  "section": "smileys",
+  "seconds": 1.533
+ },
+ {
+  "glyph": "🤮",
+  "codepoint": "1f92e",
+  "name": "vomit",
+  "keywords": [
+   "vomit"
+  ],
+  "section": "smileys",
+  "seconds": 4.0
+ },
+ {
+  "glyph": "😤",
+  "codepoint": "1f624",
+  "name": "triumph",
+  "keywords": [
+   "triumph"
+  ],
+  "section": "smileys",
+  "seconds": 1.5
+ },
+ {
+  "glyph": "🤢",
+  "codepoint": "1f922",
+  "name": "sick",
+  "keywords": [
+   "nauseated",
+   "sick"
+  ],
+  "section": "smileys",
+  "seconds": 2.567
+ },
+ {
+  "glyph": "🌟",
+  "codepoint": "1f31f",
+  "name": "glowing star",
+  "keywords": [
+   "glowing",
+   "star"
+  ],
+  "section": "smileys",
+  "seconds": 1.783
+ },
+ {
+  "glyph": "❗",
+  "codepoint": "2757",
+  "name": "exclamation",
+  "keywords": [
+   "exclamation",
+   "mark"
+  ],
+  "section": "symbols",
+  "seconds": 3.333
+ },
+ {
+  "glyph": "😥",
+  "codepoint": "1f625",
+  "name": "concerned",
+  "keywords": [
+   "concerned"
+  ],
+  "section": "smileys",
+  "seconds": 4.25
+ },
+ {
+  "glyph": "🌈",
+  "codepoint": "1f308",
+  "name": "rainbow",
+  "keywords": [
+   "rainbow"
+  ],
+  "section": "nature",
+  "seconds": 2.0
+ },
+ {
+  "glyph": "💛",
+  "codepoint": "1f49b",
+  "name": "yellow heart",
+  "keywords": [
+   "heart",
+   "yellow"
+  ],
+  "section": "smileys",
+  "seconds": 1.833
+ },
+ {
+  "glyph": "😝",
+  "codepoint": "1f61d",
+  "name": "squinting tongue",
+  "keywords": [
+   "squinting",
+   "tongue"
+  ],
+  "section": "smileys",
+  "seconds": 1.667
+ },
+ {
+  "glyph": "😫",
+  "codepoint": "1f62b",
+  "name": "distraught",
+  "keywords": [
+   "distraught"
+  ],
+  "section": "smileys",
+  "seconds": 1.7
+ },
+ {
+  "glyph": "😲",
+  "codepoint": "1f632",
+  "name": "astonished",
+  "keywords": [
+   "astonished"
+  ],
+  "section": "smileys",
+  "seconds": 2.567
+ },
+ {
+  "glyph": "‼️",
+  "codepoint": "203c_fe0f",
+  "name": "exclamation double",
+  "keywords": [
+   "!!",
+   "double",
+   "exclamation"
+  ],
+  "section": "symbols",
+  "seconds": 3.333
+ },
+ {
+  "glyph": "🤯",
+  "codepoint": "1f92f",
+  "name": "mind blown",
+  "keywords": [
+   "blown",
+   "exploding",
+   "head",
+   "mind"
+  ],
+  "section": "smileys",
+  "seconds": 2.9
+ },
+ {
+  "glyph": "💃",
+  "codepoint": "1f483",
+  "name": "dancer woman",
+  "keywords": [
+   "dancer",
+   "woman"
+  ],
+  "section": "people",
+  "seconds": 1.6
+ },
+ {
+  "glyph": "👊",
+  "codepoint": "1f44a",
+  "name": "fist",
+  "keywords": [
+   "bump",
+   "fist"
+  ],
+  "section": "smileys",
+  "seconds": 1.1
+ },
+ {
+  "glyph": "🤬",
+  "codepoint": "1f92c",
+  "name": "cursing",
+  "keywords": [
+   "cursing"
+  ],
+  "section": "smileys",
+  "seconds": 3.0
+ },
+ {
+  "glyph": "😕",
+  "codepoint": "1f615",
+  "name": "slightly frowning",
+  "keywords": [
+   "frowning",
+   "slightly"
+  ],
+  "section": "smileys",
+  "seconds": 3.317
+ },
+ {
+  "glyph": "⚡",
+  "codepoint": "26a1",
+  "name": "electricity",
+  "keywords": [
+   "electricity",
+   "lightning",
+   "zap"
+  ],
+  "section": "smileys",
+  "seconds": 1.383
+ },
+ {
+  "glyph": "☕",
+  "codepoint": "2615",
+  "name": "hot beverage",
+  "keywords": [
+   "beverage",
+   "hot"
+  ],
+  "section": "food",
+  "seconds": 2.017
+ },
+ {
+  "glyph": "🍀",
+  "codepoint": "1f340",
+  "name": "luck",
+  "keywords": [
+   "clover",
+   "four",
+   "leaf",
+   "luck"
+  ],
+  "section": "nature",
+  "seconds": 1.8
+ },
+ {
+  "glyph": "⭐",
+  "codepoint": "2b50",
+  "name": "star",
+  "keywords": [
+   "star"
+  ],
+  "section": "smileys",
+  "seconds": 2.433
+ },
+ {
+  "glyph": "🦋",
+  "codepoint": "1f98b",
+  "name": "butterfly",
+  "keywords": [
+   "butterfly"
+  ],
+  "section": "nature",
+  "seconds": 2.8
+ },
+ {
+  "glyph": "🤨",
+  "codepoint": "1f928",
+  "name": "raised eyebrow",
+  "keywords": [
+   "eyebrow",
+   "raised"
+  ],
+  "section": "smileys",
+  "seconds": 1.433
+ },
+ {
+  "glyph": "😹",
+  "codepoint": "1f639",
+  "name": "joy cat",
+  "keywords": [
+   "cat",
+   "joy"
+  ],
+  "section": "smileys",
+  "seconds": 2.933
+ },
+ {
+  "glyph": "🤘",
+  "codepoint": "1f918",
+  "name": "metal",
+  "keywords": [
+   "horns",
+   "metal"
+  ],
+  "section": "smileys",
+  "seconds": 1.5
+ },
+ {
+  "glyph": "🌷",
+  "codepoint": "1f337",
+  "name": "tulip",
+  "keywords": [
+   "tulip"
+  ],
+  "section": "nature",
+  "seconds": 3.733
+ },
+ {
+  "glyph": "💝",
+  "codepoint": "1f49d",
+  "name": "gift heart",
+  "keywords": [
+   "gift",
+   "heart"
+  ],
+  "section": "smileys",
+  "seconds": 4.767
+ },
+ {
+  "glyph": "🤝",
+  "codepoint": "1f91d",
+  "name": "handshake",
+  "keywords": [
+   "handshake"
+  ],
+  "section": "smileys",
+  "seconds": 1.2
+ },
+ {
+  "glyph": "😓",
+  "codepoint": "1f613",
+  "name": "sweat",
+  "keywords": [
+   "downcast",
+   "sweat"
+  ],
+  "section": "smileys",
+  "seconds": 2.25
+ },
+ {
+  "glyph": "💘",
+  "codepoint": "1f498",
+  "name": "cupid",
+  "keywords": [
+   "cupid"
+  ],
+  "section": "smileys",
+  "seconds": 2.467
+ },
+ {
+  "glyph": "🍻",
+  "codepoint": "1f37b",
+  "name": "clinking beer mugs",
+  "keywords": [
+   "beer",
+   "clinking",
+   "mugs"
+  ],
+  "section": "food",
+  "seconds": 1.767
+ },
+ {
+  "glyph": "😟",
+  "codepoint": "1f61f",
+  "name": "worried",
+  "keywords": [
+   "worried"
+  ],
+  "section": "smileys",
+  "seconds": 2.567
+ },
+ {
+  "glyph": "😣",
+  "codepoint": "1f623",
+  "name": "scrunched eyes",
+  "keywords": [
+   "eyes",
+   "persevering",
+   "scrunched"
+  ],
+  "section": "smileys",
+  "seconds": 3.25
+ },
+ {
+  "glyph": "🧐",
+  "codepoint": "1f9d0",
+  "name": "monocle",
+  "keywords": [
+   "monocle"
+  ],
+  "section": "smileys",
+  "seconds": 3.4
+ },
+ {
+  "glyph": "😠",
+  "codepoint": "1f620",
+  "name": "angry",
+  "keywords": [
+   "angry"
+  ],
+  "section": "smileys",
+  "seconds": 2.0
+ },
+ {
+  "glyph": "🤠",
+  "codepoint": "1f920",
+  "name": "cowboy",
+  "keywords": [
+   "cowboy"
+  ],
+  "section": "smileys",
+  "seconds": 1.617
+ },
+ {
+  "glyph": "😻",
+  "codepoint": "1f63b",
+  "name": "heart eyes cat",
+  "keywords": [
+   "cat",
+   "eyes",
+   "heart"
+  ],
+  "section": "smileys",
+  "seconds": 2.8
+ },
+ {
+  "glyph": "😛",
+  "codepoint": "1f61b",
+  "name": "stuck out tongue",
+  "keywords": [
+   "out",
+   "stuck",
+   "tongue"
+  ],
+  "section": "smileys",
+  "seconds": 2.0
+ },
+ {
+  "glyph": "🤙",
+  "codepoint": "1f919",
+  "name": "call me hand",
+  "keywords": [
+   "call",
+   "hand",
+   "me"
+  ],
+  "section": "smileys",
+  "seconds": 2.567
+ },
+ {
+  "glyph": "🙊",
+  "codepoint": "1f64a",
+  "name": "speak no evil monkey",
+  "keywords": [
+   "evil",
+   "monkey",
+   "no",
+   "speak"
+  ],
+  "section": "smileys",
+  "seconds": 2.5
+ },
+ {
+  "glyph": "🚀",
+  "codepoint": "1f680",
+  "name": "rocket",
+  "keywords": [
+   "rocket"
+  ],
+  "section": "travel",
+  "seconds": 0.667
+ },
+ {
+  "glyph": "🎯",
+  "codepoint": "1f3af",
+  "name": "direct hit",
+  "keywords": [
+   "direct",
+   "hit",
+   "target"
+  ],
+  "section": "activities",
+  "seconds": 2.333
+ },
+ {
+  "glyph": "🍕",
+  "codepoint": "1f355",
+  "name": "pizza",
+  "keywords": [
+   "pizza"
+  ],
+  "section": "food",
+  "seconds": 2.5
+ },
+ {
+  "glyph": "🍿",
+  "codepoint": "1f37f",
+  "name": "popcorn",
+  "keywords": [
+   "popcorn"
+  ],
+  "section": "food",
+  "seconds": 2.867
+ },
+ {
+  "glyph": "⚽",
+  "codepoint": "26bd",
+  "name": "soccer ball",
+  "keywords": [
+   "ball",
+   "soccer"
+  ],
+  "section": "activities",
+  "seconds": 2.0
+ },
+ {
+  "glyph": "🏆",
+  "codepoint": "1f3c6",
+  "name": "trophy",
+  "keywords": [
+   "trophy"
+  ],
+  "section": "activities",
+  "seconds": 2.267
+ },
+ {
+  "glyph": "🌊",
+  "codepoint": "1f30a",
+  "name": "ocean",
+  "keywords": [
+   "ocean"
+  ],
+  "section": "nature",
+  "seconds": 1.233
+ },
+ {
+  "glyph": "🦄",
+  "codepoint": "1f984",
+  "name": "unicorn",
+  "keywords": [
+   "unicorn"
+  ],
+  "section": "nature",
+  "seconds": 3.8
+ },
+ {
+  "glyph": "🍷",
+  "codepoint": "1f377",
+  "name": "wine glass",
+  "keywords": [
+   "glass",
+   "wine"
+  ],
+  "section": "food",
+  "seconds": 1.8
+ },
+ {
+  "glyph": "😮",
+  "codepoint": "1f62e",
+  "name": "mouth open",
+  "keywords": [
+   "mouth",
+   "open"
+  ],
+  "section": "smileys",
+  "seconds": 2.533
+ },
+ {
+  "glyph": "😯",
+  "codepoint": "1f62f",
+  "name": "surprised",
+  "keywords": [
+   "hushed",
+   "surprised"
+  ],
+  "section": "smileys",
+  "seconds": 1.467
+ },
+ {
+  "glyph": "🥹",
+  "codepoint": "1f979",
+  "name": "holding back tears",
+  "keywords": [
+   "back",
+   "holding",
+   "tears"
+  ],
+  "section": "smileys",
+  "seconds": 3.867
+ },
+ {
+  "glyph": "🫶",
+  "codepoint": "1faf6",
+  "name": "heart hands",
+  "keywords": [
+   "hands",
+   "heart"
+  ],
+  "section": "smileys",
+  "seconds": 1.833
+ },
+ {
+  "glyph": "🫠",
+  "codepoint": "1fae0",
+  "name": "melting",
+  "keywords": [
+   "melting"
+  ],
+  "section": "smileys",
+  "seconds": 3.817
+ },
+ {
+  "glyph": "🤡",
+  "codepoint": "1f921",
+  "name": "clown",
+  "keywords": [
+   "clown"
+  ],
+  "section": "smileys",
+  "seconds": 2.3
+ },
+ {
+  "glyph": "👻",
+  "codepoint": "1f47b",
+  "name": "ghost",
+  "keywords": [
+   "ghost"
+  ],
+  "section": "smileys",
+  "seconds": 2.4
+ },
+ {
+  "glyph": "🌍",
+  "codepoint": "1f30d",
+  "name": "globe showing Europe Africa",
+  "keywords": [
+   "Africa",
+   "Europe",
+   "globe",
+   "showing"
+  ],
+  "section": "nature",
+  "seconds": 2.7
+ },
+ {
+  "glyph": "✈️",
+  "codepoint": "2708_fe0f",
+  "name": "airplane",
+  "keywords": [
+   "airplane"
+  ],
+  "section": "travel",
+  "seconds": 1.8
+ },
+ {
+  "glyph": "📸",
+  "codepoint": "1f4f8",
+  "name": "camera flash",
+  "keywords": [
+   "camera",
+   "flash"
+  ],
+  "section": "activities",
+  "seconds": 1.2
+ },
+ {
+  "glyph": "💎",
+  "codepoint": "1f48e",
+  "name": "gem stone",
+  "keywords": [
+   "gem",
+   "stone"
+  ],
+  "section": "objects",
+  "seconds": 1.333
+ },
+ {
+  "glyph": "🍔",
+  "codepoint": "1f354",
+  "name": "hamburger",
+  "keywords": [
+   "hamburger"
+  ],
+  "section": "food",
+  "seconds": 2.633
+ },
+ {
+  "glyph": "🍩",
+  "codepoint": "1f369",
+  "name": "doughnut",
+  "keywords": [
+   "doughnut"
+  ],
+  "section": "food",
+  "seconds": 3.533
+ },
+ {
+  "glyph": "🥂",
+  "codepoint": "1f942",
+  "name": "clinking glasses",
+  "keywords": [
+   "clinking",
+   "glasses"
+  ],
+  "section": "food",
+  "seconds": 2.333
+ },
+ {
+  "glyph": "🍾",
+  "codepoint": "1f37e",
+  "name": "bottle with popping cork",
+  "keywords": [
+   "bottle",
+   "cork",
+   "popping",
+   "with"
+  ],
+  "section": "food",
+  "seconds": 2.5
+ },
+ {
+  "glyph": "🤑",
+  "codepoint": "1f911",
+  "name": "money face",
+  "keywords": [
+   "face",
+   "money"
+  ],
+  "section": "smileys",
+  "seconds": 2.383
+ },
+ {
+  "glyph": "😵",
+  "codepoint": "1f635",
+  "name": "x eyes",
+  "keywords": [
+   "eyes",
+   "x"
+  ],
+  "section": "smileys",
+  "seconds": 2.833
+ },
+ {
+  "glyph": "🥶",
+  "codepoint": "1f976",
+  "name": "cold face",
+  "keywords": [
+   "cold",
+   "face"
+  ],
+  "section": "smileys",
+  "seconds": 2.033
+ },
+ {
+  "glyph": "😪",
+  "codepoint": "1f62a",
+  "name": "sleepy",
+  "keywords": [
+   "sleepy"
+  ],
+  "section": "smileys",
+  "seconds": 2.0
+ },
+ {
+  "glyph": "🫡",
+  "codepoint": "1fae1",
+  "name": "salute",
+  "keywords": [
+   "salute"
+  ],
+  "section": "smileys",
+  "seconds": 2.0
+ },
+ {
+  "glyph": "🤫",
+  "codepoint": "1f92b",
+  "name": "shushing face",
+  "keywords": [
+   "face",
+   "shushing"
+  ],
+  "section": "smileys",
+  "seconds": 2.0
+ },
+ {
+  "glyph": "🙀",
+  "codepoint": "1f640",
+  "name": "scream cat",
+  "keywords": [
+   "cat",
+   "scream"
+  ],
+  "section": "smileys",
+  "seconds": 2.4
+ },
+ {
+  "glyph": "🐍",
+  "codepoint": "1f40d",
+  "name": "snake",
+  "keywords": [
+   "snake"
+  ],
+  "section": "nature",
+  "seconds": 3.267
+ },
+ {
+  "glyph": "🌵",
+  "codepoint": "1f335",
+  "name": "cactus",
+  "keywords": [
+   "cactus"
+  ],
+  "section": "nature",
+  "seconds": 3.033
+ },
+ {
+  "glyph": "🍉",
+  "codepoint": "1f349",
+  "name": "watermelon",
+  "keywords": [
+   "watermelon"
+  ],
+  "section": "food",
+  "seconds": 2.0
+ },
+ {
+  "glyph": "🍓",
+  "codepoint": "1f353",
+  "name": "strawberry",
+  "keywords": [
+   "strawberry"
+  ],
+  "section": "food",
+  "seconds": 1.667
+ },
+ {
+  "glyph": "🥑",
+  "codepoint": "1f951",
+  "name": "avocado",
+  "keywords": [
+   "avocado"
+  ],
+  "section": "food",
+  "seconds": 1.033
+ },
+ {
+  "glyph": "❄️",
+  "codepoint": "2744_fe0f",
+  "name": "snowflake",
+  "keywords": [
+   "cold",
+   "snowflake",
+   "winter"
+  ],
+  "section": "nature",
+  "seconds": 4.5
+ },
+ {
+  "glyph": "🎸",
+  "codepoint": "1f3b8",
+  "name": "guitar",
+  "keywords": [
+   "guitar"
+  ],
+  "section": "activities",
+  "seconds": 3.0
+ },
+ {
+  "glyph": "💡",
+  "codepoint": "1f4a1",
+  "name": "light bulb",
+  "keywords": [
+   "bulb",
+   "light"
+  ],
+  "section": "objects",
+  "seconds": 2.4
+ },
+ {
+  "glyph": "⏰",
+  "codepoint": "23f0",
+  "name": "alarm clock",
+  "keywords": [
+   "alarm",
+   "clock"
+  ],
+  "section": "objects",
+  "seconds": 0.567
+ },
+ {
+  "glyph": "🧡",
+  "codepoint": "1f9e1",
+  "name": "orange heart",
+  "keywords": [
+   "heart",
+   "orange"
+  ],
+  "section": "smileys",
+  "seconds": 1.833
+ },
+ {
+  "glyph": "🤍",
+  "codepoint": "1f90d",
+  "name": "white heart",
+  "keywords": [
+   "heart",
+   "white"
+  ],
+  "section": "smileys",
+  "seconds": 1.833
+ },
+ {
+  "glyph": "🤎",
+  "codepoint": "1f90e",
+  "name": "brown heart",
+  "keywords": [
+   "brown",
+   "heart"
+  ],
+  "section": "smileys",
+  "seconds": 1.833
+ },
+ {
+  "glyph": "🫣",
+  "codepoint": "1fae3",
+  "name": "peeking",
+  "keywords": [
+   "peeking"
+  ],
+  "section": "smileys",
+  "seconds": 3.85
+ },
+ {
+  "glyph": "🤐",
+  "codepoint": "1f910",
+  "name": "zipper face",
+  "keywords": [
+   "face",
+   "zipper"
+  ],
+  "section": "smileys",
+  "seconds": 3.7
+ },
+ {
+  "glyph": "😶",
+  "codepoint": "1f636",
+  "name": "mouth none",
+  "keywords": [
+   "mouth",
+   "none"
+  ],
+  "section": "smileys",
+  "seconds": 3.333
+ },
+ {
+  "glyph": "🫢",
+  "codepoint": "1fae2",
+  "name": "hand over mouth",
+  "keywords": [
+   "hand",
+   "mouth",
+   "over"
+  ],
+  "section": "smileys",
+  "seconds": 1.083
+ },
+ {
+  "glyph": "😷",
+  "codepoint": "1f637",
+  "name": "mask",
+  "keywords": [
+   "mask"
+  ],
+  "section": "smileys",
+  "seconds": 3.233
+ },
+ {
+  "glyph": "🤒",
+  "codepoint": "1f912",
+  "name": "thermometer face",
+  "keywords": [
+   "face",
+   "thermometer"
+  ],
+  "section": "smileys",
+  "seconds": 2.7
+ },
+ {
+  "glyph": "🥱",
+  "codepoint": "1f971",
+  "name": "yawn",
+  "keywords": [
+   "yawn"
+  ],
+  "section": "smileys",
+  "seconds": 2.35
+ },
+ {
+  "glyph": "😖",
+  "codepoint": "1f616",
+  "name": "scrunched mouth",
+  "keywords": [
+   "confounded",
+   "mouth",
+   "scrunched",
+   "zigzag"
+  ],
+  "section": "smileys",
+  "seconds": 2.033
+ },
+ {
+  "glyph": "🥲",
+  "codepoint": "1f972",
+  "name": "happy cry",
+  "keywords": [
+   "cry",
+   "happy"
+  ],
+  "section": "smileys",
+  "seconds": 3.0
+ },
+ {
+  "glyph": "😦",
+  "codepoint": "1f626",
+  "name": "gasp",
+  "keywords": [
+   "gasp"
+  ],
+  "section": "smileys",
+  "seconds": 3.167
+ },
+ {
+  "glyph": "😧",
+  "codepoint": "1f627",
+  "name": "anguished",
+  "keywords": [
+   "anguished"
+  ],
+  "section": "smileys",
+  "seconds": 2.367
+ },
+ {
+  "glyph": "😨",
+  "codepoint": "1f628",
+  "name": "scared",
+  "keywords": [
+   "scared"
+  ],
+  "section": "smileys",
+  "seconds": 2.533
+ },
+ {
+  "glyph": "😰",
+  "codepoint": "1f630",
+  "name": "anxious with sweat",
+  "keywords": [
+   "anxious",
+   "sweat",
+   "with"
+  ],
+  "section": "smileys",
+  "seconds": 2.8
+ },
+ {
+  "glyph": "🙁",
+  "codepoint": "1f641",
+  "name": "frown",
+  "keywords": [
+   "frown"
+  ],
+  "section": "smileys",
+  "seconds": 2.6
+ },
+ {
+  "glyph": "👽",
+  "codepoint": "1f47d",
+  "name": "alien",
+  "keywords": [
+   "alien"
+  ],
+  "section": "smileys",
+  "seconds": 3.033
+ },
+ {
+  "glyph": "🤖",
+  "codepoint": "1f916",
+  "name": "robot",
+  "keywords": [
+   "robot"
+  ],
+  "section": "smileys",
+  "seconds": 2.733
+ },
+ {
+  "glyph": "😺",
+  "codepoint": "1f63a",
+  "name": "smiley cat",
+  "keywords": [
+   "cat",
+   "smiley"
+  ],
+  "section": "smileys",
+  "seconds": 2.45
+ },
+ {
+  "glyph": "😸",
+  "codepoint": "1f638",
+  "name": "smile cat",
+  "keywords": [
+   "cat",
+   "smile"
+  ],
+  "section": "smileys",
+  "seconds": 3.5
+ },
+ {
+  "glyph": "🦊",
+  "codepoint": "1f98a",
+  "name": "fox face",
+  "keywords": [
+   "face",
+   "fox"
+  ],
+  "section": "nature",
+  "seconds": 2.1
+ },
+ {
+  "glyph": "🐼",
+  "codepoint": "1f43c",
+  "name": "panda",
+  "keywords": [
+   "panda"
+  ],
+  "section": "nature",
+  "seconds": 2.667
+ },
+ {
+  "glyph": "🐧",
+  "codepoint": "1f427",
+  "name": "penguin",
+  "keywords": [
+   "penguin"
+  ],
+  "section": "nature",
+  "seconds": 5.0
+ },
+ {
+  "glyph": "🐣",
+  "codepoint": "1f423",
+  "name": "hatching chick",
+  "keywords": [
+   "chick",
+   "hatching"
+  ],
+  "section": "nature",
+  "seconds": 3.467
+ },
+ {
+  "glyph": "🐝",
+  "codepoint": "1f41d",
+  "name": "bee",
+  "keywords": [
+   "bee"
+  ],
+  "section": "nature",
+  "seconds": 5.5
+ },
+ {
+  "glyph": "🐙",
+  "codepoint": "1f419",
+  "name": "octopus",
+  "keywords": [
+   "octopus"
+  ],
+  "section": "nature",
+  "seconds": 1.6
+ },
+ {
+  "glyph": "🐬",
+  "codepoint": "1f42c",
+  "name": "dolphin",
+  "keywords": [
+   "dolphin"
+  ],
+  "section": "nature",
+  "seconds": 1.833
+ },
+ {
+  "glyph": "🐳",
+  "codepoint": "1f433",
+  "name": "whale",
+  "keywords": [
+   "whale"
+  ],
+  "section": "nature",
+  "seconds": 2.633
+ },
+ {
+  "glyph": "🌱",
+  "codepoint": "1f331",
+  "name": "plant",
+  "keywords": [
+   "plant",
+   "seed"
+  ],
+  "section": "nature",
+  "seconds": 5.75
+ },
+ {
+  "glyph": "🍁",
+  "codepoint": "1f341",
+  "name": "maple leaf",
+  "keywords": [
+   "leaf",
+   "maple"
+  ],
+  "section": "nature",
+  "seconds": 2.033
+ },
+ {
+  "glyph": "🍂",
+  "codepoint": "1f342",
+  "name": "fallen leaf",
+  "keywords": [
+   "fallen",
+   "leaf"
+  ],
+  "section": "nature",
+  "seconds": 3.533
+ },
+ {
+  "glyph": "🌼",
+  "codepoint": "1f33c",
+  "name": "blossom",
+  "keywords": [
+   "blossom"
+  ],
+  "section": "nature",
+  "seconds": 4.0
+ },
+ {
+  "glyph": "🎆",
+  "codepoint": "1f386",
+  "name": "fireworks",
+  "keywords": [
+   "fireworks"
+  ],
+  "section": "activities",
+  "seconds": 2.067
+ },
+ {
+  "glyph": "🏁",
+  "codepoint": "1f3c1",
+  "name": "chequered flag",
+  "keywords": [
+   "chequered",
+   "flag"
+  ],
+  "section": "symbols",
+  "seconds": 4.0
+ },
+ {
+  "glyph": "🚨",
+  "codepoint": "1f6a8",
+  "name": "police car light",
+  "keywords": [
+   "car",
+   "light",
+   "police"
+  ],
+  "section": "travel",
+  "seconds": 1.667
+ },
+ {
+  "glyph": "🚗",
+  "codepoint": "1f697",
+  "name": "automobile",
+  "keywords": [
+   "automobile"
+  ],
+  "section": "travel",
+  "seconds": 2.267
+ },
+ {
+  "glyph": "🌮",
+  "codepoint": "1f32e",
+  "name": "taco",
+  "keywords": [
+   "taco"
+  ],
+  "section": "food",
+  "seconds": 3.0
+ },
+ {
+  "glyph": "🍜",
+  "codepoint": "1f35c",
+  "name": "steaming bowl",
+  "keywords": [
+   "bowl",
+   "steaming"
+  ],
+  "section": "food",
+  "seconds": 1.8
+ },
+ {
+  "glyph": "🍪",
+  "codepoint": "1f36a",
+  "name": "cookie",
+  "keywords": [
+   "cookie"
+  ],
+  "section": "food",
+  "seconds": 1.967
+ },
+ {
+  "glyph": "🫵",
+  "codepoint": "1faf5",
+  "name": "pointing",
+  "keywords": [
+   "pointing"
+  ],
+  "section": "smileys",
+  "seconds": 1.2
+ },
+ {
+  "glyph": "👆",
+  "codepoint": "1f446",
+  "name": "point up",
+  "keywords": [
+   "point",
+   "up"
+  ],
+  "section": "smileys",
+  "seconds": 1.767
+ },
+ {
+  "glyph": "☝️",
+  "codepoint": "261d_fe0f",
+  "name": "index finger",
+  "keywords": [
+   "finger",
+   "index"
+  ],
+  "section": "smileys",
+  "seconds": 2.2
+ },
+ {
+  "glyph": "🤌",
+  "codepoint": "1f90c",
+  "name": "pinched fingers",
+  "keywords": [
+   "fingers",
+   "pinched"
+  ],
+  "section": "smileys",
+  "seconds": 2.133
+ },
+ {
+  "glyph": "🤏",
+  "codepoint": "1f90f",
+  "name": "pinch",
+  "keywords": [
+   "pinch"
+  ],
+  "section": "smileys",
+  "seconds": 1.933
+ }
+]

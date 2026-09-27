@@ -1,4 +1,5 @@
 import DesignSystem
+import EmoteKit
 import MediaCore
 import UIKit
 
@@ -479,7 +480,7 @@ final class SnapSubtitleView: UIView {
     /// glyph shadow (a shadow inside a translucent container reads as
     /// smudge, not depth).
     private static func renderedCue(_ text: String) -> NSAttributedString {
-        NSAttributedString(string: text, attributes: [
+        EmoteText.attributedString(text, attributes: [
             .font: UIFont.preferredFont(forTextStyle: .footnote).withWeight(.medium),
             .foregroundColor: UIColor.white,
         ])
@@ -497,7 +498,7 @@ final class SnapSubtitleView: UIView {
 /// Deliberately no `masksToBounds`: `backgroundColor` clips to the radius
 /// on its own, the text never reaches the corners (it's inset), and an
 /// unmasked layer keeps the cue fade a direct composite.
-final class SubtitlePillLabel: UILabel {
+final class SubtitlePillLabel: EmoteLabel {
     static let textInsets = UIEdgeInsets(top: 6, left: 12, bottom: 6, right: 12)
 
     /// The corner for a pill carrying a BLOCK of text — two wrapped lines of
@@ -570,12 +571,21 @@ final class SubtitlePillLabel: UILabel {
     /// zone's `.left` alignment is there for wrapped lines, and a padded
     /// single glyph is the one case it gets wrong.
     override func drawText(in rect: CGRect) {
+        super.drawText(in: pillTextRect(in: rect))
+    }
+
+    /// Where the text draws — which is where its emotes must animate.
+    override func emoteTextRect(forBounds bounds: CGRect) -> CGRect {
+        pillTextRect(in: bounds)
+    }
+
+    private func pillTextRect(in rect: CGRect) -> CGRect {
         var text = rect.inset(by: Self.textInsets)
         let natural = super.textRect(forBounds: Self.unboundedBox, limitedToNumberOfLines: numberOfLines).width
         if natural < text.width {
             text.origin.x += (text.width - natural) / 2
             text.size.width = natural
         }
-        super.drawText(in: text)
+        return text
     }
 }

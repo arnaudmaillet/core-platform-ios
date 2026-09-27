@@ -1,6 +1,7 @@
 import CoreModels
 import MediaCore
 import DesignSystem
+import EmoteKit
 import UIKit
 
 /// A single comment: identity disc, "Name · time" header (display name
@@ -82,7 +83,9 @@ final class CommentRowView: UIView {
     private var rowTapRecognizer: UITapGestureRecognizer?
     private var contextMenu: UIContextMenuInteraction?
     private let headerLabel = UILabel()
-    private let bodyLabel = UILabel()
+    /// Emotes in a comment animate in place (`EmoteLabel` marks plain
+    /// `text` on the way in).
+    private let bodyLabel = EmoteLabel()
     /// The header line's trailing control: ♥ + counter, pushed to the far
     /// right of the name/time axis by the header label's stretch (the
     /// dynamic spacer) — and anchored to the row's trailing edge, which
