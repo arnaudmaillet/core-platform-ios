@@ -303,6 +303,188 @@ struct EmoteLabelTests {
         #expect(engine.animatedCount == 1)
     }
 
+    // MARK: - Visibility under Core Animation
+
+    /// A linear flight on `position.x`, long enough to still be running when
+    /// the test reads it, held where it starts (`timeOffset` 0, speed 0) so
+    /// the presentation is exactly `from`.
+    private func parkedFlight(fromX: CGFloat, toX: CGFloat) -> CABasicAnimation {
+        let flight = CABasicAnimation(keyPath: "position.x")
+        flight.fromValue = fromX
+        flight.toValue = toX
+        flight.duration = 100
+        flight.speed = 0
+        return flight
+    }
+
+    /// The danmaku's shape: a bubble whose MODEL sits at its exit, off the
+    /// window, while its flight shows it on screen. Visible while the
+    /// presentation is on screen — the emote plays with no touch — and
+    /// invisible again once the flight is gone.
+    @Test func aLabelFlyingOffScreenIsVisibleWhileItsPresentationIsOnScreen() throws {
+        let engine = try warmEngine(["noto:1f525"])
+        let bubble = UIView(frame: CGRect(x: 0, y: 0, width: 400, height: 50))
+        let (label, window) = nestedLabel("🔥", engine: engine, in: bubble)
+        defer { window.isHidden = true }
+        #expect(engine.animatedCount == 1)
+
+        // Flies from on screen (centre x 200) to its exit (centre x 1200),
+        // the model already resting at the exit.
+        CATransaction.begin()
+        bubble.layer.position.x = 1200
+        bubble.layer.add(parkedFlight(fromX: 200, toX: 1200), forKey: "flight")
+        CATransaction.commit()
+        CATransaction.flush()
+        #expect(bubble.frame.minX >= window.bounds.maxX, "the model is off the window")
+        #expect(EmoteVisibility.isEffectivelyVisible(label))
+        EmoteVisibilityMonitor.shared.tick()
+        label.setNeedsLayout()
+        label.layoutIfNeeded()
+        #expect(engine.animatedCount == 1, "on screen: keeps its slot")
+        #expect(label.showingEmoteCount == 1)
+
+        // The flight ends: the model is the truth again.
+        bubble.layer.removeAnimation(forKey: "flight")
+        CATransaction.flush()
+        #expect(!EmoteVisibility.isEffectivelyVisible(label))
+        EmoteVisibilityMonitor.shared.tick()
+        #expect(engine.animatedCount == 0)
+        #expect(label.placedEmoteCount == 0)
+    }
+
+    /// The reverse leg: a flight whose presentation is still off screen, with
+    /// its model on screen — the model's word is enough (it is arriving).
+    /// And a flight whose presentation AND model are both off screen is not
+    /// visible (a bubble spawned past the band's edge).
+    @Test func aFlightWhollyOffScreenIsNotVisible() throws {
+        let engine = try warmEngine(["noto:1f525"])
+        let bubble = UIView(frame: CGRect(x: 1000, y: 0, width: 400, height: 50))
+        let (label, window) = nestedLabel("🔥", engine: engine, in: bubble)
+        defer { window.isHidden = true }
+        bubble.layer.add(parkedFlight(fromX: 1600, toX: 1200), forKey: "flight")
+        CATransaction.flush()
+        #expect(!EmoteVisibility.isEffectivelyVisible(label))
+        #expect(engine.animatedCount == 0)
+    }
+
+    /// Clipping reads the presentation too: a bubble flying across a band
+    /// that clips (the danmaku's) is visible while it is inside the band,
+    /// though its model sits past the band's left edge.
+    @Test func aFlightInsideAClippingBandIsVisible() throws {
+        let engine = try warmEngine(["noto:1f525"])
+        let band = UIView(frame: CGRect(x: 0, y: 100, width: 400, height: 60))
+        band.clipsToBounds = true
+        let bubble = UIView(frame: CGRect(x: -200, y: 0, width: 200, height: 40))
+        band.addSubview(bubble)
+        let (label, window) = nestedLabel("🔥", engine: engine, in: band)
+        defer { window.isHidden = true }
+        label.removeFromSuperview()
+        label.frame = CGRect(x: 0, y: 0, width: 150, height: 30)
+        bubble.addSubview(label)
+        label.layoutIfNeeded()
+        #expect(engine.animatedCount == 0, "the model is outside the band")
+
+        bubble.layer.add(parkedFlight(fromX: 200, toX: -100), forKey: "flight")
+        CATransaction.flush()
+        #expect(EmoteVisibility.isEffectivelyVisible(label))
+        EmoteVisibilityMonitor.shared.tick()
+        label.layoutIfNeeded()
+        #expect(engine.animatedCount == 1)
+    }
+
+    /// The subtitle pill's shape: model opacity parked at 0, held visible by
+    /// a filled opacity animation. Visible while the presentation shows it.
+    @Test func aLabelHeldVisibleByAFilledOpacityAnimationIsVisible() throws {
+        let engine = try warmEngine(["noto:1f525"])
+        let container = UIView(frame: CGRect(x: 0, y: 0, width: 400, height: 400))
+        let (label, window) = nestedLabel("🔥", engine: engine, in: container)
+        defer { window.isHidden = true }
+        container.alpha = 0
+        EmoteVisibilityMonitor.shared.tick()
+        #expect(engine.animatedCount == 0)
+
+        let hold = CAKeyframeAnimation(keyPath: "opacity")
+        hold.values = [1, 1]
+        hold.duration = 0.01
+        hold.fillMode = .forwards
+        hold.isRemovedOnCompletion = false
+        container.layer.add(hold, forKey: "subtitle-cue")
+        CATransaction.flush()
+        #expect(container.alpha == 0, "the model stays at 0")
+        #expect(EmoteVisibility.isEffectivelyVisible(label))
+        EmoteVisibilityMonitor.shared.tick()
+        label.layoutIfNeeded()
+        #expect(engine.animatedCount == 1)
+
+        container.layer.removeAllAnimations()
+        CATransaction.flush()
+        EmoteVisibilityMonitor.shared.tick()
+        #expect(engine.animatedCount == 0, "the fade's end gives the slot back")
+    }
+
+    /// The #274 leak fix holds under animation: a HIDDEN ancestor is never
+    /// visible, whatever its layers are doing.
+    @Test func aHiddenAncestorStaysInvisibleWhileItAnimates() throws {
+        let engine = try warmEngine(["noto:1f525"])
+        let cell = UIView(frame: CGRect(x: 0, y: 0, width: 400, height: 50))
+        let (label, window) = nestedLabel("🔥", engine: engine, in: cell)
+        defer { window.isHidden = true }
+        #expect(engine.animatedCount == 1)
+        cell.layer.add(parkedFlight(fromX: 200, toX: 1200), forKey: "flight")
+        cell.isHidden = true
+        CATransaction.flush()
+        EmoteVisibilityMonitor.shared.tick()
+        #expect(!EmoteVisibility.isEffectivelyVisible(label))
+        #expect(engine.animatedCount == 0)
+        #expect(label.placedEmoteCount == 0)
+    }
+
+    /// Laid out in the same turn its flight was added (a danmaku spawn), a
+    /// label has no presentation to read: it says so, and plays one turn
+    /// later — not a monitor tick later.
+    @Test func aFlightAddedThisTurnIsCheckedAgainNextTurn() async throws {
+        let engine = try warmEngine(["noto:1f525"])
+        let bubble = UIView(frame: CGRect(x: 1000, y: 0, width: 400, height: 50))
+        let (label, window) = nestedLabel("🔥", engine: engine, in: bubble)
+        defer { window.isHidden = true }
+        #expect(engine.animatedCount == 0)
+
+        let fresh = UIView(frame: CGRect(x: 1000, y: 60, width: 400, height: 50))
+        window.addSubview(fresh)
+        fresh.layer.add(parkedFlight(fromX: 200, toX: 1200), forKey: "flight")
+        #expect(fresh.layer.presentation() == nil, "not committed yet")
+        label.removeFromSuperview()
+        fresh.addSubview(label)
+        #expect(EmoteVisibility.verdict(for: label) == .awaitingPresentation)
+        label.layoutIfNeeded()
+        #expect(engine.animatedCount == 0)
+
+        // One turn: the transaction commits, the queued re-check runs.
+        for _ in 0..<20 where engine.animatedCount == 0 {
+            try await Task.sleep(for: .milliseconds(10))
+            label.layoutIfNeeded()
+        }
+        #expect(engine.animatedCount == 1)
+    }
+
+    /// The per-level geometry the presentation walk uses agrees with UIKit's
+    /// own conversion, transforms included.
+    @Test func theLayerLevelConversionMatchesUIKit() {
+        let parent = UIView(frame: CGRect(x: 0, y: 0, width: 400, height: 400))
+        parent.bounds.origin = CGPoint(x: 13, y: -7)
+        let child = UIView(frame: CGRect(x: 40, y: 60, width: 120, height: 80))
+        parent.addSubview(child)
+        child.bounds.origin = CGPoint(x: 5, y: 9)
+        child.transform = CGAffineTransform(scaleX: 1.5, y: 0.5).rotated(by: 0.3)
+        let rect = CGRect(x: 10, y: 20, width: 30, height: 15)
+        let expected = child.convert(rect, to: parent)
+        let actual = EmoteVisibility.rect(rect, inSuperlayerOf: child.layer)
+        #expect(abs(actual.minX - expected.minX) < 0.001)
+        #expect(abs(actual.minY - expected.minY) < 0.001)
+        #expect(abs(actual.width - expected.width) < 0.001)
+        #expect(abs(actual.height - expected.height) < 0.001)
+    }
+
     /// A label with no emotes, or out of any window, is not monitored.
     @Test func onlyLabelsWithEmotesInAWindowAreMonitored() throws {
         let engine = try warmEngine(["noto:1f525"])

@@ -426,6 +426,9 @@ final class CommentsInputBar: UIView {
     override func didMoveToWindow() {
         super.didMoveToWindow()
         guard window != nil else { return }
+        #if DEBUG
+        runEmoteKeyboardQAIfAsked()
+        #endif
         if field.effect == nil {
             field.effect = UIGlassEffect()
         }
@@ -632,6 +635,47 @@ final class CommentsInputBar: UIView {
     func focusComposer() {
         textView.becomeFirstResponder()
     }
+
+    #if DEBUG
+    private var ranEmoteKeyboardQA = false
+
+    /// `-emote-keyboard-qa` (DEBUG): focuses the composer ~1 s after the bar
+    /// reaches a window, then swaps keyboard → emote panel → keyboard →
+    /// panel every 2.5 s, printing the bar's window y and the keyboard's
+    /// frame at each settled stage (`[emote-kbd] …`). Taps cannot be
+    /// scripted on the simulator, and "does the bar jump" is a question
+    /// about two numbers; this prints them.
+    private func runEmoteKeyboardQAIfAsked() {
+        guard !ranEmoteKeyboardQA, ProcessInfo.processInfo.arguments.contains("-emote-keyboard-qa") else { return }
+        ranEmoteKeyboardQA = true
+        let report: @MainActor (String) -> Void = { [weak self] stage in
+            guard let self, let window = self.window else { return }
+            let bar = self.convert(self.bounds, to: window)
+            let input = self.textView.inputView.map { String(describing: type(of: $0)) } ?? "system keyboard"
+            print(String(format: "[emote-kbd] %.3f %@ input=%@ bar.minY=%.1f bar.maxY=%.1f panel.h=%.1f",
+                         CACurrentMediaTime(), stage, input, bar.minY, bar.maxY,
+                         self.textView.inputView?.bounds.height ?? -1))
+        }
+        NotificationCenter.default.addObserver(
+            forName: UIResponder.keyboardDidChangeFrameNotification, object: nil, queue: .main
+        ) { note in
+            let end = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue ?? .zero
+            MainActor.assumeIsolated {
+                print(String(format: "[emote-kbd] %.3f keyboard end=(%.1f %.1f %.1f %.1f)",
+                             CACurrentMediaTime(), end.minX, end.minY, end.width, end.height))
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            self?.focusComposer()
+        }
+        for stage in 0..<5 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 + 2.5 * Double(stage + 1)) { [weak self] in
+                report("stage\(stage)")
+                if stage < 4 { self?.emotes.toggle() }
+            }
+        }
+    }
+    #endif
 
     // MARK: - Boost feedback
 
