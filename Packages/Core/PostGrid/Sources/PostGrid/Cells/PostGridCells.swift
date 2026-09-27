@@ -1,4 +1,5 @@
 import DesignSystem
+import EmoteKit
 import MediaCore
 import MediaPlayback
 import UIKit
@@ -698,11 +699,18 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     private static let showMoreTitle = "Show more"
     private static let ellipsis = "\u{2026} "
 
+    /// The caption in the card's register, its emotes marked (`EmoteText`):
+    /// a `:code:` is already the one glyph it draws as, so every measurement
+    /// below sees the final line.
     private static func plain(_ text: String, font: UIFont?) -> NSAttributedString {
-        NSAttributedString(string: text, attributes: [
+        EmoteText.attributedString(text, attributes: attributes(font: font))
+    }
+
+    private static func attributes(font: UIFont?) -> [NSAttributedString.Key: Any] {
+        [
             .font: font ?? UIFont.preferredFont(forTextStyle: .body),
             .foregroundColor: UIColor.label
-        ])
+        ]
     }
 
     /// How many lines `text` occupies at `width`, counted as LINE FRAGMENTS.
@@ -761,7 +769,10 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     private static func truncated(
         _ text: String, font: UIFont, width: CGFloat, capLines: Int
     ) -> (text: NSAttributedString, showMore: NSRange) {
-        let ns = text as NSString
+        // Cut from the MARKED caption, so a `:code:` is one glyph that a word
+        // boundary can never split, and the emotes a prefix keeps stay marked.
+        let whole = plain(text, font: font)
+        let ns = whole.string as NSString
         var boundaries: [Int] = []
         ns.enumerateSubstrings(in: NSRange(location: 0, length: ns.length),
                                options: [.byWords, .substringNotRequired]) { _, range, _, _ in
@@ -769,14 +780,15 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         }
         if boundaries.isEmpty { boundaries = [ns.length] }
 
-        func prefix(upTo end: Int) -> String {
-            ns.substring(to: min(end, ns.length))
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+        func prefix(upTo end: Int) -> NSAttributedString {
+            let head = ns.substring(to: min(end, ns.length))
+            let trimmed = head.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, let range = head.range(of: trimmed) else { return NSAttributedString() }
+            return whole.attributedSubstring(from: NSRange(range, in: head))
         }
-        func compose(_ prefix: String) -> NSAttributedString {
-            let composed = NSMutableAttributedString(
-                attributedString: plain(prefix + ellipsis, font: font)
-            )
+        func compose(_ prefix: NSAttributedString) -> NSAttributedString {
+            let composed = NSMutableAttributedString(attributedString: prefix)
+            composed.append(NSAttributedString(string: ellipsis, attributes: attributes(font: font)))
             composed.append(NSAttributedString(string: showMoreTitle, attributes: [
                 .font: font,
                 .foregroundColor: UIColor.tintColor
@@ -790,7 +802,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         var fullest = 0
         while low <= high {
             let mid = (low + high) / 2
-            let candidate = plain(prefix(upTo: boundaries[mid]), font: font)
+            let candidate = prefix(upTo: boundaries[mid])
             if lineCount(candidate, width: width) <= capLines {
                 fullest = mid
                 low = mid + 1
@@ -804,7 +816,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         while index >= 0 {
             let body = prefix(upTo: boundaries[index])
             let composed = compose(body)
-            let bodyLines = lineCount(plain(body, font: font), width: width)
+            let bodyLines = lineCount(body, width: width)
             let composedLines = lineCount(composed, width: width)
             if composedLines == bodyLines, composedLines <= capLines {
                 return (composed, showMoreRange(in: composed))
@@ -1611,7 +1623,8 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// The caption hangs off the band — at the band's gap when the band draws
     /// something, and flush when it has collapsed to nothing.
     private var captionFollowsBand: NSLayoutConstraint!
-    private let captionLabel = UILabel()
+    /// Emoji and `:code:` emotes animate in the caption (`plain` marks them).
+    private let captionLabel = EmoteLabel()
     private var isCaptionExpanded = false
     /// The caption as the post carries it. The label shows a SHORTENED version
     /// while truncated, so the label's own text is not a copy of this and

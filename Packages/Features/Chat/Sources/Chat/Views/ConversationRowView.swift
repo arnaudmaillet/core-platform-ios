@@ -1,5 +1,6 @@
 import CoreModels
 import DesignSystem
+import EmoteKit
 import MediaCore
 import UIKit
 
@@ -24,7 +25,8 @@ final class ConversationRowView: UIView {
     /// otherwise a slow avatar lands on whoever the row became.
     private var avatarPeerID: ProfileID?
     private let titleLabel = UILabel()
-    private let previewLabel = UILabel()
+    /// The last message's emotes animate (`EmoteLabel` marks plain `text`).
+    private let previewLabel = EmoteLabel()
     private let timeLabel = UILabel()
     private let mutedIcon = UIImageView(image: UIImage(systemName: "bell.slash.fill"))
     private let pinnedIcon = UIImageView(image: UIImage(systemName: "pin.fill"))

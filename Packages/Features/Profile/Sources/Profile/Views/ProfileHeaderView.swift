@@ -1,6 +1,7 @@
 import MapsInterface
 import MediaCore
 import DesignSystem
+import EmoteKit
 import UIKit
 
 /// The profile identity block, layered over an immersive media banner:
@@ -89,7 +90,8 @@ final class ProfileHeaderView: UIView {
     private let nameLabel = UILabel()
     private let verifiedBadge = UIImageView(image: UIImage(systemName: "checkmark.seal.fill"))
     private let handleLabel = UILabel()
-    private let bioLabel = UILabel()
+    /// A bio's emotes animate (`EmoteLabel` marks plain `text`).
+    private let bioLabel = EmoteLabel()
     private let websiteButton = UIButton(configuration: .plain())
     /// Bumped by every configure — see `dissolve`.
     private var configureGeneration = 0

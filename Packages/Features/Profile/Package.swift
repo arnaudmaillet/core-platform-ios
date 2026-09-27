@@ -19,6 +19,7 @@ let package = Package(
         .package(path: "../../Core/CoreNetworking"),
         .package(path: "../../Core/CoreStorage"),
         .package(path: "../../Core/DesignSystem"),
+        .package(path: "../../Core/EmoteKit"),
         .package(path: "../../Core/PostGrid")
     ],
     targets: [
@@ -35,6 +36,7 @@ let package = Package(
                 "CoreNavigation",
                 "CoreStorage",
                 "DesignSystem",
+                "EmoteKit",
                 // ⚠️ The library target, not only the test one. `PostCounterReader`
                 // lives in CoreNetworking and this feature reads its counters
                 // through it — declared here because a warm derived-data tree

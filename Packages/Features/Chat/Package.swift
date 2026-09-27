@@ -19,6 +19,7 @@ let package = Package(
         // recent in the other.
         .package(path: "../../Core/CoreStorage"),
         .package(path: "../../Core/DesignSystem"),
+        .package(path: "../../Core/EmoteKit"),
         .package(path: "../../Core/MediaCore"),
         // The conversation is drawn by Feed's text-post screen. The INTERFACE
         // only — features never import each other — the same edge Maps and
@@ -44,6 +45,7 @@ let package = Package(
                 "CoreNavigation",
                 "CoreStorage",
                 "DesignSystem",
+                "EmoteKit",
                 "FeedInterface",
                 "MediaCore",
                 "StickerKit",

@@ -218,7 +218,7 @@ public final class MockChatService: @unchecked Sendable {
             let answered = index >= 12
             let openers = [
                 "Are we still on for Thursday?",
-                "Sent you the files 👍",
+                "Sent you the files 👍 :lol:",
                 "That place you mentioned — what was it called?",
                 "Congrats on the launch!",
                 "Any chance you're free later this week?",
