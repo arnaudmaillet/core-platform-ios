@@ -54,82 +54,67 @@ public enum ZoomTransitionGeometry {
         return max(size.width / surface.width, size.height / surface.height)
     }
 
-    // MARK: - Letterboxed pages
+    // MARK: - Fitted pages
 
-    /// Where a picture of `aspect` sits when a page draws it aspect-FIT into
-    /// `page`: centred, as large as fits, bands on the other axis — the rect
-    /// `AVMakeRect(aspectRatio:insideRect:)` answers, and the one
-    /// `UIImageView.scaleAspectFit` and `.resizeAspect` both draw into.
+    /// The size a picture of `aspect` takes when a page draws it aspect-FIT
+    /// into `bounds` — as large as fits, bands on the other axis. What
+    /// `AVMakeRect(aspectRatio:insideRect:)`, `UIImageView.scaleAspectFit` and
+    /// `.resizeAspect` all draw into. `bounds` itself for a degenerate input.
+    public static func fittedMediaSize(aspect: CGSize, in bounds: CGSize) -> CGSize {
+        guard aspect.width > 0, aspect.height > 0, bounds.width > 0, bounds.height > 0
+        else { return bounds }
+        let scale = min(bounds.width / aspect.width, bounds.height / aspect.height)
+        return CGSize(width: aspect.width * scale, height: aspect.height * scale)
+    }
+
+    /// Where the picture sits inside a flying PAGE WINDOW of `window` size —
+    /// always centred, in the window's own coordinates.
     ///
-    /// Nil for a degenerate aspect or page: there is no picture to place, and
-    /// a caller must fall back to the page rect rather than fly to a point.
-    public static func fittedMediaRect(aspect: CGSize, in page: CGRect) -> CGRect? {
-        guard aspect.width > 0, aspect.height > 0, page.width > 0, page.height > 0,
-              aspect.width.isFinite, aspect.height.isFinite
-        else { return nil }
-        let scale = min(page.width / aspect.width, page.height / aspect.height)
-        let size = CGSize(width: aspect.width * scale, height: aspect.height * scale)
+    /// `fit` runs from 0, the picture COVERING the window (the tile's
+    /// aspect-fill crop: the picture's card is the whole window), to 1, the
+    /// picture FITTED in it (the page's composition). The size between is the
+    /// linear blend of those two, which is exactly what a property animator
+    /// draws between two poses — so a pose computed here mid-grab and the
+    /// spring that carries it on agree about every frame.
+    public static func pageWindowMediaRect(window: CGSize, aspect: CGSize, fit: CGFloat) -> CGRect {
+        let t = min(max(fit, 0), 1)
+        let fitted = fittedMediaSize(aspect: aspect, in: window)
+        let size = CGSize(
+            width: window.width + (fitted.width - window.width) * t,
+            height: window.height + (fitted.height - window.height) * t
+        )
         return CGRect(
-            x: page.midX - size.width / 2, y: page.midY - size.height / 2,
+            x: (window.width - size.width) / 2, y: (window.height - size.height) / 2,
             width: size.width, height: size.height
         )
     }
 
-    /// The media rect a flight should actually letterbox to, or nil when it
-    /// should fly exactly as it always has.
+    /// The picture's rect for a grab part-way home (`ZoomFlight.poseInterpolated`):
+    /// its size is the blend of the FITTED picture in the detached page
+    /// (`progress == 0`) and the whole landing tile (`progress == 1`), centred
+    /// in the window's current size.
     ///
-    /// ⚠️ NIL IS THE COMMON ANSWER, deliberately. A rect that is (within half
-    /// a point) the page itself is a picture that fills the page — the same
-    /// aspect, or a destination that fills — and the flight that already
-    /// exists is exact for it. Wrapping it anyway would change nothing on
-    /// screen and everything in the view tree, which is not a trade to make
-    /// for a rounding error. A rect that spills OUTSIDE the page, or has no
-    /// area, is not a letterbox of it and is refused rather than trusted.
-    public static func letterboxedMediaRect(
-        _ media: CGRect?, in page: CGRect, tolerance: CGFloat = 0.5
-    ) -> CGRect? {
-        guard let media, media.width > 0, media.height > 0,
-              page.width > 0, page.height > 0,
-              media.minX >= page.minX - tolerance, media.minY >= page.minY - tolerance,
-              media.maxX <= page.maxX + tolerance, media.maxY <= page.maxY + tolerance
-        else { return nil }
-        let samePage = abs(media.minX - page.minX) <= tolerance
-            && abs(media.minY - page.minY) <= tolerance
-            && abs(media.width - page.width) <= tolerance
-            && abs(media.height - page.height) <= tolerance
-        return samePage ? nil : media
-    }
-
-    /// The PAGE-shaped box around a media rect: where the letterboxed page
-    /// would be if its picture sat at `rect`.
-    ///
-    /// A letterboxed flight moves two things on one channel — the picture and
-    /// the page chrome around it — and this is the one mapping between them:
-    /// per axis, `rect` is to the returned box what `media` is to `page`.
-    /// Identity at the page end (`rect == media` answers `page`); at the tile
-    /// end it is the tile grown by the band on each side, so the chrome that
-    /// fades in around the card is always laid out against a page, never
-    /// squeezed into the picture.
-    public static func letterboxCardFrame(forMedia rect: CGRect, page: CGRect, media: CGRect) -> CGRect {
-        guard media.width > 0, media.height > 0 else { return rect }
-        let width = rect.width * page.width / media.width
-        let height = rect.height * page.height / media.height
-        return CGRect(
-            x: rect.minX - (media.minX - page.minX) / page.width * width,
-            y: rect.minY - (media.minY - page.minY) / page.height * height,
-            width: width, height: height
+    /// Not `pageWindowMediaRect(window:fit:)` at the interpolated window: that
+    /// would re-fit against a window whose aspect is itself mid-morph, a
+    /// different curve from the one the release spring then continues on —
+    /// a kink at release. Blending the two ENDPOINT rects is the curve the
+    /// animator draws, so the drag and the spring are one motion.
+    public static func interpolatedWindowMediaRect(
+        from startWindow: CGSize, to landing: CGSize, aspect: CGSize, progress: CGFloat
+    ) -> CGRect {
+        let t = min(max(progress, 0), 1)
+        let start = fittedMediaSize(aspect: aspect, in: startWindow)
+        let window = CGSize(
+            width: startWindow.width + (landing.width - startWindow.width) * t,
+            height: startWindow.height + (landing.height - startWindow.height) * t
         )
-    }
-
-    /// The inverse: where the picture sits inside a page-shaped box of `size`,
-    /// in that box's own coordinates.
-    public static func letterboxMediaFrame(inCardOfSize size: CGSize, page: CGRect, media: CGRect) -> CGRect {
-        guard page.width > 0, page.height > 0 else { return CGRect(origin: .zero, size: size) }
+        let size = CGSize(
+            width: start.width + (landing.width - start.width) * t,
+            height: start.height + (landing.height - start.height) * t
+        )
         return CGRect(
-            x: (media.minX - page.minX) / page.width * size.width,
-            y: (media.minY - page.minY) / page.height * size.height,
-            width: media.width / page.width * size.width,
-            height: media.height / page.height * size.height
+            x: (window.width - size.width) / 2, y: (window.height - size.height) / 2,
+            width: size.width, height: size.height
         )
     }
 

@@ -1,4 +1,5 @@
 import DesignSystem
+import PostGrid
 import UIKit
 
 /// What a thumb dragging a clip's bar is pointing at: the frame it would land
@@ -57,10 +58,8 @@ final class SnapScrubPreviewView: UIView {
         plate.layer.cornerRadius = 10
         plate.clipsToBounds = true
 
-        // The preview frames the clip the way the page does: whole and
-        // letterboxed on its dark plate when the page fits
-        // (`SnapFeedViewController.fitsMedia`), cropped to fill otherwise.
-        picture.contentMode = SnapFeedViewController.fitsMedia ? .scaleAspectFit : .scaleAspectFill
+        // Fill until a frame says otherwise — see `setPicture`.
+        picture.contentMode = .scaleAspectFill
         picture.clipsToBounds = true
         picture.backgroundColor = UIColor.white.withAlphaComponent(0.08)
 
@@ -122,6 +121,12 @@ final class SnapScrubPreviewView: UIView {
     /// thumb has moved a little, not somewhere else. Clearing belongs to the
     /// end of the gesture, and `hide` owns it.
     func setPicture(_ image: CGImage) {
+        // The preview frames the clip by the page's own rule
+        // (`SnapMediaAspect`): a clip the page shows whole is shown whole here,
+        // on the plate's dark ground; a clip the page fills is cropped to fill.
+        picture.contentMode = SnapMediaAspect.presentation(
+            for: CGSize(width: image.width, height: image.height)
+        ).contentMode
         picture.image = UIImage(cgImage: image)
         setLoading(false)
     }

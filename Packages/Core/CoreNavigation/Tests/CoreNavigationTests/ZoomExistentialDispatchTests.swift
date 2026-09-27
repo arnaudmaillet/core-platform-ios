@@ -69,13 +69,13 @@ struct ZoomExistentialDispatchTests {
             progress: 0.5, card: .zero, cornerRadius: 1, isSettling: false
         ))
         #expect(destination.zoomParkLiveMediaForHandoff())
-        #expect(destination.zoomTargetMediaFrame(in: probe) == spy.mediaFrame)
+        #expect(destination.zoomPageFraming(sourcePicture: nil)?.mediaAspect == spy.framingAspect)
 
         #expect(spy.calls == [
             "kind", "contentReady", "ownsDismissal", "concealsTabBar", "mediaRendering",
             "verticalPermitted", "horizontalPermitted", "mirror", "donate",
             "reclaim", "adopt", "willBegin", "prepareForPresentation", "dismissState", "park",
-            "mediaFrame",
+            "framing",
         ])
     }
 
@@ -172,9 +172,9 @@ private final class SpyDestination: NSObject, ZoomTransitionDestination {
     func zoomPrepareForPresentation(in bounds: CGRect) { calls.append("prepareForPresentation") }
     func setZoomDismissState(_ state: ZoomDismissState) { calls.append("dismissState") }
     func zoomParkLiveMediaForHandoff() -> Bool { calls.append("park"); return true }
-    let mediaFrame = CGRect(x: 0, y: 80, width: 402, height: 715)
-    func zoomTargetMediaFrame(in container: UICoordinateSpace) -> CGRect? {
-        calls.append("mediaFrame"); return mediaFrame
+    let framingAspect = CGSize(width: 4, height: 5)
+    func zoomPageFraming(sourcePicture: UIImage?) -> ZoomPageFraming? {
+        calls.append("framing"); return ZoomPageFraming(mediaAspect: framingAspect, backdrop: .black)
     }
 }
 

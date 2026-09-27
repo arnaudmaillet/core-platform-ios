@@ -288,8 +288,7 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         container.insertSubview(dim, belowSubview: fromView)
 
         let flight = ZoomFlight.build(
-            source: source, destination: destination, sourceFrame: sourceFrame, pageFrame: pageFrame,
-            mediaFrame: destination?.zoomTargetMediaFrame(in: container)
+            source: source, destination: destination, sourceFrame: sourceFrame, pageFrame: pageFrame
         )
         container.insertSubview(flight.card, belowSubview: fromView)
         container.insertSubview(flight.shadow, belowSubview: flight.card)
@@ -725,10 +724,7 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
             // teardown expects: there is no frame where the two disagree.
             self.destination?.setZoomDismissState(ZoomDismissState(
                 progress: commit ? 1 : 0,
-                // The card's rect, as on every pan event before this one —
-                // under a letterbox that is the box around the picture, so the
-                // follower lands where the card does rather than on the tile.
-                card: commit ? flight.cardFrame(forMedia: landing) : flight.pageFrame,
+                card: commit ? landing : flight.pageFrame,
                 cornerRadius: commit ? flight.card.zoomRestingCornerRadius : screenRadius,
                 isSettling: true
             ))
@@ -766,14 +762,9 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // either way (measured). So this watches the card's PRESENTATION
         // instead, which is on whatever clock the animation is actually on, and
         // keeps a wall-clock ceiling as the backstop the old timer was.
-        //
-        // The CARD's rect, which is what is watched: `landing` is where the
-        // picture goes, and a letterboxed card is the page-shaped box around
-        // it — it never reaches the tile's rect and the watch would only ever
-        // end on its ceiling.
         whenViewSettles(
             flight.card,
-            settlingAt: commit ? flight.cardFrame(forMedia: landing) : flight.pageFrame,
+            settlingAt: commit ? landing : flight.pageFrame,
             ceiling: viewSettleCeiling
         ) { [weak self] in
             self?.finishTransition(cancelled: !commit)
