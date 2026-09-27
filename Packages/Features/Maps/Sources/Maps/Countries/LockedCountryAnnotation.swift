@@ -31,10 +31,12 @@ final class LockedCountryAnnotation: NSObject, MKAnnotation {
 /// country reads before the numbers; the heart is red, the app's colour for
 /// likes; the lock says what a tap will offer.
 ///
-/// ⚠️ **BELOW THE POSTS, AND IT GIVES WAY.** `displayPriority` is low and the
-/// collision rectangle is the capsule, so at a continent's zoom MapKit hides
-/// the badges that would overlap instead of stacking them, and a post's
-/// marker always wins its place.
+/// ⚠️ **BELOW THE POSTS, AND IT GIVES WAY — THE BUSIEST FIRST.**
+/// `displayPriority` is under `.defaultLow` and the collision rectangle is the
+/// capsule, so at a continent's zoom MapKit hides the badges that would
+/// overlap instead of stacking them, and a post's marker always wins its
+/// place. Among badges the priority follows the RANK: at one flat priority
+/// MapKit kept Monaco and Vatican City and hid Germany, Spain and Italy.
 final class LockedCountryAnnotationView: MKAnnotationView {
     static let reuseIdentifier = "LockedCountryAnnotationView"
 
@@ -102,10 +104,11 @@ final class LockedCountryAnnotationView: MKAnnotationView {
         guard let country = annotation as? LockedCountryAnnotation else { return }
         flagLabel.text = country.flag
         rankLabel.text = "#\(country.standing.rank)"
+        displayPriority = MKFeatureDisplayPriority(rawValue: Float(max(10, 249 - country.standing.rank)))
         let likes = NSMutableAttributedString(
             attachment: NSTextAttachment(image: UIImage(systemName: "heart.fill")!
-                .withTintColor(.systemRed, renderingMode: .alwaysOriginal)
-                .applyingSymbolConfiguration(.init(pointSize: 10, weight: .bold))!)
+                .applyingSymbolConfiguration(.init(pointSize: 10, weight: .bold))!
+                .withTintColor(.systemRed, renderingMode: .alwaysOriginal))
         )
         likes.append(NSAttributedString(string: " " + Self.compact(country.standing.likes)))
         likesLabel.attributedText = likes

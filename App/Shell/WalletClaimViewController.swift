@@ -3,6 +3,7 @@ import CoreNavigation
 import CoreStorage
 import DesignSystem
 import FeedInterface
+import Maps
 import MediaCore
 import PostGrid
 import UIKit
@@ -63,10 +64,15 @@ final class WalletClaimViewController: UIViewController {
     private let lookUpPosts: PostLookup?
     private let imagePipeline: ImagePipeline?
     private let openFeedHero: OpenFeedHero?
+    /// The account's countries — the Countries card and its shop. Nil hides
+    /// the card (the fleet, until the backend carries unlocks).
+    private let countries: (any CountryAccess)?
 
     private nonisolated enum Section: Hashable { case summary, active, settled }
     private nonisolated enum Item: Hashable {
         case summary
+        /// The countries shop's door: what the gems buy.
+        case countries
         case stake(String)
         case noActiveStakes
     }
@@ -111,9 +117,11 @@ final class WalletClaimViewController: UIViewController {
         wallet: WalletStore,
         lookUpPosts: PostLookup? = nil,
         imagePipeline: ImagePipeline? = nil,
-        openFeedHero: OpenFeedHero? = nil
+        openFeedHero: OpenFeedHero? = nil,
+        countries: (any CountryAccess)? = nil
     ) {
         self.openFeedHero = openFeedHero
+        self.countries = countries
         self.wallet = wallet
         self.lookUpPosts = lookUpPosts
         self.imagePipeline = imagePipeline
@@ -154,6 +162,12 @@ final class WalletClaimViewController: UIViewController {
         walletObservers.tokens = [
             NotificationCenter.default.addObserver(
                 forName: WalletStore.didChangeNotification, object: wallet, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.refresh() }
+            },
+            // An unlock moves the Countries card's count.
+            NotificationCenter.default.addObserver(
+                forName: .countryAccessDidChange, object: nil, queue: .main
             ) { [weak self] _ in
                 MainActor.assumeIsolated { self?.refresh() }
             },
@@ -294,6 +308,11 @@ final class WalletClaimViewController: UIViewController {
             )
         }
         let emptyRegistration = UICollectionView.CellRegistration<WalletEmptyStakesCell, Item> { _, _, _ in }
+        let countriesRegistration = UICollectionView.CellRegistration<WalletCountriesCell, Item> { [weak self] cell, _, _ in
+            guard let countries = self?.countries else { return }
+            let standings = countries.standings()
+            cell.configure(owned: standings.filter { countries.isUnlocked($0.code) }.count, total: standings.count)
+        }
         dataSource = UICollectionViewDiffableDataSource(collectionView: collectionView) { collectionView, indexPath, item in
             switch item {
             case .summary:
@@ -302,6 +321,8 @@ final class WalletClaimViewController: UIViewController {
                 collectionView.dequeueConfiguredReusableCell(using: stakeRegistration, for: indexPath, item: item)
             case .noActiveStakes:
                 collectionView.dequeueConfiguredReusableCell(using: emptyRegistration, for: indexPath, item: item)
+            case .countries:
+                collectionView.dequeueConfiguredReusableCell(using: countriesRegistration, for: indexPath, item: item)
             }
         }
         let headerRegistration = UICollectionView.SupplementaryRegistration<WalletSectionHeader>(
@@ -421,7 +442,10 @@ final class WalletClaimViewController: UIViewController {
         guard let sheet = sheetPresentationController,
               sheet.detents.contains(where: { $0.identifier == Self.smallDetent }) else { return }
         var bottom: CGFloat?
-        let rows = dataSource.snapshot().itemIdentifiers.filter { $0 != .summary }.prefix(Self.smallDetentRows)
+        // The Countries card sits under the summary and is always shown; the
+        // rows counted are the stakes under it.
+        let rows = dataSource.snapshot().itemIdentifiers
+            .filter { $0 != .summary && $0 != .countries }.prefix(Self.smallDetentRows)
         for item in rows {
             guard let path = dataSource.indexPath(for: item),
                   let frame = collectionView.layoutAttributesForItem(at: path)?.frame else { continue }
@@ -482,6 +506,7 @@ final class WalletClaimViewController: UIViewController {
         var list = NSDiffableDataSourceSnapshot<Section, Item>()
         list.appendSections([.summary, .active])
         list.appendItems([.summary], toSection: .summary)
+        if countries != nil { list.appendItems([.countries], toSection: .summary) }
         let active = stakes.filter { !$0.isSettled }
         list.appendItems(active.isEmpty ? [.noActiveStakes] : active.map { .stake($0.targetID) }, toSection: .active)
         let settled = stakes.filter(\.isSettled)
@@ -492,7 +517,10 @@ final class WalletClaimViewController: UIViewController {
         // Rows whose stake moved (settled, grew) are reconfigured in place.
         let previous = Set(dataSource.snapshot().itemIdentifiers)
         list.reconfigureItems(list.itemIdentifiers.filter {
-            if case .stake = $0 { return previous.contains($0) } else { return false }
+            switch $0 {
+            case .stake, .countries: previous.contains($0)
+            default: false
+            }
         })
         dataSource.apply(list, animatingDifferences: collectionView.window != nil)
         // The headers' totals follow the stakes.
@@ -711,16 +739,29 @@ extension WalletClaimViewController: UICollectionViewDelegate {
         updateCompactBar()
     }
 
-    /// A stake row opens its post; nothing else on the sheet is pressable.
+    /// A stake row opens its post, the Countries card its shop; nothing else
+    /// on the sheet is pressable.
     func collectionView(_ collectionView: UICollectionView, shouldSelectItemAt indexPath: IndexPath) -> Bool {
-        guard case .stake(let id) = dataSource.itemIdentifier(for: indexPath) else { return false }
-        return entries[PostID(id)] != nil && openFeedHero != nil
+        switch dataSource.itemIdentifier(for: indexPath) {
+        case .stake(let id): entries[PostID(id)] != nil && openFeedHero != nil
+        case .countries: true
+        default: false
+        }
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         collectionView.deselectItem(at: indexPath, animated: false)
-        guard case .stake(let id) = dataSource.itemIdentifier(for: indexPath) else { return }
-        openFeed(fromStake: id)
+        switch dataSource.itemIdentifier(for: indexPath) {
+        case .stake(let id):
+            openFeed(fromStake: id)
+        case .countries:
+            // Over the wallet: the shop is where the gems go, and closing it
+            // comes back to the balance they came from.
+            guard let countries, presentedViewController == nil else { return }
+            present(CountryShopViewController.sheet(access: countries), animated: true)
+        default:
+            break
+        }
     }
 }
 

@@ -115,6 +115,8 @@ final class CountryLayer: NSObject {
     private var renderers: [String: CountryRenderer] = [:]
     private var lifted: (shape: CountryShape, renderer: CountryRenderer?)?
     private(set) var selectedCode: String?
+    /// Whether the borders are on the map (the atlas decodes off main first).
+    var hasBorders: Bool { !shapes.isEmpty }
     private let atlas: CountryAtlas
 
     init(atlas: CountryAtlas = .shared) {
