@@ -570,18 +570,51 @@ final class SnapFeedViewController: UIViewController {
     /// the feed asserts the invariant itself whenever it comes back: the bar
     /// leaves with the transition (scrubbed with an interactive pop, and put
     /// back if the pop is cancelled, since the screen that stays owns it).
+    ///
+    /// ⚠️ **"CANCELLED" MEANS TWO OPPOSITE THINGS HERE.** UIKit calls this
+    /// screen's `viewWillAppear` both when a pop TO it begins (a profile above
+    /// it leaving) and when a pop OF it is abandoned (a grab-down released under
+    /// the threshold — the feed springs back and "re-appears"). The same
+    /// cancelled flag then says "the feed did not come back" in the first case
+    /// and "the feed never left" in the second. Reading it as the first in both
+    /// is what put the dock back over a feed whose own dismissal had been
+    /// abandoned (filmed on a device: page onto a text post, grab down, let go).
+    /// So the bar goes back only when the abandoned transition was ARRIVING here.
     private func retireTabBarOnReturn() {
         guard isClosable, let tabBarController, !tabBarController.isTabBarHidden else { return }
         guard let coordinator = transitionCoordinator else {
             tabBarController.setTabBarHidden(true, animated: false)
             return
         }
+        let arriving = coordinator.viewController(forKey: .to) === self
+            || coordinator.viewController(forKey: .to) === navigationController
         coordinator.animate(alongsideTransition: { _ in
             tabBarController.setTabBarHidden(true, animated: false)
         }, completion: { context in
-            guard context.isCancelled else { return }
+            // A return TO the feed that was abandoned: the screen that stays
+            // owns the bar. Anything else leaves the feed on screen, bar-less.
+            guard context.isCancelled, arriving else { return }
             tabBarController.setTabBarHidden(false, animated: false)
         })
+    }
+
+    /// The last word after an ABANDONED dismissal of this feed: once every
+    /// party's completion has run (one turn later — theirs are registered on
+    /// the same coordinator and can reveal the dock for the screen they
+    /// expected to land on), a feed still on top and on screen has no dock.
+    private func assertNoTabBarAfterAbandonedDismissal() {
+        guard let coordinator = transitionCoordinator,
+              coordinator.viewController(forKey: .from) === self
+                || coordinator.viewController(forKey: .from) === navigationController else { return }
+        coordinator.animate(alongsideTransition: nil) { [weak self] context in
+            guard context.isCancelled else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, isClosable, view.window != nil,
+                      navigationController?.topViewController === self,
+                      let tabBarController, !tabBarController.isTabBarHidden else { return }
+                tabBarController.setTabBarHidden(true, animated: false)
+            }
+        }
     }
 
     private var isClosable: Bool {
@@ -985,6 +1018,7 @@ final class SnapFeedViewController: UIViewController {
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        assertNoTabBarAfterAbandonedDismissal()
         setNativePopSuppressed(false)
         // A grab-to-dismiss or a pop is under way: the landing's warm must not
         // build ~100 ms of panel inside it. A cancelled grab lands again, and
