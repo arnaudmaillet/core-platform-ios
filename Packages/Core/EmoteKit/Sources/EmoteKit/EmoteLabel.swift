@@ -24,10 +24,11 @@ import UIKit
 ///
 /// - **Nothing off screen.** Not EFFECTIVELY visible (`EmoteVisibility`: in a
 ///   window, no hidden or transparent ancestor, inside every clipping
-///   ancestor's bounds): no players, no slots, no bakes — and a request still
-///   baking is cancelled. Nothing tells a label its cell was hidden or its
-///   page scrolled away, so `EmoteVisibilityMonitor` re-checks a few times a
-///   second and the label gives back what it held.
+///   ancestor's bounds — read from the presentation while Core Animation
+///   moves or fades something above it): no players, no slots, no bakes — and
+///   a request still baking is cancelled. Nothing tells a label its cell was
+///   hidden or its page scrolled away, so `EmoteVisibilityMonitor` re-checks a
+///   few times a second and the label gives back what it held.
 /// - **Nothing per frame.** Playback is a `CAKeyframeAnimation` on the render
 ///   server; scrolling moves the label, which re-lays nothing out.
 /// - **Bounded.** At most `EmoteEngine.maxAnimatedEmotes` animate at once,
@@ -261,10 +262,31 @@ open class EmoteLabel: UILabel {
         }
     }
 
+    /// Whether a next-turn re-check is already queued.
+    private var recheckQueued = false
+
+    /// A label laid out in the same turn its flight or fade was added — a
+    /// danmaku bubble spawning, a subtitle cue arriving — has no presentation
+    /// to read yet, and the model alone may call it invisible. The render tree
+    /// has one the next turn, so ask again then rather than waiting on the
+    /// monitor's next tick.
+    private func recheckNextTurn() {
+        guard !recheckQueued else { return }
+        recheckQueued = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.recheckQueued = false
+            self.reevaluateVisibility()
+        }
+    }
+
     /// Places, starts, moves and removes the players for the current layout.
     private func placeEmotes() {
         let textBox = emoteTextRect(forBounds: bounds)
-        lastSeenVisible = hasEmotes && animatesEmotes && isEffectivelyVisible
+        let verdict: EmoteVisibility.Verdict = hasEmotes && animatesEmotes
+            ? EmoteVisibility.verdict(for: self) : .invisible
+        lastSeenVisible = verdict == .visible
+        if verdict == .awaitingPresentation { recheckNextTurn() }
         guard lastSeenVisible, configureLayout(for: textBox, lines: numberOfLines) else {
             resetPlayers()
             return
