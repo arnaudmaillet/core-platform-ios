@@ -22,8 +22,12 @@ import UIKit
 ///
 /// ## What it costs
 ///
-/// - **Nothing off screen.** Not in a window, or hidden: no layout work, no
-///   bakes, no views — and a request still baking is cancelled.
+/// - **Nothing off screen.** Not EFFECTIVELY visible (`EmoteVisibility`: in a
+///   window, no hidden or transparent ancestor, inside every clipping
+///   ancestor's bounds): no players, no slots, no bakes — and a request still
+///   baking is cancelled. Nothing tells a label its cell was hidden or its
+///   page scrolled away, so `EmoteVisibilityMonitor` re-checks a few times a
+///   second and the label gives back what it held.
 /// - **Nothing per frame.** Playback is a `CAKeyframeAnimation` on the render
 ///   server; scrolling moves the label, which re-lays nothing out.
 /// - **Bounded.** At most `EmoteEngine.maxAnimatedEmotes` animate at once,
@@ -44,6 +48,7 @@ open class EmoteLabel: UILabel {
         didSet {
             guard animatesEmotes != oldValue else { return }
             resetPlayers()
+            updateVisibilityMonitoring()
         }
     }
 
@@ -55,6 +60,9 @@ open class EmoteLabel: UILabel {
     /// Mark indices whose glyph is currently NOT drawn, because an animation
     /// covers it.
     private var coveredMarks: Set<Int> = []
+    /// The visibility the last layout or monitor tick saw — what a tick
+    /// compares against, so it acts only on a CHANGE.
+    private var lastSeenVisible = false
 
     override public init(frame: CGRect) {
         super.init(frame: frame)
@@ -136,6 +144,7 @@ open class EmoteLabel: UILabel {
         resetPlayers()
         marks = EmoteText.marks(in: super.attributedText)
         if !marks.isEmpty { setNeedsLayout() }
+        updateVisibilityMonitoring()
     }
 
     private func layoutDidChange() {
@@ -220,14 +229,43 @@ open class EmoteLabel: UILabel {
         } else if !marks.isEmpty {
             setNeedsLayout()
         }
+        updateVisibilityMonitoring()
+    }
+
+    // MARK: - Visibility
+
+    /// Whether this label can be seen right now (`EmoteVisibility`).
+    var isEffectivelyVisible: Bool { EmoteVisibility.isEffectivelyVisible(self) }
+
+    private func updateVisibilityMonitoring() {
+        if window != nil, !marks.isEmpty, animatesEmotes {
+            EmoteVisibilityMonitor.shared.register(self)
+        } else {
+            EmoteVisibilityMonitor.shared.unregister(self)
+        }
+    }
+
+    /// Called by `EmoteVisibilityMonitor`: gives everything back the moment
+    /// the label stops being visible, and lays out again the moment it
+    /// becomes visible. Acts only on a change, so a label at rest costs one
+    /// hierarchy walk a tick and no layout.
+    func reevaluateVisibility() {
+        guard hasEmotes, animatesEmotes else { return }
+        let visible = isEffectivelyVisible
+        guard visible != lastSeenVisible else { return }
+        lastSeenVisible = visible
+        if visible {
+            setNeedsLayout()
+        } else {
+            resetPlayers()
+        }
     }
 
     /// Places, starts, moves and removes the players for the current layout.
     private func placeEmotes() {
         let textBox = emoteTextRect(forBounds: bounds)
-        guard hasEmotes, animatesEmotes, window != nil, !isHidden,
-              configureLayout(for: textBox, lines: numberOfLines)
-        else {
+        lastSeenVisible = hasEmotes && animatesEmotes && isEffectivelyVisible
+        guard lastSeenVisible, configureLayout(for: textBox, lines: numberOfLines) else {
             resetPlayers()
             return
         }

@@ -211,33 +211,91 @@ struct EmoteEngineTests {
         #expect(await engine.art(for: lol, pixelSide: 48) == nil)
     }
 
-    /// THE SCROLL CONTRACT: while the run loop is tracking (a finger down, a
-    /// scroll decelerating) no bake draws a single frame; back in the default
-    /// mode it resumes.
-    @Test func bakesPauseWhileTheRunLoopIsTracking() async throws {
-        let fire = try emote("noto:1f525")
-        let animation = try #require(await EmoteEngine.bundledAnimation(for: fire))
-        let job = try #require(EmoteBakeJob(animation: animation, plan: .make(seconds: animation.duration, side: 48)))
-        var finished: Bool?
-        EmoteIdleBaker.shared.enqueue(job) { finished = $0 }
-
-        let tracking = CFRunLoopMode(RunLoop.Mode.tracking.rawValue as CFString)
-        Self.spin(tracking, seconds: 0.3)
-        #expect(job.drawnFrames == 0, "a bake drew \(job.drawnFrames) frames during tracking")
-
-        Self.spin(.defaultMode, seconds: 0.3)
-        #expect(job.drawnFrames > 0)
-        for _ in 0..<300 where finished == nil {
-            try await Task.sleep(for: .milliseconds(10))
+    /// THE MAIN-THREAD CONTRACT: a bake draws no frame on the main thread.
+    /// Once its tree is built and the main thread has run the tree's birth
+    /// redraw (`EmoteBakeSession.waitForBirthRedraw`), the main thread is
+    /// BLOCKED here while the whole sheet is drawn; were a single frame drawn
+    /// on it, this would time out.
+    @Test func aBakeDrawsNoFrameOnTheMainThread() async throws {
+        let cold = try emote("noto:1f976")
+        let animation = try #require(await EmoteEngine.bundledAnimation(for: cold))
+        let plan = EmoteBakePlan.make(seconds: animation.duration, side: 48)
+        let done = DispatchSemaphore(value: 0)
+        let result = BakeBox()
+        Task.detached {
+            result.set(await EmoteBakeQueue.shared.bake(animation, plan: plan))
+            done.signal()
         }
-        #expect(finished == true)
-        #expect(job.isFinished)
+        for _ in 0..<2000 where EmoteBakeQueue.shared.drawingJobs == 0 && result.value == nil {
+            try await Task.sleep(for: .milliseconds(1))
+        }
+        #expect(Self.block(on: done, seconds: 60), "the bake did not finish while the main thread was blocked")
+        let baked = try #require(result.value)
+        #expect(baked.image.width == plan.pixelWidth)
+        #expect(baked.image.height == plan.pixelHeight)
     }
 
-    /// Runs the main run loop in `mode` for `seconds` — a nested turn, as a
-    /// scroll view's tracking does.
-    private nonisolated static func spin(_ mode: CFRunLoopMode, seconds: Double) {
-        _ = CFRunLoopRunInMode(mode, seconds, false)
+    /// Blocks the calling (main) thread — deliberately synchronous.
+    private nonisolated static func block(on semaphore: DispatchSemaphore, seconds: Double) -> Bool {
+        semaphore.wait(timeout: .now() + seconds) == .success
+    }
+
+    /// The sheet a bake draws off the main thread looks like the one the old
+    /// main-thread drawer (a `LottieAnimationView`) drew, frame for frame.
+    /// Not byte for byte: backing stores are drawn at 4× the cell, not at
+    /// the composition's size (`EmoteFrameDrawer.supersampling`) — measured
+    /// ≤ 16/255 apart, 42 on 🔥's sparks. A wrong frame (a matte that cut
+    /// nothing) is thousands of channels ~100 apart.
+    @Test func offMainFramesMatchTheMainThreadDrawer() async throws {
+        for id in ["noto:1f602", "noto:1f976", "noto:1f525", "noto:1f914"] {
+            let animation = try #require(await EmoteEngine.bundledAnimation(for: try emote(id)))
+            let plan = EmoteBakePlan.make(seconds: animation.duration, side: 64)
+            let reference = try #require(ReferenceMainThreadDrawer.sheet(animation, plan: plan))
+            let baked = try #require(await EmoteBakeQueue.shared.bake(animation, plan: plan))
+            let far = TestBitmap.channelsApart(reference, baked.image, by: 48)
+            #expect(far == 0, "\(id): \(far) channels more than 48/255 from the main-thread drawer")
+        }
+    }
+
+    /// THE NO-RACE CONTRACT: with the main thread drawing Lottie in bursts
+    /// meanwhile — the reproducer that turned one frame of 😂 orange in
+    /// nearly every bake while the tree's birth redraw ran on the main thread
+    /// mid-bake — a bake draws exactly what it draws alone.
+    @Test func aBakeUnderMainThreadLottieLoadMatchesOneAlone() async throws {
+        let stress = try #require(await EmoteEngine.bundledAnimation(for: try emote("noto:1f62d")))
+        let burst = EmoteBakePlan.make(seconds: 0.3, side: 48)
+        for id in ["noto:1f602", "noto:1f979", "noto:1f525"] {
+            let animation = try #require(await EmoteEngine.bundledAnimation(for: try emote(id)))
+            let plan = EmoteBakePlan.make(seconds: animation.duration, side: 48)
+            let alone = try #require(await EmoteBakeQueue.shared.bake(animation, plan: plan))
+            for _ in 0..<3 {
+                let bake = Task.detached(priority: .utility) { await EmoteBakeQueue.shared.bake(animation, plan: plan) }
+                while EmoteBakeQueue.shared.pendingJobs > 0 {
+                    _ = ReferenceMainThreadDrawer.sheet(stress, plan: burst)
+                    try await Task.sleep(for: .milliseconds(5))
+                }
+                let loaded = try #require(await bake.value)
+                let far = TestBitmap.channelsApart(alone.image, loaded.image, by: 8)
+                #expect(far == 0, "\(id): \(far) channels differ from the same bake alone")
+            }
+        }
+    }
+
+    /// What the drawer relies on inside Lottie, checked so a Lottie update
+    /// that moves it fails HERE rather than silently: inverted mattes are
+    /// found (through `inputMatte`), and every layer draws at the cell's
+    /// supersampled scale, not the canvas's.
+    @Test func theDrawerFindsMattesAndScalesEveryStore() async throws {
+        let joy = try #require(await EmoteEngine.bundledAnimation(for: try emote("noto:1f602")))
+        let drawer = try #require(EmoteFrameDrawer(animation: joy, side: 64))
+        #expect(drawer.invertedMatteCount == 1)
+        #expect(drawer.selfDrawingCount >= 2, "the inverted matte and its gradient at least")
+        #expect(drawer.layerCount > 20)
+        let expected = EmoteFrameDrawer.supersampling * 64 / max(joy.bounds.width, joy.bounds.height)
+        #expect(drawer.backingStoreScales == [expected])
+
+        let fire = try #require(await EmoteEngine.bundledAnimation(for: try emote("noto:1f525")))
+        #expect(try #require(EmoteFrameDrawer(animation: fire, side: 64)).invertedMatteCount == 0)
     }
 
     /// The numbers for the record: bake time and memory for a spread of real
@@ -253,13 +311,52 @@ struct EmoteEngineTests {
             let art = try #require(await engine.art(for: emote, pixelSide: 64))
             let wall = (ContinuousClock.now - started).milliseconds
             lines.append(String(
-                format: "%@ %@ frames=%d bytes=%.2fMB mainMS=%.1f bakeWallMS=%.1f totalMS=%.1f",
+                format: "%@ %@ frames=%d bytes=%.2fMB offMainDrawingMS=%.1f bakeWallMS=%.1f totalMS=%.1f",
                 emote.glyph, id, art.frameCount, Double(art.byteCost) / 1_048_576,
-                engine.stats.lastBakeMainThreadMS, engine.stats.lastBakeWallMS, wall
+                engine.stats.lastBakeDrawingMS, engine.stats.lastBakeWallMS, wall
             ))
             #expect(art.byteCost <= EmoteBakePlan.maxBytes)
         }
         print("[emote-costs]\n" + lines.joined(separator: "\n"))
+    }
+}
+
+/// Carries a bake's result out of a detached task.
+final class BakeBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: EmoteBakeResult?
+    var value: EmoteBakeResult? { lock.withLock { stored } }
+    func set(_ result: EmoteBakeResult?) { lock.withLock { stored = result } }
+}
+
+/// The drawer bakes used before they moved off the main thread: a
+/// `.mainThread` `LottieAnimationView`, driven by `currentTime` and captured
+/// with `render(in:)`. Kept here as the reference the off-main path must match.
+@MainActor
+enum ReferenceMainThreadDrawer {
+    static func sheet(_ animation: LottieAnimation, plan: EmoteBakePlan) -> CGImage? {
+        guard let context = CGContext(
+            data: nil, width: plan.pixelWidth, height: plan.pixelHeight, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+        ) else { return nil }
+        context.translateBy(x: 0, y: CGFloat(plan.pixelHeight))
+        context.scaleBy(x: 1, y: -1)
+        let view = LottieAnimationView(animation: animation, configuration: LottieConfiguration(renderingEngine: .mainThread))
+        view.contentMode = .scaleAspectFit
+        view.frame = CGRect(x: 0, y: 0, width: plan.side, height: plan.side)
+        view.layoutIfNeeded()
+        for index in 0..<plan.frameCount {
+            let origin = plan.origin(ofFrame: index)
+            context.saveGState()
+            context.translateBy(x: CGFloat(origin.x), y: CGFloat(origin.y))
+            view.currentTime = plan.time(ofFrame: index)
+            view.layer.displayIfNeeded()
+            view.layer.sublayers?.forEach { $0.displayIfNeeded() }
+            view.layer.render(in: context)
+            context.restoreGState()
+        }
+        return context.makeImage()
     }
 }
 
@@ -315,6 +412,14 @@ enum TestBitmap {
             }
         }
         return Cell(pixels: pixels, inked: inked)
+    }
+
+    /// Channels (of all pixels) more than `threshold` apart in two equally
+    /// sized images.
+    static func channelsApart(_ a: CGImage, _ b: CGImage, by threshold: Int) -> Int {
+        let x = rgba(a), y = rgba(b)
+        guard x.count == y.count else { return Int.max }
+        return zip(x, y).reduce(0) { $0 + (abs(Int($1.0) - Int($1.1)) > threshold ? 1 : 0) }
     }
 
     /// Inked pixels in the gutters between cells.

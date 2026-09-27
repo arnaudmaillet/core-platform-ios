@@ -6,8 +6,8 @@ import UIKit
 ///
 /// ## What animates, and why not everything
 ///
-/// A bake costs a few hundred milliseconds of idle main-thread time and about
-/// a megabyte, so a picker that baked every visible cell would spend tens of
+/// A bake costs up to a few seconds of background drawing and about a
+/// megabyte, so a picker that baked every visible cell would spend tens of
 /// seconds and tens of megabytes the moment it opened. A tile therefore plays:
 ///
 /// - art already resident — free, whatever the section;

@@ -185,6 +185,138 @@ struct EmoteLabelTests {
         #expect(second.showingEmoteCount == 1)
     }
 
+    // MARK: - Visibility and slots
+
+    /// A label two views deep in a window: window → container → label.
+    private func nestedLabel(
+        _ text: String, engine: EmoteEngine, in container: UIView
+    ) -> (EmoteLabel, UIWindow) {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 400))
+        window.isHidden = false
+        window.addSubview(container)
+        let label = EmoteLabel()
+        label.engine = engine
+        label.font = font
+        label.setEmoteText(text)
+        container.addSubview(label)
+        label.frame = CGRect(x: 10, y: 10, width: 300, height: 30)
+        label.layoutIfNeeded()
+        return (label, window)
+    }
+
+    /// A HIDDEN ANCESTOR (a collection view's parked cell) gives the slots
+    /// back, and showing it again takes them again.
+    @Test func aLabelInAHiddenContainerReleasesItsSlots() throws {
+        let engine = try warmEngine(["noto:1f525"])
+        let container = UIView(frame: CGRect(x: 0, y: 0, width: 400, height: 400))
+        let (label, window) = nestedLabel("🔥🔥", engine: engine, in: container)
+        defer { window.isHidden = true }
+        #expect(engine.animatedCount == 2)
+
+        container.isHidden = true
+        EmoteVisibilityMonitor.shared.tick()
+        #expect(engine.animatedCount == 0)
+        #expect(label.placedEmoteCount == 0)
+        #expect(label.coveredMarkIndices.isEmpty, "a label that gave its players back must draw its glyphs")
+
+        container.isHidden = false
+        EmoteVisibilityMonitor.shared.tick()
+        label.layoutIfNeeded()
+        #expect(engine.animatedCount == 2)
+        #expect(label.showingEmoteCount == 2)
+    }
+
+    /// OUT OF A SCROLL VIEW'S BOUNDS (a pager's neighbour page, a row
+    /// scrolled away) gives the slots back; scrolling back takes them again.
+    @Test func aLabelScrolledOutOfAScrollViewReleasesItsSlots() throws {
+        let engine = try warmEngine(["noto:1f525"])
+        let scroll = UIScrollView(frame: CGRect(x: 0, y: 0, width: 400, height: 200))
+        scroll.contentSize = CGSize(width: 400, height: 2000)
+        let (label, window) = nestedLabel("🔥", engine: engine, in: scroll)
+        defer { window.isHidden = true }
+        #expect(engine.animatedCount == 1)
+
+        // Still partly inside: keeps its slot.
+        scroll.contentOffset = CGPoint(x: 0, y: 30)
+        EmoteVisibilityMonitor.shared.tick()
+        #expect(engine.animatedCount == 1)
+
+        scroll.contentOffset = CGPoint(x: 0, y: 1000)
+        EmoteVisibilityMonitor.shared.tick()
+        #expect(engine.animatedCount == 0)
+        #expect(label.placedEmoteCount == 0)
+
+        scroll.contentOffset = .zero
+        EmoteVisibilityMonitor.shared.tick()
+        label.layoutIfNeeded()
+        #expect(engine.animatedCount == 1)
+    }
+
+    @Test func aTransparentAncestorReleasesTheSlots() throws {
+        let engine = try warmEngine(["noto:1f525"])
+        let container = UIView(frame: CGRect(x: 0, y: 0, width: 400, height: 400))
+        let (_, window) = nestedLabel("🔥", engine: engine, in: container)
+        defer { window.isHidden = true }
+        #expect(engine.animatedCount == 1)
+        container.alpha = 0
+        EmoteVisibilityMonitor.shared.tick()
+        #expect(engine.animatedCount == 0)
+    }
+
+    /// Laid out outside the window (an off-screen page that does not clip):
+    /// never takes a slot at all, and still draws its glyph.
+    @Test func aLabelOutsideTheWindowNeverTakesASlot() throws {
+        let engine = try warmEngine(["noto:1f525"])
+        let container = UIView(frame: CGRect(x: 1000, y: 0, width: 400, height: 400))
+        let (label, window) = nestedLabel("🔥", engine: engine, in: container)
+        defer { window.isHidden = true }
+        #expect(engine.animatedCount == 0)
+        #expect(label.placedEmoteCount == 0)
+        #expect(Self.colouredInk(of: label) != nil, "its glyph is still drawn")
+    }
+
+    /// The monitor's own timer does it, with no test calling `tick()`, and
+    /// the freed slot goes to a VISIBLE label that was waiting for one.
+    @Test func theMonitorFreesSlotsForVisibleLabelsOnItsOwn() async throws {
+        let engine = try warmEngine(["noto:1f525"])
+        engine.maxAnimatedEmotes = 1
+        let container = UIView(frame: CGRect(x: 0, y: 0, width: 400, height: 200))
+        let (hidden, window) = nestedLabel("🔥", engine: engine, in: container)
+        defer { window.isHidden = true }
+        #expect(hidden.showingEmoteCount == 1)
+        let visible = EmoteLabel(frame: CGRect(x: 10, y: 250, width: 300, height: 30))
+        visible.engine = engine
+        visible.font = font
+        visible.setEmoteText("🔥")
+        window.addSubview(visible)
+        visible.layoutIfNeeded()
+        #expect(visible.showingEmoteCount == 0, "over the cap: waits on its glyph")
+        #expect(EmoteVisibilityMonitor.shared.isRunning)
+
+        container.isHidden = true
+        for _ in 0..<100 where visible.showingEmoteCount == 0 {
+            try await Task.sleep(for: .milliseconds(20))
+            window.layoutIfNeeded()
+        }
+        #expect(hidden.placedEmoteCount == 0)
+        #expect(visible.showingEmoteCount == 1)
+        #expect(engine.animatedCount == 1)
+    }
+
+    /// A label with no emotes, or out of any window, is not monitored.
+    @Test func onlyLabelsWithEmotesInAWindowAreMonitored() throws {
+        let engine = try warmEngine(["noto:1f525"])
+        let (label, window) = hostedLabel("🔥", engine: engine)
+        defer { window.isHidden = true }
+        let before = EmoteVisibilityMonitor.shared.registeredCount
+        label.setEmoteText("plain words")
+        #expect(EmoteVisibilityMonitor.shared.registeredCount == before - 1)
+        label.setEmoteText("🔥")
+        #expect(EmoteVisibilityMonitor.shared.registeredCount == before)
+        label.removeFromSuperview()
+        #expect(EmoteVisibilityMonitor.shared.registeredCount == before - 1)
+    }
+
     /// Reduce Motion: an emoji is left to the system (nothing placed, nothing
     /// baked); a house emote shows its first frame.
     @Test func reduceMotionShowsStills() throws {

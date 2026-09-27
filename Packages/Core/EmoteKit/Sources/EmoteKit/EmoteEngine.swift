@@ -9,8 +9,8 @@ import UIKit
 /// ## Where art comes from
 ///
 /// - **Lottie emotes** (Noto emoji, StickerKit stickers) are BAKED: drawn once
-///   into a small sprite sheet at a text-size bucket (`pixelBuckets`), in
-///   idle turns of the main run loop (`EmoteIdleBaker`), then kept in memory and on disk.
+///   into a small sprite sheet at a text-size bucket (`pixelBuckets`), OFF the
+///   main thread (`EmoteBakeQueue`), then kept in memory and on disk.
 /// - **Map icons** are already baked by `Tools/IconBaker`; they come straight
 ///   from the app's `AnimatedIconCatalog`.
 ///
@@ -23,7 +23,8 @@ import UIKit
 ///
 /// Asking twice for one sheet while it bakes waits on ONE bake. A request is
 /// cancellable, and a bake nobody is waiting for any more stops at its next
-/// slice — a caption scrolled past before its emoji baked costs one slice.
+/// frame — a caption scrolled past before its emoji baked costs one frame of
+/// background work.
 @MainActor
 public final class EmoteEngine {
     public static let shared = EmoteEngine()
@@ -64,8 +65,9 @@ public final class EmoteEngine {
         public internal(set) var bakesCancelled = 0
         public internal(set) var diskHits = 0
         public internal(set) var memoryHits = 0
-        /// Main-actor milliseconds of the most recent bake.
-        public internal(set) var lastBakeMainThreadMS: Double = 0
+        /// Milliseconds the most recent bake spent drawing — on the bake
+        /// queue, never on the main thread.
+        public internal(set) var lastBakeDrawingMS: Double = 0
         public internal(set) var lastBakeWallMS: Double = 0
         public internal(set) var lastBakeBytes = 0
     }
@@ -225,24 +227,27 @@ public final class EmoteEngine {
         if bakeDelay > .zero { try? await Task.sleep(for: bakeDelay) }
         guard !Task.isCancelled, let animation = await animationProvider(emote), !Task.isCancelled else { return nil }
         let plan = EmoteBakePlan.make(seconds: animation.duration, side: pixelSide, still: motion == .still)
-        guard let job = EmoteBakeJob(animation: animation, plan: plan) else { return nil }
         stats.bakesStarted += 1
         let clock = ContinuousClock()
         let started = clock.now
-        guard await EmoteIdleBaker.shared.run(job), let art = job.makeArt() else { return nil }
+        guard let baked = await EmoteBakeQueue.shared.bake(animation, plan: plan), !Task.isCancelled else { return nil }
+        let sheet = AnimatedIconSheet(
+            sheet: UIImage(cgImage: baked.image), frameCount: plan.frameCount, columns: plan.columns,
+            frameDuration: plan.frameDuration, gutterPX: plan.gutter
+        )
+        let art = AnimatedIconArt.sheet(sheet)
         stats.bakesFinished += 1
-        stats.lastBakeMainThreadMS = job.drawingTime.milliseconds
+        stats.lastBakeDrawingMS = baked.drawingTime.milliseconds
         stats.lastBakeWallMS = (clock.now - started).milliseconds
         stats.lastBakeBytes = plan.byteCost
         #if DEBUG
         print(String(
-            format: "[emote] baked %@@%d %df %.2fMB main=%.1fms (%.1fms/frame) wall=%.1fms turns=%d",
+            format: "[emote] baked %@@%d %df %.2fMB off-main drawing=%.1fms (%.1fms/frame) wall=%.1fms",
             emote.id, pixelSide, plan.frameCount, Double(plan.byteCost) / 1_048_576,
-            stats.lastBakeMainThreadMS, stats.lastBakeMainThreadMS / Double(plan.frameCount),
-            stats.lastBakeWallMS, job.turns
+            stats.lastBakeDrawingMS, stats.lastBakeDrawingMS / Double(plan.frameCount), stats.lastBakeWallMS
         ))
         #endif
-        if let diskCache, case .sheet(let sheet) = art {
+        if let diskCache {
             let gutter = plan.gutter
             Task.detached(priority: .utility) { diskCache.store(sheet, gutter: gutter, stem: stem) }
         }
