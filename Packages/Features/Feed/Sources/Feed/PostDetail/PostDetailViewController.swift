@@ -2,6 +2,7 @@ import CoreModels
 import CoreStorage
 import MediaCore
 import DesignSystem
+import EmoteKit
 import FeedInterface
 import ProfileInterface
 import UIKit
@@ -172,7 +173,7 @@ final class PostDetailViewController: UIViewController {
     private let monogramLabel = UILabel()
     private let nameLabel = UILabel()
     private let handleLabel = UILabel()
-    private let captionLabel = UILabel()
+    private let captionLabel = EmoteLabel()
     private let mediaView = UIImageView()
     private let timestampLabel = UILabel()
     private let likeButton = UIButton(configuration: .plain())
