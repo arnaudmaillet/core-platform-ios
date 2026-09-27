@@ -14,7 +14,12 @@ import UIKit
 /// to the keyboard and starts one.
 @MainActor
 public final class EmotePickerView: UIInputView {
-    public static let preferredHeight: CGFloat = 300
+    /// The floating section bar: height, and its inset from the panel's
+    /// safe-area edges.
+    static let barHeight: CGFloat = 44
+    static let barInset = NSDirectionalEdgeInsets(top: 0, leading: 12, bottom: 4, trailing: 12)
+    /// Daylight between the last row, scrolled to its end, and the bar.
+    static let barClearance: CGFloat = 8
 
     /// An emote was tapped.
     var onSelect: ((Emote) -> Void)?
@@ -24,22 +29,42 @@ public final class EmotePickerView: UIInputView {
     var onBackspace: (() -> Void)?
 
     private let engine: EmoteEngine
+    private let heights: EmoteKeyboardHeight
+    /// The height the panel asks for: the system keyboard's (see
+    /// `matchKeyboardHeight(in:)`).
+    private(set) var panelHeight: CGFloat
+    /// The screen width `panelHeight` was chosen for — a rotation re-asks.
+    private var matchedScreenWidth: CGFloat = 0
     private(set) var sections: [EmoteComposing.Section] = []
-    private let collectionView: UICollectionView
+    let collectionView: UICollectionView
+    /// The section bar's glass, FLOATING over the grid: the grid is the
+    /// panel's whole height and scrolls under it, the way the app's other
+    /// bars float over their content. Glass, never an opaque slab. The
+    /// effect is set on window attach: materialising one in `init` contacts
+    /// the render server (and stalls headless CI simulators).
+    let sectionBarGlass = UIVisualEffectView(effect: nil)
     private let sectionBar = UIStackView()
     private var sectionButtons: [UIButton] = []
     private let searchButton = UIButton(type: .system)
     private let deleteButton = UIButton(type: .system)
     private var deleteTimer: Timer?
 
-    init(engine: EmoteEngine) {
+    init(engine: EmoteEngine, heights: EmoteKeyboardHeight = .shared) {
         self.engine = engine
+        self.heights = heights
+        // A placeholder: `matchKeyboardHeight(in:)` states the real height
+        // before the panel is ever handed to the system.
+        panelHeight = EmoteKeyboardHeight.defaultHeight(
+            screenSize: CGSize(width: 402, height: 874), bottomInset: 34
+        )
         collectionView = UICollectionView(frame: .zero, collectionViewLayout: Self.makeLayout())
         super.init(
-            frame: CGRect(x: 0, y: 0, width: 0, height: Self.preferredHeight),
+            frame: CGRect(x: 0, y: 0, width: 0, height: panelHeight),
             inputViewStyle: .keyboard
         )
-        allowsSelfSizing = false
+        // Sized by `intrinsicContentSize` — the keyboard's height — so a
+        // change (a rotation) resizes the panel in place.
+        allowsSelfSizing = true
         autoresizingMask = [.flexibleWidth]
 
         collectionView.backgroundColor = .clear
@@ -52,6 +77,9 @@ public final class EmotePickerView: UIInputView {
         collectionView.dataSource = self
         collectionView.delegate = self
         collectionView.showsVerticalScrollIndicator = false
+        // The insets are the bar's, stated in `layoutSubviews`; the safe
+        // area's bottom is under the bar already.
+        collectionView.contentInsetAdjustmentBehavior = .never
         collectionView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(collectionView)
 
@@ -71,19 +99,72 @@ public final class EmotePickerView: UIInputView {
         sectionBar.distribution = .equalSpacing
         sectionBar.alignment = .center
         sectionBar.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(sectionBar)
+        sectionBarGlass.cornerConfiguration = .capsule()
+        sectionBarGlass.clipsToBounds = true
+        sectionBarGlass.translatesAutoresizingMaskIntoConstraints = false
+        sectionBarGlass.contentView.addSubview(sectionBar)
+        addSubview(sectionBarGlass)
 
         let guide = safeAreaLayoutGuide
+        let inset = Self.barInset
         NSLayoutConstraint.activate([
-            collectionView.topAnchor.constraint(equalTo: topAnchor, constant: 4),
+            // The grid is the whole panel, top to bottom.
+            collectionView.topAnchor.constraint(equalTo: topAnchor),
+            collectionView.bottomAnchor.constraint(equalTo: bottomAnchor),
             collectionView.leadingAnchor.constraint(equalTo: guide.leadingAnchor),
             collectionView.trailingAnchor.constraint(equalTo: guide.trailingAnchor),
-            collectionView.bottomAnchor.constraint(equalTo: sectionBar.topAnchor),
-            sectionBar.leadingAnchor.constraint(equalTo: guide.leadingAnchor, constant: 12),
-            sectionBar.trailingAnchor.constraint(equalTo: guide.trailingAnchor, constant: -12),
-            sectionBar.bottomAnchor.constraint(equalTo: guide.bottomAnchor, constant: -2),
-            sectionBar.heightAnchor.constraint(equalToConstant: 40)
+            sectionBarGlass.leadingAnchor.constraint(equalTo: guide.leadingAnchor, constant: inset.leading),
+            sectionBarGlass.trailingAnchor.constraint(equalTo: guide.trailingAnchor, constant: -inset.trailing),
+            sectionBarGlass.bottomAnchor.constraint(equalTo: guide.bottomAnchor, constant: -inset.bottom),
+            sectionBarGlass.heightAnchor.constraint(equalToConstant: Self.barHeight),
+            sectionBar.leadingAnchor.constraint(equalTo: sectionBarGlass.contentView.leadingAnchor, constant: 10),
+            sectionBar.trailingAnchor.constraint(equalTo: sectionBarGlass.contentView.trailingAnchor, constant: -10),
+            sectionBar.topAnchor.constraint(equalTo: sectionBarGlass.contentView.topAnchor),
+            sectionBar.bottomAnchor.constraint(equalTo: sectionBarGlass.contentView.bottomAnchor)
         ])
+    }
+
+    // MARK: - Height
+
+    override public var intrinsicContentSize: CGSize {
+        CGSize(width: UIView.noIntrinsicMetric, height: panelHeight)
+    }
+
+    /// Takes the height of the system keyboard on `window`'s screen — the
+    /// one this panel is about to replace. Called before every swap.
+    func matchKeyboardHeight(in window: UIWindow?) {
+        guard let window else { return }
+        let screen = window.screen.bounds.size
+        matchedScreenWidth = screen.width
+        setPanelHeight(heights.height(screenSize: screen, bottomInset: window.safeAreaInsets.bottom))
+    }
+
+    private func setPanelHeight(_ height: CGFloat) {
+        guard height != panelHeight else { return }
+        panelHeight = height
+        frame.size.height = height
+        invalidateIntrinsicContentSize()
+    }
+
+    override public func didMoveToWindow() {
+        super.didMoveToWindow()
+        guard window != nil, sectionBarGlass.effect == nil else { return }
+        sectionBarGlass.effect = UIGlassEffect(style: .regular)
+    }
+
+    override public func layoutSubviews() {
+        // A rotation while the panel is up: the keyboard for the new width.
+        if let window, window.screen.bounds.width != matchedScreenWidth, matchedScreenWidth > 0 {
+            matchKeyboardHeight(in: window)
+        }
+        super.layoutSubviews()
+        // The last row scrolls clear of the floating bar.
+        let bottom = max(0, bounds.maxY - sectionBarGlass.frame.minY) + Self.barClearance
+        let insets = UIEdgeInsets(top: 4, left: 0, bottom: bottom, right: 0)
+        if collectionView.contentInset != insets {
+            collectionView.contentInset = insets
+            collectionView.verticalScrollIndicatorInsets = insets
+        }
     }
 
     @available(*, unavailable)
@@ -121,7 +202,9 @@ public final class EmotePickerView: UIInputView {
                 ofKind: UICollectionView.elementKindSectionHeader, at: IndexPath(item: 0, section: section)
               )
         else { return }
-        let top = min(header.frame.minY, max(0, collectionView.contentSize.height - collectionView.bounds.height))
+        let insets = collectionView.contentInset
+        let end = collectionView.contentSize.height + insets.bottom - collectionView.bounds.height
+        let top = min(header.frame.minY - insets.top, max(-insets.top, end))
         collectionView.setContentOffset(CGPoint(x: 0, y: top), animated: false)
         highlightSection(section)
     }
@@ -221,7 +304,7 @@ extension EmotePickerView: UICollectionViewDataSource, UICollectionViewDelegate 
     }
 
     public func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        let probe = CGPoint(x: 20, y: scrollView.contentOffset.y + 30)
+        let probe = CGPoint(x: 20, y: scrollView.contentOffset.y + scrollView.contentInset.top + 30)
         if let indexPath = collectionView.indexPathForItem(at: probe) {
             highlightSection(indexPath.section)
         }

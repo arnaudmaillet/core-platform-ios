@@ -16,22 +16,121 @@ enum EmoteVisibility {
 
     /// In a window, nothing on the way up hidden or transparent, and some of
     /// the view's bounds inside every clipping ancestor (a scroll view clips)
-    /// and inside the window.
+    /// and inside the window — as the MODEL has it, or as the screen shows it
+    /// while Core Animation moves or fades something on the way up.
+    ///
+    /// ⚠️ **THE MODEL IS NOT WHAT IS ON SCREEN WHILE A LAYER ANIMATES.** The
+    /// feed's danmaku parks each bubble's model at its EXIT, off the band's
+    /// left edge, and flies it across with a `position.x` animation; the
+    /// subtitle pill parks its model opacity at 0 and is held visible by a
+    /// filled opacity animation. A model-only test called both invisible for
+    /// their whole life, so their emotes never played until a scrub wrote the
+    /// presentation positions into the models (probed 27 September 2026:
+    /// every bubble on the band `visible=false`, model x −76, presentation
+    /// x 34…347). So when the model says no and a layer on the way up carries
+    /// animations, the walk is repeated on the presentation values.
+    ///
+    /// Either answer is enough: a view fading IN (model 1, presentation 0) is
+    /// about to be seen, and one flying OUT (model off, presentation on) is
+    /// being seen. `isHidden` is never animated, so a hidden cell still gives
+    /// its slots back.
     ///
     /// One walk up the hierarchy, converting the rect a level at a time — a
-    /// few microseconds for a label twenty views deep.
+    /// few microseconds for a label twenty views deep; the second walk runs
+    /// only for a label the model places off screen or under a transparent
+    /// ancestor (never for a hidden one), and reads a presentation layer only
+    /// where a layer animates.
     static func isEffectivelyVisible(_ view: UIView) -> Bool {
-        guard let window = view.window else { return false }
-        var rect = view.bounds
+        verdict(for: view) == .visible
+    }
+
+    enum Verdict: Equatable {
+        case visible
+        case invisible
+        /// Invisible as far as anyone can tell yet, but a layer on the way up
+        /// carries an animation the render tree has not committed (no
+        /// presentation layer): the next turn can say otherwise.
+        case awaitingPresentation
+    }
+
+    static func verdict(for view: UIView) -> Verdict {
+        guard let window = view.window else { return .invisible }
+        let model = walk(from: view, to: window, presented: false)
+        if model.visible { return .visible }
+        guard !model.blockedByHidden else { return .invisible }
+        let presented = walk(from: view, to: window, presented: true)
+        if presented.visible { return .visible }
+        return presented.uncommittedAnimation ? .awaitingPresentation : .invisible
+    }
+
+    private struct Walk {
+        var visible = false
+        /// Stopped at a hidden view: no presentation can change that.
+        var blockedByHidden = false
+        /// Some animating layer had no presentation layer yet.
+        var uncommittedAnimation = false
+    }
+
+    /// `presented`: a layer that carries animations is read through its
+    /// presentation layer (its opacity, its geometry in its parent, its
+    /// bounds as a clip), every other one through its model. A layer's place
+    /// in its parent depends on its own position, bounds, anchor and
+    /// transform only, so each level can be read from whichever tree is
+    /// current for it.
+    private static func walk(from view: UIView, to window: UIWindow, presented: Bool) -> Walk {
+        var result = Walk()
         var current = view
+        var layer = source(of: current.layer, presented: presented, into: &result)
+        var rect = layer.bounds
         while true {
-            if current.isHidden || current.alpha < alphaThreshold { return false }
+            if current.isHidden {
+                result.blockedByHidden = true
+                return result
+            }
+            if CGFloat(layer.opacity) < alphaThreshold { return result }
             guard let parent = current.superview else { break }
-            rect = current.convert(rect, to: parent)
-            if parent.clipsToBounds, !rect.intersects(parent.bounds) { return false }
+            let parentLayer = source(of: parent.layer, presented: presented, into: &result)
+            if presented {
+                rect = Self.rect(rect, inSuperlayerOf: layer)
+            } else {
+                rect = current.convert(rect, to: parent)
+            }
+            if parent.clipsToBounds, !rect.intersects(parentLayer.bounds) { return result }
             current = parent
+            layer = parentLayer
         }
-        return current === window && rect.intersects(window.bounds)
+        result.visible = current === window && rect.intersects(layer.bounds)
+        return result
+    }
+
+    /// The layer to read a level from: the model, or — in a presented walk,
+    /// for a layer that animates — its presentation, when it has one.
+    private static func source(of layer: CALayer, presented: Bool, into result: inout Walk) -> CALayer {
+        guard presented, let keys = layer.animationKeys(), !keys.isEmpty else { return layer }
+        guard let presentation = layer.presentation() else {
+            result.uncommittedAnimation = true
+            return layer
+        }
+        return presentation
+    }
+
+    /// `rect`, in `layer`'s own coordinates, in its superlayer's — from the
+    /// layer's position, bounds, anchor point and (affine part of its)
+    /// transform: what `CALayer.convert(_:to:)` does for one level, without
+    /// needing both layers to belong to the same tree.
+    static func rect(_ rect: CGRect, inSuperlayerOf layer: CALayer) -> CGRect {
+        let bounds = layer.bounds
+        let anchor = layer.anchorPoint
+        let position = layer.position
+        var transform = CGAffineTransform(
+            translationX: -(bounds.minX + anchor.x * bounds.width),
+            y: -(bounds.minY + anchor.y * bounds.height)
+        )
+        if !CATransform3DIsIdentity(layer.transform) {
+            transform = transform.concatenating(CATransform3DGetAffineTransform(layer.transform))
+        }
+        transform = transform.concatenating(CGAffineTransform(translationX: position.x, y: position.y))
+        return rect.applying(transform)
     }
 }
 

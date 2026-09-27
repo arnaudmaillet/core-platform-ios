@@ -13,7 +13,9 @@ import UIKit
 /// ## What the person gets
 ///
 /// - **The panel** (`EmotePickerView`): the smiley swaps the keyboard for it,
-///   the keyboard glyph swaps back. Recent first, then the house emotes, then
+///   the keyboard glyph swaps back. It is exactly as tall as the system
+///   keyboard it replaces (`EmoteKeyboardHeight`), so a composer riding the
+///   keyboard does not move. Recent first, then the house emotes, then
 ///   Noto's sections; a section bar to jump; delete that takes a whole
 ///   `:code:` or a whole emoji at once. The panel leaves when editing ends, so
 ///   the next focus opens the keyboard.
@@ -38,7 +40,7 @@ public final class EmoteKeyboard: NSObject {
     private let engine: EmoteEngine
     private let recents: EmoteRecents
     private lazy var picker: EmotePickerView = {
-        let picker = EmotePickerView(engine: engine)
+        let picker = EmotePickerView(engine: engine, heights: heights)
         picker.onSelect = { [weak self] emote in self?.pick(emote) }
         picker.onBackspace = { [weak self] in self?.deleteBackward() }
         picker.onSearch = { [weak self] in self?.startSearch() }
@@ -46,6 +48,8 @@ public final class EmoteKeyboard: NSObject {
     }()
     private let strip: EmoteSuggestionStrip
     private let suggestsInline: Bool
+    /// Where the panel's height comes from: the system keyboard it replaces.
+    private let heights: EmoteKeyboardHeight
 
     /// The view the suggestion strip floats above — the composer's field.
     /// The text view itself when nil.
@@ -63,12 +67,24 @@ public final class EmoteKeyboard: NSObject {
     }
 
     /// - Parameter suggestsInline: false turns the `:query` strip off.
-    public init(
+    public convenience init(
         textView: UITextView,
         engine: EmoteEngine = .shared,
         recents: EmoteRecents = .shared,
         suggestsInline: Bool = true
     ) {
+        self.init(textView: textView, engine: engine, recents: recents,
+                  suggestsInline: suggestsInline, heights: .shared)
+    }
+
+    init(
+        textView: UITextView,
+        engine: EmoteEngine,
+        recents: EmoteRecents,
+        suggestsInline: Bool,
+        heights: EmoteKeyboardHeight
+    ) {
+        self.heights = heights
         self.textView = textView
         self.engine = engine
         self.recents = recents
@@ -77,6 +93,7 @@ public final class EmoteKeyboard: NSObject {
         super.init()
 
         strip.onSelect = { [weak self] emote in self?.acceptSuggestion(emote) }
+        heights.track(self)
 
         toggleButton.accessibilityIdentifier = "emote-toggle"
         toggleButton.addAction(UIAction { [weak self] _ in self?.toggle() }, for: .primaryActionTriggered)
@@ -99,6 +116,9 @@ public final class EmoteKeyboard: NSObject {
         } else {
             let picker = self.picker
             picker.reload(recents: recents.emotes(in: engine.catalog))
+            // Exactly the keyboard's height, settled BEFORE the swap: the
+            // system reads it once, as it slides the panel in.
+            picker.matchKeyboardHeight(in: textView.window)
             textView.inputView = picker
         }
         if textView.isFirstResponder {

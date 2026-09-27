@@ -206,3 +206,112 @@ struct EmoteKeyboardTests {
         #expect(textView.text == "full")
     }
 }
+
+/// The panel stands in for the system keyboard at EXACTLY its height, so a
+/// composer riding the keyboard does not move on the swap.
+@MainActor
+@Suite(.serialized)
+struct EmoteKeyboardHeightTests {
+    private let screen = CGRect(x: 0, y: 0, width: 402, height: 874)
+
+    private func scratch() -> (EmoteKeyboardHeight, UserDefaults) {
+        let defaults = UserDefaults(suiteName: "emote-keyboard-height-\(UUID().uuidString)")!
+        return (EmoteKeyboardHeight(defaults: defaults), defaults)
+    }
+
+    private func docked(_ height: CGFloat, width: CGFloat = 402, screenHeight: CGFloat = 874) -> CGRect {
+        CGRect(x: 0, y: screenHeight - height, width: width, height: height)
+    }
+
+    @Test func aDockedSystemKeyboardIsMeasuredPerWidthAndPersisted() {
+        let (heights, defaults) = scratch()
+        #expect(heights.record(endFrame: docked(336), screen: screen))
+        #expect(heights.height(screenSize: screen.size, bottomInset: 34) == 336)
+        // Landscape is its own measurement.
+        let landscape = CGRect(x: 0, y: 0, width: 874, height: 402)
+        #expect(heights.measuredHeight(screenWidth: 874) == nil)
+        #expect(heights.record(endFrame: docked(209, width: 874, screenHeight: 402), screen: landscape))
+        #expect(heights.height(screenSize: landscape.size, bottomInset: 21) == 209)
+        #expect(heights.height(screenSize: screen.size, bottomInset: 34) == 336)
+        // The next launch opens the panel at the measured height.
+        let relaunched = EmoteKeyboardHeight(defaults: defaults)
+        #expect(relaunched.measuredHeight(screenWidth: 402) == 336)
+        #expect(relaunched.measuredHeight(screenWidth: 874) == 209)
+    }
+
+    @Test func framesThatAreNotADockedKeyboardAreIgnored() {
+        let (heights, _) = scratch()
+        // Leaving: the end frame is below the screen.
+        #expect(!heights.record(endFrame: CGRect(x: 0, y: 874, width: 402, height: 336), screen: screen))
+        // A hardware keyboard's shortcut bar.
+        #expect(!heights.record(endFrame: docked(55), screen: screen))
+        // Undocked: does not reach the bottom.
+        #expect(!heights.record(endFrame: CGRect(x: 0, y: 300, width: 402, height: 300), screen: screen))
+        // Narrower than the screen (a floating keyboard).
+        #expect(!heights.record(endFrame: CGRect(x: 50, y: 574, width: 300, height: 300), screen: screen))
+        #expect(heights.measuredHeight(screenWidth: 402) == nil)
+    }
+
+    /// While the panel is up, the frame the system reports is the PANEL's:
+    /// it must not be taken for the keyboard's.
+    @Test func thePanelsOwnFrameIsNotMeasured() {
+        let (heights, defaults) = scratch()
+        let textView = UITextView(frame: CGRect(x: 0, y: 0, width: 300, height: 44))
+        let keyboard = EmoteKeyboard(
+            textView: textView, engine: EmoteEngine(diskCache: nil),
+            recents: EmoteRecents(defaults: defaults), suggestsInline: false, heights: heights
+        )
+        textView.inputView = keyboard.panel
+        #expect(keyboard.isShowingPanel)
+        #expect(!heights.record(endFrame: docked(300), screen: screen))
+        textView.inputView = nil
+        #expect(heights.record(endFrame: docked(336), screen: screen))
+        #expect(heights.measuredHeight(screenWidth: 402) == 336)
+    }
+
+    /// Before any keyboard was ever seen: the stock keyboard of the device.
+    @Test func theDefaultIsTheDevicesStockKeyboard() {
+        // Face ID Pro, portrait: measured 328 on the iOS 27 simulator.
+        #expect(EmoteKeyboardHeight.defaultHeight(screenSize: CGSize(width: 402, height: 874), bottomInset: 34) == 328)
+        // Touch ID SE: no inset, a shorter keyboard.
+        #expect(EmoteKeyboardHeight.defaultHeight(screenSize: CGSize(width: 375, height: 667), bottomInset: 0) == 260)
+        // A Pro Max is a little taller; landscape is shallower.
+        #expect(EmoteKeyboardHeight.defaultHeight(screenSize: CGSize(width: 440, height: 956), bottomInset: 34) == 338)
+        #expect(EmoteKeyboardHeight.defaultHeight(screenSize: CGSize(width: 874, height: 402), bottomInset: 21) < 260)
+    }
+
+    /// The panel takes the measured height, asks for it through its intrinsic
+    /// size (it self-sizes), and its grid is the whole panel with the section
+    /// bar floating over it, clear of the last row.
+    @Test func thePanelIsTheKeyboardsHeightWithAFullHeightGridUnderAFloatingBar() throws {
+        let (heights, _) = scratch()
+        let window = UIWindow(frame: screen)
+        window.isHidden = false
+        defer {
+            window.subviews.forEach { $0.removeFromSuperview() }
+            window.isHidden = true
+            window.layoutIfNeeded()
+        }
+        let screenBounds = window.screen.bounds
+        heights.record(endFrame: CGRect(x: 0, y: screenBounds.maxY - 336, width: screenBounds.width, height: 336),
+                       screen: screenBounds)
+        let panel = EmotePickerView(engine: EmoteEngine(diskCache: nil), heights: heights)
+        panel.reload(recents: [])
+        panel.matchKeyboardHeight(in: window)
+        #expect(panel.panelHeight == 336)
+        #expect(panel.intrinsicContentSize.height == 336)
+        #expect(panel.allowsSelfSizing)
+
+        panel.frame = CGRect(x: 0, y: 0, width: window.bounds.width, height: 336)
+        window.addSubview(panel)
+        panel.layoutIfNeeded()
+        let grid = panel.collectionView
+        #expect(grid.frame.minY == 0)
+        #expect(grid.frame.maxY == panel.bounds.maxY, "the grid runs under the bar to the panel's bottom")
+        let bar = panel.sectionBarGlass.frame
+        #expect(bar.maxY <= panel.bounds.maxY && bar.minY > grid.frame.minY)
+        #expect(grid.contentInset.bottom >= panel.bounds.maxY - bar.minY, "the last row scrolls clear of the bar")
+        #expect(panel.sectionBarGlass.effect is UIGlassEffect, "glass, not a slab")
+        #expect(panel.sectionBarGlass.backgroundColor == nil)
+    }
+}

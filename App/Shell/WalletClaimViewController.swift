@@ -71,7 +71,7 @@ final class WalletClaimViewController: UIViewController {
     private nonisolated enum Section: Hashable { case summary, active, settled }
     private nonisolated enum Item: Hashable {
         case summary
-        /// The countries shop's door: what the gems buy.
+        /// The Shop's door: what the gems buy.
         case countries
         case stake(String)
         case noActiveStakes
