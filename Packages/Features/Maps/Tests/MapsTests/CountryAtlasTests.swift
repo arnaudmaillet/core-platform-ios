@@ -30,6 +30,16 @@ struct CountryAtlasTests {
         #expect(atlas.country(containing: CLLocationCoordinate2D(latitude: 35, longitude: -40)) == nil)
     }
 
+    /// A post just off a coast is that coast's country; the open sea is no
+    /// country's.
+    @Test func anOffshorePostBelongsToTheNearestCoast() {
+        let offBarcelona = CLLocationCoordinate2D(latitude: 41.30, longitude: 2.30)
+        #expect(atlas.country(containing: offBarcelona) == nil, "the fixture should be at sea")
+        #expect(atlas.country(owning: offBarcelona)?.code == "ES")
+        #expect(atlas.country(owning: CLLocationCoordinate2D(latitude: 48.8566, longitude: 2.3522))?.code == "FR")
+        #expect(atlas.country(owning: CLLocationCoordinate2D(latitude: 35, longitude: -40)) == nil)
+    }
+
     /// The label point is where the rank annotation stands: it must be inside.
     @Test func everyLabelPointIsInsideItsCountry() {
         let outside = atlas.countries.filter { !$0.contains($0.label) }.map(\.code)

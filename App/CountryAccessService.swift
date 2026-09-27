@@ -97,7 +97,7 @@ final class CountryAccessService: CountryAccess {
         var activity: [String: (likes: Int64, posts: Int)] = [:]
         for placement in backend.geoDiscovery.placements() {
             let coordinate = CLLocationCoordinate2D(latitude: placement.latitude, longitude: placement.longitude)
-            guard let code = CountryAtlas.shared.country(containing: coordinate)?.code else { continue }
+            guard let code = CountryAtlas.shared.country(owning: coordinate)?.code else { continue }
             let likes = backend.counterStore.likeCount(for: placement.postID)
             let current = activity[code] ?? (0, 0)
             activity[code] = (current.likes + likes, current.posts + 1)

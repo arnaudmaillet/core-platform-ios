@@ -28,6 +28,9 @@ ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "Packages/Features/Maps/Sources/Maps/Resources/countries.json"
 TOLERANCE = 0.02
 DECIMALS = 3
+# The names people say, where Natural Earth's English name is the formal one
+# ("People's Republic of China") — a shop row is not a treaty.
+NAMES = {"CN": "China", "US": "United States", "CZ": "Czechia"}
 
 
 def perpendicular(point, start, end):
@@ -172,7 +175,7 @@ def main():
             label = inside_point(max(polygons, key=lambda p: ring_area(p[0])))
         entry = countries.setdefault(code, {
             "code": code,
-            "name": properties.get("NAME_EN") or properties.get("NAME"),
+            "name": NAMES.get(code) or properties.get("NAME_EN") or properties.get("NAME"),
             "continent": properties.get("CONTINENT"),
             "population": int(properties.get("POP_EST") or 0),
             "label": [round(label[0], DECIMALS), round(label[1], DECIMALS)],

@@ -937,23 +937,49 @@ final class MapsViewController: UIViewController {
         present(shop, animated: true)
     }
 
-    /// Frames a country's mainland and lifts it; a locked one then makes its
-    /// offer, lifted, once the map has arrived.
+    /// Goes to a country from the shop: lifted and framed, and a locked one
+    /// makes its offer (framed above the sheet).
     private func showCountry(_ code: String) {
         guard let country = CountryAtlas.shared.country(code: code) else { return }
-        let box = country.mainlandBounds
-        let region = MKCoordinateRegion(
-            center: CLLocationCoordinate2D(latitude: (box.minLat + box.maxLat) / 2, longitude: (box.minLon + box.maxLon) / 2),
-            span: MKCoordinateSpan(
-                latitudeDelta: min((box.maxLat - box.minLat) * 1.4, 150),
-                longitudeDelta: min((box.maxLon - box.minLon) * 1.4, 300)
-            )
-        )
+        if let countryAccess, !countryAccess.isUnlocked(code) {
+            offer(country)
+            return
+        }
         countryLayer.select(code)
-        mapView.setRegion(mapView.regionThatFits(region), animated: true)
-        guard let countryAccess, !countryAccess.isUnlocked(code) else { return }
-        // After the camera move, so the offer rises over the country it sells.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.offer(country) }
+        frame(country, bottomInset: 0)
+    }
+
+    /// Frames a country's mainland in the part of the map left visible
+    /// between the header and `bottomInset` from the bottom.
+    private func frame(_ country: CountryAtlas.Country, bottomInset: CGFloat) {
+        let box = country.mainlandBounds
+        let corner = MKMapPoint(CLLocationCoordinate2D(latitude: box.maxLat, longitude: box.minLon))
+        let opposite = MKMapPoint(CLLocationCoordinate2D(latitude: box.minLat, longitude: box.maxLon))
+        let rect = MKMapRect(
+            x: min(corner.x, opposite.x), y: min(corner.y, opposite.y),
+            width: abs(opposite.x - corner.x), height: abs(opposite.y - corner.y)
+        )
+        let insets = UIEdgeInsets(
+            top: view.safeAreaInsets.top + Spacing.xxl, left: Spacing.xxl,
+            bottom: max(bottomInset, view.safeAreaInsets.bottom) + Spacing.xl, right: Spacing.xxl
+        )
+        // ⚠️ NOT `setVisibleMapRect(_:edgePadding:)`: with the sheet's tall
+        // bottom padding it zoomed out ~3.7x too far (Spain above its offer
+        // came out a third of the band it was given). The visible rect is
+        // worked out here instead: the scale that fits the country in the
+        // band, and the band's centre on the country's.
+        let size = mapView.bounds.size
+        let band = CGSize(
+            width: max(size.width - insets.left - insets.right, 1),
+            height: max(size.height - insets.top - insets.bottom, 1)
+        )
+        let scale = max(rect.width / band.width, rect.height / band.height)
+        let visible = MKMapRect(
+            x: rect.midX - (insets.left + band.width / 2) * scale,
+            y: rect.midY - (insets.top + band.height / 2) * scale,
+            width: size.width * scale, height: size.height * scale
+        )
+        mapView.setVisibleMapRect(visible, animated: true)
     }
 
     /// A tap on a country: a locked one is offered (lifted, with its sheet);
@@ -971,6 +997,9 @@ final class MapsViewController: UIViewController {
         guard let countryAccess, presentedViewController == nil else { return }
         countryLayer.select(country.code)
         let sheet = CountryUnlockSheetViewController(country: country, access: countryAccess)
+        // The country being sold stands ABOVE the sheet, not under it.
+        sheet.loadViewIfNeeded()
+        frame(country, bottomInset: sheet.contentHeight + view.safeAreaInsets.bottom)
         sheet.onDismissed = { [weak self] in
             // Still lifted if it was just unlocked: the reveal is the reward.
             guard let self, !(self.countryAccess?.isUnlocked(country.code) ?? false) else { return }
@@ -985,7 +1014,8 @@ final class MapsViewController: UIViewController {
     }
 
     /// Whether `pin`'s post is on the map: its country is unlocked (or there
-    /// is nothing locked at all). A pin at sea is shown.
+    /// is nothing locked at all). A pin just offshore is its coast's
+    /// (`CountryAtlas.country(owning:)`); one on the open sea is shown.
     private func isInUnlockedCountry(_ pin: MapPin) -> Bool {
         guard let countryAccess else { return true }
         let code: String
@@ -993,7 +1023,7 @@ final class MapsViewController: UIViewController {
             code = cached
         } else {
             let coordinate = CLLocationCoordinate2D(latitude: pin.latitude, longitude: pin.longitude)
-            code = CountryAtlas.shared.country(containing: coordinate)?.code ?? ""
+            code = CountryAtlas.shared.country(owning: coordinate)?.code ?? ""
             pinCountries[pin.postID] = code
         }
         return code.isEmpty || countryAccess.isUnlocked(code)

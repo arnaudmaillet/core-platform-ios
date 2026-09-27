@@ -642,7 +642,7 @@ final class WalletCompactBar: UIView {
 /// ```
 ///  ┌──────────────────────────────────────┐
 ///  │ (🌍)  Countries                   ›  │
-///  │       3 of 237 on your map           │
+///  │       3 of 237 unlocked on your map  │
 ///  └──────────────────────────────────────┘
 /// ```
 final class WalletCountriesCell: UICollectionViewCell {
@@ -700,7 +700,7 @@ final class WalletCountriesCell: UICollectionViewCell {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     func configure(owned: Int, total: Int) {
-        subtitleLabel.text = "\(owned) of \(total) on your map · unlock more with gems"
+        subtitleLabel.text = "\(owned) of \(total) unlocked on your map"
         accessibilityLabel = "Countries, \(owned) of \(total) unlocked"
     }
 }

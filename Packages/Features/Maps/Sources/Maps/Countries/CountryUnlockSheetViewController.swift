@@ -34,7 +34,9 @@ final class CountryUnlockSheetViewController: UIViewController {
     private let unlockButton = UIButton(configuration: .prominentGlass())
     private let balanceLabel = UILabel()
     private static let detent = UISheetPresentationController.Detent.Identifier("country.unlock")
-    private var contentHeight: CGFloat = 380
+    /// The sheet's height above the bottom safe area — measured when the
+    /// view loads; the map frames the country above it.
+    private(set) var contentHeight: CGFloat = 380
 
     init(country: CountryAtlas.Country, access: any CountryAccess) {
         self.country = country
@@ -178,23 +180,30 @@ final class CountryUnlockSheetViewController: UIViewController {
         let valueLabel = UILabel()
         valueLabel.font = .monospacedDigitSystemFont(ofSize: 20, weight: .bold)
         valueLabel.textAlignment = .center
+        valueLabel.text = value
+        var valueView: UIView = valueLabel
         if heart {
-            let text = NSMutableAttributedString(attachment: NSTextAttachment(
-                image: UIImage(systemName: "heart.fill")!
-                    .withTintColor(.systemRed, renderingMode: .alwaysOriginal)
-                    .applyingSymbolConfiguration(.init(pointSize: 15, weight: .bold))!
-            ))
-            text.append(NSAttributedString(string: " " + value))
-            valueLabel.attributedText = text
-        } else {
-            valueLabel.text = value
+            // ⚠️ AN IMAGE VIEW, NOT A TEXT ATTACHMENT: the sheet's glass draws
+            // its labels vibrant, attachments included, and the red heart
+            // came out black.
+            let icon = UIImageView(image: UIImage(systemName: "heart.fill")?
+                .applyingSymbolConfiguration(.init(pointSize: 15, weight: .bold)))
+            icon.tintColor = .systemRed
+            icon.contentMode = .center
+            let row = UIStackView(arrangedSubviews: [icon, valueLabel])
+            row.spacing = 4
+            row.alignment = .center
+            let centred = UIStackView(arrangedSubviews: [row])
+            centred.axis = .vertical
+            centred.alignment = .center
+            valueView = centred
         }
         let captionLabel = UILabel()
         captionLabel.text = caption
         captionLabel.font = .preferredFont(forTextStyle: .caption1)
         captionLabel.textColor = .secondaryLabel
         captionLabel.textAlignment = .center
-        let column = UIStackView(arrangedSubviews: [valueLabel, captionLabel])
+        let column = UIStackView(arrangedSubviews: [valueView, captionLabel])
         column.axis = .vertical
         column.spacing = 2
         return column

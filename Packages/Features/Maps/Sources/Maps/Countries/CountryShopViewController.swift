@@ -36,7 +36,6 @@ public final class CountryShopViewController: UIViewController {
     private let countLabel = UILabel()
     private let progress = UIProgressView(progressViewStyle: .default)
     private let segments = UISegmentedControl(items: ["Locked", "Yours"])
-    private let balanceLabel = UILabel()
     private lazy var collectionView = UICollectionView(frame: .zero, collectionViewLayout: Self.layout())
     private var dataSource: UICollectionViewDiffableDataSource<Section, String>!
     private var query = ""
@@ -71,9 +70,6 @@ public final class CountryShopViewController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = .systemGroupedBackground
         navigationItem.largeTitleDisplayMode = .never
-        navigationItem.rightBarButtonItem = UIBarButtonItem(customView: balanceLabel)
-        navigationItem.rightBarButtonItem?.sharesBackground = false
-        navigationItem.rightBarButtonItem?.hidesSharedBackground = true
 
         let search = UISearchController(searchResultsController: nil)
         search.searchResultsUpdater = self
@@ -180,9 +176,7 @@ public final class CountryShopViewController: UIViewController {
         progress.setProgress(total == 0 ? 0 : Float(owned) / Float(total), animated: view.window != nil)
         segments.setTitle("Locked · \(total - owned)", forSegmentAt: Segment.locked.rawValue)
         segments.setTitle("Yours · \(owned)", forSegmentAt: Segment.owned.rawValue)
-        balanceLabel.attributedText = Self.gems(access.gems, font: .monospacedDigitSystemFont(ofSize: 17, weight: .semibold))
-        balanceLabel.sizeToFit()
-        balanceLabel.accessibilityLabel = "\(access.gems) gems"
+        installBalance()
     }
 
     private func configure(_ cell: UICollectionViewListCell, code: String) {
@@ -195,8 +189,8 @@ public final class CountryShopViewController: UIViewController {
         let details = NSMutableAttributedString(string: "#\(standing.rank)  ·  ")
         details.append(NSAttributedString(attachment: NSTextAttachment(
             image: UIImage(systemName: "heart.fill")!
-                .withTintColor(.systemRed, renderingMode: .alwaysOriginal)
                 .applyingSymbolConfiguration(.init(pointSize: 10, weight: .bold))!
+                .withTintColor(.systemRed, renderingMode: .alwaysOriginal)
         )))
         details.append(NSAttributedString(
             string: " \(LockedCountryAnnotationView.compact(standing.likes))  ·  "
@@ -291,14 +285,30 @@ public final class CountryShopViewController: UIViewController {
         apply(animated: true)
     }
 
-    private static func gems(_ gems: Int, font: UIFont) -> NSAttributedString {
-        let text = NSMutableAttributedString(attachment: NSTextAttachment(
-            image: UIImage(systemName: "diamond.fill")!
-                .withTintColor(GemSymbol.tint, renderingMode: .alwaysOriginal)
-                .applyingSymbolConfiguration(.init(pointSize: 13, weight: .bold))!
-        ))
-        text.append(NSAttributedString(string: " \(gems)", attributes: [.font: font]))
-        return text
+    /// The gem balance in the bar: a cyan diamond and the count.
+    ///
+    /// ⚠️ AN IMAGE VIEW, NOT A TEXT ATTACHMENT: bar items sit on glass, which
+    /// draws a label's attachments vibrant — the diamond came out black. And
+    /// a FRESH item per change, with a stable identifier: a reused custom-view
+    /// item keeps a wrapper sized for the old count.
+    private func installBalance() {
+        let diamond = UIImageView(image: UIImage(systemName: "diamond.fill")?
+            .applyingSymbolConfiguration(.init(pointSize: 13, weight: .bold)))
+        diamond.tintColor = GemSymbol.tint
+        let count = UILabel()
+        count.text = "\(access.gems)"
+        count.font = .monospacedDigitSystemFont(ofSize: 17, weight: .semibold)
+        let balance = UIStackView(arrangedSubviews: [diamond, count])
+        balance.spacing = 5
+        balance.alignment = .center
+        balance.isAccessibilityElement = true
+        balance.accessibilityLabel = "\(access.gems) gems"
+        balance.frame.size = balance.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
+        let item = UIBarButtonItem(customView: balance)
+        item.identifier = "countries.balance"
+        item.sharesBackground = false
+        item.hidesSharedBackground = true
+        navigationItem.rightBarButtonItem = item
     }
 
     private static func layout() -> UICollectionViewLayout {
