@@ -19,13 +19,16 @@ public final class MonogramAvatarView: UIView {
     public static let rowDiameter: CGFloat = 48
 
     private let label = UILabel()
+    /// The plate: an OVAL shape filled with a RESOLVED colour — see
+    /// `drawPlate` for why it is not the view's background.
+    let plate = CAShapeLayer()
     private var widthConstraint: NSLayoutConstraint!
     private var heightConstraint: NSLayoutConstraint!
 
     public init(diameter: CGFloat = MonogramAvatarView.rowDiameter) {
         super.init(frame: .zero)
-        backgroundColor = Self.plateColor
         clipsToBounds = true
+        layer.insertSublayer(plate, at: 0)
         label.font = Self.monogramFont(diameter)
         label.textColor = .secondaryLabel
         label.textAlignment = .center
@@ -34,6 +37,36 @@ public final class MonogramAvatarView: UIView {
         heightConstraint = heightAnchor.constraint(equalToConstant: diameter)
         NSLayoutConstraint.activate([widthConstraint, heightConstraint])
         setRound(diameter)
+        drawPlate(in: CGRect(x: 0, y: 0, width: diameter, height: diameter))
+        registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]) {
+            (view: MonogramAvatarView, _: UITraitCollection) in
+            view.drawPlate(in: view.bounds)
+        }
+    }
+
+    /// ⚠️ THE PLATE IS NOT THE VIEW'S BACKGROUND, and the author pill is why.
+    ///
+    /// It was `backgroundColor = .tertiarySystemFill`, a system FILL. Inside a
+    /// Liquid Glass bar item UIKit does not draw a fill as a plain layer
+    /// background: the view's layer carries NO background colour and a
+    /// `_UIMultiLayer` sublayer paints the fill instead (measured with
+    /// `-pill-probe`). When the item first materialised inside a push's bar
+    /// transition, that fill was drawn as a rounded SQUARE — the corner
+    /// radius AND the oval mask on this view notwithstanding — and stayed so
+    /// until the item was installed again (filmed on a device; reproduced on
+    /// the iPhone 18 Pro simulator with an author who has no picture).
+    ///
+    /// An oval PATH filled with a colour resolved against this view's traits
+    /// is a shape, not a fill to be reinterpreted: nothing a container does to
+    /// corners, masks or vibrancy can make an oval path square.
+    private func drawPlate(in rect: CGRect) {
+        guard rect.width > 0, rect.height > 0 else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        plate.frame = rect
+        plate.path = UIBezierPath(ovalIn: CGRect(origin: .zero, size: rect.size)).cgPath
+        plate.fillColor = Self.plateColor.resolvedColor(with: traitCollection).cgColor
+        CATransaction.commit()
     }
 
     /// ⚠️ ROUND FROM BIRTH, not from the first layout pass. The diameter is
@@ -71,6 +104,7 @@ public final class MonogramAvatarView: UIView {
         let side = min(bounds.width, bounds.height)
         if side > 0 { layer.cornerRadius = side / 2 }
         CircleMask.apply(to: self)
+        if plate.frame != bounds { drawPlate(in: bounds) }
     }
 
     /// Whether a picture covers the disc. A covered disc draws NOTHING, no
@@ -80,7 +114,10 @@ public final class MonogramAvatarView: UIView {
     public var isCovered = false {
         didSet {
             guard isCovered != oldValue else { return }
-            backgroundColor = isCovered ? .clear : Self.plateColor
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            plate.isHidden = isCovered
+            CATransaction.commit()
             label.isHidden = isCovered
         }
     }
@@ -103,4 +140,9 @@ public final class MonogramAvatarView: UIView {
     public func setMonogram(_ monogram: String) {
         label.text = monogram
     }
+
+    #if DEBUG
+    /// The initials on the plate, for probes looking for copies of it.
+    public var debugMonogramText: String? { label.text }
+    #endif
 }
