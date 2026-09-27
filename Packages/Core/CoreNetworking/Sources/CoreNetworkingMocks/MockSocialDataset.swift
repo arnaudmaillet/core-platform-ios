@@ -175,15 +175,15 @@ public struct MockSocialDataset: Sendable {
 
     static func viewerRecords(mediaCatalog: MediaCatalog, after count: Int) -> [PostRecord] {
         let captions = [
-            "Testing in production is fine if production is your simulator.",
-            "Shipping the new build tonight.",
+            "Testing in production is fine if production is your simulator. :lmao:",
+            "Shipping the new build tonight. 🚀",
             "Refactor landed and the office survived it.",
             "Weekend build log: the queue was never the problem, the clock was.",
             "No caption needed.",
-            "Three days offline and the feed can wait.",
-            "Golden hour over the harbour.",
+            "Three days offline and the feed can wait 😌",
+            "Golden hour over the harbour. 🌊✨",
             "Quiet morning, notes and a long walk before anything else.",
-            "New city, same habits."
+            "New city, same habits. ✈️"
         ]
         let shapes: [(Int, Int)] = [(1080, 1350), (1600, 900), (1080, 1080)]
         let newestMS: Int64 = 1_780_000_000_000
@@ -243,11 +243,13 @@ public struct MockSocialDataset: Sendable {
             Standup moved to nine. The deadline holds. We cut the scope of the \
             settings rewrite rather than the date, which means the migration \
             ships as-is and the polish lands next week. Anyone who needs the \
-            old behaviour can keep it behind the flag until the end of the month.
+            old behaviour can keep it behind the flag until the end of the month. ☕☕
             """,
-            // Arrivals 1 and 5 carry EMOTES — Unicode emoji and house
-            // `:code:`s — so EmoteKit's animated caption shows in mock mode.
-            // Neither `lmao` nor `lol` is in any context lexicon.
+            // Arrivals 0, 1, 2, 5, 6 and 7 carry EMOTES — Unicode emoji and
+            // house `:code:`s — so EmoteKit's animated caption shows in mock
+            // mode. Emoji add no words, and neither `lmao` nor `lol` is in any
+            // context lexicon. Arrivals 3 and 4 stay exactly as written: 3 is
+            // the focus arrival and 4 is matched BY CAPTION below.
             "Refactor landed and the office survived it. 🎉 :lmao:",
             """
             Shipping the new build tonight. The changelog is longer than I \
@@ -256,7 +258,7 @@ public struct MockSocialDataset: Sendable {
             rewrite of the retry logic that finally makes sense. Everything is \
             behind a flag, so if the numbers look wrong in the morning we turn \
             it off and nobody has to be woken up. The summary for standup is \
-            already in the doc.
+            already in the doc. 🤞
             """,
             "Quiet morning, notes and a long walk before anything else.",
             "Golden hour over the harbour.",
@@ -274,8 +276,8 @@ public struct MockSocialDataset: Sendable {
             // and the very first page down is another. Vocabulary kept clear of
             // every context lexicon — see the note above the captions — so the
             // lens counts below do not move.
-            "Third coffee. Still deciding whether the rewrite was a good idea.",
-            "Wrote four paragraphs, kept one. That is a normal ratio."
+            "Third coffee. Still deciding whether the rewrite was a good idea. ☕🤔",
+            "Wrote four paragraphs, kept one. That is a normal ratio. :lol:"
         ]
         // ⚠️ THE LEAD SCALES WITH THE COUNT, because the stamps step BACK a
         // minute each: the newest is `epochMS` and the oldest is that minus one
@@ -704,58 +706,59 @@ public struct MockSocialDataset: Sendable {
     public init(postCount: Int = 120, mediaCatalog: MediaCatalog = .synthetic) {
         self.mediaCatalog = mediaCatalog
         // (handle, name, bio, website) — bios vary from empty to multi-line so
-        // the profile header exercises every identity-row combination.
+        // the profile header exercises every identity-row combination. Many
+        // carry an emote or two, one a run, as bios do.
         let names: [(String, String, String, String)] = [
-            ("ava.moreau", "Ava Moreau", "Street photography, mostly Lyon.\nPrints on request.", "https://www.avamoreau.example/prints/"),
-            ("kenji.dev", "Kenji Tanaka", "Building small tools for small teams. Coffee first, commits later.", "https://kenji.example"),
+            ("ava.moreau", "Ava Moreau", "Street photography, mostly Lyon. 📸\nPrints on request.", "https://www.avamoreau.example/prints/"),
+            ("kenji.dev", "Kenji Tanaka", "Building small tools for small teams. Coffee first ☕, commits later. :laptop:", "https://kenji.example"),
             ("lena_klein", "Lena Klein", "", ""),
-            ("marcus.holt", "Marcus Holt", "Trail runner · Amateur baker", ""),
-            ("sofia.reyes", "Sofía Reyes", "Cocino, viajo, repito.", "https://sofia.example/blog"),
-            ("tom.okafor", "Tom Okafor", "Bass, mostly.", ""),
-            ("yuki.snow", "Yuki Shirakawa", "Snow reports and mountain film.\nSee you in Hakuba.", ""),
+            ("marcus.holt", "Marcus Holt", "Trail runner 🏁 · Amateur baker 🍪", ""),
+            ("sofia.reyes", "Sofía Reyes", "Cocino, viajo, repito. 🌮✈️", "https://sofia.example/blog"),
+            ("tom.okafor", "Tom Okafor", "Bass, mostly. 🎸", ""),
+            ("yuki.snow", "Yuki Shirakawa", "Snow reports and mountain film. ❄️\nSee you in Hakuba.", ""),
             ("zed.aldrin", "Zed Aldrin", "", "https://zed.example"),
-            ("nina.varga", "Nina Varga", "Ceramics, badly. Improving.", ""),
+            ("nina.varga", "Nina Varga", "Ceramics, badly. Improving. 🙃", ""),
             ("olu.adeyemi", "Olu Adeyemi", "Backend by day, bread by night.", "https://olu.example"),
             ("priya.raman", "Priya Raman", "Long runs and longer playlists 🎶🔥 :lol:", ""),
             ("quentin.dubois", "Quentin Dubois", "", ""),
             ("rosa.iglesias", "Rosa Iglesias", "Archivist. Ask me about microfilm.", ""),
-            ("sam.whitfield", "Sam Whitfield", "Boats, mostly small ones.", "https://sam.example"),
+            ("sam.whitfield", "Sam Whitfield", "Boats, mostly small ones. 🌊", "https://sam.example"),
             ("tara.nkemelu", "Tara Nkemelu", "Illustration + risograph.", ""),
-            ("umar.qadir", "Umar Qadir", "Teaching maths, learning guitar.", ""),
-            ("vera.lindqvist", "Vera Lindqvist", "Cold water swimmer.\nYes, year round.", ""),
+            ("umar.qadir", "Umar Qadir", "Teaching maths, learning guitar. :books: 🎸", ""),
+            ("vera.lindqvist", "Vera Lindqvist", "Cold water swimmer. 🥶\nYes, year round.", ""),
             ("wes.bramley", "Wes Bramley", "", ""),
-            ("xiomara.cruz", "Xiomara Cruz", "Salsa on Tuesdays.", "https://xio.example"),
+            ("xiomara.cruz", "Xiomara Cruz", "Salsa on Tuesdays. 💃💃💃💃💃", "https://xio.example"),
             ("yannis.papas", "Yannis Papas", "Olive groves and old engines.", ""),
             ("zara.hadid", "Zara Hadid", "Drawing buildings that won't stand up.", ""),
-            ("aiko.tanabe", "Aiko Tanabe", "Tea, type, and terrible puns.", ""),
+            ("aiko.tanabe", "Aiko Tanabe", "Tea, type, and terrible puns. :lol:", ""),
             ("bruno.costa", "Bruno Costa", "", ""),
             ("chloe.baptiste", "Chloé Baptiste", "Sound design for small films.", "https://chloe.example"),
             ("dmitri.orlov", "Dmitri Orlov", "Chess clocks and film cameras.", ""),
-            ("elif.demir", "Elif Demir", "Rooftop gardener.", ""),
-            ("finn.oleary", "Finn O'Leary", "Sea swimming, poorly.", ""),
+            ("elif.demir", "Elif Demir", "Rooftop gardener. 🌱🌷", ""),
+            ("finn.oleary", "Finn O'Leary", "Sea swimming, poorly. 🐬", ""),
             ("greta.hansen", "Greta Hansen", "Maps, always maps.", "https://greta.example"),
             ("hugo.martel", "Hugo Martel", "", ""),
-            ("ines.ferreira", "Inês Ferreira", "Botanical prints.", ""),
+            ("ines.ferreira", "Inês Ferreira", "Botanical prints. 🌸", ""),
             ("jonas.weber", "Jonas Weber", "Cycling the long way round.", ""),
             ("kaia.lindgren", "Kaia Lindgren", "Ceramicist. Kiln #3.", ""),
-            ("leo.marchetti", "Leo Marchetti", "Espresso and edge cases.", ""),
+            ("leo.marchetti", "Leo Marchetti", "Espresso and edge cases. ☕", ""),
             ("mira.solberg", "Mira Solberg", "Field recordings.", "https://mira.example"),
             ("noah.brandt", "Noah Brandt", "", ""),
             ("orla.kavanagh", "Orla Kavanagh", "Sea glass and short stories.", ""),
             ("pavel.novak", "Pavel Novák", "Trams, timetables, trivia.", ""),
             ("quinn.abara", "Quinn Abara", "", "https://quinn.example"),
             ("rita.moreno", "Rita Moreno", "Weaving on a very old loom.", ""),
-            ("stefan.ilic", "Stefan Ilić", "Mountains before breakfast.", ""),
+            ("stefan.ilic", "Stefan Ilić", "Mountains before breakfast. 🌞", ""),
             ("tessa.okonkwo", "Tessa Okonkwo", "Type design, slowly.", ""),
             ("ulf.johansson", "Ulf Johansson", "", ""),
-            ("valeria.rossi", "Valeria Rossi", "Pasta, patiently.", "https://valeria.example"),
-            ("wren.mackay", "Wren MacKay", "Birds, bothies, bad weather.", ""),
-            ("xander.pike", "Xander Pike", "Restoring one motorbike forever.", ""),
-            ("yara.haddad", "Yara Haddad", "Murals and mosaics.", ""),
+            ("valeria.rossi", "Valeria Rossi", "Pasta, patiently. 🤌", "https://valeria.example"),
+            ("wren.mackay", "Wren MacKay", "Birds, bothies, bad weather. :weather:", ""),
+            ("xander.pike", "Xander Pike", "Restoring one motorbike forever. 😩", ""),
+            ("yara.haddad", "Yara Haddad", "Murals and mosaics. 🌈", ""),
             ("zeke.turner", "Zeke Turner", "", ""),
             ("amara.diallo", "Amara Diallo", "Documentary sound.", "https://amara.example"),
             ("bo.lindholm", "Bo Lindholm", "Woodcut prints.", ""),
-            ("celia.marsh", "Celia Marsh", "Rock pools and field notes.", ""),
+            ("celia.marsh", "Celia Marsh", "Rock pools and field notes. 🐙", ""),
             ("dara.singh", "Dara Singh", "Kites, mostly homemade.", "")
         ]
         // `mediaCatalog` here is the initializer parameter, not the stored
@@ -795,9 +798,24 @@ public struct MockSocialDataset: Sendable {
             "Coffee count: unreasonable ☕😂 Progress: acceptable :lol: The refactor is finally starting to pay for itself and the test suite agrees 🔥",
             "No caption needed.",
             "Weekend build log: rebuilt the pipeline end to end, found two race conditions that only reproduce on cold caches, and learned more about backpressure than I ever wanted to. Writing it up properly this week — the short version is that the queue was never the problem, the clock was.",
-            "New city, same habits.",
-            "Testing in production is fine if production is your simulator.",
-            "The mountains were louder than the city this time. Three days offline and the feed can wait."
+            "New city, same habits. ✈️",
+            "Testing in production is fine if production is your simulator. :lmao:",
+            "The mountains were louder than the city this time. Three days offline and the feed can wait.",
+            // Entries 8 and up only lengthen the cycle, so the first eight posts
+            // keep the captions they always had. About half of the bank carries
+            // emotes (Noto emoji from EmoteKit's bundled subset, and house
+            // `:code:`s), two of them as a run, so animated text shows up on a
+            // normal scroll. ⚠️ Keep them clear of `ContentContext`'s keywords
+            // ("work", "play", "show", "notes"…): a caption is a substring
+            // search for the For You modes.
+            "Sunday market haul 🍓🥑🍉",
+            "Tried the new ramen place. Worth the queue. 🍜🔥",
+            "😂😂😂😂😂😂 I can't believe that actually happened",
+            "Nothing planned, which was the plan.",
+            "Birthday dinner with the best people 🎂🥂🎉🥳💕",
+            "Rain all week, so here's some sun from last month 🌞 :weather:",
+            "First swim of the year. Never again. Until tomorrow. 🥶🥶",
+            "Late train home, good book, zero signal."
         ]
         // Placeholder shapes, read only when the bundle has no clips or photos
         // (a post otherwise declares its own file's size): portrait,

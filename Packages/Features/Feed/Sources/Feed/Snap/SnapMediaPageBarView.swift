@@ -146,6 +146,15 @@ final class SnapMediaPageBarView: UIView {
     /// The HOST owns playback, for the reason it owns the carousel.
     var onSeekRequested: ((Double) -> Void)?
 
+    /// A drag has started moving a clip's playhead — the host stops the clip
+    /// under the thumb, so the frames it seeks to are the only ones shown.
+    var onScrubBegan: (() -> Void)?
+
+    /// The drag has let go of the playhead, at this fraction (nil on a
+    /// cancel, which changes nothing). The host lands on it exactly, and
+    /// starts the clip again if the scrub stopped it.
+    var onScrubEnded: ((Double?) -> Void)?
+
     /// Where the thumb is pointing while it drags a clip's bar: the moment, and
     /// the place along the strip to point at. Nil when the drag ends.
     ///
@@ -204,6 +213,33 @@ final class SnapMediaPageBarView: UIView {
     /// and its length is known. Nil draws nothing rather than zero — see
     /// `VideoPlaybackController.playhead`.
     private var playhead: Double?
+
+    /// ⚠️ THE THUMB'S OWN POSITION, drawn INSTEAD of the fed playhead from the
+    /// first point of a drag until the player has caught up with the release.
+    ///
+    /// The fill used to be drawn only from the playhead the host feeds, which
+    /// is the PLAYER's time: during a scrub that time stands still while a seek
+    /// decodes and then jumps to where it landed, so the bar stepped along
+    /// behind the finger — reported as "the slider stutters, isn't fluid". And
+    /// at the release it snapped back to wherever the player still was, then
+    /// forward again once the last seek landed. The thumb is the clock while a
+    /// finger holds it; the player takes it back only once it agrees.
+    private var heldPlayhead: Double?
+    /// When the finger let go of a held playhead — the hold gives up after
+    /// `handoverTimeout` if the player never arrives (a seek that failed).
+    private var heldReleasedAt: CFTimeInterval?
+
+    /// How close the fed playhead must come to the held one to take the bar
+    /// back. A frame or two of a short clip: close enough that the hand-over
+    /// cannot be seen.
+    static let handoverTolerance: Double = 0.01
+    /// How long a released hold waits for the player before letting it draw
+    /// anyway.
+    static let handoverTimeout: CFTimeInterval = 0.75
+
+    /// What the fill draws: the thumb while it holds, else the player.
+    private var drawnPlayhead: Double? { heldPlayhead ?? playhead }
+
     /// Where the carousel is, in fractional pages — the strip's entire state.
     private var position: CGFloat = 0
 
@@ -235,6 +271,9 @@ final class SnapMediaPageBarView: UIView {
     /// are simply no pages to walk to.
     func configure(count: Int, current: Int, clipPages: Set<Int> = []) {
         self.clipPages = clipPages
+        // A hold belongs to the clip it was taken on.
+        heldPlayhead = nil
+        heldReleasedAt = nil
         wakeTimer?.invalidate()
         wakeTimer = nil
         alpha = Self.restingOpacity
@@ -279,9 +318,26 @@ final class SnapMediaPageBarView: UIView {
     /// How far through the clip on the page the viewer is on. Nil when there is
     /// no clip, or none whose length is known yet.
     func setPlayhead(_ fraction: Double?) {
-        guard playhead != fraction else { return }
+        let moved = playhead != fraction
+        let wasHeld = heldPlayhead != nil
         playhead = fraction
+        // Asked on every feed, moved or not: a paused clip that has landed
+        // exactly where the thumb let go feeds the same value again and again,
+        // and that IS the player agreeing.
+        releaseHeldPlayheadIfCaughtUp()
+        let handedBack = wasHeld && heldPlayhead == nil
+        guard moved || handedBack else { return }
         layoutSegments()
+    }
+
+    /// Gives the bar back to the player once a released hold and the playhead
+    /// agree — or once the player has had long enough, or has gone.
+    private func releaseHeldPlayheadIfCaughtUp(now: CFTimeInterval = CACurrentMediaTime()) {
+        guard heldPlayhead != nil, let releasedAt = heldReleasedAt else { return }
+        let caughtUp = playhead.map { abs($0 - (heldPlayhead ?? $0)) <= Self.handoverTolerance } ?? true
+        guard caughtUp || now - releasedAt >= Self.handoverTimeout else { return }
+        heldPlayhead = nil
+        heldReleasedAt = nil
     }
 
     /// The carousel moved, in fractional pages.
@@ -302,7 +358,14 @@ final class SnapMediaPageBarView: UIView {
     /// alive here is the reflow itself.
     func setPosition(_ newPosition: CGFloat) {
         guard pageCount >= 2 else { return }
+        let watched = Int(position.rounded())
         position = min(max(newPosition, 0), CGFloat(pageCount - 1))
+        // A hold belongs to the clip it was taken on, and the watched page
+        // just changed hands.
+        if Int(position.rounded()) != watched, !isDraggingPlayhead {
+            heldPlayhead = nil
+            heldReleasedAt = nil
+        }
         layoutSegments()
         // ⚠️ AND SCROLLING THE PICTURES DOES NOT LIGHT THE STRIP. It did, on
         // the reading that the strip is about the pages and the pages were
@@ -525,7 +588,7 @@ final class SnapMediaPageBarView: UIView {
         // fill is already faint enough that the change cannot be seen.
         let watched = index == Int(position.rounded())
         let isBar = clipPages.contains(index) && clipness > 0 && watched
-        guard isBar, let playhead else {
+        guard isBar, let playhead = drawnPlayhead else {
             fills[index]?.isHidden = true
             return
         }
@@ -662,11 +725,20 @@ final class SnapMediaPageBarView: UIView {
             wake()
             touchDownX = x
             travelled = false
-            seekAnchor = playhead
+            isDraggingPlayhead = false
+            // From what the bar SHOWS, which is a hold still waiting for the
+            // player after the last release — anchoring on the player instead
+            // would throw the bar back to where it was before that release.
+            seekAnchor = drawnPlayhead
         case .changed:
             wake()
             if abs(x - touchDownX) > Self.travelThreshold { travelled = true }
             guard travelled else { return }
+            if !isDraggingPlayhead, isScrubbingAClip {
+                isDraggingPlayhead = true
+                heldReleasedAt = nil
+                onScrubBegan?()
+            }
             // ⚠️ A DRAG MEANS THE PLAYHEAD OR IT MEANS NOTHING. It used to page
             // the carousel as well, one slot per segment — a second way to do
             // what a swipe on the picture already does, on a control the width
@@ -683,6 +755,19 @@ final class SnapMediaPageBarView: UIView {
             // `.ended` leaves a card hanging on screen.
             onScrubPreview(nil)
             wake()
+            if isDraggingPlayhead {
+                isDraggingPlayhead = false
+                // The hold stays up, released, until the player agrees.
+                heldReleasedAt = CACurrentMediaTime()
+                onScrubEnded?(state == .ended ? heldPlayhead : nil)
+                if state != .ended {
+                    // A cancel changes nothing: the bar goes back to the player.
+                    heldPlayhead = nil
+                    heldReleasedAt = nil
+                    layoutSegments()
+                }
+                return
+            }
             guard state == .ended, !travelled else { return }
             let hit = page(under: x)
             // ⚠️ A TAP ON THE BAR IS A TAP ON A CLIP, and the only thing a tap
@@ -690,6 +775,11 @@ final class SnapMediaPageBarView: UIView {
             // the page you are already on. On a lone clip it is the only
             // instruction the strip can carry at all.
             if isBar(hit), let fraction = fractionAlongBar(hit, atX: x) {
+                // Drawn where the tap landed at once, and held there until the
+                // player has got there too — see `heldPlayhead`.
+                heldPlayhead = fraction
+                heldReleasedAt = CACurrentMediaTime()
+                layoutSegments()
                 onSeekRequested?(fraction)
             } else {
                 onPageRequested?(hit)
@@ -743,9 +833,17 @@ final class SnapMediaPageBarView: UIView {
         guard let seekAnchor, let bar = barWidth, bar > 0 else { return }
         let moved = Double((x - touchDownX) / bar)
         let fraction = min(max(seekAnchor + moved, 0), 1)
+        // The fill follows the finger in THIS event, 1:1 — before the seek is
+        // even asked for, and whatever the player does with it.
+        heldPlayhead = fraction
+        layoutSegments()
         onSeekRequested?(fraction)
         onScrubPreview((fraction: fraction, x: x))
     }
+
+    /// Whether this touch is moving a clip's playhead — from the first point of
+    /// travel to the release.
+    private var isDraggingPlayhead = false
 
     /// The drawn width of the segment carrying the clip's bar — the distance
     /// the whole clip is worth, which is what makes the seek 1:1 with the thumb.
@@ -820,6 +918,14 @@ final class SnapMediaPageBarView: UIView {
     /// Drives the scrub without a finger; the simulator injects none.
     func debugScrub(_ state: UIGestureRecognizer.State, atX x: CGFloat) {
         handleScrub(state, atX: x)
+    }
+
+    /// The thumb's position while it holds the bar, nil once the player has it.
+    var debugHeldPlayhead: Double? { heldPlayhead }
+
+    /// Runs a released hold's clock out, so a spec need not wait for it.
+    func debugElapseHandover() {
+        heldReleasedAt = heldReleasedAt.map { $0 - Self.handoverTimeout }
     }
 
     /// What the counter reads, and how much room it takes from the run.

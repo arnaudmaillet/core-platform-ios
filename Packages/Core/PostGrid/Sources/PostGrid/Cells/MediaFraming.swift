@@ -64,13 +64,13 @@ public enum MediaBackdrop {
     /// Long side of the reduced picture, in pixels. Small enough that the
     /// upscale to a full screen IS most of the blur, large enough to keep the
     /// picture's broad colour regions where they are.
-    static let reducedLongSide = 40
+    nonisolated static let reducedLongSide = 40
     /// Tent kernel (odd), applied twice.
-    static let kernel: UInt32 = 7
+    nonisolated static let kernel: UInt32 = 7
     /// How much black is laid over the blur — enough that white captions and
     /// the fitted picture's own edge read against it, not so much that the
     /// band reads as a black band with a tint.
-    static let darkening: CGFloat = 0.2
+    nonisolated static let darkening: CGFloat = 0.2
 
     private static let cache: NSCache<UIImage, UIImage> = {
         let cache = NSCache<UIImage, UIImage>()
@@ -94,37 +94,68 @@ public enum MediaBackdrop {
     private static func render(_ image: UIImage) -> UIImage? {
         let size = image.size
         guard size.width > 0, size.height > 0 else { return nil }
-        let scale = CGFloat(reducedLongSide) / max(size.width, size.height)
-        let width = max(Int((size.width * scale).rounded()), 2)
-        let height = max(Int((size.height * scale).rounded()), 2)
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = 1
-        format.opaque = true
-        format.preferredRange = .standard
+        let reducedSize = reducedSize(for: size)
         // Area-averaged reduction: `.high` interpolation, so a 1440px photo and
         // its 300px tile cover reduce to the same pixels.
-        let reduced = UIGraphicsImageRenderer(size: CGSize(width: width, height: height), format: format)
+        let reduced = UIGraphicsImageRenderer(size: reducedSize, format: rendererFormat)
             .image { context in
                 context.cgContext.interpolationQuality = .high
-                image.draw(in: CGRect(x: 0, y: 0, width: width, height: height))
+                image.draw(in: CGRect(origin: .zero, size: reducedSize))
             }
         guard let cgImage = reduced.cgImage else { return nil }
+        return finish(reduced: cgImage)
+    }
+
+    /// The pixel size a picture of `size` is reduced to before it is blurred:
+    /// `reducedLongSide` on its long side, in its own shape, never under 2×2.
+    nonisolated static func reducedSize(for size: CGSize) -> CGSize {
+        guard size.width > 0, size.height > 0 else { return CGSize(width: 2, height: 2) }
+        let scale = CGFloat(reducedLongSide) / max(size.width, size.height)
+        return CGSize(width: max(Int((size.width * scale).rounded()), 2),
+                      height: max(Int((size.height * scale).rounded()), 2))
+    }
+
+    /// The second half of the backdrop, blur then darkening, over a picture
+    /// ALREADY reduced to `reducedSize`.
+    ///
+    /// ⚠️ SHARED BY THE STILL AND THE LIVE BAND (`LiveMediaBackdrop`), which is
+    /// why it is a function of its own. A playing clip's band is made from its
+    /// decoded frames, reduced by VideoToolbox instead of by a context draw, and
+    /// then finished HERE. So a poster and the frame that replaces it go
+    /// through the same blur and the same darkening, and the hand-over from
+    /// one to the other cannot change the look.
+    ///
+    /// Nonisolated: the live band finishes its frames off the main thread, and
+    /// `UIGraphicsImageRenderer` and vImage are both safe there.
+    nonisolated static func finish(reduced cgImage: CGImage) -> UIImage? {
+        let size = CGSize(width: cgImage.width, height: cgImage.height)
+        guard size.width > 0, size.height > 0 else { return nil }
         let blurred = tentBlur(cgImage) ?? cgImage
-        return UIGraphicsImageRenderer(size: CGSize(width: width, height: height), format: format)
+        return UIGraphicsImageRenderer(size: size, format: rendererFormat)
             .image { context in
-                UIImage(cgImage: blurred).draw(in: CGRect(x: 0, y: 0, width: width, height: height))
+                UIImage(cgImage: blurred).draw(in: CGRect(origin: .zero, size: size))
                 // ⚠️ `.normal`, stated: the renderer's plain `fill` is
                 // `UIRectFill`, which COPIES — a translucent black copied over an
                 // opaque canvas is solid black, and every backdrop came out as
                 // plain black bands until a spec read the pixels.
                 UIColor.black.withAlphaComponent(darkening).setFill()
-                context.fill(CGRect(x: 0, y: 0, width: width, height: height), blendMode: .normal)
+                context.fill(CGRect(origin: .zero, size: size), blendMode: .normal)
             }
+    }
+
+    /// One pixel per point, opaque, standard range: the backdrop is a handful
+    /// of pixels stretched over a page, and nothing about it is wide colour.
+    nonisolated private static var rendererFormat: UIGraphicsImageRendererFormat {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        format.preferredRange = .standard
+        return format
     }
 
     /// Two tent passes over the reduced picture, edges extended so the border
     /// does not darken toward transparent.
-    private static func tentBlur(_ image: CGImage) -> CGImage? {
+    nonisolated private static func tentBlur(_ image: CGImage) -> CGImage? {
         // An explicit 8-bit format, never the image's own: an ARGB8888
         // convolution reads bytes, and a picture decoded wide (16-bit half
         // floats) would be convolved as garbage.

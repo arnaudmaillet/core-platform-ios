@@ -7,17 +7,47 @@ struct SnapCommentTickerViewTests {
     private let bandWidth: CGFloat = 400
     /// The band lays no train outside a window (a flight on a layer in no
     /// render tree completes at once and recycles its bubble), so every
-    /// ticker under test is hosted, the way the page hosts it.
-    private let window: UIWindow = {
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 100))
+    /// ticker under test is hosted, the way the page hosts it: in a visible
+    /// window the test owns for exactly the length of `body`, and takes down
+    /// before it returns.
+    ///
+    /// ⚠️ NOT a stored property of the suite. A `UIWindow` released while it
+    /// is still visible, in the same run-loop turn that dirtied its layout,
+    /// crashes the test host: its layer outlives it in the pending Core
+    /// Animation transaction, and the next flush calls
+    /// `layoutSublayersOfLayer:` on the freed window (NSZombie:
+    /// `-[UIWindow methodForSelector:]: message sent to deallocated
+    /// instance`; without zombies, EXC_BAD_ACCESS in
+    /// `_sceneSafeAreaAlignedEdgesForFrame:inSuperview:`). A window stored on
+    /// the suite dies with the suite instance, still visible, straight after
+    /// a synchronous test mutated it. A race: 3 runs of this suite in 25
+    /// crashed on the iOS 27 simulator (27 September 2026), and a crashed
+    /// host takes down the rest of the package's run with it.
+    private func hosting(_ body: (UIWindow) throws -> Void) rethrows {
+        let window = makeHostWindow()
+        defer { takeDown(window) }
+        try body(window)
+    }
+
+    private func makeHostWindow() -> UIWindow {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: bandWidth, height: 100))
         window.isHidden = false
         return window
-    }()
+    }
 
-    private func makeTicker(itemCount: Int = 12, hosted: Bool = true) -> SnapCommentTickerView {
+    /// Empties, hides and lays out the window, so nothing is left for a later
+    /// flush to lay out once it is gone.
+    private func takeDown(_ window: UIWindow) {
+        window.subviews.forEach { $0.removeFromSuperview() }
+        window.isHidden = true
+        window.layoutIfNeeded()
+    }
+
+    /// A ticker with `itemCount` comments, in `window` (nil: in none).
+    private func makeTicker(itemCount: Int = 12, in window: UIWindow?) -> SnapCommentTickerView {
         let ticker = SnapCommentTickerView(frame: CGRect(x: 0, y: 0, width: bandWidth, height: 69))
         ticker.setComments((0..<itemCount).map { TickerCommentModel(id: "r\($0)", text: "GG 🔥 \($0)") })
-        if hosted { window.addSubview(ticker) }
+        window?.addSubview(ticker)
         return ticker
     }
 
@@ -33,12 +63,14 @@ struct SnapCommentTickerViewTests {
     /// already populated and every bubble is in flight — no empty first
     /// seconds, no one-by-one crawl-in from the right edge.
     @Test func activationPrefillsTheVisibleBand() {
-        let ticker = makeTicker()
-        ticker.setActive(true)
+        hosting { window in
+            let ticker = makeTicker(in: window)
+            ticker.setActive(true)
 
-        let labels = bubbleViews(ticker)
-        #expect(labels.count >= SnapCommentTickerView.laneCount)
-        #expect(labels.allSatisfy { $0.layer.animation(forKey: "flight") != nil })
+            let labels = bubbleViews(ticker)
+            #expect(labels.count >= SnapCommentTickerView.laneCount)
+            #expect(labels.allSatisfy { $0.layer.animation(forKey: "flight") != nil })
+        }
     }
 
     /// A page can be configured and activated by the layout pass a
@@ -48,35 +80,41 @@ struct SnapCommentTickerViewTests {
     /// tap, 25 September 2026). So the band lays nothing until it has a
     /// window, and lays the train the moment it gets one.
     @Test func activationBeforeTheWindowLaysTheTrainOnArrival() {
-        let ticker = makeTicker(hosted: false)
-        ticker.setActive(true)
-        #expect(bubbleViews(ticker).isEmpty)
+        hosting { window in
+            let ticker = makeTicker(in: nil)
+            ticker.setActive(true)
+            #expect(bubbleViews(ticker).isEmpty)
 
-        window.addSubview(ticker)
-        let labels = bubbleViews(ticker)
-        #expect(labels.count >= SnapCommentTickerView.laneCount)
-        #expect(labels.allSatisfy { $0.layer.animation(forKey: "flight") != nil })
+            window.addSubview(ticker)
+            let labels = bubbleViews(ticker)
+            #expect(labels.count >= SnapCommentTickerView.laneCount)
+            #expect(labels.allSatisfy { $0.layer.animation(forKey: "flight") != nil })
+        }
     }
 
     /// Held for a flight, an active band with content lays nothing; the
     /// release lays it, at the width the band then has.
     @Test func aHeldBandLaysItsTrainAtTheRelease() {
-        let ticker = makeTicker()
-        ticker.setHeldForFlight(true)
-        ticker.setActive(true)
-        #expect(bubbleViews(ticker).isEmpty)
+        hosting { window in
+            let ticker = makeTicker(in: window)
+            ticker.setHeldForFlight(true)
+            ticker.setActive(true)
+            #expect(bubbleViews(ticker).isEmpty)
 
-        ticker.setHeldForFlight(false)
-        #expect(bubbleViews(ticker).count >= SnapCommentTickerView.laneCount)
+            ticker.setHeldForFlight(false)
+            #expect(bubbleViews(ticker).count >= SnapCommentTickerView.laneCount)
+        }
     }
 
     @Test func deactivationClearsEveryBubble() {
-        let ticker = makeTicker()
-        ticker.setActive(true)
-        #expect(!bubbleViews(ticker).isEmpty)
+        hosting { window in
+            let ticker = makeTicker(in: window)
+            ticker.setActive(true)
+            #expect(!bubbleViews(ticker).isEmpty)
 
-        ticker.setActive(false)
-        #expect(bubbleViews(ticker).isEmpty)
+            ticker.setActive(false)
+            #expect(bubbleViews(ticker).isEmpty)
+        }
     }
 
     @Test func emptyQueueKeepsTheBandHiddenAndUnpopulated() {
@@ -93,59 +131,62 @@ struct SnapCommentTickerViewTests {
     /// Grabbing the band freezes CA flights into model positions: every
     /// bubble keeps an on-screen coordinate and no animation remains.
     @Test func beginScrubFreezesFlightsIntoModelPositions() {
-        let ticker = makeTicker()
-        ticker.setActive(true)
+        hosting { window in
+            let ticker = makeTicker(in: window)
+            ticker.setActive(true)
 
-        ticker.beginScrub()
+            ticker.beginScrub()
 
-        let labels = bubbleViews(ticker)
-        #expect(!labels.isEmpty)
-        #expect(labels.allSatisfy { $0.layer.animation(forKey: "flight") == nil })
-        // Frozen positions are the visible train, not the parked exit values.
-        #expect(labels.contains { $0.layer.position.x > 0 })
+            let labels = bubbleViews(ticker)
+            #expect(!labels.isEmpty)
+            #expect(labels.allSatisfy { $0.layer.animation(forKey: "flight") == nil })
+            // Frozen positions are the visible train, not the parked exit values.
+            #expect(labels.contains { $0.layer.position.x > 0 })
+        }
     }
 
     /// Dragging displaces the surviving bubbles exactly with the finger, and
     /// backfill keeps the band covered right up to the entry edge in both
     /// scrub directions.
     @Test func scrubTranslatesAndBackfillsBothDirections() {
-        let ticker = makeTicker()
-        ticker.setActive(true)
-        ticker.beginScrub()
+        hosting { window in
+            let ticker = makeTicker(in: window)
+            ticker.setActive(true)
+            ticker.beginScrub()
 
-        // Only mid-band labels: ones near the left edge retire under the
-        // translation and their (pooled) label can be reused by backfill in
-        // the same pass, which would alias the identity check.
-        let before = Dictionary(
-            uniqueKeysWithValues: bubbleViews(ticker)
-                .filter { (150..<300).contains($0.layer.position.x) }
-                .map { ($0, $0.layer.position.x) }
-        )
-        #expect(!before.isEmpty)
+            // Only mid-band labels: ones near the left edge retire under the
+            // translation and their (pooled) label can be reused by backfill in
+            // the same pass, which would alias the identity check.
+            let before = Dictionary(
+                uniqueKeysWithValues: bubbleViews(ticker)
+                    .filter { (150..<300).contains($0.layer.position.x) }
+                    .map { ($0, $0.layer.position.x) }
+            )
+            #expect(!before.isEmpty)
 
-        ticker.applyScrubTranslation(-120) // scrub forward
-        for (label, x) in before {
-            #expect(abs(label.layer.position.x - (x - 120)) < 0.5)
+            ticker.applyScrubTranslation(-120) // scrub forward
+            for (label, x) in before {
+                #expect(abs(label.layer.position.x - (x - 120)) < 0.5)
+            }
+            let rightmostAfterForward = bubbleViews(ticker).map { $0.frame.maxX }.max() ?? 0
+            #expect(rightmostAfterForward > bandWidth - SnapCommentTickerView.interItemGap - 48)
+
+            ticker.applyScrubTranslation(600) // scrub far backward: rewinds the queue
+            let labels = bubbleViews(ticker)
+            #expect(!labels.isEmpty)
+            let leftmostAfterBackward = labels.map { $0.frame.minX }.min() ?? 0
+            #expect(leftmostAfterBackward < SnapCommentTickerView.interItemGap + 48)
         }
-        let rightmostAfterForward = bubbleViews(ticker).map { $0.frame.maxX }.max() ?? 0
-        #expect(rightmostAfterForward > bandWidth - SnapCommentTickerView.interItemGap - 48)
-
-        ticker.applyScrubTranslation(600) // scrub far backward: rewinds the queue
-        let labels = bubbleViews(ticker)
-        #expect(!labels.isEmpty)
-        let leftmostAfterBackward = labels.map { $0.frame.minX }.min() ?? 0
-        #expect(leftmostAfterBackward < SnapCommentTickerView.interItemGap + 48)
     }
 
     /// A release near the drift hands back to CA: flights reattach and the
     /// train keeps flowing. Needs a real window — flights on layers outside
     /// a render tree "complete" immediately, which would recycle everything.
     @Test func releaseHandsBubblesBackToTheConveyor() async throws {
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: bandWidth, height: 100))
-        let ticker = makeTicker()
-        window.addSubview(ticker)
-        window.isHidden = false
-        defer { window.isHidden = true }
+        // Hosted by hand: `hosting` takes a synchronous body.
+        let window = makeHostWindow()
+        defer { takeDown(window) }
+        let ticker = makeTicker(in: window)
 
         ticker.setActive(true)
         ticker.beginScrub()
@@ -184,14 +225,16 @@ struct SnapCommentTickerViewTests {
     /// slide-to-pop, pin grab) over its own frame — they are required to
     /// wait for the band's pan to fail.
     @Test func bandPanPreemptsOtherPanRecognizers() throws {
-        let ticker = makeTicker()
-        let bandPan = try #require(ticker.gestureRecognizers?.compactMap { $0 as? UIPanGestureRecognizer }.first)
-        let dismissalPan = UIPanGestureRecognizer()
-        let tap = UITapGestureRecognizer()
+        try hosting { window in
+            let ticker = makeTicker(in: window)
+            let bandPan = try #require(ticker.gestureRecognizers?.compactMap { $0 as? UIPanGestureRecognizer }.first)
+            let dismissalPan = UIPanGestureRecognizer()
+            let tap = UITapGestureRecognizer()
 
-        #expect(ticker.gestureRecognizer(bandPan, shouldBeRequiredToFailBy: dismissalPan))
-        // Taps (play/pause) are not held hostage.
-        #expect(!ticker.gestureRecognizer(bandPan, shouldBeRequiredToFailBy: tap))
+            #expect(ticker.gestureRecognizer(bandPan, shouldBeRequiredToFailBy: dismissalPan))
+            // Taps (play/pause) are not held hostage.
+            #expect(!ticker.gestureRecognizer(bandPan, shouldBeRequiredToFailBy: tap))
+        }
     }
 
     /// Bug 2: the entry spawn is geometry-checked — an uncleared entry edge
@@ -219,28 +262,30 @@ struct SnapCommentTickerViewTests {
     /// animator silently ignores `fractionComplete`), disengaged at
     /// handover, where the reversal run owns the fade-out.
     @Test func kineticBlurEngagesDuringCoastAndDisengagesAtHandover() throws {
-        let ticker = makeTicker()
-        ticker.setActive(true)
-        ticker.beginScrub()
-        ticker.applyScrubTranslation(-40)
-        ticker.endScrub(releaseVelocity: 1200)
+        try hosting { window in
+            let ticker = makeTicker(in: window)
+            ticker.setActive(true)
+            ticker.beginScrub()
+            ticker.applyScrubTranslation(-40)
+            ticker.endScrub(releaseVelocity: 1200)
 
-        let blur = try #require(
-            ticker.subviews.first { $0.accessibilityIdentifier == "ticker-kinetic-backdrop" }
-        )
-        // The ticker's own release stamp, not a fresh reading — see
-        // `accumulatorSumsAbsoluteDeltasNotNetTranslation` for what a second
-        // clock read costs on a loaded runner.
-        let start = ticker.coastStartTime
-        ticker.coastStep(now: start + 0.016) // one fast frame into the decay
-        #expect(!blur.isHidden)
-        #expect(ticker.currentKineticFraction > 0)
+            let blur = try #require(
+                ticker.subviews.first { $0.accessibilityIdentifier == "ticker-kinetic-backdrop" }
+            )
+            // The ticker's own release stamp, not a fresh reading — see
+            // `accumulatorSumsAbsoluteDeltasNotNetTranslation` for what a second
+            // clock read costs on a loaded runner.
+            let start = ticker.coastStartTime
+            ticker.coastStep(now: start + 0.016) // one fast frame into the decay
+            #expect(!blur.isHidden)
+            #expect(ticker.currentKineticFraction > 0)
 
-        ticker.coastStep(now: start + 30) // decay long settled → handover
-        #expect(ticker.currentKineticFraction == 0) // disengaged; reversal fades out
-        let labels = bubbleViews(ticker)
-        #expect(!labels.isEmpty)
-        #expect(labels.allSatisfy { $0.layer.animation(forKey: "flight") != nil })
+            ticker.coastStep(now: start + 30) // decay long settled → handover
+            #expect(ticker.currentKineticFraction == 0) // disengaged; reversal fades out
+            let labels = bubbleViews(ticker)
+            #expect(!labels.isEmpty)
+            #expect(labels.allSatisfy { $0.layer.animation(forKey: "flight") != nil })
+        }
     }
 
     /// The backdrop is a true accumulator during a touch: monotone
@@ -261,21 +306,23 @@ struct SnapCommentTickerViewTests {
     /// The accumulator sums |Δx|, not net translation: scrubbing forward
     /// then all the way back builds intensity instead of cancelling out.
     @Test func accumulatorSumsAbsoluteDeltasNotNetTranslation() {
-        let ticker = makeTicker()
-        ticker.setActive(true)
-        ticker.beginScrub()
-        ticker.applyScrubTranslation(-200)
-        ticker.applyScrubTranslation(200) // net translation: zero
-        ticker.endScrub(releaseVelocity: 1200)
+        hosting { window in
+            let ticker = makeTicker(in: window)
+            ticker.setActive(true)
+            ticker.beginScrub()
+            ticker.applyScrubTranslation(-200)
+            ticker.applyScrubTranslation(200) // net translation: zero
+            ticker.endScrub(releaseVelocity: 1200)
 
-        // Anchored to the release the ticker recorded, NOT to a fresh clock
-        // reading: the gap between `endScrub` and this line is real elapsed
-        // time, and on a loaded runner it is long enough for the fraction to
-        // decay out of the assertion. This test is about the accumulator
-        // summing |Δx|, not about how fast the machine got here.
-        ticker.coastStep(now: ticker.coastStartTime + 0.001)
-        // 400pt of absolute travel ≥ blurDistanceScale → released at the cap.
-        #expect(ticker.currentKineticFraction > SnapCommentTickerView.maxBlurFraction - 0.05)
+            // Anchored to the release the ticker recorded, NOT to a fresh clock
+            // reading: the gap between `endScrub` and this line is real elapsed
+            // time, and on a loaded runner it is long enough for the fraction to
+            // decay out of the assertion. This test is about the accumulator
+            // summing |Δx|, not about how fast the machine got here.
+            ticker.coastStep(now: ticker.coastStartTime + 0.001)
+            // 400pt of absolute travel ≥ blurDistanceScale → released at the cap.
+            #expect(ticker.currentKineticFraction > SnapCommentTickerView.maxBlurFraction - 0.05)
+        }
     }
 
     // MARK: - Decay math

@@ -639,11 +639,25 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         }
         chrome.onMediaSeekRequested = { [weak self] fraction in
             guard let self, let videoPlayback else { return }
-            videoPlayback.seek(toFraction: fraction, in: mediaCard.renderView)
-            // The bar redraws from the playhead it is fed, and the feed is a
-            // frame away — so it follows the finger on the next tick rather
-            // than being told twice.
+            // ⚠️ EXACT, drag or tap. The quarter-second tolerance this used to
+            // take let the player answer with whichever frame it had nearest —
+            // usually a keyframe — so the picture jumped between keyframes
+            // while the thumb moved smoothly: "it skips a lot of frames". The
+            // controller's chase keeps ONE seek in flight and goes to the
+            // latest position when it lands, so exact seeks never queue up
+            // behind the finger; they just land as fast as the decoder can.
+            // Measured in the PR (`-scrub-log`).
+            videoPlayback.seek(toFraction: fraction, in: mediaCard.renderView,
+                               toleranceSeconds: Self.scrubSeekTolerance)
+            #if DEBUG
+            scrubTrace?.requests += 1
+            #endif
+            // The bar draws the finger itself while it drags (see
+            // `SnapMediaPageBarView.heldPlayhead`); the fed playhead takes over
+            // once the player has caught up.
         }
+        chrome.onMediaScrubBegan = { [weak self] in self?.beginPlayheadScrub() }
+        chrome.onMediaScrubEnded = { [weak self] fraction in self?.endPlayheadScrub(at: fraction) }
         chrome.onMediaPageRequested = { [weak self] page in
             guard let self else { return }
             // ⚠️ A NEIGHBOUR IS A PAGE TURN; ANYTHING FURTHER IS A JUMP.
@@ -2584,6 +2598,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             stopPlayheadFeed()
             return
         }
+        // The same question, the same answer: the page on screen, watching a
+        // clip. The card narrows it to a single fitted-blurred one.
+        mediaCard.setLiveBackdropActive(true)
         publishPlayhead()
         guard playheadLink == nil else { return }
         let link = CADisplayLink(target: self, selector: #selector(publishPlayhead))
@@ -2602,6 +2619,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         playheadLink?.invalidate()
         playheadLink = nil
         chrome.setMediaPlayhead(nil)
+        mediaCard.setLiveBackdropActive(false)
     }
 
     private var playheadLink: CADisplayLink?
@@ -2679,6 +2697,93 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     private var wantedPreviewFraction: Double?
     private var isFetchingPreview = false
+
+    // MARK: - Scrubbing the playhead
+
+    /// How far from the asked-for moment a scrub's seek may land. Zero: frame
+    /// accurate — see `onMediaSeekRequested` for why a tolerant seek is what
+    /// made the picture jump. `-scrub-tolerance <seconds>` overrides it in a
+    /// debug build, for the A/B.
+    static let scrubSeekTolerance: Double = {
+        #if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        if let position = arguments.firstIndex(of: "-scrub-tolerance"),
+           position + 1 < arguments.count, let seconds = Double(arguments[position + 1]) {
+            return seconds
+        }
+        #endif
+        return 0
+    }()
+
+    /// Whether the clip was running when a drag took its playhead, so the
+    /// release knows to start it again — and leaves a clip the viewer had
+    /// paused, paused.
+    private var resumesAfterScrub = false
+
+    /// ⚠️ THE CLIP STOPS UNDER THE THUMB. Left running, it advanced between
+    /// seeks and every landing was followed by a few frames of playback the
+    /// finger never asked for — the picture shuffling forward and back while
+    /// the thumb moved one way.
+    private func beginPlayheadScrub() {
+        guard let videoPlayback else { return }
+        let view = mediaCard.renderView
+        resumesAfterScrub = videoPlayback.isPaused(in: view) == false
+        videoPlayback.setPaused(true, in: view)
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-scrub-log") {
+            scrubTrace = ScrubTrace(start: CACurrentMediaTime(),
+                                    landedAtStart: videoPlayback.debugSeeksLanded,
+                                    cancelledAtStart: videoPlayback.debugSeeksCancelled)
+        }
+        #endif
+    }
+
+    /// Lands exactly where the thumb let go, and only THEN starts the clip
+    /// again — see `VideoPlaybackController.whenSeeksSettle` for what resuming
+    /// under a seek still in flight looked like.
+    private func endPlayheadScrub(at fraction: Double?) {
+        guard let videoPlayback else { return }
+        let view = mediaCard.renderView
+        if let fraction {
+            videoPlayback.seek(toFraction: fraction, in: view, toleranceSeconds: 0)
+        }
+        let resumes = resumesAfterScrub
+        resumesAfterScrub = false
+        #if DEBUG
+        let trace = scrubTrace
+        scrubTrace = nil
+        #endif
+        videoPlayback.whenSeeksSettle(in: view) { [weak self] in
+            guard let self else { return }
+            #if DEBUG
+            if let trace {
+                let seconds = CACurrentMediaTime() - trace.start
+                let landed = videoPlayback.debugSeeksLanded - trace.landedAtStart
+                print(String(format: "[scrub] %.3f %.2fs requests=%d landed=%d (%.1f/s) cancelled=%d "
+                             + "tolerance=%.3fs head=%@",
+                             CACurrentMediaTime(), seconds, trace.requests, landed,
+                             Double(landed) / max(seconds, 0.001),
+                             videoPlayback.debugSeeksCancelled - trace.cancelledAtStart,
+                             Self.scrubSeekTolerance,
+                             videoPlayback.playhead(in: view).map { String(format: "%.4f", $0.fraction) } ?? "nil"))
+            }
+            #endif
+            // A page that stopped being watched mid-scrub stays stopped.
+            guard resumes, self.isActive, self.mediaCard.renderView === view else { return }
+            videoPlayback.setPaused(false, in: view)
+        }
+    }
+
+    #if DEBUG
+    /// `-scrub-log`: what one drag asked of the player and what it got.
+    private struct ScrubTrace {
+        let start: CFTimeInterval
+        let landedAtStart: Int
+        let cancelledAtStart: Int
+        var requests = 0
+    }
+    private var scrubTrace: ScrubTrace?
+    #endif
 
     // MARK: - Paging and chrome, for the transitions
 
@@ -3034,6 +3139,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // picture belonging to a different post.
         mediaCard.clearPausedMarks()
         pauseGlyphSuppressedByEngagement = false
+        resumesAfterScrub = false
         stopPlayheadFeed()
         // ⚠️ A held chrome must never ride a recycled cell. A flight that is
         // cancelled, or a dismissal that ends the page instead of landing it,
