@@ -39,9 +39,17 @@ final class CountryRenderer: MKMultiPolygonRenderer {
     var style: CountryStyle = .unlocked { didSet { if style != oldValue { applyStyle() } } }
     private let isLifted: Bool
 
-    init(shape: CountryShape) {
-        isLifted = shape.isLifted
-        super.init(multiPolygon: shape)
+    convenience init(shape: CountryShape) {
+        self.init(overlay: shape)
+    }
+
+    /// ⚠️ **THE OVERLAY INIT, NOT `init(multiPolygon:)`.** MapKit's
+    /// `init(multiPolygon:)` calls `init(overlay:)` on `self`, and a Swift
+    /// subclass that declares its own designated init does not inherit it: the
+    /// map trapped on "unimplemented initializer" the moment the borders drew.
+    override init(overlay: any MKOverlay) {
+        isLifted = (overlay as? CountryShape)?.isLifted ?? false
+        super.init(overlay: overlay)
         applyStyle()
     }
 
