@@ -1,14 +1,16 @@
 import CoreVideo
+import MediaPlayback
 import Testing
 import UIKit
 @testable import PostGrid
 
 /// The playing band of a fitted clip (`LiveMediaBackdrop`): the same look as
-/// the still, a bounded rate, and a lifecycle that falls back to the still
-/// everywhere it should.
+/// the still, drawn with its own frame and never another's, and a lifecycle
+/// that falls back to the still everywhere it should.
 ///
-/// No decoder here: the source is a fake that hands out a pixel buffer the
-/// test made, and the frame token stands for "a new frame was displayed".
+/// No decoder here: the test plays the renderer's part, handing over pixel
+/// buffers it made (`prepare`) and saying when each goes on screen
+/// (`present`).
 @MainActor
 struct LiveMediaBackdropTests {
     // MARK: - The look
@@ -46,64 +48,117 @@ struct LiveMediaBackdropTests {
         #expect(abs(r - g) < 0.05 && abs(g - b) < 0.05, "\(r) \(g) \(b)")
     }
 
-    // MARK: - Rate
+    // MARK: - In step with the picture
 
-    @Test func aSampleWaitsForANewFrameTheIntervalAndTheLastSample() {
-        let interval = 1 / LiveMediaBackdrop.samplesPerSecond
-        #expect(LiveMediaBackdrop.shouldSample(now: 10, lastSample: 10 - interval, token: 2,
-                                               lastToken: 1, isConverting: false))
-        // The same frame again: a paused clip costs nothing.
-        #expect(!LiveMediaBackdrop.shouldSample(now: 10, lastSample: 0, token: 1,
-                                                lastToken: 1, isConverting: false))
-        // Too soon: a 60 or 120 Hz display does not make it a 60 Hz band.
-        #expect(!LiveMediaBackdrop.shouldSample(now: 10, lastSample: 10 - interval / 3, token: 2,
-                                                lastToken: 1, isConverting: false))
-        // One in flight at most.
-        #expect(!LiveMediaBackdrop.shouldSample(now: 10, lastSample: 0, token: 2,
-                                                lastToken: 1, isConverting: true))
-    }
-
-    /// Ticked at 60 Hz for a second with a new frame on every tick, the band
-    /// is redrawn about a dozen times — never once per frame.
-    @Test func aSecondOfSixtyHertzFramesIsADozenBands() async throws {
+    /// ⚠️ THE SYNC CLAIM. A band is made while its frame is still on its way
+    /// (`prepare`) and drawn only when the surface puts that frame on screen
+    /// (`present`) — not before, however early it is ready.
+    @Test func aBandIsDrawnWhenItsFrameIsPresentedAndNotBefore() async throws {
         let rig = try Rig()
         rig.band.setActive(true)
-        for tick in 0..<60 {
-            rig.source.token += 1
-            rig.band.debugTick(now: 100 + Double(tick) / 60)
-            // Let each sample land before the next tick, as a real one would.
-            await rig.settle { !rig.band.debugIsConverting }
+        #expect(rig.band.wantsFramesAhead)
+        rig.band.prepare(rig.frame(.red), as: VideoFrameID(1))
+        await rig.settle { rig.band.debugReadyCount == 1 }
+        #expect(rig.band.debugReadyCount == 1, "guard: the band was never made")
+        #expect(rig.target.image === rig.still, "a band was drawn before its frame")
+        rig.band.present(VideoFrameID(1))
+        #expect(rig.band.isShowingLive)
+        #expect(rig.target.image !== rig.still)
+        rig.band.setActive(false)
+    }
+
+    /// Every frame of a playing clip gets its own band — none skipped, none
+    /// drawn twice.
+    @Test func everyPresentedFrameGetsItsOwnBand() async throws {
+        let rig = try Rig()
+        rig.band.setActive(true)
+        var shown: [UIImage] = []
+        for serial in 1...30 {
+            let id = VideoFrameID(serial)
+            rig.band.prepare(rig.frame(serial.isMultiple(of: 2) ? .red : .blue), as: id)
+            await rig.settle { rig.band.debugReadyCount == 1 }
+            rig.band.present(id)
+            if let image = rig.target.image { shown.append(image) }
         }
-        let drawn = rig.band.debugDeliveredCount
-        #expect(drawn >= 10 && drawn <= 13, "\(drawn) bands")
+        #expect(rig.band.debugDeliveredCount == 30)
+        #expect(Set(shown.map(ObjectIdentifier.init)).count == 30)
+        // And the colour on screen is the frame's, not its neighbour's.
+        let last = try #require(rig.target.image.flatMap(Self.averageColour))
+        #expect(last.r > last.b, "frame 30 is red, the band shows \(last)")
+        rig.band.setActive(false)
+    }
+
+    /// A band not ready when its frame goes on screen is drawn as soon as it
+    /// is: late, but for the frame the picture is still on.
+    @Test func aBandLateForItsFrameIsDrawnOnArrival() async throws {
+        let rig = try Rig(slowReduce: true)
+        rig.band.setActive(true)
+        rig.band.prepare(rig.frame(.red), as: VideoFrameID(1))
+        rig.band.present(VideoFrameID(1))
+        #expect(rig.target.image === rig.still)
+        await rig.settle { rig.band.isShowingLive }
+        #expect(rig.band.isShowingLive)
+        rig.band.setActive(false)
+    }
+
+    /// A band that lands after the picture has moved on to a later frame is
+    /// never drawn: it would put the band behind the picture.
+    @Test func aBandForAFrameThePictureHasLeftIsNeverDrawn() async throws {
+        let rig = try Rig(slowReduce: true)
+        rig.band.setActive(true)
+        rig.band.prepare(rig.frame(.red), as: VideoFrameID(1))
+        rig.band.prepare(rig.frame(.blue), as: VideoFrameID(2))
+        rig.band.present(VideoFrameID(1))
+        rig.band.present(VideoFrameID(2))
+        await rig.settle { rig.band.debugInFlightCount == 0 }
+        #expect(rig.band.debugDeliveredCount == 1, "\(rig.band.debugDeliveredCount) bands drawn")
+        let shown = try #require(rig.target.image.flatMap(Self.averageColour))
+        #expect(shown.b > shown.r, "frame 2 is blue, the band shows \(shown)")
+        rig.band.setActive(false)
+    }
+
+    /// Only the FIRST live band fades in over the still; after that the band
+    /// changes with its frame, on the spot. A fade between frames is a band
+    /// that is always partly the previous frame.
+    @Test func afterTheFirstBandFramesChangeWithoutAnimation() async throws {
+        let rig = try Rig()
+        rig.band.setActive(true)
+        rig.band.prepare(rig.frame(.red), as: VideoFrameID(1))
+        await rig.settle { rig.band.debugReadyCount == 1 }
+        rig.band.present(VideoFrameID(1))
+        #expect(rig.band.debugLastFade == LiveMediaBackdrop.firstLiveFade, "the first band did not fade in")
+        for serial in 2...4 {
+            rig.band.prepare(rig.frame(.blue), as: VideoFrameID(serial))
+            await rig.settle { rig.band.debugReadyCount == 1 }
+            rig.band.present(VideoFrameID(serial))
+            #expect(rig.band.debugLastFade == 0, "frame \(serial) faded over \(rig.band.debugLastFade)s")
+        }
+        rig.band.setActive(false)
+    }
+
+    /// At most `maxInFlight` frames are ever being made: a reducer that falls
+    /// behind skips frames rather than queueing up a backlog of the past.
+    @Test func aReducerThatFallsBehindIsNotQueuedUp() async throws {
+        let rig = try Rig(slowReduce: true)
+        rig.band.setActive(true)
+        for serial in 1...10 {
+            rig.band.prepare(rig.frame(.red), as: VideoFrameID(serial))
+        }
+        #expect(rig.band.debugInFlightCount == LiveMediaBackdrop.maxInFlight)
         rig.band.setActive(false)
     }
 
     // MARK: - Lifecycle
 
-    @Test func aPlayingClipReplacesTheStillWithItsFrames() async throws {
-        let rig = try Rig()
-        rig.band.setActive(true)
-        #expect(rig.band.isRunning)
-        rig.source.token = 1
-        rig.band.debugTick(now: 1)
-        await rig.settle { rig.band.isShowingLive }
-        #expect(rig.band.isShowingLive)
-        #expect(rig.target.image != nil && rig.target.image !== rig.still)
-        rig.band.setActive(false)
-    }
-
     /// A page that stops being watched keeps the frame it paused on — its
-    /// picture is paused on that same frame — and stops sampling.
-    @Test func leavingTheScreenStopsSamplingAndKeepsTheFrame() async throws {
+    /// picture is paused on that same frame — and stops following.
+    @Test func leavingTheScreenStopsFollowingAndKeepsTheFrame() async throws {
         let rig = try Rig()
-        rig.band.setActive(true)
-        rig.source.token = 1
-        rig.band.debugTick(now: 1)
-        await rig.settle { rig.band.isShowingLive }
+        try await rig.goLive()
         let live = rig.target.image
         rig.band.setActive(false)
         #expect(!rig.band.isRunning)
+        #expect(!rig.band.wantsFramesAhead)
         #expect(rig.target.image === live)
         // A still arriving meanwhile (a re-decided framing) is kept for later
         // and does not overwrite the frame on screen.
@@ -111,12 +166,12 @@ struct LiveMediaBackdropTests {
         #expect(rig.target.image === live)
     }
 
-    /// A sample still being made when its page leaves is dropped, not drawn.
-    @Test func aSampleInFlightWhenThePageLeavesIsDropped() async throws {
+    /// A band still being made when its page leaves is dropped, not drawn.
+    @Test func aBandInFlightWhenThePageLeavesIsDropped() async throws {
         let rig = try Rig(slowReduce: true)
         rig.band.setActive(true)
-        rig.source.token = 1
-        rig.band.debugTick(now: 1)
+        rig.band.prepare(rig.frame(.red), as: VideoFrameID(1))
+        rig.band.present(VideoFrameID(1))
         rig.band.setActive(false)
         try await Task.sleep(for: .milliseconds(300))
         #expect(!rig.band.isShowingLive)
@@ -126,10 +181,7 @@ struct LiveMediaBackdropTests {
     /// A recycled card, or a new post: the still, at once.
     @Test func returningToTheStillPutsThePosterBack() async throws {
         let rig = try Rig()
-        rig.band.setActive(true)
-        rig.source.token = 1
-        rig.band.debugTick(now: 1)
-        await rig.settle { rig.band.isShowingLive }
+        try await rig.goLive()
         rig.band.setActive(false)
         rig.band.returnToStill()
         #expect(!rig.band.isShowingLive)
@@ -137,17 +189,17 @@ struct LiveMediaBackdropTests {
     }
 
     /// The surface went back to its poster (a stopped player): so does the
-    /// band.
+    /// band — and a source that is not drawing gets no frames asked for.
     @Test func aSourceThatStopsDrawingFramesPutsTheStillBack() async throws {
         let rig = try Rig()
-        rig.band.setActive(true)
-        rig.source.token = 1
-        rig.band.debugTick(now: 1)
-        await rig.settle { rig.band.isShowingLive }
+        try await rig.goLive()
         rig.source.isShowingLiveFrames = false
-        rig.band.debugTick(now: 2)
+        #expect(!rig.band.wantsFramesAhead)
+        rig.band.sourceStoppedDrawing()
         #expect(!rig.band.isShowingLive)
         #expect(rig.target.image === rig.still)
+        rig.band.prepare(rig.frame(.red), as: VideoFrameID(9))
+        #expect(rig.band.debugInFlightCount == 0)
         rig.band.setActive(false)
     }
 
@@ -157,8 +209,9 @@ struct LiveMediaBackdropTests {
         rig.band.isSuppressedBySystem = { true }
         rig.band.setActive(true)
         #expect(!rig.band.isRunning)
-        rig.source.token = 1
-        rig.band.debugTick(now: 1)
+        #expect(!rig.band.wantsFramesAhead)
+        rig.band.prepare(rig.frame(.red), as: VideoFrameID(1))
+        rig.band.present(VideoFrameID(1))
         try await Task.sleep(for: .milliseconds(100))
         #expect(!rig.band.isShowingLive)
         #expect(rig.target.image === rig.still)
@@ -170,10 +223,7 @@ struct LiveMediaBackdropTests {
         let rig = try Rig()
         var suppressed = false
         rig.band.isSuppressedBySystem = { suppressed }
-        rig.band.setActive(true)
-        rig.source.token = 1
-        rig.band.debugTick(now: 1)
-        await rig.settle { rig.band.isShowingLive }
+        try await rig.goLive()
         suppressed = true
         rig.band.debugSettingsChanged()
         #expect(!rig.band.isRunning)
@@ -181,15 +231,14 @@ struct LiveMediaBackdropTests {
         #expect(rig.target.image === rig.still)
     }
 
-    /// Nothing is sampled from a band nobody can see.
-    @Test func aBandOutsideAWindowSamplesNothing() async throws {
-        let rig = try Rig()
+    /// Nothing is asked for a band nobody can see.
+    @Test func aBandOutsideAWindowWantsNoFrames() {
+        let rig = try? Rig()
+        guard let rig else { Issue.record("rig"); return }
         rig.target.removeFromSuperview()
         rig.band.setActive(true)
-        rig.source.token = 1
-        rig.band.debugTick(now: 1)
-        try await Task.sleep(for: .milliseconds(100))
-        #expect(!rig.band.isShowingLive)
+        #expect(rig.band.isRunning)
+        #expect(!rig.band.wantsFramesAhead)
         rig.band.setActive(false)
     }
 
@@ -197,11 +246,7 @@ struct LiveMediaBackdropTests {
 
     @MainActor
     private final class FakeSource: LiveBackdropFrameSource {
-        var token: CFTimeInterval = 0
-        var buffer: CVPixelBuffer?
         var isShowingLiveFrames = true
-        var liveFrameToken: CFTimeInterval { token }
-        var liveFrameBuffer: CVPixelBuffer? { buffer }
     }
 
     @MainActor
@@ -217,11 +262,9 @@ struct LiveMediaBackdropTests {
             window.isHidden = false
             target.frame = window.bounds
             window.addSubview(target)
-            source.buffer = try #require(LiveMediaBackdropTests.bgraBuffer(.red, CGSize(width: 64, height: 80)))
             band = LiveMediaBackdrop(target: target)
             band.source = source
             band.isSuppressedBySystem = { false }
-            band.usesDisplayLink = false
             if slowReduce {
                 band.reduce = { buffer in
                     Thread.sleep(forTimeInterval: 0.1)
@@ -229,6 +272,19 @@ struct LiveMediaBackdropTests {
                 }
             }
             band.setStill(still)
+        }
+
+        func frame(_ colour: UIColor) -> CVPixelBuffer {
+            LiveMediaBackdropTests.bgraBuffer(colour, CGSize(width: 64, height: 80))!
+        }
+
+        /// Running, with a first live band on screen.
+        func goLive() async throws {
+            band.setActive(true)
+            band.prepare(frame(.red), as: VideoFrameID(1))
+            await settle { band.debugReadyCount == 1 }
+            band.present(VideoFrameID(1))
+            try #require(band.isShowingLive, "guard: the band never went live")
         }
 
         func settle(until condition: () -> Bool) async {

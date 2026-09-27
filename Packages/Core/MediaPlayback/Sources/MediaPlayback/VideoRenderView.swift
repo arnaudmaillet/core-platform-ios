@@ -258,6 +258,13 @@ public final class VideoRenderView: UIView {
     /// the picture on screen must not rotate this either.
     public var currentFrameBuffer: CVPixelBuffer? { renderer?.currentFrameBuffer }
 
+    /// Something drawn from this surface's frames that must change on the same
+    /// refresh as its picture — see `VideoFrameCompanion`. Weak: the companion
+    /// belongs to whoever hosts this surface, and a surface outlives hosts (it
+    /// is re-pointed at every hero seam). Nothing under `-avplayer-render`,
+    /// which has no renderer to lead.
+    public weak var frameCompanion: (any VideoFrameCompanion)?
+
     public func setPoster(_ image: UIImage?) {
         posterView.image = image
         updatePosterVisibility(ready: isReadyForDisplay)
@@ -809,8 +816,11 @@ public final class VideoRenderView: UIView {
     // MARK: - Frame intake
 
     /// Displays one frame. Called by `VideoFrameRenderer` on the display link.
-    func enqueue(_ sampleBuffer: CMSampleBuffer) {
-        guard let sampleBufferLayer else { return }
+    /// False when the layer took nothing — it had no room, or there is no
+    /// sample-buffer layer — so the frame is not on screen.
+    @discardableResult
+    func enqueue(_ sampleBuffer: CMSampleBuffer) -> Bool {
+        guard let sampleBufferLayer else { return false }
         let renderer = sampleBufferLayer.sampleBufferRenderer
 
         // Both recovery cases are checked here rather than through
@@ -822,7 +832,7 @@ public final class VideoRenderView: UIView {
         if renderer.requiresFlushToResumeDecoding || renderer.status == .failed {
             flushSampleBuffers()
         }
-        guard renderer.isReadyForMoreMediaData else { return }
+        guard renderer.isReadyForMoreMediaData else { return false }
 
         renderer.enqueue(sampleBuffer)
         // Enqueue is fire-and-forget: a buffer the layer cannot display is
@@ -846,6 +856,7 @@ public final class VideoRenderView: UIView {
             updatePosterVisibility(ready: true)
             logFirstFrame()
         }
+        return true
     }
 
     /// Drops frames queued but not yet shown, keeping the one on screen.

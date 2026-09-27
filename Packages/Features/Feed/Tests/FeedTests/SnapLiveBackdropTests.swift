@@ -80,6 +80,32 @@ struct SnapLiveBackdropTests {
         #expect(!card.isShowingLiveFrames)
     }
 
+    /// ⚠️ THE BAND FOLLOWS THE CARD'S SURFACE, WHICHEVER IT IS. It is that
+    /// surface's frame companion — the renderer hands it each frame ahead and
+    /// tells it when the frame goes on screen — and a landing re-points the
+    /// card at the flight's surface: the band must move with it, and leave the
+    /// surface it replaced.
+    @Test func theBandIsTheCompanionOfWhicheverSurfaceTheCardDrawsWith() {
+        let card = Self.fittedClip()
+        let first = card.renderView
+        #expect(first.frameCompanion === card.debugLiveBackdrop)
+        let landed = VideoRenderView()
+        card.restoreRenderView(landed)
+        #expect(card.renderView === landed)
+        #expect(landed.frameCompanion === card.debugLiveBackdrop)
+        #expect(first.frameCompanion == nil)
+    }
+
+    /// A band that is running asks for frames ahead only while its card's
+    /// surface is drawing in a window — never for a card nobody can see.
+    @Test func aBandAsksForFramesOnlyWhileItsCardIsOnScreen() {
+        let card = Self.fittedClip()
+        card.setLiveBackdropActive(true)
+        #expect(card.debugLiveBackdrop.isRunning)
+        #expect(!card.debugLiveBackdrop.wantsFramesAhead, "a card outside a window asked for frames")
+        card.setLiveBackdropActive(false)
+    }
+
     private static func fittedClip(suppressed: Bool = false) -> SnapMediaCardView {
         let card = SnapMediaCardView()
         card.debugLiveBackdrop.isSuppressedBySystem = { suppressed }
