@@ -1949,9 +1949,20 @@ extension PlaceProfileViewController: ZoomTransitionSource {
 
     func makeZoomFlightCard() -> any ZoomFlightCard {
         let appearance = page.heroAppearance(for: anchorID)
+        let departure = activeCover?()
         let card = PostGridFlightCard(
             post: page.post(for: anchorID) ?? Self.placeholder(id: anchorID),
-            cover: appearance?.cover,
+            // ⚠️ NEVER A CARD WITH NOTHING TO DRAW. This page is inserted under
+            // the feed at the grab's first frame, so on a first grab its tiles
+            // have not loaded a single picture yet and the landing tile's
+            // cover is nil. The card then rested entirely on the feed's
+            // donated video surface, which the move had just emptied: the
+            // grab held the feed up over a surface that never drew (the page
+            // went BLACK), then dropped it to show a card with nothing in it
+            // over the place page — the media "disappearing from the window"
+            // filmed on a device. The picture the viewer is leaving is the
+            // honest stand-in until the tile's own arrives.
+            cover: appearance?.cover ?? departure,
             style: appearance?.style ?? .tile
         )
         // ⚠️ AND THE PICTURE THE VIEWER IS LEAVING, dissolved into it.
@@ -1962,7 +1973,7 @@ extension PlaceProfileViewController: ZoomTransitionSource {
         // exists for. Nil when they never paged, which leaves the flight
         // exactly the single-pictured one it has always been.
         if let settled = activePostID?(), settled != anchorID {
-            card.setDeparturePicture(activeCover?())
+            card.setDeparturePicture(departure)
         }
         return card
     }
