@@ -205,4 +205,45 @@ struct ChasedSeekTests {
         #expect(controller.debugSeeksLanded < 24,
                 "every one of 24 requests was issued separately — nothing was coalesced")
     }
+
+    // MARK: - Letting go
+
+    /// Nothing in flight: the release has nothing to wait for.
+    @Test func settlingWithNoSeekRunsAtOnce() async throws {
+        let (controller, surface) = try await bound()
+        var ran = false
+        controller.whenSeeksSettle(in: surface) { ran = true }
+        #expect(ran)
+        // And a surface with no player at all does not strand its caller.
+        var ranUnbound = false
+        controller.whenSeeksSettle(in: VideoRenderView()) { ranUnbound = true }
+        #expect(ranUnbound)
+    }
+
+    /// ⚠️ THE RELEASE WAITS FOR THE LAST SEEK, and when it runs the picture is
+    /// where the finger lifted — exactly, at zero tolerance. Resuming before
+    /// the landing played from wherever the player happened to be.
+    @Test func settlingWaitsForTheLastSeekToLand() async throws {
+        let (controller, surface) = try await bound()
+        _ = try #require(controller.playhead(in: surface))
+        controller.setPaused(true, in: surface)
+
+        for step in 0..<12 {
+            controller.seek(toFraction: Double(step) / 24, in: surface, toleranceSeconds: 0)
+        }
+        controller.seek(toFraction: 0.6, in: surface, toleranceSeconds: 0)
+        var landedAt: Double?
+        var inFlightWhenRun = -1
+        controller.whenSeeksSettle(in: surface) {
+            landedAt = controller.playhead(in: surface)?.fraction
+            inFlightWhenRun = controller.debugSeeksInFlight
+        }
+        #expect(landedAt == nil, "it ran before the seeks it was waiting for")
+        for _ in 0..<300 where landedAt == nil {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let head = try #require(landedAt, "the release was never let go")
+        #expect(abs(head - 0.6) < 0.02, "it ran with the picture at \(head), not at 0.6")
+        #expect(inFlightWhenRun == 0)
+    }
 }

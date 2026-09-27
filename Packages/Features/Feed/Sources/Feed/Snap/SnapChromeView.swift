@@ -1023,6 +1023,19 @@ final class SnapChromeView: UIView {
         set { mediaPageBar.onSeekRequested = newValue }
     }
 
+    /// A drag took hold of the clip's playhead — see `SnapMediaPageBarView
+    /// .onScrubBegan`.
+    var onMediaScrubBegan: (() -> Void)? {
+        get { mediaPageBar.onScrubBegan }
+        set { mediaPageBar.onScrubBegan = newValue }
+    }
+
+    /// The drag let go, at this fraction (nil on a cancel).
+    var onMediaScrubEnded: ((Double?) -> Void)? {
+        get { mediaPageBar.onScrubEnded }
+        set { mediaPageBar.onScrubEnded = newValue }
+    }
+
 
     /// The viewer asked for a page by touching the indicator. The CELL owns the
     /// carousel, so the request travels out rather than the chrome reaching in.

@@ -1,3 +1,4 @@
+import CoreVideo
 import DesignSystem
 import MediaCore
 import MediaPlayback
@@ -88,25 +89,51 @@ final class SnapMediaCardView: UIView {
     /// The blurred extension of the picture a `.fitBlurred` card draws in the
     /// bands — below both surfaces, full-bleed, hidden otherwise.
     ///
-    /// ⚠️ A STILL, FOR VIDEO TOO. The live alternative — a second surface on
-    /// the same player (`VideoPlaybackController.attachSurface(_:alongside
-    /// Surface:)`) under a blur — was weighed and declined on cost:
+    /// A still for a photo. For a PLAYING clip it is redrawn from the clip's
+    /// own decoded frames (`liveBackdrop`), starting from — and falling back
+    /// to — the blurred poster.
     ///
-    /// - a system blur over a moving picture is a full-screen blur pass on
-    ///   EVERY composited frame for as long as the clip plays, where a still
-    ///   is one static texture;
-    /// - under the player-layer backing (`-avplayer-render`) a second surface
-    ///   STEALS the render slot, which would black the picture itself — the
-    ///   feature would need a second code path per backing;
-    /// - the hero donates, adopts and reclaims ONE surface per page at every
-    ///   seam; a second one riding along is a second hand-over to get right
-    ///   at each of them, for a layer nobody can see detail in.
-    ///
-    /// At this blur strength (`MediaBackdrop`: the picture reduced to a few
-    /// dozen pixels) a clip's motion reads as a slow drift of colour, which a
-    /// blurred poster conveys nearly as well. Revisit if clips whose colours
-    /// change a lot scene to scene look wrong against their bands.
+    /// ⚠️ NOT A SECOND SURFACE under a system blur, which was weighed and
+    /// declined: a blur over a moving picture is a full-screen pass on every
+    /// composited frame, a second surface steals the render slot under
+    /// `-avplayer-render`, and the hero hands over ONE surface per page at
+    /// every seam. The live band reads the frame the renderer already holds
+    /// instead, and composites one 40-pixel image as the still did.
     private let backdropView = UIImageView()
+
+    /// The band's live half — see `LiveMediaBackdrop` for the design and its
+    /// numbers. Its source is the CARD (below), not a surface, because the
+    /// surface this card draws with is re-pointed at every hero seam.
+    private lazy var liveBackdrop: LiveMediaBackdrop = {
+        let live = LiveMediaBackdrop(target: backdropView)
+        live.source = self
+        return live
+    }()
+
+    /// Whether the cell lets this card's band play: the page is the one on
+    /// screen, and its clip is the one being watched.
+    private var wantsLiveBackdrop = false
+
+    /// Lets the band follow the clip, or holds it on the frame it has — see
+    /// `LiveMediaBackdrop.setActive`. The cell calls this exactly where it
+    /// starts and stops feeding the playhead, which is the same question.
+    func setLiveBackdropActive(_ active: Bool) {
+        wantsLiveBackdrop = active
+        updateLiveBackdrop()
+    }
+
+    /// A single fitted-blurred clip only: a collection's pages draw their own
+    /// bands, and keep them still.
+    private func updateLiveBackdrop() {
+        liveBackdrop.setActive(
+            wantsLiveBackdrop && framing == .fitBlurred && !showsCollection && !renderView.isHidden
+        )
+    }
+
+    #if DEBUG
+    /// The band's state, for a spec.
+    var debugLiveBackdrop: LiveMediaBackdrop { liveBackdrop }
+    #endif
 
     /// The picture's shape as far as anything can tell right now: what is
     /// drawn (a clip's natural size, a photo's pixels), else what was
@@ -147,8 +174,10 @@ final class SnapMediaCardView: UIView {
         // `renderView`, so stamping the card's single-picture answer on it here
         // would fight the page that hosts it.
         guard !showsCollection else {
-            backdropView.image = nil
+            liveBackdrop.returnToStill()
+            liveBackdrop.setStill(nil)
             backdropView.isHidden = true
+            updateLiveBackdrop()
             // Its pages re-decide instead — a first frame is when a clip page
             // learns its natural size.
             carousel?.refreshFraming()
@@ -162,12 +191,18 @@ final class SnapMediaCardView: UIView {
         renderView.posterAspect = framing.fits ? framingAspect : nil
         applyGround(to: renderView)
         if framing == .fitBlurred, let still = imageView.image ?? posterImage {
-            backdropView.image = MediaBackdrop.blurred(still)
+            // ⚠️ THROUGH THE LIVE BAND, never onto the view: this runs on every
+            // first frame and every poster, and a band that is playing must
+            // not be put back to the poster by a re-decision that changed
+            // nothing. The band keeps the still for when it stops.
+            liveBackdrop.setStill(MediaBackdrop.blurred(still))
             backdropView.isHidden = false
         } else {
-            backdropView.image = nil
+            liveBackdrop.returnToStill()
+            liveBackdrop.setStill(nil)
             backdropView.isHidden = true
         }
+        updateLiveBackdrop()
     }
 
     /// The surface whose opaque ground this card switched off, if any — so it
@@ -367,6 +402,8 @@ final class SnapMediaCardView: UIView {
         imageView.transform = .identity
         renderView.setPoster(nil)
         posterImage = nil
+        // A recycled card's band was the last post's clip.
+        liveBackdrop.returnToStill()
         // A recycled card must not frame a new post by the last one's shape;
         // the cell declares this post's right after (`setDeclaredAspect`).
         declaredAspect = nil
@@ -951,4 +988,16 @@ final class SnapMediaCardView: UIView {
     // to reset, nothing to gate on `isCommentsEngaged`, and no path that
     // can strand a scale. The two `.identity` assignments at build time are
     // the whole story.
+}
+
+/// The live band reads its frames through the CARD, which adds the one thing a
+/// surface cannot know: that it is still this card's. A surface donated to a
+/// hero flight is in a window and drawing, and a band that went on sampling it
+/// would be redrawing a page nobody is looking at from a layer that has left.
+extension SnapMediaCardView: LiveBackdropFrameSource {
+    var liveFrameToken: CFTimeInterval { renderView.liveFrameToken }
+    var liveFrameBuffer: CVPixelBuffer? { renderView.liveFrameBuffer }
+    var isShowingLiveFrames: Bool {
+        renderView.superview === self && renderView.isShowingLiveFrames
+    }
 }
