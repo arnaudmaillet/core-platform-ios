@@ -1,4 +1,5 @@
 import MediaCore
+import MediaPlayback
 import UIKit
 
 /// The pages of a collection post, scrolled horizontally inside a row's
@@ -191,15 +192,73 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
             && !hasTravel(towardsPageDelta: -1)
     }
 
-    /// How each page draws its cover. Fill, which is what every carousel has
-    /// always done; a host that letterboxes its pictures (the fitted post
-    /// page) sets `.scaleAspectFit`. Applied to the pages already built and to
-    /// every page built after, so a host may set it at any time.
-    public var pageContentMode: UIView.ContentMode = .scaleAspectFill {
-        didSet {
-            guard pageContentMode != oldValue else { return }
-            pageViews.forEach { $0.cover.contentMode = pageContentMode }
+    /// How a page frames its picture, given the picture's shape — nil, which
+    /// is every `.card` carousel, fills every page exactly as carousels always
+    /// have.
+    ///
+    /// ⚠️ PER PAGE, because a collection's pages need not agree about their
+    /// shape: a 9:16 clip beside a 4:3 photograph fills on one page and fits on
+    /// the next. Each page decides on the best shape it has — see
+    /// `CarouselPageView.framingAspect` — and fills when it has none. Applied
+    /// to the pages already built and to every page built after, so a host may
+    /// set it at any time.
+    public var pageFraming: ((CGSize) -> MediaFraming)? {
+        didSet { pageViews.indices.forEach(applyFraming(onPage:)) }
+    }
+
+    /// The shape each page DECLARES, in page order, as the host knows it — nil
+    /// entries for pages nobody vouches for.
+    ///
+    /// ⚠️ THE HOST'S, not `MediaPage.aspectRatio`: a head page's is the
+    /// historical default of 1 whatever the picture is (see
+    /// `FeedItemDisplayModel.headAspectRatio`), and a guessed square would
+    /// frame a portrait clip as a square until its first frame.
+    public func setDeclaredAspects(_ aspects: [CGSize?]) {
+        for (index, view) in pageViews.enumerated() {
+            view.declaredAspect = aspects.indices.contains(index) ? aspects[index] : nil
+            applyFraming(onPage: index)
         }
+    }
+
+    /// Re-decides every page's framing — for a host that knows something a
+    /// page cannot see for itself arrived (a clip's first frame, which is when
+    /// its natural size is known).
+    public func refreshFraming() {
+        pageViews.indices.forEach(applyFraming(onPage:))
+    }
+
+    /// The framing the CURRENT page draws with — what a hero flying from or
+    /// to this page must compose.
+    public var currentPageFraming: MediaFraming {
+        pageViews.indices.contains(currentPage) ? pageViews[currentPage].framing : .fill
+    }
+
+    /// The shape the current page's framing was decided on, nil when it had
+    /// none (and so fills).
+    public var currentPageAspect: CGSize? {
+        pageViews.indices.contains(currentPage) ? pageViews[currentPage].framingAspect : nil
+    }
+
+    /// The backdrop the current page is drawing around its fitted picture, nil
+    /// when it draws none (it fills, fits on black, or has no picture yet).
+    public var currentPageBackdrop: UIImage? {
+        pageViews.indices.contains(currentPage) ? pageViews[currentPage].backdropImage : nil
+    }
+
+    #if DEBUG
+    /// Hands a page its picture the way the pipeline would, for a spec with no
+    /// network — the same framing path the download takes.
+    func debugSetCover(_ image: UIImage, onPage index: Int) {
+        guard pageViews.indices.contains(index) else { return }
+        pageViews[index].cover.image = image
+        applyFraming(onPage: index)
+    }
+    #endif
+
+    /// Re-decides one page's framing from what it has now.
+    private func applyFraming(onPage index: Int) {
+        guard pageViews.indices.contains(index) else { return }
+        pageViews[index].applyFraming(rule: pageFraming)
     }
 
     /// The image the CURRENT page is showing — what a hero flight departs with.
@@ -480,7 +539,6 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
         loadedPages = []
         pageViews = pages.map { page in
             let view = CarouselPageView()
-            view.cover.contentMode = pageContentMode
             // ⚠️ A page knows whether it is PLAYABLE, and it is per page.
             //
             // Nothing in `post.v1` says a carousel's attachments agree about
@@ -506,6 +564,7 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
             scrollView.addSubview(view)
             return view
         }
+        pageViews.indices.forEach(applyFraming(onPage:))
         currentPage = 0
         scrollView.setContentOffset(.zero, animated: false)
         setNeedsLayout()
@@ -533,18 +592,24 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
             loadedPages.insert(index)
             if let cached = imagePipeline.cachedImage(for: url) {
                 pageViews[index].cover.image = cached
+                // The picture's own pixels now decide its framing.
+                applyFraming(onPage: index)
                 continue
             }
             loadTasks.append(Task { [weak self] in
                 guard let image = try? await imagePipeline.image(for: url),
                       !Task.isCancelled, let self,
                       self.pageViews.indices.contains(index) else { return }
-                let view = self.pageViews[index].cover
+                let page = self.pageViews[index]
+                // The whole page dissolves, not only its cover: a fitted page
+                // gains its backdrop in the same beat as its picture, and a
+                // backdrop that cut in under a fading picture would flash.
                 UIView.transition(
-                    with: view, duration: 0.25,
+                    with: page.pictureLayers, duration: 0.25,
                     options: [.transitionCrossDissolve, .allowUserInteraction]
                 ) {
-                    view.image = image
+                    page.cover.image = image
+                    self.applyFraming(onPage: index)
                 }
             })
         }
@@ -901,22 +966,127 @@ final class CarouselPageView: UIView {
     /// Whether this page is REALLY holding `view` — both halves, for the reason
     /// `host` states: a weak reference outlives the view being taken away.
     func hosts(_ view: UIView) -> Bool { surface === view && view.superview === self }
+
+    /// The page's still layers — backdrop, then cover — in one container, so
+    /// the arrival of a picture dissolves both as one (`MediaCarouselView
+    /// .loadPagesAroundCurrent`) and nothing hosted above them is caught in
+    /// the transition.
+    let pictureLayers = UIView()
+    /// The blurred copy of the picture a `.fitBlurred` page draws around it.
+    /// Hidden for every other framing, and on every `.card` carousel.
+    private let backdrop = UIImageView()
+
+    /// How this page draws its picture. `.fill` until a host asks otherwise.
+    private(set) var framing: MediaFraming = .fill
+    /// The shape the host declares for this page (`MediaCarouselView
+    /// .setDeclaredAspects`), nil when nobody vouches for one.
+    var declaredAspect: CGSize?
+
+    /// The shape this page frames by: what is DRAWN when it can say, else
+    /// what was declared, else nothing (and the page fills).
+    ///
+    /// ⚠️ A CLIP'S COVER IS NOT ITS SHAPE. On a playable page the cover is the
+    /// clip's poster, a thumbnail, and thumbnails are routinely cropped — the
+    /// mock corpus serves 168×168 squares for 9:16 clips, which framed a
+    /// portrait clip as a blurred square. A clip page trusts only its surface's
+    /// natural size and the declared shape; a photo page's cover IS the photo.
+    var framingAspect: CGSize? {
+        func valid(_ size: CGSize?) -> CGSize? {
+            guard let size, size.width > 0, size.height > 0 else { return nil }
+            return size
+        }
+        if isPlayable {
+            return valid((hostedSurface as? VideoRenderView)?.nativeVideoSize) ?? declaredAspect
+        }
+        return valid(cover.image?.size) ?? declaredAspect
+    }
+    /// The backdrop being drawn, nil when there is none.
+    var backdropImage: UIImage? { backdrop.isHidden ? nil : backdrop.image }
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         clipsToBounds = true
+        pictureLayers.isUserInteractionEnabled = false
+        addSubview(pictureLayers)
+        backdrop.contentMode = .scaleAspectFill
+        backdrop.clipsToBounds = true
+        backdrop.isHidden = true
+        pictureLayers.addSubview(backdrop)
         cover.contentMode = .scaleAspectFill
         cover.clipsToBounds = true
-        addSubview(cover)
+        pictureLayers.addSubview(cover)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    /// Decides and draws this page's framing from `framingAspect` — `.fill`
+    /// without one, and always with a nil rule, which is what a page did
+    /// before framing existed.
+    func applyFraming(rule: ((CGSize) -> MediaFraming)?) {
+        framing = rule.flatMap { rule in framingAspect.map(rule) } ?? .fill
+        layoutCover()
+        if framing == .fitBlurred, let image = cover.image {
+            backdrop.image = MediaBackdrop.blurred(image)
+            backdrop.isHidden = false
+        } else {
+            backdrop.image = nil
+            backdrop.isHidden = true
+        }
+        // The page's surface draws the way the page does. A surface handed
+        // back to a GRID leaves at fill (`SnapFeedCell.donateLiveRenderView`).
+        if let surface = hostedSurface as? VideoRenderView {
+            applyFraming(toSurface: surface)
+        }
+    }
+
+    /// The surface whose opaque ground this page switched off, if any.
+    private weak var groundClearedSurface: VideoRenderView?
+
+    /// Gravity, and the ground under a fitted clip: a surface paints an
+    /// opaque black ground (`VideoRenderView.paintsOpaqueGround`) that would
+    /// cover this page's backdrop in the bands. Switched back on only on a
+    /// surface this page switched off — `SnapMediaCardView.applyGround` states
+    /// the same rule for a single picture.
+    private func applyFraming(toSurface surface: VideoRenderView) {
+        surface.videoGravity = framing.videoGravity
+        // Its poster framed to the clip's rect, as this page's cover is.
+        surface.posterAspect = framing.fits ? framingAspect : nil
+        if framing.fits {
+            surface.paintsOpaqueGround = false
+            groundClearedSurface = surface
+        } else if groundClearedSurface === surface {
+            surface.paintsOpaqueGround = true
+            groundClearedSurface = nil
+        }
+    }
+
+    /// The cover's place: the whole page when it fills; when it fits, the
+    /// rect of the picture's shape inside the page, FILLED.
+    ///
+    /// ⚠️ FILLED, not fitted on its own shape, because on a clip page the
+    /// cover is the POSTER and a poster may be a cropped thumbnail — fitted on
+    /// its own square it sat inset inside the clip's rect and the clip then
+    /// jumped out to its real size on its first frame. For a photo the rect IS
+    /// the cover's own shape (`framingAspect`), so filling it is the fit.
+    private func layoutCover() {
+        let area = pictureLayers.bounds
+        if framing.fits, let aspect = framingAspect, area.width > 0, area.height > 0 {
+            cover.frame = MediaFraming.fittedRect(aspect: aspect, in: area)
+            cover.contentMode = .scaleAspectFill
+        } else {
+            cover.frame = area
+            cover.contentMode = framing.contentMode
+        }
+    }
+
     /// Frames, not constraints — the carousel lays its pages out by frame on
     /// every width change, and a page that mixed the two would fight it.
     override func layoutSubviews() {
         super.layoutSubviews()
-        cover.frame = bounds
+        pictureLayers.frame = bounds
+        backdrop.frame = pictureLayers.bounds
+        layoutCover()
         surface?.frame = bounds
         pausedMark?.frame = bounds
         loader?.center = CGPoint(x: bounds.midX, y: bounds.midY)
@@ -982,6 +1152,9 @@ final class CarouselPageView: UIView {
         // attempt always worked and the first never did.
         guard surface !== self.surface || surface.superview !== self else { return }
         self.surface = surface
+        // Whatever surface arrives — minted by the host, adopted from a flight,
+        // reclaimed from a cancelled grab — draws the way this page draws.
+        if let video = surface as? VideoRenderView { applyFraming(toSurface: video) }
         // Over the cover: the picture replaces the poster the moment it has a
         // frame of its own, and nothing sits above it — except the stopped
         // mark, which is about the picture and has to stay on top of it.
@@ -996,6 +1169,13 @@ final class CarouselPageView: UIView {
         guard let surface else { return nil }
         surface.removeFromSuperview()
         self.surface = nil
+        // It leaves as it came: whoever hosts it next — another page, a
+        // flight, a grid — decides its ground for itself.
+        if let video = surface as? VideoRenderView, groundClearedSurface === video {
+            video.paintsOpaqueGround = true
+            video.posterAspect = nil
+            groundClearedSurface = nil
+        }
         return surface
     }
 }
