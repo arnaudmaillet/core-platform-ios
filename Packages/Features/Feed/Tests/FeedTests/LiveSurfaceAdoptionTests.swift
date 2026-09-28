@@ -99,4 +99,51 @@ struct LiveSurfaceAdoptionTests {
         #expect(pool.hasPlayer(in: card))
         #expect(pool.isAdvancing(in: card))
     }
+
+    /// **THE PAGE THAT ADOPTED ITS LANDING STILL SILENCES ITSELF ON THE WAY
+    /// OUT** — the place page's Activity row played the dismissed clip WITH
+    /// SOUND.
+    ///
+    /// The adoption moves the pool's audible surface onto the card's view, and
+    /// the surface the screen had named is the one the landing threw away. The
+    /// screen's "only clear what I set" rule asked by identity, took the
+    /// adopted view for another feed's, and left the player heard; the row the
+    /// close lands on draws that very player.
+    @Test func aScreenLeavingAfterAnAdoptedLandingSilencesItsPlayer() async {
+        guard VideoRenderFlags.usesSampleBufferLayer else { return }
+        let (cell, pool, card) = await Self.pageWithMirroredCard()
+        let screen = UIView(frame: cell.frame)
+        screen.addSubview(cell)
+        let named = cell.debugRenderSurface
+        pool.setAudibleSurface(named)
+        defer { pool.setAudibleSurface(nil) }
+
+        cell.adoptLiveRenderView(card)
+
+        #expect(pool.currentAudibleSurface === card, "the premise: the adoption moves what is heard")
+        #expect(pool.currentAudibleSurface !== named, "the premise: identity alone calls it someone else's")
+        #expect(pool.isMuted(in: card) == false)
+        #expect(SnapFeedViewController.leavingClearsAudibleSurface(
+            pool.currentAudibleSurface, own: named, screen: screen
+        ), "the adopted surface is this screen's own view")
+
+        pool.setAudibleSurface(nil)
+        #expect(pool.isMuted(in: card) == true, "the closed feed's clip is still heard")
+    }
+
+    /// The other half of the rule: a feed pushed on top owns the sound, and
+    /// the one underneath leaving must not silence it. A surface nobody holds
+    /// any more is cleared — its player may still be talking.
+    @Test func leavingLeavesAnotherScreensSurfaceAlone() {
+        let screen = UIView(), other = UIView()
+        let mine = VideoRenderView(), theirs = VideoRenderView()
+        screen.addSubview(mine)
+        other.addSubview(theirs)
+
+        #expect(!SnapFeedViewController.leavingClearsAudibleSurface(theirs, own: nil, screen: screen))
+        #expect(!SnapFeedViewController.leavingClearsAudibleSurface(theirs, own: mine, screen: screen))
+        #expect(SnapFeedViewController.leavingClearsAudibleSurface(mine, own: nil, screen: screen))
+        #expect(SnapFeedViewController.leavingClearsAudibleSurface(theirs, own: theirs, screen: nil))
+        #expect(SnapFeedViewController.leavingClearsAudibleSurface(nil, own: mine, screen: screen))
+    }
 }
