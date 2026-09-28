@@ -5,8 +5,8 @@ import Testing
 import UIKit
 @testable import Feed
 
-/// The sound sheet's rules: how it opens, what large means for the clip
-/// behind, and that from large a drag down can only close it.
+/// The sound sheet's rules: how it opens, and that no detent — large
+/// included — pauses the clip behind.
 @MainActor
 struct SoundSheetTests {
     private func sheet(tiles: Int = 1) -> SoundSheetViewController {
@@ -34,9 +34,9 @@ struct SoundSheetTests {
         #expect(presentation.prefersGrabberVisible)
     }
 
-    /// Large covers the clip behind; coming back down to collapsed gives it
-    /// back — and collapsed is still there to come back to.
-    @Test func largeCoversAndCollapsedGivesTheClipBack() throws {
+    /// Large leaves the clip behind playing, and so does coming back down to
+    /// collapsed — and collapsed is still there to come back to.
+    @Test func largeDoesNotCoverTheClip() throws {
         let controller = sheet()
         let presentation = try #require(controller.sheetPresentationController)
         var covered: [Bool] = []
@@ -44,12 +44,12 @@ struct SoundSheetTests {
 
         presentation.selectedDetentIdentifier = .large
         controller.sheetPresentationControllerDidChangeSelectedDetentIdentifier(presentation)
-        #expect(covered == [true], "the clip behind did not pause at large")
+        #expect(covered.isEmpty, "the clip behind paused at large")
         #expect(presentation.detents.count == 2, "large must keep collapsed to come back to")
 
         presentation.selectedDetentIdentifier = presentation.detents.first?.identifier
         controller.sheetPresentationControllerDidChangeSelectedDetentIdentifier(presentation)
-        #expect(covered == [true, false], "back at collapsed, the clip did not play again")
+        #expect(covered.isEmpty, "a detent change paused or resumed the clip behind")
     }
 
     /// The collapsed detent leaves the clip playing.
