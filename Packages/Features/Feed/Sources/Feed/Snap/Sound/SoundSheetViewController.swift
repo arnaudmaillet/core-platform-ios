@@ -432,6 +432,11 @@ final class SoundSheetViewController: UIViewController {
     /// Before the sheet has a window — `viewDidLoad`, during `present` — so
     /// it rises at the right height: the grid laid out at the PRESENTER's
     /// window width, and the toolbar's band as the bar says it would be.
+    ///
+    /// ⚠️ An ESTIMATE for the band: the bar answered 48 where the sheet's safe
+    /// area later gave it 52 (iPhone 18 Pro, iOS 27), and `toolbar.frame` is
+    /// no help — it spans the whole view on iOS 27, its glass items floating
+    /// in it. `viewIsAppearing` corrects it from the real safe area.
     private func measureBeforeWindow() {
         guard let window = presentingViewController?.view.window, window.bounds.width > 0 else { return }
         view.frame = CGRect(origin: .zero, size: window.bounds.size)
@@ -450,10 +455,13 @@ final class SoundSheetViewController: UIViewController {
     ///
     /// ⚠️ NOT during a transition: a sheet on its way in or out is where its
     /// safe area is least settled, and a detent invalidated mid-dismissal
-    /// would pull the sheet back.
+    /// would pull the sheet back. Nor from a safe area WITHOUT the toolbar's
+    /// band: the bar is always shown, so a bottom inset no taller than the
+    /// window's is a layout caught between detents, not the bar's height.
     private func refreshCollapsedHeight() {
         guard let window = view.window, !isSheetBeingDismissed,
               navigationController?.transitionCoordinator?.isInteractive != true,
+              view.safeAreaInsets.bottom > window.safeAreaInsets.bottom,
               let fold = foldBottom()
         else { return }
         let height = Self.collapsedDetentHeight(
@@ -542,14 +550,26 @@ final class SoundSheetViewController: UIViewController {
     /// "View all": up to the whole grid.
     private func expand() {
         guard let sheet = navigationController?.sheetPresentationController, !isExpanded else { return }
-        sheet.animateChanges { sheet.selectedDetentIdentifier = .large }
-        // A programmatic change is not reported to the delegate.
+        // A programmatic change is not reported to the delegate. ⚠️ BEFORE
+        // the change: the sheet lays out inside `animateChanges`, and a fold
+        // measured there — still "collapsed", mid-way to large — read the
+        // bottom safe area without the toolbar's band (measured: 34 for 86)
+        // and rested the collapsed detent 52pt short.
         detentChanged(to: .large)
+        sheet.animateChanges { sheet.selectedDetentIdentifier = .large }
     }
 
     #if DEBUG
     /// `-snap-sound-sheet large`: "View all", without the tap.
     func debugExpand() { expand() }
+
+    /// `-snap-sound-sheet roundtrip`: back down to collapsed, as the grabber
+    /// would take it.
+    func debugCollapse() {
+        guard let sheet = navigationController?.sheetPresentationController else { return }
+        sheet.animateChanges { sheet.selectedDetentIdentifier = Self.collapsedDetent }
+        detentChanged(to: Self.collapsedDetent)
+    }
     #endif
 
     // MARK: - Cover

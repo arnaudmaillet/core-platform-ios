@@ -961,13 +961,16 @@ final class SnapFeedViewController: UIViewController {
                 }
             }
         }
-        // `-snap-sound-sheet [large]`: opens the active page's sound sheet —
-        // the attribution's tap — once the page (or `-snap-start-index`'s
-        // target) is settled; `large` then presses "View all" 2s later.
+        // `-snap-sound-sheet [large|roundtrip]`: opens the active page's sound
+        // sheet — the attribution's tap — once the page (or
+        // `-snap-start-index`'s target) is settled; `large` then presses
+        // "View all" 2s later, `roundtrip` also comes back to collapsed 2.5s
+        // after that.
         // Pair with `-sound-sheet-trace` for the collapsed detent's measures.
         if !didDebugSoundSheet, let position = arguments.firstIndex(of: "-snap-sound-sheet") {
             didDebugSoundSheet = true
-            let expands = arguments.indices.contains(position + 1) && arguments[position + 1] == "large"
+            let mode = arguments.indices.contains(position + 1) ? arguments[position + 1] : ""
+            let expands = mode == "large" || mode == "roundtrip"
             let jumpTarget = arguments.firstIndex(of: "-snap-start-index")
                 .flatMap { arguments.indices.contains($0 + 1) ? Int(arguments[$0 + 1]) : nil }
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
@@ -985,6 +988,10 @@ final class SnapFeedViewController: UIViewController {
                     guard expands else { return }
                     DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak sheet] in
                         sheet?.debugExpand()
+                    }
+                    guard mode == "roundtrip" else { return }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 4.5) { [weak sheet] in
+                        sheet?.debugCollapse()
                     }
                 }
             }
@@ -4454,7 +4461,14 @@ final class SnapFeedViewController: UIViewController {
         // The grid lists the posts set to this sound that THIS feed can show,
         // so every tile leads somewhere: the sound's original post first when
         // it is a media post, then the page it was opened from.
-        let using = soundProvider?.postIDs(using: sound) ?? []
+        var using = soundProvider?.postIDs(using: sound) ?? []
+        #if DEBUG
+        // `-sound-sheet-all-posts`: LAYOUT QA ONLY — lists every post of this
+        // feed as if it used the sound. The mock's sounds are rarely shared by
+        // more than two posts of one feed, so "View all" and the rows under
+        // the toolbar are otherwise hard to reach.
+        if ProcessInfo.processInfo.arguments.contains("-sound-sheet-all-posts") { using += orderedIDs }
+        #endif
         // With nobody to ask, a clip's own sound (`sound(for:)`) is this
         // page's: it is its own original.
         let original = soundProvider?.originalPostID(of: sound)

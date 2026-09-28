@@ -147,9 +147,17 @@ struct SoundSheetTests {
         ) == 350)
     }
 
-    /// Hosted at the height the collapsed detent gives it, the sheet shows the
-    /// sound, the WHOLE first row and "View all" above the toolbar — and the
-    /// second row starts under "View all", behind the bar.
+    /// At the collapsed detent the sheet shows the sound, the WHOLE first row
+    /// and "View all" above the toolbar — and the second row starts under
+    /// "View all", behind the bar.
+    ///
+    /// Read off the laid-out CELLS against the view's safe area: the bar's
+    /// top edge is the bottom safe area, which keeps its distance to the
+    /// sheet's bottom at any height, and a collapsed sheet is the detent plus
+    /// the window's bottom safe area tall. ⚠️ Not `toolbar.frame`: on iOS 27
+    /// the bar's frame spans the whole view (measured 402×874), glass items
+    /// floating in it. (Resizing the test window to the collapsed height
+    /// instead changed the window's own safe area with it.)
     @Test func atTheCollapsedHeightTheFirstRowAndViewAllSitAboveTheToolbar() throws {
         let controller = sheet(tiles: 7, original: 0)
         let navigation = controller.wrappedInSheet()
@@ -161,19 +169,20 @@ struct SoundSheetTests {
         controller.view.layoutIfNeeded()
 
         let collapsed = try #require(controller.collapsedHeight)
-        let windowBottom = window.safeAreaInsets.bottom
-        window.frame.size.height = collapsed + windowBottom
-        navigation.view.layoutIfNeeded()
-        controller.view.layoutIfNeeded()
-        #expect(abs((controller.collapsedHeight ?? 0) - collapsed) < 0.5, "the fold moved with the height")
+        let collapsedSheet = collapsed + window.safeAreaInsets.bottom
+        let toolbarTop = collapsedSheet - controller.view.safeAreaInsets.bottom
+        #expect(controller.view.safeAreaInsets.bottom > window.safeAreaInsets.bottom, "no toolbar band")
 
         let collection = try #require(controller.view.subviews.compactMap { $0 as? UICollectionView }.first)
         collection.layoutIfNeeded()
-        let toolbarTop = navigation.toolbar.convert(navigation.toolbar.bounds, to: controller.view).minY
         let visible = collection.visibleCells.map { ($0, $0.convert($0.bounds, to: controller.view)) }
         let more = try #require(visible.first { $0.0 is SoundSheetMoreCell })
         #expect((more.0 as? SoundSheetMoreCell)?.title == "View all 7 posts")
-        #expect(more.1.maxY <= toolbarTop + 0.5, "View all is under the toolbar")
+        #expect(more.1.maxY <= toolbarTop + 0.5, """
+            View all is under the toolbar: more \(more.1) bar top \(toolbarTop) collapsed \(collapsed) \
+            safe \(controller.view.safeAreaInsets) window \(window.safeAreaInsets)
+            """)
+        #expect(toolbarTop - more.1.maxY <= SoundSheetViewController.foldGap + 1, "the detent rests taller than its fold")
 
         let tiles = visible.filter { $0.0 is SoundSheetTileCell }
         let firstRow = tiles.filter { $0.1.maxY <= more.1.minY + 0.5 }
