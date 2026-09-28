@@ -1184,7 +1184,10 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             openFeedHero: { [self] ids, presenter, origin in
                 presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)
             },
-            galleryPost: { id in repository.peekPost(id).map(ForYouRepository.galleryPost(from:)) }
+            galleryPost: { id in repository.peekPost(id).map(ForYouRepository.galleryPost(from:)) },
+            // …and the posts the grid lists from outside the feed: loaded into
+            // the same cache, which `galleryPost` then answers from.
+            prewarmPosts: { ids in await repository.prewarm(ids) }
         )
     }
 

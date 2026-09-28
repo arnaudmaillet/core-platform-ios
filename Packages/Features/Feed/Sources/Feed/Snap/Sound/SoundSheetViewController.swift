@@ -63,13 +63,22 @@ final class SoundSheetViewController: UIViewController {
         let isCurrent: Bool
         /// The post the sound was first published with — first in the grid.
         let isOriginal: Bool
+        /// Whether the post itself is known yet. The grid lists EVERY post set
+        /// to the sound, most of them outside the feed behind: those arrive as
+        /// placeholders — so the sheet rises at once, at its final size — and
+        /// are filled in by `update(tiles:)` once the repository has them.
+        let isLoaded: Bool
 
-        init(postID: PostID, thumbnailURL: URL?, caption: String?, isCurrent: Bool, isOriginal: Bool = false) {
+        init(
+            postID: PostID, thumbnailURL: URL?, caption: String?, isCurrent: Bool,
+            isOriginal: Bool = false, isLoaded: Bool = true
+        ) {
             self.postID = postID
             self.thumbnailURL = thumbnailURL
             self.caption = caption
             self.isCurrent = isCurrent
             self.isOriginal = isOriginal
+            self.isLoaded = isLoaded
         }
     }
 
@@ -80,8 +89,11 @@ final class SoundSheetViewController: UIViewController {
         case firstRow, more, rest
     }
 
+    /// ⚠️ A tile is identified by its POST, not by its content: a placeholder
+    /// filled in is the same item reconfigured, and an original that moves is
+    /// the same item moved.
     enum Item: Hashable, Sendable {
-        case tile(Tile)
+        case tile(PostID)
         case more
     }
 
@@ -118,7 +130,8 @@ final class SoundSheetViewController: UIViewController {
     private let sound: PostSound
     private let authorHandle: String
     private let fallbackArtworkURL: URL?
-    private let tiles: [Tile]
+    private(set) var tiles: [Tile]
+    private var tileByID: [PostID: Tile]
     private let imagePipeline: ImagePipeline
 
     private lazy var collectionView = UICollectionView(frame: .zero, collectionViewLayout: makeLayout())
@@ -147,6 +160,7 @@ final class SoundSheetViewController: UIViewController {
         self.authorHandle = authorHandle
         self.fallbackArtworkURL = fallbackArtworkURL
         self.tiles = tiles
+        self.tileByID = Dictionary(tiles.map { ($0.postID, $0) }, uniquingKeysWith: { first, _ in first })
         self.imagePipeline = imagePipeline
         super.init(nibName: nil, bundle: nil)
     }
@@ -330,12 +344,13 @@ final class SoundSheetViewController: UIViewController {
 
     private func configureDataSource() {
         let pipeline = imagePipeline
-        let tileRegistration = UICollectionView.CellRegistration<SoundSheetTileCell, Tile> { cell, _, tile in
+        let tileRegistration = UICollectionView.CellRegistration<SoundSheetTileCell, PostID> {
+            [weak self] cell, _, id in
+            guard let tile = self?.tileByID[id] else { return }
             cell.configure(tile, pipeline: pipeline)
         }
-        let total = tiles.count
         let moreRegistration = UICollectionView.CellRegistration<SoundSheetMoreCell, Item> { [weak self] cell, _, _ in
-            cell.configure(title: Self.moreTitle(posts: total))
+            cell.configure(title: Self.moreTitle(posts: self?.tiles.count ?? 0))
             cell.onTap = { [weak self] in self?.expand() }
         }
         let headerRegistration = UICollectionView.SupplementaryRegistration<SoundSheetHeaderView>(
@@ -346,8 +361,8 @@ final class SoundSheetViewController: UIViewController {
         }
         dataSource = UICollectionViewDiffableDataSource(collectionView: collectionView) { view, path, item in
             switch item {
-            case .tile(let tile):
-                view.dequeueConfiguredReusableCell(using: tileRegistration, for: path, item: tile)
+            case .tile(let id):
+                view.dequeueConfiguredReusableCell(using: tileRegistration, for: path, item: id)
             case .more:
                 view.dequeueConfiguredReusableCell(using: moreRegistration, for: path, item: item)
             }
@@ -362,7 +377,7 @@ final class SoundSheetViewController: UIViewController {
     private func makeSnapshot() -> NSDiffableDataSourceSnapshot<Section, Item> {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
         snapshot.appendSections([.firstRow])
-        snapshot.appendItems(tiles.prefix(Self.columns).map(Item.tile), toSection: .firstRow)
+        snapshot.appendItems(tiles.prefix(Self.columns).map { .tile($0.postID) }, toSection: .firstRow)
         let rest = tiles.dropFirst(Self.columns)
         guard !rest.isEmpty else { return snapshot }
         if !isExpanded {
@@ -370,8 +385,24 @@ final class SoundSheetViewController: UIViewController {
             snapshot.appendItems([.more], toSection: .more)
         }
         snapshot.appendSections([.rest])
-        snapshot.appendItems(rest.map(Item.tile), toSection: .rest)
+        snapshot.appendItems(rest.map { .tile($0.postID) }, toSection: .rest)
         return snapshot
+    }
+
+    /// The grid's posts as now known: placeholders filled in, a post that could
+    /// not be loaded gone, the original moved if it turned out not to be one.
+    /// Tiles whose content changed are reconfigured in place; the count on the
+    /// header and on "View all" follows.
+    func update(tiles newTiles: [Tile]) {
+        let changed = newTiles.filter { tileByID[$0.postID] != nil && tileByID[$0.postID] != $0 }
+        tiles = newTiles
+        tileByID = Dictionary(newTiles.map { ($0.postID, $0) }, uniquingKeysWith: { first, _ in first })
+        guard dataSource != nil else { return }
+        var snapshot = makeSnapshot()
+        snapshot.reconfigureItems(changed.map { .tile($0.postID) })
+        if snapshot.indexOfSection(.more) != nil { snapshot.reconfigureItems([.more]) }
+        dataSource.apply(snapshot, animatingDifferences: view.window != nil)
+        if !isPreviewing { header?.setMeta(Self.meta(duration: sound.duration, posts: tiles.count)) }
     }
 
     private func configure(_ header: SoundSheetHeaderView) {
@@ -521,28 +552,32 @@ final class SoundSheetViewController: UIViewController {
 
     // MARK: - Order
 
-    /// The grid's posts, in order, and which of them is the ORIGINAL:
-    /// 1. the post the sound was first published with — only when it is a
-    ///    MEDIA post this grid can show (a text post's words are no "original"
-    ///    of a sound, and a tile that leads nowhere is not offered);
+    /// The grid's posts, in order, and which of them is MARKED "Original":
+    /// 1. the post the sound was first published with, unless it is known to
+    ///    be a text post (a text post's words are no "original" of a sound: it
+    ///    then keeps its place among the others);
     /// 2. the post the sheet was opened from;
-    /// 3. the others the sound is set to, as the provider ranks them, among
-    ///    those this grid can show.
+    /// 3. every other post set to the sound, as the provider ranks them —
+    ///    across the whole corpus, not only the feed behind the sheet.
     /// Each post once.
+    ///
+    /// `isMedia` is nil for a post not loaded yet. An unknown original still
+    /// leads — it is a clip's post far more often than not, and holding its
+    /// place keeps the grid from reshuffling when it loads — but it is marked
+    /// only once it is KNOWN to be a media post.
     static func gridPostIDs(
         current: PostID,
         original: PostID?,
         using: [PostID],
-        canShow: (PostID) -> Bool,
-        isMedia: (PostID) -> Bool
+        isMedia: (PostID) -> Bool?
     ) -> (ids: [PostID], original: PostID?) {
-        let original = original.flatMap { canShow($0) && isMedia($0) ? $0 : nil }
+        let leading = original.flatMap { isMedia($0) == false ? nil : $0 }
         var ids: [PostID] = []
         var seen = Set<PostID>()
-        for id in [original, current].compactMap({ $0 }) + using.filter(canShow) where seen.insert(id).inserted {
+        for id in [leading, current].compactMap({ $0 }) + using where seen.insert(id).inserted {
             ids.append(id)
         }
-        return (ids, original)
+        return (ids, leading.flatMap { isMedia($0) == true ? $0 : nil })
     }
 
     // MARK: - Expansion
@@ -617,6 +652,7 @@ final class SoundSheetViewController: UIViewController {
             },
             setConcealed: { [weak self] concealed in self?.tileCell(for: id)?.setConcealed(concealed) }
         )
+        trace("open \(id.rawValue) (\(post.kind)) stream \(stream.prefix(3).map(\.id.rawValue))")
         stopPreview()
         isShowingFeed = true
         refreshCover()
@@ -630,8 +666,7 @@ final class SoundSheetViewController: UIViewController {
     }
 
     private func tileCell(for id: PostID) -> SoundSheetTileCell? {
-        guard let tile = tiles.first(where: { $0.postID == id }),
-              let path = dataSource.indexPath(for: .tile(tile)) else { return nil }
+        guard let path = dataSource.indexPath(for: .tile(id)) else { return nil }
         return collectionView.cellForItem(at: path) as? SoundSheetTileCell
     }
 
@@ -757,10 +792,15 @@ extension SoundSheetViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         collectionView.deselectItem(at: indexPath, animated: true)
         switch dataSource.itemIdentifier(for: indexPath) {
-        case .tile(let tile):
+        case .tile(let id):
+            // A placeholder leads nowhere yet: its post is still on its way.
+            guard let tile = tileByID[id], tile.isLoaded else { return }
             if openFeed(from: tile) { return }
+            // Scrolling the feed behind reaches only ITS posts; any other
+            // stays put rather than closing the sheet on nothing.
+            guard openFeedHero == nil else { return }
             let select = onSelectPost
-            dismiss(animated: true) { select?(tile.postID) }
+            dismiss(animated: true) { select?(id) }
         case .more:
             expand()
         case nil:

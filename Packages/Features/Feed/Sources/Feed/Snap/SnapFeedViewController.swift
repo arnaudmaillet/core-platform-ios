@@ -463,6 +463,9 @@ final class SnapFeedViewController: UIViewController {
     /// Opens a new feed with the hero — the sound sheet's grid uses it.
     private let openFeedHero: (@MainActor ([PostID], UIViewController, SnapFeedHeroOrigin) -> Void)?
     private let galleryPost: (@MainActor (PostID) -> GalleryPost?)?
+    /// Loads posts into the repository's cache, after which `galleryPost`
+    /// answers for them — the sound sheet's tiles outside this feed.
+    private let prewarmPosts: (@Sendable ([PostID]) async -> Void)?
 
     init(
         viewModel: FeedViewModel,
@@ -479,8 +482,10 @@ final class SnapFeedViewController: UIViewController {
         soundProvider: (any PostSoundProviding)? = nil,
         useSound: (@MainActor (PostSound) -> Void)? = nil,
         openFeedHero: (@MainActor ([PostID], UIViewController, SnapFeedHeroOrigin) -> Void)? = nil,
-        galleryPost: (@MainActor (PostID) -> GalleryPost?)? = nil
+        galleryPost: (@MainActor (PostID) -> GalleryPost?)? = nil,
+        prewarmPosts: (@Sendable ([PostID]) async -> Void)? = nil
     ) {
+        self.prewarmPosts = prewarmPosts
         self.soundProvider = soundProvider
         self.useSound = useSound
         self.openFeedHero = openFeedHero
@@ -900,7 +905,9 @@ final class SnapFeedViewController: UIViewController {
     private var didDebugPageSwipe = false
     private var didDebugFling = false
     private var didDebugAutoDismiss = false
-    private var didDebugSoundSheet = false
+    /// ONCE PER LAUNCH, not per feed: a feed opened from the sheet's own grid
+    /// ran the hook again and stacked a second sheet over it.
+    private static var didDebugSoundSheet = false
     private weak var debugPresentedSoundSheet: SoundSheetViewController?
 
     private func runDebugAppearanceHooks() {
@@ -978,8 +985,8 @@ final class SnapFeedViewController: UIViewController {
         // "View all" 2s later, `roundtrip` also comes back to collapsed 2.5s
         // after that.
         // Pair with `-sound-sheet-trace` for the collapsed detent's measures.
-        if !didDebugSoundSheet, let position = arguments.firstIndex(of: "-snap-sound-sheet") {
-            didDebugSoundSheet = true
+        if !Self.didDebugSoundSheet, let position = arguments.firstIndex(of: "-snap-sound-sheet") {
+            Self.didDebugSoundSheet = true
             let mode = arguments.indices.contains(position + 1) ? arguments[position + 1] : ""
             let expands = mode == "large" || mode == "roundtrip"
             let jumpTarget = arguments.firstIndex(of: "-snap-start-index")
@@ -4513,33 +4520,16 @@ final class SnapFeedViewController: UIViewController {
     private func presentSoundSheet() {
         guard presentedViewController == nil, let model = activeModel,
               let sound = sound(for: model) else { return }
-        // The grid lists the posts set to this sound that THIS feed can show,
-        // so every tile leads somewhere: the sound's original post first when
-        // it is a media post, then the page it was opened from.
-        var using = soundProvider?.postIDs(using: sound) ?? []
-        #if DEBUG
-        // `-sound-sheet-all-posts`: LAYOUT QA ONLY — lists every post of this
-        // feed as if it used the sound. The mock's sounds are rarely shared by
-        // more than two posts of one feed, so "View all" and the rows under
-        // the toolbar are otherwise hard to reach.
-        if ProcessInfo.processInfo.arguments.contains("-sound-sheet-all-posts") { using += orderedIDs }
-        #endif
+        // The grid lists EVERY post set to this sound, not only this feed's:
+        // the sound's original post first when it is a media post, then the
+        // page it was opened from.
+        let using = soundProvider?.postIDs(using: sound) ?? []
         // With nobody to ask, a clip's own sound (`sound(for:)`) is this
         // page's: it is its own original.
         let original = soundProvider?.originalPostID(of: sound)
             ?? (sound.id == "original-\(model.id.rawValue)" ? model.id : nil)
-        let order = SoundSheetViewController.gridPostIDs(
-            current: model.id, original: original, using: using,
-            canShow: { [modelsByID] in modelsByID[$0] != nil },
-            isMedia: { [modelsByID] in modelsByID[$0]?.mediaURL != nil }
-        )
-        let tiles = order.ids.map { id in
-            SoundSheetViewController.Tile(
-                postID: id, thumbnailURL: modelsByID[id]?.thumbnailURL,
-                caption: modelsByID[id]?.caption, isCurrent: id == model.id,
-                isOriginal: id == order.original
-            )
-        }
+        let current = model.id
+        let tiles = soundSheetTiles(current: current, original: original, using: using)
         let sheet = SoundSheetViewController(
             sound: sound,
             authorHandle: Self.handle(of: model),
@@ -4575,6 +4565,45 @@ final class SnapFeedViewController: UIViewController {
         #if DEBUG
         debugPresentedSoundSheet = sheet
         #endif
+        // ⚠️ THE SHEET RISES AT ONCE, never after an await: the posts this
+        // feed does not hold are placeholders, filled in when the repository
+        // has loaded them — and a post it cannot load leaves the grid, since
+        // its tile would lead nowhere.
+        let pending = tiles.filter { !$0.isLoaded }.map(\.postID)
+        guard !pending.isEmpty, let prewarmPosts else { return }
+        Task { @MainActor [weak self, weak sheet] in
+            await prewarmPosts(pending)
+            guard let self, let sheet else { return }
+            sheet.update(tiles: soundSheetTiles(current: current, original: original, using: using)
+                .filter { $0.isLoaded || $0.postID == current })
+        }
+    }
+
+    /// The sound sheet's tiles, in the grid's order, from what the feed knows
+    /// of each post NOW: its own page, else the repository's cache (a post
+    /// shown elsewhere, or loaded for the sheet), else nothing yet — a
+    /// placeholder.
+    private func soundSheetTiles(
+        current: PostID, original: PostID?, using: [PostID]
+    ) -> [SoundSheetViewController.Tile] {
+        let galleryPost = galleryPost
+        let known: (PostID) -> (thumbnailURL: URL?, caption: String?, isMedia: Bool)? = { [modelsByID] id in
+            if let model = modelsByID[id] { return (model.thumbnailURL, model.caption, model.mediaURL != nil) }
+            if let post = galleryPost?(id) {
+                return (post.thumbnailURL, post.caption.isEmpty ? nil : post.caption, post.kind != .text)
+            }
+            return nil
+        }
+        let order = SoundSheetViewController.gridPostIDs(
+            current: current, original: original, using: using, isMedia: { known($0)?.isMedia }
+        )
+        return order.ids.map { id in
+            let post = known(id)
+            return SoundSheetViewController.Tile(
+                postID: id, thumbnailURL: post?.thumbnailURL, caption: post?.caption,
+                isCurrent: id == current, isOriginal: id == order.original, isLoaded: post != nil
+            )
+        }
     }
 
     /// Brings `id` to the screen — a tile of the sound sheet.
