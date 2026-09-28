@@ -1,80 +1,93 @@
 import Foundation
 import UIKit
 
-/// WHEN the grid may put the system tab bar back after a screen it pushed
-/// goes away.
+/// # Native chrome is UIKit's
 ///
-/// The bar is hidden by hand for the length of a post's visit (see the push in
-/// `openPost`), so something has to put it back. The obvious place —
-/// `viewWillAppear` on the way back — is right for two of the three paths that
-/// reach it and wrong for the third, and the third is the common one:
+/// Product rule (2026-09-28, and it reverses the one before it): the tab bar,
+/// its bottom accessory, a navigation controller's toolbar and its items, the
+/// navigation bar — every piece of NATIVE chrome — is shown and hidden by
+/// UIKit, through UIKit's own API, on UIKit's own animation. Nothing in this
+/// app writes their `alpha`, holds them at 0 through a transition, strips an
+/// `opacity` animation UIKit put on them, or fades them on a flight's clock.
 ///
-/// UIKit runs the incoming screen's `viewWillAppear` when an interactive pop
-/// BEGINS, not when it commits. A drag released below the completion threshold
-/// therefore left the bar standing over a feed that had sprung back, with
-/// nothing to take it away again — `viewWillDisappear` is guarded on being the
-/// top view controller and the stack has already been restored by then, and the
-/// completed-pop callback correctly never fires for a cancel. The bar simply
-/// stayed.
+/// The API, and nothing else: `setTabBarHidden(_:animated: true)`
+/// (`showTabBarNatively` / `hideTabBarNatively` below),
+/// `hidesBottomBarWhenPushed`, `setBottomAccessory(_:animated:)`,
+/// `setToolbarHidden(_:animated:)`, `setNavigationBarHidden(_:animated:)`.
+///
+/// The bar arriving while a close is still in the air is FINE — stability and
+/// the platform's own motion matter more than holding it for the landing,
+/// which is what the previous rule did by writing the bar's opacity by hand
+/// (and what read as the bar arriving late, then all at once). Our OWN views
+/// (a map's filter pills, a feed cell's overlay, a flight's card) are not
+/// native chrome and keep their own choreography.
+///
+/// # WHEN the grid may put the bar back
+///
+/// What this type still decides is the MOMENT, never the manner. The bar is
+/// hidden by hand for the length of a post's visit (see the push in
+/// `openPost`), so something has to put it back, and the obvious place —
+/// `viewWillAppear` on the way back — is a question on two of the paths that
+/// reach it:
+///
+/// - UIKit runs the incoming screen's `viewWillAppear` when an interactive pop
+///   BEGINS, not when it commits. A drag released below the completion
+///   threshold used to leave the bar standing over a feed that had sprung
+///   back, with nothing to take it away again — `viewWillDisappear` is guarded
+///   on being the top view controller, and the completed-pop callback
+///   correctly never fires for a cancel. So a scrub reveals at its RELEASE,
+///   and only if it committed.
+/// - ⚠️ A bar un-hidden INSIDE a close of the snap feed that has not been
+///   committed by a finger — a button-driven pop, running from `viewWillAppear`
+///   — comes back as a state every API reports as shown and nothing draws: a
+///   row of empty glass capsules, or a `UITabBar` left `isHidden` for the life
+///   of the screen, measured on For You, the map and the place page. The
+///   owners therefore show it BEFORE such a pop is triggered (the chevron's
+///   `onWillCloseFeed`), outside any transition, where it paints and where UIKit
+///   animates it in alongside the return; this policy's `.afterTransition` is
+///   only the backstop for a pop nobody announced.
 ///
 /// Split out as a value because three appearance paths reach one line of code
 /// and only one of them may act on it immediately — a distinction with no
-/// syntax at the call site, and the reason the bug survived review.
+/// syntax at the call site, and the reason the first bug survived review.
 ///
 /// ⚠️ Lives HERE, not beside the grid that first needed it. It was internal to
 /// the Feed package, so the profile — which hides the same one bar for the same
-/// screen and has the same three appearance paths — could not reach it and
-/// asserted its dock unconditionally instead. The consequence was the exact
-/// failure the doc above describes, on the other surface: a swipe released
-/// below the threshold left the bar standing over a post that had sprung back.
-/// A policy two screens must agree on cannot be owned by one of them.
-/// ## The dock never returns WITH a close — it is there when the close is over
-///
-/// Product decision, 2026-09-28. Leaving the vertical snap feed for a screen
-/// that shows the tab bar — For You, a profile, the place page, the map — the
-/// bar used to arrive by as many routes as there were screens: faded in 1:1
-/// with a grab, faded in on the flight's spring, slid in alongside a
-/// back-button pop, or put back after the landing. Now it is one rule, on
-/// every close (hero flight, window, slide, grab, chevron): the bar stays down
-/// for the whole return and appears at once at the landing, with no fade. A
-/// return that is abandoned never shows it at all.
-///
-/// Where the grid's LAYOUT depends on the bar, the owner still restores its
-/// hidden STATE before the pop (outside any transition, where it paints) at
-/// alpha 0 — geometrically present, visually absent — so the landing only
-/// flips the opacity and nothing moves.
+/// screen and has the same appearance paths — could not reach it and asserted
+/// its dock unconditionally instead, stranding the bar over a post that had
+/// sprung back. A policy two screens must agree on cannot be owned by one of
+/// them.
 public enum TabBarRevealPolicy {
     public enum Timing: Equatable {
-        /// Nothing is animating: a tab switch back, or a non-animated pop.
-        /// Safe to reveal outright.
+        /// Nothing is animating, or an ordinary button-driven pop: safe to
+        /// reveal outright.
         case immediately
         /// A scrub owns the screen and could still be taken back. Reveal when
         /// the finger lifts and only if it committed: a cancelled drag leaves
         /// the pushed screen on display, and the bar must stay hidden under it.
-        ///
-        /// For a scrub that does NOT come back from the snap feed — an ordinary
-        /// back-swipe off a pushed screen; the feed's closes are `.atLanding`.
         case whenTransitionCommits
-        /// A return from a screen that shows no dock — the snap feed — is in
-        /// flight: the bottom chrome is owed at its LANDING, at once, and only
-        /// if it lands (see the type's doc).
-        case atLanding
+        /// A close of the snap feed that no finger drives is running, and an
+        /// un-hide inside it is not drawn (see the type's doc). Reveal once it
+        /// is over, and only if it landed. Normally a no-op: the close's owner
+        /// showed the bar before triggering the pop.
+        case afterTransition
     }
 
     /// - Parameter returnsFromFullBleed: whether this appearance is the far
     ///   side of a close of a dock-less screen (`isReturningFromDocklessScreen`)
     ///   — or, for a screen that owns a flight, whether one is in the air.
     public static func timing(returnsFromFullBleed: Bool, isTransitioning: Bool, isInteractive: Bool) -> Timing {
-        // Only a transition HAS a landing to wait for. With nothing moving the
-        // landing is now.
-        if returnsFromFullBleed, isTransitioning { return .atLanding }
-        // Only a SCRUB can be taken back. A still screen and a button-driven
-        // pop both have a known outcome already, and deferring a certainty is
-        // what makes the bar arrive on a screen that has finished moving.
-        return isTransitioning && isInteractive ? .whenTransitionCommits : .immediately
+        // With nothing moving there is nothing to be out of step with.
+        guard isTransitioning else { return .immediately }
+        // Only a SCRUB can be taken back.
+        if isInteractive { return .whenTransitionCommits }
+        // A button-driven pop has a known outcome. Deferring a certainty is
+        // what makes the bar arrive on a screen that has finished moving — so
+        // only the one pop whose in-flight un-hide does not paint waits.
+        return returnsFromFullBleed ? .afterTransition : .immediately
     }
 
-    /// The completion half of `.whenTransitionCommits` and `.atLanding`.
+    /// The completion half of `.whenTransitionCommits` and `.afterTransition`.
     /// Trivial by design: the value of stating it is that the cancel branch is
     /// now a case someone has to delete on purpose rather than one nobody
     /// wrote.
@@ -84,12 +97,104 @@ public enum TabBarRevealPolicy {
 }
 
 @MainActor
+public extension UITabBarController {
+    /// Shows the bar through UIKit, on UIKit's own animation. Idempotent, so
+    /// the several owners a return has (the close's driver, the screen it
+    /// lands on, a backstop) can all ask and only the first one acts.
+    ///
+    /// ⚠️ NEVER FOLLOWED BY AN ALPHA WRITE — see the rule above.
+    func showTabBarNatively() {
+        guard isTabBarHidden else { return }
+        setTabBarHidden(false, animated: true)
+    }
+
+    /// `showTabBarNatively`, one runloop turn later: for a caller running
+    /// inside a transition's completion or a `didShow`/`viewDidAppear`, where
+    /// UIKit's own end-of-transition bookkeeping was measured to swallow an
+    /// un-hide (see `whenCommitted`). A BACKSTOP — the bar is normally up by
+    /// then, and this finds nothing to do.
+    func showTabBarNativelyNextTurn() {
+        DispatchQueue.main.async { [weak self] in self?.showTabBarNatively() }
+    }
+
+    /// Hides the bar through UIKit, on UIKit's own animation. Idempotent.
+    func hideTabBarNatively() {
+        guard !isTabBarHidden else { return }
+        setTabBarHidden(true, animated: true)
+    }
+}
+
+@MainActor
+public extension UINavigationController {
+    /// Whether `screen`, on this stack, shows the app's tab bar — what a
+    /// close landing on it may give back.
+    ///
+    /// ⚠️ `concealsAppTabBar`, NOT conformance to `ZoomTransitionDestination`.
+    /// Conformance used to be read as "another full-bleed surface is
+    /// underneath, whose own mechanic owns the dock"; the place page conforms
+    /// without covering anything, so a feed popping onto it left the viewer
+    /// on a perfectly ordinary screen with no dock.
+    ///
+    /// ⚠️ AND UIKIT'S OWN RULE for a pushed screen: a stack with
+    /// `hidesBottomBarWhenPushed` anywhere above its root, up to and including
+    /// `screen` (a pushed profile sets it), has no dock to give back.
+    func showsAppTabBar(for screen: UIViewController?) -> Bool {
+        guard let screen else { return false }
+        if (screen as? any ZoomTransitionDestination)?.concealsAppTabBar == true { return false }
+        guard let index = viewControllers.firstIndex(of: screen) else { return true }
+        return !viewControllers[...index].dropFirst().contains { $0.hidesBottomBarWhenPushed }
+    }
+}
+
+@MainActor
+public extension UIViewControllerTransitionCoordinator {
+    /// Runs `body` once this transition is COMMITTED — at the release for a
+    /// scrub, at the completion otherwise — and never for one that is
+    /// cancelled.
+    ///
+    /// One runloop turn after UIKit's callout rather than inside it: the
+    /// interaction-change handler runs inside the driver's
+    /// `finishInteractiveTransition()` and the completion inside
+    /// `completeTransition`, and a bar un-hidden from inside UIKit's own
+    /// end-of-transition bookkeeping was measured never to render (a
+    /// `setTabBarHidden(false)` issued inline from a pop's `viewDidAppear`;
+    /// one turn later it painted every time).
+    ///
+    /// The completion leg is also the backstop for a scrub that never reports
+    /// a release — a gesture the system cancels outright — so `body` may be
+    /// asked twice; it must be idempotent, which every reveal here is.
+    func whenCommitted(_ body: @escaping @MainActor () -> Void) {
+        if isInteractive {
+            notifyWhenInteractionChanges { context in
+                guard TabBarRevealPolicy.shouldReveal(afterTransitionCancelled: context.isCancelled)
+                else { return }
+                DispatchQueue.main.async { body() }
+            }
+        }
+        animate(alongsideTransition: nil) { context in
+            guard TabBarRevealPolicy.shouldReveal(afterTransitionCancelled: context.isCancelled)
+            else { return }
+            DispatchQueue.main.async { body() }
+        }
+    }
+
+    /// Runs `body` once this transition is OVER and landed — never for one
+    /// that is cancelled, and never at the release of a scrub.
+    func whenLanded(_ body: @escaping @MainActor () -> Void) {
+        animate(alongsideTransition: nil) { context in
+            guard TabBarRevealPolicy.shouldReveal(afterTransitionCancelled: context.isCancelled)
+            else { return }
+            DispatchQueue.main.async { body() }
+        }
+    }
+}
+
+@MainActor
 public extension UIViewController {
     /// Whether this screen is appearing because a screen that shows NO dock —
     /// the snap feed (`ZoomTransitionDestination.concealsAppTabBar`) — is
     /// leaving it. Asked of the transition in flight, so it is only true
-    /// between a close's begin and its landing: exactly the window in which
-    /// the dock must not be seen coming back.
+    /// between a close's begin and its landing.
     var isReturningFromDocklessScreen: Bool {
         guard let from = transitionCoordinator?.viewController(forKey: .from),
               from !== self, from !== navigationController
@@ -97,38 +202,28 @@ public extension UIViewController {
         return (from as? any ZoomTransitionDestination)?.concealsAppTabBar == true
     }
 
-    /// Holds `chrome` at alpha 0 for the rest of the transition in flight.
+    /// Runs `reveal` at the moment `TabBarRevealPolicy` allows for this
+    /// screen's transition in flight: now, at a committed release, or after a
+    /// landed close. The HOW is the caller's `reveal`, which must go through
+    /// UIKit's API (`showTabBarNatively`) and never an alpha.
     ///
-    /// ⚠️ FOR A BAR UN-HIDDEN INSIDE A TRANSITION. `setTabBarHidden(false)`
-    /// called from `viewWillAppear` of a pop (a tap-back that had no chance to
-    /// restore the bar before it began) is finished by UIKit in the
-    /// transition's own animation block, which writes the bar's alpha back to
-    /// 1 — animated, so it faded in over the return. Measured with
-    /// `-dock-trace`: alpha 0 written in `viewWillAppear`, alpha 1 with an
-    /// `opacity` animation by the first alongside block. The alongside block
-    /// is the one place that runs after UIKit's write and before a frame is
-    /// drawn, so the 0 is re-asserted there and UIKit's fade removed.
-    func keepInvisibleThroughTransition(_ chrome: UIView?) {
-        guard let chrome, let coordinator = transitionCoordinator else { return }
-        coordinator.animate(alongsideTransition: { _ in
-            chrome.layer.removeAnimation(forKey: "opacity")
-            UIView.performWithoutAnimation { chrome.alpha = 0 }
-        })
-    }
-
-    /// Runs `reveal` at the LANDING of the transition in flight, and only if
-    /// it lands — the `.atLanding` half of `TabBarRevealPolicy`. Unanimated:
-    /// the dock is simply there when the return is over. With no transition
-    /// in flight the landing is now.
-    func revealBottomChromeAtLanding(_ reveal: @escaping () -> Void) {
-        guard let coordinator = transitionCoordinator else {
-            UIView.performWithoutAnimation(reveal)
-            return
-        }
-        coordinator.animate(alongsideTransition: nil) { context in
-            guard TabBarRevealPolicy.shouldReveal(afterTransitionCancelled: context.isCancelled)
-            else { return }
-            UIView.performWithoutAnimation(reveal)
+    /// - Parameter returnsFromFullBleed: see `TabBarRevealPolicy.timing`.
+    ///   Defaults to asking the transition (`isReturningFromDocklessScreen`).
+    func revealBottomChromeWhenAllowed(returnsFromFullBleed: Bool? = nil,
+                                       animated: Bool = true,
+                                       _ reveal: @escaping @MainActor (_ animated: Bool) -> Void) {
+        let coordinator = transitionCoordinator
+        switch TabBarRevealPolicy.timing(
+            returnsFromFullBleed: returnsFromFullBleed ?? isReturningFromDocklessScreen,
+            isTransitioning: coordinator != nil,
+            isInteractive: coordinator?.isInteractive ?? false
+        ) {
+        case .immediately:
+            reveal(animated)
+        case .whenTransitionCommits:
+            coordinator?.whenCommitted { reveal(true) }
+        case .afterTransition:
+            coordinator?.whenLanded { reveal(true) }
         }
     }
 }
@@ -163,17 +258,18 @@ public extension UIViewController {
     /// which is why this is a policy and not a moved line. UIKit runs it when an
     /// interactive pop BEGINS, so a back-swipe released below the threshold
     /// would show the band over a screen that springs back and then take it
-    /// away again; and a CLOSE of the snap feed owes its bottom chrome at the
-    /// landing, never during the return (`TabBarRevealPolicy.Timing.atLanding`).
-    /// `TabBarRevealPolicy` already draws exactly this distinction for the tab
-    /// bar itself, and forking it per screen is what its own doc warns against.
+    /// away again; and a close of the snap feed that no finger drives cannot
+    /// un-hide the bar from inside itself. `TabBarRevealPolicy` already draws
+    /// exactly this distinction for the tab bar itself, and forking it per
+    /// screen is what its own doc warns against.
     ///
-    /// ⚠️ **THE BAND COMES BACK WITH THE BAR, AT THE LANDING.** The accessory is
-    /// not a subview of the tab bar (measured with `-dock-trace`: the place
-    /// page's pill faded in over a return while the bar stood hidden), so no
-    /// alpha written to the bar can hold it back. Returning from the feed, the
-    /// install waits for the landing and runs unanimated, which is the moment
-    /// and the manner the bar itself is shown.
+    /// ⚠️ **THE BAND FOLLOWS THE BAR.** The accessory is not a subview of the
+    /// tab bar, and with the bar hidden it does not leave with it — it moves
+    /// down to the screen's foot (`.regular` is "above the bar when it is
+    /// visible, OR at the bottom of the tab bar controller's view"). So a close
+    /// of the feed whose owner has already shown the bar installs it now,
+    /// alongside the return; one whose bar is still down waits for the moment
+    /// the bar will come back.
     ///
     /// - Parameter hasActiveFlight: whether a hero flight owned by this screen
     ///   is in the air. A close of the snap feed is recognised on its own
@@ -193,13 +289,13 @@ public extension UIViewController {
     ///   incoming one installed at the release, with empty screen in between.
     ///   A cancelled scrub is covered by the other screen's own
     ///   `viewDidAppear`, which re-claims the slot.
-    /// - Parameter install: idempotent, and called at most once — a caller
-    ///   keeps its `viewDidAppear` install as the backstop for the paths this
-    ///   deliberately declines. Its argument says whether to animate: `false`
-    ///   at a landing, where the band must appear at once with the bar.
+    /// - Parameter install: idempotent, and called at most once per path — a
+    ///   caller keeps its `viewDidAppear` install as the backstop for the paths
+    ///   this deliberately declines. UIKit animates it
+    ///   (`setBottomAccessory(_:animated: true)`).
     func installBottomChromeWhenAppearing(hasActiveFlight: Bool = false,
                                           handsOver: Bool = false,
-                                          _ install: @escaping (_ animated: Bool) -> Void) {
+                                          _ install: @escaping @MainActor () -> Void) {
         let coordinator = transitionCoordinator
         switch TabBarRevealPolicy.timing(
             returnsFromFullBleed: hasActiveFlight || isReturningFromDocklessScreen,
@@ -208,30 +304,23 @@ public extension UIViewController {
         ) {
         case .immediately:
             // The tab switch — the case this exists for.
-            install(true)
+            install()
         case .whenTransitionCommits where handsOver:
             // A hand-over, not an arrival: claim the slot now and let the
             // screen being left find it already spoken for.
-            install(true)
+            install()
         case .whenTransitionCommits:
-            guard let coordinator else { return install(true) }
-            coordinator.notifyWhenInteractionChanges { context in
-                guard TabBarRevealPolicy.shouldReveal(afterTransitionCancelled: context.isCancelled)
-                else { return }
-                install(true)
+            guard let coordinator else { return install() }
+            coordinator.whenCommitted { install() }
+        case .afterTransition:
+            // The close's owner showed the bar before the pop: the band rides
+            // in with it. Otherwise it waits for the bar's own backstop.
+            if tabBarController?.isTabBarHidden == false {
+                install()
+            } else {
+                guard let coordinator else { return install() }
+                coordinator.whenLanded { install() }
             }
-            // Backstop for a scrub that never reports a release. Idempotent
-            // against the notifier above, exactly as the tab bar's own is.
-            coordinator.animate(alongsideTransition: nil) { context in
-                guard TabBarRevealPolicy.shouldReveal(afterTransitionCancelled: context.isCancelled)
-                else { return }
-                install(true)
-            }
-        case .atLanding:
-            // With the bar, at once, and only if the close lands. The caller's
-            // `viewDidAppear` install stays the backstop and finds the slot
-            // already claimed.
-            revealBottomChromeAtLanding { install(false) }
         }
     }
 }

@@ -125,17 +125,14 @@ struct HeroCardCloseParityTests {
         #expect(close != nil, "a flight from a list row left no card close beside it")
         #expect(close?.arbitratesWithHeroGrab == true)
         #expect(close?.prepareForDismissal != nil)
-        #expect(close?.onWillBeginPop != nil,
-                "the close would land the row on a screen with no dock")
     }
 
-    // MARK: - The dock comes back at the landing, never with the return
+    // MARK: - The dock is UIKit's, and comes back once a close is committed
 
-    /// A row close puts the dock's STATE back at its begin — outside any
-    /// transition, so the landing's layout is final — but INVISIBLE: the
-    /// product rule is that the bar appears at the landing, never with the
-    /// return. The close used to fade it in 1:1 with the drag.
-    @Test func aRowCloseRestoresTheDockOffstageAtItsBegin() {
+    /// ⚠️ NATIVE CHROME IS UIKIT'S (2026-09-28). A drag's begin is a question,
+    /// not an answer: nothing may raise the dock there — and nothing may write
+    /// its alpha to hide it instead. It used to be put back at alpha 0 here.
+    @Test func aRowCloseLeavesTheDockAloneAtItsBegin() {
         let stack = Stack()
         stack.builder.presentSnapFeedHero(
             postIDs: [PostID("m1")], from: stack.presenter,
@@ -145,26 +142,43 @@ struct HeroCardCloseParityTests {
 
         (stack.nav.delegate as? InteractiveSlideDismissal)?.onWillBeginPop?(.vertical)
 
-        #expect(stack.tabs.isTabBarHidden == false, "the landing's layout would settle mid-flight")
-        #expect(stack.tabs.tabBar.alpha == 0, "the dock would be seen during the return")
+        // ⚠️ NO ALPHA EXPECTATION HERE: on iOS 27 UIKit's own hide animates
+        // the bar's model alpha to 0 (measured with `-dock-trace`,
+        // `hidden=Y m0.00` after a plain `setTabBarHidden(true, animated:)`),
+        // so a hidden bar's alpha says nothing about who wrote it.
+        #expect(stack.tabs.isTabBarHidden, "a drag that may still spring back raised the dock")
     }
 
-    /// The chevron has no grab-begin; `onWillCloseFeed` is its equivalent, and
-    /// it must do the same for EVERY kind of close — the flight's tap-back
-    /// included, which used to reach the dock only inside the pop, where a bar
-    /// un-hidden reads shown and draws nothing.
-    @Test func theChevronRestoresTheDockOffstageToo() {
+    /// A tapped chevron is committed the moment it is tapped: the feed brings
+    /// the dock back BEFORE its pop — outside any transition, where an un-hide
+    /// paints — through UIKit's API, never by its alpha.
+    @Test func theChevronShowsTheDockThroughUIKitBeforeItsPop() throws {
         let stack = Stack()
         stack.builder.presentSnapFeedHero(
             postIDs: [PostID("m1")], from: stack.presenter, origin: origin(reveal: nil)
         )
-        let feed = stack.nav.viewControllers.last as? SnapFeedViewController
-        #expect(feed?.onWillCloseFeed != nil, "a chevron close would restore the dock inside the pop")
+        let feed = try #require(stack.nav.viewControllers.last as? SnapFeedViewController)
+        #expect(stack.tabs.isTabBarHidden, "precondition: the push hides the dock")
 
-        feed?.onWillCloseFeed?()
+        feed.revealDockBeforePop(on: stack.nav)
 
         #expect(stack.tabs.isTabBarHidden == false)
-        #expect(stack.tabs.tabBar.alpha == 0)
+        #expect(stack.tabs.tabBar.alpha == 1, "the dock's alpha was written by hand")
+    }
+
+    /// …and only for a landing that shows one: a feed that UIKit's own flag
+    /// hid the dock for gets it back from UIKit's pop, not from here.
+    @Test func theChevronLeavesADockUIKitOwnsToUIKit() throws {
+        let stack = Stack()
+        stack.builder.presentSnapFeedHero(
+            postIDs: [PostID("m1")], from: stack.presenter, origin: origin(reveal: nil)
+        )
+        let feed = try #require(stack.nav.viewControllers.last as? SnapFeedViewController)
+        feed.hidesBottomBarWhenPushed = true
+
+        feed.revealDockBeforePop(on: stack.nav)
+
+        #expect(stack.tabs.isTabBarHidden, "the feed raised a dock UIKit's own pop owns")
     }
 
     /// The control: no row, no card close — the flight still owns the stack.

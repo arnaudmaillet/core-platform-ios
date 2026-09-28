@@ -1,4 +1,5 @@
 import Testing
+import UIKit
 @testable import CoreNavigation
 
 /// A CANCELLED DRAG IS NOT A RETURN.
@@ -46,22 +47,71 @@ struct TabBarRevealPolicyTests {
                 "a cancelled drag leaves the pushed screen on display — the bar stays under it")
     }
 
-    /// THE PRODUCT RULE (2026-09-28): a close of the snap feed owes the dock
-    /// at its LANDING, whatever drives it — a grab, a flight's tap-back, a
-    /// window, the chevron. It used to be faded in with the return (1:1 with a
-    /// grab, on the flight's spring, alongside a back-button pop); none of
-    /// those may win over the landing any more.
-    @Test func aReturnFromTheFeedRevealsAtTheLanding() {
-        for interactive in [true, false] {
-            #expect(TabBarRevealPolicy.timing(returnsFromFullBleed: true, isTransitioning: true,
-                                              isInteractive: interactive) == .atLanding)
-        }
+    /// NATIVE CHROME IS UIKIT'S (2026-09-28): a close of the snap feed shows
+    /// the dock through UIKit, on UIKit's animation, as soon as it is
+    /// COMMITTED — and a scrub is committed by its release, exactly like any
+    /// other scrub. It is not held for the landing any more (that took an alpha
+    /// written by hand, which the rule forbids).
+    @Test func aScrubbedReturnFromTheFeedRevealsWhenItCommits() {
+        #expect(TabBarRevealPolicy.timing(returnsFromFullBleed: true, isTransitioning: true,
+                                          isInteractive: true) == .whenTransitionCommits)
     }
 
-    /// …and with nothing moving there is no landing to wait for: waiting for
-    /// a transition that does not exist would leave the dock down for good.
+    /// …but a close of the feed that no finger drives cannot un-hide the bar
+    /// from inside itself: measured, the bar comes back as a state every API
+    /// reports as shown and nothing draws. Its owner shows it BEFORE the pop;
+    /// the policy's answer is the backstop for a pop nobody announced, after it.
+    @Test func aButtonCloseOfTheFeedRevealsAfterTheTransition() {
+        #expect(TabBarRevealPolicy.timing(returnsFromFullBleed: true, isTransitioning: true,
+                                          isInteractive: false) == .afterTransition)
+    }
+
+    /// …and with nothing moving there is nothing to wait for: waiting for a
+    /// transition that does not exist would leave the dock down for good.
     @Test func aReturnWithNoTransitionRevealsOutright() {
         #expect(TabBarRevealPolicy.timing(returnsFromFullBleed: true, isTransitioning: false,
                                           isInteractive: false) == .immediately)
+    }
+}
+
+/// Which landing a close of the snap feed may give the dock back to.
+///
+/// Asked by the feed itself before it raises the bar, so a wrong answer is
+/// either a screen left with no dock (the place page, once) or a dock raised
+/// over a screen UIKit's own `hidesBottomBarWhenPushed` keeps bar-less (a
+/// pushed profile).
+@MainActor
+struct ShowsAppTabBarTests {
+    @Test func aTabRootShowsTheDock() {
+        let root = UIViewController()
+        let nav = UINavigationController(rootViewController: root)
+        #expect(nav.showsAppTabBar(for: root))
+    }
+
+    /// UIKit's rule: anything above the root that hides the bar hides it for
+    /// every screen above it too.
+    @Test func aScreenUnderHidesBottomBarWhenPushedShowsNone() {
+        let root = UIViewController()
+        let pushed = UIViewController()
+        pushed.hidesBottomBarWhenPushed = true
+        let above = UIViewController()
+        let nav = UINavigationController(rootViewController: root)
+        nav.setViewControllers([root, pushed, above], animated: false)
+        #expect(nav.showsAppTabBar(for: pushed) == false)
+        #expect(nav.showsAppTabBar(for: above) == false)
+        #expect(nav.showsAppTabBar(for: root))
+    }
+
+    /// …but the ROOT's own flag means nothing to UIKit, and nothing here.
+    @Test func theRootsOwnFlagIsIgnored() {
+        let root = UIViewController()
+        root.hidesBottomBarWhenPushed = true
+        let nav = UINavigationController(rootViewController: root)
+        #expect(nav.showsAppTabBar(for: root))
+    }
+
+    @Test func noLandingShowsNothing() {
+        let nav = UINavigationController(rootViewController: UIViewController())
+        #expect(nav.showsAppTabBar(for: nil) == false)
     }
 }
