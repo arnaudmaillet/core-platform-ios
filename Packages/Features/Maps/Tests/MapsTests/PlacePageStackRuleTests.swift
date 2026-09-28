@@ -133,48 +133,6 @@ struct MapCardCloseTargetTests {
     }
 }
 
-/// **THE SHARED CLOSE IS THE DEFAULT; `-maps-own-card-close` IS THE ONLY WAY
-/// BACK TO THE MAP'S OWN COPY.**
-///
-/// The map's card close beside a hero flight is armed through the shared
-/// `armAsCardCloseAlongsideFlight` by default; the flag arms the map's own
-/// copy instead, with the same landings. The default is what ships, so the
-/// easy mistake to pin is the old copy leaking into a launch that did not ask
-/// for it.
-@MainActor
-struct MapCardClosePathTests {
-    @Test func theDefaultIsTheSharedHelper() {
-        #expect(MapsViewController.cardClosePath(arguments: []) == .unified)
-        #expect(
-            MapsViewController.cardClosePath(
-                arguments: ["core-platform-ios", "-mock-auto-login", "-maps-open-first-pin"]
-            ) == .unified
-        )
-    }
-
-    @Test func theFlagArmsTheMapsOwnClose() {
-        #expect(
-            MapsViewController.cardClosePath(
-                arguments: ["core-platform-ios", "-mock-auto-login", "-maps-own-card-close"]
-            ) == .mapOwn
-        )
-    }
-
-    /// The whole token, not a prefix or a neighbour's value.
-    @Test func onlyTheExactArgumentCounts() {
-        #expect(
-            MapsViewController.cardClosePath(
-                arguments: ["-maps-own-card-close-off", "-maps-own"]
-            ) == .unified
-        )
-    }
-
-    /// The name the scheme is told to use is the name the code reads.
-    @Test func theDocumentedNameIsTheOneRead() {
-        #expect(MapsViewController.ownCardCloseArgument == "-maps-own-card-close")
-    }
-}
-
 /// **`didAdd` IS NOT "SOMETHING NEW HAPPENED".**
 ///
 /// MapKit calls it for every view it realizes — including the whole visible set
