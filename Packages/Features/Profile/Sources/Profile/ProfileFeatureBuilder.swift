@@ -74,13 +74,14 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
         (ProfileRelationshipsViewModel.Subject, RelationshipDirection) -> UIViewController
     )? {
         guard let relationships else { return nil }
-        return { [imagePipeline, router] subject, direction in
+        return { [imagePipeline, router, followEvents] subject, direction in
             ProfileRelationshipsViewController(
                 viewModel: ProfileRelationshipsViewModel(
                     subject: subject,
                     repository: relationships,
                     router: router,
-                    direction: direction
+                    direction: direction,
+                    followEvents: followEvents
                 ),
                 imagePipeline: imagePipeline
             )
@@ -113,7 +114,8 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                 bookmarks: bookmarks,
                 source: .currentUser,
                 router: router,
-                cache: cache
+                cache: cache,
+                followEvents: followEvents
             ),
             imagePipeline: imagePipeline,
             videoPlayback: videoPlayback,
@@ -164,6 +166,10 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     /// The wallet the gallery cards' like chips stake from — the app's one
     /// instance. Nil leaves the chips counters.
     public var wallet: WalletStore?
+    /// The app's one follow-change channel: the header's Follow button and
+    /// the followers lists keep agreeing with a follow made anywhere else.
+    /// Nil leaves each screen with the answer it loaded.
+    public var followEvents: FollowGraphEvents?
 
     public func makeProfileViewController(for profileID: ProfileID, identityStub: ProfileIdentityStub?) -> UIViewController {
         let controller = ProfileViewController(
@@ -175,7 +181,8 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                 galleryPreferences: galleryPreferences,
                 source: .profile(profileID),
                 router: router,
-                cache: cache
+                cache: cache,
+                followEvents: followEvents
             ),
             imagePipeline: imagePipeline,
             videoPlayback: videoPlayback,

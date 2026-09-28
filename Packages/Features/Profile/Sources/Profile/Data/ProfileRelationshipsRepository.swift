@@ -196,12 +196,31 @@ public actor ProfileRelationshipsRepository: ProfileRelationshipsProviding {
         socialGraphClient: any SocialGraph_V1_SocialGraphServiceClientInterface,
         profileClient: any Profile_V1_ProfileServiceClientInterface,
         viewer: any ProfileViewerResolving,
-        supportsFollowerRemoval: Bool
+        supportsFollowerRemoval: Bool,
+        followEvents: FollowGraphEvents? = nil
     ) {
         self.socialGraphClient = socialGraphClient
         self.profileClient = profileClient
         self.viewer = viewer
         self.supportsFollowerRemoval = supportsFollowerRemoval
+        self.followEvents = followEvents
+    }
+
+    /// Announces this repository's own accepted follows, and keeps the cached
+    /// follow set honest about everyone else's — see `FollowGraphEvents`.
+    private let followEvents: FollowGraphEvents?
+    /// Registered with the cache it keeps: nothing to fold before there is one.
+    private var followSubscription: FollowGraphSubscription?
+
+    /// A follow accepted anywhere — a profile's button, a feed's "+", the
+    /// inbox's suggestions — lands in the session's follow set, so the next
+    /// page of any list renders it rather than the answer it was loaded with.
+    private func fold(_ change: FollowChange) {
+        if change.isFollowing {
+            viewerFollowing?.insert(change.profileID.rawValue)
+        } else {
+            viewerFollowing?.remove(change.profileID.rawValue)
+        }
     }
 
     public func invalidateViewerCache() {
@@ -393,6 +412,11 @@ public actor ProfileRelationshipsRepository: ProfileRelationshipsProviding {
     /// list would not be.
     private func resolveViewerFollowing(viewerID: ProfileID?) async -> Set<String> {
         if let viewerFollowing { return viewerFollowing }
+        if followSubscription == nil {
+            followSubscription = followEvents?.subscribe { [weak self] change in
+                Task { await self?.fold(change) }
+            }
+        }
         guard let viewerID else { return [] }
 
         var request = SocialGraph_V1_ListFollowingRequest()
@@ -428,12 +452,11 @@ public actor ProfileRelationshipsRepository: ProfileRelationshipsProviding {
             try Self.ensureAccepted(await socialGraphClient.unfollow(request: request, headers: [:]))
         }
         // Keep the cached set honest, so a later page of the same screen
-        // renders this row's new state rather than the one it was loaded with.
-        if following {
-            viewerFollowing?.insert(profileID.rawValue)
-        } else {
-            viewerFollowing?.remove(profileID.rawValue)
-        }
+        // renders this row's new state rather than the one it was loaded with
+        // — at once, not a hop later through our own announcement.
+        let change = FollowChange(profileID: profileID, isFollowing: following)
+        fold(change)
+        followEvents?.publish(change)
     }
 
     /// Removing a follower is *their* unfollow, issued by the viewer — which is

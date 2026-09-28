@@ -83,6 +83,10 @@ final class AppContainer {
 
     /// Bridge from the compose feature to the feed's optimistic insert.
     private let composedPostChannel = ComposedPostChannel()
+    /// The viewer's accepted follows and unfollows, announced by every
+    /// repository that writes them and heard by every surface that shows one
+    /// — see `FollowGraphEvents`. One instance, like the channel above.
+    private let followGraphEvents = FollowGraphEvents()
 
     private lazy var unauthenticatedRPCClient = ConnectClientFactory.makeUnauthenticated(
         host: environment.host,
@@ -389,6 +393,9 @@ final class AppContainer {
         // And whether the viewer follows an author already — the snap feed's
         // author pill offers "+" only to someone they do not.
         followRelations: profileRepository,
+        // And hear a follow made on any other surface, so that "+" and the
+        // profile's button never disagree.
+        followEvents: followGraphEvents,
         // counter.v1, so a card can show reach. The timeline read hydrates
         // likes only, and a card's counter chip shows VIEWS — without this it
         // has nothing to say and hides itself, which is what it did.
@@ -609,7 +616,8 @@ final class AppContainer {
         profileClient: Profile_V1_ProfileServiceClient(client: authenticatedRPCClient),
         counterClient: Counter_V1_CounterServiceClient(client: authenticatedRPCClient),
         socialGraphClient: SocialGraph_V1_SocialGraphServiceClient(client: authenticatedRPCClient),
-        authSession: sessionManager
+        authSession: sessionManager,
+        followEvents: followGraphEvents
     )
 
     /// Files profile reports through `moderation.v1.OpenCase` (the profile's
@@ -664,7 +672,8 @@ final class AppContainer {
         socialGraphClient: SocialGraph_V1_SocialGraphServiceClient(client: authenticatedRPCClient),
         profileClient: Profile_V1_ProfileServiceClient(client: authenticatedRPCClient),
         viewer: profileRepository,
-        supportsFollowerRemoval: environment == .mock
+        supportsFollowerRemoval: environment == .mock,
+        followEvents: followGraphEvents
     )
 
     private(set) lazy var profileFeature: any ProfileFeatureBuilding = {
@@ -688,6 +697,9 @@ final class AppContainer {
         builder.videoPlayback = videoPlayback
         // The gallery cards' like chips stake from the app's one wallet.
         builder.wallet = walletStore
+        // A follow made on another surface (a feed's "+", a card's Unfollow)
+        // reaches the profile screens and their followers lists.
+        builder.followEvents = followGraphEvents
         builder.openFeedHero = { [weak self] postIDs, presenter, origin in
             self?.feedFeature.presentSnapFeedHero(
                 postIDs: postIDs, from: presenter, origin: origin
@@ -793,7 +805,8 @@ final class AppContainer {
         socialGraphClient: SocialGraph_V1_SocialGraphServiceClient(client: authenticatedRPCClient),
         profileClient: Profile_V1_ProfileServiceClient(client: authenticatedRPCClient),
         viewer: chatRepository,
-        pageSize: 200
+        pageSize: 200,
+        followEvents: followGraphEvents
     )
 
     /// The compose picker's people lookup. Its own repository rather than the

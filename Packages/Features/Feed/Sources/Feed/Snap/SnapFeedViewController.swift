@@ -452,6 +452,11 @@ final class SnapFeedViewController: UIViewController {
     private var followLookups: Set<ProfileID> = []
     /// Follows in flight, so a double tap sends one.
     private var followsInFlight: Set<ProfileID> = []
+    /// Keeps `followRelationsByAuthor` agreeing with a follow or unfollow
+    /// accepted ANYWHERE — the author's own profile pushed from this pill, a
+    /// card's Unfollow — for the screen's life (`FollowGraphEvents`). Nil
+    /// without a channel, and then a return re-asks instead.
+    private var followSubscription: FollowGraphSubscription?
     /// See `FeedFeatureBuilder.soundProvider` / `useSound`.
     private let soundProvider: (any PostSoundProviding)?
     private let useSound: (@MainActor (PostSound) -> Void)?
@@ -470,6 +475,7 @@ final class SnapFeedViewController: UIViewController {
         reporting: (any ContentReporting)? = nil,
         socialGraph: (any SocialGraphWriting)? = nil,
         followRelations: (any SocialGraphReading)? = nil,
+        followEvents: FollowGraphEvents? = nil,
         soundProvider: (any PostSoundProviding)? = nil,
         useSound: (@MainActor (PostSound) -> Void)? = nil,
         openFeedHero: (@MainActor ([PostID], UIViewController, SnapFeedHeroOrigin) -> Void)? = nil,
@@ -490,6 +496,9 @@ final class SnapFeedViewController: UIViewController {
         self.socialGraph = socialGraph
         self.followRelations = followRelations
         super.init(nibName: nil, bundle: nil)
+        followSubscription = followEvents?.subscribeOnMain { [weak self] change in
+            self?.followGraphDidChange(change)
+        }
     }
 
     @available(*, unavailable)
@@ -753,9 +762,11 @@ final class SnapFeedViewController: UIViewController {
         // through UIKit as it pushes.
         if hasAppeared { retireTabBarOnReturn() }
         // A return may follow a follow made elsewhere — on the author's own
-        // profile, pushed from this pill. Ask again for the author on it; the
-        // answer lands through the landing install.
-        if hasAppeared, let author = authorIdentityView.shownAuthor?.authorID {
+        // profile, pushed from this pill. With the channel wired that change
+        // has already been HEARD (`followGraphDidChange`); without one, ask
+        // again for the author on the pill. Either answer lands through the
+        // landing install.
+        if hasAppeared, followSubscription == nil, let author = authorIdentityView.shownAuthor?.authorID {
             resolveFollowRelation(for: author, refresh: true)
         }
         // The back item exists only when there is somewhere to go back to — a
@@ -1837,6 +1848,21 @@ final class SnapFeedViewController: UIViewController {
             guard let relation, !self.followsInFlight.contains(author) else { return }
             self.setFollowRelation(relation, for: author)
         }
+    }
+
+    /// A follow or unfollow the graph accepted, from any surface. This
+    /// screen's own tap comes back through here too, and changes nothing: the
+    /// answer is already the one it drew. The viewer themself, and someone
+    /// they block, keep their answer — an unfollow does not make either
+    /// followable.
+    private func followGraphDidChange(_ change: FollowChange) {
+        let author = change.profileID
+        guard !followsInFlight.contains(author) else { return }
+        switch followRelationsByAuthor[author] {
+        case .viewer?, .blocked?: return
+        default: break
+        }
+        setFollowRelation(change.isFollowing ? .following : .notFollowing, for: author)
     }
 
     /// Internal for tests.
