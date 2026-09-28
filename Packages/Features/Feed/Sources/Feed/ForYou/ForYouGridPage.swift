@@ -642,11 +642,32 @@ final class ForYouGridPage: UIView {
 
     // MARK: - Autoplay
 
-    /// Minimum fraction of a tile that must be inside the inset viewport before
-    /// it may autoplay. A brick creeping in at the edge is not something the
-    /// viewer is looking at, and starting it there spends a pool slot the
-    /// centre of the screen wants.
-    private static let minimumVisibleFraction: CGFloat = 0.5
+    /// The part of this page the viewer can see — what autoplay measures a
+    /// tile against. At least half of a tile's media must be inside it (see
+    /// `GridPlaybackVisibility.minimumVisibleFraction`): a brick creeping in at
+    /// the edge is not something the viewer is looking at, and starting it
+    /// there spends a pool slot the centre of the screen wants.
+    ///
+    /// ⚠️ NOT `bounds.inset(by: adjustedContentInset)` WHEN HOSTED. On For You
+    /// both insets are floating bars, so the inset is the cover. Under the
+    /// place page's header neither is: the top is the header's whole height as
+    /// reserved range (content starts there, nothing hides behind it), and the
+    /// bottom is inflated by `applyBottomInset` so the page can always travel
+    /// that height. Measured at the landing, `bounds=-479…395 inset=t479/b369`:
+    /// a 26pt band. Every Discover tile read as under half visible
+    /// (`frac=0.11/0.20/0.00`), so the reconcile that runs as the page appears
+    /// stopped the tile the dismissal had just landed on, its card timed out
+    /// on `frames=0`, and nothing on the grid ever played. The host's cover
+    /// (`setChromeOcclusion`) is what the departure reveal already trusts;
+    /// autoplay now reads the same number, as the profile gallery's
+    /// `visibleBand` does.
+    private var autoplayViewport: CGRect {
+        GridPlaybackVisibility.viewport(
+            bounds: collectionView.bounds,
+            contentInset: collectionView.adjustedContentInset,
+            hostOcclusion: hostChromeOcclusion
+        )
+    }
 
     /// Reconciles autoplay against what is on screen now. Cheap and idempotent;
     /// call it whenever the visible set or the surface's visibility can have
@@ -658,7 +679,7 @@ final class ForYouGridPage: UIView {
     func updateAutoplay(allowingStarts: Bool = true) {
         requestWarm(allowingStarts)
         guard let playback else { return }
-        let viewport = collectionView.bounds.inset(by: collectionView.adjustedContentInset)
+        let viewport = autoplayViewport
         let centreY = viewport.midY
         let candidates = collectionView.indexPathsForVisibleItems.compactMap {
             indexPath -> GridVideoPlaybackCoordinator.Candidate? in
@@ -692,11 +713,7 @@ final class ForYouGridPage: UIView {
             // itself (`videoMediaRect`) — a tile's is its bounds, a row's is
             // the preview box inside its card.
             let frame = cell.convert(cell.videoMediaRect, to: collectionView)
-            let visible = frame.intersection(viewport)
-            guard !visible.isNull, frame.height > 0,
-                  (visible.height * visible.width) / (frame.height * frame.width)
-                      >= Self.minimumVisibleFraction
-            else { return nil }
+            guard GridPlaybackVisibility.autoplays(frame, in: viewport) else { return nil }
 
             return .init(
                 id: post.id, url: held, cell: cell,
@@ -725,7 +742,7 @@ final class ForYouGridPage: UIView {
         guard ProcessInfo.processInfo.arguments.contains("-grid-playback-log"),
               !showsSkeleton
         else { return }
-        let viewport = collectionView.bounds.inset(by: collectionView.adjustedContentInset)
+        let viewport = autoplayViewport
         for indexPath in collectionView.indexPathsForVisibleItems.sorted() {
             let index = flatIndex(for: indexPath)
             guard posts.indices.contains(index) else { continue }
@@ -739,10 +756,7 @@ final class ForYouGridPage: UIView {
             // nothing; everything else is worth a line.
             guard held != nil || post.kind == .video || post.isCollection else { continue }
             let frame = cell.convert(cell.videoMediaRect, to: collectionView)
-            let visible = frame.intersection(viewport)
-            let fraction = visible.isNull || frame.width <= 0 || frame.height <= 0
-                ? 0
-                : (visible.height * visible.width) / (frame.height * frame.width)
+            let fraction = GridPlaybackVisibility.visibleFraction(of: frame, in: viewport)
             print("[grid-reject] \(post.id.rawValue) kind=\(post.kind)"
                 + " collection=\(post.isCollection ? "Y" : "N")"
                 + " carousel=\(row.map { $0.showsCarousel ? "Y" : "N" } ?? "-")"
@@ -750,7 +764,15 @@ final class ForYouGridPage: UIView {
                 + " held=\(held?.lastPathComponent ?? "nil")"
                 + " cover=\(hasCover(for: post, in: cell) ? "Y" : "N")"
                 + " flying=\(post.id == heroFlyingPostID ? "Y" : "N")"
-                + String(format: " frac=%.2f", fraction))
+                // The rects the fraction came from, and the content inset it
+                // is NOT taken from on a hosted page — a wrong band is
+                // otherwise indistinguishable from a tile genuinely off screen.
+                + String(format: " frac=%.2f media=%.0f…%.0f viewport=%.0f…%.0f"
+                         + " bounds=%.0f…%.0f inset=t%.0f/b%.0f",
+                         fraction, frame.minY, frame.maxY, viewport.minY, viewport.maxY,
+                         collectionView.bounds.minY, collectionView.bounds.maxY,
+                         collectionView.adjustedContentInset.top,
+                         collectionView.adjustedContentInset.bottom))
         }
     }
 
@@ -1168,7 +1190,7 @@ final class ForYouGridPage: UIView {
     /// The posts on screen that COULD play, with the same centre distance the
     /// ranking uses — the independent check on what the coordinator chose.
     var debugVisibleVideoRanking: [(id: String, distance: Int)] {
-        let viewport = collectionView.bounds.inset(by: collectionView.adjustedContentInset)
+        let viewport = autoplayViewport
         let centreY = viewport.midY
         return collectionView.indexPathsForVisibleItems.compactMap {
             indexPath -> (id: String, distance: Int)? in
