@@ -453,7 +453,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         // backstop for the paths the policy declines (a scrub that has not
         // committed, a flight that owns the chrome).
         installBottomChromeWhenAppearing(hasActiveFlight: false,
-                                         handsOver: tabBarController?.bottomAccessory != nil) { [weak self] in
+                                         handsOver: tabBarController?.bottomAccessory != nil) { [weak self] animated in
             guard let self else { return }
             selectorAccessory?.install(into: tabBarController,
                                    // ⚠️ THE TAB ROOT ONLY. A pushed profile keeps
@@ -463,7 +463,8 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
                                    // cannot use it gives every other tab a
                                    // minimizing bar and this one nothing.
                                    minimizesOnScroll: trayPlacement == .aboveBottomSafeArea,
-                                       alongside: transitionCoordinator)
+                                       alongside: transitionCoordinator,
+                                       animated: animated)
         }
 
         // ⚠️ **The dock is not optional on a tab ROOT.** Whatever hid it — a post
@@ -482,21 +483,27 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         // nothing left to take it away — the completed-pop callbacks correctly
         // never fire for a cancel. See `TabBarRevealPolicy`, which the For You
         // grid has consulted for this since it hit the identical failure.
+        //
+        // ⚠️ …and a close of the snap feed owes it at the LANDING, never
+        // during the return. This used to reveal alongside the pop — measured
+        // with `-dock-trace` on a chevron close from Activity, the bar went
+        // 0 → 1 over the flight while the post was still shrinking home.
         if navigationController?.viewControllers.first === self,
            tabBarController?.isTabBarHidden == true {
             switch TabBarRevealPolicy.timing(
                 // This screen owns no flight object — a post opened from here is
-                // presented by the feed feature, which restores the bar on its
-                // own completed return. False makes a non-interactive tap-back
-                // reveal immediately, which is what it did before and is right.
-                hasActiveFlight: false,
+                // presented by the feed feature. A close of that feed is
+                // recognised from the transition itself.
+                returnsFromFullBleed: isReturningFromDocklessScreen,
                 isTransitioning: transitionCoordinator != nil,
                 isInteractive: transitionCoordinator?.isInteractive == true
             ) {
-            case .immediately, .drivenByFlight:
+            case .immediately:
                 revealDock(animated: animated)
             case .whenTransitionCommits:
                 revealDockIfTransitionCommits()
+            case .atLanding:
+                revealBottomChromeAtLanding { [weak self] in self?.revealDock(animated: false) }
             }
         }
         // Re-bind the bar synchronously BEFORE the transition animates: any
@@ -568,9 +575,14 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        // ⚠️ UNANIMATED: this is the BACKSTOP, and it runs at a landing. The
+        // one that reaches it is a close of the snap feed, whose bottom chrome
+        // is owed at once with the bar (`TabBarRevealPolicy`); animated, the
+        // band faded in over ~280ms under a bar already up (`-dock-trace`). A
+        // tab switch installs from `viewWillAppear` and finds nothing to do here.
         selectorAccessory?.install(into: tabBarController,
                                    minimizesOnScroll: trayPlacement == .aboveBottomSafeArea,
-                                   alongside: transitionCoordinator)
+                                   alongside: transitionCoordinator, animated: false)
         #if DEBUG
         verifyRevealClearsSelector()
         #endif

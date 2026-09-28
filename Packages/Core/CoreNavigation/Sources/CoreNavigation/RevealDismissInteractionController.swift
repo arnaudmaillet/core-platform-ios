@@ -20,8 +20,10 @@ import UIKit
 ///   rubber-banded along the axis and across it — so it floats under the finger
 ///   with no lag and no animation in flight.
 /// - **Morph** (progress-driven): the window's SIZE and rounding interpolate
-///   toward the card's, and dim, veil, presenter depth and returning chrome are
-///   pure functions of `translation / span`.
+///   toward the card's, and dim, veil and presenter depth are pure functions
+///   of `translation / span`. The source's chrome (the app's tab bar) is NOT
+///   on this channel: it stays down for the whole close and the owner shows it
+///   at the landing (`RevealGeometry.dismissalDidEnd`).
 ///
 /// Release then springs from the window's exact current pose to the card's rect
 /// (commit) or back to the whole screen (cancel), seeded with the hand's
@@ -48,7 +50,6 @@ import UIKit
 final class RevealDismissInteractionController: NSObject,
                                                 UIViewControllerInteractiveTransitioning {
     private let geometry: RevealGeometry
-    private weak var returningChrome: UIView?
     /// The axis this grab travels, chosen from the hand's velocity before the
     /// gesture began and fixed for its lifetime — as the zoom grab does.
     private let axis: ZoomDismissAxis
@@ -104,11 +105,9 @@ final class RevealDismissInteractionController: NSObject,
 
     init(
         geometry: RevealGeometry,
-        returningChrome: UIView?,
         axis: ZoomDismissAxis
     ) {
         self.geometry = geometry
-        self.returningChrome = returningChrome
         self.axis = axis
     }
 
@@ -204,7 +203,6 @@ final class RevealDismissInteractionController: NSObject,
         presenting.transform = CGAffineTransform(
             scaleX: ZoomFlight.presenterDepthScale, y: ZoomFlight.presenterDepthScale
         )
-        returningChrome?.alpha = 0
 
         self.context = context
         self.host = host
@@ -339,9 +337,6 @@ final class RevealDismissInteractionController: NSObject,
         // The borrowed band arrives on the same channel: the closer the window
         // is to being the card, the more of the card it has to be showing.
         geometry.setDestinationAuthorBandOpacity(pose.progress)
-        // And the source's own chrome arrives on the mirror of it, revealed by
-        // the hand rather than switched on after the landing.
-        returningChrome?.alpha = pose.progress
         let depth = ZoomFlight.presenterDepthScale
             + (1 - ZoomFlight.presenterDepthScale) * pose.progress
         presentingView?.transform = CGAffineTransform(scaleX: depth, y: depth)
@@ -465,7 +460,6 @@ final class RevealDismissInteractionController: NSObject,
         #endif
 
         let dim = dim
-        let chrome = returningChrome
         let presenting = presentingView
         let depth = ZoomFlight.presenterDepthScale
         // The SAME spring the tap-back close now wears, so a released grab and
@@ -505,7 +499,6 @@ final class RevealDismissInteractionController: NSObject,
                 (self.standIn as? RevealStandInShaping)?.setContentOpacity(0)
             }
             dim?.alpha = commit ? 0 : 1
-            chrome?.alpha = commit ? 1 : 0
             self.geometry.setDestinationVeilOpacity(commit ? 1 : 0)
             self.geometry.setDestinationAuthorBandOpacity(commit ? 1 : 0)
             // Into the card's tone on the way home, so the last frame of the
@@ -553,7 +546,6 @@ final class RevealDismissInteractionController: NSObject,
         geometry.setDestinationGround(nil)
         geometry.installDestinationVeil(nil, nil)
         geometry.installDestinationAuthorBand(nil)
-        returningChrome?.alpha = cancelled ? 0 : 1
         geometry.dismissalDidEnd(!cancelled)
         context?.completeTransition(!cancelled)
         context = nil

@@ -19,14 +19,14 @@ struct TabBarRevealPolicyTests {
     /// A tab switch back, or any non-animated return: nothing is moving, so
     /// there is nothing to be out of step with.
     @Test func aStillScreenRevealsOutright() {
-        #expect(TabBarRevealPolicy.timing(hasActiveFlight: false, isTransitioning: false,
+        #expect(TabBarRevealPolicy.timing(returnsFromFullBleed: false, isTransitioning: false,
                                           isInteractive: false) == .immediately)
     }
 
     /// The regression. A scrub is a question, not an answer — the reveal
     /// belongs to whatever the finger turns out to have meant.
     @Test func aScrubDefersTheReveal() {
-        #expect(TabBarRevealPolicy.timing(hasActiveFlight: false, isTransitioning: true,
+        #expect(TabBarRevealPolicy.timing(returnsFromFullBleed: false, isTransitioning: true,
                                           isInteractive: true) == .whenTransitionCommits)
     }
 
@@ -35,7 +35,7 @@ struct TabBarRevealPolicyTests {
     /// measured at ~400ms after landing, which reads as a snap. Deferring is
     /// for uncertainty, not for transitions in general.
     @Test func aButtonPopDoesNotDeferBecauseItCannotBeTakenBack() {
-        #expect(TabBarRevealPolicy.timing(hasActiveFlight: false, isTransitioning: true,
+        #expect(TabBarRevealPolicy.timing(returnsFromFullBleed: false, isTransitioning: true,
                                           isInteractive: false) == .immediately)
     }
 
@@ -46,17 +46,22 @@ struct TabBarRevealPolicyTests {
                 "a cancelled drag leaves the pushed screen on display — the bar stays under it")
     }
 
-    /// A hero return keeps its own arrangement: the bar is made geometrically
-    /// present and visually absent at pop-begin so the flight has something to
-    /// fade in. Deferring THAT to a completion handler is what once made the
-    /// bar snap in after the card had already landed, so the flight must keep
-    /// winning over the transition test below it.
-    @Test func aFlightKeepsDrivingItsOwnReveal() {
+    /// THE PRODUCT RULE (2026-09-28): a close of the snap feed owes the dock
+    /// at its LANDING, whatever drives it — a grab, a flight's tap-back, a
+    /// window, the chevron. It used to be faded in with the return (1:1 with a
+    /// grab, on the flight's spring, alongside a back-button pop); none of
+    /// those may win over the landing any more.
+    @Test func aReturnFromTheFeedRevealsAtTheLanding() {
         for interactive in [true, false] {
-            #expect(TabBarRevealPolicy.timing(hasActiveFlight: true, isTransitioning: true,
-                                              isInteractive: interactive) == .drivenByFlight)
+            #expect(TabBarRevealPolicy.timing(returnsFromFullBleed: true, isTransitioning: true,
+                                              isInteractive: interactive) == .atLanding)
         }
-        #expect(TabBarRevealPolicy.timing(hasActiveFlight: true, isTransitioning: false,
-                                          isInteractive: false) == .drivenByFlight)
+    }
+
+    /// …and with nothing moving there is no landing to wait for: waiting for
+    /// a transition that does not exist would leave the dock down for good.
+    @Test func aReturnWithNoTransitionRevealsOutright() {
+        #expect(TabBarRevealPolicy.timing(returnsFromFullBleed: true, isTransitioning: false,
+                                          isInteractive: false) == .immediately)
     }
 }

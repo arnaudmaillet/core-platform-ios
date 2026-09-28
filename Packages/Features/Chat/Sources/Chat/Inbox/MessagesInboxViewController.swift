@@ -271,10 +271,11 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         // backstop for the paths the policy declines (a scrub that has not
         // committed, a flight that owns the chrome).
         installBottomChromeWhenAppearing(hasActiveFlight: false,
-                                         handsOver: tabBarController?.bottomAccessory != nil) { [weak self] in
+                                         handsOver: tabBarController?.bottomAccessory != nil) { [weak self] animated in
             guard let self else { return }
             selectorAccessory?.install(into: tabBarController, minimizesOnScroll: true,
-                                       alongside: transitionCoordinator)
+                                       alongside: transitionCoordinator,
+                                       animated: animated)
         }
 
         pagerView?.reassertActivePage()

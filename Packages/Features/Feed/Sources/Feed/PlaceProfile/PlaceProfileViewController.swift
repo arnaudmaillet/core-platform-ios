@@ -211,8 +211,13 @@ final class PlaceProfileViewController: UIViewController {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        // ⚠️ UNANIMATED: this is the BACKSTOP, and it runs at a landing. The
+        // one that reaches it is a close of the snap feed, whose bottom chrome
+        // is owed at once with the bar (`TabBarRevealPolicy`); animated, the
+        // band faded in over ~280ms under a bar already up (`-dock-trace`). A
+        // tab switch installs from `viewWillAppear` and finds nothing to do here.
         selectorAccessory?.install(into: tabBarController, minimizesOnScroll: true,
-                                   alongside: transitionCoordinator)
+                                   alongside: transitionCoordinator, animated: false)
         assertAppTabBar()
         // ⚠️ THE ONE INSTANT THE BAR IS BOTH PRESENT AND LAID OUT on this
         // screen: `assertAppTabBar` has just restored it synchronously. The
@@ -671,10 +676,11 @@ final class PlaceProfileViewController: UIViewController {
         // backstop for the paths the policy declines (a scrub that has not
         // committed, a flight that owns the chrome).
         installBottomChromeWhenAppearing(hasActiveFlight: false,
-                                         handsOver: tabBarController?.bottomAccessory != nil) { [weak self] in
+                                         handsOver: tabBarController?.bottomAccessory != nil) { [weak self] animated in
             guard let self else { return }
             selectorAccessory?.install(into: tabBarController, minimizesOnScroll: true,
-                                       alongside: transitionCoordinator)
+                                       alongside: transitionCoordinator,
+                                       animated: animated)
         }
 
         syncAutoplay()
