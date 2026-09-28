@@ -119,4 +119,76 @@ struct CardCloseAlongsideFlightTests {
         #expect(driver.revealPresents == false)
         #expect(driver.revealGeometry == nil)
     }
+
+    // MARK: - The axis-aware form (the map's)
+
+    /// The axis reaches the host: the map's two axes land on two different
+    /// screens, and a staging that cannot tell them apart aims one at the other.
+    @Test func theAxisIsHandedToTheStaging() {
+        let feed = StubFeed()
+        feed.kind = .card
+        let driver = InteractiveSlideDismissal()
+        var axes: [ZoomDismissAxis] = []
+        driver.armAsCardCloseAlongsideFlight(on: feed, restagesOnEveryAttempt: true) { _, axis in
+            axes.append(axis)
+            return true
+        }
+        driver.prepareForDismissal?(.vertical)
+        driver.prepareForDismissal?(.horizontal)
+        #expect(axes == [.vertical, .horizontal])
+        withExtendedLifetime(feed) {}
+    }
+
+    /// ⚠️ NO LATCH when restaging: an abandoned vertical close must not leave
+    /// its landing armed for the chevron that follows. A staging that answered
+    /// `true` is asked again all the same.
+    @Test func aRestagingHostIsAskedOnEveryAttempt() {
+        let feed = StubFeed()
+        feed.kind = .card
+        let driver = InteractiveSlideDismissal()
+        var stages = 0
+        driver.armAsCardCloseAlongsideFlight(on: feed, restagesOnEveryAttempt: true) { _, _ in
+            stages += 1
+            return true
+        }
+        driver.prepareForDismissal?(.vertical)
+        driver.prepareForDismissal?(.vertical)
+        driver.prepareForDismissal?(.horizontal)
+        #expect(stages == 3)
+        withExtendedLifetime(feed) {}
+    }
+
+    /// Restaging relaxes the latch and nothing else: a post that flies is
+    /// still never staged, and the shared arming rules still hold.
+    @Test func aRestagingHostStillNeverStagesAFlight() {
+        let feed = StubFeed()
+        feed.kind = .hero
+        let driver = InteractiveSlideDismissal()
+        var stages = 0
+        driver.armAsCardCloseAlongsideFlight(on: feed, restagesOnEveryAttempt: true) { _, _ in
+            stages += 1
+            return true
+        }
+        driver.prepareForDismissal?(.horizontal)
+        #expect(stages == 0)
+        #expect(driver.arbitratesWithHeroGrab)
+        #expect(driver.debugArmedAxes == [.horizontal, .vertical])
+        withExtendedLifetime(feed) {}
+    }
+
+    /// With the latch ON, the axis-aware form is the one-closure form: once.
+    @Test func theLatchedAxisAwareFormStagesOnce() {
+        let feed = StubFeed()
+        feed.kind = .card
+        let driver = InteractiveSlideDismissal()
+        var stages = 0
+        driver.armAsCardCloseAlongsideFlight(on: feed, restagesOnEveryAttempt: false) { _, _ in
+            stages += 1
+            return true
+        }
+        driver.prepareForDismissal?(.vertical)
+        driver.prepareForDismissal?(.horizontal)
+        #expect(stages == 1)
+        withExtendedLifetime(feed) {}
+    }
 }
