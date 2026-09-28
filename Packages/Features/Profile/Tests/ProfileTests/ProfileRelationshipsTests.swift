@@ -438,6 +438,25 @@ struct ProfileRelationshipsViewModelTests {
         #expect(await provider.followCalls.map(\.0) == [true])
     }
 
+    /// A follow accepted elsewhere — the profile a row opened — reaches the
+    /// row when the list is shown again.
+    @Test func aFollowMadeElsewhereReachesTheRow() async {
+        let events = FollowGraphEvents()
+        let viewModel = ProfileRelationshipsViewModel(
+            subject: subject(),
+            repository: StubRelationshipsProvider(followers: [person("ava", viewerFollows: false)]),
+            followEvents: events
+        )
+        let phases = phaseRecorder(viewModel)
+        viewModel.viewDidLoad()
+        await settle(until: { !rows(phases).isEmpty })
+
+        events.publish(FollowChange(profileID: ProfileID("ava"), isFollowing: true))
+        await settle(until: { rows(phases).first?.action == .following })
+
+        #expect(rows(phases).first?.action == .following)
+    }
+
     @Test func aRejectedFollowRollsBackAndReports() async {
         let provider = StubRelationshipsProvider(
             followers: [person("ava")], followError: SampleError()

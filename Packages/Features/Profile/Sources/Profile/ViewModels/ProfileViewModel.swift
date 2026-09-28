@@ -254,7 +254,8 @@ public final class ProfileViewModel {
         bookmarks: PostBookmarkStore? = nil,
         source: Source = .currentUser,
         router: (any Router)? = nil,
-        cache: ProfileCache? = nil
+        cache: ProfileCache? = nil,
+        followEvents: FollowGraphEvents? = nil
     ) {
         self.repository = repository
         self.mapPinning = mapPinning
@@ -271,6 +272,26 @@ public final class ProfileViewModel {
         if let stored = galleryPreferences?.filter {
             galleryFilter = stored
         }
+        followSubscription = followEvents?.subscribeOnMain { [weak self] change in
+            self?.followGraphDidChange(change)
+        }
+    }
+
+    /// Keeps the Follow button agreeing with a follow accepted ANYWHERE —
+    /// the "+" on this person's post in a feed pushed from here, an Unfollow
+    /// in a card's menu, a followers list's row — for as long as this profile
+    /// lives. See `FollowGraphEvents` for why this is heard, not re-read.
+    private var followSubscription: FollowGraphSubscription?
+
+    /// Takes a change about THIS profile the way its own toggle would —
+    /// button, and the follower count nudged by one — unless the button says
+    /// so already (which is how its own accepted toggle comes back), or its
+    /// own toggle is still in flight and about to answer for itself.
+    private func followGraphDidChange(_ change: FollowChange) {
+        guard let profile, change.profileID == profile.id,
+              followButton == .follow || followButton == .following,
+              change.isFollowing != isFollowing, !followInFlight else { return }
+        applyFollow(change.isFollowing, on: profile)
     }
 
     /// Whether the "Message" action applies (another user's profile).

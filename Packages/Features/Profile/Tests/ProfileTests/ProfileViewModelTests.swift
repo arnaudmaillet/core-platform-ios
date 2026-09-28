@@ -251,6 +251,62 @@ struct ProfileViewModelTests {
         #expect(calls.first?.id == ProfileID("prof-1"))
     }
 
+    /// A follow accepted ELSEWHERE — the "+" on this person's post in a feed
+    /// pushed from here — reaches the profile, button and count, the way its
+    /// own toggle would. And the reverse for an unfollow.
+    @Test func aFollowMadeElsewhereReachesTheProfile() async {
+        let events = FollowGraphEvents()
+        let viewModel = ProfileViewModel(
+            repository: StubProfileProvider(
+                .success(sampleProfile(followers: .exact(10))),
+                relationship: .other(isFollowing: false, isBlocked: false)
+            ),
+            source: .profile(ProfileID("prof-1")),
+            followEvents: events
+        )
+        let follow = followRecorder(viewModel)
+        let phases = phaseRecorder(viewModel)
+        viewModel.viewDidLoad()
+        await settle(until: { follow().last == .follow })
+
+        events.publish(FollowChange(profileID: ProfileID("prof-1"), isFollowing: true))
+        await settle(until: { follow().last == .following })
+        #expect(follow().last == .following)
+        #expect(lastFollowerText(phases) == "11")
+
+        events.publish(FollowChange(profileID: ProfileID("prof-1"), isFollowing: false))
+        await settle(until: { follow().last == .follow })
+        #expect(follow().last == .follow)
+        #expect(lastFollowerText(phases) == "10")
+    }
+
+    /// Someone else's change is not this profile's, and the profile's own
+    /// accepted toggle coming back is not a second follow (no double count).
+    @Test func otherPeoplesChangesAndItsOwnEchoChangeNothing() async {
+        let events = FollowGraphEvents()
+        let viewModel = ProfileViewModel(
+            repository: StubProfileProvider(
+                .success(sampleProfile(followers: .exact(10))),
+                relationship: .other(isFollowing: false, isBlocked: false)
+            ),
+            source: .profile(ProfileID("prof-1")),
+            followEvents: events
+        )
+        let follow = followRecorder(viewModel)
+        let phases = phaseRecorder(viewModel)
+        viewModel.viewDidLoad()
+        await settle(until: { follow().last == .follow })
+
+        events.publish(FollowChange(profileID: ProfileID("prof-9"), isFollowing: true))
+        viewModel.toggleFollow()
+        await settle()
+        events.publish(FollowChange(profileID: ProfileID("prof-1"), isFollowing: true))
+        await settle()
+
+        #expect(follow().last == .following)
+        #expect(lastFollowerText(phases) == "11")
+    }
+
     @Test func failedFollowRollsBackButtonAndCount() async {
         let provider = StubProfileProvider(
             .success(sampleProfile(followers: .exact(10))),

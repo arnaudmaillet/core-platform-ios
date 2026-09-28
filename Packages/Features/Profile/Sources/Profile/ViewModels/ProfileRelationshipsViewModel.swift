@@ -169,7 +169,8 @@ public final class ProfileRelationshipsViewModel {
         repository: any ProfileRelationshipsProviding,
         router: (any Router)? = nil,
         direction: RelationshipDirection = .followers,
-        pageSize: Int32 = 24
+        pageSize: Int32 = 24,
+        followEvents: FollowGraphEvents? = nil
     ) {
         self.subject = subject
         self.repository = repository
@@ -177,6 +178,24 @@ public final class ProfileRelationshipsViewModel {
         self.direction = direction
         self.pageSize = pageSize
         counts = [.followers: subject.followerCount, .following: subject.followingCount]
+        followSubscription = followEvents?.subscribeOnMain { [weak self] change in
+            self?.followGraphDidChange(change)
+        }
+    }
+
+    /// Keeps the rows agreeing with a follow accepted ANYWHERE — the profile a
+    /// row opened, a feed's "+" — for as long as this list lives.
+    private var followSubscription: FollowGraphSubscription?
+
+    /// A row mid-toggle is left alone: its own answer is on its way, and the
+    /// announcement of it would only repeat what the row already shows.
+    private func followGraphDidChange(_ change: FollowChange) {
+        guard !mutating.contains(change.profileID) else { return }
+        let stale = states.values.contains { state in
+            state.relations.contains { $0.id == change.profileID && $0.viewerFollows != change.isFollowing }
+        }
+        guard stale else { return }
+        applyFollow(change.isFollowing, to: change.profileID)
     }
 
     /// Segment titles in `RelationshipDirection.allCases` order, each led by

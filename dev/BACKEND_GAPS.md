@@ -32,6 +32,7 @@ full functionality.
 | 22 | `CreatePost` carries no post-level policy, and no AI disclosure | New Post's six settings toggles (drawn, honoured by the screen alone) | Medium |
 | 23 | Video publishes as an IMAGE asset: no `MEDIA_KIND_POST_VIDEO`, no `asset_id` on `MediaAttachmentInput`, and `ResolveDelivery` polled synchronously | Publishing a video against a real fleet (works in mock mode only) | **High** |
 | 24 | No country entitlements, standings or gem purchases; `RadarPin` has no country | Map country unlocks + Countries shop (mock only; fleet shows every country) | Medium |
+| 25 | `notification.v1`: no FOLLOW kind, no per-row read, no comment text | Notifications drawer — no "started following you / Follow back" rows; opening marks ALL read | Medium |
 
 ---
 
@@ -922,6 +923,32 @@ open and nothing is sold.
 - a country code stored per post at publish time.
 
 Full proposal: `dev/issues/BACKEND_COUNTRY_UNLOCKS.md`.
+
+---
+
+## 25. `notification.v1` has no FOLLOW kind, and no per-row read / comment text
+
+**Status: client built 2026-09-28 (notifications drawer).** The redesigned
+list shows likes, comments, replies and mentions — every
+`Notification_V1_NotificationKind` there is. Three things it would show if the
+contract carried them:
+
+- **Follows.** There is no `NOTIFICATION_KIND_FOLLOW`, so "Ava started
+  following you [Follow back]" — the most common row in comparable apps, and
+  the one the design asked for — cannot be drawn. The client would add a
+  trailing Follow back button driven by `social_graph.v1.Follow`.
+- **Per-row read.** Only `MarkAllRead` exists, so opening the drawer marks
+  everything read, including rows folded behind "Show more". A
+  `MarkRead(notification_ids)` (or a read horizon the client can set) would let
+  "seen" mean "was on screen".
+- **Comment text.** A comment/reply row cannot quote what was said: the view
+  carries a subject id only, and for `SUBJECT_KIND_COMMENT` there is no batch
+  comment read. A `preview_text` on the view would avoid an N+1.
+
+Sender pictures and post thumbnails are hydrated client-side (`profile.v1`
+`GetProfileById` per distinct sender, `post.v1` `GetPost` per distinct post) —
+N+1, cached per session. → **Needs:** the FOLLOW kind; `MarkRead` by id;
+optionally denormalised `preview_text` / `thumbnail_url` on the view.
 
 ---
 
