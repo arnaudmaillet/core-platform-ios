@@ -113,14 +113,38 @@ struct CardCloseAlongsideFlightTests {
         let feed = StubFeed()
         let driver = InteractiveSlideDismissal()
         driver.heroLandingAcceptsHero = { false }
+        driver.heroClaimsAxis = { _ in false }
         driver.revealPresents = true
         driver.armAsCardCloseAlongsideFlight(on: feed) { _ in true }
         #expect(driver.heroLandingAcceptsHero == nil)
+        #expect(driver.heroClaimsAxis == nil)
         #expect(driver.revealPresents == false)
         #expect(driver.revealGeometry == nil)
     }
 
     // MARK: - The axis-aware form (the map's)
+
+    /// ⚠️ AN AXIS TAKEN FROM THE HERO IS STAGED FOR A PHOTOGRAPH TOO — and the
+    /// other axis still is not.
+    ///
+    /// Downward onto a place page, every post closes as the card onto its
+    /// Activity row; a media post's close was gated out here by its kind, so
+    /// the window had no geometry and the page came back on a plain slide.
+    @Test func anAxisTakenFromTheHeroIsStagedForAMediaPost() {
+        let feed = StubFeed()
+        feed.kind = .hero
+        let driver = InteractiveSlideDismissal()
+        var axes: [ZoomDismissAxis] = []
+        driver.armAsCardCloseAlongsideFlight(on: feed, restagesOnEveryAttempt: true) { _, axis in
+            axes.append(axis)
+            return true
+        }
+        driver.heroClaimsAxis = { $0 != .vertical }
+        driver.prepareForDismissal?(.horizontal)
+        driver.prepareForDismissal?(.vertical)
+        #expect(axes == [.vertical], "the flight's axis was staged, or the card's was not")
+        withExtendedLifetime(feed) {}
+    }
 
     /// The axis reaches the host: the map's two axes land on two different
     /// screens, and a staging that cannot tell them apart aims one at the other.

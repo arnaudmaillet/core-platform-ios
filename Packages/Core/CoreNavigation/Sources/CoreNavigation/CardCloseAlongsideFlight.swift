@@ -66,6 +66,9 @@ extension InteractiveSlideDismissal {
     ///
     /// Everything else — both axes, the arbitration, the card-only gate, the
     /// reset — is the one-closure form's, which forwards here with the latch on.
+    /// A host that gives an axis to this driver outright sets `heroClaimsAxis`
+    /// after this call; the card-only gate then lets that axis's staging run
+    /// for a media post too.
     public func armAsCardCloseAlongsideFlight(
         on feed: UIViewController,
         restagesOnEveryAttempt: Bool,
@@ -77,11 +80,15 @@ extension InteractiveSlideDismissal {
         arbitratesWithHeroGrab = true
         attach(to: feed, axes: [.horizontal, .vertical])
         var hasStaged = false
-        prepareForDismissal = { [weak feed] axis in
-            guard !hasStaged, let feed,
+        // `self` WEAKLY: this driver owns the closure (see
+        // `prepareForDismissal`'s note on the cycle a strong capture makes).
+        prepareForDismissal = { [weak self, weak feed] axis in
+            guard !hasStaged, let self, let feed,
                   // Asked of the same authority both grabs gate on, so the
-                  // three can never disagree about what the post is.
-                  (feed as? any ZoomTransitionDestination)?.zoomDismissalKind == .card
+                  // three can never disagree about what the post is — plus the
+                  // axis a host has taken from the hero (`heroClaimsAxis`, set
+                  // AFTER this call, which resets it).
+                  closeCarriesCard(of: feed, axis: axis)
             else { return }
             let staged = stage(feed, axis)
             if !restagesOnEveryAttempt { hasStaged = staged }
