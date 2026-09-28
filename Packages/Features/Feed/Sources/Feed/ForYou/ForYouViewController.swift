@@ -1554,24 +1554,20 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             // hero to fly after all. Attached BEFORE the slide installs, so the
             // slide saves this controller as the delegate it displaced and can
             // forward a hero pop straight back to it.
-            if let page = pager.page(for: format) {
+            let alongside = pager.page(for: format).flatMap { page in
                 attachFlightAlongsideCardClose(feed: feed, page: page, tappedID: tapped.id)
             }
             textSlideDismissal.arbitratesWithHeroGrab = true
-            // ⚠️ AND CLAIM THE DRAGS THE HERO DECLINES — the mirror of
-            // `ForYouGridZoomSource.zoomLandingAcceptsHero`, asked of the same
-            // page about the same row.
+            // ⚠️ AND CLAIM THE DRAGS THE HERO DECLINES — asked of the hero's
+            // own gate, see `heroLandingArbiter`.
             //
-            // This screen opened as a WINDOW on a text row, so its landing IS
-            // that text row, whatever the viewer has since paged to. The hero
-            // attached alongside refuses a landing it cannot draw; without this
-            // line the refusals are symmetric and NEITHER driver claims the
-            // drag, which is a plain slide — the failure this whole pairing
-            // exists to prevent.
-            textSlideDismissal.heroLandingAcceptsHero = { [weak self] in
-                guard let page = self?.pager.page(for: format) else { return true }
-                return page.landsByAdoption || page.heroAppearance(for: tapped.id) != nil
-            }
+            // This screen opened as a WINDOW on a text row, so on a list its
+            // landing IS that text row, whatever the viewer has since paged to.
+            // The hero attached alongside refuses a landing it cannot draw;
+            // without this line the refusals are symmetric and NEITHER driver
+            // claims the drag, which is a plain slide — the failure this whole
+            // pairing exists to prevent.
+            textSlideDismissal.heroLandingAcceptsHero = Self.heroLandingArbiter(asking: alongside)
             textSlideDismissal.install(on: navigationController)
             navigationController.pushViewController(feed, animated: true)
             #if DEBUG
@@ -1776,7 +1772,9 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // driver with no flight to offer. Taking it after leaves the flight
         // controller as `savedDelegate`, which is where a hero pop is forwarded
         // back to.
-        attachCardCloseAlongsideFlight(feed: feed, format: format, departureID: tapped.id)
+        attachCardCloseAlongsideFlight(
+            feed: feed, format: format, departureID: tapped.id, flightSource: source
+        )
         #if DEBUG
         zoomProfilerNote("push returned")
         #endif
@@ -1867,11 +1865,15 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// navigation delegate and then immediately shadowed by the slide, which is
     /// exactly what makes the window's own push survive — and what leaves this
     /// controller reachable, as `savedDelegate`, when a hero pop is forwarded.
+    ///
+    /// Returns the flight's source, so the slide can ask the hero's own gate
+    /// who takes a drag — see `heroLandingArbiter`.
+    @discardableResult
     private func attachFlightAlongsideCardClose(
         feed: UIViewController, page: ForYouGridPage, tappedID: PostID
-    ) {
+    ) -> ForYouGridZoomSource? {
         guard let navigationController,
-              let destination = feed as? any ZoomTransitionDestination else { return }
+              let destination = feed as? any ZoomTransitionDestination else { return nil }
         let source = ForYouGridZoomSource(
             page: page,
             tappedID: tappedID,
@@ -1935,6 +1937,32 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             }
             self?.navigationController?.popViewController(animated: true)
         }
+        return source
+    }
+
+    /// The slide's half of the hero/card arbitration, answered BY THE HERO'S
+    /// OWN GATE rather than restated beside it.
+    ///
+    /// Both drivers sit on one screen and each must refuse exactly the drags
+    /// the other takes. The slide's refusal therefore has to be the negation of
+    /// `ForYouGridZoomSource.zoomLandingAcceptsHero` — and it is read from the
+    /// source that flight will actually fly, so the two can no longer drift.
+    ///
+    /// ⚠️ THEY DID DRIFT, and the drift only showed after paging DEEP. The
+    /// flight path's copy asked `heroAppearance` for the post the viewer ENDED
+    /// on, which reads a REALIZED CELL — the trap `canLandHero(on:)` records
+    /// for the adoption. A mosaic adopts the settled post into the departure
+    /// slot whatever it is, so its hero accepts every landing; but a tile ~25
+    /// posts past the one tapped has no cell, so the copy answered "the hero
+    /// cannot land". The slide then claimed the grab, the chevron's pop was no
+    /// longer forwarded to the flight, and the feed left on a plain slide to
+    /// the right. A shallow close never showed it: the settled tile was still
+    /// realized next to the departure.
+    ///
+    /// No source — nothing to fly — is "no opinion", the protocol's own
+    /// default, which is what the slide read before this channel existed.
+    static func heroLandingArbiter(asking source: ForYouGridZoomSource?) -> () -> Bool {
+        { [weak source] in source?.zoomLandingAcceptsHero ?? true }
     }
 
     /// Attaches the card-shaped close to a screen that was opened by a FLIGHT,
@@ -1946,7 +1974,8 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// drag when the destination says the post on screen travels as a card, and
     /// a hook to build that card's geometry at the moment it does.
     private func attachCardCloseAlongsideFlight(
-        feed: UIViewController, format: GalleryFilter.Format, departureID: PostID
+        feed: UIViewController, format: GalleryFilter.Format, departureID: PostID,
+        flightSource: ForYouGridZoomSource
     ) {
         guard let navigationController else { return }
         // ⚠️ THE SHARED RULES FIRST — both axes, arbitrated, staged ONCE and
@@ -1984,15 +2013,9 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // screen leaves on UIKit's own edge-swipe animation. Filmed as the last
         // close of a run having no hero at all.
         //
-        // The landing is the same one the reveal anchors on: the departure row,
-        // unless a mosaic has adopted the settled post into its slot.
-        textSlideDismissal.heroLandingAcceptsHero = { [weak self] in
-            guard let page = self?.pager.page(for: format) else { return true }
-            let landing = page.landsByAdoption
-                ? ((feed as? SnapFeedViewController)?.activePostID ?? departureID)
-                : departureID
-            return page.heroAppearance(for: landing) != nil
-        }
+        // Asked of THIS flight's own gate — see `heroLandingArbiter` for the
+        // restatement it replaces, which sent every deep close on a slide.
+        textSlideDismissal.heroLandingAcceptsHero = Self.heroLandingArbiter(asking: flightSource)
         // ⚠️ AND WHATEVER ANIMATED THE CLOSE, NO ROW STAYS HIDDEN.
         //
         // The concealment above is paid back by the reveal's own completion —
