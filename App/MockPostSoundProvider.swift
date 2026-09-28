@@ -25,6 +25,10 @@ struct MockPostSoundProvider: PostSoundProviding {
     /// whose clip made an original sound, or who first posted with a song —
     /// who a post BORROWING it credits.
     private let creators: [String: String]
+    /// The post each sound was first published with: the first post playing
+    /// a clip (a borrower earlier in the dataset does not count — the sound
+    /// was cut from the clip), or the first post set to a song.
+    private let originals: [String: PostID]
 
     init(clips: MockClipCatalog = .shared, songs: MockSongCatalog = .shared, dataset: MockSocialDataset) {
         self.clips = clips
@@ -32,6 +36,7 @@ struct MockPostSoundProvider: PostSoundProviding {
         var borrowed: [PostID: String] = [:]
         var postsBySound: [String: [PostID]] = [:]
         var creators: [String: String] = [:]
+        var originals: [String: PostID] = [:]
         let handles = Dictionary(dataset.authors.map { ($0.profileID, $0.handle) }, uniquingKeysWith: { a, _ in a })
         for (index, post) in dataset.posts.enumerated() {
             let id = PostID(post.postID)
@@ -40,6 +45,7 @@ struct MockPostSoundProvider: PostSoundProviding {
             if !clipIDs.isEmpty {
                 for clip in Set(clipIDs) {
                     postsBySound[clip, default: []].append(id)
+                    if originals[clip] == nil { originals[clip] = id }
                     if creators[clip] == nil, let handle = handles[post.authorProfileID] {
                         creators[clip] = "@\(handle)"
                     }
@@ -55,13 +61,17 @@ struct MockPostSoundProvider: PostSoundProviding {
             guard let sound else { continue }
             borrowed[id] = sound
             postsBySound[sound, default: []].append(id)
-            if sound.hasPrefix("song-"), creators[sound] == nil, let handle = handles[post.authorProfileID] {
-                creators[sound] = "@\(handle)"
+            if sound.hasPrefix("song-") {
+                if originals[sound] == nil { originals[sound] = id }
+                if creators[sound] == nil, let handle = handles[post.authorProfileID] {
+                    creators[sound] = "@\(handle)"
+                }
             }
         }
         self.borrowed = borrowed
         self.postsBySound = postsBySound
         self.creators = creators
+        self.originals = originals
     }
 
     func sound(forPost postID: PostID, clip: URL?) -> PostSound? {
@@ -73,6 +83,14 @@ struct MockPostSoundProvider: PostSoundProviding {
 
     func postIDs(using sound: PostSound) -> [PostID] {
         postsBySound[sound.id] ?? []
+    }
+
+    /// A clip's sound is its clip's; a song is its first poster's only when
+    /// the song names no artist — the one it is credited to. A named artist's
+    /// song came from outside and has no original post.
+    func originalPostID(of sound: PostSound) -> PostID? {
+        if let song = songs.song(id: sound.id), song.artist != nil { return nil }
+        return originals[sound.id]
     }
 
     private func sound(clip: MockClipCatalog.Clip) -> PostSound {

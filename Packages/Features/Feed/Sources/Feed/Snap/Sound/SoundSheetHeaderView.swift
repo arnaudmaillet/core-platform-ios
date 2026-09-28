@@ -1,19 +1,16 @@
 import DesignSystem
 import UIKit
 
-/// The sound sheet's head: the artwork that plays and pauses the sound, what
-/// the sound is, "Use this sound" and share, and the grid's title.
+/// The sound sheet's head: the artwork that plays and pauses the sound, and
+/// what the sound is — nothing else. "Use this sound" and share are bar items
+/// of the sheet's native TOOLBAR, and the grid's door is "View all" under its
+/// first row (`SoundSheetMoreCell`).
 ///
-/// Laid out inside the section's side insets; the sheet measures its
-/// collapsed detent from this view alone (`measureCollapsedHeight`).
+/// Laid out inside the section's side insets, as the first row's header.
 final class SoundSheetHeaderView: UICollectionReusableView {
     static let artworkSide: CGFloat = 96
-    private static let actionHeight: CGFloat = 48
 
     var onTogglePreview: (() -> Void)?
-    var onUse: (() -> Void)?
-    var onShare: (() -> Void)?
-    var onToggleExpanded: (() -> Void)?
 
     private let record = UIView()
     private let artwork = UIImageView()
@@ -21,10 +18,6 @@ final class SoundSheetHeaderView: UICollectionReusableView {
     private let titleLabel = UILabel()
     private let subtitleLabel = UILabel()
     private let metaLabel = UILabel()
-    private let useButton = UIButton(configuration: .prominentGlass())
-    private let shareButton = UIButton(configuration: .glass())
-    private let gridTitle = UIButton(configuration: .plain())
-    private let actionsFiller = UIView()
     private let artworkBackdrop = UIView()
 
     override init(frame: CGRect) {
@@ -100,60 +93,20 @@ final class SoundSheetHeaderView: UICollectionReusableView {
         let identity = UIStackView(arrangedSubviews: [record, labels])
         identity.spacing = Spacing.lg
         identity.alignment = .center
+        identity.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(identity)
 
-        useButton.configuration?.title = "Use this sound"
-        useButton.configuration?.image = UIImage(systemName: "music.note")
-        useButton.configuration?.imagePadding = Spacing.sm
-        useButton.configuration?.cornerStyle = .capsule
-        useButton.tintColor = .systemRed
-        useButton.addAction(UIAction { [weak self] _ in self?.onUse?() }, for: .primaryActionTriggered)
-
-        shareButton.configuration?.image = UIImage(systemName: "square.and.arrow.up")
-        shareButton.configuration?.cornerStyle = .capsule
-        shareButton.accessibilityLabel = "Share sound"
-        shareButton.addAction(UIAction { [weak self] _ in self?.onShare?() }, for: .primaryActionTriggered)
-
-        // Holds the row's width when "Use this sound" is not offered, so share
-        // keeps its circle at the trailing end instead of stretching.
-        actionsFiller.isHidden = true
-        let actions = UIStackView(arrangedSubviews: [useButton, actionsFiller, shareButton])
-        actions.spacing = Spacing.sm
-
-        // The grid's title, and its door: collapsed, the grid is below the
-        // fold and this is all of it that shows; a tap goes up to it.
-        var expander = UIButton.Configuration.plain()
-        expander.image = UIImage(systemName: "chevron.up")
-        expander.preferredSymbolConfigurationForImage = .init(pointSize: 12, weight: .bold)
-        expander.imagePadding = Spacing.sm
-        expander.contentInsets = .init(top: Spacing.sm, leading: Spacing.sm, bottom: Spacing.sm, trailing: Spacing.sm)
-        expander.baseForegroundColor = .secondaryLabel
-        var title = AttributedString("Posts with this sound")
-        title.font = UIFont.preferredFont(forTextStyle: .subheadline).withWeight(.semibold)
-        expander.attributedTitle = title
-        gridTitle.configuration = expander
-        // Centred: it is the sheet's hinge, not a column heading.
-        gridTitle.contentHorizontalAlignment = .center
-        gridTitle.addAction(UIAction { [weak self] _ in self?.onToggleExpanded?() }, for: .primaryActionTriggered)
-
-        let column = UIStackView(arrangedSubviews: [identity, actions, gridTitle])
-        column.axis = .vertical
-        column.spacing = Spacing.lg
-        column.setCustomSpacing(Spacing.md, after: actions)
-        column.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(column)
-
-        let bottom = column.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Spacing.sm)
+        // The gap to the grid below is the header's own, so the first row
+        // starts where the header says it ends.
+        let bottom = identity.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Spacing.lg)
         bottom.priority = .init(999)
         NSLayoutConstraint.activate([
-            column.topAnchor.constraint(equalTo: topAnchor),
-            column.leadingAnchor.constraint(equalTo: leadingAnchor),
-            column.trailingAnchor.constraint(equalTo: trailingAnchor),
+            identity.topAnchor.constraint(equalTo: topAnchor),
+            identity.leadingAnchor.constraint(equalTo: leadingAnchor),
+            identity.trailingAnchor.constraint(equalTo: trailingAnchor),
             bottom,
             record.widthAnchor.constraint(equalToConstant: Self.artworkSide),
             record.heightAnchor.constraint(equalToConstant: Self.artworkSide),
-            useButton.heightAnchor.constraint(equalToConstant: Self.actionHeight),
-            shareButton.heightAnchor.constraint(equalToConstant: Self.actionHeight),
-            shareButton.widthAnchor.constraint(equalToConstant: Self.actionHeight),
         ])
         setPlaying(false)
     }
@@ -161,14 +114,12 @@ final class SoundSheetHeaderView: UICollectionReusableView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    func configure(title: String, subtitle: String, meta: String, canPreview: Bool, canUse: Bool) {
+    func configure(title: String, subtitle: String, meta: String, canPreview: Bool) {
         titleLabel.text = title
         subtitleLabel.text = subtitle
         metaLabel.text = meta
         playButton.isHidden = !canPreview
         record.isUserInteractionEnabled = canPreview
-        useButton.isHidden = !canUse
-        actionsFiller.isHidden = canUse
     }
 
     func setArtwork(_ image: UIImage?) {
@@ -182,12 +133,6 @@ final class SoundSheetHeaderView: UICollectionReusableView {
         playButton.configuration?.image = UIImage(systemName: playing ? "pause.fill" : "play.fill")
         playButton.accessibilityLabel = playing ? "Pause sound" : "Play sound"
         artwork.layer.setRecordSpinning(playing)
-    }
-
-    /// The chevron points where a tap goes: up to the grid, or back down.
-    func setExpanded(_ expanded: Bool) {
-        gridTitle.configuration?.image = UIImage(systemName: expanded ? "chevron.down" : "chevron.up")
-        gridTitle.accessibilityHint = expanded ? "Shows less" : "Shows the posts"
     }
 
     func setMeta(_ meta: String) {
