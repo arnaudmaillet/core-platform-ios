@@ -61,18 +61,47 @@ struct DiscoverListPageTests {
         #expect(ForYouPagerView.style(for: .activity) == .list)
     }
 
-    /// Discover is handed the WHOLE corpus — every kind — while the media-only
-    /// state stays what the pushed gallery shows.
-    @Test func discoverIsHandedEveryKindOfPost() {
+    /// The Discover page is handed DISCOVER's state, not Following's; the
+    /// Following page keeps its own.
+    @Test func eachTabIsHandedItsOwnCorpus() {
         let all = corpus(9)
+        let following = Array(all.prefix(4))
         let snapshot = ForYouViewModel.Snapshot(
-            activity: .content(all),
+            activity: .content(following),
             media: .content(all.filter { $0.kind != .text }),
-            short: .content(all.filter { $0.kind == .text })
+            short: .content(following.filter { $0.kind == .text }),
+            discover: .content(all)
         )
         #expect(ForYouPagerView.pageState(for: .media, in: snapshot) == .content(all))
-        #expect(ForYouPagerView.pageState(for: .activity, in: snapshot) == .content(all))
-        #expect(snapshot.discover == snapshot.activity)
+        #expect(ForYouPagerView.pageState(for: .activity, in: snapshot) == .content(following))
+    }
+
+    /// Discover is everyone: an author unfollowed from the screen leaves
+    /// Following and stays in Discover's state — list and mosaic both — and
+    /// an empty Discover speaks Discover's words.
+    @Test func discoverIsEveryoneFollowingIsTheFollowed() async {
+        let posts = corpus(6).enumerated().map { index, post in
+            GalleryPost(
+                id: post.id, kind: post.kind, isRepost: false, pages: post.pages,
+                caption: post.caption, publishedAtMS: post.publishedAtMS,
+                authorID: ProfileID(index.isMultiple(of: 2) ? "followed" : "stranger")
+            )
+        }
+        let model = ForYouViewModel(repository: DiscoverStubProvider(posts: posts))
+        var latest: ForYouViewModel.Snapshot?
+        model.onSnapshotChange = { latest = $0 }
+        model.viewDidLoad()
+        for _ in 0..<40 where model.discoverPosts.isEmpty {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        model.removeAuthor(ProfileID("stranger"))
+
+        #expect(latest?.discover == .content(posts))
+        #expect(model.posts(for: .activity).allSatisfy { $0.authorID == ProfileID("followed") })
+        #expect(model.posts(for: .media).contains { $0.authorID == ProfileID("stranger") })
+
+        let empty = ForYouViewModel.discoverEmptyState(source: .trending)
+        #expect(empty.title.contains("discover"))
     }
 
     // MARK: - Stretches, sections, cells
@@ -255,5 +284,14 @@ struct DiscoverGalleryTests {
         #expect(opened?.ids == Array(shown[2...].prefix(40)).map(\.id))
         #expect(opened?.origin.hasHero == true)
         #expect(opened?.origin.style == .tile)
+    }
+}
+
+private final class DiscoverStubProvider: ForYouProviding, @unchecked Sendable {
+    private let posts: [GalleryPost]
+    init(posts: [GalleryPost]) { self.posts = posts }
+    func firstPage() async throws -> ForYouPage { ForYouPage(posts: posts, nextPageToken: nil) }
+    func page(after token: String) async throws -> ForYouPage {
+        ForYouPage(posts: [], nextPageToken: nil)
     }
 }

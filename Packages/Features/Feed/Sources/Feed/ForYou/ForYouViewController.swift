@@ -1289,9 +1289,9 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             do {
                 try await socialGraph.setFollowing(false, for: id)
                 guard let self else { return }
-                // This surface is the following feed, so an author who is no
-                // longer followed has nothing left on it. Without this the
-                // action reads as having failed.
+                // Following loses the author — without this the action reads
+                // as having failed. Discover keeps them: it is everyone, not
+                // the people the viewer follows (`removeAuthor`).
                 viewModel.removeAuthor(id)
                 let name = handle.isEmpty ? "this author" : "@\(handle)"
                 ToastView.present("Unfollowed \(name)", symbol: "person.badge.minus", in: view)
