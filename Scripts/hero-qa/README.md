@@ -31,6 +31,11 @@ frame-0 flash family), did the screen come back to its pre-flight self
 fails, a final census with residue fails). `summary.md` collects verdicts
 plus an 8-frame evidence strip per case.
 
+The For You cases open `-foryou-open 3`: Discover is a list of cards with
+mosaic chunks (2026-09-28), and index 3 is its first chunk's first TILE —
+three cards precede the first chunk — so the cases keep flying a media hero
+rather than whatever kind the corpus's first card happens to be.
+
 ## The channel doctrine
 
 - **The probe** (`hero;seq=…` accessibility identifier) is the UI suites'

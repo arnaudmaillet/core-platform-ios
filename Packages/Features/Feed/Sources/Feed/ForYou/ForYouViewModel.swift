@@ -50,7 +50,20 @@ public final class ForYouViewModel {
             case .short: short
             }
         }
+
+        /// Discover's list: EVERY kind of post, in the corpus's order — the
+        /// list decides for itself which of them become mosaic tiles
+        /// (`MosaicChunkPlanner`). The same posts `activity` holds, under its
+        /// own name because the two tabs ask different things of them: Following
+        /// groups the arrivals, Discover pulls media forward into chunks.
+        /// `media` stays the media-only corpus — the pushed "View all" gallery.
+        public var discover: PageState { activity }
     }
+
+    /// Whether another page of the corpus can still be fetched. What lets
+    /// Discover decide the chunk at its tail instead of holding the posts
+    /// behind it back for a page that is never coming.
+    public var hasMorePages: Bool { nextPageToken != nil }
 
     public var onSnapshotChange: ((Snapshot) -> Void)?
     /// Fires when a NEXT-PAGE fetch starts and again when it settles.

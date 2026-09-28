@@ -75,9 +75,10 @@ final class HeroCardUITests: XCTestCase {
 
     // MARK: - A tile on the Media grid, tapped for real
 
-    /// The mosaic: switch the pager to Discover — the header tabs map onto
-    /// `ForYouPagerView.pageOrder`, and Discover IS the `.media` grid page
-    /// (Following is the `.activity` card list). A tile is a rect whatever
+    /// The mosaic: Discover is a list of cards with mosaic chunks now
+    /// (2026-09-28), and the whole mosaic is a screen of its own behind a
+    /// chunk's "View all" (`DiscoverGalleryViewController`). So: Discover,
+    /// "View all", then a tile of the pushed grid. A tile is a rect whatever
     /// the post, so EVERY tile flies; tap one, come home by the back button,
     /// twice, because the second open is where reuse bugs live.
     func testATileOnTheMediaGridFliesUnderARealFinger() throws {
@@ -88,6 +89,19 @@ final class HeroCardUITests: XCTestCase {
         XCTAssertTrue(mediaTab.waitForExistence(timeout: 15),
                       "no Discover tab in the For You header")
         mediaTab.tap()
+
+        // The first chunk sits under three cards; scroll until its
+        // "View all" can be pressed.
+        let viewAll = app.buttons["View all"].firstMatch
+        var scrolls = 0
+        while !(viewAll.exists && viewAll.isHittable), scrolls < 6 {
+            app.swipeUp()
+            scrolls += 1
+        }
+        XCTAssertTrue(viewAll.isHittable, "no View all under a Discover chunk")
+        viewAll.tap()
+        XCTAssertTrue(app.navigationBars["Discover"].waitForExistence(timeout: 10),
+                      "View all did not push the mosaic")
 
         for round in 1...2 {
             let tile = app.collectionViews.firstMatch.cells.firstMatch

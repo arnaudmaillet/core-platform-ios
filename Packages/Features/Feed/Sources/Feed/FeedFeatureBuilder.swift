@@ -217,6 +217,12 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             videoPlayback: videoPlayback,
             // The same seeded surface a Maps pin opens, from a tile instead.
             makeSnapFeed: { postIDs in makeSnapFeedViewController(postIDs: postIDs) },
+            // Discover's pushed mosaic opens its tiles through the shared
+            // flight, the one the place page and the search results use —
+            // see `DiscoverGalleryViewController`.
+            openPostHero: { presenter, origin, ids in
+                presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)
+            },
             prewarm: { ids in await repository.prewarm(ids) },
             // Text posts open straight into comment layout, so their first
             // page is warmed while the grid is still on screen — see

@@ -40,6 +40,21 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// The cards' stakes — see `PostCardStaking`.
     private let staking: PostCardStaking?
     private let makeSnapFeed: ([PostID]) -> UIViewController
+    /// The builder's shared flight (`presentSnapFeedHero`), for the one screen
+    /// this one pushes that opens posts of its own: Discover's whole mosaic.
+    /// See `DiscoverGalleryViewController` for why it does not borrow
+    /// `openFeed`.
+    private let openPostHero: ((UIViewController, SnapFeedHeroOrigin, [PostID]) -> Void)?
+    /// Kept for the pushed gallery's own page, which draws with the same
+    /// pipeline and plays from the same pool as the tabs.
+    private let imagePipeline: ImagePipeline
+    private let videoPlayback: VideoPlaybackController?
+    /// Discover's whole mosaic while it is on the stack — fed every snapshot,
+    /// the paging spinner and the refresh from here. Weak: the stack owns it.
+    private weak var discoverGallery: DiscoverGalleryViewController?
+    /// The last snapshot rendered, so a gallery pushed between two publishes
+    /// opens on what is loaded rather than on a skeleton.
+    private var lastSnapshot: ForYouViewModel.Snapshot?
     private let prewarm: ([PostID]) async -> Void
     /// Loads a post's first page of comments into the panel's synchronous
     /// cache. Optional so the other entry points need not supply one.
@@ -448,6 +463,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         imagePipeline: ImagePipeline,
         videoPlayback: VideoPlaybackController? = nil,
         makeSnapFeed: @escaping ([PostID]) -> UIViewController,
+        openPostHero: ((UIViewController, SnapFeedHeroOrigin, [PostID]) -> Void)? = nil,
         prewarm: @escaping ([PostID]) async -> Void,
         prefetchTopComments: ((PostID) async -> Void)? = nil,
         router: (any Router)? = nil,
@@ -457,6 +473,9 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     ) {
         self.viewModel = viewModel
         self.makeSnapFeed = makeSnapFeed
+        self.openPostHero = openPostHero
+        self.imagePipeline = imagePipeline
+        self.videoPlayback = videoPlayback
         self.prewarm = prewarm
         self.prefetchTopComments = prefetchTopComments
         self.router = router
@@ -641,7 +660,11 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
 
         viewModel.onSnapshotChange = { [weak self] snapshot in
             guard let self else { return }
+            // BEFORE the render it is for: Discover plans its tail on it.
+            pager.setCorpusComplete(!viewModel.hasMorePages)
             pager.render(snapshot)
+            lastSnapshot = snapshot
+            discoverGallery?.render(snapshot.media)
             prewarmVisible()
             #if DEBUG
             auditPostMenu()
@@ -653,8 +676,16 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             // says nothing about what is on screen now.
             self?.warmedComments.removeAll()
         }
-        viewModel.onLoadSettled = { [weak self] in self?.pager.endRefreshing() }
-        viewModel.onPagingChange = { [weak self] paging in self?.pager.setPaging(paging) }
+        viewModel.onLoadSettled = { [weak self] in
+            self?.pager.endRefreshing()
+            self?.discoverGallery?.endRefreshing()
+        }
+        viewModel.onPagingChange = { [weak self] paging in
+            self?.pager.setPaging(paging)
+            self?.discoverGallery?.setPaging(paging)
+        }
+        // Discover's "View all": the whole mosaic, pushed.
+        pager.onViewAllTapped = { [weak self] in self?.pushDiscoverGallery() }
         viewModel.onUnreadChange = { [weak self] counts in self?.applyBadges(counts) }
         viewModel.onContextCountsChange = { [weak self] counts in
             guard let self else { return }
@@ -664,8 +695,9 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             // has to be pushed.
             publishTabPresentation()
         }
-        // The badged tab's rows split on this number. Only that page has
-        // sections; Discover is a ranked mosaic with no "since" to divide on.
+        // The badged tab's rows split on this number. Only that page has a
+        // "New" section; Discover is a ranked list with no "since" to divide
+        // on (its sections are its stretches of cards and mosaic).
         viewModel.onNewPostsChange = { [weak self] ids in
             self?.pager.setNewPosts(ids, for: ForYouViewModel.badgedTab)
         }
@@ -1323,6 +1355,30 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "OK", style: .default))
         present(alert, animated: true)
+    }
+
+    // MARK: - Discover's whole mosaic
+
+    /// "View all" under a chunk: pushes the mosaic Discover used to be, over
+    /// the same corpus (`DiscoverGalleryViewController`).
+    ///
+    /// Only from rest — this screen on top, no flight of its own in the air —
+    /// so a tap landing mid-transition cannot stack a push on a pop.
+    func pushDiscoverGallery() {
+        guard activeTransition == nil,
+              let navigationController, navigationController.topViewController === self,
+              navigationController.transitionCoordinator == nil
+        else { return }
+        let gallery = DiscoverGalleryViewController(
+            imagePipeline: imagePipeline, videoPlayback: videoPlayback, openPost: openPostHero
+        )
+        gallery.onNearEnd = { [weak self] in self?.viewModel.loadNextPageIfNeeded() }
+        gallery.onRefresh = { [weak self] in self?.viewModel.refresh() }
+        // What is loaded NOW, so the push shows the mosaic rather than a
+        // skeleton waiting for the next publish.
+        if let lastSnapshot { gallery.render(lastSnapshot.media) }
+        discoverGallery = gallery
+        navigationController.pushViewController(gallery, animated: true)
     }
 
     private func openFeed(
@@ -2190,6 +2246,14 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // line here covers a push, a tab switch, and the un-appearance after a
         // cancelled interactive pop.
         selectorAccessory?.remove(from: tabBarController, alongside: transitionCoordinator)
+        // ⚠️ AND THE PUSHED MOSAIC, which the guard below lets through. A push
+        // of the FEED keeps playback up on purpose (the flight owns it); a push
+        // of Discover's whole mosaic covers these pages with a grid of its own
+        // that wants the same pool, and nothing is flying. Also runs for a pop
+        // back to this screen that was CANCELLED, which re-covers the pages.
+        if navigationController?.topViewController is DiscoverGalleryViewController {
+            pager.setAutoplayActive(false)
+        }
         guard navigationController?.topViewController === self else { return }
         // The hosted surface lives in the TAB BAR CONTROLLER's view, one level
         // above the navigation controller — deliberately, so a push cannot
@@ -2358,7 +2422,10 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// opens from memory instead of the network — the same trick Maps uses on
     /// viewport settle.
     private func prewarmVisible() {
-        let visible = Array(viewModel.posts(for: viewModel.format).prefix(12))
+        // The PAGE's order — the one the viewer sees and `openFeed` seeds from.
+        // On Discover the view model's `.media` list is not even the same posts:
+        // the tab is a list of every kind now, with media pulled into chunks.
+        let visible = Array(pager.posts(for: viewModel.format).prefix(12))
         let ids = visible.map(\.id)
         guard !ids.isEmpty else { return }
         Task { [prewarm] in await prewarm(Array(ids)) }
@@ -2876,6 +2943,26 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: attempt)
         }
+        // `-foryou-view-all [delay]`: presses the first chunk's "View all"
+        // once Discover has a chunk on screen, and `-foryou-gallery-open N`
+        // then opens tile N of the pushed mosaic once its cover is up. Both
+        // poll, like `-foryou-open`, because a fixed delay silently no-ops
+        // under `-mock-latency`.
+        if let position = arguments.firstIndex(of: "-foryou-view-all") {
+            let delay = position + 1 < arguments.count ? (Double(arguments[position + 1]) ?? 1.0) : 1.0
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                QAWait.until("-foryou-view-all", { [weak self] in
+                    guard let self else { return false }
+                    return pager.page(for: .media)?.segments.contains { $0.chunk != nil } == true
+                        && navigationController?.transitionCoordinator == nil
+                }) { [weak self] in
+                    guard let self else { return }
+                    print("[qa] -foryou-view-all: pushing the mosaic")
+                    pushDiscoverGallery()
+                    scheduleGalleryOpenIfRequested()
+                }
+            }
+        }
         // `-foryou-open-comments N` is `-foryou-open N` through the comment
         // count instead of the card, so the shorter route is exercised by the
         // same waiting-for-content machinery rather than by a second one.
@@ -2980,6 +3067,28 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + openDelay, execute: attempt)
+    }
+
+    /// `-foryou-gallery-open N`, once `-foryou-view-all` has pushed the mosaic:
+    /// waits for the push to land and tile N to have a cover, then taps it.
+    private func scheduleGalleryOpenIfRequested() {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let position = arguments.firstIndex(of: "-foryou-gallery-open"),
+              position + 1 < arguments.count,
+              let index = Int(arguments[position + 1])
+        else { return }
+        let label = "-foryou-gallery-open \(index)"
+        QAWait.until(label, { [weak self] in
+            guard let gallery = self?.discoverGallery,
+                  gallery.navigationController?.topViewController === gallery,
+                  gallery.navigationController?.transitionCoordinator == nil
+            else { return false }
+            return gallery.debugTileIsReady(at: index)
+        }) { [weak self] in
+            guard let gallery = self?.discoverGallery else { return }
+            print("[qa] \(label): opening \(gallery.posts[index].id.rawValue) of \(gallery.posts.count)")
+            _ = gallery.debugOpenTile(at: index)
+        }
     }
     #endif
 }
