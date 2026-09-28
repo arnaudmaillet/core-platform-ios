@@ -62,13 +62,13 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// honest verb rather than a toggle that has to ask first.
     private let socialGraph: (any SocialGraphWriting)?
 
-    /// The tab titles, in `ForYouPagerView.pageOrder` order: Discover (the
-    /// media grid) then Following (the unfiltered page).
+    /// The tab titles, in `ForYouPagerView.pageOrder` order: Following (the
+    /// unfiltered page) then Discover (the media grid).
     ///
     /// They deliberately do not echo `GalleryFilter.Format`'s case names. The
     /// enum names the content SHAPE, these name the product idea; the audit
     /// reads this array rather than a second copy of the strings.
-    private static let tabTitles = ["Discover", "Following"]
+    private static let tabTitles = ["Following", "Discover"]
 
     /// The tab capsule. Shared with the Messages inbox — see `PagedTabBar` for
     /// why the lens is a tint rather than a second material.
