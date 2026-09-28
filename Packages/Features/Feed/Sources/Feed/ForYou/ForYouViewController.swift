@@ -1916,10 +1916,30 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         feed: UIViewController, format: GalleryFilter.Format, departureID: PostID
     ) {
         guard let navigationController else { return }
-        // Nothing from the last opening survives into this one — see
-        // `resetForNewPresentation`.
-        textSlideDismissal.resetForNewPresentation()
-        textSlideDismissal.arbitratesWithHeroGrab = true
+        // ⚠️ THE SHARED RULES FIRST — both axes, arbitrated, staged ONCE and
+        // only for a close that carries a card. They are
+        // `armAsCardCloseAlongsideFlight`'s now, the same call a profile's and
+        // a place page's flights make through `presentSnapFeedHero`, because
+        // the copy a profile was missing is the defect that call ended. It
+        // also resets whatever the last opening left on this driver.
+        //
+        // ⚠️ ADOPT FIRST, BUILD SECOND, and the order is not stylistic.
+        //
+        // The geometry's caption cut, its band and its stand-in are all read
+        // off the landed post's ROW, so that row has to be in the departure
+        // slot before any of them is asked for — otherwise they describe a card
+        // sitting somewhere off screen. `adoptPost` is what puts it there.
+        textSlideDismissal.armAsCardCloseAlongsideFlight(on: feed) { [weak self] feed in
+            guard let self,
+                  let page = pager.page(for: format),
+                  let landed = (feed as? SnapFeedViewController)?.activePostID
+            else { return false }
+            stageCardClose(
+                feed: feed, page: page, format: format,
+                landed: landed, departureID: departureID
+            )
+            return true
+        }
         // ⚠️ THE MIRROR, ON THIS PATH TOO — and it was set on only one of the
         // two, which is a plain slide.
         //
@@ -1939,80 +1959,6 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
                 ? ((feed as? SnapFeedViewController)?.activePostID ?? departureID)
                 : departureID
             return page.heroAppearance(for: landing) != nil
-        }
-        textSlideDismissal.attach(to: feed, axes: [.horizontal, .vertical])
-        // ⚠️ ADOPT FIRST, BUILD SECOND, and the order is not stylistic.
-        //
-        // The geometry's caption cut, its band and its stand-in are all read
-        // off the landed post's ROW, so that row has to be in the departure
-        // slot before any of them is asked for — otherwise they describe a card
-        // sitting somewhere off screen. `adoptPost` is what puts it there.
-        // ⚠️ ONCE. A swipe asks twice — when the grab claims the screen, and
-        // again when the pop it triggers asks for an animator — and a second
-        // swap would put the two cards back where they started.
-        var hasPrepared = false
-        textSlideDismissal.prepareForDismissal = { [weak self, weak feed] _ in
-            guard !hasPrepared else { return }
-            guard let self, let feed,
-                  let page = pager.page(for: format),
-                  let landed = (feed as? SnapFeedViewController)?.activePostID
-            else { return }
-            // ⚠️ ONLY FOR A CLOSE THAT CARRIES A CARD.
-            //
-            // This runs from the pop as well as from the grab, and a pop is
-            // every dismissal there is — including a hero's. Doing this work
-            // for one is not merely wasted: it CONCEALS the row below, and a
-            // flight that lands on a hidden row reads as no animation at all.
-            // Reported exactly that way, as the hero having stopped working.
-            //
-            // Asked of the same authority the two grabs gate on, so the three
-            // can never disagree about what the post is.
-            guard (feed as? any ZoomTransitionDestination)?.zoomDismissalKind == .card
-            else { return }
-            hasPrepared = true
-            if landed != departureID {
-                // Only a mosaic moves its posts to meet a close — see
-                // `ForYouGridPage.landsByAdoption`. A list lands back on the
-                // post the opening left from, with its order untouched.
-                if page.landsByAdoption {
-                    page.adoptPost(
-                        landed, intoSlotOf: departureID, orInsert: self.viewModel.post(for: landed)
-                    )
-                }
-            }
-            // ⚠️ THE ROW THE WINDOW LANDS ON, WHICH IS NOT ALWAYS THE LANDED
-            // POST — and the two are the same question `adoptPost` above just
-            // answered.
-            //
-            // A mosaic has just MOVED the landed post into the departure slot,
-            // so there the landed post is what sits under the window. A list
-            // moved nothing: its rule is that a close returns to the post the
-            // opening left from, order untouched, so the window lands on
-            // `departureID` and anchoring on `landed` aimed it at a row the
-            // viewer had never scrolled to — unrealized, therefore nil, and the
-            // whole reveal was cleared.
-            //
-            // ⚠️ AND THIS CHANGE IS ONLY SAFE WITH THE GUARD ABOVE. Pointing the
-            // anchor here without widening the guard's predicate is the exact
-            // regression this replaces, from the other direction: the departure
-            // row carries media, `textRowFrame` refuses it, and the reveal is
-            // cleared again. Filmed twice, once each way.
-            let landingID = page.landsByAdoption ? landed : departureID
-            installTextReveal(feed: feed, format: format, postID: landingID, presenting: false)
-            // ⚠️ AND HIDE THE ROW, which on this path nothing else has.
-            //
-            // A reveal normally conceals the row it departed from at the
-            // OPENING — "the row goes the moment the window takes its place" —
-            // and its close only puts it back. This screen was opened by a
-            // FLIGHT, so no opening ever hid anything: without this the card
-            // flies home over a grid already showing the same card, and the
-            // landing has nothing to reveal. Measured as a close whose trace
-            // carried a single `conceal=false` and no `conceal=true` at all.
-            //
-            // Last, because `adoptPost` deliberately un-hides both swapped
-            // cells — the hero's requirement, since a flight LANDS on one of
-            // them — and this is the opposite need.
-            page.setRevealConcealed(true, for: landingID)
         }
         // ⚠️ AND WHATEVER ANIMATED THE CLOSE, NO ROW STAYS HIDDEN.
         //
@@ -2042,6 +1988,59 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             self?.cardPathFlight = nil
         }
         textSlideDismissal.install(on: navigationController)
+    }
+
+    /// Stages a card-shaped close for a feed a FLIGHT opened, once the viewer
+    /// has paged onto a post with no media — the host half of
+    /// `armAsCardCloseAlongsideFlight`, which has already decided that this is
+    /// such a close and that it runs once.
+    private func stageCardClose(
+        feed: UIViewController, page: ForYouGridPage, format: GalleryFilter.Format,
+        landed: PostID, departureID: PostID
+    ) {
+        if landed != departureID {
+            // Only a mosaic moves its posts to meet a close — see
+            // `ForYouGridPage.landsByAdoption`. A list lands back on the
+            // post the opening left from, with its order untouched.
+            if page.landsByAdoption {
+                page.adoptPost(
+                    landed, intoSlotOf: departureID, orInsert: self.viewModel.post(for: landed)
+                )
+            }
+        }
+        // ⚠️ THE ROW THE WINDOW LANDS ON, WHICH IS NOT ALWAYS THE LANDED
+        // POST — and the two are the same question `adoptPost` above just
+        // answered.
+        //
+        // A mosaic has just MOVED the landed post into the departure slot,
+        // so there the landed post is what sits under the window. A list
+        // moved nothing: its rule is that a close returns to the post the
+        // opening left from, order untouched, so the window lands on
+        // `departureID` and anchoring on `landed` aimed it at a row the
+        // viewer had never scrolled to — unrealized, therefore nil, and the
+        // whole reveal was cleared.
+        //
+        // ⚠️ AND THIS CHANGE IS ONLY SAFE WITH THE GUARD ABOVE. Pointing the
+        // anchor here without widening the guard's predicate is the exact
+        // regression this replaces, from the other direction: the departure
+        // row carries media, `textRowFrame` refuses it, and the reveal is
+        // cleared again. Filmed twice, once each way.
+        let landingID = page.landsByAdoption ? landed : departureID
+        installTextReveal(feed: feed, format: format, postID: landingID, presenting: false)
+        // ⚠️ AND HIDE THE ROW, which on this path nothing else has.
+        //
+        // A reveal normally conceals the row it departed from at the
+        // OPENING — "the row goes the moment the window takes its place" —
+        // and its close only puts it back. This screen was opened by a
+        // FLIGHT, so no opening ever hid anything: without this the card
+        // flies home over a grid already showing the same card, and the
+        // landing has nothing to reveal. Measured as a close whose trace
+        // carried a single `conceal=false` and no `conceal=true` at all.
+        //
+        // Last, because `adoptPost` deliberately un-hides both swapped
+        // cells — the hero's requirement, since a flight LANDS on one of
+        // them — and this is the opposite need.
+        page.setRevealConcealed(true, for: landingID)
     }
 
     private func restoreChromeAfterTransition() {

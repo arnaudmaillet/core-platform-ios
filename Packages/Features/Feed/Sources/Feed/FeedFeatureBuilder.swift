@@ -325,7 +325,22 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // dropped the gallery mid-gesture and re-inserted it on a cancel, and
         // the `setDismissSource` registration that pointed a pop at a marker.
         // A gesture that no longer crosses two levels needs none of it.
-        let galleryPresenter = presenter as? PlaceProfileViewController
+        // ⚠️ AND THE CARD-SHAPED CLOSE RIDES ALONG FOR EVERY PRESENTER THAT CAN
+        // LAND ONE — not only the place page.
+        //
+        // This used to ask `presenter as? PlaceProfileViewController`, so a
+        // PROFILE opened its media posts with a flight and nothing beside it:
+        // page onto a text post and both zoom grabs refuse the `.card` close,
+        // the flight's animator declines it, and the stack's edge pop is
+        // disclaimed — no drag at all, and a chevron that fell through to
+        // UIKit's plain pop. Filmed on a profile's Activity tab as the list
+        // coming back on a cut, while For You's Following list, which has
+        // always armed this close, revealed onto its card. See
+        // `cardCloseLanding(for:origin:pipeline:dock:)`.
+        let cardLanding = Self.cardCloseLanding(
+            for: presenter, origin: origin, pipeline: imagePipeline,
+            dock: { Self.withDockChoreography($0, on: nav) }
+        )
         // THE GRAB. Without it this push had no dismissal gesture at all:
         // claiming `zoomOwnsInteractiveDismissal` above tells the stack's
         // native edge-swipe to stay out of the way, which is correct only
@@ -397,9 +412,9 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // here makes the FLIGHT what this driver saves and forwards a `.hero`
         // pop back to. The map's own card-close says the same thing about the
         // same ordering.
-        if let gallery = galleryPresenter {
+        if let cardLanding {
             Self.attachTileCardClose(
-                feed: destination, landing: gallery, on: nav, retainer: retainer
+                feed: destination, landing: cardLanding, on: nav, retainer: retainer
             )
         }
     }
@@ -690,6 +705,21 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             // carries one for the case where the viewer pages onto a text post
             // before closing. See `InteractiveSlideDismissal.revealPresents`.
             dismissal.revealPresents = true
+            // ⚠️ AND NO HERO WILL TAKE THIS SCREEN'S CLOSE, so the slide must
+            // not hand a media page's pop to one.
+            //
+            // This screen opened as a WINDOW, and the feed is a pager: page onto
+            // a photograph and its post reports `.hero`. The slide then
+            // FORWARDS a pop with no gesture behind it — the chevron — to the
+            // delegate it displaced. On this path that is never a flight for
+            // this feed (nothing here builds one; a profile's own slide or the
+            // map's controller answers about a different screen), so the answer
+            // is nil, and nil is UIKit's plain pop: the list came back on a cut
+            // while a drag on the same page closed as the window. For You's list
+            // says the same thing about the same landing (its
+            // `heroLandingAcceptsHero` is false for a text row), and so the
+            // chevron there closes as the window too.
+            dismissal.heroLandingAcceptsHero = { false }
             dismissal.revealGeometry = TextRevealInstaller.geometry(
                 feed: destination,
                 origin: Self.withDockChoreography(reveal, on: nav),
@@ -938,25 +968,46 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     ) {
         let close = InteractiveSlideDismissal()
         retainer.cardClose = close
-        close.resetForNewPresentation()
-        close.arbitratesWithHeroGrab = true
-        close.attach(to: feed, axes: [.horizontal, .vertical])
-        // ⚠️ ONCE. A swipe asks twice — when the grab claims the screen, and
-        // again when the pop it triggers asks for an animator — and the staging
-        // below MOVES a scroll position and releases a concealment, so a second
-        // pass would re-do both against a screen already halfway home.
-        var hasPrepared = false
-        close.prepareForDismissal = { [weak feed, weak landing, weak close] _ in
-            guard !hasPrepared, let feed, let landing, let close else { return }
-            // ⚠️ ONLY FOR A CLOSE THAT CARRIES A CARD. This runs for every
-            // dismissal including the flight's, and the staging conceals the
-            // landing — a flight arriving on a hidden tile reads as no
-            // animation at all. Asked of the same authority both grabs gate on,
-            // so the three can never disagree about what the post is.
-            guard (feed as? any ZoomTransitionDestination)?.zoomDismissalKind == .card
-            else { return }
-            hasPrepared = true
+        // A landing that is not a screen has no other owner — see
+        // `HeroTransitionRetainer.cardCloseLanding`. A screen needs no help.
+        if landing is RowCardCloseLanding { retainer.cardCloseLanding = landing }
+        // The shared rules — both axes, arbitrated, staged ONCE and only for a
+        // close that carries a card — are `armAsCardCloseAlongsideFlight`'s,
+        // the same call For You's grid makes. What is this host's is only the
+        // landing, and the staging MOVES a scroll position and releases a
+        // concealment, which is why the once-only latch matters here.
+        close.armAsCardCloseAlongsideFlight(on: feed) { [weak landing, weak close] feed in
+            guard let landing, let close else { return false }
             close.revealGeometry = landing.cardCloseGeometry(dismissing: feed)
+            return true
+        }
+        // ⚠️ THE DOCK COMES BACK WITH A ROW'S CLOSE, the way it does from For
+        // You's list and from this builder's own reveal push.
+        //
+        // The flight hid the bar at the push and only its own return puts it
+        // back — animated, AFTER the landing. A card close replacing that
+        // return would therefore land the row on a screen with no dock, which
+        // then slides in on top of it. Restored at alpha 0 BEFORE the pop
+        // (outside any transition, the one place it paints — see
+        // `pushWithoutFlight`), faded in by the window, and put back down if
+        // the grab springs back (`withDockChoreography`'s cancel leg, which
+        // `RowCardCloseLanding` already carries).
+        //
+        // Gated on `.card` on the chevron's leg, because that hook hears EVERY
+        // close — a media page's chevron is the flight's, whose own animator
+        // fades nothing and whose return restores the bar itself.
+        if landing is RowCardCloseLanding {
+            close.revealReturningChrome = nav.tabBarController?.tabBar
+            let restoreDockOffstage: (UINavigationController?) -> Void = { nav in
+                nav?.tabBarController?.setTabBarHidden(false, animated: false)
+                nav?.tabBarController?.tabBar.alpha = 0
+            }
+            close.onWillBeginPop = { [weak nav] _ in restoreDockOffstage(nav) }
+            (feed as? SnapFeedViewController)?.onWillCloseFeed = { [weak nav, weak feed] in
+                guard (feed as? any ZoomTransitionDestination)?.zoomDismissalKind == .card
+                else { return }
+                restoreDockOffstage(nav)
+            }
         }
         // The backstop: whatever animated the close, nothing stays hidden. The
         // staging conceals a tile and only the reveal's own completion pays
@@ -964,6 +1015,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         close.onFeedPopped = { [weak landing] _ in
             landing?.clearLandingConcealment()
             retainer.cardClose = nil
+            retainer.cardCloseLanding = nil
         }
         // AFTER the push, so the flight controller is what `install` captures
         // and a `.hero` pop forwards straight back to it.
@@ -1271,6 +1323,11 @@ final class HeroTransitionRetainer {
     /// both close-outs, because the flight's return and the escape's landing
     /// are two different exits and either can be the last one.
     var cardClose: InteractiveSlideDismissal?
+    /// The landing that close stages, when it is not a screen the stack
+    /// already owns — a surface's own ROW, described by its `TextRevealOrigin`
+    /// (`RowCardCloseLanding`). The close holds its landing weakly, as it must
+    /// for a screen, so an object nothing else owns has to be kept here.
+    var cardCloseLanding: (any CardCloseLanding)?
 }
 
 /// Keeps a plain push's swipe-to-dismiss alive for the length of the screen.

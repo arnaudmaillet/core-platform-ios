@@ -2617,9 +2617,12 @@ extension ProfileViewController {
             // surfaces cannot drift apart.
             //
             // Offered for EVERY post, not only text ones. `hasHero`
-            // decides which presentation runs, and a media post never
-            // reaches the reveal; a row that turns out not to be a text
-            // row answers nil from `textRowFrame` anyway.
+            // decides which presentation OPENS the post — and a media post
+            // opened by a flight still CLOSES through this description when
+            // the viewer has paged onto a text post: the feed lands that
+            // close as a window on this row (`RowCardCloseLanding`), the
+            // same close For You's Following list runs. Before it did, that
+            // page had no drag and a chevron that cut.
             textReveal: TextRevealOrigin(
                 rowFrame: { [weak self] space in
                     // The text row's rect, or ANY row's — see
