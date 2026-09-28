@@ -293,7 +293,7 @@ public final class MockSocialServices: @unchecked Sendable {
             if id == MockSocialDataset.viewerProfileID {
                 return summary(
                     id: id, handle: "you",
-                    name: "Demo Viewer", avatar: "mock://avatar/viewer?w=128&h=128"
+                    name: "Demo Viewer", avatar: MockPostStore.viewer.avatarURL
                 )
             }
             guard let author = dataset.author(for: id) else { return nil }

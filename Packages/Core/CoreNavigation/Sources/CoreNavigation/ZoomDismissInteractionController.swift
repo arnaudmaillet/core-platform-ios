@@ -313,6 +313,15 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
                                        card?.zoomLiveMediaIsDrawing ?? true
                                    }) {
                 guard let self, !self.hasAbandonedContentHide else { return }
+                // ⚠️ A SURFACE THAT STOPPED DRAWING. The hold timed out on a
+                // donated surface that had a frame when it was taken and has
+                // shown nothing since — measured on a grab within ~2 s of a
+                // cluster feed's landing: the window flew EMPTY over the place
+                // page and the feed underneath went black. The card's cover
+                // comes back before the page is hidden.
+                if let card = self.flight?.card, !card.zoomLiveMediaIsDrawing {
+                    card.zoomLiveMediaDidStall()
+                }
                 self.destination?.setZoomContentHidden(true)
             }
         }

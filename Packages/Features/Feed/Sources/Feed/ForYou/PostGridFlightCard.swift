@@ -650,6 +650,20 @@ extension PostGridFlightCard: ZoomFlightCard {
         #endif
     }
 
+    /// The adopted surface had a frame when it was taken and has drawn
+    /// nothing since: the cover is the content again, under the empty surface.
+    func zoomLiveMediaDidStall() {
+        guard fliesHotLiveMedia else { return }
+        fliesHotLiveMedia = false
+        applyContentFloor()
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print(String(format: "[zoom-live] %.3f card STALLED surface → cover back %@",
+                         CACurrentMediaTime(), zoomLiveMediaDebugState))
+        }
+        #endif
+    }
+
     func adoptZoomLiveMedia(_ mirror: (UIView) -> Bool) {
         guard mirror(videoRenderView) else { return }
         hasAdoptedLiveMedia = true
