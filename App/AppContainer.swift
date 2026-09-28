@@ -386,6 +386,9 @@ final class AppContainer {
         // the Feed package knowing the Profile package exists.
         reporting: profileReportRepository,
         socialGraph: profileRepository,
+        // And whether the viewer follows an author already — the snap feed's
+        // author pill offers "+" only to someone they do not.
+        followRelations: profileRepository,
         // counter.v1, so a card can show reach. The timeline read hydrates
         // likes only, and a card's counter chip shows VIEWS — without this it
         // has nothing to say and hides itself, which is what it did.

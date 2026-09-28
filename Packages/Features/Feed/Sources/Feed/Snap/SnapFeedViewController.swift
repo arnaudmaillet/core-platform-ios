@@ -32,9 +32,18 @@ final class SnapFeedViewController: UIViewController {
     /// place gives it nothing to transition between.
     private var authorIdentityView = SnapAuthorIdentityView()
     /// The media attribution (cover + author + audio line), hosted as the
-    /// native bottom toolbar's leading item. Same stable-custom-view contract
-    /// as the identity pill: installed once, content follows the active page.
-    private let mediaAttributionView = SnapMediaAttributionView()
+    /// native bottom toolbar's leading item.
+    ///
+    /// ⚠️ NOT ONE VIEW FOR THE SCREEN'S LIFE either, for the identity pill's
+    /// reason: a page that draws a different attribution gets a NEW view in a
+    /// NEW item under its own `identifier` (`showAttribution`). It used to be
+    /// one view in one identifier-less item, rewritten in place under its own
+    /// cross-dissolve and a hand-driven toolbar relayout — so the toolbar never
+    /// ran the native morph the header's pill gets: to the bar nothing had
+    /// changed.
+    private var mediaAttributionView = SnapMediaAttributionView()
+    /// The toolbar item wearing `mediaAttributionView`.
+    private var attributionItem = UIBarButtonItem()
     /// Mutes and unmutes the feed for the session (`FeedSound`), shown on
     /// clips only. It sits in the ATTRIBUTION'S capsule, on purpose: adjacent
     /// items share one platter on iOS 26, so the sound reads as one thing —
@@ -63,8 +72,9 @@ final class SnapFeedViewController: UIViewController {
     /// bookmark/share/more cluster yields — those live in the engaged
     /// card; the audio attribution stays anchored on the left).
     private let commentSortButton = SnapCommentSortButton()
-    /// The one living toolbar's items (keep-and-stack): built once and never
-    /// swapped. The engagement no longer touches the footer — see
+    /// The one living toolbar's items (keep-and-stack): built once, and only
+    /// the leading attribution is ever swapped — for a fresh item per content
+    /// (`showAttribution`). The engagement no longer touches the footer — see
     /// `configureToolbarItems` for why the trailing ✕ left it.
     private var defaultToolbarItems: [UIBarButtonItem] = []
     /// The nav bar's two trailing items, held so comment mode can add the
@@ -83,8 +93,22 @@ final class SnapFeedViewController: UIViewController {
     /// So a new AUTHOR changes the identifier, and a fresh item for the same
     /// author (the landing install, a better projection) keeps it and lands
     /// without a flicker.
-    static func authorItemIdentifier(for author: ProfileID?) -> String {
-        "feed.snap.author-pill." + (author?.rawValue ?? "none")
+    ///
+    /// The "+" is part of what the pill IS, so it is part of the identifier
+    /// too: following the author (or learning that the viewer already does)
+    /// is a fresh pill under the identifier without `.follow`, and the bar
+    /// morphs the capsule down to its narrower self instead of snapping.
+    static func authorItemIdentifier(for author: ProfileID?, offersFollow: Bool = false) -> String {
+        "feed.snap.author-pill." + (author?.rawValue ?? "none") + (offersFollow ? ".follow" : "")
+    }
+
+    /// The attribution item's identifier — the author pill's rule applied to
+    /// the toolbar: one per thing DRAWN (`SnapMediaAttributionView.contentKey`),
+    /// so a page that draws a different pill is a different item and the bar
+    /// runs its own transition, and a page that draws the same one is the same
+    /// item and nothing moves. `nil` is the empty pill the screen opens with.
+    static func attributionItemIdentifier(forContent key: String?) -> String {
+        "feed.snap.attribution." + (key ?? "none")
     }
     /// The viewer's balance, closing the trailing run on its left —
     /// [‹ back] … [🪙 solde] [author pill] — so a spend made on this very
@@ -415,6 +439,19 @@ final class SnapFeedViewController: UIViewController {
     /// Files a post's Report. Nil withholds the row entirely: an action that
     /// cannot act is not offered — the grid's card menu follows the same rule.
     private let reporting: (any ContentReporting)?
+    /// Follows an author from the pill's "+", and says whether the "+" is on
+    /// offer at all. The pill offers it only when BOTH are wired and the
+    /// reader has said the viewer does not follow the author — see
+    /// `offersFollow(to:)`.
+    private let socialGraph: (any SocialGraphWriting)?
+    private let followRelations: (any SocialGraphReading)?
+    /// What the reader answered, per author, overlaid by this screen's own
+    /// follows. Absent: not known yet, which offers no "+".
+    private(set) var followRelationsByAuthor: [ProfileID: FollowRelation] = [:]
+    /// Lookups in flight, so paging back and forth asks once per author.
+    private var followLookups: Set<ProfileID> = []
+    /// Follows in flight, so a double tap sends one.
+    private var followsInFlight: Set<ProfileID> = []
     /// See `FeedFeatureBuilder.soundProvider` / `useSound`.
     private let soundProvider: (any PostSoundProviding)?
     private let useSound: (@MainActor (PostSound) -> Void)?
@@ -431,6 +468,8 @@ final class SnapFeedViewController: UIViewController {
         wallet: WalletStore? = nil,
         makeWalletSheet: (@MainActor () -> UIViewController)? = nil,
         reporting: (any ContentReporting)? = nil,
+        socialGraph: (any SocialGraphWriting)? = nil,
+        followRelations: (any SocialGraphReading)? = nil,
         soundProvider: (any PostSoundProviding)? = nil,
         useSound: (@MainActor (PostSound) -> Void)? = nil,
         openFeedHero: (@MainActor ([PostID], UIViewController, SnapFeedHeroOrigin) -> Void)? = nil,
@@ -448,6 +487,8 @@ final class SnapFeedViewController: UIViewController {
         self.wallet = wallet
         self.makeWalletSheet = makeWalletSheet
         self.reporting = reporting
+        self.socialGraph = socialGraph
+        self.followRelations = followRelations
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -711,6 +752,12 @@ final class SnapFeedViewController: UIViewController {
         // arrival: that one is the opening's, whose owner hides the dock
         // through UIKit as it pushes.
         if hasAppeared { retireTabBarOnReturn() }
+        // A return may follow a follow made elsewhere — on the author's own
+        // profile, pushed from this pill. Ask again for the author on it; the
+        // answer lands through the landing install.
+        if hasAppeared, let author = authorIdentityView.shownAuthor?.authorID {
+            resolveFollowRelation(for: author, refresh: true)
+        }
         // The back item exists only when there is somewhere to go back to — a
         // map-opened feed, not the Timeline tab root — and the stack/
         // presentation relationship is known only here, not at viewDidLoad.
@@ -1641,7 +1688,9 @@ final class SnapFeedViewController: UIViewController {
 
     private func makeAuthorItem(_ pill: SnapAuthorIdentityView) -> UIBarButtonItem {
         let item = UIBarButtonItem(customView: pill)
-        item.identifier = Self.authorItemIdentifier(for: pill.shownAuthor?.authorID)
+        item.identifier = Self.authorItemIdentifier(
+            for: pill.shownAuthor?.authorID, offersFollow: pill.offersFollow
+        )
         return item
     }
 
@@ -1661,7 +1710,8 @@ final class SnapFeedViewController: UIViewController {
     /// Internal, not private, so the item contract is testable without a
     /// populated feed.
     func showAuthor(_ model: FeedItemDisplayModel) {
-        if authorIdentityView.showsSameFace(as: model) {
+        if authorIdentityView.showsSameFace(as: model),
+           authorIdentityView.offersFollow == offersFollow(to: model.authorID) {
             authorIdentityView.setAuthor(model, pipeline: imagePipeline)
             return
         }
@@ -1690,9 +1740,12 @@ final class SnapFeedViewController: UIViewController {
         let previous = authorIdentityView
         let fresh = SnapAuthorIdentityView()
         fresh.inheritChrome(from: previous)
-        if let model = model ?? previous.shownAuthor {
-            fresh.setAuthor(model, pipeline: imagePipeline, animated: false)
+        let shown = model ?? previous.shownAuthor
+        if let shown {
+            fresh.setAuthor(shown, pipeline: imagePipeline, animated: false)
         }
+        // Before the item is made: the "+" is in its identifier.
+        fresh.setFollowHidden(!offersFollow(to: shown?.authorID))
         authorIdentityView = fresh
         let previousItem = authorItem
         authorItem = makeAuthorItem(fresh)
@@ -1704,7 +1757,8 @@ final class SnapFeedViewController: UIViewController {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-pill-probe") {
             print("[pill-probe] install \(fresh.shownAuthor?.authorName ?? "-") animated=\(animated)"
-                  + " window=\(view.window != nil) coordinator=\(transitionCoordinator != nil) flight=\(isAwaitingAnyFlight)")
+                  + " window=\(view.window != nil) coordinator=\(transitionCoordinator != nil) flight=\(isAwaitingAnyFlight)"
+                  + " follow=\(fresh.offersFollow) id=\(authorItem.identifier ?? "-")")
         }
         #endif
         items[index] = authorItem
@@ -1740,7 +1794,82 @@ final class SnapFeedViewController: UIViewController {
         // animation context it closes in.
         DispatchQueue.main.async { [weak self] in
             guard let self, self.view.window != nil else { return }
-            self.installAuthorPill(for: nil, animated: false)
+            // Unseen when nothing changed. But a follow relation that arrived
+            // during the flight was left for this install (`followRelation
+            // DidChange`), and a "+" coming or going is a different item — the
+            // bar's own morph, not a snap.
+            let author = self.authorIdentityView.shownAuthor?.authorID
+            let changes = self.authorItem.identifier != Self.authorItemIdentifier(
+                for: author, offersFollow: self.offersFollow(to: author)
+            )
+            self.installAuthorPill(for: nil, animated: changes && self.canAnimateBarItems)
+        }
+    }
+
+    // MARK: - Follow
+
+    /// Whether the pill offers "+" for `author`: a follow seam to act through,
+    /// and an answer saying the viewer does not follow them yet. Unknown is
+    /// NO — a "+" drawn for someone the viewer follows and then withdrawn is
+    /// worse than one that arrives late, and on the Following feed every
+    /// author is followed. The viewer's own posts answer `.viewer`, no "+".
+    func offersFollow(to author: ProfileID?) -> Bool {
+        guard socialGraph != nil, let author else { return false }
+        return followRelationsByAuthor[author]?.offersFollow ?? false
+    }
+
+    /// Asks the graph where the viewer stands with `author`, once per author
+    /// — or again with `refresh`, for an answer that may have moved while the
+    /// screen was covered (a follow on the author's own profile). The cached
+    /// answer keeps drawing until the new one lands.
+    ///
+    /// Internal for tests.
+    func resolveFollowRelation(for author: ProfileID, refresh: Bool = false) {
+        guard socialGraph != nil, let followRelations,
+              refresh || followRelationsByAuthor[author] == nil,
+              !followLookups.contains(author), !followsInFlight.contains(author) else { return }
+        followLookups.insert(author)
+        Task { [weak self] in
+            let relation = try? await followRelations.followRelation(to: author)
+            guard let self else { return }
+            self.followLookups.remove(author)
+            // A tap that followed while the question was out outranks it.
+            guard let relation, !self.followsInFlight.contains(author) else { return }
+            self.setFollowRelation(relation, for: author)
+        }
+    }
+
+    /// Internal for tests.
+    func setFollowRelation(_ relation: FollowRelation, for author: ProfileID) {
+        guard followRelationsByAuthor[author] != relation else { return }
+        followRelationsByAuthor[author] = relation
+        followRelationDidChange(for: author)
+    }
+
+    /// Re-draws the pill when its author's "+" changed. During a presentation
+    /// the landing install is armed and will read the new answer — installing
+    /// now would put a fresh item inside the flight's bar transition.
+    private func followRelationDidChange(for author: ProfileID) {
+        guard authorIdentityView.shownAuthor?.authorID == author,
+              authorIdentityView.offersFollow != offersFollow(to: author) else { return }
+        if authorPillAwaitsLandingInstall, isAwaitingAnyFlight || transitionCoordinator != nil { return }
+        installAuthorPill(for: nil, animated: canAnimateBarItems)
+    }
+
+    /// The pill's "+": follows the author, OPTIMISTICALLY — the profile's
+    /// Follow button's rule (`ProfileViewModel.toggleFollow`). The "+" goes at
+    /// once, through the bar's own morph, and comes back if the graph refuses.
+    ///
+    /// Internal for tests.
+    func followAuthor(_ author: ProfileID) {
+        guard let socialGraph, offersFollow(to: author), !followsInFlight.contains(author) else { return }
+        followsInFlight.insert(author)
+        setFollowRelation(.following, for: author)
+        Task { [weak self] in
+            let accepted = (try? await socialGraph.setFollowing(true, for: author)) != nil
+            guard let self else { return }
+            self.followsInFlight.remove(author)
+            if !accepted { self.setFollowRelation(.notFollowing, for: author) }
         }
     }
 
@@ -1764,6 +1893,9 @@ final class SnapFeedViewController: UIViewController {
         // wallet badge (when a wallet is wired) — the feed's chrome stays
         // identical on every entry path (menu push and pin flight), so
         // nothing else may install items, here or from outside.
+        // No "+" until the graph has answered for an author — and it is in
+        // the item's identifier, so it is decided before the item is made.
+        authorIdentityView.setFollowHidden(true)
         authorItem = makeAuthorItem(authorIdentityView)
         sortItem = UIBarButtonItem(customView: commentSortButton)
         if wallet != nil {
@@ -1842,11 +1974,10 @@ final class SnapFeedViewController: UIViewController {
         // Set once, on the first pill; every fresh pill inherits them
         // (`SnapAuthorIdentityView.inheritChrome`).
         authorIdentityView.onAuthorTapped = { [weak self] id in self?.viewModel.didTapAuthor(id) }
-        // The feed layer has no follow API (follow state/toggling lives in the
-        // Profile feature), so the follow affordance routes to the author's
-        // profile — the surface that owns the real Follow button. Swap for a
-        // one-tap follow once a social seam exists on the feed side.
-        authorIdentityView.onFollowTapped = { [weak self] id in self?.viewModel.didTapAuthor(id) }
+        // The "+" follows, in place (`followAuthor`). It is only ever drawn
+        // for an author the viewer does not follow yet, so there is no
+        // unfollow here: that is the profile's Following button.
+        authorIdentityView.onFollowTapped = { [weak self] id in self?.followAuthor(id) }
 
         // Keep `title` (it feeds pushed screens' back labels) but suppress its
         // centered rendering — the bar's center stays empty by design.
@@ -1860,9 +1991,9 @@ final class SnapFeedViewController: UIViewController {
     /// custom views never join a shared item background — each on the 36pt
     /// bar-bubble invariant the top bar's controls already follow.
     ///
-    /// Items are installed exactly once; only the attribution's content and
-    /// the bookmark glyph follow the active page (same stable-view contract
-    /// as the identity pill). Every action resolves the active post at
+    /// Items are installed once; the bookmark glyph follows the active page in
+    /// place, and the attribution follows it as a fresh item per content
+    /// (`showAttribution` — the identity pill's contract). Every action resolves the active post at
     /// action time, so none can act on a page the user has scrolled past.
     private func configureToolbarItems() {
         bookmarkButton.accessibilityLabel = "Save"
@@ -1936,10 +2067,17 @@ final class SnapFeedViewController: UIViewController {
         // The sort selector is not here either — it moved to the nav bar
         // beside the author pill (`setEngagedChrome`).
         soundButton.addAction(UIAction { [weak self] _ in self?.toggleSound() }, for: .primaryActionTriggered)
+        // Set once, on the first pill; every fresh pill inherits it
+        // (`SnapMediaAttributionView.inheritChrome`).
         mediaAttributionView.onTap = { [weak self] in self?.presentSoundSheet() }
         refreshSoundButton()
+        attributionItem = makeAttributionItem(mediaAttributionView)
+        // The items that are never replaced carry stable identifiers too, so a
+        // re-handed set (`showAttribution`) is matched item for item and
+        // only the attribution transitions.
+        soundItem.identifier = "feed.snap.sound"
         let leading: [UIBarButtonItem] = [
-            UIBarButtonItem(customView: mediaAttributionView),
+            attributionItem,
             soundItem,
             .flexibleSpace(),
         ]
@@ -1955,10 +2093,14 @@ final class SnapFeedViewController: UIViewController {
             return
         }
         #endif
+        let actionsItem = UIBarButtonItem(customView: shareCluster)
+        actionsItem.identifier = "feed.snap.actions"
+        let moreItem = UIBarButtonItem(customView: more)
+        moreItem.identifier = "feed.snap.more"
         defaultToolbarItems = leading + [
-            UIBarButtonItem(customView: shareCluster),
+            actionsItem,
             .fixedSpace(Spacing.sm),
-            UIBarButtonItem(customView: more),
+            moreItem,
         ]
         #if DEBUG
         // `-no-toolbar`: the UPPER BOUND on what trimming the footer can buy,
@@ -4048,18 +4190,25 @@ final class SnapFeedViewController: UIViewController {
             authorIdentityView.debugProbe("setAuthor \(model.authorName)")
         }
         #endif
-        // The cover is the SOUND's: its artwork, a note for a song that has
-        // none, and the post's own picture only for a sound with neither.
         let postSound = sound(for: model)
-        let cover: SnapMediaAttributionView.Cover = switch (postSound?.artworkURL, postSound?.isOriginal) {
-        case (let artwork?, _): .artwork(artwork)
-        case (nil, false): .note
-        default: .post
+        let attribution = attributionContent(for: model)
+        showAttribution(model, sound: attribution.sound, cover: attribution.cover)
+        // The neighbours' covers too, so the attribution paged to next arrives
+        // wearing its own.
+        for neighbour in [index - 1, index + 1] where orderedIDs.indices.contains(neighbour) {
+            if let next = modelsByID[orderedIDs[neighbour]] {
+                SnapMediaAttributionView.warmCover(
+                    for: next, cover: attributionContent(for: next).cover, pipeline: imagePipeline
+                )
+            }
         }
-        mediaAttributionView.setPost(
-            model, sound: soundLine(for: model).map { .sound($0) } ?? .none, cover: cover,
-            pipeline: imagePipeline
-        )
+        // And where the viewer stands with this author and the neighbours', so
+        // the pill's "+" is decided before the page is.
+        for neighbour in [index, index - 1, index + 1] where orderedIDs.indices.contains(neighbour) {
+            if let author = modelsByID[orderedIDs[neighbour]]?.authorID {
+                resolveFollowRelation(for: author)
+            }
+        }
         // The bars float over the PAGE, so their text has to know what kind
         // of ground it is floating over. A media page is arbitrary and dark
         // enough to want white-and-shadowed; a text page follows the system
@@ -4076,6 +4225,68 @@ final class SnapFeedViewController: UIViewController {
         // The sound bubble is for posts that HAVE a sound: a clip, or a
         // collection with one. A photograph or a text page has nothing to mute.
         soundItem.isHidden = postSound == nil
+    }
+
+    /// What the attribution draws for `model`: the sound's line, and a cover
+    /// that is the SOUND's — its artwork, a note for a song that has none, and
+    /// the post's own picture only for a sound with neither.
+    private func attributionContent(
+        for model: FeedItemDisplayModel
+    ) -> (sound: SnapMediaAttributionView.SoundCredit, cover: SnapMediaAttributionView.Cover) {
+        let postSound = sound(for: model)
+        let cover: SnapMediaAttributionView.Cover = switch (postSound?.artworkURL, postSound?.isOriginal) {
+        case (let artwork?, _): .artwork(artwork)
+        case (nil, false): .note
+        default: .post
+        }
+        return (soundLine(for: model).map { .sound($0) } ?? .none, cover)
+    }
+
+    private func makeAttributionItem(_ pill: SnapMediaAttributionView) -> UIBarButtonItem {
+        let item = UIBarButtonItem(customView: pill)
+        item.identifier = Self.attributionItemIdentifier(forContent: pill.shownContentKey)
+        return item
+    }
+
+    /// Puts `model`'s attribution in the toolbar — the author pill's mechanism
+    /// (`showAuthor`), for the same reason: the bar animates a change of ITEM,
+    /// never a change inside one.
+    ///
+    /// A page that draws the same pill (`contentKey`) changes nothing. One that
+    /// draws another gets a fresh pill in a fresh item under that content's
+    /// identifier, handed over through `setToolbarItems(_:animated:)`, and
+    /// iOS 26 runs its own item transition: the glass morphs between the two
+    /// widths while the old content blurs out and the new blurs in.
+    ///
+    /// Internal, not private, so the item contract is testable without a
+    /// populated feed.
+    func showAttribution(
+        _ model: FeedItemDisplayModel,
+        sound: SnapMediaAttributionView.SoundCredit,
+        cover: SnapMediaAttributionView.Cover
+    ) {
+        let key = SnapMediaAttributionView.contentKey(for: model, sound: sound, cover: cover)
+        guard key != mediaAttributionView.shownContentKey else { return }
+        let fresh = SnapMediaAttributionView()
+        fresh.inheritChrome(from: mediaAttributionView)
+        fresh.setPost(model, sound: sound, cover: cover, pipeline: imagePipeline, animated: false)
+        mediaAttributionView = fresh
+        let previousItem = attributionItem
+        attributionItem = makeAttributionItem(fresh)
+        // The held set too: it is what a disengage or a re-appearance re-hands.
+        if let index = defaultToolbarItems.firstIndex(of: previousItem) {
+            defaultToolbarItems[index] = attributionItem
+        }
+        // The record picks up where the page's media is, once it is in the bar.
+        defer { refreshCoverSpin() }
+        guard var items = toolbarItems, let index = items.firstIndex(of: previousItem) else { return }
+        items[index] = attributionItem
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-pill-probe") {
+            print("[pill-probe] attribution animated=\(canAnimateBarItems) id=\(attributionItem.identifier ?? "-")")
+        }
+        #endif
+        setToolbarItems(items, animated: canAnimateBarItems)
     }
 
     // MARK: - Sound

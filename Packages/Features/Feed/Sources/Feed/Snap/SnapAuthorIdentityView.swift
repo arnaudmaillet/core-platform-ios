@@ -62,9 +62,13 @@ final class SnapAuthorIdentityView: UIView {
     /// allowed to be squeezed to nothing before the handle gives anything.
     var widthKeepingHandleWhole: CGFloat {
         let avatarBreathing = (Self.barItemWrapperHeight - AvatarImageView.barDiameter) / 2
+        // A hidden "+" takes no width and no spacing: the stack skips both.
+        let follow = followButton.isHidden
+            ? 0
+            : Spacing.sm + followButton.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
         let chrome = AvatarImageView.barDiameter
-            + Spacing.sm * 2            // avatar → labels → follow
-            + followButton.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
+            + Spacing.sm                // avatar → labels
+            + follow                    // labels → follow, and the "+" itself
             + avatarBreathing + Spacing.sm   // the row's own leading/trailing insets
         return chrome + ceil(metaLabel.intrinsicContentSize.width)
     }
@@ -149,6 +153,7 @@ final class SnapAuthorIdentityView: UIView {
         followConfig.baseForegroundColor = .label
         followConfig.contentInsets = .zero
         followButton.configuration = followConfig
+        followButton.accessibilityLabel = "Follow"
         followButton.addAction(UIAction { [weak self] _ in
             guard let id = self?.authorID else { return }
             self?.onFollowTapped?(id)
@@ -295,11 +300,16 @@ final class SnapAuthorIdentityView: UIView {
     /// Takes on everything the HOST decided about `other` — its width cap,
     /// compactness, shadow, follow button and tap handlers — but not its
     /// author. For a fresh pill replacing `other` in the bar.
+    ///
+    /// The follow button's visibility is inherited as a DEFAULT only: whether
+    /// the "+" is offered is a fact about the author, so a host that knows
+    /// the new author's relation sets it again (`setFollowHidden`).
     func inheritChrome(from other: SnapAuthorIdentityView) {
         onAuthorTapped = other.onAuthorTapped
         onFollowTapped = other.onFollowTapped
-        followButton.isHidden = other.followButton.isHidden
+        isFollowHidden = other.isFollowHidden
         isCompact = other.isCompact
+        followButton.isHidden = isFollowHidden || isCompact
         applyLabelVisibility()
         maxWidthConstraint?.constant = other.maxWidthConstraint?.constant ?? Self.maxWidth
         minWidthConstraint?.isActive = other.minWidthConstraint?.isActive ?? true
@@ -384,11 +394,19 @@ final class SnapAuthorIdentityView: UIView {
     /// The face `setPerson` last asked for — the arrival guard for its fetch.
     private var personAvatarURL: URL?
 
-    /// A conversation offers no follow from its header: the correspondent's
-    /// profile is one tap away, and that is where following lives.
+    /// Withholds the "+". A conversation offers no follow from its header
+    /// (the correspondent's profile is one tap away, and that is where
+    /// following lives); the snap feed withholds it from an author the viewer
+    /// already follows, from the viewer themself, and while it does not know.
     func setFollowHidden(_ hidden: Bool) {
-        followButton.isHidden = hidden
+        isFollowHidden = hidden
+        followButton.isHidden = hidden || isCompact
     }
+
+    /// Whether the "+" is on offer — what `setFollowHidden` last said.
+    var offersFollow: Bool { !isFollowHidden }
+
+    private var isFollowHidden = false
 
     @objc private func authorTapped() {
         guard let authorID else { return }
@@ -423,7 +441,7 @@ final class SnapAuthorIdentityView: UIView {
         isCompact = compact
         let apply = {
             self.applyLabelVisibility()
-            self.followButton.isHidden = compact
+            self.followButton.isHidden = compact || self.isFollowHidden
             self.maxWidthConstraint?.constant = compact ? Self.compactMaxWidth : Self.maxWidth
             // The cold-start floor is a RESTING metric (it holds the pill
             // open while the name hydrates). Compact is only ever entered
