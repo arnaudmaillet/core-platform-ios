@@ -133,29 +133,30 @@ struct MapCardCloseTargetTests {
     }
 }
 
-/// **`-maps-unified-card-close` DECIDES WHICH COPY ARMS THE CLOSE — and only
-/// when asked.**
+/// **THE SHARED CLOSE IS THE DEFAULT; `-maps-own-card-close` IS THE ONLY WAY
+/// BACK TO THE MAP'S OWN COPY.**
 ///
-/// The map's card close beside a hero flight is its own copy by default; the
-/// flag arms the shared `armAsCardCloseAlongsideFlight` instead, with the same
-/// landings. The default is what ships, so the easy mistake to pin is the flag
-/// leaking into a launch that did not ask for it.
+/// The map's card close beside a hero flight is armed through the shared
+/// `armAsCardCloseAlongsideFlight` by default; the flag arms the map's own
+/// copy instead, with the same landings. The default is what ships, so the
+/// easy mistake to pin is the old copy leaking into a launch that did not ask
+/// for it.
 @MainActor
 struct MapCardClosePathTests {
-    @Test func theDefaultIsTheMapsOwnClose() {
-        #expect(MapsViewController.cardClosePath(arguments: []) == .mapOwn)
+    @Test func theDefaultIsTheSharedHelper() {
+        #expect(MapsViewController.cardClosePath(arguments: []) == .unified)
         #expect(
             MapsViewController.cardClosePath(
                 arguments: ["core-platform-ios", "-mock-auto-login", "-maps-open-first-pin"]
-            ) == .mapOwn
+            ) == .unified
         )
     }
 
-    @Test func theFlagArmsTheSharedHelper() {
+    @Test func theFlagArmsTheMapsOwnClose() {
         #expect(
             MapsViewController.cardClosePath(
-                arguments: ["core-platform-ios", "-mock-auto-login", "-maps-unified-card-close"]
-            ) == .unified
+                arguments: ["core-platform-ios", "-mock-auto-login", "-maps-own-card-close"]
+            ) == .mapOwn
         )
     }
 
@@ -163,14 +164,14 @@ struct MapCardClosePathTests {
     @Test func onlyTheExactArgumentCounts() {
         #expect(
             MapsViewController.cardClosePath(
-                arguments: ["-maps-unified-card-close-off", "-maps-unified"]
-            ) == .mapOwn
+                arguments: ["-maps-own-card-close-off", "-maps-own"]
+            ) == .unified
         )
     }
 
     /// The name the scheme is told to use is the name the code reads.
     @Test func theDocumentedNameIsTheOneRead() {
-        #expect(MapsViewController.unifiedCardCloseArgument == "-maps-unified-card-close")
+        #expect(MapsViewController.ownCardCloseArgument == "-maps-own-card-close")
     }
 }
 
