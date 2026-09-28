@@ -9,7 +9,8 @@ import Foundation
 ///   full sound.
 /// - A photograph, a collection without a clip or a text post is set to a
 ///   song (`MockSongCatalog`) or to another clip's sound, the way a post
-///   borrows a sound it did not make.
+///   borrows a sound it did not make — most often one of a few HITS
+///   (`chart`), otherwise one from the long tail.
 /// - Every fifth of those has none at all, because "No audio" is a state the
 ///   feed has to show.
 ///
@@ -53,12 +54,8 @@ struct MockPostSoundProvider: PostSoundProviding {
                 continue
             }
             guard index % 5 != 3 else { continue }
-            // Two in three borrow a song, one in three another clip's sound —
-            // a spread wide enough that most sounds are used more than once.
-            let sound = index % 3 == 0
-                ? clips.clip(forSlot: index / 3)?.id
-                : songs.song(forSlot: index)?.id
-            guard let sound else { continue }
+            guard let sound = Self.borrowedSoundID(postID: post.postID, index: index, clips: clips, songs: songs)
+            else { continue }
             borrowed[id] = sound
             postsBySound[sound, default: []].append(id)
             if sound.hasPrefix("song-") {
@@ -114,5 +111,67 @@ struct MockPostSoundProvider: PostSoundProviding {
             artworkURL: nil,
             duration: song.duration
         )
+    }
+}
+
+// MARK: - Popularity
+
+extension MockPostSoundProvider {
+    /// The CHART a borrowing post draws from: a few sounds everybody uses,
+    /// then a long tail. Percent of the borrowing posts, most popular first.
+    ///
+    /// Sized on the corpus (120 posts, 80 without a clip, every fifth of those
+    /// silent): the hits land on 17, 9, 5, 4 and 7 borrowers — plus, for the
+    /// two clips, the clip's own post — photographs and text posts mixed, by
+    /// every kind of author. What is left (about a third) keeps the old
+    /// spread, one or two posts per sound. (Before this, no sound was used by
+    /// more than two posts, and the sound sheet's first row and "View all"
+    /// never showed on real mock data.)
+    private static let chart: [(share: Int, sound: Hit)] = [
+        (26, .clip(slot: 0)),   // post-0000's original sound
+        (16, .song(slot: 6)),   // "Haru Haru" · BIGBANG, a named track
+        (11, .clip(slot: 2)),   // post-0006's original sound
+        (8, .song(slot: 11)),   // "This song drops"
+        (6, .song(slot: 0)),    // "Champagne Coast (piano cover)"
+    ]
+
+    private enum Hit {
+        case clip(slot: Int)
+        case song(slot: Int)
+    }
+
+    /// The sound a post without a clip of its own borrows: a hit when its
+    /// roll falls in the chart, else the long tail — two in three a song, one
+    /// in three another clip's sound, as before.
+    ///
+    /// ⚠️ ROLLED ON THE POST ID with FNV-1a, not `hashValue` (seeded per
+    /// launch): the same post keeps the same sound on every run, and a hit's
+    /// posts are spread over the whole timeline rather than bunched in one
+    /// stretch of it — so any feed's slice of the corpus meets the hits.
+    static func borrowedSoundID(
+        postID: String, index: Int, clips: MockClipCatalog, songs: MockSongCatalog
+    ) -> String? {
+        let roll = Int(fnv1a(postID) % 100)
+        var ceiling = 0
+        for entry in chart {
+            ceiling += entry.share
+            guard roll < ceiling else { continue }
+            switch entry.sound {
+            case .clip(let slot): return clips.clip(forSlot: slot)?.id
+            case .song(let slot): return songs.song(forSlot: slot)?.id
+            }
+        }
+        return index % 3 == 0
+            ? clips.clip(forSlot: index / 3)?.id
+            : songs.song(forSlot: index)?.id
+    }
+
+    private static func fnv1a(_ text: String) -> UInt32 {
+        var hash: UInt32 = 2_166_136_261
+        for byte in text.utf8 {
+            hash ^= UInt32(byte)
+            hash = hash &* 16_777_619
+        }
+        return hash
     }
 }
