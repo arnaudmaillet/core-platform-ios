@@ -1,4 +1,5 @@
 import AVFoundation
+import QuartzCore
 
 extension VideoPlaybackController {
     /// What a player's current arrangement laid for its sound.
@@ -57,7 +58,32 @@ extension VideoPlaybackController {
     public func setAudibleSurface(_ view: VideoRenderView?) {
         audibleSurface = view
         refreshAudibleSurface()
+        #if DEBUG
+        traceSound("audible=\(view?.debugProducerName ?? "nil")"
+            + " heard=\(surfaceHeardPlayer.map { VideoProducerLog.name($0) } ?? "-")")
+        // Sampled after the call as well, because what matters is what is
+        // still talking once the screen that asked has gone — a close lands
+        // ~0.5 s later, and a grid starts its rows after that.
+        guard Self.tracesSound else { return }
+        for delay in [1.0, 3.0] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self else { return }
+                for line in debugSoundCensus() { traceSound("census +\(Int(delay))s \(line)") }
+            }
+        }
+        #endif
     }
+
+    #if DEBUG
+    /// `-sound-log`: who is heard, as the audible surface moves — and a census
+    /// of every player's mute a moment later (`debugSoundCensus`).
+    static let tracesSound = ProcessInfo.processInfo.arguments.contains("-sound-log")
+
+    func traceSound(_ message: @autoclosure () -> String) {
+        guard Self.tracesSound else { return }
+        print(String(format: "[sound] %.3f %@", CACurrentMediaTime(), message()))
+    }
+    #endif
 
     /// The surface `setAudibleSurface` last named, if it is still alive.
     public var currentAudibleSurface: VideoRenderView? { audibleSurface }

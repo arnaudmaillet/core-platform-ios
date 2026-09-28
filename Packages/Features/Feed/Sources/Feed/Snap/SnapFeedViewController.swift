@@ -4310,12 +4310,41 @@ final class SnapFeedViewController: UIViewController {
         }
         // Only ever CLEARS what this screen set: another feed pushed on top
         // owns the sound now, and this one leaving must not silence it.
-        if surface == nil, videoPlayback.currentAudibleSurface !== ownAudibleSurface {
+        if surface == nil, !Self.leavingClearsAudibleSurface(
+            videoPlayback.currentAudibleSurface, own: ownAudibleSurface, screen: viewIfLoaded
+        ) {
             ownAudibleSurface = nil
             return
         }
         ownAudibleSurface = surface
         videoPlayback.setAudibleSurface(surface)
+    }
+
+    /// Whether a screen whose page no longer wants to be heard should silence
+    /// the surface the pool is hearing now.
+    ///
+    /// ⚠️ **THE SURFACE THIS SCREEN NAMED IS NOT ALWAYS THE ONE IT HEARS.** A
+    /// landing that hands the page the flight card's live view
+    /// (`SnapFeedCell.adoptLiveRenderView` → `VideoPlaybackController
+    /// .adoptSurface`) moves the pool's audible surface onto that view, and
+    /// the one this screen remembered is thrown away. Asked by identity alone,
+    /// the screen then took the adopted view for ANOTHER feed's and left it
+    /// talking: a map marker's feed closed onto the place page with its clip
+    /// still heard, because the Activity row the close lands on plays the very
+    /// same player (the post the viewer was on is that row).
+    ///
+    /// So a surface is this screen's when it is the one it named OR one of its
+    /// own views — the page's surface lives in this screen's hierarchy whatever
+    /// swapped it in. A surface nobody holds any more (nil) is cleared too: its
+    /// player may still be heard, and no screen is listening to it. Only a live
+    /// surface elsewhere — a feed pushed on top — is left alone.
+    static func leavingClearsAudibleSurface(
+        _ current: UIView?, own: UIView?, screen: UIView?
+    ) -> Bool {
+        guard let current else { return true }
+        if current === own { return true }
+        guard let screen else { return false }
+        return current.isDescendant(of: screen)
     }
 
     /// The sound of a page with no clip — a photograph, a collection of
