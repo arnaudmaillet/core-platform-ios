@@ -388,6 +388,65 @@ struct DismissalDriverArbitrationTests {
         #expect(driven, "the finger drove nothing: the decline was taken for an answer")
     }
 
+    // MARK: - An axis taken from the hero
+
+    /// ⚠️ A PHOTOGRAPH'S DOWNWARD CLOSE THE HERO WAS TOLD TO LEAVE ALONE IS
+    /// NEVER HANDED TO IT.
+    ///
+    /// The map's hierarchy marker: rightward a photograph flies home to the
+    /// marker, downward every post closes as the card onto the place page's
+    /// Activity row. The pop's forward used to ask only the post — a `.hero`
+    /// post went to the flight whatever the axis, so the downward close flew a
+    /// card onto a Discover tile while this driver's window was live.
+    @Test func aLiveGrabOnAnAxisTakenFromTheHeroIsNotForwarded() async {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        let feed = StubFeed()
+        feed.kind = .hero
+        let nav = UINavigationController(rootViewController: UIViewController())
+        nav.pushViewController(feed, animated: false)
+        window.rootViewController = nav
+        window.makeKeyAndVisible()
+        window.layoutIfNeeded()
+
+        let saved = SavedDelegate()
+        nav.delegate = saved
+
+        let slide = InteractiveSlideDismissal()
+        slide.attach(to: feed, axes: [.horizontal, .vertical])
+        slide.arbitratesWithHeroGrab = true
+        slide.heroClaimsAxis = { $0 != .vertical }
+        slide.install(on: nav)
+
+        let driven = await slide.debugPerformSwipe(peakProgress: 0.9, axis: .vertical)
+
+        #expect(saved.animatorAsks == 0, "the flight was handed a downward close it had given up")
+        #expect(driven)
+    }
+
+    /// And the back button keeps its flight: a pop with no gesture travels the
+    /// platform's own direction, which the hero still claims.
+    @Test func aBackButtonPopStillFliesWhenOnlyTheVerticalAxisWasTaken() {
+        let rig = rig(kind: .hero)
+        rig.driver.heroClaimsAxis = { $0 != .vertical }
+
+        let animator = popAnimator(rig)
+
+        #expect(rig.saved.animatorAsks == 1)
+        #expect(animator === rig.saved.animator)
+    }
+
+    /// The card-only staging gate opens for the axis the hero gave up, and only
+    /// for it — see `closeCarriesCard`.
+    @Test func theCardGateOpensOnlyOnTheAxisTakenFromTheHero() {
+        let rig = rig(kind: .hero)
+        #expect(!rig.driver.closeCarriesCard(of: rig.feed, axis: .vertical))
+        rig.driver.heroClaimsAxis = { $0 != .vertical }
+        #expect(rig.driver.closeCarriesCard(of: rig.feed, axis: .vertical))
+        #expect(!rig.driver.closeCarriesCard(of: rig.feed, axis: .horizontal))
+        rig.feed.kind = .card
+        #expect(rig.driver.closeCarriesCard(of: rig.feed, axis: .horizontal))
+    }
+
     /// And the narrowing: a pop with NO gesture keeps forwarding exactly as it
     /// did, nil included. There is nothing being driven that a decline could
     /// strand, and the animator this would otherwise fall through to is chosen
@@ -512,6 +571,36 @@ struct DismissalGrabArbitrationTests {
         }
     }
 
+    /// ⚠️ THE MAP'S SHAPE: THE SAME PHOTOGRAPH IS THE HERO'S RIGHTWARD AND THE
+    /// SLIDE'S DOWNWARD, and still exactly one driver claims each drag.
+    ///
+    /// The downward landing (the place page) refuses a hero, and the slide asks
+    /// that same answer per axis (`heroClaimsAxis`) — one predicate from both
+    /// sides, swept over both kinds and both axes.
+    @Test func anAxisTakenFromTheHeroHasExactlyOneDriver() {
+        for kind in [ZoomDismissalKind.hero, .card] {
+            for velocity in [CGPoint(x: 900, y: 0), CGPoint(x: 0, y: 900)] {
+                let rig = rig(kind: kind)
+                let vertical = velocity.y > 0
+                // Rightward the landing is the marker, which takes a flight;
+                // downward it is the place page, which does not.
+                rig.source.landingAcceptsHero = !vertical
+                rig.slide.heroClaimsAxis = { [source = rig.source] axis in
+                    axis != .vertical || source.landingAcceptsHero
+                }
+                let pan = FakePan()
+                pan.fakeVelocity = velocity
+
+                let hero = rig.hero.gestureRecognizerShouldBegin(pan)
+                let slide = rig.slide.gestureRecognizerShouldBegin(pan)
+                #expect(hero != slide, "kind=\(kind) vertical=\(vertical) hero=\(hero) slide=\(slide)")
+                if vertical {
+                    #expect(slide, "kind=\(kind): the downward close is not the card's")
+                }
+            }
+        }
+    }
+
     /// ⚠️ AND A NEW PRESENTATION FORGETS THE LAST ONE'S ANSWER. This driver is
     /// one retained instance for the screen's life, so a predicate left behind
     /// is asked again about a post that is no longer on screen — which is how
@@ -519,8 +608,10 @@ struct DismissalGrabArbitrationTests {
     @Test func aNewPresentationForgetsThePreviousLandingPredicate() {
         let slide = InteractiveSlideDismissal()
         slide.heroLandingAcceptsHero = { false }
+        slide.heroClaimsAxis = { _ in false }
         slide.resetForNewPresentation()
         #expect(slide.heroLandingAcceptsHero == nil)
+        #expect(slide.heroClaimsAxis == nil)
     }
 
     /// ⚠️ A POST WITH MEDIA IS THE HERO GRAB'S, AND THE SLIDE STANDS DOWN.

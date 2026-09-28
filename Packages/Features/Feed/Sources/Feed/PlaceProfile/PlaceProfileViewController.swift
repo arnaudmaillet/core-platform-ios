@@ -12,7 +12,8 @@ import UIKit
 /// cluster-gallery milestone, redesigned to read like a profile page):
 /// tapping a City/Country/Region cluster on the map lands on the snap feed
 /// with this screen already on the stack under it, and a downward grab on the
-/// feed morphs the active post into its Gallery tile here.
+/// feed closes the active post onto the FIRST ROW of its Activity tab here —
+/// whatever kind of post the marker wore and whatever post is on screen.
 ///
 /// The page is a profile-shaped column:
 /// - a HERO BANNER wearing the place's TOP post (highest engagement — the
@@ -21,7 +22,7 @@ import UIKit
 /// - a two-metric band: the place's aggregated REACTIONS and VIEWS. No
 ///   avatar, no bio, no edit/share — a place is not an account;
 /// - two tabs under the metrics — **Discover** (the popularity grid) and
-///   **Activity** (the same posts as CARDS, newest first) — a `PagedTabBar`
+///   **Activity** (every post as CARDS, most popular first) — a `PagedTabBar`
 ///   over a `HorizontalPagerView`, the same pairing the profile's
 ///   relationship screen ships. Deliberately For You's own vocabulary and
 ///   shapes: its Discover is a media grid and its Following is a card list,
@@ -31,15 +32,16 @@ import UIKit
 /// It remains an ordinary navigation citizen — plain title ("Paris • City
 /// Cluster"), tab bar visible, native edge-pop back to the map — because
 /// every special behaviour of the flow lives in the TRANSITIONS, not in the
-/// screen: the two-VC stack insertion is the map's, the vertical morph is
-/// the zoom stack's, and this type only has to host its column and answer
-/// the `ZoomTransitionSource` questions about the Gallery grid.
+/// screen: the two-VC stack insertion is the map's, the vertical close is
+/// the card close's, and this type only has to host its column and say where
+/// that close lands (`CardCloseLanding`).
 final class PlaceProfileViewController: UIViewController {
-    /// The Discover tab's grid — the flight anchor every dismissal lands on.
+    /// The Discover tab's grid of covers.
     private let page: ForYouGridPage
     /// The Activity tab: the SAME component For You's "Following" is — a
-    /// `ForYouGridPage` in `.list` style — over the same corpus in
-    /// chronological order. Not a bespoke list: a place's activity is posts,
+    /// `ForYouGridPage` in `.list` style — over the same corpus in popularity
+    /// order, and the landing of every dismissal from the map. Not a bespoke
+    /// list: a place's activity is posts,
     /// and a viewer who reads them as cards on For You must read them as the
     /// same cards here.
     private let activityPage: ForYouGridPage
@@ -126,13 +128,6 @@ final class PlaceProfileViewController: UIViewController {
     /// so this screen never has to know what a feed is.
     var activePostID: (() -> PostID?)?
 
-    /// The PICTURE that post is showing, for the same reason and from the same
-    /// place. A landing that no longer aims at the settled post has to carry it
-    /// anyway — the card takes off from a full screen the viewer is looking at,
-    /// and arriving as the first tile's photograph without passing through
-    /// theirs is a cut.
-    var activeCover: (() -> UIImage?)?
-
     /// The header's follow-this-place toggle, when the caller's subject has a
     /// followable identity (`ClusterGalleryFollowing`); nil hides the button.
     private let following: ClusterGalleryFollowing?
@@ -156,9 +151,9 @@ final class PlaceProfileViewController: UIViewController {
     /// the button without asking the caller's store again.
     private var followState = false
 
-    /// The tile a dismissal is currently flying to. Starts at the cluster's
-    /// representative (the feed's first post) and re-points to whatever the
-    /// feed settled on when a dismissal stages.
+    /// The Activity row a dismissal from the map lands on. Starts at the
+    /// cluster's representative (the feed's first post) and re-points to the
+    /// post the viewer was on once a close stages it at the head of the list.
     private var anchorID: PostID
     private var loadTask: Task<Void, Never>?
 
@@ -1301,10 +1296,10 @@ final class PlaceProfileViewController: UIViewController {
         page.render(gallery.isEmpty
             ? .empty(.init(title: "No photos or videos here yet"))
             : .content(gallery))
-        let recent = Self.chronological(members)
-        activityPage.render(recent.isEmpty
+        let activity = Self.activity(members)
+        activityPage.render(activity.isEmpty
             ? .empty(.init(title: "Nothing has happened here yet"))
-            : .content(recent))
+            : .content(activity))
         // ⚠️ THE WHOLE CORPUS, not the gallery's. These are the PLACE's
         // numbers, and a check-in with no photograph is still something that
         // happened here — dropping it from a total because a grid cannot draw
@@ -1332,7 +1327,8 @@ final class PlaceProfileViewController: UIViewController {
 
     // MARK: - The page's pure rules (tested directly)
 
-    /// The profile's one ordering: POPULARITY descending — the place leads
+    /// The profile's ordering — Discover's AND Activity's: POPULARITY
+    /// descending, which on this page means REACTIONS — the place leads
     /// with what it is known for, not what happened last. The trending rule
     /// verbatim (reactions, then recency, then id, so ties are stable),
     /// applied HERE so the screen owns its ordering contract. Client-side
@@ -1372,13 +1368,28 @@ final class PlaceProfileViewController: UIViewController {
         ranked.first
     }
 
-    /// The Activity tab's corpus: every member, NEWEST first — the one
-    /// surface of this page that is chronological, because "what is happening
-    /// here" is a different question from "what is this place known for".
+    /// The Activity tab's corpus: every member, MOST POPULAR first (product
+    /// call, 2026-09-28) — `ranked`, the same rule Discover leads with, so
+    /// the two tabs agree about what the place is known for and differ only in
+    /// what a grid can draw.
+    ///
+    /// Popularity is REACTIONS (likes), then recency, then id — `ranked`'s
+    /// words, not a new formula. It is the number every other popularity
+    /// surface already reads: For You's Trending, this page's banner and first
+    /// tile, and the map marker's face ("its most-liked member"). Comments and
+    /// views were not folded in: nothing else ranks by them, and a second
+    /// definition here would let this list and the marker above it disagree
+    /// about which post is the place's loudest.
+    ///
+    /// It used to be chronological (newest first). A close from the map still
+    /// moves the post the viewer was on to the head of this list
+    /// (`activityCardRevealOrigin`); that pin wins over the ranking for the
+    /// landing it serves.
+    ///
     /// Every KIND travels: a place's activity is its posts, so the cards show
     /// words, stills and video exactly as For You's own card tab does.
-    static func chronological(_ posts: [GalleryPost]) -> [GalleryPost] {
-        DiscoverySource.recent.ordering(posts)
+    static func activity(_ posts: [GalleryPost]) -> [GalleryPost] {
+        ranked(posts)
     }
 
     /// The place's aggregated counters. Missing values count as zero rather
@@ -1710,22 +1721,30 @@ final class PlaceProfileViewController: UIViewController {
     }
 }
 
-// MARK: - The close a flight cannot carry
+// MARK: - The close from the map's feed
 
-/// What a TEXT post closes onto when it was opened by a FLIGHT.
+/// What a post closes onto when its feed was opened by a FLIGHT from the map.
 ///
 /// ⚠️ THE PRESENTATION WAS CHOSEN AT THE TAP, and the feed is a pager: a
-/// media-faced marker opens with a hero, the viewer swipes to a text post,
-/// and now there is no media for that hero to fly. The map attaches a
-/// card-shaped driver alongside the flight for exactly this
-/// (`attachCardCloseAlongsideFlight`) and asks this screen where to land it.
+/// media-faced marker opens with a hero, and the viewer may be on any post by
+/// the time they close. The map attaches a card-shaped driver alongside the
+/// flight (`attachCardCloseAlongsideFlight`) and asks this screen where to
+/// land it — and DOWNWARD it is that driver's close for every post, media
+/// included, because this page refuses a hero (`zoomLandingAcceptsHero`).
 ///
-/// ⚠️ THERE IS NO DEPARTURE TILE HERE, which is what makes this simpler than
-/// For You's version of the same close. That screen departs FROM a grid tile
-/// and must MOVE the landed post into the slot it left, or the close lands
-/// somewhere the viewer never was. This flight departed from a map marker and
-/// this grid has never been seen — so nothing has to be swapped anywhere. The
-/// close simply brings the landing post's own tile on screen and lands on it.
+/// ⚠️ THE LANDING DOES NOT DEPEND ON THE MARKER'S KIND. It used to: a text
+/// marker's feed (a reveal, `FeedFeatureBuilder.pushWithoutFlight`) closed
+/// onto the Activity tab with the post on screen moved to its top, while a
+/// media marker's feed flew onto the FIRST DISCOVER TILE — two tabs for one
+/// gesture, chosen by what the marker happened to wear (filmed: Paris, a text
+/// marker, right; Lyon, a music clip, wrong). Both now go through
+/// `activityCardRevealOrigin(sizedTo:settled:)`.
+///
+/// ⚠️ THERE IS NO DEPARTURE ROW HERE, which is what makes the head of the
+/// list the honest landing. For You's version of this close departs FROM a
+/// row and lands back on it; this flight departed from a map marker onto a
+/// page that has never been seen, so there is nowhere on it the viewer was.
+/// The close puts what they were reading first and lands there.
 extension PlaceProfileViewController: CardCloseLanding {
     func cardCloseGeometry(dismissing feed: UIViewController) -> RevealGeometry? {
         // A flight that left THIS page has a tile to go back to. Answered
@@ -1734,75 +1753,14 @@ extension PlaceProfileViewController: CardCloseLanding {
         if let tileDeparture {
             return tileCardCloseGeometry(dismissing: feed, departure: tileDeparture)
         }
-        // ⚠️ THE FIRST TILE, like the flight beside it — the same product rule,
-        // for the same reason: this grid arrived from a marker and the viewer
-        // has never seen it, so there is nowhere on it they were.
-        //
-        // It used to hunt for the next landable MEDIA after the settled post
-        // (`nextLandableMedia`), which was the honest answer while a text post
-        // had a tile of its own to be "after". Discover is media-only now, so
-        // the settled text post is not in that array at all and the lookup
-        // returned nil for every one of these closes — a dead branch that read
-        // as a plain slide. Asking for the first tile needs no lookup.
-        guard let landed = activePostID?(), let first = page.posts.first else { return nil }
-        stageDiscoverLanding(revealing: first.id, sizedTo: view.bounds)
-        let substitute = first
-        stageDiscoverLanding(revealing: substitute.id, sizedTo: nil)
-        guard page.rowFrame(for: substitute.id, in: page) != nil else {
-            debugLogLanding("no realized tile for \(substitute.id.rawValue)")
-            return nil
-        }
-        anchorID = substitute.id
-        debugLogLanding("landing \(landed.rawValue) on FIRST tile \(substitute.id.rawValue)")
-        let origin = TextRevealOrigin(
-            rowFrame: { [weak self] space in
-                self?.page.rowFrame(for: substitute.id, in: space)
-            },
-            // A tile has no caption to cut against, so no veil — the same
-            // answer the map's marker gives, and for the same reason.
-            captionEnd: nil,
-            depthView: { [weak self] in self?.pager },
-            makeDismissStandIn: { [weak self] _ in
-                // The CLONE: a free-standing tile drawn from the substitute's
-                // own model, which loads its own cover. Sized from the slot it
-                // is landing on.
-                self?.page.makeTileStandIn(for: substitute, slotOf: substitute.id)
-            },
-            // ⚠️ FALSE, like the marker's. Aligning a full page to a small
-            // tile slides it most of the screen's width; the page holds still
-            // and the window closes over it.
-            alignsPageToSource: false,
-            // ⚠️ THE PAGE FILLS THE WINDOW — see `RevealPageFit.covering`.
-            //
-            // Held still it stayed at full size while the window shrank around
-            // it: a keyhole panning over a photograph, filmed on this screen.
-            // It fitted INSIDE the window for a while instead, which stopped
-            // the truncation and started the other half of it — on the release
-            // spring, where the window's aspect leaves the page's, the media
-            // sat letterboxed with the card's ground above and below it.
-            // Filmed too.
-            //
-            // The invariant every report has agreed on is the simple one: the
-            // media fills the transition window, always. That is covering, and
-            // it is what the marker has used all along.
-            pageFit: .covering,
-            // Asked, not restated — see `ForYouGridPage.tileCornerRadius`. The
-            // same page the stand-in is built from answers it.
-            cornerRadius: page.tileCornerRadius,
-            // The tile's own floor, so the beat where the window carries
-            // neither picture is the colour of the brick it lands on.
-            fill: PostGridTileCell.fillColor(for: substitute),
-            setConcealed: { [weak self] concealed in
-                self?.page.setRevealConcealed(concealed, for: substitute.id)
-            },
-            willStageDismissal: { [weak self] _ in
-                self?.stageDiscoverLanding(revealing: substitute.id, sizedTo: nil)
-            },
-            dismissalDidEnd: { [weak self] committed in
-                self?.page.endHeroFreeze()
-                if !committed { self?.page.clearRevealConcealment() }
-            }
-        )
+        guard let landed = activePostID?() else { return nil }
+        // Measured in the bounds the pop will run in: this page is off-stack
+        // and unsized when the driver asks, and the feed's own stack is the
+        // one it is about to join.
+        let bounds = feed.navigationController?.view.bounds ?? feed.view.bounds
+        guard let origin = activityCardRevealOrigin(sizedTo: bounds, settled: landed)
+        else { return nil }
+        debugLogLanding("landing \(landed.rawValue) on the FIRST Activity row")
         return TextRevealInstaller.geometry(feed: feed, origin: origin, pipeline: imagePipeline)
     }
 
@@ -1936,125 +1894,63 @@ extension PlaceProfileViewController: CardCloseLanding {
     }
 }
 
-// MARK: - The landing side of the cluster feed's vertical grab
+// MARK: - The registered intermediate that refuses a flight
 
+/// ⚠️ A `ZoomTransitionSource` THAT NEVER RECEIVES A FLIGHT, and it is both on
+/// purpose.
+///
+/// The map registers this page as its flight's intermediate
+/// (`ZoomTransitionController.setDismissSource`), and that registration is how
+/// it hears a dismissal LANDED here rather than on the map
+/// (`onDismissedToIntermediate`: the lock released, the marker un-hidden). The
+/// registration takes a source, so this page is one.
+///
+/// It used to be a real one: a photograph's downward grab flew its card onto
+/// the first DISCOVER tile, so a media marker's feed closed onto a different
+/// tab from a text marker's (see `cardCloseGeometry`). Every downward close is
+/// now the card close onto the Activity row, and `zoomLandingAcceptsHero` is
+/// the refusal that makes it so — asked by the hero grab AND by the map's card
+/// driver (`heroClaimsAxis`), so exactly one of them claims the drag. The
+/// members below are the protocol's floor and nothing more: no grab begins
+/// against this source, so none of them is ever asked to draw.
 extension PlaceProfileViewController: ZoomTransitionSource {
-    /// The whole column recedes; the navigation title stays grounded.
-    var zoomPresenterDepthView: UIView? { view }
+    var zoomLandingAcceptsHero: Bool { false }
 
     func zoomHeroFrame(in container: UICoordinateSpace) -> CGRect {
-        guard let hero = page.hero(for: anchorID, in: container) else {
-            return ZoomTransitionGeometry.centeredFallback(in: container.bounds, side: 96)
-        }
-        return hero.frame
+        ZoomTransitionGeometry.centeredFallback(in: container.bounds, side: 96)
     }
 
-    var zoomSourceIsOnScreen: Bool {
-        page.isPostVisible(anchorID)
-    }
+    var zoomSourceIsOnScreen: Bool { false }
 
     func makeZoomFlightCard() -> any ZoomFlightCard {
-        let appearance = page.heroAppearance(for: anchorID)
-        let departure = activeCover?()
-        let card = PostGridFlightCard(
-            post: page.post(for: anchorID) ?? Self.placeholder(id: anchorID),
-            // ⚠️ NEVER A CARD WITH NOTHING TO DRAW. This page is inserted under
-            // the feed at the grab's first frame, so on a first grab its tiles
-            // have not loaded a single picture yet and the landing tile's
-            // cover is nil. The card then rested entirely on the feed's
-            // donated video surface, which the move had just emptied: the
-            // grab held the feed up over a surface that never drew (the page
-            // went BLACK), then dropped it to show a card with nothing in it
-            // over the place page — the media "disappearing from the window"
-            // filmed on a device. The picture the viewer is leaving is the
-            // honest stand-in until the tile's own arrives.
-            cover: appearance?.cover ?? departure,
-            style: appearance?.style ?? .tile
-        )
-        // ⚠️ AND THE PICTURE THE VIEWER IS LEAVING, dissolved into it.
-        //
-        // The landing is the first tile now, which is almost never the post on
-        // screen — so the card would take off wearing a photograph the viewer
-        // has not seen, from the first frame. That is the cut the blend channel
-        // exists for. Nil when they never paged, which leaves the flight
-        // exactly the single-pictured one it has always been.
-        if let settled = activePostID?(), settled != anchorID {
-            card.setDeparturePicture(departure)
-        }
-        return card
+        PostGridFlightCard(post: Self.placeholder(id: PostID("")), cover: nil, style: .tile)
     }
 
-    func setZoomSourceHidden(_ hidden: Bool) {
-        page.setHeroHidden(hidden, for: anchorID)
-        if !hidden {
-            page.endHeroFreeze()
-        }
-    }
+    func setZoomSourceHidden(_ hidden: Bool) {}
 
-    /// Re-anchor on the post the feed settled on and BRING ITS TILE INTO
-    /// VIEW — on the GALLERY tab, whatever tab was up: the flight lands on a
-    /// grid tile, and landing over the Activity list would put the card down
-    /// on a surface that has no tile for it. The opposite scrolling rule
-    /// from `ForYouGridZoomSource` (which pins the departure tile and adopts
-    /// the post into it), and deliberately: this grid has never been seen
-    /// when the first dismissal stages — the viewer arrived from a map pin,
-    /// not from a tile — so there is no departure context to preserve and
-    /// the honest landing is the post's own place in the ranking.
-    func zoomSourceWillStageDismissal() {
-        if activeIndex != 0 {
-            // Adopt the Discover tab through the same alignment rule as a
-            // tap, so the header does not move for the switch.
-            page.setVerticalOffset(alignedOffset(for: 0))
-            activeIndex = 0
-            applyHeaderOffset(page.verticalOffset)
-            syncAutoplay()
-        }
-        mirrorSelection(to: 0)
-        pager.setActivePage(0, animated: false)
-        page.beginHeroFreeze()
-        // ⚠️ THE FIRST TILE, whatever the viewer paged to (product call).
-        //
-        // This flight came from a MAP MARKER: the viewer has never seen this
-        // grid, so there is no place on it they were, and no reason to arrive
-        // in the middle of it. Landing on the settled post's own tile — what
-        // this did — meant tapping a cluster, swiping twice and closing put the
-        // page down scrolled to an arbitrary row, with everything above it
-        // unseen. The first tile is the page introducing itself.
-        //
-        // A post opened FROM this page is the opposite case and keeps the
-        // opposite rule: it lands on the very tile that was tapped, through
-        // `ExternalHeroZoomSource`, which never asks this source anything.
-        if let first = page.posts.first?.id {
-            anchorID = first
-        }
-        debugLogLanding("flight from \(activePostID?()?.rawValue ?? "nil")"
-            + " to FIRST tile \(anchorID.rawValue)"
-            + " blend=\(activePostID?() != anchorID && activeCover?() != nil)")
-        page.revealPost(anchorID, clearing: landingOcclusion)
-        // Visible for the whole return: the card is landing ON this tile.
-        page.setHeroHidden(true, for: anchorID, conceals: false)
-    }
+    /// ⚠️ DECLARED, because both protocols default it and this page conforms
+    /// to both (the map return below makes it a DESTINATION): with two
+    /// defaults and no member, the conformance is ambiguous. Nothing to adopt
+    /// on either side — no flight lands here as a source, and as a destination
+    /// this page is never PRESENTED by a zoom (it is spliced into the stack),
+    /// which is the only leg that hands a destination the surface.
+    func zoomAdoptLiveMediaView(_ view: UIView) {}
+}
 
-    var zoomLandingMediaIsReady: Bool {
-        page.isLandingPlaybackReady(for: anchorID)
-    }
+extension PlaceProfileViewController {
+    // MARK: - The Activity card every downward close lands on
 
-    func zoomFinalizeLanding() {
-        page.finalizeLandingLayout(for: anchorID)
-    }
-
-    func zoomAdoptLiveMediaView(_ view: UIView) {
-        guard let view = view as? VideoRenderView else { return }
-        page.adoptLivePlayback(view, for: anchorID)
-    }
-
-    // MARK: - The Activity card a text post closes onto
-
-    /// Where a TEXT-faced cluster's feed goes home: the post's own CARD on the
-    /// Activity tab, described as a reveal origin.
+    /// Where a cluster feed's DOWNWARD close goes home, whichever route opened
+    /// it (a text marker's reveal, a media marker's flight — see
+    /// `cardCloseGeometry`): the post's own CARD at the head of the Activity
+    /// tab, described as a reveal origin.
     ///
-    /// ⚠️ A REVEAL, NOT A HERO FLIGHT, and the difference is not a preference.
-    /// The zoom stack refuses this post three separate ways — the hero grab
+    /// ⚠️ A REVEAL, NOT A HERO FLIGHT, for a photograph too. The window carries
+    /// the whole page into the row (`RevealPageFit.covering`), which lands a
+    /// clip on its card exactly as it lands words on theirs; one close for
+    /// every post is what makes the page arrive the same way whatever the
+    /// marker wore. For a text post there was never a choice: the zoom stack
+    /// refuses it three separate ways — the hero grab
     /// declines a `.card` dismissal outright, the slide forwards to a flight
     /// delegate only for `.hero`, and the one flight card this feature owns
     /// (`PostGridFlightCard`) has no style that can carry a caption, so it
@@ -2079,15 +1975,10 @@ extension PlaceProfileViewController: ZoomTransitionSource {
     func activityCardRevealOrigin(
         sizedTo bounds: CGRect, settled: PostID? = nil
     ) -> TextRevealOrigin? {
-        // ⚠️ THE FIRST ROW, whatever the viewer paged to — the same product
-        // rule the flight and the Discover close beside it now follow, and for
-        // the same reason: this list arrived from a MARKER, the viewer has
-        // never seen it, so there is nowhere on it they were.
-        //
-        // It used to re-point at the settled post. That was the honest answer
-        // while "where they are" meant something here; from a marker it does
-        // not, and it put the page down scrolled to an arbitrary row with
-        // everything above it unseen.
+        // ⚠️ THE FIRST ROW, whatever the viewer paged to: this list arrived
+        // from a MARKER, the viewer has never seen it, so there is nowhere on
+        // it they were — and a page put down scrolled to an arbitrary row
+        // hides everything above it.
         //
         // ⚠️ Settled BEFORE anything is measured, because every caption field
         // below is read as a VALUE off this row.
@@ -2114,6 +2005,7 @@ extension PlaceProfileViewController: ZoomTransitionSource {
            ) {
             anchor = settled
         }
+        anchorID = anchor
         stageActivityLanding(for: anchor, sizedTo: bounds)
         // Nothing to describe — no cell for this post even after staging.
         guard activityPage.rowFrame(for: anchor, in: activityPage) != nil else {
@@ -2291,11 +2183,15 @@ extension PlaceProfileViewController {
     }
     /// The band's two numbers as rendered — the place's own totals, which are
     /// deliberately NOT the gallery's (see `render`).
-    /// Which post a dismissal from the MAP is currently aimed at. The rule it
-    /// pins is a product one — always the first — and its violation is a page
-    /// that lands scrolled to an arbitrary row, which looks like a scroll
-    /// position rather than like a bug.
+    /// Which Activity row a dismissal from the MAP is currently aimed at. The
+    /// rule it pins is a product one — always the head of the list, holding the
+    /// post the viewer was on — and its violation is a page that lands
+    /// scrolled to an arbitrary row, which looks like a scroll position rather
+    /// than like a bug.
     var debugLandingAnchor: PostID { anchorID }
+    /// The title of the tab the page is on, so a test can say "Activity"
+    /// without knowing where the strip puts it.
+    var debugActiveTabTitle: String { Self.tabTitles[activeIndex] }
     var debugMetrics: (reactions: Int64, views: Int64) {
         (reactionsMetric.debugValue, viewsMetric.debugValue)
     }
@@ -2487,12 +2383,12 @@ private final class GradientScrimView: UIView {
 
 // MARK: - The map return flight's destination half
 //
-// This screen is BOTH sides of a zoom now, deliberately: the SOURCE of the
-// tile flights above it (the extension near the top), and the DESTINATION of
-// its own dismissal to the map — the whole page lifts off and the marker's
-// card (built by `MapPinZoomSource`, the marker's exact twin) flies home to
-// the cluster. The two conformances share no members, so neither can
-// impersonate the other.
+// This screen is BOTH sides of a zoom, deliberately: a SOURCE that refuses
+// every flight (the map's registered intermediate, after `cardCloseGeometry`),
+// and the DESTINATION of its own dismissal to the map — the whole page lifts
+// off and the marker's card (built by `MapPinZoomSource`, the marker's exact
+// twin) flies home to the cluster. The two conformances share one member,
+// `zoomAdoptLiveMediaView`, a no-op declared beside the source's floor.
 extension PlaceProfileViewController: ZoomTransitionDestination {
     /// ⚠️ FALSE, and this is the member that exists BECAUSE of this screen.
     ///

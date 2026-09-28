@@ -90,8 +90,9 @@ final class MapsViewController: UIViewController {
     /// Builds the place gallery a HIERARCHY cluster's feed dismisses into
     /// (`FeedFeatureBuilding.makeClusterGallery`): (member ids, the place
     /// itself, the feed about to cover it, the map-return flight source) →
-    /// the gallery screen, which also serves as the vertical grab's flight
-    /// target (`ZoomTransitionSource`). The whole `MapPlace` travels (not
+    /// the gallery screen, which is the vertical close's landing
+    /// (`CardCloseLanding`) and the flight's registered intermediate
+    /// (`ZoomTransitionSource`, refusing any hero). The whole `MapPlace` travels (not
     /// just its `galleryTitle`) so the builder can wire the header's follow
     /// toggle to this place's identity; the last argument stages the page's
     /// OWN dismissal back to the cluster marker (`makeMapReturnSource`).
@@ -2960,8 +2961,8 @@ extension MapsViewController: MKMapViewDelegate {
     /// Which screen a card close is aiming at.
     ///
     /// ⚠️ THE POP'S DESTINATION DECIDES, not the post. A vertical grab lands on
-    /// the place page and closes onto its tile; everything else — the chevron,
-    /// a horizontal grab, and both axes when there is no place page at all —
+    /// the place page and closes onto its Activity row; everything else — the
+    /// chevron, a horizontal grab, and both axes when there is no place page at all —
     /// lands on the MAP, so it closes onto the marker whatever post the viewer
     /// paged to. Aiming a card at a screen the pop is not going to is how a
     /// close ends up with no animation at all.
@@ -2987,7 +2988,7 @@ extension MapsViewController: MKMapViewDelegate {
     ///
     /// Only the hero-opened feed is concerned: a media marker (and a
     /// media-faced city or country, with its place page) paged onto a text
-    /// post. A text marker opens as a REVEAL, whose close is the feed
+    /// post — and, downward onto that place page, any post. A text marker opens as a REVEAL, whose close is the feed
     /// builder's and is the same with or without the flag.
     enum MapCardClosePath: Equatable, CustomStringConvertible {
         case mapOwn, unified
@@ -3104,8 +3105,12 @@ extension MapsViewController: MKMapViewDelegate {
         // its feed. The page joins the stack invisibly in the same
         // transaction as the feed (UIKit animates a stack whose last element
         // is new exactly like a push, and never even loads the mid
-        // controller's view), and the VERTICAL grab flies the active post
-        // into its tile there instead of back to the pin. ORDINARY clusters
+        // controller's view), and the VERTICAL grab closes the active post
+        // onto the page's Activity row instead of back to the pin — as the
+        // card close beside this flight (`attachCardCloseAlongsideFlight`),
+        // for EVERY post: the page refuses a hero (`zoomLandingAcceptsHero`),
+        // so the vertical flight driver below stays armed only to decline.
+        // ORDINARY clusters
         // — proximity groups, even ones whose members happen to share a leaf
         // place — and single pins skip all of this: only a city or a country
         // has a place page (product call, 2026-08-31).
@@ -3400,6 +3405,23 @@ extension MapsViewController: MKMapViewDelegate {
             slide.arbitratesWithHeroGrab = true
             slide.attach(to: feed, axes: [.horizontal, .vertical])
         }
+        // ⚠️ DOWNWARD ONTO A PLACE PAGE, EVERY POST IS THIS DRIVER'S — media
+        // included. After the arming above, which resets it.
+        //
+        // The page's landing is its ACTIVITY row, with the post the viewer is
+        // on moved to the top (`PlaceProfileViewController.cardCloseGeometry`):
+        // the close a TEXT marker's feed has always had, and the one filmed as
+        // right (Paris). A media marker's feed used to hand a photograph's
+        // downward close to the hero instead, which flew it onto a DISCOVER
+        // tile — the tab chosen by the kind of post the marker wore (Lyon).
+        // The page now refuses a flight (`zoomLandingAcceptsHero`), and this
+        // asks that same answer, so the vertical hero grab and this driver
+        // cannot both decline — or both claim — one drag. Rightward, and with
+        // no page at all, the hero keeps every photograph it had.
+        let gallerySource = gallery as? any ZoomTransitionSource
+        slide.heroClaimsAxis = { [weak gallerySource] axis in
+            axis != .vertical || gallerySource?.zoomLandingAcceptsHero != false
+        }
         // ⚠️ THE DEFAULT AXES, deliberately restored. Restricting the window
         // to `[.vertical]` made a horizontal grab a percent-driven SLIDE, and
         // the chevron a plain one — which is the fallback that was filmed. Both
@@ -3418,6 +3440,27 @@ extension MapsViewController: MKMapViewDelegate {
                   )
             else { return }
             nav.setViewControllers(plan, animated: false)
+            // ⚠️ AND OUT AGAIN FOR AN ABANDONED SWIPE — the removal the hero's
+            // own vertical grab has in `onDismissalCancelled`, which this
+            // driver now needs for every post rather than only text ones:
+            // left spliced, the back button that follows lands on a place page
+            // the viewer never asked for. Both hops are load-bearing, for the
+            // reasons `FeedFeatureBuilder.pushWithoutFlight` measured: the
+            // coordinator exists only once the pop has begun (next turn), and
+            // a `setViewControllers` inside `completeTransition(false)`'s call
+            // stack is silently swallowed.
+            DispatchQueue.main.async { [weak nav, weak feed] in
+                guard let coordinator = feed?.transitionCoordinator else { return }
+                coordinator.animate(alongsideTransition: nil) { context in
+                    guard context.isCancelled else { return }
+                    DispatchQueue.main.async { [weak nav, weak feed] in
+                        guard let nav, let feed, nav.topViewController === feed,
+                              let plan = Self.stack(nav.viewControllers, removing: gallery)
+                        else { return }
+                        nav.setViewControllers(plan, animated: false)
+                    }
+                }
+            }
         }
         if path == .mapOwn {
             armMapOwnCardClose(slide, feed: feed, landing: landing, markerOrigin: markerOrigin)
@@ -3470,8 +3513,9 @@ extension MapsViewController: MKMapViewDelegate {
             guard let self, let feed, let slide else { return }
             // ⚠️ A HERO'S POP IS FORWARDED BEFORE ANY OF THIS IS READ, so
             // staging here for a media post would only conceal a marker the
-            // flight is about to land on.
-            guard (feed as? any ZoomTransitionDestination)?.zoomDismissalKind == .card
+            // flight is about to land on — on the axes the hero still claims
+            // (`heroClaimsAxis`; downward onto a place page it claims none).
+            guard slide.closeCarriesCard(of: feed, axis: axis)
             else {
                 slide.revealGeometry = nil
                 return
@@ -3495,8 +3539,7 @@ extension MapsViewController: MKMapViewDelegate {
             // tile — a flight landing on a hidden tile reads as no animation
             // at all. Asked of the same authority both grabs gate on, so the
             // three can never disagree about what the post is.
-            guard (feed as? any ZoomTransitionDestination)?.zoomDismissalKind == .card
-            else { return }
+            guard slide.closeCarriesCard(of: feed, axis: axis) else { return }
             hasPrepared = true
             slide.revealGeometry = landing.cardCloseGeometry(dismissing: feed)
         }

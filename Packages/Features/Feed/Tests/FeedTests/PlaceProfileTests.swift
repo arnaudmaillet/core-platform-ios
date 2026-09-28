@@ -9,8 +9,8 @@ import UIKit
 @testable import Feed
 
 /// The PLACE PROFILE: a hero banner wearing the top post, aggregated
-/// Reactions/Views, three tabs (Gallery by popularity, Shorts, chronological
-/// Activity), and the follow toggle in its header.
+/// Reactions/Views, two tabs (a Discover grid and an Activity list, both by
+/// popularity), and the follow toggle in its header.
 @MainActor
 struct PlaceProfileTests {
     private func post(
@@ -50,23 +50,17 @@ struct PlaceProfileTests {
         )
     }
 
-    // MARK: - The landing card
+    // MARK: - The landing
 
-    /// A first vertical grab builds its card before this page (inserted under
-    /// the feed that same frame) has loaded a single tile picture. The card
-    /// must still draw something: the picture the viewer is leaving. Without
-    /// it the grab held the feed up over an emptied video surface (a black
-    /// page) and then showed an empty window over the place page.
-    @Test func aCardWithNoTilePictureYetWearsThePictureBeingLeft() throws {
-        let profile = makeProfile(posts: [post("p1"), post("p2")])
-        let leaving = UIGraphicsImageRenderer(size: CGSize(width: 9, height: 16)).image { context in
-            UIColor.red.setFill()
-            context.fill(CGRect(x: 0, y: 0, width: 9, height: 16))
-        }
-        profile.activeCover = { leaving }
-        let card = profile.makeZoomFlightCard()
-        let cover = try #require(card.zoomCoverSurface as? UIImageView)
-        #expect(cover.image === leaving)
+    /// ⚠️ NO FLIGHT LANDS HERE. A media marker's feed used to fly a photograph's
+    /// downward close onto a Discover tile, while a text marker's closed onto
+    /// the Activity row — two tabs for one gesture (filmed: Lyon wrong, Paris
+    /// right). The refusal is what hands every downward close to the card
+    /// close, and the map's driver asks this same answer
+    /// (`InteractiveSlideDismissal.heroClaimsAxis`).
+    @Test func thePageRefusesAHero() {
+        let profile = makeProfile(posts: [post("p1")])
+        #expect(profile.zoomLandingAcceptsHero == false)
     }
 
     // MARK: - The banner
@@ -287,18 +281,23 @@ struct PlaceProfileTests {
 
     // MARK: - Activity
 
-    /// The Activity tab is CHRONOLOGICAL, newest first — the one surface of
-    /// the page that is not popularity — and it carries EVERY kind: a
-    /// place's activity is its posts, so words, stills and video all travel.
-    @Test func activityIsNewestFirstAndKeepsEveryKind() {
-        let recent = PlaceProfileViewController.chronological([
-            post("post-1", kind: .photo, publishedAtMS: 1_000),
-            post("post-2", kind: .text, publishedAtMS: 3_000),
-            post("post-3", kind: .video, publishedAtMS: 2_000),
+    /// The Activity tab is MOST POPULAR first — reactions, then recency, then
+    /// id: the page's one ranking, not a second formula — and it carries EVERY
+    /// kind: a place's activity is its posts, so words, stills and video all
+    /// travel.
+    @Test func activityIsMostPopularFirstAndKeepsEveryKind() {
+        let ordered = PlaceProfileViewController.activity([
+            post("post-1", kind: .photo, reactions: 40, publishedAtMS: 3_000),
+            post("post-2", kind: .text, reactions: 900, publishedAtMS: 1_000),
+            post("post-3", kind: .video, reactions: 120, publishedAtMS: 2_000),
+            // A tie on reactions: the newer one leads.
+            post("post-4", kind: .photo, reactions: 40, publishedAtMS: 4_000),
         ])
-        #expect(recent.map(\.id.rawValue) == ["post-2", "post-3", "post-1"])
-        #expect(Set(recent.map(\.kind)) == [.photo, .text, .video],
-                "no kind is filtered out — the cards show what For You's own card tab shows")
+        #expect(ordered.map(\.id.rawValue) == ["post-2", "post-3", "post-4", "post-1"])
+        #expect(Set(ordered.map(\.kind)) == [.photo, .text, .video],
+                "no kind is filtered out — the cards show what For You's own card tab does")
+        #expect(ordered == PlaceProfileViewController.ranked(ordered),
+                "the same ranking Discover leads with, so the two tabs cannot disagree")
     }
 
     /// Which posts open through a WINDOW rather than the platform's slide.
@@ -322,8 +321,8 @@ struct PlaceProfileTests {
     }
 
     /// The whole fan-out through one hydration: both tabs populated from one
-    /// corpus, each under its own rule — popularity on Discover, recency on
-    /// Activity.
+    /// corpus under one ranking — popularity — and differing only in what a
+    /// grid can draw.
     ///
     /// ⚠️ THEY NO LONGER SHOW THE SAME POSTS. Discover is a GRID of covers and
     /// drops what has none; Activity is a column of cards and keeps every kind.
@@ -333,7 +332,8 @@ struct PlaceProfileTests {
         let profile = makeProfile(posts: [
             post("post-1", kind: .photo, reactions: 50, publishedAtMS: 1_000),
             post("post-2", kind: .video, reactions: 90, publishedAtMS: 2_000),
-            post("post-3", kind: .text, reactions: 10, publishedAtMS: 3_000),
+            // The loudest post, and the OLDEST: first by popularity, last by date.
+            post("post-3", kind: .text, reactions: 900, publishedAtMS: 500),
         ])
         profile.beginLoading()
         for _ in 0..<50 where profile.renderedPosts.isEmpty { await Task.yield() }
@@ -344,39 +344,42 @@ struct PlaceProfileTests {
         #expect(profile.tabTitles == ["Discover", "Activity"])
     }
 
-    /// ⚠️ A DISMISSAL FROM THE MAP LANDS ON THE FIRST POST, however far the
-    /// viewer paged.
+    /// ⚠️ A DISMISSAL FROM THE MAP LANDS ON ACTIVITY, WITH THE POST THE VIEWER
+    /// WAS ON AT ITS HEAD — whatever that post's kind, and whatever tab the
+    /// page was on.
     ///
-    /// This flight arrives from a MARKER: the grid beneath it has never been
-    /// seen, so there is no place on it the viewer was and no reason to put the
-    /// page down scrolled to an arbitrary row with everything above it unseen.
-    /// It used to land on the settled post's own tile.
-    ///
-    /// Its violation is quiet — a page that opens mid-list reads as a scroll
-    /// position, not as a bug — which is why the rule is pinned rather than
-    /// left to the animation.
-    @Test func aDismissalFromTheMapLandsOnTheFirstPost() async {
+    /// It used to depend on the route: a media marker's feed closed onto the
+    /// first DISCOVER tile, a text marker's onto the Activity row. Pinned here
+    /// through the landing's one entry point (`cardCloseGeometry`, which both
+    /// routes now reach), for a photograph, a clip and words.
+    @Test(arguments: [GalleryPost.Kind.photo, .video, .text])
+    func aDismissalFromTheMapLandsOnActivityWithThePostFirst(kind: GalleryPost.Kind) async {
         let profile = makeProfile(posts: [
             post("post-1", kind: .photo, reactions: 50),
             post("post-2", kind: .photo, reactions: 90),
-            post("post-3", kind: .photo, reactions: 10),
+            post("post-3", kind: kind, reactions: 10),
         ])
-        profile.view.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+        laidOut(profile)
         profile.beginLoading()
-        for _ in 0..<50 where profile.renderedPosts.isEmpty { await Task.yield() }
-        let first = try? #require(profile.renderedPosts.first?.id)
-        #expect(first == PostID("post-2"), "precondition: the ranking put post-2 first")
+        for _ in 0..<50 where profile.renderedActivity.isEmpty { await Task.yield() }
+        #expect(profile.renderedActivity.first?.id == PostID("post-2"),
+                "precondition: the ranking put post-2 first")
 
-        // The viewer paged three posts on before closing.
+        // The viewer paged on to the least popular post before closing.
         profile.activePostID = { PostID("post-3") }
-        profile.zoomSourceWillStageDismissal()
-        #expect(profile.debugLandingAnchor == PostID("post-2"),
-                "the landing followed the viewer instead of introducing the page")
+        let feed = UIViewController()
+        feed.view.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        _ = profile.cardCloseGeometry(dismissing: feed)
+        #expect(profile.debugActiveTabTitle == "Activity",
+                "the landing chose a tab by the post's kind again")
+        #expect(profile.debugLandingAnchor == PostID("post-3"))
+        #expect(profile.renderedActivity.first?.id == PostID("post-3"),
+                "the post the viewer was on is not at the head of the list")
+        #expect(Set(profile.renderedActivity.map(\.id)).count == 3, "no second copy")
 
-        // And with no paging at all it is the same answer, not a special case.
-        profile.activePostID = { PostID("post-2") }
-        profile.zoomSourceWillStageDismissal()
-        #expect(profile.debugLandingAnchor == PostID("post-2"))
+        // Asked again — a swipe asks twice — it stays put rather than swapping back.
+        _ = profile.cardCloseGeometry(dismissing: feed)
+        #expect(profile.renderedActivity.first?.id == PostID("post-3"))
     }
 
     /// The gallery's rule, on its own: the ranking minus what a grid cannot

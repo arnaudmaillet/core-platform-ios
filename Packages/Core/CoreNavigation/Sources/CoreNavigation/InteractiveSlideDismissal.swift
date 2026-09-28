@@ -160,6 +160,36 @@ public final class InteractiveSlideDismissal: NSObject {
     /// the arbitration exactly as it was.
     public var heroLandingAcceptsHero: (() -> Bool)?
 
+    /// Whether the HERO takes a close travelling on this AXIS, asked for the
+    /// screens whose two axes close onto DIFFERENT screens.
+    ///
+    /// ⚠️ `heroLandingAcceptsHero` HAS NO AXIS, and on the map's hierarchy
+    /// marker the answer depends on it: rightward (and the back button) a
+    /// photograph flies home to the MARKER, while downward every post — media
+    /// included — closes as a window onto the place page's Activity row, the
+    /// same close a text marker's feed has always had. One axis-less answer
+    /// can only give both axes to the hero (the downward close then flew a
+    /// card onto a Discover tile instead of the row the product asks for) or
+    /// both to this driver (the marker's flight lost).
+    ///
+    /// `false` for an axis makes this driver claim that axis whatever the
+    /// post's kind, stage its card for it (`closeCarriesCard`), and keep the
+    /// pop's animator instead of forwarding it to the flight. `nil` is "no
+    /// opinion" — every owner that never sets it keeps the arbitration it had.
+    public var heroClaimsAxis: ((ZoomDismissAxis) -> Bool)?
+
+    /// Whether a close of `feed` on `axis` is this driver's card rather than
+    /// the hero's flight — the gate a staging asks before building a geometry.
+    ///
+    /// The post's kind, as it always was, OR an axis the hero has been told
+    /// to leave alone (`heroClaimsAxis`). Deliberately not the begin gate's
+    /// whole predicate: `heroLandingAcceptsHero`'s owners stage their own way,
+    /// and widening their staging here would change a close nobody asked to.
+    public func closeCarriesCard(of feed: UIViewController, axis: ZoomDismissAxis) -> Bool {
+        (feed as? any ZoomTransitionDestination)?.zoomDismissalKind == .card
+            || heroClaimsAxis?(axis) == false
+    }
+
     /// Whether the PUSH onto this screen is the reveal's.
     ///
     /// ⚠️ SEPARATE FROM HAVING A GEOMETRY, and the two came apart the moment
@@ -289,6 +319,8 @@ public final class InteractiveSlideDismissal: NSObject {
         // sets it must get the arbitration it had before this channel existed,
         // and `true` is a claim rather than the absence of one.
         heroLandingAcceptsHero = nil
+        // The per-axis form of the same answer, for the same reason.
+        heroClaimsAxis = nil
     }
 
     public func install(on nav: UINavigationController) {
@@ -515,7 +547,8 @@ extension InteractiveSlideDismissal: UINavigationControllerDelegate {
         // `.horizontal` for a pop with no gesture: the back button means the
         // platform's own direction, and a swipe re-asks with its real axis a
         // moment earlier in `beginSwipe`.
-        prepareForDismissal?(interaction != nil || revealGrab != nil ? activeAxis : .horizontal)
+        let popAxis: ZoomDismissAxis = interaction != nil || revealGrab != nil ? activeAxis : .horizontal
+        prepareForDismissal?(popAxis)
         // ⚠️ A POST THAT FLIES GOES BACK TO WHOEVER HELD THIS SLOT BEFORE US.
         //
         // This driver holds the delegate slot for the whole of the screen's
@@ -555,8 +588,12 @@ extension InteractiveSlideDismissal: UINavigationControllerDelegate {
         // the card was empty because the landing has no picture, and the page
         // it hid was the one the reveal was carrying. The pop completed with
         // the feed still drawn over the grid. Filmed.
+        //
+        // ⚠️ AND SO DOES THE AXIS (`heroClaimsAxis`): a downward close the hero
+        // was told to leave alone is this driver's, whatever the post carries.
         if (fromVC as? any ZoomTransitionDestination)?.zoomDismissalKind == .hero,
            heroLandingAcceptsHero?() != false,
+           heroClaimsAxis?(popAxis) != false,
            let savedDelegate {
             let forwarded = savedDelegate.navigationController?(
                 navigationController, animationControllerFor: operation, from: fromVC, to: toVC
@@ -714,14 +751,19 @@ extension InteractiveSlideDismissal: UIGestureRecognizerDelegate {
         // if this driver went on refusing there too, neither would claim the
         // drag and the screen would leave on a plain slide. The two answers
         // come from one predicate so they cannot drift apart.
+        //
+        // ⚠️ ASKED ONCE THE AXIS IS KNOWN, because the answer can depend on it
+        // (`heroClaimsAxis`): the same photograph flies home rightward and
+        // closes as this driver's window downward.
+        guard let axis = ZoomDismissAxis.match(velocity: pan.velocity(in: view), axes: axes)
+        else { return false }
         if arbitratesWithHeroGrab,
            (feed as? any ZoomTransitionDestination)?.zoomDismissalKind != .card,
-           heroLandingAcceptsHero?() != false {
+           heroLandingAcceptsHero?() != false,
+           heroClaimsAxis?(axis) != false {
             return false
         }
         if let canBeginDismissal, !canBeginDismissal() { return false }
-        guard let axis = ZoomDismissAxis.match(velocity: pan.velocity(in: view), axes: axes)
-        else { return false }
         // Same extra gate as the zoom grab's vertical leg: subsurfaces that
         // own their vertical gestures (a text page's comment stream, the
         // shortcut rail) keep their touches.
