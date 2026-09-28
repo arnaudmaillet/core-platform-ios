@@ -194,12 +194,12 @@ public struct RevealGeometry {
     /// this the same way: its thaw hangs off `setZoomSourceHidden(false)`,
     /// which is likewise called on every ending.
     ///
-    /// The outcome is a parameter and not two hooks because the caller's two
-    /// jobs differ by exactly one thing — the source chrome it restored
-    /// OFFSTAGE (state shown, alpha 0) at grab-begin. A cancelled close puts it
-    /// back down; a committed one shows it, at once: this is the landing, and
-    /// the landing is the only moment the dock is allowed to appear. Nothing
-    /// in the close fades it — the transition never touches the chrome.
+    /// The outcome is a parameter and not two hooks because a caller's jobs
+    /// can differ by it. A committed close is also where an owner may put its
+    /// dock back as a BACKSTOP — through UIKit (`showTabBarNatively`), and
+    /// idempotently, since the screen landed on has normally shown it at the
+    /// close's commit already. The transition itself never touches native
+    /// chrome (see `TabBarRevealPolicy`).
     public let dismissalDidEnd: (Bool) -> Void
     /// Whether the page counter-translates to match its caption to the row's
     /// (`true`), or simply sits still while the window opens over it
@@ -1179,25 +1179,22 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
     private let censusToken = RevealCensusToken()
     #endif
     private let geometry: RevealGeometry
-    /// Source chrome that must LEAVE with the opening rather than before it —
-    /// the app's floating tab bar.
-    ///
-    /// The bar draws OVER the grid without insetting it, so at rest it covers
-    /// the bottom of the row a reveal departs from: measured on an iPhone 17
-    /// Pro, the bar occupies y 791…874 and the row 741…817, so 26pt of the
-    /// card — its whole metric line — is not on screen. Hidden before the push,
-    /// as a plain push does it, that line SNAPS into existence one frame after
-    /// the mask opens: the card the viewer tapped is not the card that starts
-    /// growing.
-    ///
-    /// Driven here instead, the bar is fully in place on frame 0 — so the
-    /// revealed rect is pixel-identical to what was there — and dissolves as
-    /// the page grows past it.
-    private weak var departingChrome: UIView?
+    // ⚠️ NO DEPARTING CHROME, and there used to be one: the app's tab bar,
+    // faded 1 → 0 by hand over the first 60% of this opening and put back to 1
+    // at its completion. Native chrome is UIKit's (see `TabBarRevealPolicy`):
+    // the owner hides the bar with `setTabBarHidden(true, animated: true)` as
+    // it pushes, the way every other opening does, and UIKit animates it away
+    // (a fade, on iOS 27).
+    //
+    // What the fade bought, and what is given up for it: the bar draws OVER
+    // the grid without insetting it, so at rest it covers the bottom of the
+    // row a reveal departs from (measured on an iPhone 17 Pro, 26pt of a
+    // 145pt card — its metric line). With the bar held opaque on frame 0 the
+    // revealed rect was pixel-identical to the row; with UIKit's fade, that
+    // strip is uncovered by the bar leaving instead.
 
-    init(geometry: RevealGeometry, departingChrome: UIView?) {
+    init(geometry: RevealGeometry) {
         self.geometry = geometry
-        self.departingChrome = departingChrome
     }
 
     func transitionDuration(using context: (any UIViewControllerContextTransitioning)?) -> TimeInterval {
@@ -1351,19 +1348,6 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
         UIView.animate(withDuration: duration * 0.65, delay: duration * 0.35, options: [.curveEaseIn]) {
             dim.alpha = 1
         }
-        // FRONT-LOADED, unlike the dim: the bar has to be gone by the time the
-        // mask has grown past where it sits, or it stands over the opening
-        // page (it is a sibling of the navigation controller and renders above
-        // the whole transition). Fading over the first 60% clears it while the
-        // mask is still below it.
-        let chrome = departingChrome
-        UIView.animate(withDuration: duration * 0.6, delay: 0, options: [.curveEaseIn]) {
-            chrome?.alpha = 0
-        } completion: { _ in
-            #if DEBUG
-            RevealStage.log("present", "chrome faded to \(chrome?.alpha ?? -1)")
-            #endif
-        }
         // THE HAND-OFF, which for a CARD-SHAPED source is the dismissal's run
         // backwards.
         //
@@ -1441,13 +1425,10 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
             // Cleared under the opaque page, where the reset cannot be seen.
             presenting?.transform = .identity
             ZoomFlight.clearRecededChrome(from: presenting)
-            // The owner takes the chrome down for real (or puts it back on a
-            // reversal); the alpha goes home either way, since the view is
-            // shared with every other screen that shows it.
+            // The owner puts the bar back on a reversal, through UIKit.
             #if DEBUG
             RevealStage.log("present", "landed")
             #endif
-            chrome?.alpha = 1
             self.geometry.presentationDidEnd(!cancelled)
             context.completeTransition(!cancelled)
         }

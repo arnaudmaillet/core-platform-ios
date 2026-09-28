@@ -800,11 +800,10 @@ final class SearchResultsViewController: UIViewController {
         // use it is how every other tab inherits a collapsing bar.
         installBottomChromeWhenAppearing(
             handsOver: tabBarController?.bottomAccessory != nil
-        ) { [weak self] animated in
+        ) { [weak self] in
             guard let self else { return }
             selectorAccessory?.install(into: tabBarController,
-                                       alongside: transitionCoordinator,
-                                       animated: animated)
+                                       alongside: transitionCoordinator)
         }
         // ⚠️ RE-SUBSCRIBED EVERY TIME, and this is not belt and braces.
         // `SearchViewModel`'s callbacks are single-assignment slots, and a

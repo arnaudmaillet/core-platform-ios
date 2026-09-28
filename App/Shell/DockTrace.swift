@@ -2,9 +2,18 @@ import UIKit
 
 #if DEBUG
 
-/// `-dock-trace` — the dock's VISIBLE opacity, sampled every frame and printed
-/// on change, so "does the tab bar fade in during a return, or appear at the
-/// landing?" is a timeline rather than an impression.
+/// `-dock-trace` — the dock's VISIBLE opacity and position, sampled every frame
+/// and printed on change, so "when does the tab bar come back, and who moves
+/// it?" is a timeline rather than an impression.
+///
+/// ⚠️ THE MODEL ALPHA (`m`) IS UIKIT'S. Native chrome is UIKit's (see
+/// `TabBarRevealPolicy`): the bar is shown and hidden through
+/// `setTabBarHidden(_:animated:)` only. Measured on iOS 27, UIKit's own
+/// animation of that call is a FADE, not a slide — `y` stays at 791 and the
+/// model alpha goes to 0 with `hidden=Y` and back to 1 with `hidden=N`, the
+/// drawn `bar` ramping over ~0.3s. So `m0.00` is right while `hidden=Y`; an
+/// `m` below 1 while `hidden=N` at rest is an alpha written by hand, which the
+/// rule forbids.
 ///
 /// What is printed is what the viewer sees, not what the model says: the
 /// product of every PRESENTATION-layer opacity from the view up to its window,
@@ -15,15 +24,16 @@ import UIKit
 ///
 /// Both halves of the bottom chrome are traced — the system tab bar and the
 /// bottom accessory's content (For You's Discover/Following selector, the place
-/// page's Discover/Activity pill) — because the product rule is that they come
-/// back TOGETHER, at the landing.
+/// page's Discover/Activity pill) — because the band follows the bar, and both
+/// come back once a close is committed.
 ///
 ///     [dock] +7901ms moving top=ForYouViewController bar=0.00(m0.00) y=791 hidden=N acc=none
 ///     [dock] +9293ms rest top=ForYouViewController bar=1.00(m1.00) y=791 hidden=N acc=1.00
 ///
 /// `bar` is what is drawn, `m` the model alpha (they differ while an alpha
 /// animation runs, listed as `anim=`), `rest` the first frame after the
-/// transition completed — the landing.
+/// transition completed — the landing. With the rule in force the bar should
+/// arrive (`hidden=N`, `bar` ramping up) while the phase still reads `moving`.
 @MainActor
 final class DockTrace {
     private static var shared: DockTrace?
@@ -66,7 +76,7 @@ final class DockTrace {
         let nav = tabBarController.selectedViewController as? UINavigationController
         let top = nav?.topViewController.map { String(describing: type(of: $0)) } ?? "?"
         // `moving` while the stack has a transition in flight, `rest` once it
-        // has landed — the landing is the instant the dock is owed.
+        // has landed.
         let phase = nav?.transitionCoordinator != nil ? "moving" : "rest"
         let line = String(
             format: "%@ top=%@ bar=%.2f(m%.2f%@) y=%.0f hidden=%@ acc=%@",

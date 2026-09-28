@@ -611,8 +611,10 @@ final class SnapFeedViewController: UIViewController {
             DispatchQueue.main.async { [weak self] in
                 guard let self, isClosable, view.window != nil,
                       navigationController?.topViewController === self,
-                      let tabBarController, !tabBarController.isTabBarHidden else { return }
-                tabBarController.setTabBarHidden(true, animated: false)
+                      let tabBarController else { return }
+                // Through UIKit, on its animation: native chrome is never
+                // hidden by hand (see `TabBarRevealPolicy`).
+                tabBarController.hideTabBarNatively()
             }
         }
     }
@@ -623,34 +625,91 @@ final class SnapFeedViewController: UIViewController {
         return nav.viewControllers.first !== self
     }
 
-    /// Leaves the feed the way it arrived: pop when pushed (runs the
-    /// interactive-capable zoom-out on the map's stack), dismiss when
-    /// presented.
     /// The chevron is about to close this screen.
     ///
     /// ⚠️ A TAP HAS NO "BEGIN". A dragged close announces itself through the
-    /// dismissal's `onWillBeginPop`, and owners use that moment to put chrome
-    /// back while nothing is in flight — the one point at which a tab bar
-    /// restored this way actually paints. That hook has a single caller,
+    /// dismissal's `onWillBeginPop`, and owners use that moment to restage
+    /// things while nothing is in flight. That hook has a single caller,
     /// `beginSwipe`, so the chevron reached none of it and the same work
     /// landed inside the transition instead, where it does not take. This is
     /// the tap's equivalent, and it runs at the same point in the story.
     var onWillCloseFeed: (() -> Void)?
 
+    /// Leaves the feed the way it arrived: pop when pushed (runs the
+    /// interactive-capable zoom-out on the map's stack), dismiss when
+    /// presented.
     private func closeFeed() {
         onWillCloseFeed?()
         if let nav = navigationController, nav.viewControllers.first !== self {
+            revealDockBeforePop(on: nav)
             nav.popViewController(animated: true)
         } else {
             dismiss(animated: true)
         }
     }
 
+    // MARK: - The dock, on the way out
+
+    /// ⚠️ **A CLOSE OF THIS FEED BRINGS THE DOCK BACK, AND THE FEED SAYS SO
+    /// ITSELF — THROUGH UIKIT.** Native chrome is UIKit's (see
+    /// `TabBarRevealPolicy`): the bar is shown with `setTabBarHidden(false,
+    /// animated: true)` and UIKit animates it, alongside the return; nobody
+    /// writes its alpha, and it is no longer held back for the landing. It
+    /// used to be — restored at alpha 0 before the pop by each of five owners
+    /// (For You, the profile's and the place page's builder, the map, the
+    /// window) and flipped to 1 at their landings, which is what the viewer
+    /// saw arrive late (video 3 of 2026-09-28, Activity → post → close).
+    ///
+    /// Owned here rather than by each screen that opens a post, because every
+    /// one of those closes is a close of THIS screen, and a surface that forgot
+    /// to wire it was a surface with no dock. The owners keep their idempotent
+    /// landing backstops.
+    ///
+    /// Two moments, because a close is committed at two different times:
+    /// - a TAP (`closeFeed`) is committed the moment it happens, so the bar
+    ///   comes back BEFORE the pop is triggered — outside any transition. A bar
+    ///   un-hidden inside a button-driven pop comes back as a state every API
+    ///   reports as shown and nothing draws (measured on For You, the map and
+    ///   the place page);
+    /// - a DRAG is a question until the finger lifts: the bar comes back at a
+    ///   COMMITTED release (`revealDockWhenCloseCommits`), and never for one
+    ///   that springs back.
+    ///
+    /// ⚠️ NOT WHEN UIKIT OWNS IT. A feed pushed with `hidesBottomBarWhenPushed`
+    /// (a routed feed, the map's defensive plain push) gets its dock back from
+    /// UIKit's own pop; a landing that shows no dock (another feed, a pushed
+    /// profile) gets none — `UINavigationController.showsAppTabBar(for:)`.
+    func revealDockBeforePop(on nav: UINavigationController) {
+        guard !hidesBottomBarWhenPushed, nav.topViewController === self,
+              let index = nav.viewControllers.firstIndex(of: self), index > 0,
+              nav.showsAppTabBar(for: nav.viewControllers[index - 1])
+        else { return }
+        tabBarController?.showTabBarNatively()
+    }
+
+    /// The DRAG's half of `revealDockBeforePop`, registered from
+    /// `viewWillDisappear` — which UIKit runs at the pop's begin for every
+    /// driver (the flight's grab, a window's drag, a slide), with the pop's
+    /// coordinator in hand. A tap's pop reaches here too, already revealed; a
+    /// pop nobody announced (a route, a scripted pop) gets its dock after the
+    /// landing, through the coordinator's completion.
+    private func revealDockWhenCloseCommits() {
+        guard !hidesBottomBarWhenPushed, isMovingFromParent,
+              let coordinator = transitionCoordinator,
+              let nav = navigationController,
+              nav.showsAppTabBar(for: coordinator.viewController(forKey: .to))
+        else { return }
+        let tabs = tabBarController
+        coordinator.whenCommitted { [weak tabs] in
+            tabs?.showTabBarNatively()
+        }
+    }
+
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         // A RETURN (a pop back from a profile, a sheet gone), never the first
-        // arrival: that one is the opening flight's, which fades the dock
-        // under the growing page and retires it at landing.
+        // arrival: that one is the opening's, whose owner hides the dock
+        // through UIKit as it pushes.
         if hasAppeared { retireTabBarOnReturn() }
         // The back item exists only when there is somewhere to go back to — a
         // map-opened feed, not the Timeline tab root — and the stack/
@@ -1019,6 +1078,7 @@ final class SnapFeedViewController: UIViewController {
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         assertNoTabBarAfterAbandonedDismissal()
+        revealDockWhenCloseCommits()
         setNativePopSuppressed(false)
         // A grab-to-dismiss or a pop is under way: the landing's warm must not
         // build ~100 ms of panel inside it. A cancelled grab lands again, and
@@ -1997,17 +2057,22 @@ final class SnapFeedViewController: UIViewController {
 
     // MARK: - Toolbar visibility
 
-    /// The toolbar's push/pop choreography, mirroring the navigation bar's
-    /// contract: bar chrome belongs to the navigation controller, ABOVE the
-    /// transition container, so it is never part of a flight card or a
-    /// sliding view — it cross-fades in place while content transitions
-    /// beneath it.
+    /// The toolbar's push/pop choreography — UIKit's, through UIKit's API.
     ///
-    /// Shown non-animated so the bottom safe area is final before a zoom
-    /// present's `layoutIfNeeded` bakes the flight replica's insets; the
-    /// *visual* entrance is an alpha fade registered on the transition
-    /// coordinator, which every entry path coordinates (and a cancelled pop,
-    /// re-firing this, skips — the toolbar was never hidden).
+    /// ⚠️ NATIVE CHROME IS UIKIT'S (see `TabBarRevealPolicy`). This used to
+    /// show the bar unanimated and then fade its `alpha` 0 → 1 on the
+    /// transition coordinator, and the grab faded it 1 → 0 with the finger.
+    /// Both are gone: `setToolbarHidden(_:animated:)` is the whole of it, and
+    /// with a transition in flight UIKit animates the change alongside it, the
+    /// way it animates a navigation bar's items.
+    ///
+    /// ⚠️ THE GEOMETRY QUESTION the unanimated show used to answer: the bottom
+    /// safe area has to be final before a zoom present's `layoutIfNeeded`
+    /// bakes the flight replica's insets. UIKit's animated form commits the
+    /// toolbar's frame (and the safe area it implies) as a model value inside
+    /// its own animation block, so it is final before the transition lays
+    /// anything out — `-dock-trace` prints the safe area either side of the
+    /// call to prove it on a device.
     private func presentToolbar() {
         guard let nav = navigationController else { return }
         toolbarHost = nav
@@ -2023,57 +2088,43 @@ final class SnapFeedViewController: UIViewController {
         nav.toolbar.scrollEdgeAppearance = appearance
         nav.toolbar.tintColor = .white
 
-        let wasHidden = nav.isToolbarHidden
-        nav.setToolbarHidden(false, animated: false)
-        nav.toolbar.alpha = 1
-        if wasHidden, let coordinator = transitionCoordinator {
-            nav.toolbar.alpha = 0
-            coordinator.animate(alongsideTransition: { _ in
-                nav.toolbar.alpha = 1
-            }, completion: { _ in
-                // A push cannot cancel; pin the end state either way.
-                nav.toolbar.alpha = 1
-            })
+        guard nav.isToolbarHidden else { return }
+        #if DEBUG
+        let safeBefore = view.safeAreaInsets.bottom
+        #endif
+        nav.setToolbarHidden(false, animated: transitionCoordinator != nil)
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-dock-trace") {
+            view.layoutIfNeeded()
+            print("[dock] feed toolbar shown animated=\(transitionCoordinator != nil)"
+                + " safeB \(safeBefore) -> \(view.safeAreaInsets.bottom)"
+                + " alpha=\(nav.toolbar.alpha)")
         }
+        #endif
     }
 
-    /// The exit leg. Fades the toolbar alongside whatever transition is
-    /// carrying the feed away — the percent-driven timeline slide scrubs it
-    /// with the finger; the zoom pop runs it on the transition clock; the
-    /// free-floating pin grab (not percent-driven) runs it over the
-    /// post-release remainder, exactly like the navigation bar's own item
-    /// cross-fade on that leg. Only a *completed* disappearance hides the
-    /// bar; a cancelled swipe's completion restores alpha and keeps it.
+    /// The exit leg: UIKit hides the toolbar, alongside whatever transition is
+    /// carrying the feed away (the percent-driven slide scrubs it with the
+    /// finger; the zoom pop runs it on the transition clock; the free-floating
+    /// grab runs it over the post-release remainder, exactly like the
+    /// navigation bar's own item cross-fade on that leg). A cancelled close
+    /// re-appears this screen, and `presentToolbar` puts it back the same way.
     private func concealToolbar() {
         guard let nav = navigationController, !nav.isToolbarHidden else { return }
         // Hand the bar over intact when the incoming screen is a toolbar
         // owner too (the profile's filter tray): it adopts the shared
-        // instance and reconfigures it in its own viewWillAppear — fading it
+        // instance and reconfigures it in its own viewWillAppear — hiding it
         // here would fight that presentation, the flash this rule replaces.
         if successorUsesToolbar(on: nav) { return }
-        guard let coordinator = transitionCoordinator else {
-            // Instant paths (tab switch): no transition to ride.
-            nav.setToolbarHidden(true, animated: false)
-            return
-        }
-        coordinator.animate(alongsideTransition: { _ in
-            nav.toolbar.alpha = 0
-        }, completion: { context in
-            if context.isCancelled {
-                nav.toolbar.alpha = 1
-            } else {
-                nav.setToolbarHidden(true, animated: false)
-                nav.toolbar.alpha = 1
-            }
-        })
+        // Instant paths (tab switch) have no transition to ride.
+        nav.setToolbarHidden(true, animated: transitionCoordinator != nil)
     }
 
     /// Deterministic backstop for the toolbar's hide, in the one callback
-    /// that fires only for *completed* disappearances. The interactive pin
-    /// grab's coordinator completions can be deferred indefinitely (see
-    /// `ZoomDismissInteractionController` — it tears down by wall clock for
-    /// the same reason); if the fade above never settled, settle it here so
-    /// the map can never inherit a visible empty toolbar.
+    /// that fires only for *completed* disappearances. If the hide above was
+    /// undone or never ran, settle it here so the screen underneath can never
+    /// inherit a visible empty toolbar. Unanimated: nothing of this screen is
+    /// on display any more.
     private func settleToolbarAfterDisappearance() {
         guard let nav = toolbarHost, !nav.isToolbarHidden,
               nav.topViewController !== self else { return }
@@ -2082,7 +2133,6 @@ final class SnapFeedViewController: UIViewController {
         // that screen's chrome.
         if successorUsesToolbar(on: nav) { return }
         nav.setToolbarHidden(true, animated: false)
-        nav.toolbar.alpha = 1
     }
 
     /// Whether the navigation stack's current top — the screen this feed is
@@ -5424,7 +5474,6 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         guard commentsEngagedID != nil, !commentsEngagementIsResting,
               let cell = activeSnapCell
         else { return }
-        let progress = state.progress
         if !isEngagedDismissalActive {
             isEngagedDismissalActive = true
             view.alpha = 1
@@ -5439,20 +5488,12 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // page mid-grab is undone on the next frame the finger produces, so a
         // race can cost one frame instead of the whole gesture.
         view.alpha = 1
-        // ⚠️ AND THE NAVIGATION BAR RECEDES WITH IT.
-        //
-        // The bar is the navigation controller's, above the transition's
-        // container — the flight leaves it there deliberately, because on an
-        // ordinary dismissal the page underneath is hidden and the bar is
-        // simply chrome over a shrinking card. Here the page is VISIBLE and
-        // travelling, so a bar pinned to the screen's corners while everything
-        // under it moves reads as two layers coming apart. It carries the
-        // engaged interface's own controls — the close, the sort, the author —
-        // so it belongs to the thread and leaves with it.
-        //
-        // The toolbar needs nothing: the interaction controller already fades
-        // it on this same channel.
-        navigationController?.navigationBar.alpha = 1 - min(max(progress, 0), 1)
+        // ⚠️ THE NAVIGATION BAR IS NOT FADED HERE, and it used to be:
+        // `alpha = 1 - progress` on every pan event, because a bar pinned to
+        // the screen's corners over a VISIBLE, travelling page reads as two
+        // layers coming apart. Native chrome is UIKit's (see
+        // `TabBarRevealPolicy`): the pop's own navigation-bar transition takes
+        // the engaged interface's items away, on UIKit's clock.
         // The rect arrives in the CONTAINER's coordinates, which are this
         // view's: both are full-bleed in it. The same assumption the opening
         // makes about the rect it is handed.
@@ -5464,7 +5505,6 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     private func endEngagedDismissalIfNeeded() {
         guard isEngagedDismissalActive else { return }
         isEngagedDismissalActive = false
-        navigationController?.navigationBar.alpha = 1
         activeSnapCell?.endEngagedDismissal()
         // Through the resolver: this used to hand back a literal black, which
         // re-blacked a TEXT page even with its data present.

@@ -22,8 +22,8 @@ import UIKit
 /// - **Morph** (progress-driven): the window's SIZE and rounding interpolate
 ///   toward the card's, and dim, veil and presenter depth are pure functions
 ///   of `translation / span`. The source's chrome (the app's tab bar) is NOT
-///   on this channel: it stays down for the whole close and the owner shows it
-///   at the landing (`RevealGeometry.dismissalDidEnd`).
+///   on this channel, nor on any of ours: native chrome is shown by UIKit, on
+///   UIKit's animation, once the close is committed (`TabBarRevealPolicy`).
 ///
 /// Release then springs from the window's exact current pose to the card's rect
 /// (commit) or back to the whole screen (cancel), seeded with the hand's

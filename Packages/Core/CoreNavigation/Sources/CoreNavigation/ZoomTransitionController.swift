@@ -63,8 +63,12 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
     public var onSourceReturned: (() -> Void)?
 
     /// Fires when an interactive grab is CANCELLED — the destination stays up,
-    /// so anything the owner undid at grab-begin (the tab bar's hidden state)
-    /// has to go back. A completed return reports through `onSourceReturned`.
+    /// so anything the owner undid at grab-begin has to go back. A completed
+    /// return reports through `onSourceReturned`.
+    ///
+    /// ⚠️ NOT the tab bar's any more. The bar is shown only once a close is
+    /// committed (`TabBarRevealPolicy`), so an abandoned grab never raised it
+    /// and has nothing of it to put back.
     public var onDismissalCancelled: (() -> Void)? {
         didSet {
             interaction.onCancelled = onDismissalCancelled

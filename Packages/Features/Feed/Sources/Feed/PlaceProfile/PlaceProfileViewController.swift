@@ -211,16 +211,16 @@ final class PlaceProfileViewController: UIViewController {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        // ⚠️ UNANIMATED: this is the BACKSTOP, and it runs at a landing. The
-        // one that reaches it is a close of the snap feed, whose bottom chrome
-        // is owed at once with the bar (`TabBarRevealPolicy`); animated, the
-        // band faded in over ~280ms under a bar already up (`-dock-trace`). A
-        // tab switch installs from `viewWillAppear` and finds nothing to do here.
+        // The BACKSTOP, on UIKit's own animation like every other install
+        // (native chrome is UIKit's — see `TabBarRevealPolicy`). A tab switch
+        // and a committed close install from `viewWillAppear` and find nothing
+        // to do here.
         selectorAccessory?.install(into: tabBarController, minimizesOnScroll: true,
-                                   alongside: transitionCoordinator, animated: false)
+                                   alongside: transitionCoordinator)
         assertAppTabBar()
         // ⚠️ THE ONE INSTANT THE BAR IS BOTH PRESENT AND LAID OUT on this
-        // screen: `assertAppTabBar` has just restored it synchronously. The
+        // screen: `assertAppTabBar` has just restored its state (UIKit commits
+        // the frame as a model value even while it animates it in). The
         // layout pass is forced for the measurement's sake — `ForYouViewController`
         // forces one in the same place, for the same read.
         view.layoutIfNeeded()
@@ -269,11 +269,12 @@ final class PlaceProfileViewController: UIViewController {
     /// interactive-pop BEGIN, so a restore there would raise the dock over a
     /// feed still on screen and strand it there when the grab is released
     /// short of the threshold.
+    ///
+    /// Through UIKit, on its animation, never an alpha (see
+    /// `TabBarRevealPolicy`) — and normally a no-op: the feed's own close
+    /// has shown the bar by the time this page appears.
     private func assertAppTabBar() {
-        guard let tabBarController else { return }
-        tabBarController.tabBar.alpha = 1
-        guard tabBarController.isTabBarHidden else { return }
-        tabBarController.setTabBarHidden(false, animated: false)
+        tabBarController?.showTabBarNatively()
     }
 
     /// Installs the hero return each time this page becomes the top screen.
@@ -676,11 +677,10 @@ final class PlaceProfileViewController: UIViewController {
         // backstop for the paths the policy declines (a scrub that has not
         // committed, a flight that owns the chrome).
         installBottomChromeWhenAppearing(hasActiveFlight: false,
-                                         handsOver: tabBarController?.bottomAccessory != nil) { [weak self] animated in
+                                         handsOver: tabBarController?.bottomAccessory != nil) { [weak self] in
             guard let self else { return }
             selectorAccessory?.install(into: tabBarController, minimizesOnScroll: true,
-                                       alongside: transitionCoordinator,
-                                       animated: animated)
+                                       alongside: transitionCoordinator)
         }
 
         syncAutoplay()

@@ -55,14 +55,13 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     /// The held card's give — see `GrabDeformation`. Lives for one grab.
     private var deformation: GrabDeformation?
     private var dim: UIView?
-    /// The feed's native bottom toolbar — navigation-controller chrome above
-    /// this container, never part of the flight card. Captured at stage time
-    /// so the grab can cross-fade it with progress: unlike the navigation
-    /// bar (whose item cross-fade UIKit runs after release), the toolbar is
-    /// *content* chrome of the departing page and must recede under the
-    /// finger like the dim does. The feed's own coordinator choreography
-    /// settles the hidden state after completion; this only drives alpha.
-    private weak var toolbar: UIToolbar?
+    // ⚠️ NO TOOLBAR HERE, and there used to be one. The grab captured the
+    // feed's native `UIToolbar` and wrote `alpha = 1 - progress` on it every
+    // pan event, then 0/1 on the release spring. Native chrome is UIKit's
+    // (see `TabBarRevealPolicy`): the feed hides its toolbar with
+    // `setToolbarHidden(_:animated: true)` as it disappears, and UIKit runs
+    // that alongside this transition exactly as it runs the navigation bar's
+    // item cross-fade.
     private weak var presentingView: UIView?
     private var screenRadius: CGFloat = 0
     private var pageCenter: CGPoint = .zero
@@ -141,8 +140,8 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     #endif
 
     /// Reports a cancelled grab, so the owner can put back whatever it undid
-    /// when the grab began (the tab bar's hidden state). Completed grabs are
-    /// reported by the navigation controller's `didShow` instead.
+    /// when the grab began. Completed grabs are reported by the navigation
+    /// controller's `didShow` instead.
     var onCancelled: (() -> Void)?
 
     /// Installs the pan on the presented feed's view. `onBeginDismiss` should
@@ -332,10 +331,6 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // card exist, so the arming belongs where the card is assigned.
         ZoomGeometrySampler.shared.start(card: flight.mediaCard, label: "grab")
         #endif
-        if let nav = context.viewController(forKey: .from)?.navigationController,
-           !nav.isToolbarHidden {
-            self.toolbar = nav.toolbar
-        }
         self.presentingView = presentingView
         self.screenRadius = screenRadius
         self.pageCenter = CGPoint(x: pageFrame.midX, y: pageFrame.midY)
@@ -596,9 +591,6 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
             ))
         }
         dim?.alpha = 1 - progress
-        // The toolbar recedes on the same channel as the dim: pure function
-        // of progress, tracking the finger frame-by-frame.
-        toolbar?.alpha = 1 - progress
         let mapScale = ZoomFlight.presenterDepthScale + (1 - ZoomFlight.presenterDepthScale) * progress
         presentingView?.transform = CGAffineTransform(scaleX: mapScale, y: mapScale)
         context.updateInteractiveTransition(progress)
@@ -686,7 +678,6 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         armReleaseProbe(card: flight.card)
         #endif
         let dim = dim
-        let toolbar = toolbar
         let presentingView = presentingView
         let screenRadius = screenRadius
         // The SAME spring as the tap-back dismissal (`ZoomFlight.spring*`), so a
@@ -722,12 +713,10 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
             if commit {
                 flight.poseAtSource(at: landing)
                 dim?.alpha = 0
-                toolbar?.alpha = 0
                 presentingView?.transform = .identity
             } else {
                 flight.poseAsPage(cornerRadius: screenRadius)
                 dim?.alpha = 1
-                toolbar?.alpha = 1
                 presentingView?.transform = CGAffineTransform(
                     scaleX: ZoomFlight.presenterDepthScale, y: ZoomFlight.presenterDepthScale
                 )
@@ -833,10 +822,6 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         dim?.removeFromSuperview()
         presentingView?.transform = .identity
         ZoomFlight.clearRecededChrome(from: presentingView) // reset is covered either way
-        // Hand the toolbar back at full alpha: on cancel it stays shown; on
-        // commit the feed's disappearance bookkeeping hides it within this
-        // same completeTransition turn, so no restored frame can render.
-        toolbar?.alpha = 1
         // Idempotent on the cancel path — `.restoreDestinationContent` already
         // ran these, first, for the reason that action documents — and the
         // only place they run when the dismissal finished.
@@ -865,7 +850,6 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         context = nil
         flight = nil
         dim = nil
-        toolbar = nil
         detachDeadline = 0
     }
 
