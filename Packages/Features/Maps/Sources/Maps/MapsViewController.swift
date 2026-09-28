@@ -2972,39 +2972,6 @@ extension MapsViewController: MKMapViewDelegate {
         axis == .vertical && hasLanding ? .placeCard : .marker
     }
 
-    /// Which implementation arms the card close beside a hero flight.
-    ///
-    /// **THE SHARED HELPER BY DEFAULT** (`.unified`, since 2026-09-28):
-    /// `InteractiveSlideDismissal.armAsCardCloseAlongsideFlight`, the call For
-    /// You, a profile and the place page's own tiles already make — with this
-    /// screen's landings unchanged (the marker's window; the place page's card
-    /// for a vertical close). It was tried behind an opt-in launch argument
-    /// (#286) and kept: one close for every screen is one set of rules.
-    ///
-    /// **`-maps-own-card-close`** (DEBUG builds only) arms the map's own copy
-    /// instead (`armMapOwnCardClose`), exactly as it shipped before. KEPT, not
-    /// deleted, for now: it is the reference the shared close replaced, and a
-    /// launch away from a side-by-side comparison should a landing regress.
-    ///
-    /// Only the hero-opened feed is concerned: a media marker (and a
-    /// media-faced city or country, with its place page) paged onto a text
-    /// post — and, downward onto that place page, any post. A text marker opens as a REVEAL, whose close is the feed
-    /// builder's and is the same with or without the flag.
-    enum MapCardClosePath: Equatable, CustomStringConvertible {
-        case mapOwn, unified
-
-        var description: String { self == .unified ? "unified" : "map-own" }
-    }
-
-    static let ownCardCloseArgument = "-maps-own-card-close"
-
-    /// Pure, so the wiring is testable without a live map. ⚠️ Not gated
-    /// itself: the caller reads the launch arguments in DEBUG only, so a
-    /// release build is always `.unified`.
-    static func cardClosePath(arguments: [String]) -> MapCardClosePath {
-        arguments.contains(ownCardCloseArgument) ? .mapOwn : .unified
-    }
-
     /// Where a place page goes when a vertical dismissal commits: beneath the
     /// feed it is landing from.
     ///
@@ -3387,24 +3354,12 @@ extension MapsViewController: MKMapViewDelegate {
         let landing = gallery as? any CardCloseLanding
         let slide = InteractiveSlideDismissal()
         cardClose = slide
-        // The shared helper by default; `-maps-own-card-close` (DEBUG) arms
-        // this screen's own copy instead — see `MapCardClosePath`.
         #if DEBUG
-        let path = Self.cardClosePath(arguments: ProcessInfo.processInfo.arguments)
-        print("[card-close] map armed path=\(path) placePage=\(landing != nil)")
-        #else
-        let path = MapCardClosePath.unified
+        print("[card-close] map armed placePage=\(landing != nil)")
         #endif
-        switch path {
-        case .unified:
-            // ⚠️ FIRST, because arming resets the driver — every setter below
-            // (`fallbackSlideAxis` among them) has to land after it.
-            armUnifiedCardClose(slide, feed: feed, landing: landing, markerOrigin: markerOrigin)
-        case .mapOwn:
-            slide.resetForNewPresentation()
-            slide.arbitratesWithHeroGrab = true
-            slide.attach(to: feed, axes: [.horizontal, .vertical])
-        }
+        // ⚠️ FIRST, because arming resets the driver — every setter below
+        // (`fallbackSlideAxis` among them) has to land after it.
+        armCardClose(slide, feed: feed, landing: landing, markerOrigin: markerOrigin)
         // ⚠️ DOWNWARD ONTO A PLACE PAGE, EVERY POST IS THIS DRIVER'S — media
         // included. After the arming above, which resets it.
         //
@@ -3462,9 +3417,6 @@ extension MapsViewController: MKMapViewDelegate {
                 }
             }
         }
-        if path == .mapOwn {
-            armMapOwnCardClose(slide, feed: feed, landing: landing, markerOrigin: markerOrigin)
-        }
         // The backstop: whatever animated the close, no tile stays hidden. The
         // staging above conceals one, and only the reveal's own completion
         // pays that back — a pop finished by anything else would leave a hole
@@ -3487,74 +3439,14 @@ extension MapsViewController: MKMapViewDelegate {
         debugScriptCardCloseIfRequested(slide)
     }
 
-    /// The map's OWN staging — no longer the default: armed only under
-    /// `-maps-own-card-close` (DEBUG), unchanged from what shipped.
-    ///
-    /// Kept beside `armUnifiedCardClose` rather than deleted: it is the
-    /// reference the shared close replaced, held a launch argument away for a
-    /// side-by-side comparison until the viewer settles it for good.
-    private func armMapOwnCardClose(
-        _ slide: InteractiveSlideDismissal, feed: UIViewController,
-        landing: (any CardCloseLanding)?, markerOrigin: TextRevealOrigin
-    ) {
-        // ⚠️ ONCE. A swipe asks twice — when the grab claims the screen, and
-        // again when the pop it triggers asks for an animator — and the
-        // adoption below is a MOVE, so a second one would put the two tiles
-        // back where they started.
-        var hasPrepared = false
-        // ⚠️ `slide` WEAKLY, and the strong capture it replaces was a retain
-        // cycle: the driver owns this closure and the closure writes back
-        // through the driver, so every card close ever staged kept its driver
-        // alive for the life of the process — one per opened post, and
-        // invisible to every census, because what leaks is a DRIVER and nothing
-        // counts those. `cardClose = nil` could not help: the cycle holds the
-        // object whether or not this controller still points at it.
-        slide.prepareForDismissal = { [weak self, weak feed, weak landing, weak slide] axis in
-            guard let self, let feed, let slide else { return }
-            // ⚠️ A HERO'S POP IS FORWARDED BEFORE ANY OF THIS IS READ, so
-            // staging here for a media post would only conceal a marker the
-            // flight is about to land on — on the axes the hero still claims
-            // (`heroClaimsAxis`; downward onto a place page it claims none).
-            guard slide.closeCarriesCard(of: feed, axis: axis)
-            else {
-                slide.revealGeometry = nil
-                return
-            }
-            switch Self.closeTarget(axis: axis, hasLanding: landing != nil) {
-            case .marker:
-                // ⚠️ NOT LATCHED, unlike the card below. The origin re-derives
-                // the marker's rect at ask time, so rebuilding is both free and
-                // more correct than remembering one — the map may have moved.
-                // No will-close hook: the feed's chevron brings the dock back
-                // itself (`revealDockBeforePop`), and the filter bars come back
-                // from `viewWillAppear`.
-                slide.revealGeometry = self.makeRevealGeometry(feed, markerOrigin, nil)
-                return
-            case .placeCard:
-                break
-            }
-            guard !hasPrepared, let landing else { return }
-            // ⚠️ ONLY FOR A CLOSE THAT CARRIES A CARD. This runs for every
-            // dismissal including a hero's, and the staging below CONCEALS a
-            // tile — a flight landing on a hidden tile reads as no animation
-            // at all. Asked of the same authority both grabs gate on, so the
-            // three can never disagree about what the post is.
-            guard slide.closeCarriesCard(of: feed, axis: axis) else { return }
-            hasPrepared = true
-            slide.revealGeometry = landing.cardCloseGeometry(dismissing: feed)
-        }
-    }
-
-    /// The same two landings, armed through the SHARED helper
-    /// (`armAsCardCloseAlongsideFlight`) — For You's, the profile's and the
-    /// place page's own close — instead of `armMapOwnCardClose`. The DEFAULT
-    /// (it was opt-in behind a launch argument, #286);
-    /// `-maps-own-card-close` swaps the map's own copy back in.
+    /// The map's two landings, armed through the SHARED helper
+    /// (`armAsCardCloseAlongsideFlight`) — the close For You, a profile and
+    /// the place page's own tiles make.
     ///
     /// What the helper brings is the shared rules: both axes, arbitrated
     /// against the hero grab, the reset, and a staging asked ONLY for a close
-    /// that carries a card. What stays here is only the landing, and it is the
-    /// one the map has today — the marker's window, or the place page's card.
+    /// that carries a card. What stays here is only the landing: the marker's
+    /// window, or the place page's card.
     ///
     /// ⚠️ RESTAGED ON EVERY ATTEMPT (`restagesOnEveryAttempt`), not once.
     /// The helper's latch assumes one landing per presentation; this screen
@@ -3570,13 +3462,18 @@ extension MapsViewController: MKMapViewDelegate {
     ///   ADOPTS a tile (a move that undoes itself if repeated) — and handed
     ///   back on a later vertical attempt, even after a marker attempt
     ///   replaced it in between.
-    private func armUnifiedCardClose(
+    private func armCardClose(
         _ slide: InteractiveSlideDismissal, feed: UIViewController,
         landing: (any CardCloseLanding)?, markerOrigin: TextRevealOrigin
     ) {
         var placeCardGeometry: RevealGeometry?
-        // `slide` WEAKLY — the driver owns this closure (see the map-own
-        // staging's note on the cycle this avoids).
+        // ⚠️ `slide` WEAKLY: the driver owns this closure and the closure
+        // writes back through the driver, so a strong capture is a retain
+        // cycle — every card close ever staged would keep its driver alive
+        // for the life of the process, one per opened post, and invisible to
+        // every census, because what leaks is a DRIVER and nothing counts
+        // those. `cardClose = nil` cannot help: the cycle holds the object
+        // whether or not this controller still points at it.
         slide.armAsCardCloseAlongsideFlight(
             on: feed, restagesOnEveryAttempt: true
         ) { [weak self, weak landing, weak slide] feed, axis in
@@ -3594,7 +3491,7 @@ extension MapsViewController: MKMapViewDelegate {
             }
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-grab-log") {
-                print("[card-close] unified stage axis=\(axis)"
+                print("[card-close] stage axis=\(axis)"
                       + " geometry=\(slide.revealGeometry != nil)")
             }
             #endif
@@ -3602,7 +3499,7 @@ extension MapsViewController: MKMapViewDelegate {
         }
     }
 
-    /// `-text-swipe-demo`, shared by both arming paths.
+    /// `-text-swipe-demo`: drives the armed close from a script.
     private func debugScriptCardCloseIfRequested(_ slide: InteractiveSlideDismissal) {
         #if DEBUG
         // `-text-swipe-demo <peak>` (+ `-zoom-demo-grab-vertical` for the
