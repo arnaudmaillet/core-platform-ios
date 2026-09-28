@@ -225,6 +225,30 @@ struct ProfileRepositoryTests {
         #expect(try await followedBy.relationship(for: ProfileID("prof-3")) == .other(isFollowing: false, isBlocked: false))
     }
 
+    /// The follow affordance's read keeps BOTH directions of the edge: a
+    /// mutual is a friend (drawn apart from a one-way follow), and someone who
+    /// follows the viewer is still followable — following back makes a friend.
+    @Test(arguments: [
+        (SocialGraph_V1_RelationStatus.none, FollowRelation.notFollowing),
+        (.following, .following),
+        (.mutual, .mutual),
+        (.followedBy, .followedBy),
+        (.blocking, .blocked),
+        // Inbound blocks are never surfaced.
+        (.blockedBy, .notFollowing),
+    ])
+    func followRelationKeepsBothDirections(
+        _ status: SocialGraph_V1_RelationStatus, _ expected: FollowRelation
+    ) async throws {
+        let (repository, _) = makeRepositoryWithGraph(status: status)
+        #expect(try await repository.followRelation(to: ProfileID("prof-3")) == expected)
+    }
+
+    @Test func theViewersOwnFollowRelationIsViewer() async throws {
+        let (repository, _) = makeRepositoryWithGraph(status: .mutual)
+        #expect(try await repository.followRelation(to: ProfileID(MockSocialDataset.viewerProfileID)) == .viewer)
+    }
+
     @Test func readsBlockStatus() async throws {
         // `.blocking` is the viewer's OUTBOUND block — the state the overflow
         // menu reads to offer Unblock.

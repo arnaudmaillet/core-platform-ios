@@ -520,7 +520,7 @@ final class TextPostComposerViewController: UIViewController {
         applyLeadingItems(animated: true)
 
         // Your own post: there is nobody to follow.
-        authorPill.setFollowHidden(true)
+        authorPill.setFollowBadge(.none)
         authorPill.setOverMedia(false)
         authorPill.setAuthor(model, pipeline: imagePipeline)
         authorPill.onAuthorTapped = { [weak self] id in

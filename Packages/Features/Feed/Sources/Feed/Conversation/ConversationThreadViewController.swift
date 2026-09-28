@@ -390,7 +390,7 @@ final class ConversationThreadViewController: UIViewController {
         // `title` still feeds back labels; the centre stays empty.
         navigationItem.titleView = UIView()
 
-        peerPill.setFollowHidden(true)
+        peerPill.setFollowBadge(.none)
         peerPill.setOverMedia(false)
         peerPill.onAuthorTapped = { [weak self] _ in self?.driver.didTapIdentity() }
         var items = [UIBarButtonItem(customView: peerPill)]
