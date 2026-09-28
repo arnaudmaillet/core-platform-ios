@@ -14,13 +14,15 @@ import UIKit
 @MainActor
 struct SnapAuthorFollowTests {
     private static func feed(
-        graph: FollowGraphStub? = FollowGraphStub(), readable: Bool = true
+        graph: FollowGraphStub? = FollowGraphStub(), readable: Bool = true,
+        events: FollowGraphEvents? = nil
     ) -> SnapFeedViewController {
         let feed = SnapFeedViewController(
             viewModel: FeedViewModel(repository: FollowFeedProvider()),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             socialGraph: graph,
-            followRelations: readable ? graph : nil
+            followRelations: readable ? graph : nil,
+            followEvents: events
         )
         let nav = UINavigationController(rootViewController: UIViewController())
         nav.pushViewController(feed, animated: false)
@@ -147,6 +149,46 @@ struct SnapAuthorFollowTests {
             try await Task.sleep(for: .milliseconds(5))
         }
         #expect(try Self.pill(feed).offersFollow)
+    }
+
+    /// A follow accepted ELSEWHERE — on the author's own profile — takes the
+    /// "+" away, and an unfollow elsewhere brings it back: the pill and the
+    /// profile's button never disagree.
+    @Test func aFollowOrUnfollowMadeElsewhereReachesThePill() async throws {
+        let events = FollowGraphEvents()
+        let feed = Self.feed(events: events)
+        feed.setFollowRelation(.notFollowing, for: ProfileID("prof-2"))
+        feed.showAuthor(Self.model(authorID: "prof-2"))
+        #expect(try Self.pill(feed).offersFollow)
+
+        events.publish(FollowChange(profileID: ProfileID("prof-2"), isFollowing: true))
+        for _ in 0..<200 where (try? Self.pill(feed).offersFollow) == true {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(try Self.pill(feed).offersFollow == false)
+
+        events.publish(FollowChange(profileID: ProfileID("prof-2"), isFollowing: false))
+        for _ in 0..<200 where (try? Self.pill(feed).offersFollow) == false {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(try Self.pill(feed).offersFollow)
+    }
+
+    /// An unfollow does not make the viewer themself, or someone they block,
+    /// followable.
+    @Test func anUnfollowElsewhereLeavesTheViewerAndTheBlockedAlone() async throws {
+        let events = FollowGraphEvents()
+        let feed = Self.feed(events: events)
+        feed.setFollowRelation(.viewer, for: ProfileID("me"))
+        feed.setFollowRelation(.blocked, for: ProfileID("prof-3"))
+
+        events.publish(FollowChange(profileID: ProfileID("me"), isFollowing: false))
+        events.publish(FollowChange(profileID: ProfileID("prof-3"), isFollowing: false))
+        // One main-queue turn delivers both (publication order).
+        try await Task.sleep(for: .milliseconds(50))
+
+        #expect(feed.followRelationsByAuthor[ProfileID("me")] == .viewer)
+        #expect(feed.followRelationsByAuthor[ProfileID("prof-3")] == .blocked)
     }
 
     /// Nothing to follow THROUGH, nothing offered — an action that cannot act

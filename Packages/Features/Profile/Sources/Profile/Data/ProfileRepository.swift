@@ -263,6 +263,9 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileViewe
     /// Upper bound on edges sampled for the fallback count; beyond it the count
     /// is reported as `atLeast(limit)` rather than paginating the whole graph.
     private let edgeSampleLimit: Int32
+    /// Where an accepted follow or unfollow is announced — see
+    /// `FollowGraphEvents`. Nil announces nothing.
+    private let followEvents: FollowGraphEvents?
     private let logger = Logger(subsystem: "cn.wynn.core-platform-ios", category: "profile")
 
     private var viewerProfileID: ProfileID?
@@ -272,8 +275,10 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileViewe
         counterClient: any Counter_V1_CounterServiceClientInterface,
         socialGraphClient: any SocialGraph_V1_SocialGraphServiceClientInterface,
         authSession: any AuthSessionProviding,
-        edgeSampleLimit: Int32 = 200
+        edgeSampleLimit: Int32 = 200,
+        followEvents: FollowGraphEvents? = nil
     ) {
+        self.followEvents = followEvents
         self.profileClient = profileClient
         self.counterClient = counterClient
         self.socialGraphClient = socialGraphClient
@@ -345,6 +350,7 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileViewe
             request.targetID = profileID.rawValue
             try Self.ensureAccepted(await socialGraphClient.unfollow(request: request, headers: [:]))
         }
+        followEvents?.publish(FollowChange(profileID: profileID, isFollowing: following))
     }
 
     public func setBlocked(_ blocked: Bool, for profileID: ProfileID) async throws {

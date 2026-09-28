@@ -53,6 +53,10 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     /// pill offers its "+" only to someone the viewer does not follow yet, and
     /// follows them through `socialGraph`. Nil (or a nil `socialGraph`): no "+".
     private let followRelations: (any SocialGraphReading)?
+    /// The app's one follow-change channel, so the pill's "+" agrees with a
+    /// follow or unfollow made on any other surface. Nil: each feed keeps the
+    /// answers it asked for, and re-asks on a return.
+    private let followEvents: FollowGraphEvents?
     /// The Text Post page's drafts. The app hands in its one store (built
     /// once in `AppContainer`, charter P4); a test hands in one of its own.
     /// Nil is the fallback for a caller that has neither, and it costs a file
@@ -79,6 +83,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         reporting: (any ContentReporting)? = nil,
         socialGraph: (any SocialGraphWriting)? = nil,
         followRelations: (any SocialGraphReading)? = nil,
+        followEvents: FollowGraphEvents? = nil,
         /// Reads the numbers the timeline does not carry, so a card can show
         /// reach. Optional: without it the cards simply hide their counter,
         /// which is what they did before.
@@ -94,6 +99,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         self.reporting = reporting
         self.socialGraph = socialGraph
         self.followRelations = followRelations
+        self.followEvents = followEvents
         self.makeProfileSwitcher = makeProfileSwitcher
         self.repository = repository
         self.engagementProvider = engagementProvider
@@ -1170,6 +1176,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             // profile's Follow button writes through.
             socialGraph: socialGraph,
             followRelations: followRelations,
+            followEvents: followEvents,
             soundProvider: soundProvider,
             useSound: useSound,
             // The sound sheet's grid opens a NEW feed of the posts with that

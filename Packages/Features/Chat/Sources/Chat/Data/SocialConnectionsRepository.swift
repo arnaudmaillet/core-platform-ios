@@ -108,6 +108,11 @@ public actor SocialConnectionsRepository: SuggestionsProviding, PeerRelationProv
     /// The viewer's own follow set, cached for the session: it answers the
     /// request partition on every inbox reload and seeds every ranking.
     private var followingCache: Set<ProfileID>?
+    /// Announces this repository's own accepted follows, and keeps
+    /// `followingCache` honest about everyone else's (a profile's button, a
+    /// feed's "+") — see `FollowGraphEvents`. Registered with the cache.
+    private let followEvents: FollowGraphEvents?
+    private var followSubscription: FollowGraphSubscription?
     private var profileCache: [ProfileID: Profile_V1_ProfileView] = [:]
 
     /// `pageSize` carries no default: a default argument on an actor
@@ -117,12 +122,14 @@ public actor SocialConnectionsRepository: SuggestionsProviding, PeerRelationProv
         socialGraphClient: any SocialGraph_V1_SocialGraphServiceClientInterface,
         profileClient: any Profile_V1_ProfileServiceClientInterface,
         viewer: any ViewerIdentityProviding,
-        pageSize: Int32
+        pageSize: Int32,
+        followEvents: FollowGraphEvents? = nil
     ) {
         self.socialGraphClient = socialGraphClient
         self.profileClient = profileClient
         self.viewer = viewer
         self.pageSize = pageSize
+        self.followEvents = followEvents
     }
 
     // MARK: - PeerRelationProviding
@@ -183,6 +190,7 @@ public actor SocialConnectionsRepository: SuggestionsProviding, PeerRelationProv
             throw SuggestionsError.transport(message: error.message ?? "code \(error.code)")
         }
         followingCache?.insert(profileID)
+        followEvents?.publish(FollowChange(profileID: profileID, isFollowing: true))
     }
 
     public func unfollow(_ profileID: ProfileID) async throws {
@@ -195,12 +203,26 @@ public actor SocialConnectionsRepository: SuggestionsProviding, PeerRelationProv
             throw SuggestionsError.transport(message: error.message ?? "code \(error.code)")
         }
         followingCache?.remove(profileID)
+        followEvents?.publish(FollowChange(profileID: profileID, isFollowing: false))
+    }
+
+    private func fold(_ change: FollowChange) {
+        if change.isFollowing {
+            followingCache?.insert(change.profileID)
+        } else {
+            followingCache?.remove(change.profileID)
+        }
     }
 
     // MARK: - Edges
 
     private func viewerFollowing() async throws -> Set<ProfileID> {
         if let followingCache { return followingCache }
+        if followSubscription == nil {
+            followSubscription = followEvents?.subscribe { [weak self] change in
+                Task { await self?.fold(change) }
+            }
+        }
         let edges = try await following(of: try await viewer.viewerProfileID())
         followingCache = edges
         return edges
