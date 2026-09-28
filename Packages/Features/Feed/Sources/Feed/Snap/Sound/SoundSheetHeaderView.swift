@@ -6,7 +6,9 @@ import UIKit
 /// of the sheet's native TOOLBAR, and the grid's door is "View all" under its
 /// first row (`SoundSheetMoreCell`).
 ///
-/// Laid out inside the section's side insets, as the first row's header.
+/// Laid out inside the section's side insets, as the first row's header — one
+/// gutter from the sheet's edge, on the tiles' left edge — at the ABSOLUTE
+/// height `fittingHeight` computes.
 final class SoundSheetHeaderView: UICollectionReusableView {
     static let artworkSide: CGFloat = 96
 
@@ -113,6 +115,22 @@ final class SoundSheetHeaderView: UICollectionReusableView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// How tall a header `width` wide is with these lines, at the CURRENT
+    /// trait environment's text size (call it inside `performAsCurrent`) —
+    /// what the sound sheet's collapsed detent counts, and what its layout
+    /// then gives the header, so the two cannot disagree.
+    static func fittingHeight(
+        width: CGFloat, title: String, subtitle: String, meta: String, canPreview: Bool
+    ) -> CGFloat {
+        let header = SoundSheetHeaderView(frame: CGRect(x: 0, y: 0, width: width, height: 200))
+        header.configure(title: title, subtitle: subtitle, meta: meta, canPreview: canPreview)
+        return header.systemLayoutSizeFitting(
+            CGSize(width: width, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        ).height.rounded(.up)
+    }
 
     func configure(title: String, subtitle: String, meta: String, canPreview: Bool) {
         titleLabel.text = title

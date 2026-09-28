@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreModels
 import CoreNavigation
+import CoreStorage
 import DesignSystem
 import FeedInterface
 import MediaCore
@@ -9,21 +10,26 @@ import UIKit
 
 /// The sound a post is set to, opened from the attribution at the foot of
 /// the feed: what it is, a listen, the posts set to it, and — in the sheet's
-/// native toolbar — "Use this sound" and share.
+/// native toolbar — "Use this sound", save and share.
 ///
 /// ```
 ///  ┌──────────────────────────────────────┐
 ///  │ ▔▔                                   │
-///  │  ╭────╮  Veridis Quo                 │  the round artwork = play/pause
-///  │  │ ▶︎  │  Daft Punk                   │  (it turns while the sound plays)
-///  │  ╰────╯  0:30 · 7 posts              │
-///  │ ▢♪Original ▢Watching ▢               │  the first row
+///  │╭────╮  Veridis Quo                   │  the round artwork = play/pause
+///  ││ ▶︎  │  Daft Punk                     │  (it turns while the sound plays)
+///  │╰────╯  0:30 · 7 posts                │
+///  │▢♪Original ▢Watching ▢                │  the first row
 ///  │         View all 7 posts ⌄           │
-///  │ ░(Use this sound)░░░░░░░░░░░░░(↑)░░░ │  ← collapsed detent ends here:
+///  │(   Use this sound         )(🔖)(↑)   │  ← collapsed detent ends here:
 ///  ├──────────────────────────────────────┤    the toolbar, row 2 under it
-///  │ ▢ ▢ ▢                                │  large: the grid, whole
+///  │▢ ▢ ▢                                 │  large: the grid, whole
 ///  └──────────────────────────────────────┘
 /// ```
+///
+/// **ONE GUTTER** (`gutter`) is the sheet's side margin, the gap between tiles
+/// and the gap between rows, and the header stands on it too: sound, tiles and
+/// "View all" share one left edge. The tiles' corners are CONCENTRIC with the
+/// sheet's (`SoundSheetTileCell`).
 ///
 /// **PRESENTED INSIDE A NAVIGATION CONTROLLER** (`wrappedInSheet()`), for its
 /// toolbar alone — the bar is hidden. The actions are bar items, so they are
@@ -31,10 +37,22 @@ import UIKit
 /// scrolls on UNDER them behind the system's scroll-edge effect. Nothing here
 /// writes an alpha on that chrome (see memory `native-chrome-uikit-only`).
 ///
-/// **THE COLLAPSED DETENT IS MEASURED, NOT CHOSEN** (`collapsedDetentHeight`):
-/// the sound, the grid's first row and "View all", then the toolbar's band —
-/// read off the laid-out grid and the view's bottom safe area, first before
-/// the sheet has a window and again once it has one.
+/// **THE COLLAPSED DETENT IS COMPUTED, NEVER MEASURED OFF THE LIVE SHEET**
+/// (`collapsedDetentHeight`): the sound's header, the first row and "View
+/// all" are pure arithmetic on the sheet's WIDTH and the text size, plus the
+/// toolbar's band — nothing that depends on how tall the sheet is right now.
+/// So the answer is the same at every visit to collapsed, and it is asked
+/// again (`invalidateDetents`) only when an INPUT changes: the post count
+/// crossing a row, the text size, the width, the band once known.
+///
+/// ⚠️ **NEVER FROM A LAYOUT CALLBACK.** #296 re-measured the fold in
+/// `viewDidLayoutSubviews` and invalidated the detents inside `animateChanges`
+/// when it moved. A drag from the grabber lays the sheet out on every frame,
+/// the fold read there moved with the sheet (the "View all" row coming back
+/// mid-flight, a safe area caught between detents), and each re-resolve laid
+/// the sheet out again: a stack overflow (`EXC_BAD_ACCESS` code 2 in
+/// `invalidateDetents`), and between crashes a collapsed height that drifted
+/// from one visit to the next.
 ///
 /// **THE FEED STAYS ALIVE UNDER THE SHEET, AT EVERY DETENT.** Neither detent
 /// pauses the clip behind: a detent is where the sheet sits, not a choice to
@@ -121,11 +139,18 @@ final class SoundSheetViewController: UIViewController {
 
     static let collapsedDetent = UISheetPresentationController.Detent.Identifier("sound.collapsed")
     static let columns = 3
-    private static let topInset: CGFloat = 24
-    private static let tileSpacing: CGFloat = 2
+    /// Under the grabber, before the sound starts.
+    static let topInset: CGFloat = 24
+    /// THE gutter: the sheet's side margin, between tiles, between rows — the
+    /// Upload picker's rule (`Spacing.sm` both ways), so the grid reads as
+    /// tiles on the sheet rather than a wall with a frame around it.
+    static let gutter: CGFloat = Spacing.sm
     /// Between the fold — "View all", or the first row when there is nothing
     /// more — and the toolbar's band.
     static let foldGap: CGFloat = Spacing.sm
+    /// Under the first row when there is no "View all": a little more than a
+    /// gutter, so the row does not sit on the bar.
+    static let singleRowFoldGap: CGFloat = Spacing.lg
 
     private let sound: PostSound
     private let authorHandle: String
@@ -133,14 +158,29 @@ final class SoundSheetViewController: UIViewController {
     private(set) var tiles: [Tile]
     private var tileByID: [PostID: Tile]
     private let imagePipeline: ImagePipeline
+    private let savedSounds: SavedSoundStore
 
     private lazy var collectionView = UICollectionView(frame: .zero, collectionViewLayout: makeLayout())
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
     private weak var header: SoundSheetHeaderView?
     private weak var shareItem: UIBarButtonItem?
+    private weak var useItem: UIBarButtonItem?
+    private(set) weak var bookmarkItem: UIBarButtonItem?
 
-    /// The collapsed detent's value, once measured (`refreshCollapsedHeight`).
+    /// What the collapsed detent is made of, and its value (`collapsedHeight`)
+    /// — set only by `refreshCollapsedMetrics`, never by a layout pass.
+    private(set) var collapsedMetrics: CollapsedMetrics?
     private(set) var collapsedHeight: CGFloat?
+    /// How often the collapsed detent was re-asked — what a test reads to
+    /// prove that laying the sheet out never does it.
+    private(set) var detentInvalidations = 0
+    /// The sheet's width, the one input of the grid's geometry.
+    private var sheetWidth: CGFloat?
+    /// The toolbar's band above the home indicator, as the sheet's safe area
+    /// last reported it (`viewIsAppearing`). Kept across sheets: it is the
+    /// bar's, not this sound's, so the second sheet rises at the exact height.
+    private static var measuredToolbarBand: CGFloat?
+    private var headerHeightCache: (key: String, height: CGFloat)?
     private(set) var isExpanded = false
     private var isPreviewing = false
     private var isCovering = false
@@ -154,7 +194,8 @@ final class SoundSheetViewController: UIViewController {
         authorHandle: String,
         fallbackArtworkURL: URL?,
         tiles: [Tile],
-        imagePipeline: ImagePipeline
+        imagePipeline: ImagePipeline,
+        savedSounds: SavedSoundStore = SavedSoundStore()
     ) {
         self.sound = sound
         self.authorHandle = authorHandle
@@ -162,6 +203,7 @@ final class SoundSheetViewController: UIViewController {
         self.tiles = tiles
         self.tileByID = Dictionary(tiles.map { ($0.postID, $0) }, uniquingKeysWith: { first, _ in first })
         self.imagePipeline = imagePipeline
+        self.savedSounds = savedSounds
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -181,6 +223,9 @@ final class SoundSheetViewController: UIViewController {
         navigation.modalPresentationStyle = .pageSheet
         if let sheet = navigation.sheetPresentationController {
             sheet.detents = [
+                // ⚠️ READS A STORED ANSWER, NOTHING ELSE: a resolver that lays
+                // out or loads a view runs inside the sheet's own resolution
+                // (memory `upload-media-picker`).
                 .custom(identifier: Self.collapsedDetent) { [weak self] context in
                     min(self?.collapsedHeight ?? 420, context.maximumDetentValue)
                 },
@@ -217,22 +262,49 @@ final class SoundSheetViewController: UIViewController {
         ])
         // The toolbar's scroll-edge effect reads THIS scroll view.
         setContentScrollView(collectionView, for: .bottom)
+        // Before the first layout and before the sheet asks its detent: the
+        // presenter's window gives the width the sheet will have.
+        sheetWidth = presentingViewController?.view.window?.bounds.width ?? view.bounds.width
+        refreshCollapsedMetrics(reason: "load")
         toolbarItems = makeToolbarItems()
         configureDataSource()
-        measureBeforeWindow()
+        // A text size change moves the header and so the fold: an input.
+        registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) {
+            (controller: SoundSheetViewController, _: UITraitCollection) in
+            controller.refreshCollapsedMetrics(reason: "text size")
+        }
     }
 
     override func viewIsAppearing(_ animated: Bool) {
         super.viewIsAppearing(animated)
-        // In a window now: the toolbar's real band is known.
-        refreshCollapsedHeight()
+        // In a window now: the real width, and the toolbar's real band — the
+        // bottom safe area less the window's. Both are the BAR's and the
+        // screen's, the same at any detent, so reading them here converges:
+        // at most one correction, the first time a sheet is ever shown (the
+        // band is kept for the next ones).
+        if let window = view.window {
+            if view.bounds.width > 0 { sheetWidth = view.bounds.width }
+            let band = Self.toolbarBand(
+                bottomSafeArea: view.safeAreaInsets.bottom, windowBottomSafeArea: window.safeAreaInsets.bottom
+            )
+            // No band is a safe area caught without its bar, not a bar of none.
+            if band > 0 { Self.measuredToolbarBand = band }
+        }
+        refreshCollapsedMetrics(reason: "appearing")
     }
 
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        // A text size change moves the fold; so would a different toolbar.
-        refreshCollapsedHeight()
+    override func viewWillTransition(to size: CGSize, with coordinator: any UIViewControllerTransitionCoordinator) {
+        super.viewWillTransition(to: size, with: coordinator)
+        // A new width is a new grid — an input, not a layout pass.
+        coordinator.animate(alongsideTransition: nil) { [weak self] _ in
+            guard let self, view.bounds.width > 0 else { return }
+            sheetWidth = view.bounds.width
+            refreshCollapsedMetrics(reason: "size")
+        }
     }
+
+    // ⚠️ NO `viewDidLayoutSubviews` HERE, DELIBERATELY — see the type's note.
+    // The collapsed height is never re-read from a layout.
 
     // ⚠️ NO `preferredCornerRadius`: UIKit's own. Setting the device's radius
     // once the sheet had appeared made the corners pop from one value to the
@@ -269,9 +341,21 @@ final class SoundSheetViewController: UIViewController {
 
     // MARK: - Toolbar
 
-    /// "Use this sound" (prominent, leading) and share (trailing) — native bar
-    /// items, drawn in UIKit's glass. Without a way to use the sound, share
-    /// keeps its trailing place alone.
+    /// `[Use this sound ——————][🔖][↑]`: "Use this sound" takes every point
+    /// the two trailing bubbles leave; save and share are a bubble EACH — the
+    /// zero-width fixed spaces are what keep UIKit from joining them in one
+    /// shared glass platter. Without a way to use the sound, save and share
+    /// keep the trailing edge.
+    ///
+    /// **"USE THIS SOUND" FILLS THE BAR BY AUTO LAYOUT, NOT BY ARITHMETIC.**
+    /// There is no flexible-width bar item, and a `.prominent` title item's
+    /// `width` is IGNORED on iOS 27 (set to 266, drawn at its title's ~144).
+    /// A custom view that hugs nothing and asks, at the lowest priority, for
+    /// more room than any bar has is stretched by the bar to exactly what the
+    /// other items leave — measured on iOS 27 — whatever the width, the text
+    /// size or the OS's bar margins. Its own `.prominentGlass()` capsule is
+    /// its background, so the item hides the shared one (no bubble in a
+    /// bubble).
     private func makeToolbarItems() -> [UIBarButtonItem] {
         let share = UIBarButtonItem(
             systemItem: .action,
@@ -279,15 +363,81 @@ final class SoundSheetViewController: UIViewController {
         )
         share.accessibilityLabel = "Share sound"
         shareItem = share
-        guard onUseSound != nil else { return [.flexibleSpace(), share] }
-        let use = UIBarButtonItem(
-            title: "Use this sound",
-            primaryAction: UIAction { [weak self] _ in self?.useSound() }
-        )
-        use.style = .prominent
-        use.tintColor = .systemRed
-        return [use, .flexibleSpace(), share]
+        // ⚠️ AN ACTION WITHOUT AN IMAGE, the glyph on the ITEM: an action's
+        // image is re-applied to its item when it fires, and put the
+        // "bookmark" outline back over the fill just set (measured: the fill
+        // flashed during the press and was gone at rest).
+        let bookmark = UIBarButtonItem(primaryAction: UIAction { [weak self] _ in self?.toggleSaved() })
+        bookmarkItem = bookmark
+        refreshBookmark()
+        let trailing: [UIBarButtonItem] = [bookmark, .fixedSpace(), share]
+        guard onUseSound != nil else { return [.flexibleSpace()] + trailing }
+        let use = UIBarButtonItem(customView: makeUseButton())
+        use.hidesSharedBackground = true
+        useItem = use
+        return [use, .fixedSpace()] + trailing
     }
+
+    /// The prominent red capsule, as tall as the bar's bubbles.
+    private func makeUseButton() -> UIButton {
+        var configuration = UIButton.Configuration.prominentGlass()
+        configuration.title = "Use this sound"
+        configuration.baseBackgroundColor = .systemRed
+        configuration.baseForegroundColor = .white
+        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
+            var attributes = attributes
+            attributes.font = UIFont.preferredFont(forTextStyle: .body).withWeight(.semibold)
+            return attributes
+        }
+        let button = UIButton(configuration: configuration, primaryAction: UIAction { [weak self] _ in
+            self?.useSound()
+        })
+        button.accessibilityIdentifier = "sound.use"
+        // Hugs nothing, and wants everything — at the lowest priorities, so
+        // the bar's own layout (the bubbles, their gaps, its margins) wins
+        // and this takes the rest.
+        button.setContentHuggingPriority(.init(1), for: .horizontal)
+        let fill = button.widthAnchor.constraint(equalToConstant: 10_000)
+        fill.priority = .init(2)
+        // 999, never required: the bar's first pass pins its item wrapper to
+        // the raw intrinsic size (`SnapNavControls.makeCircularBarButton`).
+        let height = button.heightAnchor.constraint(equalToConstant: Self.barBubbleHeight)
+        height.priority = .init(999)
+        NSLayoutConstraint.activate([fill, height])
+        return button
+    }
+
+    /// The bar's glass bubbles' height (bookmark, share): 48, measured on
+    /// iOS 27 (iPhone 18 Pro) — at 44 the capsule stood visibly shorter.
+    static let barBubbleHeight: CGFloat = 48
+
+    /// The "Use this sound" control — what a test reads.
+    var useButton: UIButton? { useItem?.customView as? UIButton }
+
+    // MARK: - Saved
+
+    /// Saves the sound, or unsaves it; the glyph and its label follow.
+    private func toggleSaved() {
+        let saved = savedSounds.toggle(sound.id)
+        refreshBookmark()
+        trace("saved \(sound.id): \(saved)")
+    }
+
+    /// The bookmark's glyph for the sound's state — what a test reads.
+    var bookmarkSymbol: String { savedSounds.isSaved(sound.id) ? "bookmark.fill" : "bookmark" }
+
+    private func refreshBookmark() {
+        let saved = savedSounds.isSaved(sound.id)
+        bookmarkItem?.image = UIImage(systemName: bookmarkSymbol)
+        // The label follows the state, like the feed's: "Save" and "Saved"
+        // are different offers to a reader who cannot see the fill.
+        bookmarkItem?.accessibilityLabel = saved ? "Sound saved" : "Save sound"
+    }
+
+    #if DEBUG
+    /// Presses the save item, as a tap would.
+    func debugToggleSaved() { toggleSaved() }
+    #endif
 
     // MARK: - Layout
 
@@ -295,11 +445,16 @@ final class SoundSheetViewController: UIViewController {
         UICollectionViewCompositionalLayout { [weak self] index, environment in
             switch self?.dataSource?.sectionIdentifier(for: index) ?? .firstRow {
             case .firstRow:
-                // Row two follows at the grid's own spacing once "View all"
-                // has left (large).
-                let section = Self.gridSection(environment, bottom: Self.tileSpacing)
+                // Row two follows one gutter down once "View all" has left
+                // (large). ⚠️ The header is ABSOLUTE, at the height the
+                // collapsed detent was computed with — a self-sizing header
+                // settles after an estimate, and the fold would move with it.
+                let section = Self.gridSection(environment, bottom: Self.gutter)
                 let header = NSCollectionLayoutBoundarySupplementaryItem(
-                    layoutSize: .init(widthDimension: .fractionalWidth(1), heightDimension: .estimated(140)),
+                    layoutSize: .init(
+                        widthDimension: .fractionalWidth(1),
+                        heightDimension: .absolute(self?.collapsedMetrics?.headerHeight ?? 112)
+                    ),
                     elementKind: UICollectionView.elementKindSectionHeader, alignment: .top
                 )
                 section.boundarySupplementaryItems = [header]
@@ -312,7 +467,7 @@ final class SoundSheetViewController: UIViewController {
                     group: .horizontal(layoutSize: size, subitems: [NSCollectionLayoutItem(layoutSize: size)])
                 )
                 section.contentInsets = .init(
-                    top: Spacing.xs, leading: Spacing.lg, bottom: Self.foldGap, trailing: Spacing.lg
+                    top: 0, leading: Self.gutter, bottom: Self.foldGap, trailing: Self.gutter
                 )
                 return section
             case .rest:
@@ -321,25 +476,32 @@ final class SoundSheetViewController: UIViewController {
         }
     }
 
-    /// Three columns of 3:4 tiles inside the sheet's side margins.
+    /// Three columns of 3:4 tiles, one gutter from the sheet's sides and from
+    /// each other.
     private static func gridSection(
         _ environment: NSCollectionLayoutEnvironment, bottom: CGFloat
     ) -> NSCollectionLayoutSection {
         let item = NSCollectionLayoutItem(layoutSize: .init(
             widthDimension: .fractionalWidth(1 / CGFloat(columns)), heightDimension: .fractionalHeight(1)
         ))
-        let columnWidth = (environment.container.effectiveContentSize.width - 2 * Spacing.lg
-            - CGFloat(columns - 1) * tileSpacing) / CGFloat(columns)
         let group = NSCollectionLayoutGroup.horizontal(
             layoutSize: .init(widthDimension: .fractionalWidth(1),
-                              heightDimension: .absolute((columnWidth * 4 / 3).rounded())),
+                              heightDimension: .absolute(tileHeight(width: environment.container.effectiveContentSize.width))),
             repeatingSubitem: item, count: columns
         )
-        group.interItemSpacing = .fixed(tileSpacing)
+        group.interItemSpacing = .fixed(gutter)
         let section = NSCollectionLayoutSection(group: group)
-        section.interGroupSpacing = tileSpacing
-        section.contentInsets = .init(top: 0, leading: Spacing.lg, bottom: bottom, trailing: Spacing.lg)
+        section.interGroupSpacing = gutter
+        section.contentInsets = .init(top: 0, leading: gutter, bottom: bottom, trailing: gutter)
         return section
+    }
+
+    /// A tile's height on a sheet `width` wide: three columns and four
+    /// gutters across, each tile 3:4. What the grid lays out AND what the
+    /// collapsed detent counts — one function, so they cannot disagree.
+    static func tileHeight(width: CGFloat) -> CGFloat {
+        let column = (width - CGFloat(columns + 1) * gutter) / CGFloat(columns)
+        return (max(0, column) * 4 / 3).rounded()
     }
 
     private func configureDataSource() {
@@ -403,6 +565,9 @@ final class SoundSheetViewController: UIViewController {
         if snapshot.indexOfSection(.more) != nil { snapshot.reconfigureItems([.more]) }
         dataSource.apply(snapshot, animatingDifferences: view.window != nil)
         if !isPreviewing { header?.setMeta(Self.meta(duration: sound.duration, posts: tiles.count)) }
+        // A count crossing the first row adds or removes "View all": the one
+        // content change that moves the fold.
+        refreshCollapsedMetrics(reason: "tiles")
     }
 
     private func configure(_ header: SoundSheetHeaderView) {
@@ -424,95 +589,150 @@ final class SoundSheetViewController: UIViewController {
 
     // MARK: - Collapsed detent
 
-    /// The collapsed detent's value: the sheet down to `foldBottom` (from its
-    /// top edge — the sound, the first row, "View all" and the gap under it),
-    /// then the toolbar's band, which is the view's bottom safe area less the
-    /// window's.
+    /// Everything the collapsed height is made of. Each is an INPUT — the
+    /// sheet's width, the header at the text size, whether "View all" is
+    /// there, the toolbar's band — and none depends on how tall the sheet is.
+    struct CollapsedMetrics: Equatable {
+        var width: CGFloat
+        var headerHeight: CGFloat
+        var hasMore: Bool
+        var toolbarBand: CGFloat
+    }
+
+    /// The collapsed detent's value: the fold (`foldBottom`), then the
+    /// toolbar's band.
     ///
     /// ⚠️ A custom detent's height EXCLUDES the bottom safe area — the sheet
     /// adds it back (memory `economy-ab-claim-sheet`). The toolbar stands on
     /// that safe area, so what the detent owes it is its band ABOVE it:
     /// counting the whole inset rested the fold 34pt too high.
-    static func collapsedDetentHeight(
-        foldBottom: CGFloat, bottomSafeArea: CGFloat, windowBottomSafeArea: CGFloat
-    ) -> CGFloat {
-        (foldBottom + max(0, bottomSafeArea - windowBottomSafeArea)).rounded(.up)
+    static func collapsedDetentHeight(_ metrics: CollapsedMetrics) -> CGFloat {
+        (foldBottom(width: metrics.width, headerHeight: metrics.headerHeight, hasMore: metrics.hasMore)
+            + metrics.toolbarBand).rounded(.up)
     }
 
-    /// Where the fold ends, in this view's space with the grid at rest: under
-    /// "View all" when it is there, under the first row otherwise. Nil at
-    /// large, where "View all" has left the grid and the first row is not the
-    /// fold — the collapsed height keeps the value measured before.
-    private func foldBottom() -> CGFloat? {
-        guard !isExpanded, let snapshot = dataSource?.snapshot() else { return nil }
-        let fold: (IndexPath, CGFloat)?
-        if snapshot.indexOfSection(.more) != nil, let path = dataSource.indexPath(for: .more) {
-            fold = (path, Self.foldGap)
-        } else if let last = snapshot.itemIdentifiers(inSection: .firstRow).last,
-                  let path = dataSource.indexPath(for: last) {
-            fold = (path, Spacing.lg)
-        } else {
-            fold = nil
-        }
-        guard let (path, gap) = fold,
-              let frame = collectionView.collectionViewLayout.layoutAttributesForItem(at: path)?.frame
-        else { return nil }
-        return collectionView.adjustedContentInset.top + frame.maxY + gap
+    /// Where the fold ends, from the sheet's top edge, with the grid at rest:
+    /// the inset under the grabber, the sound, the first row, then "View all"
+    /// and its gap — or, with nothing more to view, the first row's own gap.
+    /// The grid's layout is built from the same numbers (`tileHeight`, the
+    /// absolute header, the `.more` section's insets).
+    static func foldBottom(width: CGFloat, headerHeight: CGFloat, hasMore: Bool) -> CGFloat {
+        let rowBottom = topInset + headerHeight + tileHeight(width: width)
+        guard hasMore else { return rowBottom + singleRowFoldGap }
+        return rowBottom + gutter + SoundSheetMoreCell.height + foldGap
     }
 
-    /// Before the sheet has a window — `viewDidLoad`, during `present` — so
-    /// it rises at the right height: the grid laid out at the PRESENTER's
-    /// window width, and the toolbar's band as the bar says it would be.
-    ///
-    /// ⚠️ An ESTIMATE for the band: the bar answered 48 where the sheet's safe
-    /// area later gave it 52 (iPhone 18 Pro, iOS 27), and `toolbar.frame` is
-    /// no help — it spans the whole view on iOS 27, its glass items floating
-    /// in it. `viewIsAppearing` corrects it from the real safe area.
-    private func measureBeforeWindow() {
-        guard let window = presentingViewController?.view.window, window.bounds.width > 0 else { return }
-        view.frame = CGRect(origin: .zero, size: window.bounds.size)
-        view.layoutIfNeeded()
-        guard let fold = foldBottom() else { return }
-        let toolbar = navigationController?.toolbar
-        let band = toolbar?.sizeThatFits(CGSize(width: window.bounds.width, height: 0)).height ?? 0
-        collapsedHeight = Self.collapsedDetentHeight(
-            foldBottom: fold, bottomSafeArea: band, windowBottomSafeArea: 0
+    /// The toolbar's band above the home indicator: the view's bottom safe
+    /// area less the window's.
+    static func toolbarBand(bottomSafeArea: CGFloat, windowBottomSafeArea: CGFloat) -> CGFloat {
+        max(0, bottomSafeArea - windowBottomSafeArea)
+    }
+
+    /// Recomputes the collapsed height from its inputs and re-asks the sheet
+    /// ONLY when the answer moved. Called when an input changes — loading,
+    /// appearing (the real width and band), the text size, the width, the
+    /// tiles — and from nowhere else. ⚠️ Never from a layout callback: see the
+    /// type's note.
+    private func refreshCollapsedMetrics(reason: String) {
+        guard let width = sheetWidth, width > 0 else { return }
+        let traits = view.window != nil
+            ? traitCollection
+            : (presentingViewController?.traitCollection ?? traitCollection)
+        let metrics = CollapsedMetrics(
+            width: width,
+            headerHeight: headerHeight(width: width, traits: traits),
+            hasMore: tiles.count > Self.columns,
+            toolbarBand: Self.measuredToolbarBand ?? estimatedToolbarBand(width: width)
         )
-        trace("before window: fold \(fold) band \(band)")
-    }
-
-    /// From the real layout, in the window: re-measures, and moves the detent
-    /// only when the value changed.
-    ///
-    /// ⚠️ NOT during a transition: a sheet on its way in or out is where its
-    /// safe area is least settled, and a detent invalidated mid-dismissal
-    /// would pull the sheet back. Nor from a safe area WITHOUT the toolbar's
-    /// band: the bar is always shown, so a bottom inset no taller than the
-    /// window's is a layout caught between detents, not the bar's height.
-    private func refreshCollapsedHeight() {
-        guard let window = view.window, !isSheetBeingDismissed,
-              navigationController?.transitionCoordinator?.isInteractive != true,
-              view.safeAreaInsets.bottom > window.safeAreaInsets.bottom,
-              let fold = foldBottom()
-        else { return }
-        let height = Self.collapsedDetentHeight(
-            foldBottom: fold,
-            bottomSafeArea: view.safeAreaInsets.bottom,
-            windowBottomSafeArea: window.safeAreaInsets.bottom
-        )
-        if let collapsedHeight, abs(collapsedHeight - height) < 0.5 { return }
-        trace("in window: fold \(fold) safe \(view.safeAreaInsets.bottom) window \(window.safeAreaInsets.bottom) → \(height) (was \(collapsedHeight.map { "\($0)" } ?? "nil"))")
+        guard metrics != collapsedMetrics else { return }
+        let headerMoved = metrics.headerHeight != collapsedMetrics?.headerHeight
+        let previous = collapsedHeight
+        collapsedMetrics = metrics
+        let height = Self.collapsedDetentHeight(metrics)
         collapsedHeight = height
+        trace("""
+            \(reason): width \(metrics.width) header \(metrics.headerHeight) more \(metrics.hasMore) \
+            band \(metrics.toolbarBand) → \(height) (was \(previous.map { "\($0)" } ?? "nil"))
+            """)
+        if headerMoved, isViewLoaded { collectionView.collectionViewLayout.invalidateLayout() }
+        guard let previous, abs(previous - height) >= 0.5 else { return }
+        invalidateCollapsedDetent()
+    }
+
+    /// The one place the detents are re-asked.
+    private func invalidateCollapsedDetent() {
+        detentInvalidations += 1
         // Only a sheet that is up has detents to move.
         guard let navigation = navigationController, navigation.presentingViewController != nil,
               let sheet = navigation.sheetPresentationController else { return }
-        sheet.animateChanges { sheet.invalidateDetents() }
+        // While it rises (the first `viewIsAppearing`) the presentation
+        // animates the change itself.
+        if navigation.transitionCoordinator != nil {
+            sheet.invalidateDetents()
+        } else {
+            sheet.animateChanges { sheet.invalidateDetents() }
+        }
+    }
+
+    /// Before any sheet has been shown, the bar's band as the bar says it
+    /// would be. ⚠️ An ESTIMATE: it answered 48 where the sheet's safe area
+    /// later gave 52 (iPhone 18 Pro, iOS 27) — `viewIsAppearing` corrects it
+    /// once, and the measure is kept for every sheet after. `toolbar.frame` is
+    /// no help: it spans the whole view on iOS 27, its glass items floating.
+    private func estimatedToolbarBand(width: CGFloat) -> CGFloat {
+        navigationController?.toolbar.sizeThatFits(CGSize(width: width, height: 0)).height ?? 0
+    }
+
+    /// The header's height at `width` and the text size: a sizing header with
+    /// the sound's own lines, fitted off screen — the sheet's height plays no
+    /// part. Cached per width and text size.
+    private func headerHeight(width: CGFloat, traits: UITraitCollection) -> CGFloat {
+        let headerWidth = width - 2 * Self.gutter
+        let key = "\(headerWidth)|\(traits.preferredContentSizeCategory.rawValue)"
+        if let headerHeightCache, headerHeightCache.key == key { return headerHeightCache.height }
+        var height: CGFloat = 0
+        traits.performAsCurrent {
+            height = SoundSheetHeaderView.fittingHeight(
+                width: headerWidth,
+                title: sound.title ?? "Original sound",
+                subtitle: sound.artist ?? "@\(authorHandle)",
+                // The meta line is one line whatever it says.
+                meta: Self.meta(duration: sound.duration, posts: tiles.count),
+                canPreview: sound.previewURL != nil
+            )
+        }
+        headerHeightCache = (key, height)
+        return height
+    }
+
+    /// `-sound-sheet-trace`: the height the sheet SETTLED at after a detent
+    /// change, read once the spring is over — collapsed must read the same
+    /// value at every visit. Read-only: it moves nothing.
+    private func traceSettledHeight(expanded: Bool) {
+        #if DEBUG
+        guard ProcessInfo.processInfo.arguments.contains("-sound-sheet-trace") else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+            guard let self, let window = view.window else { return }
+            let settled = view.bounds.height - window.safeAreaInsets.bottom
+            let detent = collapsedHeight.map { "\($0)" } ?? "nil"
+            trace("settled \(expanded ? "large" : "collapsed"): \(settled) (detent \(detent), invalidations \(detentInvalidations))")
+            // Geometry, in the WINDOW: a collapsed sheet floats inset and is
+            // drawn SCALED (measured 402 wide in its own space, 386 on
+            // screen), so the view's bounds stay the width the grid and the
+            // detent are computed for.
+            let inWindow: CGRect = view.convert(view.bounds, to: nil)
+            let use: CGRect = useButton.map { $0.convert($0.bounds, to: nil) } ?? .zero
+            trace("geometry: view \(view.bounds) on screen \(inWindow) use \(use)")
+        }
+        #endif
     }
 
     private func trace(_ message: @autoclosure () -> String) {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-sound-sheet-trace") {
-            print("[sound-sheet] \(message())")
+            // NSLog, not print: it reaches the unified log, which `simctl`
+            // can read back without a pty (memory `upload-media-picker`).
+            NSLog("[sound-sheet] %@", message())
         }
         #endif
     }
@@ -585,11 +805,7 @@ final class SoundSheetViewController: UIViewController {
     /// "View all": up to the whole grid.
     private func expand() {
         guard let sheet = navigationController?.sheetPresentationController, !isExpanded else { return }
-        // A programmatic change is not reported to the delegate. ⚠️ BEFORE
-        // the change: the sheet lays out inside `animateChanges`, and a fold
-        // measured there — still "collapsed", mid-way to large — read the
-        // bottom safe area without the toolbar's band (measured: 34 for 86)
-        // and rested the collapsed detent 52pt short.
+        // A programmatic change is not reported to the delegate.
         detentChanged(to: .large)
         sheet.animateChanges { sheet.selectedDetentIdentifier = .large }
     }
@@ -775,6 +991,7 @@ extension SoundSheetViewController: UISheetPresentationControllerDelegate {
         let expanded = identifier == .large
         guard expanded != isExpanded else { return }
         isExpanded = expanded
+        traceSettledHeight(expanded: expanded)
         guard dataSource != nil else { return }
         dataSource.apply(makeSnapshot(), animatingDifferences: true)
         if !expanded {
