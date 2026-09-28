@@ -2973,13 +2973,17 @@ extension MapsViewController: MKMapViewDelegate {
 
     /// Which implementation arms the card close beside a hero flight.
     ///
-    /// **`-maps-unified-card-close`** (any build — add it to the scheme's
-    /// Arguments Passed On Launch) arms it through the SHARED helper,
+    /// **THE SHARED HELPER BY DEFAULT** (`.unified`, since 2026-09-28):
     /// `InteractiveSlideDismissal.armAsCardCloseAlongsideFlight`, the call For
     /// You, a profile and the place page's own tiles already make — with this
     /// screen's landings unchanged (the marker's window; the place page's card
-    /// for a vertical close). Without it, the map's own copy
-    /// (`armMapOwnCardClose`), exactly as it shipped.
+    /// for a vertical close). It was tried behind an opt-in launch argument
+    /// (#286) and kept: one close for every screen is one set of rules.
+    ///
+    /// **`-maps-own-card-close`** (DEBUG builds only) arms the map's own copy
+    /// instead (`armMapOwnCardClose`), exactly as it shipped before. KEPT, not
+    /// deleted, for now: it is the reference the shared close replaced, and a
+    /// launch away from a side-by-side comparison should a landing regress.
     ///
     /// Only the hero-opened feed is concerned: a media marker (and a
     /// media-faced city or country, with its place page) paged onto a text
@@ -2991,11 +2995,13 @@ extension MapsViewController: MKMapViewDelegate {
         var description: String { self == .unified ? "unified" : "map-own" }
     }
 
-    static let unifiedCardCloseArgument = "-maps-unified-card-close"
+    static let ownCardCloseArgument = "-maps-own-card-close"
 
-    /// Pure, so the wiring is testable without a live map.
+    /// Pure, so the wiring is testable without a live map. ⚠️ Not gated
+    /// itself: the caller reads the launch arguments in DEBUG only, so a
+    /// release build is always `.unified`.
     static func cardClosePath(arguments: [String]) -> MapCardClosePath {
-        arguments.contains(unifiedCardCloseArgument) ? .unified : .mapOwn
+        arguments.contains(ownCardCloseArgument) ? .mapOwn : .unified
     }
 
     /// Where a place page goes when a vertical dismissal commits: beneath the
@@ -3376,11 +3382,13 @@ extension MapsViewController: MKMapViewDelegate {
         let landing = gallery as? any CardCloseLanding
         let slide = InteractiveSlideDismissal()
         cardClose = slide
-        // `-maps-unified-card-close`: the same close, armed through the shared
-        // helper instead of this screen's own copy — see `MapCardClosePath`.
-        let path = Self.cardClosePath(arguments: ProcessInfo.processInfo.arguments)
+        // The shared helper by default; `-maps-own-card-close` (DEBUG) arms
+        // this screen's own copy instead — see `MapCardClosePath`.
         #if DEBUG
+        let path = Self.cardClosePath(arguments: ProcessInfo.processInfo.arguments)
         print("[card-close] map armed path=\(path) placePage=\(landing != nil)")
+        #else
+        let path = MapCardClosePath.unified
         #endif
         switch path {
         case .unified:
@@ -3436,11 +3444,12 @@ extension MapsViewController: MKMapViewDelegate {
         debugScriptCardCloseIfRequested(slide)
     }
 
-    /// The map's OWN staging — the default, unchanged.
+    /// The map's OWN staging — no longer the default: armed only under
+    /// `-maps-own-card-close` (DEBUG), unchanged from what shipped.
     ///
-    /// Kept beside `armUnifiedCardClose` rather than folded into it while the
-    /// flag decides between them: this is what ships, and the other is what
-    /// is being tried against it.
+    /// Kept beside `armUnifiedCardClose` rather than deleted: it is the
+    /// reference the shared close replaced, held a launch argument away for a
+    /// side-by-side comparison until the viewer settles it for good.
     private func armMapOwnCardClose(
         _ slide: InteractiveSlideDismissal, feed: UIViewController,
         landing: (any CardCloseLanding)?, markerOrigin: TextRevealOrigin
@@ -3495,8 +3504,9 @@ extension MapsViewController: MKMapViewDelegate {
 
     /// The same two landings, armed through the SHARED helper
     /// (`armAsCardCloseAlongsideFlight`) — For You's, the profile's and the
-    /// place page's own close — instead of `armMapOwnCardClose`. Opt-in, under
-    /// `-maps-unified-card-close`.
+    /// place page's own close — instead of `armMapOwnCardClose`. The DEFAULT
+    /// (it was opt-in behind a launch argument, #286);
+    /// `-maps-own-card-close` swaps the map's own copy back in.
     ///
     /// What the helper brings is the shared rules: both axes, arbitrated
     /// against the hero grab, the reset, and a staging asked ONLY for a close

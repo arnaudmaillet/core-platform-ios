@@ -24,20 +24,21 @@ import UIKit
 ///  └──────────────────────────────────────┘
 /// ```
 ///
-/// **THE FEED STAYS ALIVE UNDER THE COLLAPSED SHEET.** Two detents: the
-/// collapsed one is the sound and its actions — the grid stays below the fold,
-/// announced by its title and a chevron — while the clip keeps playing above;
-/// the large one is a page of its own, and the clip behind pauses
-/// (`onCoverChanged`).
+/// **THE FEED STAYS ALIVE UNDER THE SHEET, AT EVERY DETENT.** Two detents:
+/// the collapsed one is the sound and its actions — the grid stays below the
+/// fold, announced by its title and a chevron — and the large one is the grid
+/// as a page of its own. Neither pauses the clip behind: a detent is where
+/// the sheet sits, not a choice to stop listening. (Large paused it for a
+/// while; the viewer asked for the post to keep playing, 2026-09-28.)
 ///
-/// **FROM LARGE, A DRAG DOWN COMES BACK TO COLLAPSED**, and the clip behind
-/// plays again; a second one closes. (It closed straight from large for a
-/// while; walking back through collapsed is the platform's own gesture and
-/// what the viewer asked for.)
+/// **FROM LARGE, A DRAG DOWN COMES BACK TO COLLAPSED**; a second one closes.
+/// (It closed straight from large for a while; walking back through collapsed
+/// is the platform's own gesture and what the viewer asked for.)
 ///
-/// ⚠️ **THE PREVIEW PAUSES THE CLIP.** Two sounds at once is noise; listening
-/// to the sound is a choice the viewer just made, so the clip gives way until
-/// the preview stops or the sheet goes.
+/// ⚠️ **THE PREVIEW PAUSES THE CLIP** (`onCoverChanged`), at any detent. Two
+/// sounds at once is noise; listening to the sound is a choice the viewer just
+/// made, so the clip gives way until the preview stops or the sheet goes. A
+/// feed opened from a tile covers it the same way, for the trip.
 final class SoundSheetViewController: UIViewController {
     struct Tile: Hashable, Sendable {
         let postID: PostID
@@ -47,8 +48,8 @@ final class SoundSheetViewController: UIViewController {
         let isCurrent: Bool
     }
 
-    /// Whether the clip behind should pause: the sheet is large, or the
-    /// preview is playing.
+    /// Whether the clip behind should pause: the preview is playing, or a
+    /// feed opened from a tile covers it. NEVER the detent alone.
     var onCoverChanged: ((Bool) -> Void)?
     /// A tile was chosen; the sheet is already on its way out.
     var onSelectPost: ((PostID) -> Void)?
@@ -307,8 +308,10 @@ final class SoundSheetViewController: UIViewController {
         onCoverChanged?(covering)
     }
 
+    /// ⚠️ NOT `isExpanded`: the large detent leaves the clip behind playing,
+    /// like the collapsed one — only a second sound or a second feed covers it.
     private func refreshCover() {
-        setCovering(isExpanded || isPreviewing || isShowingFeed)
+        setCovering(isPreviewing || isShowingFeed)
     }
 
     /// A feed opened from a tile covers everything, the page behind the sheet
@@ -453,13 +456,14 @@ extension SoundSheetViewController: UISheetPresentationControllerDelegate {
     }
 
     /// The one place a detent change is acted on — a drag reports it through
-    /// the delegate, a tap on the grid's title does not report it at all.
+    /// the delegate, a tap on the grid's title does not report it at all. It
+    /// turns the grid title's chevron and nothing else: the clip behind plays
+    /// on at either detent.
     fileprivate func detentChanged(to identifier: UISheetPresentationController.Detent.Identifier?) {
         let expanded = identifier == .large
         guard expanded != isExpanded else { return }
         isExpanded = expanded
         header?.setExpanded(expanded)
-        refreshCover()
     }
 }
 
