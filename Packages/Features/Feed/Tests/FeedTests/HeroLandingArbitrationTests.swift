@@ -26,6 +26,12 @@ import UIKit
 /// (`ForYouViewController.heroLandingArbiter`), not on the hero's gate through
 /// it, and each case fixes its precondition — the landing's tile really is
 /// unrealized — so a pass cannot come from a grid that happened to be short.
+///
+/// ⚠️ EVERY CASE HOLDS ITS SOURCE ALIVE. The arbiter captures the source
+/// WEAKLY (in the app the flight's controller owns it), and a released source
+/// answers "no opinion" — true. Handed an inline temporary, the two `true`
+/// cases passed for that reason alone and the `false` one failed: measured on
+/// the first run of this suite.
 @MainActor
 struct HeroLandingArbitrationTests {
     private struct SilentFetcher: ImageFetching {
@@ -87,7 +93,9 @@ struct HeroLandingArbitrationTests {
         let source = source(on: page, tapped: tapped, landed: landed)
         let heroTakesIt = ForYouViewController.heroLandingArbiter(asking: source)
 
-        #expect(heroTakesIt(), "the slide claimed a deep close the hero accepts")
+        withExtendedLifetime(source) {
+            #expect(heroTakesIt(), "the slide claimed a deep close the hero accepts")
+        }
     }
 
     /// The shallow case, which always worked, must keep working — a realized
@@ -98,11 +106,10 @@ struct HeroLandingArbitrationTests {
         let landed = page.posts[3].id
         #expect(page.heroAppearance(for: landed) != nil, "precondition: realized")
 
-        let heroTakesIt = ForYouViewController.heroLandingArbiter(
-            asking: source(on: page, tapped: tapped, landed: landed)
-        )
+        let source = source(on: page, tapped: tapped, landed: landed)
+        let heroTakesIt = ForYouViewController.heroLandingArbiter(asking: source)
 
-        #expect(heroTakesIt())
+        withExtendedLifetime(source) { #expect(heroTakesIt()) }
     }
 
     // MARK: - The list: the landing is the departure row, whatever was paged to
@@ -117,11 +124,10 @@ struct HeroLandingArbitrationTests {
         #expect(page.heroAppearance(for: landed) == nil,
                 "precondition: the settled post's row is NOT realized")
 
-        let heroTakesIt = ForYouViewController.heroLandingArbiter(
-            asking: source(on: page, tapped: tapped, landed: landed)
-        )
+        let source = source(on: page, tapped: tapped, landed: landed)
+        let heroTakesIt = ForYouViewController.heroLandingArbiter(asking: source)
 
-        #expect(heroTakesIt())
+        withExtendedLifetime(source) { #expect(heroTakesIt()) }
     }
 
     /// The half that must keep REFUSING: a list opened on a TEXT row lands on
@@ -133,11 +139,12 @@ struct HeroLandingArbitrationTests {
         let landed = page.posts[3].id
         #expect(page.post(for: tapped)?.kind == .text, "precondition: a text row")
 
-        let heroTakesIt = ForYouViewController.heroLandingArbiter(
-            asking: source(on: page, tapped: tapped, landed: landed)
-        )
+        let source = source(on: page, tapped: tapped, landed: landed)
+        let heroTakesIt = ForYouViewController.heroLandingArbiter(asking: source)
 
-        #expect(!heroTakesIt(), "the slide deferred to a hero that cannot land")
+        withExtendedLifetime(source) {
+            #expect(!heroTakesIt(), "the slide deferred to a hero that cannot land")
+        }
     }
 
     /// No flight, no opinion — the slide's gate reads what it read before the
