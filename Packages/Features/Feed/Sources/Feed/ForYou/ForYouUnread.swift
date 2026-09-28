@@ -219,8 +219,9 @@ public final class ForYouUnreadStore {
         }
     }
 
-    /// `-foryou-badges 3,0,1` — counts for Activity, Gallery and Short in pager
-    /// order.
+    /// `-foryou-badges 3,0` — one count per tab, in pager order
+    /// (`ForYouViewModel.tabs`: Following, then Discover). ⚠️ POSITIONAL: a
+    /// script written before the 2026-09-28 swap put Discover's number first.
     ///
     /// Exists because the honest derivation is very hard to *see* on demand: it
     /// needs posts published between two visits, which against a fixed mock

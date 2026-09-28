@@ -19,18 +19,27 @@ import UIKit
 final class ForYouPagerView: UIView {
     /// Pager order == selector order == the tabs the screen actually has.
     ///
-    /// **Two tabs, and the media grid leads.** `GalleryFilter.Format` still has
-    /// three cases because the profile gallery uses all of them; For You simply
-    /// does not give each one a tab. `.short` (text-only posts) has no tab of
-    /// its own here — those posts still appear, under Following, which is the
+    /// **Two tabs, and the card list leads**: Following on the left, Discover
+    /// on the right (product call, 2026-09-28 — it was the other way round).
+    /// The screen still OPENS on Discover (`ForYouViewModel.defaultFormat`),
+    /// which is a format, not a position, so the swap moved the tab without
+    /// moving the landing. `GalleryFilter.Format` still has three cases
+    /// because the profile gallery uses all of them; For You simply does not
+    /// give each one a tab. `.short` (text-only posts) has no tab of its own
+    /// here — those posts still appear, under Following, which is the
     /// unfiltered page.
+    ///
+    /// ⚠️ Every position on this screen is asked of this array — the strip's
+    /// segments, the badges (`applyBadges`), `-foryou-badges`' numbers
+    /// (`ForYouViewModel.tabs`, pinned equal to this) — so reordering it is the
+    /// whole of a reorder.
     ///
     /// The titles the viewer reads are `ForYouViewController`'s, and they do not
     /// echo the enum: `.media` is "Discover" and `.activity` is "Following".
     /// The enum names the CONTENT SHAPE (what is in the page), the titles name
     /// the PRODUCT IDEA (why you would go there), and those were never the same
     /// question.
-    static let pageOrder: [GalleryFilter.Format] = [.media, .activity]
+    static let pageOrder: [GalleryFilter.Format] = [.activity, .media]
 
     /// The tapped post's index into the *given format page's* posts.
     var onItemTapped: ((GalleryFilter.Format, Int) -> Void)?

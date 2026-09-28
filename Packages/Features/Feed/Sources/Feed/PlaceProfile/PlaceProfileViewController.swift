@@ -22,7 +22,8 @@ import UIKit
 /// - a two-metric band: the place's aggregated REACTIONS and VIEWS. No
 ///   avatar, no bio, no edit/share — a place is not an account;
 /// - two tabs under the metrics — **Discover** (the popularity grid) and
-///   **Activity** (every post as CARDS, most popular first) — a `PagedTabBar`
+///   **Activity** (every post as CARDS, most popular first) — Activity on the
+///   left, Discover on the right (`tabOrder`) — a `PagedTabBar`
 ///   over a `HorizontalPagerView`, the same pairing the profile's
 ///   relationship screen ships. Deliberately For You's own vocabulary and
 ///   shapes: its Discover is a media grid and its Following is a card list,
@@ -57,8 +58,36 @@ final class PlaceProfileViewController: UIViewController {
     private let reactionsMetric = PlaceMetricView(title: "Reactions")
     private let viewsMetric = PlaceMetricView(title: "Views")
 
+    /// The page's two tabs, by what they ARE rather than where they sit.
+    enum Tab: Equatable {
+        case activity, discover
+
+        var title: String {
+            switch self {
+            case .activity: "Activity"
+            case .discover: "Discover"
+            }
+        }
+    }
+
+    /// Strip order == pager order == `hostedPages` order: Activity on the
+    /// LEFT, Discover on the right (product call, 2026-09-28 — the same swap
+    /// For You's Following/Discover got).
+    ///
+    /// ⚠️ EVERY POSITION IS ASKED OF THIS ARRAY (`index(of:)`), never written
+    /// as a literal. The staging of a landing, the header's alignment, the
+    /// autoplay gate and the tab strip all speak in indices; the order used to
+    /// live in five `0`s and `1`s, and a swap that missed one would land a
+    /// close on the right tab's INDEX with the wrong tab's page.
+    static let tabOrder: [Tab] = [.activity, .discover]
+
+    /// Where `tab` sits in the strip and the pager.
+    static func index(of tab: Tab) -> Int {
+        tabOrder.firstIndex(of: tab) ?? 0
+    }
+
     /// The tab titles, one source for both selector copies.
-    private static let tabTitles = ["Discover", "Activity"]
+    private static let tabTitles = tabOrder.map(\.title)
     /// ⚠️ **ONE STRIP NOW, AND THE HAND-OVER IS GONE WITH THE SECOND.** There
     /// were two — an inline copy in the header's slot and a docked copy in the
     /// navigation bar's leading group — crossfading at a threshold as the
@@ -113,6 +142,11 @@ final class PlaceProfileViewController: UIViewController {
     /// Which page the header is riding. Adopted at tab-tap time (the
     /// destination takes the offset BEFORE it travels) and confirmed on
     /// swipe settle.
+    ///
+    /// Starts on the FIRST tab, which is Activity: every arrival from the map
+    /// lands there anyway (`stageActivityLanding`), so the page's resting tab
+    /// and its landing tab are one tab — a close that fell back to the plain
+    /// slide shows the same tab the window would have.
     private var activeIndex = 0
 
     private let postIDs: [PostID]
@@ -365,7 +399,9 @@ final class PlaceProfileViewController: UIViewController {
     /// `-maps-place-pop-demo`: pops this page ~1.5s after it becomes top —
     /// the sim can't tap the back button, and the non-interactive pop is
     /// exactly the leg that proves the hero return animator is installed.
-    /// `-maps-place-tab <index>` selects a tab and `-maps-place-scroll <pt>`
+    /// `-maps-place-tab <activity|discover|index>` selects a tab (a NAME
+    /// survives a reorder of the strip; an index is its position, left to
+    /// right) and `-maps-place-scroll <pt>`
     /// drives the active page's offset — the two gestures this screen is
     /// read by, neither of which the simulator can inject. The scroll runs
     /// last and later, so a run can ask for "the Activity tab, docked".
@@ -378,7 +414,9 @@ final class PlaceProfileViewController: UIViewController {
                   position + 1 < arguments.count else { return nil }
             return Double(arguments[position + 1])
         }
-        if let index = value("-maps-place-tab").map(Int.init) {
+        if let position = arguments.firstIndex(of: "-maps-place-tab"),
+           position + 1 < arguments.count,
+           let index = Self.debugTabIndex(arguments[position + 1]) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
                 self?.tabBar.debugSimulateTap(at: index)
             }
@@ -786,8 +824,14 @@ final class PlaceProfileViewController: UIViewController {
         // over them (added second, so it draws above the content sliding
         // under it) and is moved by its top constraint from whichever page
         // is being read.
-        hostedPages = [page, activityPage]
-        pager = HorizontalPagerView(pages: [page, activityPage])
+        let pages: [ForYouGridPage] = Self.tabOrder.map { tab in
+            switch tab {
+            case .activity: activityPage
+            case .discover: page
+            }
+        }
+        hostedPages = pages
+        pager = HorizontalPagerView(pages: pages)
         pager.pin(to: view)
 
         headerHost.translatesAutoresizingMaskIntoConstraints = false
@@ -2094,19 +2138,14 @@ extension PlaceProfileViewController {
         }
         // ⚠️ A PASS BEFORE THE PAGER IS TOUCHED. `setActivePage` moves a
         // scroll view by PAGE WIDTH, and a pager that has never been laid out
-        // has none — so the offset it computes is zero and page 1 is never
-        // brought on, whatever it was asked for. Measured: the landing row
-        // stayed unrealized on the first ask and only appeared on the second,
-        // one run loop later, which sent every close to the fallback slide.
+        // has none — so the offset it computes is zero and any page but the
+        // first is never brought on, whatever it was asked for. Measured (when
+        // Activity was the SECOND tab): the landing row stayed unrealized on
+        // the first ask and only appeared on the second, one run loop later,
+        // which sent every close to the fallback slide. Kept for whichever tab
+        // sits second.
         view.layoutIfNeeded()
-        if activeIndex != 1 {
-            activityPage.setVerticalOffset(alignedOffset(for: 1))
-            activeIndex = 1
-            applyHeaderOffset(activityPage.verticalOffset)
-            syncAutoplay()
-        }
-        mirrorSelection(to: 1)
-        pager.setActivePage(1, animated: false)
+        adoptTab(.activity)
         // ⚠️ LAY OUT BEFORE REVEALING, and this ordering is the whole of it.
         // `revealPost` asks the collection view for the landing row's layout
         // attributes; on a page that has only just been given a size those
@@ -2128,17 +2167,25 @@ extension PlaceProfileViewController {
         loadViewIfNeeded()
         if let bounds, view.bounds.size != bounds.size { view.frame = bounds }
         view.layoutIfNeeded()
-        if activeIndex != 0 {
-            page.setVerticalOffset(alignedOffset(for: 0))
-            activeIndex = 0
-            applyHeaderOffset(page.verticalOffset)
-            syncAutoplay()
-        }
-        mirrorSelection(to: 0)
-        pager.setActivePage(0, animated: false)
+        adoptTab(.discover)
         page.beginHeroFreeze()
         page.revealPost(anchor, clearing: landingOcclusion)
         view.layoutIfNeeded()
+    }
+
+    /// Puts the header, the strip and the pager on `tab` with no animation —
+    /// the landing's half of a tab tap, through the same alignment rule, so the
+    /// header does not move for the switch.
+    private func adoptTab(_ tab: Tab) {
+        let index = Self.index(of: tab)
+        if activeIndex != index {
+            hostedPages[index].setVerticalOffset(alignedOffset(for: index))
+            activeIndex = index
+            applyHeaderOffset(hostedPages[index].verticalOffset)
+            syncAutoplay()
+        }
+        mirrorSelection(to: index)
+        pager.setActivePage(index, animated: false)
     }
 
     /// A landing post the grid does not hold (hydration raced the grab, or
@@ -2191,7 +2238,23 @@ extension PlaceProfileViewController {
     var debugLandingAnchor: PostID { anchorID }
     /// The title of the tab the page is on, so a test can say "Activity"
     /// without knowing where the strip puts it.
-    var debugActiveTabTitle: String { Self.tabTitles[activeIndex] }
+    var debugActiveTabTitle: String { Self.tabOrder[activeIndex].title }
+    /// The tab the strip's pill is on, which must agree with the page.
+    var debugSelectedTabTitle: String { Self.tabOrder[tabBar.selectedIndex].title }
+    /// Selects `tab` the way a settled landing does, for a test that needs the
+    /// page to start somewhere else.
+    func debugSelectTab(_ tab: Tab) {
+        loadViewIfNeeded()
+        adoptTab(tab)
+    }
+    /// `-maps-place-tab`'s argument: a tab's name, or its position.
+    static func debugTabIndex(_ argument: String) -> Int? {
+        switch argument.lowercased() {
+        case "activity": index(of: .activity)
+        case "discover": index(of: .discover)
+        default: Int(argument).flatMap { tabOrder.indices.contains($0) ? $0 : nil }
+        }
+    }
     var debugMetrics: (reactions: Int64, views: Int64) {
         (reactionsMetric.debugValue, viewsMetric.debugValue)
     }

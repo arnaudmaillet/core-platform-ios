@@ -21,9 +21,12 @@ import UIKit
 /// page the viewer was looking at marked inactive, so it never autoplayed, and
 /// the view model's format wrong, which also gates pagination.
 ///
-/// Only reachable when the restored format is NOT the default: restoring
-/// Gallery returns at the `index != activeIndex` guard and moves neither index.
-/// That is why the default path looked fine.
+/// Only reachable when the restored format is NOT the pager's FIRST page:
+/// restoring that one returns at the `index != activeIndex` guard and moves
+/// neither index. That is why the default path looked fine while Discover
+/// led — and why these tests speak in `pageOrder` rather than in formats:
+/// since Following moved to the left (2026-09-28) the DEFAULT restore
+/// (Discover) is the one that takes the early return.
 @MainActor
 struct ForYouPagerActivePageTests {
     private func pager() -> ForYouPagerView {
@@ -43,20 +46,20 @@ struct ForYouPagerActivePageTests {
         pager.scrollViewDidEndDecelerating(scrollView)
     }
 
-    /// The regression. Restore Activity before layout, then swipe back to
-    /// Gallery: the settle must be seen, not swallowed.
-    @Test func aSwipeBackToTheDefaultPageIsReportedAfterRestoringAnother() {
+    /// The regression. Restore the second page before layout, then swipe back
+    /// to the first: the settle must be seen, not swallowed.
+    @Test func aSwipeBackToTheFirstPageIsReportedAfterRestoringAnother() {
         let pager = pager()
         var settled: [GalleryFilter.Format] = []
         pager.onPageSettled = { settled.append($0) }
 
         // `viewDidLoad`: no layout has happened yet.
         #expect(pager.bounds.width == 0, "the premise is a pre-layout restore")
-        pager.setActivePage(.activity, animated: false)
+        pager.setActivePage(ForYouPagerView.pageOrder[1], animated: false)
 
         swipe(pager, to: 0)
 
-        #expect(settled == [.media],
+        #expect(settled == [ForYouPagerView.pageOrder[0]],
                 "the page the viewer landed on was never reported — autoplay and the format stay on the other page")
     }
 
@@ -67,7 +70,7 @@ struct ForYouPagerActivePageTests {
         var settled: [GalleryFilter.Format] = []
         pager.onPageSettled = { settled.append($0) }
 
-        pager.setActivePage(.activity, animated: false)
+        pager.setActivePage(ForYouPagerView.pageOrder[1], animated: false)
         swipe(pager, to: 1)   // land where the restore already put us
         swipe(pager, to: 1)   // and settle there again
 
@@ -75,15 +78,31 @@ struct ForYouPagerActivePageTests {
                 "settling on the page already active is a no-op, not a repeat announcement")
     }
 
-    /// A restore of the DEFAULT format must stay a no-op — the guard above the
-    /// early return has to keep winning, or every launch reports a page change
-    /// nobody made.
-    @Test func restoringTheDefaultFormatChangesNothing() {
+    /// A restore — the default one included, which is Discover and no longer
+    /// the first page — must not announce a page change nobody made: every
+    /// launch goes through it.
+    @Test func restoringAFormatBeforeLayoutAnnouncesNothing() {
+        for format in ForYouPagerView.pageOrder {
+            let pager = pager()
+            var settled: [GalleryFilter.Format] = []
+            pager.onPageSettled = { settled.append($0) }
+
+            pager.setActivePage(format, animated: false)
+
+            #expect(settled.isEmpty, "restoring \(format) was announced")
+        }
+    }
+
+    /// And the default restore lands where the screen opens: a settle on
+    /// Discover right after it is the page already active, not news.
+    @Test func theDefaultRestoreIsThePageTheFirstSettleFinds() {
         let pager = pager()
         var settled: [GalleryFilter.Format] = []
         pager.onPageSettled = { settled.append($0) }
 
-        pager.setActivePage(.media, animated: false)
+        pager.setActivePage(ForYouViewModel.defaultFormat, animated: false)
+        let index = ForYouPagerView.pageOrder.firstIndex(of: ForYouViewModel.defaultFormat) ?? 0
+        swipe(pager, to: index)
 
         #expect(settled.isEmpty)
     }

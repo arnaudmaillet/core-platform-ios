@@ -341,7 +341,8 @@ struct PlaceProfileTests {
                 "a text post has no cover and cannot be a tile")
         #expect(profile.renderedActivity.map(\.id.rawValue) == ["post-3", "post-2", "post-1"],
                 "the cards keep every kind — its words are not lost, only moved")
-        #expect(profile.tabTitles == ["Discover", "Activity"])
+        #expect(profile.tabTitles == ["Activity", "Discover"],
+                "Activity on the left, Discover on the right")
     }
 
     /// ⚠️ A DISMISSAL FROM THE MAP LANDS ON ACTIVITY, WITH THE POST THE VIEWER
@@ -380,6 +381,42 @@ struct PlaceProfileTests {
         // Asked again — a swipe asks twice — it stays put rather than swapping back.
         _ = profile.cardCloseGeometry(dismissing: feed)
         #expect(profile.renderedActivity.first?.id == PostID("post-3"))
+    }
+
+    /// ⚠️ EVERY POSITION IS ASKED OF THE ORDER, and the landing proves it: with
+    /// Activity moved to the LEFT, a staging that still spoke in the old `1`
+    /// would put the strip on Discover's slot while revealing an Activity row.
+    /// Driven from Discover so the landing has a tab to move off.
+    @Test func theActivityLandingFollowsTheTabOrder() async {
+        let profile = makeProfile(posts: [
+            post("post-1", kind: .photo, reactions: 50),
+            post("post-2", kind: .photo, reactions: 90),
+        ])
+        laidOut(profile)
+        profile.beginLoading()
+        for _ in 0..<50 where profile.renderedActivity.isEmpty { await Task.yield() }
+        #expect(PlaceProfileViewController.tabOrder == [.activity, .discover])
+        #expect(profile.debugActiveTabTitle == "Activity", "the page rests on its first tab")
+
+        profile.debugSelectTab(.discover)
+        #expect(profile.debugActiveTabTitle == "Discover")
+
+        profile.activePostID = { PostID("post-1") }
+        let feed = UIViewController()
+        feed.view.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        _ = profile.cardCloseGeometry(dismissing: feed)
+        #expect(profile.debugActiveTabTitle == "Activity")
+        #expect(profile.debugSelectedTabTitle == "Activity",
+                "the strip's pill sits on another tab than the page the close landed on")
+    }
+
+    /// `-maps-place-tab` takes a NAME, which survives a reorder, or a position.
+    @Test func thePlaceTabArgumentTakesANameOrAPosition() {
+        #expect(PlaceProfileViewController.debugTabIndex("activity") == 0)
+        #expect(PlaceProfileViewController.debugTabIndex("Discover") == 1)
+        #expect(PlaceProfileViewController.debugTabIndex("1") == 1)
+        #expect(PlaceProfileViewController.debugTabIndex("2") == nil)
+        #expect(PlaceProfileViewController.debugTabIndex("shorts") == nil)
     }
 
     /// The gallery's rule, on its own: the ranking minus what a grid cannot
