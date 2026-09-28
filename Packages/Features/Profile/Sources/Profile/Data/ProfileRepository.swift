@@ -252,8 +252,10 @@ public protocol ProfileSwitching: Sendable {
 /// `dev/BACKEND_GAPS.md` §7.
 // `SocialGraphWriting` is satisfied by `ProfileProviding.setFollowing` — the
 // same method, declared again in CoreModels so a feed row's "..." menu can
-// unfollow without importing this package.
-public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileViewerResolving, SocialGraphWriting {
+// unfollow without importing this package. `SocialGraphReading` is
+// `relationship(for:)` folded to the one question a follow "+" asks.
+public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileViewerResolving,
+    SocialGraphWriting, SocialGraphReading {
     private let profileClient: any Profile_V1_ProfileServiceClientInterface
     private let counterClient: any Counter_V1_CounterServiceClientInterface
     private let socialGraphClient: any SocialGraph_V1_SocialGraphServiceClientInterface
@@ -316,6 +318,15 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileViewe
             )
         case .failure(let error):
             throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+        }
+    }
+
+    public func followRelation(to profileID: ProfileID) async throws -> FollowRelation {
+        switch try await relationship(for: profileID) {
+        case .me: .viewer
+        case .other(_, _, isBlocked: true): .blocked
+        case .other(isFollowing: true, _, _): .following
+        case .other: .notFollowing
         }
     }
 

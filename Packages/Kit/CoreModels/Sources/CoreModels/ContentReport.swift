@@ -65,3 +65,30 @@ public protocol ContentReporting: Sendable {
 public protocol SocialGraphWriting: Sendable {
     func setFollowing(_ following: Bool, for profileID: ProfileID) async throws
 }
+
+/// Where the viewer stands with one person, as far as a follow affordance
+/// cares — the answer a surface needs to decide whether to offer "Follow".
+public enum FollowRelation: Equatable, Sendable {
+    /// The person IS the viewer: there is nobody to follow.
+    case viewer
+    /// The viewer already follows them (a mutual included).
+    case following
+    /// The viewer does not follow them: the one case that offers "Follow".
+    case notFollowing
+    /// The viewer blocks them. Following is not on offer until the block is
+    /// lifted, which is the profile screen's business.
+    case blocked
+
+    /// Whether a follow affordance should be drawn for this person.
+    public var offersFollow: Bool { self == .notFollowing }
+}
+
+/// Reads the viewer's relation to one person.
+///
+/// The read half beside `SocialGraphWriting`, for the same reason and with the
+/// same shape: a surface that shows an author (the snap feed's author pill)
+/// has to know whether its "+" means anything, without importing the Profile
+/// feature that owns the relationship model.
+public protocol SocialGraphReading: Sendable {
+    func followRelation(to profileID: ProfileID) async throws -> FollowRelation
+}

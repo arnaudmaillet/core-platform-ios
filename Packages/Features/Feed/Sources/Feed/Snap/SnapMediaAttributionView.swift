@@ -15,9 +15,12 @@ import UIKit
 ///   circle), the labels compress first (749, one under UIKit's default), so
 ///   a long author name truncates under the width cap instead of pushing the
 ///   trailing actions.
-/// - Screen-scoped, page-fed: content follows the active page through the
-///   same settle-quantized lifecycle seam that drives the identity pill,
-///   cross-fading on page changes — never re-negotiating mid-scroll.
+/// - Page-fed, ONE VIEW PER CONTENT in the snap feed: a page that draws
+///   something else gets a fresh attribution in a fresh item under its own
+///   `identifier` (`SnapFeedViewController.showAttribution`), so the toolbar
+///   runs iOS 26's own item transition — the identity pill's mechanism. A view
+///   rewritten in place (`setPost` on a live pill, the Text Post composer's
+///   use) cross-fades its labels instead, and the bar has nothing to morph.
 final class SnapMediaAttributionView: UIView {
     /// The bar-bubble invariant: every bubble on the feed's bars — back
     /// button, identity pill wrapper, and all three toolbar bubbles — renders
@@ -195,9 +198,80 @@ final class SnapMediaAttributionView: UIView {
         case note
     }
 
+    /// The second line `sound` puts under `model`'s name.
+    private static func line(for model: FeedItemDisplayModel, sound: SoundCredit) -> String {
+        switch sound {
+        case .sound(let line): line
+        case .none: "No audio"
+        // Derived attribution until the BFF carries track metadata; non-audio
+        // posts fall back to the handle/time meta line.
+        case .unresolved: model.audioText ?? model.metaText
+        }
+    }
+
+    /// The picture the round cover draws, nil for the note.
+    private static func coverURL(for model: FeedItemDisplayModel, cover: Cover) -> URL? {
+        switch cover {
+        case .note: nil
+        case .artwork(let artwork): artwork
+        // The media's thumbnail, else the author's avatar.
+        case .post: model.thumbnailURL ?? model.avatarURL
+        }
+    }
+
+    /// Everything the pill DRAWS for this post, as one string: the name, the
+    /// sound line, whether a tap opens anything, and the cover.
+    ///
+    /// It is the snap feed's bar item identity. Two pages that draw the same
+    /// pill (one person's posts set to one song with its own artwork) are one
+    /// item, and paging between them changes nothing on the bar; anything that
+    /// draws differently is a new item, which is what gets the native morph.
+    /// A post's own id is deliberately NOT in it: the cover already carries the
+    /// post whenever the post is what it shows.
+    static func contentKey(
+        for model: FeedItemDisplayModel, sound: SoundCredit = .unresolved, cover: Cover = .post
+    ) -> String {
+        let tappable = if case .sound = sound { "tap" } else { "-" }
+        let picture = switch cover {
+        case .note: "note"
+        case .artwork, .post: coverURL(for: model, cover: cover)?.absoluteString ?? "blank"
+        }
+        return [model.authorName, line(for: model, sound: sound), tappable, picture].joined(separator: "|")
+    }
+
+    /// `contentKey` of what the pill shows now; nil before its first post.
+    private(set) var shownContentKey: String?
+
+    /// Takes on everything the HOST decided about `other` — its width cap, its
+    /// shadow and its tap — but not its post. For a fresh pill replacing
+    /// `other` in the toolbar.
+    func inheritChrome(from other: SnapMediaAttributionView) {
+        onTap = other.onTap
+        if let theirs = other.maxWidthConstraint?.constant { maxWidthConstraint?.constant = theirs }
+        for (mine, theirs) in zip([titleLabel, trackLabel], [other.titleLabel, other.trackLabel]) {
+            mine.layer.shadowOpacity = theirs.layer.shadowOpacity
+        }
+    }
+
+    /// Fetches `model`'s cover into the pill's cache ahead of need — the next
+    /// page's — so a fresh pill for it is drawn with it.
+    static func warmCover(
+        for model: FeedItemDisplayModel, cover: Cover, pipeline: ImagePipeline
+    ) {
+        guard let url = coverURL(for: model, cover: cover),
+              !url.isFileURL, SnapAttributionCoverCache.cover(for: url) == nil else { return }
+        Task { @MainActor in
+            guard let image = try? await pipeline.image(for: url) else { return }
+            SnapAttributionCoverCache.store(image, for: url)
+        }
+    }
+
+    /// - Parameter animated: false for a FRESH pill that is not in the bar yet
+    ///   (the snap feed's content change), where the bar's own item transition
+    ///   is the animation and a cross-dissolve inside it would play twice.
     func setPost(
         _ model: FeedItemDisplayModel, sound: SoundCredit = .unresolved, cover: Cover = .post,
-        pipeline: ImagePipeline
+        pipeline: ImagePipeline, animated: Bool = true
     ) {
         let soundLine: String? = if case .sound(let line) = sound { line } else { nil }
         guard model != renderedModel || sound != renderedSound || cover != renderedCover else { return }
@@ -205,42 +279,37 @@ final class SnapMediaAttributionView: UIView {
         renderedModel = model
         renderedSound = sound
         renderedCover = cover
+        shownContentKey = Self.contentKey(for: model, sound: sound, cover: cover)
         // A new post's record starts upright; the same one keeps its angle.
         if isNewPost { resetSpin() }
         renderedSoundLine = soundLine
-        let line = switch sound {
-        case .sound(let line): line
-        case .none: "No audio"
-        case .unresolved: model.audioText ?? model.metaText
-        }
+        let line = Self.line(for: model, sound: sound)
         postID = model.id
-        defer { animateBarRemeasure() }
+        let url = Self.coverURL(for: model, cover: cover)
+        // A cover already in hand is drawn in the same pass as the labels:
+        // nothing to fade in after a fresh pill appears.
+        let cached: UIImage? = switch cover {
+        case .note: Self.noteImage
+        case .artwork, .post: url.flatMap(SnapAttributionCoverCache.cover(for:))
+        }
 
-        UIView.transition(with: self, duration: 0.18,
-                          options: [.transitionCrossDissolve, .allowUserInteraction]) {
+        let apply = {
             self.titleLabel.text = model.authorName
-            // Derived attribution until the BFF carries track metadata;
-            // non-audio posts fall back to the handle/time meta line.
             self.trackLabel.text = line
             self.accessibilityLabel = "\(model.authorName), \(line)"
             self.accessibilityHint = soundLine == nil ? nil : "Opens the sound"
-
-            self.coverView.image = nil
+            self.coverView.image = cached
+        }
+        if animated {
+            defer { animateBarRemeasure() }
+            UIView.transition(with: self, duration: 0.18,
+                              options: [.transitionCrossDissolve, .allowUserInteraction], animations: apply)
+        } else {
+            apply()
         }
 
         coverTask?.cancel()
-        let url: URL?
-        switch cover {
-        case .note:
-            coverView.image = Self.noteImage
-            return
-        case .artwork(let artwork):
-            url = artwork
-        case .post:
-            // The media's thumbnail, else the author's avatar.
-            url = model.thumbnailURL ?? model.avatarURL
-        }
-        guard let url else { return }
+        guard cached == nil, let url else { return }
         let id = model.id
         coverTask = Task { [weak self] in
             // ⚠️ A file is read as it is: the mock pipeline paints a colour for
@@ -253,6 +322,7 @@ final class SnapMediaAttributionView: UIView {
                 try? await pipeline.image(for: url)
             }
             guard let image else { return }
+            if !url.isFileURL { SnapAttributionCoverCache.store(image, for: url) }
             guard let self, self.postID == id else { return }
             UIView.transition(with: self.coverView, duration: 0.15, options: [.transitionCrossDissolve]) {
                 self.coverView.image = image
@@ -299,6 +369,32 @@ final class SnapMediaAttributionView: UIView {
         host?.setNeedsLayout()
         UIView.animate(withDuration: 0.22, delay: 0, options: [.curveEaseInOut, .allowUserInteraction]) {
             host?.layoutIfNeeded()
+        }
+    }
+}
+
+/// The covers the attribution pill has drawn lately, readable SYNCHRONOUSLY —
+/// `SnapAuthorFaceCache`'s twin, for the same reason: a pill built to go into
+/// the toolbar on this turn has to arrive wearing its cover, not swap to it a
+/// frame into the bar's own item transition.
+///
+/// Smaller than the face cache: a cover can be a post's whole thumbnail.
+@MainActor
+enum SnapAttributionCoverCache {
+    static let capacity = 8
+    private static var covers: [URL: UIImage] = [:]
+    /// Least recently stored first.
+    private static var order: [URL] = []
+
+    static func cover(for url: URL) -> UIImage? { covers[url] }
+
+    static func store(_ image: UIImage, for url: URL) {
+        if covers.updateValue(image, forKey: url) != nil {
+            order.removeAll { $0 == url }
+        }
+        order.append(url)
+        while order.count > capacity {
+            covers[order.removeFirst()] = nil
         }
     }
 }

@@ -49,6 +49,10 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     /// clients are already wired, and the composition root hands the same
     /// instances to whoever needs them.
     private let socialGraph: (any SocialGraphWriting)?
+    /// Whether the viewer follows a post's author — the snap feed's author
+    /// pill offers its "+" only to someone the viewer does not follow yet, and
+    /// follows them through `socialGraph`. Nil (or a nil `socialGraph`): no "+".
+    private let followRelations: (any SocialGraphReading)?
     /// The Text Post page's drafts. The app hands in its one store (built
     /// once in `AppContainer`, charter P4); a test hands in one of its own.
     /// Nil is the fallback for a caller that has neither, and it costs a file
@@ -74,6 +78,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         makeWalletSheet: (@MainActor () -> UIViewController)? = nil,
         reporting: (any ContentReporting)? = nil,
         socialGraph: (any SocialGraphWriting)? = nil,
+        followRelations: (any SocialGraphReading)? = nil,
         /// Reads the numbers the timeline does not carry, so a card can show
         /// reach. Optional: without it the cards simply hide their counter,
         /// which is what they did before.
@@ -88,6 +93,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         self.counterClient = counterClient
         self.reporting = reporting
         self.socialGraph = socialGraph
+        self.followRelations = followRelations
         self.makeProfileSwitcher = makeProfileSwitcher
         self.repository = repository
         self.engagementProvider = engagementProvider
@@ -1159,6 +1165,11 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             // For the ⋯ menu's Report row, which withholds itself when there is
             // nobody to file with — the same rule the grid's card menu follows.
             reporting: reporting,
+            // The author pill's "+": offered to someone the viewer does not
+            // follow yet, and a tap follows them — the same repositories the
+            // profile's Follow button writes through.
+            socialGraph: socialGraph,
+            followRelations: followRelations,
             soundProvider: soundProvider,
             useSound: useSound,
             // The sound sheet's grid opens a NEW feed of the posts with that
