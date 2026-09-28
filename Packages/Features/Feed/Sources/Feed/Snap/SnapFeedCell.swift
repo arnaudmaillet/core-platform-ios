@@ -2577,9 +2577,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         traceViewerPlayback("hold", paused: isHeldPaused)
     }
 
-    /// Pauses the clip while a sheet covers it — the sound sheet expanded, or
-    /// its preview playing — and resumes it after, but only if it was running
-    /// when covered: a clip the viewer had paused stays paused.
+    /// Pauses the clip while a sheet covers it — the sound sheet's preview
+    /// playing, or a feed opened from its grid (never the sheet's detent
+    /// alone) — and resumes it after, but only if it was running when
+    /// covered: a clip the viewer had paused stays paused.
     func setCoveredBySheet(_ covered: Bool) {
         guard let videoPlayback, let surface = audibleSurface else { return }
         if covered {
