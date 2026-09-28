@@ -142,14 +142,6 @@ public final class InteractiveSlideDismissal: NSObject {
     /// post's kind from opposite sides.
     public var arbitratesWithHeroGrab = false
 
-    /// Whether a HORIZONTAL grab asks the screen first
-    /// (`ZoomTransitionDestination.zoomHorizontalDismissalPermitted`), the way
-    /// the zoom grab always has. Opt-in, so the screens this driver has served
-    /// until now keep exactly the gate they had: the place page needs it —
-    /// a rightward drag on any tab but the first is "previous tab", and a
-    /// carousel under the finger is its own tenant.
-    public var consultsHorizontalPermission = false
-
     /// Whether the HERO grab would accept this dismissal's landing, asked so
     /// this driver can claim the drags the hero declines.
     ///
@@ -764,27 +756,24 @@ extension InteractiveSlideDismissal: UIGestureRecognizerDelegate {
             return false
         }
         if let canBeginDismissal, !canBeginDismissal() { return false }
-        // Same extra gate as the zoom grab's vertical leg: subsurfaces that
-        // own their vertical gestures (a text page's comment stream, the
-        // shortcut rail) keep their touches.
-        if axis == .vertical,
-           let destination = feed as? any ZoomTransitionDestination,
-           !destination.zoomVerticalDismissalPermitted(at: pan.location(in: view), in: view) {
-            return false
-        }
-        // ⚠️ The gesture's ORIGIN, not where the finger is now — the trap
-        // `ZoomDismissInteractionController` already measured: this callback
-        // fires once the pan has travelled its slop, so a swipe that began
-        // in the leading strip was read tens of points past it and refused
-        // on every tab but the first. The pager had yielded the same drag, so
-        // nobody took it.
-        let origin = CGPoint(
-            x: pan.location(in: view).x - pan.translation(in: view).x,
-            y: pan.location(in: view).y - pan.translation(in: view).y
-        )
-        if axis == .horizontal, consultsHorizontalPermission,
-           let destination = feed as? any ZoomTransitionDestination,
-           !destination.zoomHorizontalDismissalPermitted(at: origin, in: view) {
+        // ⚠️ AND THE SCREEN'S TENANTS, ON BOTH AXES, ALWAYS — through the same
+        // predicate the zoom grab asks (`permitsDismissalGrab`), never a copy.
+        //
+        // Vertically: a text page's comment stream, the shortcut rail. And
+        // horizontally: a tab pager with a tab to the left, a carousel with a
+        // photograph to the left. The horizontal half used to be OPT-IN here
+        // (`consultsHorizontalPermission`, set by the place page alone) while
+        // the zoom grab always asked. So the same carousel answered differently
+        // depending on how its feed was opened: through a media row (the
+        // hero's) a rightward drag on photograph 2/4 went to 1/4; through a
+        // TEXT row (this driver's window) it grabbed the window. Reported from
+        // a device, the two iterations side by side.
+        //
+        // Unconditional is safe because the answer is the destination's: a
+        // screen with no tenants inherits "anywhere" and claims every drag it
+        // claimed before.
+        if let destination = feed as? any ZoomTransitionDestination,
+           !destination.permitsDismissalGrab(pan, along: axis, in: view) {
             return false
         }
         activeAxis = axis
