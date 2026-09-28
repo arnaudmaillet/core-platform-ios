@@ -453,7 +453,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         // backstop for the paths the policy declines (a scrub that has not
         // committed, a flight that owns the chrome).
         installBottomChromeWhenAppearing(hasActiveFlight: false,
-                                         handsOver: tabBarController?.bottomAccessory != nil) { [weak self] animated in
+                                         handsOver: tabBarController?.bottomAccessory != nil) { [weak self] in
             guard let self else { return }
             selectorAccessory?.install(into: tabBarController,
                                    // ⚠️ THE TAB ROOT ONLY. A pushed profile keeps
@@ -463,8 +463,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
                                    // cannot use it gives every other tab a
                                    // minimizing bar and this one nothing.
                                    minimizesOnScroll: trayPlacement == .aboveBottomSafeArea,
-                                       alongside: transitionCoordinator,
-                                       animated: animated)
+                                       alongside: transitionCoordinator)
         }
 
         // ⚠️ **The dock is not optional on a tab ROOT.** Whatever hid it — a post
@@ -484,26 +483,20 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         // never fire for a cancel. See `TabBarRevealPolicy`, which the For You
         // grid has consulted for this since it hit the identical failure.
         //
-        // ⚠️ …and a close of the snap feed owes it at the LANDING, never
-        // during the return. This used to reveal alongside the pop — measured
-        // with `-dock-trace` on a chevron close from Activity, the bar went
-        // 0 → 1 over the flight while the post was still shrinking home.
+        // ⚠️ …and a close of the snap feed that no finger drives cannot un-hide
+        // it from inside itself: the feed's owner shows it before that pop
+        // (`onWillCloseFeed`), and the policy answers "after the landing" only
+        // as the backstop. It is never held back by an alpha — native chrome
+        // is UIKit's (see `TabBarRevealPolicy`). Video 3 of 2026-09-28 (Activity
+        // → media post → close) filmed the old rule's cost: the bar, held for
+        // the landing, arrived late.
         if navigationController?.viewControllers.first === self,
            tabBarController?.isTabBarHidden == true {
-            switch TabBarRevealPolicy.timing(
-                // This screen owns no flight object — a post opened from here is
-                // presented by the feed feature. A close of that feed is
-                // recognised from the transition itself.
-                returnsFromFullBleed: isReturningFromDocklessScreen,
-                isTransitioning: transitionCoordinator != nil,
-                isInteractive: transitionCoordinator?.isInteractive == true
-            ) {
-            case .immediately:
-                revealDock(animated: animated)
-            case .whenTransitionCommits:
-                revealDockIfTransitionCommits()
-            case .atLanding:
-                revealBottomChromeAtLanding { [weak self] in self?.revealDock(animated: false) }
+            // This screen owns no flight object — a post opened from here is
+            // presented by the feed feature. A close of that feed is recognised
+            // from the transition itself.
+            revealBottomChromeWhenAllowed(animated: animated) { [weak self] animated in
+                self?.revealDock(animated: animated)
             }
         }
         // Re-bind the bar synchronously BEFORE the transition animates: any
@@ -519,37 +512,17 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         viewModel.loadSavedPosts()
     }
 
-    /// Puts the dock back, idempotently.
+    /// Puts the dock back, idempotently — through UIKit, never an alpha.
     ///
     /// The guard is what makes it safe to call from more than one place: the
-    /// feed's own completed-return restore can arrive before or after this, and
-    /// two animated reveals of an already-visible bar is a flicker.
+    /// feed's own close can show it before or after this, and two animated
+    /// reveals of an already-visible bar is a flicker.
     private func revealDock(animated: Bool) {
         guard let tabBarController, tabBarController.isTabBarHidden else { return }
-        tabBarController.tabBar.alpha = 1
-        tabBarController.setTabBarHidden(false, animated: animated)
-    }
-
-    /// Defers the dock to the far side of a scrub — and only if the finger
-    /// meant it.
-    ///
-    /// Both blocks run for a CANCELLED transition too, which is the entire
-    /// point: that is the case that strands the bar over a post that stayed.
-    /// The release is where the outcome is known and the pop's tail is still
-    /// running, so the bar arrives WITH the screen rather than onto it; the
-    /// second is the backstop for a gesture the system cancels outright, and is
-    /// idempotent against the first.
-    private func revealDockIfTransitionCommits() {
-        guard let coordinator = transitionCoordinator else { return }
-        coordinator.notifyWhenInteractionChanges { [weak self] context in
-            guard TabBarRevealPolicy.shouldReveal(afterTransitionCancelled: context.isCancelled)
-            else { return }
-            self?.revealDock(animated: true)
-        }
-        coordinator.animate(alongsideTransition: nil) { [weak self] context in
-            guard TabBarRevealPolicy.shouldReveal(afterTransitionCancelled: context.isCancelled)
-            else { return }
-            self?.revealDock(animated: true)
+        if animated {
+            tabBarController.showTabBarNatively()
+        } else {
+            tabBarController.setTabBarHidden(false, animated: false)
         }
     }
 
@@ -575,14 +548,13 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        // ⚠️ UNANIMATED: this is the BACKSTOP, and it runs at a landing. The
-        // one that reaches it is a close of the snap feed, whose bottom chrome
-        // is owed at once with the bar (`TabBarRevealPolicy`); animated, the
-        // band faded in over ~280ms under a bar already up (`-dock-trace`). A
-        // tab switch installs from `viewWillAppear` and finds nothing to do here.
+        // The BACKSTOP, on UIKit's own animation like every other install
+        // (native chrome is UIKit's — see `TabBarRevealPolicy`). A tab switch
+        // and a committed close install from `viewWillAppear` and find nothing
+        // to do here.
         selectorAccessory?.install(into: tabBarController,
                                    minimizesOnScroll: trayPlacement == .aboveBottomSafeArea,
-                                   alongside: transitionCoordinator, animated: false)
+                                   alongside: transitionCoordinator)
         #if DEBUG
         verifyRevealClearsSelector()
         #endif

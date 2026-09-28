@@ -658,8 +658,8 @@ final class MapsViewController: UIViewController {
     /// back on the completed pop — restoring the inset without invalidating this
     /// view's layout. Nothing then re-ran `syncBarsPosition`, so the map came
     /// back with its filter pills sitting exactly behind the restored tab bar:
-    /// present, laid out, and invisible. The flight path never showed it because
-    /// its return drives a layout of its own (`restoreBottomChromeForReturn`).
+    /// present, laid out, and invisible. The flight path never showed it: the
+    /// bars' constant is frozen at its resting value for the whole flight.
     override func viewSafeAreaInsetsDidChange() {
         super.viewSafeAreaInsetsDidChange()
         syncBarsPosition()
@@ -737,15 +737,16 @@ final class MapsViewController: UIViewController {
         // left the map docked to nothing.
         //
         // `viewDidAppear` and NOT `viewWillAppear`: UIKit runs the latter at
-        // interactive-pop BEGIN, so a restore there would show the bar over the
-        // feed for the whole return flight and strand it there when the grab is
-        // cancelled. By here every transition is over and the assertion is safe.
+        // interactive-pop BEGIN, so an unconditional restore there would show
+        // the bar over the feed and strand it there when the grab is cancelled.
+        // By here every transition is over and the assertion is safe.
         //
-        // Both failure modes are repaired, because `restoreBottomChromeForReturn`
-        // writes `tabBar.alpha` BEFORE its `isTabBarHidden` guard: a bar left
-        // hidden comes back, and a bar left at alpha 0 by an interrupted flight
-        // gets its opacity back even though its state already read visible.
-        restoreBottomChromeForReturn(alpha: 1)
+        // Through UIKit, on its animation, a turn later (an inline un-hide from
+        // `viewDidAppear` was measured never to render) — and never an alpha:
+        // native chrome is UIKit's (see `TabBarRevealPolicy`). Normally a
+        // no-op: the feed's close has shown the bar already.
+        barsStack.alpha = 1
+        tabBarController?.showTabBarNativelyNextTurn()
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -761,13 +762,24 @@ final class MapsViewController: UIViewController {
         // `viewDidAppear` is where every transition is genuinely over, and this
         // file already says so three comments below for the tab bar.
         guard activeTransition == nil else {
-            // A hero return, though, does need its bottom chrome's STATE put
-            // back — invisible, and it stays so until the landing
-            // (`onSourceReturned`). This is the only chance the back-button pop
-            // gets; a grab already did it at grab-begin, so there this is a
-            // no-op.
-            restoreBottomChromeForReturn(alpha: 0)
-            keepInvisibleThroughTransition(tabBarController?.tabBar)
+            // A return, though, owes the bottom chrome back.
+            //
+            // The FILTER BARS are this screen's own views, inside its view:
+            // back at full opacity now, where the flight's dim veils them and
+            // the presenter's recede carries them — a fade of their own would
+            // double the dim. Their constant was frozen at its resting value
+            // for the flight (`syncBarsPosition`), so they already sit where the
+            // dock will have them. A cancelled grab takes them down again.
+            //
+            // The TAB BAR is UIKit's: shown through its API, on its animation,
+            // once the close is committed — at the release for a grab, after
+            // the landing for a pop nobody announced. The feed asks for the
+            // same thing itself (`SnapFeedViewController.revealDockBeforePop`);
+            // whichever comes first shows it. See `TabBarRevealPolicy`.
+            barsStack.alpha = 1
+            revealBottomChromeWhenAllowed(returnsFromFullBleed: true) { [weak self] _ in
+                self?.tabBarController?.showTabBarNatively()
+            }
             return
         }
         videoCoordinator.setSurfaceVisible(true)
@@ -1650,31 +1662,6 @@ final class MapsViewController: UIViewController {
         ))
     }
     #endif
-
-    /// Brings the map's bottom chrome back as the feed leaves: the app's tab bar
-    /// and the map's own filter bars.
-    ///
-    /// The tab bar's hidden STATE and its OPACITY are set separately, and the
-    /// split is the point. The state has to be restored outside any transition —
-    /// done inside one, the bar's frame returns and `isTabBarHidden` reads false
-    /// while its buttons never paint, leaving a row of empty glass capsules. The
-    /// opacity is then held at 0 for the whole return and set to 1 at the
-    /// LANDING, at once: the product rule is that the dock never fades in with
-    /// a return (`TabBarRevealPolicy`). Nothing drives it in between.
-    ///
-    /// The filter bars follow the tab bar, same value, same moment: they are
-    /// the map's bottom chrome and sit right on top of the dock, so pills
-    /// arriving with the return over an empty band where the dock will be
-    /// would be the same fade the rule removes, one row up. (They used to be
-    /// restored at full opacity at grab-begin and ride the flight's dim.)
-    private func restoreBottomChromeForReturn(alpha: CGFloat) {
-        barsStack.alpha = alpha
-        guard let tabBarController else { return }
-        tabBarController.tabBar.alpha = alpha
-        guard tabBarController.isTabBarHidden else { return }
-        tabBarController.setTabBarHidden(false, animated: false)
-        tabBarController.view.layoutIfNeeded()
-    }
 
     private func bindViewModel() {
         viewModel.onDiff = { [weak self] diff in self?.handleDiff(diff) }
@@ -2961,7 +2948,9 @@ extension MapsViewController: MKMapViewDelegate {
                 openGate.dismissalBegan()
                 openGate.dismissalEnded(committed: committed)
                 guard committed else { return }
-                restoreBottomChromeForReturn(alpha: 1)
+                // A BACKSTOP — the close's commit has normally shown the dock.
+                barsStack.alpha = 1
+                tabBarController?.showTabBarNativelyNextTurn()
                 activeTransition = nil
                 videoCoordinator.setSurfaceVisible(true)
                 refreshVideoPlayback()
@@ -3137,7 +3126,7 @@ extension MapsViewController: MKMapViewDelegate {
                 transition.setDismissSource(gallerySource, for: built)
                 transition.attachInteractiveDismissal(
                     to: feedVC.view, axes: [.vertical], towards: gallerySource
-                ) { [weak self, built, weak nav, weak feedVC] in
+                ) { [built, weak nav, weak feedVC] in
                     // ⚠️ THE PAGE JOINS THE STACK HERE, at the last moment
                     // before the pop that lands on it — the mirror of the
                     // reveal route's own splice. `built` is captured STRONGLY:
@@ -3152,11 +3141,10 @@ extension MapsViewController: MKMapViewDelegate {
                        ) {
                         nav.setViewControllers(plan, animated: false)
                     }
-                    // Same grab-begin contract as the pin return: the tab
-                    // bar's hidden STATE goes back outside the transition
-                    // (at alpha 0, shown by the place page at its landing); the
-                    // filter bars are invisible under the gallery either way.
-                    self?.restoreBottomChromeForReturn(alpha: 0)
+                    // Nothing about the dock here: this pop lands on the place
+                    // page, and the feed brings the bar back through UIKit once
+                    // the release commits. The filter bars are invisible under
+                    // the gallery either way.
                     #if DEBUG
                     if ProcessInfo.processInfo.arguments.contains("-grab-log") {
                         print("[caseb] splice+pop delegate=\(nav?.delegate.map { "\(type(of: $0))" } ?? "nil")"
@@ -3201,7 +3189,8 @@ extension MapsViewController: MKMapViewDelegate {
             nav?.delegate = nil
             self.activeTransition = nil
             self.openGate.presentationCancelled()
-            self.restoreBottomChromeForReturn(alpha: 1)
+            self.barsStack.alpha = 1
+            self.tabBarController?.showTabBarNativelyNextTurn()
             self.videoCoordinator.setSurfaceVisible(true)
             self.refreshVideoPlayback()
         }
@@ -3232,20 +3221,18 @@ extension MapsViewController: MKMapViewDelegate {
             }
             #endif
         }
-        // ⚠️ THE BAR IS NOT THE FLIGHT'S. It is put back at alpha 0 before the
-        // pop (grab-begin, or `viewWillAppear` for a tap-back), stays invisible
-        // for the whole return, and appears at once here, at the landing — the
-        // product rule every surface follows (`TabBarRevealPolicy`). It used
-        // to be faded in 1:1 with the grab and on the flight's spring.
+        // ⚠️ THE BAR IS NOT THE FLIGHT'S, and nothing here writes its alpha.
+        // UIKit shows it once the close is committed (`viewWillAppear`'s
+        // policy, and the feed's own close); this is the backstop. See
+        // `TabBarRevealPolicy`.
         transition.onSourceReturned = { [weak self, weak nav] in
             // Completed pop only — a cancelled grab reports through
             // `onDismissalCancelled`, so the transition (and future grabs)
             // survives it by construction.
             nav?.delegate = nil
             guard let self else { return }
-            // THE LANDING: the tab bar and the filter bars appear together, at
-            // once (see `restoreBottomChromeForReturn`).
-            self.restoreBottomChromeForReturn(alpha: 1)
+            self.barsStack.alpha = 1
+            self.tabBarController?.showTabBarNativelyNextTurn()
             self.activeTransition = nil
             self.openGate.dismissalBegan()
             self.openGate.dismissalEnded(committed: true)
@@ -3257,9 +3244,8 @@ extension MapsViewController: MKMapViewDelegate {
             // `.open`, which is what `committed: false` means.
             self?.openGate.dismissalBegan()
             self?.openGate.dismissalEnded(committed: false)
-            // The feed is staying up: put the bottom chrome back down behind it.
-            self?.tabBarController?.setTabBarHidden(true, animated: false)
-            self?.tabBarController?.tabBar.alpha = 1
+            // The feed is staying up: the filter bars go back down behind it.
+            // The dock was never raised — it waits for a COMMITTED release.
             self?.barsStack.alpha = 0
             // ⚠️ THE UNDO IS NOW A REMOVAL, and it used to be an insertion.
             //
@@ -3298,27 +3284,21 @@ extension MapsViewController: MKMapViewDelegate {
             // exactly one of the two ever claims a drag.
             _ = clusterGallery
             transition.attachInteractiveDismissal(to: feedVC.view, axes: [.horizontal]) {
-                [weak self, weak nav, weak feedVC] in
-                // Only for a pop that will happen — see the pin grab below.
-                if let feedVC, nav?.topViewController === feedVC {
-                    self?.restoreBottomChromeForReturn(alpha: 0)
-                }
+                [weak nav] in
+                // The bottom chrome comes back from `viewWillAppear`, which
+                // this pop runs — see the pin grab below.
                 nav?.popViewController(animated: true)
             }
         } else {
             // Case A (single pin / generic cluster): both axes fly home to
             // the pin.
-            transition.attachInteractiveDismissal(to: feedVC.view) { [weak self, weak nav, weak feedVC] in
-                // Restore the bar's hidden STATE at grab-begin, before the pop
-                // and so outside any transition — the one point at which it
-                // paints correctly. Invisible until the landing shows it.
-                //
-                // ⚠️ Only for a pop that will happen: a grab-begin with the
-                // feed no longer on top pops nothing, and the map at rest would
-                // keep an invisible dock and invisible filter bars.
-                if let feedVC, nav?.topViewController === feedVC {
-                    self?.restoreBottomChromeForReturn(alpha: 0)
-                }
+            transition.attachInteractiveDismissal(to: feedVC.view) { [weak nav] in
+                // ⚠️ NOTHING ABOUT THE DOCK AT GRAB-BEGIN any more. It used to
+                // put the bar's state back here at alpha 0 and show it at the
+                // landing. A grab is a question until it is released: the pop
+                // below runs this screen's `viewWillAppear`, which restores the
+                // filter bars and hands the dock to `TabBarRevealPolicy` —
+                // UIKit shows it when the release commits.
                 nav?.popViewController(animated: true)
             }
         }
@@ -3330,12 +3310,12 @@ extension MapsViewController: MKMapViewDelegate {
         // Tab bar managed by hand, NOT hidesBottomBarWhenPushed: that flag's
         // bottom-bar choreography doesn't scrub with a custom interactive pop
         // (the bar snaps in at pop-begin and flashes over the feed when a grab
-        // cancels). Manually it slides away with the lift-off, stays hidden
-        // through cancelled grabs, and comes back at the return's landing, at
-        // once (`restoreBottomChromeForReturn`). Constraint: a
+        // cancels). By hand — through UIKit's API, on UIKit's animation — it
+        // leaves with the lift-off, stays hidden through cancelled grabs,
+        // and comes back once a close is committed. Constraint: a
         // programmatic cross-tab route while the feed is pushed would find the
         // bar hidden — today no such route fires from inside the feed.
-        tabBarController?.setTabBarHidden(true, animated: true)
+        tabBarController?.hideTabBarNatively()
         setFilterBar(hidden: true)
         nav.delegate = transition
         // ⚠️ NOT pre-paying the destination's layout here, and the empty space
@@ -3448,22 +3428,17 @@ extension MapsViewController: MKMapViewDelegate {
         // now close as a window onto the marker; `fallbackSlideAxis` stays as
         // the floor for the case where no geometry could be staged at all.
         slide.fallbackSlideAxis = .horizontal
-        // The bottom chrome is NOT the closing window's: restored at alpha 0
-        // before the pop (below, and `makeRevealGeometry`'s will-close hook for
-        // the chevron) and shown at once at the landing, by the marker
-        // origin's `dismissalDidEnd` — exactly as the hero's own return does.
-        slide.onWillBeginPop = { [weak self, weak nav, weak feed, gallery] axis in
+        // The bottom chrome is NOT the closing window's: the filter bars come
+        // back from `viewWillAppear` and the dock through UIKit once the close
+        // is committed (the feed's own close, and `viewWillAppear`'s policy),
+        // with the marker origin's `dismissalDidEnd` as the landing's
+        // backstop — exactly as the hero's own return does.
+        slide.onWillBeginPop = { [weak nav, weak feed, gallery] axis in
             guard axis == .vertical, let gallery, let nav, let feed,
                   let plan = Self.stack(
                       nav.viewControllers, inserting: gallery, beneath: feed
                   )
-            else {
-                // Every other axis lands on the MAP, so the dock's hidden state
-                // goes back here — outside the transition, the one point at
-                // which it paints.
-                self?.restoreBottomChromeForReturn(alpha: 0)
-                return
-            }
+            else { return }
             nav.setViewControllers(plan, animated: false)
             // ⚠️ AND OUT AGAIN FOR AN ABANDONED SWIPE — the removal the hero's
             // own vertical grab has in `onDismissalCancelled`, which this
@@ -3550,10 +3525,10 @@ extension MapsViewController: MKMapViewDelegate {
                 // ⚠️ NOT LATCHED, unlike the card below. The origin re-derives
                 // the marker's rect at ask time, so rebuilding is both free and
                 // more correct than remembering one — the map may have moved.
-                slide.revealGeometry = self.makeRevealGeometry(
-                    feed, markerOrigin,
-                    { [weak self] in self?.restoreBottomChromeForReturn(alpha: 0) }
-                )
+                // No will-close hook: the feed's chevron brings the dock back
+                // itself (`revealDockBeforePop`), and the filter bars come back
+                // from `viewWillAppear`.
+                slide.revealGeometry = self.makeRevealGeometry(feed, markerOrigin, nil)
                 return
             case .placeCard:
                 break
@@ -3608,10 +3583,7 @@ extension MapsViewController: MKMapViewDelegate {
             guard let self, let slide else { return false }
             switch Self.closeTarget(axis: axis, hasLanding: landing != nil) {
             case .marker:
-                slide.revealGeometry = self.makeRevealGeometry(
-                    feed, markerOrigin,
-                    { [weak self] in self?.restoreBottomChromeForReturn(alpha: 0) }
-                )
+                slide.revealGeometry = self.makeRevealGeometry(feed, markerOrigin, nil)
             case .placeCard:
                 if placeCardGeometry == nil {
                     placeCardGeometry = landing?.cardCloseGeometry(dismissing: feed)

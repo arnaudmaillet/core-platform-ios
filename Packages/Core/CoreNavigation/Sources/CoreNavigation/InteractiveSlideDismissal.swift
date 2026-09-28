@@ -98,17 +98,6 @@ public final class InteractiveSlideDismissal: NSObject {
     /// a different ANIMATION of the same dismissal, not a second dismissal.
     public var revealGeometry: RevealGeometry?
 
-    /// Source chrome the reveal's OPENING fades out as the page grows over it —
-    /// the app's tab bar. Only consulted while `revealGeometry` is set and the
-    /// reveal presents.
-    ///
-    /// ⚠️ THE OPENING ONLY. The close never touches it: the bar stays down for
-    /// the whole return, whether a finger or the chevron drives it, and the
-    /// owner shows it at once at the landing (`RevealGeometry.dismissalDidEnd`,
-    /// or `onFeedPopped`) — the product rule is that the dock never fades in
-    /// with a return, it is simply there when the return is over.
-    public weak var revealDepartingChrome: UIView?
-
     /// Which axes close as a WINDOW when `revealGeometry` is set. Both by
     /// default, and both is now the shipped case for the place page too: the
     /// rightward close lands on the map's marker and the downward one on the
@@ -544,9 +533,7 @@ extension InteractiveSlideDismissal: UINavigationControllerDelegate {
         // which is exactly the gap this is measuring.
         if operation == .push, toVC === feedViewController, revealPresents,
            let revealGeometry {
-            return RevealPresentAnimator(
-                geometry: revealGeometry, departingChrome: revealDepartingChrome
-            )
+            return RevealPresentAnimator(geometry: revealGeometry)
         }
         guard operation == .pop, fromVC === feedViewController else { return nil }
         // ⚠️ A POP WITH NO GESTURE BEHIND IT still has to be prepared.

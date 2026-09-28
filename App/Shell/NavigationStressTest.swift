@@ -200,16 +200,19 @@ final class NavigationStressTest {
     ///
     /// The scripted grab runs two gestures with timing of its own, so a fixed
     /// sleep can land mid-transition — and mid-transition every alarm goes
-    /// off at once: the tab bar caught at alpha 0.4, interaction off on a
+    /// off at once: the tab bar caught mid-fade, interaction off on a
     /// wrapper view, touches landing on `UINavigationTransitionView`. All true,
     /// none of it a leak. An audit that cannot tell "still animating" from
     /// "left broken" reports the first as the second.
+    ///
+    /// The bar is settled when UIKit's own animation of it is over: the dock
+    /// is shown one runloop turn after a close commits (`whenCommitted`), so
+    /// the stack can be still while the bar is still arriving.
     private func waitUntilIdle(limit: Int = 40) async {
         for _ in 0..<limit {
             let animating = activeStack()?.transitionCoordinator != nil
-            let settledBar = tabBarController.tabBar.alpha > 0.99
-                || tabBarController.isTabBarHidden
-            if !animating, settledBar { return }
+            let barMoving = tabBarController.tabBar.layer.animationKeys()?.isEmpty == false
+            if !animating, !barMoving { return }
             await settle(0.1)
         }
     }
@@ -236,8 +239,15 @@ final class NavigationStressTest {
         if tabBarController.isTabBarHidden {
             report.problems.append("tab bar hidden at root")
         }
+        // ⚠️ NOBODY WRITES ITS ALPHA — native chrome is UIKit's (see
+        // `TabBarRevealPolicy`) — so anything under 1 at rest is a hand-written
+        // opacity that leaked. And a bar every API reports as shown whose view
+        // is hidden is the one an un-hide INSIDE a transition leaves behind.
         if tabBarController.tabBar.alpha < 0.99 {
-            report.problems.append("tab bar alpha=\(tabBarController.tabBar.alpha)")
+            report.problems.append("tab bar alpha=\(tabBarController.tabBar.alpha) (written by hand)")
+        }
+        if !tabBarController.isTabBarHidden, tabBarController.tabBar.isHidden {
+            report.problems.append("tab bar shown by state but its view is hidden (un-hidden inside a transition)")
         }
         if !tabBarController.tabBar.isUserInteractionEnabled {
             report.problems.append("tab bar interaction disabled")
