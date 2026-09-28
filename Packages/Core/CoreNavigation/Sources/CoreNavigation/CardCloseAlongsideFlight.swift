@@ -43,19 +43,48 @@ extension InteractiveSlideDismissal {
         on feed: UIViewController,
         stage: @escaping (UIViewController) -> Bool
     ) {
+        armAsCardCloseAlongsideFlight(
+            on: feed, restagesOnEveryAttempt: false
+        ) { feed, _ in stage(feed) }
+    }
+
+    /// The same arming, for a host whose landing depends on the AXIS.
+    ///
+    /// ⚠️ ONE STAGING CANNOT DESCRIBE TWO LANDINGS. The map's hero feed closes
+    /// rightward (and by its chevron) onto the MARKER, and downward onto its
+    /// place page's card — a different screen, a different rect. Latched after
+    /// the first staging, a vertical grab abandoned half-way would leave the
+    /// place page's geometry armed for the chevron that follows, and the
+    /// window would shrink onto a tile that is not on screen. So:
+    ///
+    /// * `stage` is handed the axis the dismissal travels on (`.horizontal`
+    ///   for a pop with no gesture — the back button's direction);
+    /// * `restagesOnEveryAttempt` turns the once-only latch OFF: `stage` is
+    ///   asked on every card-carrying ask, and making a staging that MOVES
+    ///   something idempotent becomes the host's job (its return value is then
+    ///   informational only).
+    ///
+    /// Everything else — both axes, the arbitration, the card-only gate, the
+    /// reset — is the one-closure form's, which forwards here with the latch on.
+    public func armAsCardCloseAlongsideFlight(
+        on feed: UIViewController,
+        restagesOnEveryAttempt: Bool,
+        stage: @escaping (_ feed: UIViewController, _ axis: ZoomDismissAxis) -> Bool
+    ) {
         // Nothing from the last opening survives into this one — see
         // `resetForNewPresentation`.
         resetForNewPresentation()
         arbitratesWithHeroGrab = true
         attach(to: feed, axes: [.horizontal, .vertical])
         var hasStaged = false
-        prepareForDismissal = { [weak feed] _ in
+        prepareForDismissal = { [weak feed] axis in
             guard !hasStaged, let feed,
                   // Asked of the same authority both grabs gate on, so the
                   // three can never disagree about what the post is.
                   (feed as? any ZoomTransitionDestination)?.zoomDismissalKind == .card
             else { return }
-            hasStaged = stage(feed)
+            let staged = stage(feed, axis)
+            if !restagesOnEveryAttempt { hasStaged = staged }
         }
     }
 }
