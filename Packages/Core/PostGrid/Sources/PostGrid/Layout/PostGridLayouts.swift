@@ -199,6 +199,12 @@ public enum PostGridListLayout {
     /// register one string and supply another.
     public static let headerElementKind = "PostGridListLayout.header"
 
+    /// The gap between two cards, and the reading margin either side of them.
+    /// Stated once so a surface that interleaves other content with these rows
+    /// (`DiscoverListLayout`) lines it up with the cards rather than guessing.
+    public static let rowSpacing: CGFloat = 10
+    public static let sideMargin: CGFloat = 16
+
     /// Headers FLOAT over the rows rather than pushing them down: the header is
     /// a capsule, not a band, and a pinned capsule reads as an object sitting on
     /// the list — the same treatment the inbox's plain tables give theirs.
@@ -224,7 +230,7 @@ public enum PostGridListLayout {
                 subitems: [item]
             )
             let section = NSCollectionLayoutSection(group: group)
-            section.interGroupSpacing = 10
+            section.interGroupSpacing = rowSpacing
             // The margin that separates two sections is on the TRAILING edge of
             // the one above, never the leading edge of the one below.
             //
@@ -255,9 +261,9 @@ public enum PostGridListLayout {
             // the margin goes on the section above.
             section.contentInsets = NSDirectionalEdgeInsets(
                 top: 0,
-                leading: 16,
+                leading: sideMargin,
                 bottom: hasHeader == nil ? 0 : SectionHeaderPillButton.Metrics.sectionGap,
-                trailing: 16
+                trailing: sideMargin
             )
             if hasHeader?(index) == true {
                 let header = NSCollectionLayoutBoundarySupplementaryItem(
