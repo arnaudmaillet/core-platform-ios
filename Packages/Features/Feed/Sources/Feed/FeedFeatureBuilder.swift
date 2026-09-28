@@ -307,8 +307,12 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             nav?.delegate = previousDelegate
             origin.setConcealed(false)
             retainer.transition = nil
+            // THE LANDING — the one moment the dock is shown, at once.
             Self.restoreTabBar(on: nav)
         }
+        // An abandoned grab leaves the post up: the dock restored offstage at
+        // grab-begin goes back down, never having been seen.
+        transition.onDismissalCancelled = { [weak nav] in Self.retireDock(on: nav) }
         // ⚠️ BOTH AXES GO HOME TO THE TILE, including for a post opened from
         // the PLACE PAGE.
         //
@@ -349,9 +353,18 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // so the pan has something to attach to.
         transition.attachInteractiveDismissal(
             to: destination.view, axes: [.horizontal, .vertical]
-        ) { [weak nav, weak transition] in
+        ) { [weak nav, weak transition, weak destination] in
             if let transition { nav?.delegate = transition }
+            // The dock's STATE goes back BEFORE the pop, outside any
+            // transition — see `restoreDockOffstage`.
+            Self.restoreDockOffstage(on: nav, closing: destination)
             nav?.popViewController(animated: true)
+        }
+        // …and the chevron's equivalent, which has no grab-begin. Every kind
+        // of close: the flight's tap-back and the card close alike land on a
+        // screen whose layout wants the bar in place before they measure it.
+        (destination as? SnapFeedViewController)?.onWillCloseFeed = { [weak nav, weak destination] in
+            Self.restoreDockOffstage(on: nav, closing: destination)
         }
         #if DEBUG
         // `-zoom-live-log`: the grab is invisible until a finger arrives, and
@@ -678,7 +691,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             // when the window is measured and dissolves as the page grows past
             // it, and `presentationDidEnd` retires it for real underneath the
             // landed page where the frame change cannot be seen.
-            dismissal.revealReturningChrome = nav.tabBarController?.tabBar
+            dismissal.revealDepartingChrome = nav.tabBarController?.tabBar
             // Restoring it at alpha 0 BEFORE the pop is triggered settles the
             // grid's layout while nothing is in flight. Inside the transition
             // instead, the bar comes back as a row of empty glass capsules that
@@ -692,13 +705,11 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             // area never returns — measured on the map's reveal route as a
             // dock that was "shown" by every API and drawn by none, with the
             // filter pills left 49pt low behind it.
-            let restoreDockOffstage: (UINavigationController?) -> Void = { nav in
-                nav?.tabBarController?.setTabBarHidden(false, animated: false)
-                nav?.tabBarController?.tabBar.alpha = 0
+            dismissal.onWillBeginPop = { [weak nav, weak destination] _ in
+                Self.restoreDockOffstage(on: nav, closing: destination)
             }
-            dismissal.onWillBeginPop = { [weak nav] _ in restoreDockOffstage(nav) }
-            (destination as? SnapFeedViewController)?.onWillCloseFeed = { [weak nav] in
-                restoreDockOffstage(nav)
+            (destination as? SnapFeedViewController)?.onWillCloseFeed = { [weak nav, weak destination] in
+                Self.restoreDockOffstage(on: nav, closing: destination)
             }
             // The OPENING is this reveal's, and it has to say so: a geometry
             // alone no longer means the push is one, now that a media post
@@ -905,13 +916,12 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             },
             dismissalDidEnd: { [weak nav] committed in
                 reveal.dismissalDidEnd(committed)
-                // A cancelled swipe leaves the post on screen, so the bar
-                // restored at grab-begin has to go back down — unanimated and
-                // behind the page that sprang back, where nothing renders the
-                // change. Committed pops leave it up; `onFeedPopped` takes it
-                // from there.
-                guard !committed else { return }
-                nav?.tabBarController?.setTabBarHidden(true, animated: false)
+                // THE LANDING: the bar restored offstage at grab-begin is shown
+                // here, at once — nothing in the close faded it. A cancelled
+                // swipe leaves the post on screen, so it goes back down
+                // instead, unanimated and never having been seen.
+                guard committed else { return Self.retireDock(on: nav) }
+                Self.restoreTabBar(on: nav)
             }
         )
     }
@@ -984,29 +994,17 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // ⚠️ THE DOCK COMES BACK WITH A ROW'S CLOSE, the way it does from For
         // You's list and from this builder's own reveal push.
         //
-        // The flight hid the bar at the push and only its own return puts it
-        // back — animated, AFTER the landing. A card close replacing that
-        // return would therefore land the row on a screen with no dock, which
-        // then slides in on top of it. Restored at alpha 0 BEFORE the pop
-        // (outside any transition, the one place it paints — see
-        // `pushWithoutFlight`), faded in by the window, and put back down if
-        // the grab springs back (`withDockChoreography`'s cancel leg, which
-        // `RowCardCloseLanding` already carries).
-        //
-        // Gated on `.card` on the chevron's leg, because that hook hears EVERY
-        // close — a media page's chevron is the flight's, whose own animator
-        // fades nothing and whose return restores the bar itself.
+        // The flight's own return puts the bar back at ITS landing; a card
+        // close replacing that return has to do the same at its own. Restored
+        // at alpha 0 BEFORE the pop (outside any transition, the one place it
+        // paints — see `restoreDockOffstage`), shown at once at the landing
+        // and put back down if the grab springs back — both
+        // `withDockChoreography`'s `dismissalDidEnd`, which
+        // `RowCardCloseLanding` already carries. The chevron's leg is the
+        // flight's `onWillCloseFeed`, which hears every close.
         if landing is RowCardCloseLanding {
-            close.revealReturningChrome = nav.tabBarController?.tabBar
-            let restoreDockOffstage: (UINavigationController?) -> Void = { nav in
-                nav?.tabBarController?.setTabBarHidden(false, animated: false)
-                nav?.tabBarController?.tabBar.alpha = 0
-            }
-            close.onWillBeginPop = { [weak nav] _ in restoreDockOffstage(nav) }
-            (feed as? SnapFeedViewController)?.onWillCloseFeed = { [weak nav, weak feed] in
-                guard (feed as? any ZoomTransitionDestination)?.zoomDismissalKind == .card
-                else { return }
-                restoreDockOffstage(nav)
+            close.onWillBeginPop = { [weak nav, weak feed] _ in
+                Self.restoreDockOffstage(on: nav, closing: feed)
             }
         }
         // The backstop: whatever animated the close, nothing stays hidden. The
@@ -1084,9 +1082,9 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // Idempotent, because the screen underneath may have got there first:
         // a tab ROOT asserts its own dock on the far side of a committed scrub
         // (`ProfileViewController.revealDock`), and the two orders are not
-        // guaranteed. Whichever arrives first animates; the second finds the bar
-        // already down and re-asserts it without a second animation.
-        // ⚠️ AND IT ONLY EVER ANIMATES A BAR THAT IS ACTUALLY HIDDEN. When
+        // guaranteed. Whichever arrives first shows it; the second finds the
+        // bar already up and has nothing to do.
+        // ⚠️ AND IT ONLY EVER UN-HIDES A BAR THAT IS ACTUALLY HIDDEN. When
         // the state already reads visible there is nothing here to repair —
         // and repairing it here is the wrong place anyway: a bar restored
         // while a transition is running comes back as a state nothing draws,
@@ -1094,7 +1092,48 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // restore it BEFORE the pop, which is what `onWillCloseFeed` and
         // `onWillBeginPop` are both for.
         guard tabs.isTabBarHidden else { return }
-        tabs.setTabBarHidden(false, animated: true)
+        // ⚠️ UNANIMATED. This is the landing, and the product rule is that the
+        // dock is simply THERE when a return is over — it neither fades nor
+        // slides in after it (see `TabBarRevealPolicy`).
+        tabs.setTabBarHidden(false, animated: false)
+    }
+
+    /// Puts the dock's hidden STATE back before a close of `feed` begins, at
+    /// alpha 0 — geometrically present, visually absent.
+    ///
+    /// ⚠️ OUTSIDE ANY TRANSITION, and that is the whole of why it exists. A bar
+    /// un-hidden inside one comes back as a state every API reports as shown
+    /// and nothing draws: measured with `-dock-trace` on the place page after a
+    /// chevron close, `hidden=N` with the `UITabBar` view itself `isHidden`,
+    /// for the life of the screen. Done here instead, the landing screen's
+    /// layout settles while nothing is in flight, so the landing only flips the
+    /// opacity (`restoreTabBar`) and nothing moves.
+    ///
+    /// A landing that shows no dock of its own (another snap feed) is left
+    /// alone: `restoreTabBar` would never show it, and a bar left at alpha 0
+    /// is a dock the next screen cannot see.
+    static func restoreDockOffstage(on nav: UINavigationController?, closing feed: UIViewController?) {
+        // Only for a close that is about to pop THIS feed: a begin that pops
+        // nothing would leave an invisible dock on a screen at rest.
+        guard let nav, let tabs = nav.tabBarController, let feed,
+              nav.topViewController === feed,
+              let index = nav.viewControllers.firstIndex(of: feed), index > 0
+        else { return }
+        if (nav.viewControllers[index - 1] as? any ZoomTransitionDestination)?.concealsAppTabBar == true {
+            return
+        }
+        tabs.setTabBarHidden(false, animated: false)
+        tabs.tabBar.alpha = 0
+    }
+
+    /// An abandoned close: the post stays up, so the dock restored offstage at
+    /// its begin goes back down — unanimated, and never having been seen. The
+    /// alpha goes home with it, since the view is shared with every screen
+    /// that shows it.
+    private static func retireDock(on nav: UINavigationController?) {
+        guard let tabs = nav?.tabBarController else { return }
+        tabs.setTabBarHidden(true, animated: false)
+        tabs.tabBar.alpha = 1
     }
 
     public func makeSnapFeedViewController(

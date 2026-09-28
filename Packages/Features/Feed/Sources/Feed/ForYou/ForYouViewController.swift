@@ -1076,14 +1076,15 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // nothing is in flight. Inside the transition instead, the bar comes
         // back as a row of empty glass capsules that never paint (measured on
         // the hero path, which restores it at grab-begin for this exact
-        // reason). The pop then drives its alpha from 0, so it fades in with
-        // the grid rather than switching on after it.
+        // reason). It stays at alpha 0 for the whole close and is shown at
+        // once at the landing (`dismissalDidEnd`), never faded in with it.
         textSlideDismissal.onWillBeginPop = { [weak self] _ in
             log("beginPop  pre")
             self?.showTabBar(alpha: 0)
             log("beginPop post")
         }
-        textSlideDismissal.revealReturningChrome = tabBarController?.tabBar
+        // The OPENING still dissolves the bar as the page grows past it.
+        textSlideDismissal.revealDepartingChrome = tabBarController?.tabBar
         // The GEOMETRY is not built here — see `TextRevealInstaller`. A
         // profile draws the same row and must open it the same way, and two
         // hand-written copies of thirteen fields agree only on the day they
@@ -1208,13 +1209,16 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
                     // looking at it for the length of the flight. Dropping it
                     // to zero and bringing it back is a blink of something
                     // already on screen — reported exactly that way.
-                    // A cancelled swipe leaves the post on screen, so the bar
-                    // restored at grab-begin has to go back down — unanimated
-                    // and behind the page that sprang back, where nothing
-                    // renders the change. Committed pops leave it up;
-                    // `onFeedPopped` takes it from there.
-                    guard !committed else { return }
+                    // THE LANDING: the bar restored offstage at grab-begin is
+                    // shown here, at once. A cancelled swipe leaves the post on
+                    // screen, so it goes back down instead — unanimated, and
+                    // never having been seen.
+                    guard !committed else {
+                        self?.showTabBar(alpha: 1)
+                        return
+                    }
                     self?.tabBarController?.setTabBarHidden(true, animated: false)
+                    self?.tabBarController?.tabBar.alpha = 1
                 }
             ),
             pipeline: page.bandImagePipeline
@@ -1347,6 +1351,14 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // it while its player is in flight.
         pager.beginPlaybackHandoff(of: tapped.id)
         let feed = snapFeed(for: Array(ids))
+        // ⚠️ THE CHEVRON'S "BEGIN". A dragged close restores the bar's STATE
+        // at grab-begin, outside any transition, where it paints and where the
+        // grid's layout settles; a tapped chevron has no begin, and without
+        // this it reached the restore only inside the pop. At alpha 0 — the
+        // bar is shown at the landing, never during the return.
+        (feed as? SnapFeedViewController)?.onWillCloseFeed = { [weak self] in
+            self?.showTabBar(alpha: 0)
+        }
         // Hand the feed the projection this grid already holds, so its first
         // page configures at push time rather than when its own fetch returns.
         // Measured at ~0.69s of empty destination without it.
@@ -1656,10 +1668,11 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // its way. Stated rather than left at the default: the controller is
         // reused, and the previous presentation may have said otherwise.
         (feed as? SnapFeedViewController)?.zoomOwnsInteractiveDismissal = true
-        // The bar's alpha is driven 1:1 by the grab (and by the flight's spring
-        // on a tap-back), so it is revealed by the hand instead of appearing
-        // after the card has already landed.
-        transition.returningSourceChrome = tabBarController?.tabBar
+        // ⚠️ THE BAR IS NOT THE FLIGHT'S. It comes back at alpha 0 before the
+        // pop (grab-begin below, `viewWillAppear` for a tap-back) so the grid's
+        // layout is final, stays invisible for the whole return, and is shown
+        // at once by `onSourceReturned` — the landing. Product rule, see
+        // `TabBarRevealPolicy`; it used to be faded in 1:1 with the grab.
         transition.onSourceReturned = { [weak self, weak page] in
             // A card-shaped close that was cancelled left a row hidden under
             // the page; if the viewer then left by this flight instead, nothing
@@ -1670,8 +1683,8 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             // survives it by construction.
             self?.navigationController?.delegate = nil
             self?.activeTransition = nil
-            // Idempotent close-out: the state and the alpha are already correct
-            // by now, this just guarantees it if a leg was skipped.
+            // THE LANDING: the bar (and the selector beside it) appear here, at
+            // once. The state has been visible, at alpha 0, since the pop began.
             self?.showTabBar(alpha: 1)
             self?.restoreChromeAfterTransition()
             // Close the handoff scope. This is the single act that restores the
@@ -1691,8 +1704,9 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             #endif
         }
         transition.onDismissalCancelled = { [weak self] in
-            // The feed is staying up, so put the bar back down — it is behind
-            // the restored page by now, so nothing renders the change.
+            // The feed is staying up, so put the bar back down. It was never
+            // seen — alpha 0 for the whole of the abandoned grab — so nothing
+            // renders the change.
             self?.tabBarController?.setTabBarHidden(true, animated: false)
             self?.tabBarController?.tabBar.alpha = 1
             self?.restoreChromeAfterTransition()
@@ -1714,7 +1728,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             self?.pager.endPlaybackHandoff()
         }
         // Accessing `view` loads it so the grab-to-dismiss pan can attach.
-        transition.attachInteractiveDismissal(to: feed.view) { [weak self] in
+        transition.attachInteractiveDismissal(to: feed.view) { [weak self, weak feed] in
             // Restore the bar's hidden STATE here, at grab-begin — before the
             // pop and therefore before any transition is in flight.
             //
@@ -1727,10 +1741,19 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             // inside the bar's safe area — so every landing rect the flight
             // reads is already the rect the tile will still occupy.
             //
-            // It goes back at alpha 0 so the drag can fade it in; the bar is a
-            // sibling of the navigation controller's view and renders above the
-            // transition's dim, which is why the dim cannot veil it for us.
-            self?.showTabBar(alpha: 0)
+            // It goes back at alpha 0 and STAYS there for the drag: the landing
+            // (`onSourceReturned`) shows it, a cancel puts it back down unseen.
+            // The bar is a sibling of the navigation controller's view and
+            // renders above the transition's dim, so the dim cannot veil it —
+            // the alpha is the only thing keeping it out of the return.
+            // ⚠️ ONLY FOR A POP THAT WILL HAPPEN. A grab-begin with the feed no
+            // longer on top (a scripted grab re-armed by a landing) pops
+            // nothing, and a bar left at alpha 0 on a screen at rest is a dock
+            // nobody can see — measured with `-dock-trace` after
+            // `-foryou-demo-grab`, 1.9s after a clean landing.
+            if let feed, self?.navigationController?.topViewController === feed {
+                self?.showTabBar(alpha: 0)
+            }
             self?.navigationController?.popViewController(animated: true)
         }
         navigationController.delegate = transition
@@ -1869,7 +1892,15 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             source: source, destination: destination, presents: false
         )
         cardPathFlight = transition
-        transition.returningSourceChrome = tabBarController?.tabBar
+        // The same dock rule as the flight path: down for the whole return,
+        // shown at once at the landing, never seen by an abandoned grab.
+        transition.onSourceReturned = { [weak self] in
+            self?.showTabBar(alpha: 1)
+        }
+        transition.onDismissalCancelled = { [weak self] in
+            self?.tabBarController?.setTabBarHidden(true, animated: false)
+            self?.tabBarController?.tabBar.alpha = 1
+        }
         navigationController.delegate = transition
         #if DEBUG
         // `-foryou-demo-grab [delay]` on the WINDOW path too. This flight is the
@@ -1896,10 +1927,12 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             }
         }
         #endif
-        transition.attachInteractiveDismissal(to: feed.view) { [weak self] in
+        transition.attachInteractiveDismissal(to: feed.view) { [weak self, weak feed] in
             // The same bar choreography the flight path states at length: back
-            // at alpha 0 before the pop, so the drag fades it in.
-            self?.showTabBar(alpha: 0)
+            // at alpha 0 before the pop, and shown only at the landing.
+            if let feed, self?.navigationController?.topViewController === feed {
+                self?.showTabBar(alpha: 0)
+            }
             self?.navigationController?.popViewController(animated: true)
         }
     }
@@ -2115,8 +2148,13 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // `setContentScrollView(_:for: .bottom)`. The behaviour is shell-wide;
         // arming it from a host with no scroller registered would give every
         // other tab a collapsing bar and this one nothing.
+        // ⚠️ UNANIMATED: this is the BACKSTOP, and it runs at a landing. The
+        // one that reaches it is a close of the snap feed, whose bottom chrome
+        // is owed at once with the bar (`TabBarRevealPolicy`); animated, the
+        // band faded in over ~280ms under a bar already up (`-dock-trace`). A
+        // tab switch installs from `viewWillAppear` and finds nothing to do here.
         selectorAccessory?.install(into: tabBarController, minimizesOnScroll: true,
-                                   alongside: transitionCoordinator)
+                                   alongside: transitionCoordinator, animated: false)
         tabBarController?.view.layoutIfNeeded()
         pager.setFootChromeCover(floatingBarCover)
         sweepAbandonedTransition()
@@ -2200,10 +2238,11 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // backstop for the paths the policy declines (a scrub that has not
         // committed, a flight that owns the chrome).
         installBottomChromeWhenAppearing(hasActiveFlight: activeTransition != nil,
-                                         handsOver: tabBarController?.bottomAccessory != nil) { [weak self] in
+                                         handsOver: tabBarController?.bottomAccessory != nil) { [weak self] animated in
             guard let self else { return }
             selectorAccessory?.install(into: tabBarController, minimizesOnScroll: true,
-                                       alongside: transitionCoordinator)
+                                       alongside: transitionCoordinator,
+                                       animated: animated)
         }
 
         // The segment row and the view model hold two copies of one fact — which
@@ -2230,39 +2269,41 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         pager.setAutoplayActive(true)
         // Coming back from the feed: this screen owns the bottom again.
         guard navigationController?.topViewController === self else { return }
-        switch TabBarRevealPolicy.timing(hasActiveFlight: activeTransition != nil,
-                                         isTransitioning: transitionCoordinator != nil,
-                                         isInteractive: transitionCoordinator?.isInteractive == true) {
+        switch TabBarRevealPolicy.timing(
+            returnsFromFullBleed: activeTransition != nil || isReturningFromDocklessScreen,
+            isTransitioning: transitionCoordinator != nil,
+            isInteractive: transitionCoordinator?.isInteractive == true
+        ) {
         case .immediately:
-            // A tab switch back, or a back-button pop: nothing here can be
-            // taken back, so revealing now simply runs the bar alongside it.
+            // A tab switch back, or a non-animated pop: nothing is moving, so
+            // there is nothing to be out of step with.
             revealTabBar(animated: animated)
-            return
         case .whenTransitionCommits:
-            // A swipe on the plain-push fallback for a text-only row. This
-            // runs at pop-BEGIN, which for a scrub is a question and not yet
-            // an answer — so hand the reveal to the gesture's release (see
+            // A scrub that is not a close of the feed (those are `.atLanding`).
+            // This runs at pop-BEGIN, which for a scrub is a question and not
+            // yet an answer — so hand the reveal to the gesture's release (see
             // `TabBarRevealPolicy`).
             revealTabBarIfSwipeCommits()
-            return
-        case .drivenByFlight:
-            break
+        case .atLanding:
+            // A close of the feed, whichever way it is driven. The bar's STATE
+            // goes back now, INVISIBLE, so the grid's inset freeze captures the
+            // resting layout (see `showTabBar`) — the only chance a pop gets if
+            // nothing restored it before it began. On a grab (and a chevron,
+            // via `onWillCloseFeed`) the state was already restored outside the
+            // transition, so this is a no-op there.
+            //
+            // The OPACITY is owed at the landing and only there: the close's
+            // own completion shows it (`onSourceReturned`, `dismissalDidEnd`,
+            // `onFeedPopped`), and this is the backstop for a close that
+            // reaches none of them. A cancelled close never shows it.
+            showTabBar(alpha: 0)
+            keepInvisibleThroughTransition(tabBarController?.tabBar)
+            revealBottomChromeAtLanding { [weak self] in self?.showTabBar(alpha: 1) }
         }
-        // A hero return: put the bar back INVISIBLE so the flight has something
-        // to fade in, and so the grid's inset freeze captures the resting
-        // layout (see `showTabBar`).
-        //
-        // This is the only chance the *back-button* pop gets — there is no
-        // grab-begin on that path, and leaving the state to the transition's
-        // completion is exactly what made the bar snap in after the card had
-        // already landed. On an interactive grab the state was restored at
-        // grab-begin, before this ran, so this is a no-op there. Either way the
-        // opacity is the flight's to drive, never this method's.
-        showTabBar(alpha: 0)
     }
 
-    /// Puts the bar back on the far side of a scrubbed pop — but only if the
-    /// finger meant it.
+    /// Puts the bar back on the far side of a scrubbed pop that is NOT a close
+    /// of the feed — but only if the finger meant it.
     ///
     /// Both blocks below run for a CANCELLED transition too, which is the
     /// entire point: that is the case that used to leave the bar stranded over
@@ -2385,18 +2426,30 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
 
     private func showTabBar(alpha: CGFloat) {
         guard let tabBarController else { return }
-        tabBarController.tabBar.alpha = alpha
         // ⚠️ `selectorAccessory?.hostView`, NEVER a bare `tabBar.alpha`: inside
         // this class `tabBar` is the SELECTOR and the system bar is always
         // `tabBarController?.tabBar`. Once both live in the same band, a line
         // written for one silently targets the other.
-        selectorAccessory?.hostView.alpha = alpha
-        guard tabBarController.isTabBarHidden else { return }
-        tabBarController.setTabBarHidden(false, animated: false)
-        // Force the layout the change implies now, so nothing downstream reads
-        // a stale cell rect.
-        tabBarController.view.layoutIfNeeded()
-        view.layoutIfNeeded()
+        //
+        // ⚠️ WITHOUT ANIMATION, whatever block this is called from. The landing
+        // call arrives from the navigation delegate's `didShow`, inside an
+        // animation context of UIKit's: the selector faded 0 → 1 over ~280ms
+        // under a bar already fully up (`-dock-trace`, an `opacity` animation
+        // on the host itself). Both halves appear in the same frame.
+        UIView.performWithoutAnimation { selectorAccessory?.hostView.alpha = alpha }
+        if tabBarController.isTabBarHidden {
+            tabBarController.setTabBarHidden(false, animated: false)
+            // Force the layout the change implies now, so nothing downstream
+            // reads a stale cell rect.
+            tabBarController.view.layoutIfNeeded()
+            view.layoutIfNeeded()
+        }
+        // ⚠️ AFTER THE UN-HIDE, never before it. Un-hiding puts the bar's
+        // opacity back to 1 on its own: written first, the 0 was lost and the
+        // bar stood fully opaque over the first frames of a grab (measured
+        // with `-dock-trace`, `bar=1.00` for ~70ms after grab-begin). Nothing
+        // used to see it, because the grab re-wrote the alpha on every frame.
+        UIView.performWithoutAnimation { tabBarController.tabBar.alpha = alpha }
     }
 
     /// Warms the top of the corpus into the feed's post cache so a tile tap

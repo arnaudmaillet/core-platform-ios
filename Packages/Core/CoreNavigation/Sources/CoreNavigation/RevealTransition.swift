@@ -195,9 +195,11 @@ public struct RevealGeometry {
     /// which is likewise called on every ending.
     ///
     /// The outcome is a parameter and not two hooks because the caller's two
-    /// jobs differ by exactly one thing — a cancelled close has to put back
-    /// the source chrome it restored at grab-begin, and a committed one must
-    /// not.
+    /// jobs differ by exactly one thing — the source chrome it restored
+    /// OFFSTAGE (state shown, alpha 0) at grab-begin. A cancelled close puts it
+    /// back down; a committed one shows it, at once: this is the landing, and
+    /// the landing is the only moment the dock is allowed to appear. Nothing
+    /// in the close fades it — the transition never touches the chrome.
     public let dismissalDidEnd: (Bool) -> Void
     /// Whether the page counter-translates to match its caption to the row's
     /// (`true`), or simply sits still while the window opens over it
@@ -1527,15 +1529,11 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     private let censusToken = RevealCensusToken()
     #endif
     private let geometry: RevealGeometry
-    /// Source chrome that comes back with the return (the app's tab bar), so
-    /// it is revealed by the hand rather than switched on after the landing.
-    private weak var returningChrome: UIView?
     /// Held so `interruptibleAnimator` hands UIKit the same object every time.
     private var staged: UIViewPropertyAnimator?
 
-    init(geometry: RevealGeometry, returningChrome: UIView?) {
+    init(geometry: RevealGeometry) {
         self.geometry = geometry
-        self.returningChrome = returningChrome
     }
 
     func transitionDuration(using context: (any UIViewControllerContextTransitioning)?) -> TimeInterval {
@@ -1698,9 +1696,6 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         presenting.transform = CGAffineTransform(
             scaleX: ZoomFlight.presenterDepthScale, y: ZoomFlight.presenterDepthScale
         )
-        let chrome = returningChrome
-        let chromeAlpha: CGFloat = 1
-        chrome?.alpha = 0
         UIView.setAnimationsEnabled(animationsWereEnabled)
 
         // The chevron has no finger, so the swap's fractions become keyframes on
@@ -1761,7 +1756,6 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             self.geometry.setDestinationAuthorBandOpacity(1)
             dim.alpha = 0
             presenting.transform = .identity
-            chrome?.alpha = chromeAlpha
         }
         #if DEBUG
         // The WINDOW's own trajectory, sampled every frame — see
@@ -1803,7 +1797,6 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             self.geometry.setDestinationGround(nil)
             self.geometry.installDestinationVeil(nil, nil)
             self.geometry.installDestinationAuthorBand(nil)
-            chrome?.alpha = cancelled ? 0 : chromeAlpha
             self.geometry.dismissalDidEnd(!cancelled)
             context.completeTransition(!cancelled)
         }

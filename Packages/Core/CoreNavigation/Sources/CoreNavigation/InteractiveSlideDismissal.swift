@@ -98,11 +98,16 @@ public final class InteractiveSlideDismissal: NSObject {
     /// a different ANIMATION of the same dismissal, not a second dismissal.
     public var revealGeometry: RevealGeometry?
 
-    /// Source chrome the reveal drives on BOTH legs — the app's tab bar: faded
-    /// out as the page opens over it, faded back in as the page closes. Only
-    /// consulted while `revealGeometry` is set; the slide leaves the bar to the
-    /// owner's `onFeedPopped`, as before.
-    public weak var revealReturningChrome: UIView?
+    /// Source chrome the reveal's OPENING fades out as the page grows over it —
+    /// the app's tab bar. Only consulted while `revealGeometry` is set and the
+    /// reveal presents.
+    ///
+    /// ⚠️ THE OPENING ONLY. The close never touches it: the bar stays down for
+    /// the whole return, whether a finger or the chevron drives it, and the
+    /// owner shows it at once at the landing (`RevealGeometry.dismissalDidEnd`,
+    /// or `onFeedPopped`) — the product rule is that the dock never fades in
+    /// with a return, it is simply there when the return is over.
+    public weak var revealDepartingChrome: UIView?
 
     /// Which axes close as a WINDOW when `revealGeometry` is set. Both by
     /// default, and both is now the shipped case for the place page too: the
@@ -386,7 +391,6 @@ public final class InteractiveSlideDismissal: NSObject {
             // cannot express that.
             revealGrab = RevealDismissInteractionController(
                 geometry: revealGeometry,
-                returningChrome: revealReturningChrome,
                 axis: activeAxis
             )
         } else {
@@ -509,7 +513,7 @@ extension InteractiveSlideDismissal: UINavigationControllerDelegate {
         if operation == .push, toVC === feedViewController, revealPresents,
            let revealGeometry {
             return RevealPresentAnimator(
-                geometry: revealGeometry, departingChrome: revealReturningChrome
+                geometry: revealGeometry, departingChrome: revealDepartingChrome
             )
         }
         guard operation == .pop, fromVC === feedViewController else { return nil }
@@ -596,9 +600,7 @@ extension InteractiveSlideDismissal: UINavigationControllerDelegate {
         // axis `revealReturnAxes` excludes is a SLIDE by decision, and giving
         // it the window here would overrule the begin-time choice.
         if let revealGeometry, interaction == nil {
-            return RevealPopAnimator(
-                geometry: revealGeometry, returningChrome: revealReturningChrome
-            )
+            return RevealPopAnimator(geometry: revealGeometry)
         }
         // The axis is the live swipe's — unless the owner transposed it (see
         // `fallbackSlideAxis`). A back-button pop (no interaction) exits

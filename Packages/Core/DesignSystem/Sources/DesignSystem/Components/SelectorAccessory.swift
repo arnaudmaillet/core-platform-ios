@@ -613,13 +613,21 @@ public final class SelectorAccessory {
     ///
     ///   ⚠️ **THE ACCESSORY WAS ON A CLOCK NOBODY ELSE SHARED.** The tab bar is
     ///   deliberately put on the transition's clock everywhere (see
-    ///   `TabBarRevealPolicy`, and `returningSourceChrome` for the flights);
-    ///   the accessory was not, and it showed twice over. Pass the screen's
+    ///   `TabBarRevealPolicy`; a close of the snap feed shows both at its
+    ///   landing); the accessory was not, and it showed twice over. Pass the screen's
     ///   `transitionCoordinator` and the change rides the push or pop that is
     ///   already running instead of starting a second animation against it.
+    /// - Parameter animated: `false` puts the band up in one frame. For the
+    ///   LANDING of a close of the snap feed, where the tab bar is shown at
+    ///   once and the band has to arrive with it rather than fade in after
+    ///   it — measured with `-dock-trace`: an animated install at For You's
+    ///   landing took ~280ms to reach full opacity under a bar already up.
+    ///   `UIView.performWithoutAnimation` does NOT suppress UIKit's own
+    ///   accessory animation, so this has to be said to it.
     public func install(into controller: UITabBarController?,
                         minimizesOnScroll: Bool = false,
-                        alongside coordinator: UIViewControllerTransitionCoordinator? = nil) {
+                        alongside coordinator: UIViewControllerTransitionCoordinator? = nil,
+                        animated: Bool = true) {
         guard let controller else { return }
         // ⚠️ **"ALREADY OURS" IS NOT THE SAME AS "ALREADY WORKING", AND THE
         // GUARD USED TO CONFLATE THEM.** Setting `bottomAccessory` during a
@@ -666,7 +674,7 @@ public final class SelectorAccessory {
         // The claim has to be a fact by the time anyone else looks. The
         // animation is UIKit's own from here; with a hand-over there is no
         // appearance to animate anyway, because the band never leaves.
-        controller.setBottomAccessory(UITabAccessory(contentView: hostView), animated: true)
+        controller.setBottomAccessory(UITabAccessory(contentView: hostView), animated: animated)
         if minimizesOnScroll, !holdsMinimize {
             holdsMinimize = true
             MinimizeBehaviourStore.arm(controller)

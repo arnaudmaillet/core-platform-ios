@@ -62,19 +62,6 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
     public var onDestinationShown: (() -> Void)?
     public var onSourceReturned: (() -> Void)?
 
-    /// Chrome of the SOURCE screen that is down while the destination is up and
-    /// must come back with the return — the app's tab bar. Assign it and the
-    /// grab drives its alpha 1:1 with the drag, and the non-interactive pop
-    /// fades it in on the flight's own spring, so it is never seen to pop in
-    /// after the card has landed. The owner is responsible for its hidden
-    /// state; this only drives alpha.
-    public var returningSourceChrome: UIView? {
-        didSet {
-            interaction.setReturningChrome(returningSourceChrome)
-            extraInteractions.forEach { $0.setReturningChrome(returningSourceChrome) }
-        }
-    }
-
     /// Fires when an interactive grab is CANCELLED — the destination stays up,
     /// so anything the owner undid at grab-begin (the tab bar's hidden state)
     /// has to go back. A completed return reports through `onSourceReturned`.
@@ -171,7 +158,6 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
     ) {
         guard let destination else { return }
         let driver = ZoomDismissInteractionController()
-        driver.setReturningChrome(returningSourceChrome)
         driver.onCancelled = onDismissalCancelled
         driver.attach(
             to: view, source: flightSource, destination: destination, axes: axes,
@@ -290,8 +276,7 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
                 // The flight flies to whichever screen this pop LANDS on —
                 // the presenting screen normally, a registered intermediate
                 // (the cluster gallery) when the stack carries one.
-                isPresenting: false, source: dismissSource(for: toVC), destination: destination,
-                returningChrome: returningSourceChrome
+                isPresenting: false, source: dismissSource(for: toVC), destination: destination
             )
         default:
             return nil // e.g. comments detail above the feed — native

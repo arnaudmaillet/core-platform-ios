@@ -63,16 +63,6 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     /// finger like the dim does. The feed's own coordinator choreography
     /// settles the hidden state after completion; this only drives alpha.
     private weak var toolbar: UIToolbar?
-    /// Chrome belonging to the SOURCE screen that is down while the destination
-    /// is up and has to come back with the return — the app's tab bar.
-    ///
-    /// It is driven here, on the progress channel, for a structural reason: the
-    /// tab bar is a sibling of the navigation controller's view inside the tab
-    /// bar controller, so it renders ABOVE the transition container and the dim
-    /// cannot veil it. Left to a completion handler it snaps in at full opacity
-    /// after the card has already landed. Its alpha instead tracks the finger,
-    /// which is the same thing the dim does, so the bar is revealed by the hand.
-    private weak var returningChrome: UIView?
     private weak var presentingView: UIView?
     private var screenRadius: CGFloat = 0
     private var pageCenter: CGPoint = .zero
@@ -149,11 +139,6 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         ZoomDebugCensus.decrement(ZoomDebugCensus.Key.grabDriver)
     }
     #endif
-
-    /// Set by the owner alongside `attach`; see `returningChrome`.
-    func setReturningChrome(_ chrome: UIView?) {
-        returningChrome = chrome
-    }
 
     /// Reports a cancelled grab, so the owner can put back whatever it undid
     /// when the grab began (the tab bar's hidden state). Completed grabs are
@@ -614,8 +599,6 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // The toolbar recedes on the same channel as the dim: pure function
         // of progress, tracking the finger frame-by-frame.
         toolbar?.alpha = 1 - progress
-        // And the source's own chrome arrives on the mirror of it.
-        returningChrome?.alpha = progress
         let mapScale = ZoomFlight.presenterDepthScale + (1 - ZoomFlight.presenterDepthScale) * progress
         presentingView?.transform = CGAffineTransform(scaleX: mapScale, y: mapScale)
         context.updateInteractiveTransition(progress)
@@ -704,7 +687,6 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         #endif
         let dim = dim
         let toolbar = toolbar
-        let returningChrome = returningChrome
         let presentingView = presentingView
         let screenRadius = screenRadius
         // The SAME spring as the tap-back dismissal (`ZoomFlight.spring*`), so a
@@ -741,13 +723,11 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
                 flight.poseAtSource(at: landing)
                 dim?.alpha = 0
                 toolbar?.alpha = 0
-                returningChrome?.alpha = 1
                 presentingView?.transform = .identity
             } else {
                 flight.poseAsPage(cornerRadius: screenRadius)
                 dim?.alpha = 1
                 toolbar?.alpha = 1
-                returningChrome?.alpha = 0
                 presentingView?.transform = CGAffineTransform(
                     scaleX: ZoomFlight.presenterDepthScale, y: ZoomFlight.presenterDepthScale
                 )

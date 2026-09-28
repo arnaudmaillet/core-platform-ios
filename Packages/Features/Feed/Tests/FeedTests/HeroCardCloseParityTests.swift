@@ -125,8 +125,46 @@ struct HeroCardCloseParityTests {
         #expect(close != nil, "a flight from a list row left no card close beside it")
         #expect(close?.arbitratesWithHeroGrab == true)
         #expect(close?.prepareForDismissal != nil)
-        #expect(close?.revealReturningChrome === stack.tabs.tabBar,
+        #expect(close?.onWillBeginPop != nil,
                 "the close would land the row on a screen with no dock")
+    }
+
+    // MARK: - The dock comes back at the landing, never with the return
+
+    /// A row close puts the dock's STATE back at its begin — outside any
+    /// transition, so the landing's layout is final — but INVISIBLE: the
+    /// product rule is that the bar appears at the landing, never with the
+    /// return. The close used to fade it in 1:1 with the drag.
+    @Test func aRowCloseRestoresTheDockOffstageAtItsBegin() {
+        let stack = Stack()
+        stack.builder.presentSnapFeedHero(
+            postIDs: [PostID("m1")], from: stack.presenter,
+            origin: origin(reveal: reveal(Box()))
+        )
+        #expect(stack.tabs.isTabBarHidden, "precondition: the push hides the dock")
+
+        (stack.nav.delegate as? InteractiveSlideDismissal)?.onWillBeginPop?(.vertical)
+
+        #expect(stack.tabs.isTabBarHidden == false, "the landing's layout would settle mid-flight")
+        #expect(stack.tabs.tabBar.alpha == 0, "the dock would be seen during the return")
+    }
+
+    /// The chevron has no grab-begin; `onWillCloseFeed` is its equivalent, and
+    /// it must do the same for EVERY kind of close — the flight's tap-back
+    /// included, which used to reach the dock only inside the pop, where a bar
+    /// un-hidden reads shown and draws nothing.
+    @Test func theChevronRestoresTheDockOffstageToo() {
+        let stack = Stack()
+        stack.builder.presentSnapFeedHero(
+            postIDs: [PostID("m1")], from: stack.presenter, origin: origin(reveal: nil)
+        )
+        let feed = stack.nav.viewControllers.last as? SnapFeedViewController
+        #expect(feed?.onWillCloseFeed != nil, "a chevron close would restore the dock inside the pop")
+
+        feed?.onWillCloseFeed?()
+
+        #expect(stack.tabs.isTabBarHidden == false)
+        #expect(stack.tabs.tabBar.alpha == 0)
     }
 
     /// The control: no row, no card close — the flight still owns the stack.

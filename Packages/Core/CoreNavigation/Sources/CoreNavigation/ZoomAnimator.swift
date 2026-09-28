@@ -38,10 +38,6 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     /// settle with identical physics.
     private let duration = ZoomFlight.springDuration
 
-    /// Source chrome that fades in over the dismiss spring; see
-    /// `ZoomTransitionController.returningSourceChrome`.
-    private weak var returningChrome: UIView?
-
     /// The dismissal's animator, kept so it can be paused and scrubbed.
     ///
     /// Cached against the CONTEXT that built it, and never cleared while that
@@ -72,13 +68,11 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     init(
         isPresenting: Bool,
         source: any ZoomTransitionSource,
-        destination: any ZoomTransitionDestination,
-        returningChrome: UIView? = nil
+        destination: any ZoomTransitionDestination
     ) {
         self.isPresenting = isPresenting
         self.source = source
         self.destination = destination
-        self.returningChrome = returningChrome
         super.init()
         #if DEBUG
         ZoomDebugCensus.increment(ZoomDebugCensus.Key.animator)
@@ -1119,9 +1113,6 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
                 )
             }
             dim.alpha = 0
-            // Arrives on the flight's own spring rather than after it, so a
-            // tap-back and a released grab reveal the bar the same way.
-            self.returningChrome?.alpha = 1
             presentingView?.transform = .identity
         }
         animator.addCompletion { _ in

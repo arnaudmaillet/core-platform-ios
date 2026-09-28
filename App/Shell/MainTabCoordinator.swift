@@ -241,6 +241,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
         HeroTransitionAudit.installIfRequested(pools: container.debugPlaybackPools)
         AccessoryCollapseAudit.installIfRequested(tabBarController: tabBarController)
         PillDragAudit.installIfRequested(tabBarController: tabBarController)
+        DockTrace.installIfRequested(tabBarController: tabBarController)
         #endif
 
         #if DEBUG
