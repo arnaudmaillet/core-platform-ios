@@ -255,6 +255,13 @@ public protocol ZoomFlightCard: UIView {
     /// to nothing — a mosaic brick rests flat against its neighbours, and the
     /// stand-in stays inert.
     func applyZoomRestingShadow(to layer: CALayer)
+
+    /// The live surface this card adopted is NOT drawing after the first-frame
+    /// hold ran out. A card that made itself transparent beneath a surface
+    /// that had a frame (to avoid a one-pass blink) must bring its cover back:
+    /// otherwise the flight carries an empty window over a page whose own
+    /// surface it has just taken. Defaults to nothing.
+    func zoomLiveMediaDidStall()
 }
 
 public extension ZoomFlightCard {
@@ -273,4 +280,5 @@ public extension ZoomFlightCard {
     func setZoomLandingLiveMedia(_ view: UIView) {}
     func prepareZoomLiveMediaForFlight(destinationSize: CGSize) {}
     func applyZoomRestingShadow(to layer: CALayer) {}
+    func zoomLiveMediaDidStall() {}
 }
