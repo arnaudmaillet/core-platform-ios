@@ -45,6 +45,11 @@ protocol AppNavigating: AnyObject {
     /// Switches the selected tab (a no-op if already selected).
     func selectTab(_ tab: AppTab)
 
+    /// Closes whatever stands BESIDE the tab stacks rather than on them — the
+    /// notifications drawer. Called at the start of every route: a route
+    /// lands on a tab stack, and the viewer should see it land.
+    func closeOverlays()
+
     /// Opens the timeline feed: dismisses anything presented, then pushes the
     /// retained feed onto the currently selected tab's stack. No longer has a
     /// bar button behind it — this is what `AppRoute.feed` resolves to (deep

@@ -187,7 +187,7 @@ final class AppCoordinator: Coordinator {
             // weakly, so logout (which drops the coordinator) stops routing.
             container.routeResolver.navigator = tabCoordinator
             mainTabCoordinator = tabCoordinator
-            setRoot(tabCoordinator.tabBarController)
+            setRoot(tabCoordinator.rootViewController)
 
             #if DEBUG
             // Launch arguments describe how this PROCESS was started, so they

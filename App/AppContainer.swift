@@ -781,12 +781,15 @@ final class AppContainer {
     private lazy var notificationsRepository = NotificationsRepository(
         notificationClient: Notification_V1_NotificationServiceClient(client: authenticatedRPCClient),
         profileClient: Profile_V1_ProfileServiceClient(client: authenticatedRPCClient),
+        // The subject post's still (or a text post's opening) for each row.
+        postClient: Post_V1_PostServiceClient(client: authenticatedRPCClient),
         authSession: sessionManager
     )
 
     private(set) lazy var notificationsFeature: any NotificationsFeatureBuilding = NotificationsFeatureBuilder(
         repository: notificationsRepository,
-        router: routeResolver
+        router: routeResolver,
+        imagePipeline: imagePipeline
     )
 
     // MARK: - Chat

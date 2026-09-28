@@ -900,6 +900,8 @@ final class SnapFeedViewController: UIViewController {
     private var didDebugPageSwipe = false
     private var didDebugFling = false
     private var didDebugAutoDismiss = false
+    private var didDebugSoundSheet = false
+    private weak var debugPresentedSoundSheet: SoundSheetViewController?
 
     private func runDebugAppearanceHooks() {
         // Once per screen, like every other hook here: this runs from
@@ -966,6 +968,41 @@ final class SnapFeedViewController: UIViewController {
                         print("[qa] \(label): active page \(target) of \(self.orderedIDs.count)")
                     } else {
                         QAWait.fail(label, "jumped but active page is \(self.lifecycle.activeIndex.map(String.init) ?? "nil")")
+                    }
+                }
+            }
+        }
+        // `-snap-sound-sheet [large|roundtrip]`: opens the active page's sound
+        // sheet — the attribution's tap — once the page (or
+        // `-snap-start-index`'s target) is settled; `large` then presses
+        // "View all" 2s later, `roundtrip` also comes back to collapsed 2.5s
+        // after that.
+        // Pair with `-sound-sheet-trace` for the collapsed detent's measures.
+        if !didDebugSoundSheet, let position = arguments.firstIndex(of: "-snap-sound-sheet") {
+            didDebugSoundSheet = true
+            let mode = arguments.indices.contains(position + 1) ? arguments[position + 1] : ""
+            let expands = mode == "large" || mode == "roundtrip"
+            let jumpTarget = arguments.firstIndex(of: "-snap-start-index")
+                .flatMap { arguments.indices.contains($0 + 1) ? Int(arguments[$0 + 1]) : nil }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+                QAWait.until("-snap-sound-sheet", { [weak self] in
+                    guard let self, let index = self.lifecycle.activeIndex else { return false }
+                    return jumpTarget == nil || index == jumpTarget
+                }) { [weak self] in
+                    guard let self else { return }
+                    self.presentSoundSheet()
+                    guard let sheet = self.debugPresentedSoundSheet else {
+                        QAWait.fail("-snap-sound-sheet", "the active page has no sound")
+                        return
+                    }
+                    print("[qa] -snap-sound-sheet: opened")
+                    guard expands else { return }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak sheet] in
+                        sheet?.debugExpand()
+                    }
+                    guard mode == "roundtrip" else { return }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 4.5) { [weak sheet] in
+                        sheet?.debugCollapse()
                     }
                 }
             }
@@ -4336,12 +4373,41 @@ final class SnapFeedViewController: UIViewController {
         }
         // Only ever CLEARS what this screen set: another feed pushed on top
         // owns the sound now, and this one leaving must not silence it.
-        if surface == nil, videoPlayback.currentAudibleSurface !== ownAudibleSurface {
+        if surface == nil, !Self.leavingClearsAudibleSurface(
+            videoPlayback.currentAudibleSurface, own: ownAudibleSurface, screen: viewIfLoaded
+        ) {
             ownAudibleSurface = nil
             return
         }
         ownAudibleSurface = surface
         videoPlayback.setAudibleSurface(surface)
+    }
+
+    /// Whether a screen whose page no longer wants to be heard should silence
+    /// the surface the pool is hearing now.
+    ///
+    /// ⚠️ **THE SURFACE THIS SCREEN NAMED IS NOT ALWAYS THE ONE IT HEARS.** A
+    /// landing that hands the page the flight card's live view
+    /// (`SnapFeedCell.adoptLiveRenderView` → `VideoPlaybackController
+    /// .adoptSurface`) moves the pool's audible surface onto that view, and
+    /// the one this screen remembered is thrown away. Asked by identity alone,
+    /// the screen then took the adopted view for ANOTHER feed's and left it
+    /// talking: a map marker's feed closed onto the place page with its clip
+    /// still heard, because the Activity row the close lands on plays the very
+    /// same player (the post the viewer was on is that row).
+    ///
+    /// So a surface is this screen's when it is the one it named OR one of its
+    /// own views — the page's surface lives in this screen's hierarchy whatever
+    /// swapped it in. A surface nobody holds any more (nil) is cleared too: its
+    /// player may still be heard, and no screen is listening to it. Only a live
+    /// surface elsewhere — a feed pushed on top — is left alone.
+    static func leavingClearsAudibleSurface(
+        _ current: UIView?, own: UIView?, screen: UIView?
+    ) -> Bool {
+        guard let current else { return true }
+        if current === own { return true }
+        guard let screen else { return false }
+        return current.isDescendant(of: screen)
     }
 
     /// The sound of a page with no clip — a photograph, a collection of
@@ -4448,13 +4514,30 @@ final class SnapFeedViewController: UIViewController {
         guard presentedViewController == nil, let model = activeModel,
               let sound = sound(for: model) else { return }
         // The grid lists the posts set to this sound that THIS feed can show,
-        // so every tile leads somewhere; the page it was opened from first.
-        let using = soundProvider?.postIDs(using: sound) ?? []
-        let ids = [model.id] + using.filter { $0 != model.id && modelsByID[$0] != nil }
-        let tiles = ids.map { id in
+        // so every tile leads somewhere: the sound's original post first when
+        // it is a media post, then the page it was opened from.
+        var using = soundProvider?.postIDs(using: sound) ?? []
+        #if DEBUG
+        // `-sound-sheet-all-posts`: LAYOUT QA ONLY — lists every post of this
+        // feed as if it used the sound. The mock's sounds are rarely shared by
+        // more than two posts of one feed, so "View all" and the rows under
+        // the toolbar are otherwise hard to reach.
+        if ProcessInfo.processInfo.arguments.contains("-sound-sheet-all-posts") { using += orderedIDs }
+        #endif
+        // With nobody to ask, a clip's own sound (`sound(for:)`) is this
+        // page's: it is its own original.
+        let original = soundProvider?.originalPostID(of: sound)
+            ?? (sound.id == "original-\(model.id.rawValue)" ? model.id : nil)
+        let order = SoundSheetViewController.gridPostIDs(
+            current: model.id, original: original, using: using,
+            canShow: { [modelsByID] in modelsByID[$0] != nil },
+            isMedia: { [modelsByID] in modelsByID[$0]?.mediaURL != nil }
+        )
+        let tiles = order.ids.map { id in
             SoundSheetViewController.Tile(
                 postID: id, thumbnailURL: modelsByID[id]?.thumbnailURL,
-                caption: modelsByID[id]?.caption, isCurrent: id == model.id
+                caption: modelsByID[id]?.caption, isCurrent: id == model.id,
+                isOriginal: id == order.original
             )
         }
         let sheet = SoundSheetViewController(
@@ -4487,7 +4570,11 @@ final class SnapFeedViewController: UIViewController {
         sheet.onSelectPost = { [weak self] id in self?.showPost(id) }
         sheet.openFeedHero = openFeedHero
         sheet.galleryPost = galleryPost
-        present(sheet, animated: true)
+        // Inside a navigation controller, for the toolbar its actions live in.
+        present(sheet.wrappedInSheet(), animated: true)
+        #if DEBUG
+        debugPresentedSoundSheet = sheet
+        #endif
     }
 
     /// Brings `id` to the screen — a tile of the sound sheet.

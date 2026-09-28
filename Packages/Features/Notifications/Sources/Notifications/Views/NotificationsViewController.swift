@@ -1,35 +1,41 @@
 import DesignSystem
+import MediaCore
 import UIKit
 
+/// The notifications list, as the shell's left drawer shows it: "New" (the six
+/// most recent, then "Show more"), then "Earlier". Rows lie on the page with
+/// no separators and no unread tint — see `NotificationSection` and
+/// `NotificationCell` for why.
+///
+/// It does not know it lives in a drawer. The drawer container forwards real
+/// appearance callbacks, and those are what drive the visit: `viewWillAppear`
+/// refreshes, `viewDidAppear` marks the new rows seen, `viewDidDisappear` moves
+/// them to "Earlier" (see `NotificationsViewModel`).
 final class NotificationsViewController: UIViewController {
-    private enum Section { case main }
+    private enum Item: Hashable {
+        case row(String)
+        case showMore
+    }
 
     private let viewModel: NotificationsViewModel
+    private let imagePipeline: ImagePipeline?
 
-    /// ⚠️ Built with its horizontal indicator off explicitly. The app-wide
-    /// appearance default (`ScrollIndicatorStyle`) covers the vertical one and
-    /// covers collection views entirely, but `UITableView` sets
-    /// `showsHorizontalScrollIndicator` on itself at init, and an instance
-    /// value outranks an appearance default.
-    private let tableView: UITableView = {
-        let table = UITableView(frame: .zero, style: .plain)
-        table.showsHorizontalScrollIndicator = false
-        return table
-    }()
+    private lazy var collectionView = UICollectionView(frame: .zero, collectionViewLayout: makeLayout())
     private let refreshControl = UIRefreshControl()
     /// Rows where the rows will be, until the first page lands (charter P8).
-    private let skeleton = PersonListSkeletonView(avatarSize: 40, showsTrailingBone: true)
-    private let statusLabel = UILabel()
-    private lazy var markAllReadButton = UIBarButtonItem(
-        title: "Mark all read",
-        primaryAction: UIAction { [weak self] _ in self?.viewModel.markAllRead() }
-    )
+    private let skeleton = PersonListSkeletonView(avatarSize: NotificationCell.Metrics.avatarArea, showsTrailingBone: true)
+    private let emptyState = EmptyStateView()
 
-    private var dataSource: UITableViewDiffableDataSource<Section, String>!
+    private var dataSource: UICollectionViewDiffableDataSource<NotificationSection.Kind, Item>!
+    private var sections: [NotificationSection] = []
     private var modelsByID: [String: NotificationDisplayModel] = [:]
+    /// True between `viewDidAppear` and `viewWillDisappear` — the only time a
+    /// change is worth animating.
+    private var isOnScreen = false
 
-    init(viewModel: NotificationsViewModel) {
+    init(viewModel: NotificationsViewModel, imagePipeline: ImagePipeline?) {
         self.viewModel = viewModel
+        self.imagePipeline = imagePipeline
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -38,65 +44,135 @@ final class NotificationsViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "Activity"
-        view.backgroundColor = .systemBackground
-        configureNavigationBar()
-        configureTableView()
+        title = "Notifications"
+        navigationItem.largeTitleDisplayMode = .always
+        view.backgroundColor = Surface.page
+        configureCollectionView()
         configureStatusViews()
 
         viewModel.onPhaseChange = { [weak self] phase in self?.render(phase) }
-        viewModel.onHasUnreadChange = { [weak self] hasUnread in self?.markAllReadButton.isEnabled = hasUnread }
         render(.loading)
         viewModel.viewDidLoad()
     }
 
-    // MARK: - Setup
-
-    private func configureNavigationBar() {
-        markAllReadButton.isEnabled = false
-        navigationItem.rightBarButtonItem = markAllReadButton
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        viewModel.willReveal()
     }
 
-    private func configureTableView() {
-        tableView.register(NotificationCell.self, forCellReuseIdentifier: NotificationCell.reuseIdentifier)
-        tableView.delegate = self
-        tableView.rowHeight = UITableView.automaticDimension
-        tableView.estimatedRowHeight = 64
-        // No effect under the bar: the rows run up under the pills untouched — see
-        // `prefersClearTopEdge`.
-        tableView.prefersClearTopEdge()
-        tableView.pin(to: view)
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        isOnScreen = true
+        viewModel.didReveal()
+        #if DEBUG
+        debugShowMoreIfRequested()
+        #endif
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        isOnScreen = false
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        viewModel.didConceal()
+        // The next visit starts at the top, where "New" is.
+        collectionView.setContentOffset(
+            CGPoint(x: 0, y: -collectionView.adjustedContentInset.top), animated: false
+        )
+    }
+
+    // MARK: - Setup
+
+    private func makeLayout() -> UICollectionViewLayout {
+        var configuration = UICollectionLayoutListConfiguration(appearance: .plain)
+        configuration.showsSeparators = false
+        configuration.backgroundColor = .clear
+        configuration.headerMode = .supplementary
+        configuration.headerTopPadding = Spacing.sm
+        return UICollectionViewCompositionalLayout { _, environment in
+            let section = NSCollectionLayoutSection.list(using: configuration, layoutEnvironment: environment)
+            // A plain list pins its headers; these scroll with their rows.
+            // "New" and "Earlier" are landmarks in one list, not sticky
+            // chrome — and pinned on a clear background they would sit over
+            // the rows passing under them.
+            for header in section.boundarySupplementaryItems {
+                header.pinToVisibleBounds = false
+            }
+            return section
+        }
+    }
+
+    private func configureCollectionView() {
+        collectionView.backgroundColor = .clear
+        collectionView.delegate = self
+        // No effect under the bar: the rows run up under the header untouched
+        // — see `prefersClearTopEdge`.
+        collectionView.prefersClearTopEdge()
+        collectionView.pin(to: view)
 
         refreshControl.addAction(UIAction { [weak self] _ in self?.viewModel.refresh() }, for: .valueChanged)
-        tableView.refreshControl = refreshControl
+        collectionView.refreshControl = refreshControl
 
-        dataSource = UITableViewDiffableDataSource<Section, String>(tableView: tableView) {
-            [weak self] tableView, indexPath, id in
-            let cell = tableView.dequeueReusableCell(
-                withIdentifier: NotificationCell.reuseIdentifier, for: indexPath
-            ) as! NotificationCell
-            if let model = self?.modelsByID[id] {
-                cell.configure(with: model)
-            }
-            return cell
+        let rowRegistration = UICollectionView.CellRegistration<NotificationCell, String> {
+            [weak self] cell, _, id in
+            guard let self, let model = modelsByID[id] else { return }
+            cell.configure(with: model, imagePipeline: imagePipeline)
         }
+        let showMoreRegistration = UICollectionView.CellRegistration<NotificationShowMoreCell, Int> {
+            cell, _, hiddenCount in
+            cell.configure(hiddenCount: hiddenCount)
+        }
+        let headerRegistration = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
+            elementKind: UICollectionView.elementKindSectionHeader
+        ) { [weak self] header, _, indexPath in
+            guard let self, sections.indices.contains(indexPath.section) else { return }
+            var content = UIListContentConfiguration.header()
+            content.text = sections[indexPath.section].title
+            content.textProperties.font = Self.headerFont
+            content.textProperties.color = .label
+            content.textProperties.transform = .none
+            content.directionalLayoutMargins = NSDirectionalEdgeInsets(
+                top: Spacing.md, leading: Spacing.lg, bottom: Spacing.xs, trailing: Spacing.lg
+            )
+            header.contentConfiguration = content
+            header.backgroundConfiguration = .clear()
+            header.accessibilityTraits = .header
+        }
+
+        dataSource = UICollectionViewDiffableDataSource(collectionView: collectionView) {
+            [weak self] collectionView, indexPath, item in
+            switch item {
+            case .row(let id):
+                return collectionView.dequeueConfiguredReusableCell(using: rowRegistration, for: indexPath, item: id)
+            case .showMore:
+                let hidden = self?.sections.first { $0.kind == .new }?.hiddenCount ?? 0
+                return collectionView.dequeueConfiguredReusableCell(using: showMoreRegistration, for: indexPath, item: hidden)
+            }
+        }
+        dataSource.supplementaryViewProvider = { collectionView, _, indexPath in
+            collectionView.dequeueConfiguredReusableSupplementary(using: headerRegistration, for: indexPath)
+        }
+    }
+
+    /// Section titles: the headline weight a step up in size — a list's
+    /// landmarks, not its content.
+    private static var headerFont: UIFont {
+        let title3 = UIFont.preferredFont(forTextStyle: .title3)
+        return UIFont(
+            descriptor: title3.fontDescriptor.addingAttributes([
+                .traits: [UIFontDescriptor.TraitKey.weight: UIFont.Weight.bold]
+            ]),
+            size: 0
+        )
     }
 
     private func configureStatusViews() {
         skeleton.pin(to: view)
         skeleton.isHidden = true
-
-        statusLabel.font = .preferredFont(forTextStyle: .body)
-        statusLabel.adjustsFontForContentSizeCategory = true
-        statusLabel.textColor = .secondaryLabel
-        statusLabel.textAlignment = .center
-        statusLabel.numberOfLines = 0
-        statusLabel.isHidden = true
-        statusLabel.constrain(in: view) { parent in
-            statusLabel.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
-            statusLabel.leadingAnchor.constraint(equalTo: parent.layoutMarginsGuide.leadingAnchor)
-            statusLabel.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor)
-        }
+        emptyState.pin(to: view)
+        emptyState.isHidden = true
     }
 
     // MARK: - Render
@@ -106,53 +182,97 @@ final class NotificationsViewController: UIViewController {
         case .loading:
             // A pull-to-refresh keeps its own indicator and its rows; only a
             // first load, with nothing to show, wears the skeleton.
-            if !refreshControl.isRefreshing {
+            if !refreshControl.isRefreshing, sections.isEmpty {
                 skeleton.showSkeleton()
-                tableView.isHidden = true
+                collectionView.isHidden = true
             }
-            statusLabel.isHidden = true
-        case .content(let models):
+            emptyState.isHidden = true
+        case .content(let sections):
             refreshControl.endRefreshing()
-            statusLabel.isHidden = true
-            tableView.isHidden = false
-            modelsByID = Dictionary(uniqueKeysWithValues: models.map { ($0.id, $0) })
-            apply(models.map(\.id))
-            dismissSkeleton()
+            emptyState.isHidden = true
+            collectionView.isHidden = false
+            apply(sections)
+            skeleton.fadeOutSkeleton()
         case .empty:
             refreshControl.endRefreshing()
-            tableView.isHidden = true
-            dismissSkeleton()
-            showStatus("No activity yet.")
+            collectionView.isHidden = true
+            skeleton.fadeOutSkeleton()
+            emptyState.configure(
+                symbolName: "bell",
+                title: "No notifications yet",
+                subtitle: "Likes, comments and mentions of your posts will show up here."
+            )
+            emptyState.isHidden = false
         case .failed(let message):
             refreshControl.endRefreshing()
-            tableView.isHidden = true
-            dismissSkeleton()
-            showStatus(message)
+            collectionView.isHidden = true
+            skeleton.fadeOutSkeleton()
+            emptyState.configure(
+                symbolName: "wifi.exclamationmark",
+                title: message,
+                actionTitle: "Try Again"
+            ) { [weak self] in
+                self?.viewModel.refresh()
+            }
+            emptyState.isHidden = false
         }
     }
 
-    /// Bones out, rows in: the one cross-fade (charter P10).
-    private func dismissSkeleton() {
-        skeleton.fadeOutSkeleton()
+    private func apply(_ newSections: [NotificationSection]) {
+        let previous = modelsByID
+        sections = newSections
+        modelsByID = Dictionary(
+            newSections.flatMap(\.rows).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }
+        )
+
+        var snapshot = NSDiffableDataSourceSnapshot<NotificationSection.Kind, Item>()
+        for section in newSections {
+            snapshot.appendSections([section.kind])
+            snapshot.appendItems(section.rows.map { .row($0.id) }, toSection: section.kind)
+            if section.hiddenCount > 0 {
+                snapshot.appendItems([.showMore], toSection: section.kind)
+            }
+        }
+        // A row whose content changed under the same id (a new time, a fold
+        // that added a sender) is re-drawn in place.
+        let changed = modelsByID.compactMap { id, model -> Item? in
+            guard let old = previous[id], old != model else { return nil }
+            return .row(id)
+        }
+        snapshot.reconfigureItems(changed.filter { snapshot.indexOfItem($0) != nil })
+        if snapshot.indexOfItem(.showMore) != nil {
+            snapshot.reconfigureItems([.showMore])
+        }
+        dataSource.apply(snapshot, animatingDifferences: isOnScreen && !previous.isEmpty)
     }
 
-    private func apply(_ ids: [String]) {
-        var snapshot = NSDiffableDataSourceSnapshot<Section, String>()
-        snapshot.appendSections([.main])
-        snapshot.appendItems(ids, toSection: .main)
-        dataSource.apply(snapshot, animatingDifferences: false)
+    #if DEBUG
+    /// `-notifications-show-more`: presses "Show more" a second after the list
+    /// is first on screen, so the expansion can be filmed without a tap.
+    private func debugShowMoreIfRequested() {
+        guard ProcessInfo.processInfo.arguments.contains("-notifications-show-more") else { return }
+        QAWait.until("-notifications-show-more: a list with Show more", { [weak self] in
+            guard let self else { return true }
+            return sections.contains { $0.hiddenCount > 0 }
+        }) { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                self?.viewModel.showMore()
+            }
+        }
     }
-
-    private func showStatus(_ text: String) {
-        statusLabel.text = text
-        statusLabel.isHidden = false
-    }
+    #endif
 }
 
-extension NotificationsViewController: UITableViewDelegate {
-    func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
-        tableView.deselectRow(at: indexPath, animated: true)
-        guard let id = dataSource.itemIdentifier(for: indexPath) else { return }
-        viewModel.didSelect(id)
+extension NotificationsViewController: UICollectionViewDelegate {
+    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        collectionView.deselectItem(at: indexPath, animated: true)
+        switch dataSource.itemIdentifier(for: indexPath) {
+        case .row(let id):
+            viewModel.didSelect(id)
+        case .showMore:
+            viewModel.showMore()
+        case nil:
+            break
+        }
     }
 }

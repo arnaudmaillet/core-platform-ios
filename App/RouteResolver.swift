@@ -109,6 +109,9 @@ final class RouteResolver: Router {
             logger.debug("No navigator; dropping route: \(String(describing: route))")
             return
         }
+        // The notifications drawer slides shut as the destination arrives —
+        // a tap on a notification is a route, and it lands underneath.
+        navigator.closeOverlays()
 
         switch route {
         case .feed:
