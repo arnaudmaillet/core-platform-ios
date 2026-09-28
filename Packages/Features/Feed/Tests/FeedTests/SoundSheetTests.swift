@@ -96,16 +96,17 @@ struct SoundSheetTests {
 
     // MARK: - Order
 
-    private static let showable = Set(["cur", "orig", "a", "b", "text"].map { PostID($0) })
-
-    private func order(original: String?, using: [String]) -> (ids: [String], original: String?) {
-        let text = PostID("text")
+    /// `unknown` posts are not loaded yet (`isMedia` nil); "text" is a text post.
+    private func order(
+        original: String?, using: [String], unknown: Set<String> = []
+    ) -> (ids: [String], original: String?) {
         let result = SoundSheetViewController.gridPostIDs(
             current: PostID("cur"),
             original: original.map { PostID($0) },
             using: using.map { PostID($0) },
-            canShow: { (id: PostID) in Self.showable.contains(id) },
-            isMedia: { (id: PostID) in id != text }
+            isMedia: { (id: PostID) -> Bool? in
+                unknown.contains(id.rawValue) ? nil : id.rawValue != "text"
+            }
         )
         return (result.ids.map { (id: PostID) in id.rawValue }, result.original?.rawValue)
     }
@@ -122,16 +123,60 @@ struct SoundSheetTests {
         #expect(result.original == "cur")
     }
 
-    /// A text post is no "original" of a sound, and a post this feed cannot
-    /// show is not offered at all: the current post leads.
-    @Test func aTextOrUnshowableOriginalIsNotMarked() {
+    /// A text post is no "original" of a sound: it keeps its place among the
+    /// others, unmarked, and the current post leads.
+    @Test func aTextOriginalIsNotMarked() {
         let text = order(original: "text", using: ["a", "text"])
         #expect(text.ids == ["cur", "a", "text"])
         #expect(text.original == nil)
+    }
 
-        let elsewhere = order(original: "gone", using: ["gone", "a"])
-        #expect(elsewhere.ids == ["cur", "a"])
-        #expect(elsewhere.original == nil)
+    /// Every post using the sound is listed, the feed's or not; an original
+    /// not loaded yet holds the first place, unmarked until it is known.
+    @Test func anUnloadedOriginalLeadsUnmarked() {
+        let result = order(original: "orig", using: ["orig", "a", "b"], unknown: ["orig", "b"])
+        #expect(result.ids == ["orig", "cur", "a", "b"])
+        #expect(result.original == nil)
+    }
+
+    // MARK: - Placeholders
+
+    /// Posts outside the feed arrive as placeholders and are filled in —
+    /// reconfigured in place, a failed one removed, the counts following —
+    /// and a placeholder's tap leads nowhere.
+    @Test func placeholdersAreFilledInAndFailuresLeave() throws {
+        let controller = SoundSheetViewController(
+            sound: PostSound(id: "clip-01", title: nil, artist: nil, previewURL: nil, artworkURL: nil, duration: 30),
+            authorHandle: "ava",
+            fallbackArtworkURL: nil,
+            tiles: (0..<6).map { (index: Int) in
+                SoundSheetViewController.Tile(
+                    postID: PostID("p\(index)"), thumbnailURL: nil, caption: nil,
+                    isCurrent: index == 0, isLoaded: index < 2
+                )
+            },
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+        )
+        var selected: [PostID] = []
+        controller.onSelectPost = { selected.append($0) }
+        _ = controller.wrappedInSheet()
+        controller.loadViewIfNeeded()
+        let collection = try #require(controller.view.subviews.compactMap { $0 as? UICollectionView }.first)
+        #expect(collection.numberOfItems(inSection: 2) == 3)
+
+        // A placeholder (p3, first of row two) does nothing when tapped.
+        controller.collectionView(collection, didSelectItemAt: IndexPath(item: 0, section: 2))
+        #expect(selected.isEmpty)
+
+        // p5 could not be loaded: it leaves; the others are filled in.
+        controller.update(tiles: (0..<5).map { (index: Int) in
+            SoundSheetViewController.Tile(
+                postID: PostID("p\(index)"), thumbnailURL: nil, caption: "post \(index)", isCurrent: index == 0
+            )
+        })
+        #expect(controller.tiles.count == 5)
+        #expect(controller.tiles.allSatisfy { $0.isLoaded })
+        #expect(collection.numberOfItems(inSection: 2) == 2)
     }
 
     // MARK: - Collapsed detent

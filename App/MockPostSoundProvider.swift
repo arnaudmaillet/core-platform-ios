@@ -121,14 +121,16 @@ extension MockPostSoundProvider {
     /// then a long tail. Percent of the borrowing posts, most popular first.
     ///
     /// Sized on the corpus (120 posts, 80 without a clip, every fifth of those
-    /// silent): the hits land on 17, 9, 5, 4 and 7 borrowers — plus, for the
-    /// two clips, the clip's own post — photographs and text posts mixed, by
-    /// every kind of author. What is left (about a third) keeps the old
-    /// spread, one or two posts per sound. (Before this, no sound was used by
-    /// more than two posts, and the sound sheet's first row and "View all"
-    /// never showed on real mock data.)
+    /// silent): in the main timeline the hits land on 15, 8, 6, 5 and 4
+    /// borrowers — plus, for the two clips, the clip's own post, and a few
+    /// more among the just-arrived and the viewer's own posts (the top one
+    /// reads "23 posts") — photographs and text posts mixed, by every kind of
+    /// author. What is left (about a third) keeps the old spread, one or two
+    /// posts per sound. (Before this, no sound was used by more than two
+    /// posts, and the sound sheet's first row and "View all" never showed on
+    /// real mock data.)
     private static let chart: [(share: Int, sound: Hit)] = [
-        (26, .clip(slot: 0)),   // post-0000's original sound
+        (22, .clip(slot: 0)),   // post-0000's original sound
         (16, .song(slot: 6)),   // "Haru Haru" · BIGBANG, a named track
         (11, .clip(slot: 2)),   // post-0006's original sound
         (8, .song(slot: 11)),   // "This song drops"
