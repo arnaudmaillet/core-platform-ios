@@ -45,9 +45,23 @@ final class MainTabCoordinator: NSObject, Coordinator {
     /// state and the tap live here once, and each header is handed a FRESH item
     /// bound to them (`NotificationsBell`) — a bar item lives in one bar, so the
     /// single item this used to be could only ever lead the map's.
-    private lazy var notificationsBell = NotificationsBell { [weak self] in
-        self?.pushNotifications()
+    private lazy var notificationsBell: NotificationsBell = NotificationsBell { [weak self] in
+        self?.notificationsDrawer.open()
     }
+    /// Notifications, as a drawer BEHIND the shell: the whole tab bar
+    /// controller slides right to reveal it. See `NotificationsDrawer`.
+    private lazy var notificationsDrawer: NotificationsDrawer = NotificationsDrawer(
+        tabBarController: tabBarController,
+        list: container.notificationsFeature.makeNotificationsViewController(),
+        onDidOpen: { [weak self] in
+            // Opening the list is what reads it (the list tells the server
+            // itself); the bells stop saying "unread" at once.
+            self?.notificationsBell.setUnread(false)
+        }
+    )
+    /// What the window shows: the drawer container, holding the tab bar
+    /// controller as its main screen.
+    var rootViewController: UIViewController { notificationsDrawer.container }
     private var feedFlow: FeedFlowCoordinator?
     /// The Profile root. Held so the viewer's avatar can be pushed onto its tab
     /// image as it loads, and again whenever the active profile changes.
@@ -427,12 +441,16 @@ final class MainTabCoordinator: NSObject, Coordinator {
                 }
             }
         }
-        // `-open-notifications` pushes the notifications feed on launch — the
-        // bells' exact code path — so it's screenshottable without a tap
-        // (the sim injects none). Deferred a tick, as above.
-        if arguments.contains("-open-notifications") {
-            DispatchQueue.main.async { [weak self] in self?.pushNotifications() }
-        }
+        // `-open-notifications` opens the notifications drawer on launch — the
+        // bells' exact code path — once the shell is in a window at rest on a
+        // root (pair with `-select-tab N` for the main screen behind it).
+        // `-notifications-progress <0…1.1>` instead HOLDS the drawer part-way,
+        // as a finger would, for a still of a half-open state; above 1 shows
+        // the rubber band. `-notifications-drag-demo` drives the tracking path
+        // the edge swipe takes (minus the recogniser): a drag that falls back,
+        // one that opens, then a drag back that closes. See
+        // `debugNotificationsDrawerHooks`.
+        debugNotificationsDrawerHooks(arguments)
         // `-feed-repush-demo` pushes the feed twice (combine with
         // `-snap-auto-dismiss`, which pops it ~2.5s after each landing): the
         // second push must resume where the first left off — the retained-
@@ -487,25 +505,6 @@ final class MainTabCoordinator: NSObject, Coordinator {
             }
         }
         #endif
-    }
-
-    /// Pushes Notifications onto the SELECTED tab's stack — the bell's action.
-    ///
-    /// It used to be the Maps stack, always, because the map was the only
-    /// header with a bell. Every root header leads with one now, and a bell only
-    /// ever stands on a tab ROOT with nothing presented over it, so the selected
-    /// stack is by construction the one whose bell was pressed: back returns to
-    /// the header the viewer tapped. Reading clears the badge server-side, and
-    /// `refreshUnreadBadge` reconciles on the next tab switch. Shared with the
-    /// `-open-notifications` debug hook, which therefore pushes onto whichever
-    /// tab `-select-tab` chose.
-    private func pushNotifications() {
-        guard let navigationController = tabBarController.selectedViewController
-            as? UINavigationController else { return }
-        navigationController.pushViewController(
-            container.notificationsFeature.makeNotificationsViewController(),
-            animated: true
-        )
     }
 
     @objc private func activeProfileChanged() {
@@ -762,6 +761,13 @@ extension MainTabCoordinator: AppNavigating {
         syncTabBarVisibility()
     }
 
+    /// A route always lands on the main screen, so it closes the drawer —
+    /// which is how a tap on a notification shows where it went: the drawer
+    /// slides shut while the destination is pushed onto the selected tab.
+    func closeOverlays() {
+        notificationsDrawer.close()
+    }
+
     func openFeed() {
         // "Take me to the feed" — from a bar tap, a deep link, or a push
         // payload: anything presented over the shell would cover the pushed
@@ -789,6 +795,60 @@ extension MainTabCoordinator {
               let stack = tabBarController.selectedViewController as? UINavigationController,
               stack.transitionCoordinator == nil else { return nil }
         return stack
+    }
+
+    /// The notifications drawer's launch hooks: see the note in `start()`.
+    fileprivate func debugNotificationsDrawerHooks(_ arguments: [String]) {
+        let wantsOpen = arguments.contains("-open-notifications")
+        let heldProgress = arguments.firstIndex(of: "-notifications-progress")
+            .flatMap { $0 + 1 < arguments.count ? Double(arguments[$0 + 1]) : nil }
+        let wantsDragDemo = arguments.contains("-notifications-drag-demo")
+        guard wantsOpen || heldProgress != nil || wantsDragDemo else { return }
+        let drawer = notificationsDrawer
+        // Deferred past launch, then gated: the drawer only opens from a root
+        // at rest in a window, and `-select-tab` lands after `start()`.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            QAWait.until("notifications drawer: a resting root in a window", { [weak self] in
+                guard let self else { return true }
+                return tabBarController.viewIfLoaded?.window != nil && drawer.edgeBelongsToDrawer
+            }) {
+                if let heldProgress {
+                    drawer.container.debugHold(progress: CGFloat(heldProgress))
+                } else if wantsDragDemo {
+                    Self.debugRunDrawerDragDemo(drawer.container)
+                } else {
+                    drawer.open()
+                }
+            }
+        }
+    }
+
+    /// Three drags through the gesture's own tracking path, each once the last
+    /// has settled: to 30% released slowly (falls back shut), to 45% released
+    /// with a rightward flick (opens), then back 60% with a leftward flick
+    /// (closes). `[drawer-demo]` lines mark each step.
+    private static func debugRunDrawerDragDemo(_ container: SideDrawerContainerViewController) {
+        let log = { (line: String) in print("[drawer-demo] \(line)") }
+        log("drag to 0.30, slow release")
+        container.debugScriptedDrag(to: 0.30, duration: 0.8, releaseVelocity: 40) {
+            QAWait.until("-notifications-drag-demo: closed after the short drag", { container.phase == .closed }) {
+                log("closed; drag to 0.45, flick right")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    container.debugScriptedDrag(to: 0.45, duration: 0.5, releaseVelocity: 900) {
+                        QAWait.until("-notifications-drag-demo: open after the flick", { container.phase == .open }) {
+                            log("open; drag back to 0.40, flick left")
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                                container.debugScriptedDrag(to: 0.40, duration: 0.5, releaseVelocity: -900) {
+                                    QAWait.until("-notifications-drag-demo: closed", { container.phase == .closed }) {
+                                        log("closed; done")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// Drives `-plus-hold-demo`: see the hook in `start()`.

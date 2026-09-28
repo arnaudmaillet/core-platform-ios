@@ -18,54 +18,74 @@ private struct AuthenticatedSessionStub: AuthSessionProviding {
 /// Drives the read path — repository → generated clients → real ProtocolClient
 /// → MockBFF — with production wire bytes, in-process.
 struct NotificationsRepositoryTests {
-    private func makeRepository() -> NotificationsRepository {
+    private func makeRepository(withPosts: Bool = true) -> NotificationsRepository {
         let dataset = MockSocialDataset()
         let bff = MockBFF()
-        MockSocialServices(dataset: dataset).register(on: bff) // viewer resolve + sender hydration
+        MockSocialServices(dataset: dataset).register(on: bff) // viewer, senders, posts
         MockNotificationService(dataset: dataset).register(on: bff)
         let client = ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: bff)
         return NotificationsRepository(
             notificationClient: Notification_V1_NotificationServiceClient(client: client),
             profileClient: Profile_V1_ProfileServiceClient(client: client),
+            postClient: withPosts ? Post_V1_PostServiceClient(client: client) : nil,
             authSession: AuthenticatedSessionStub()
         )
     }
 
-    @Test func loadsAndHydratesSenderNames() async throws {
+    @Test func loadsAndHydratesSenders() async throws {
         let repository = makeRepository()
 
         let items = try await repository.loadNotifications(limit: 50)
 
-        #expect(items.count == 4)
+        // Enough new rows to exercise "Show more", and some already read.
+        #expect(items.filter { !$0.isRead }.count > NotificationSectionBuilder.newLimit + 1)
+        #expect(items.contains { $0.isRead })
         // Sender names are hydrated from profile.v1, not left as ids.
         let first = try #require(items.first)
         #expect(first.action == .reaction)
         #expect(!first.senderName.isEmpty)
         #expect(first.senderName != first.senderID.rawValue)
         #expect(first.postSubjectID != nil) // subject is a post → routes to .post
-        #expect(first.isRead == false)
+        // …and so are their pictures: a real photograph or none at all.
+        #expect(items.contains { $0.senderAvatarURL != nil })
+        #expect(items.contains { $0.senderAvatarURL == nil })
     }
 
-    @Test func aggregatedNotificationCarriesOtherSenderCount() async throws {
+    @Test func aggregatedNotificationsCarryTheirCountAndASecondFace() async throws {
         let repository = makeRepository()
 
         let items = try await repository.loadNotifications(limit: 50)
 
-        // The third fixture is an aggregate of 4 senders.
         let aggregated = try #require(items.first { $0.otherSenderCount > 0 })
-        #expect(aggregated.otherSenderCount == 3)
+        #expect(aggregated.otherSenderCount == 4)
+        // The server's sample leads with the primary; the repository keeps the
+        // OTHERS, hydrated, for the stacked avatar.
+        let second = try #require(aggregated.sampleSenders.first)
+        #expect(second.id != aggregated.senderID)
+        #expect(!second.name.isEmpty)
     }
 
-    @Test func markAllReadSucceeds() async throws {
-        let repository = makeRepository()
-        try await repository.markAllRead()
+    /// Media posts bring a still, text posts their words.
+    @Test func subjectPostsArePreviewed() async throws {
+        let items = try await makeRepository().loadNotifications(limit: 50)
+        #expect(items.contains { $0.subjectPreview?.thumbnailURL != nil })
+        #expect(items.contains { $0.subjectPreview?.excerpt?.isEmpty == false })
     }
 
-    @Test func unreadCountReflectsMarkAllRead() async throws {
+    @Test func withoutAPostClientRowsSimplyHaveNoPreview() async throws {
+        let items = try await makeRepository(withPosts: false).loadNotifications(limit: 50)
+        #expect(!items.isEmpty)
+        #expect(items.allSatisfy { $0.subjectPreview == nil })
+    }
+
+    @Test func markAllReadClearsTheCountAndTheList() async throws {
         let repository = makeRepository()
 
-        #expect(try await repository.unreadCount() == 2)
+        let unread = try await repository.unreadCount()
+        #expect(unread > 0)
         try await repository.markAllRead()
         #expect(try await repository.unreadCount() == 0)
+        let items = try await repository.loadNotifications(limit: 50)
+        #expect(items.allSatisfy { $0.isRead })
     }
 }

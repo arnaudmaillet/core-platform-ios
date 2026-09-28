@@ -3,15 +3,28 @@ import CoreNavigation
 import DesignSystem
 import Foundation
 
+/// The notifications list: loads, splits into "New" and "Earlier", holds the
+/// "Show more" state, marks the new rows seen, and routes a tap.
+///
+/// ## When a notification counts as read
+///
+/// When the viewer has LOOKED at the list — the drawer settled open with the
+/// list loaded (`didReveal`) — the server is told at once, so the bell's badge
+/// clears while the drawer is still open. The rows, though, stay where they
+/// were for the rest of that visit: nothing moves out of "New" under the
+/// viewer's eye. They move to "Earlier" when the drawer closes
+/// (`didConceal`), which is also when "Show more" folds back. A peek that
+/// never settles open marks nothing.
+///
+/// Everything behind "Show more" is marked too — the only write the contract
+/// has is "mark ALL read" — and that is the right call anyway: the section
+/// header said how many there were, which is what "seen" means for a badge.
 @MainActor
 public final class NotificationsViewModel {
-    /// The shared four states (charter P11) — the first screen to adopt
-    /// `Loadable` instead of spelling them itself.
-    public typealias Phase = Loadable<[NotificationDisplayModel]>
+    /// The shared four states (charter P11).
+    public typealias Phase = Loadable<[NotificationSection]>
 
     public var onPhaseChange: ((Phase) -> Void)?
-    /// Enables/disables the "Mark all read" affordance (true when any unread).
-    public var onHasUnreadChange: ((Bool) -> Void)?
 
     private let repository: any NotificationsProviding
     private let router: (any Router)?
@@ -21,6 +34,13 @@ public final class NotificationsViewModel {
     private var items: [NotificationItem] = []
     private var phase: Phase = .loading { didSet { onPhaseChange?(phase) } }
     private var load: Task<Void, Never>?
+    private var hasLoaded = false
+    /// "Show more" was pressed this visit.
+    private var isNewExpanded = false
+    /// The drawer is open and settled.
+    private var isRevealed = false
+    /// The server has been told this visit's rows are read.
+    private var hasMarkedThisVisit = false
 
     public init(
         repository: any NotificationsProviding,
@@ -40,14 +60,50 @@ public final class NotificationsViewModel {
         reload()
     }
 
+    /// The list is about to show. Every visit after the first reloads, so a
+    /// drawer opened an hour later is not an hour stale; the first visit's
+    /// load is already running from `viewDidLoad`.
+    public func willReveal() {
+        guard hasLoaded, load == nil else { return }
+        reload()
+    }
+
+    /// The list has settled on screen: the viewer is looking at it.
+    public func didReveal() {
+        isRevealed = true
+        markSeenIfLooking()
+    }
+
+    /// The list has gone. What was new this visit is old from now on.
+    public func didConceal() {
+        isRevealed = false
+        let wasExpanded = isNewExpanded
+        isNewExpanded = false
+        if hasMarkedThisVisit {
+            hasMarkedThisVisit = false
+            items = items.map { $0.markedRead() }
+            emitContent()
+        } else if wasExpanded {
+            emitContent()
+        }
+    }
+
     public func refresh() {
         guard load == nil else { return }
         reload()
     }
 
+    /// "Show more": the rest of the new rows, in place.
+    public func showMore() {
+        guard !isNewExpanded else { return }
+        isNewExpanded = true
+        emitContent()
+    }
+
     /// Tap on a row: route to its subject — a post when the notification is
     /// about one, otherwise the sender's profile. Notifications never imports
-    /// Feed or Profile; it only emits routes.
+    /// Feed or Profile; it only emits routes (and the shell, receiving one,
+    /// closes the drawer to show where it went).
     public func didSelect(_ id: String) {
         guard let item = items.first(where: { $0.id == id }) else { return }
         if let postID = item.postSubjectID {
@@ -59,15 +115,6 @@ public final class NotificationsViewModel {
         }
     }
 
-    /// Optimistically clears unread state, then tells the server. A failure
-    /// simply resurfaces on the next load.
-    public func markAllRead() {
-        guard items.contains(where: { !$0.isRead }) else { return }
-        items = items.map { $0.markedRead() }
-        emitContent()
-        Task { [weak self] in try? await self?.repository.markAllRead() }
-    }
-
     // MARK: - Loading
 
     private func reload() {
@@ -77,9 +124,9 @@ public final class NotificationsViewModel {
             do {
                 let loaded = try await self.repository.loadNotifications(limit: self.pageSize)
                 self.items = loaded
+                self.hasLoaded = true
                 if loaded.isEmpty {
                     self.phase = .empty
-                    self.onHasUnreadChange?(false)
                 } else {
                     self.emitContent()
                 }
@@ -87,31 +134,29 @@ public final class NotificationsViewModel {
                 // Superseded; leave the phase alone.
             } catch {
                 if case .content = self.phase {} else {
-                    self.phase = .failed(message: "Couldn't load your activity. Pull to retry.")
+                    self.phase = .failed(message: "Couldn't load your notifications.")
                 }
             }
             self.load = nil
+            self.markSeenIfLooking()
         }
     }
 
-    private func emitContent() {
-        let models = items.map { NotificationDisplayModel(item: $0, now: now()) }
-        phase = .content(models)
-        onHasUnreadChange?(items.contains { !$0.isRead })
+    /// Tells the server the new rows were seen — once per visit, only while
+    /// the viewer is looking, and only once there is something loaded to have
+    /// looked AT (a reveal over a skeleton waits for the load).
+    private func markSeenIfLooking() {
+        guard isRevealed, load == nil, !hasMarkedThisVisit,
+              items.contains(where: { !$0.isRead }) else { return }
+        hasMarkedThisVisit = true
+        let repository = repository
+        Task { try? await repository.markAllRead() }
     }
-}
 
-private extension NotificationItem {
-    func markedRead() -> NotificationItem {
-        NotificationItem(
-            id: id,
-            action: action,
-            senderID: senderID,
-            senderName: senderName,
-            otherSenderCount: otherSenderCount,
-            postSubjectID: postSubjectID,
-            isRead: true,
-            createdAt: createdAt
-        )
+    private func emitContent() {
+        guard !items.isEmpty else { return }
+        phase = .content(NotificationSectionBuilder.sections(
+            from: items, newExpanded: isNewExpanded, now: now()
+        ))
     }
 }

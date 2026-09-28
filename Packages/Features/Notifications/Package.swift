@@ -14,7 +14,8 @@ let package = Package(
         .package(path: "../../Kit/CoreModels"),
         .package(path: "../../Core/CoreNavigation"),
         .package(path: "../../Core/CoreNetworking"),
-        .package(path: "../../Core/DesignSystem")
+        .package(path: "../../Core/DesignSystem"),
+        .package(path: "../../Core/MediaCore")
     ],
     targets: [
         .target(
@@ -25,7 +26,8 @@ let package = Package(
                 "CoreContracts",
                 "CoreModels",
                 "CoreNavigation",
-                "DesignSystem"
+                "DesignSystem",
+                "MediaCore"
             ]
         ),
         .testTarget(
