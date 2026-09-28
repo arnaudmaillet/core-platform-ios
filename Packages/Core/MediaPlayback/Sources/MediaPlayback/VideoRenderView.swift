@@ -1087,7 +1087,7 @@ public final class VideoRenderView: UIView {
     /// distinct surfaces all label themselves "page"; without this, four poster
     /// events look like one surface flickering four times rather than four
     /// separate cells each doing it once.
-    private var debugInstanceTag: String {
+    var debugInstanceTag: String {
         String(UInt(bitPattern: ObjectIdentifier(self).hashValue) % 0x1000, radix: 16)
     }
 

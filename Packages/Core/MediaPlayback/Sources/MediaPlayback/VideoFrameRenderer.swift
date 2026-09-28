@@ -202,6 +202,11 @@ final class VideoFrameRenderer {
         // the bug, not a diagnostic curiosity.
         log("INVALIDATE dropping \(surfaces.count) surface(s): "
             + surfaces.allObjects.map { $0.debugLabelOrAnonymous }.sorted().joined(separator: ","))
+        #if DEBUG
+        VideoProducerLog.emit("INVALIDATE \(VideoProducerLog.name(player)) dropping ["
+            + surfaces.allObjects.map { "\($0.debugProducerName):\($0.enqueuedFrameCount)" }.sorted()
+                .joined(separator: ",") + "]")
+        #endif
         for surface in surfaces.allObjects { surface.detachFromRenderer() }
         surfaces.removeAllObjects()
         held.removeAll()
@@ -281,7 +286,40 @@ final class VideoFrameRenderer {
         for surface in targets {
             surface.setCatchingUp(source.isCatchingUp)
         }
+        #if DEBUG
+        if frame != nil { producerPulls += 1 }
+        logProducerHeartbeat(atHostTime: hostTime, targets: targets)
+        #endif
     }
+
+    #if DEBUG
+    private var producerPulls = 0
+    private var lastProducerBeat: CFTimeInterval = 0
+
+    /// Twice a second under `-zoom-live-log`, for a renderer drawing a surface
+    /// somebody NAMED: what was pulled, what each surface holds, and the
+    /// player's own account — before the "nothing new" answer and after it.
+    ///
+    /// ⚠️ Emitted whether or not frames flowed, so a stall reads as `pulled=0`
+    /// on a line rather than as the line going missing.
+    private func logProducerHeartbeat(atHostTime hostTime: CFTimeInterval, targets: [VideoRenderView]) {
+        guard VideoProducerLog.isEnabled, targets.contains(where: { $0.debugLabel != nil }) else { return }
+        if lastProducerBeat == 0 { lastProducerBeat = hostTime; return }
+        guard hostTime - lastProducerBeat >= 0.5 else { return }
+        let detail = targets.map { surface in
+            "\(surface.debugProducerName):\(surface.enqueuedFrameCount)"
+                + (surface.window == nil ? "/nowin" : "") + (surface.isHidden ? "/hid" : "")
+        }.sorted().joined(separator: ",")
+        VideoProducerLog.emit(String(
+            format: "beat %@ pulled=%d/%.1fs clock=%@ hasNew=%@ why=%@ surfaces=[%@] %@",
+            VideoProducerLog.name(player), producerPulls, hostTime - lastProducerBeat,
+            isRegistered ? "Y" : "N", source.debugHasNewBuffer(atHostTime: hostTime),
+            source.noFrameReason, detail, source.debugPlayerState
+        ))
+        producerPulls = 0
+        lastProducerBeat = hostTime
+    }
+    #endif
 
     /// Frames pulled ahead and not yet shown — empty unless leading.
     ///

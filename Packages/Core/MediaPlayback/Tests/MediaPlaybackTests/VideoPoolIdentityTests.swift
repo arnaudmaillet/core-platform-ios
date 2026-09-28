@@ -109,6 +109,134 @@ struct VideoPoolIdentityTests {
         #expect(controller.isAdvancing(in: survivor))
     }
 
+    // MARK: - A host that swaps its surface (the early-grab stall)
+
+    /// ⚠️ THE MECHANISM, pinned as it behaves: a surface that only JOINED a
+    /// playback goes down with its owner.
+    ///
+    /// Not a defect on its own — a flight card joined to a tile is meant to end
+    /// with the tile. It becomes one when the owner is the surface a host has
+    /// just THROWN AWAY in favour of the joined one: a feed page adopting the
+    /// present card's live view at landing kept the loan filed under the view
+    /// it discarded, and the first sweep after that (any `play`) retired the
+    /// player under the page and under every card a grab had joined to it.
+    /// Measured in the app as `INVALIDATE dropping [card:1, page:38]`, one tick
+    /// after the donation. `adoptSurface` below exists because of this.
+    @Test func aJoinedSurfaceGoesDownWithAnOwnerThatDiesInSilence() async {
+        let controller = pool()
+        let url = URL(string: "mock://video/adopted")!
+        let probeURL = URL(string: "mock://video/probe")!
+        let adopted = VideoRenderView()
+        let probe = VideoRenderView()
+        var replaced: VideoRenderView? = VideoRenderView()
+        weak var released = replaced
+        await controller.play(url, in: replaced!)
+        // ⚠️ IN A POOL OF ITS OWN: the join goes through Objective-C
+        // collections that can leave the view autoreleased, and a view that
+        // outlives this block is a surface that never died — the premise
+        // below — and a test that passes for the wrong reason.
+        autoreleasepool {
+            #expect(controller.attachSurface(adopted, alongsideSurface: replaced!))
+            replaced = nil
+        }
+        #expect(released == nil)
+
+        await controller.play(probeURL, in: probe)
+
+        #expect(players(controller, on: url) == 0)
+        #expect(controller.activePlayer(in: adopted) == nil)
+    }
+
+    /// ⚠️ THE FIX: the surface a host swaps in takes the loan of the one it
+    /// replaces, so the replaced view can die without taking the picture.
+    ///
+    /// Asserted AFTER a sweep, because before one the two states look the
+    /// same: the orphaned loan is only discovered — and the player retired —
+    /// by the next question the pool is asked.
+    @Test func anAdoptedSurfaceTakesTheLoanOfTheViewItReplaces() async {
+        let controller = pool()
+        let url = URL(string: "mock://video/adopted")!
+        let probeURL = URL(string: "mock://video/probe")!
+        let adopted = VideoRenderView()
+        let card = VideoRenderView()
+        let probe = VideoRenderView()
+        var replaced: VideoRenderView? = VideoRenderView()
+        weak var released = replaced
+        await controller.play(url, in: replaced!)
+        autoreleasepool {
+            let player = controller.activePlayer(in: replaced!)
+            #expect(controller.attachSurface(adopted, alongsideSurface: replaced!))
+            #expect(controller.adoptSurface(adopted, replacing: replaced!))
+            #expect(controller.activePlayer(in: adopted) === player)
+            #expect(controller.activePlayer(in: replaced!) == nil)
+            replaced = nil
+        }
+        // The premise: the host has let the replaced view go.
+        #expect(released == nil)
+
+        // The sweep a place page's first `play` used to be.
+        await controller.play(probeURL, in: probe)
+
+        #expect(players(controller, on: url) == 1)
+        #expect(controller.activePlayer(in: adopted) != nil)
+        #expect(controller.isAdvancing(in: adopted))
+        // And the page can still hand a live surface to a grab — the donation
+        // that came back REFUSED on the second grab.
+        #expect(controller.attachSurface(card, alongsideSurface: adopted))
+        #expect(controller.watchedPlayer(in: card) === controller.activePlayer(in: adopted))
+        #expect(controller.itemCreations == 2)
+    }
+
+    /// The replaced surface's loan on some OTHER player is given back, not
+    /// left for a sweep to find: nothing will ever draw it again, and a loan
+    /// nobody stops is a decoder running for nobody until the view happens to
+    /// be collected.
+    @Test func adoptingReturnsALoanTheReplacedViewHeldOnAnotherPlayer() async {
+        let controller = pool()
+        let urlA = URL(string: "mock://video/a")!
+        let urlB = URL(string: "mock://video/b")!
+        let replaced = VideoRenderView()
+        let owner = VideoRenderView()
+        let adopted = VideoRenderView()
+        await controller.play(urlA, in: replaced)
+        await controller.play(urlB, in: owner)
+        #expect(controller.attachSurface(adopted, alongsideSurface: owner))
+
+        #expect(controller.adoptSurface(adopted, replacing: replaced))
+
+        #expect(players(controller, on: urlA) == 0)
+        #expect(controller.activePlayer(in: replaced) == nil)
+        // B's loan moved to the adopted surface, so its former owner stopping
+        // no longer takes the picture with it.
+        #expect(controller.activePlayer(in: owner) == nil)
+        controller.stop(owner)
+        #expect(players(controller, on: urlB) == 1)
+        #expect(controller.isAdvancing(in: adopted))
+    }
+
+    /// The page is HEARD through its surface, so the one it swaps in is the
+    /// one to hear — or the sound stops at the landing for no visible reason.
+    @Test func theAdoptedSurfaceInheritsBeingHeard() async {
+        let controller = pool()
+        let url = URL(string: "mock://video/heard")!
+        let replaced = VideoRenderView()
+        let adopted = VideoRenderView()
+        await controller.play(url, in: replaced)
+        controller.setAudibleSurface(replaced)
+        #expect(controller.attachSurface(adopted, alongsideSurface: replaced))
+
+        #expect(controller.adoptSurface(adopted, replacing: replaced))
+
+        #expect(controller.currentAudibleSurface === adopted)
+        #expect(controller.isMuted(in: adopted) == false)
+    }
+
+    /// A surface bound to nothing has no playback to own, and says so.
+    @Test func adoptingAnUnboundSurfaceIsRefused() {
+        let controller = pool()
+        #expect(!controller.adoptSurface(VideoRenderView(), replacing: VideoRenderView()))
+    }
+
     // MARK: - One video, opened and closed many times
 
     /// ⚠️ THE REPORTED SHAPE: a gallery with one clip, opened and dismissed

@@ -822,6 +822,18 @@ public final class GridVideoPlaybackCoordinator {
         view.revealOnFirstFrame()
         pool.setPeakBitRate(Self.tileBitRateCap, for: url)
         loans[id] = cell
+        // ⚠️ AND THE STREAM, with the loan — the two are one fact to `update`.
+        //
+        // A loan whose `playingURLs` entry disagrees with the candidate's url
+        // reads as "the carousel paged to another clip", and a one-surface row
+        // is STOPPED for it. A tile that never played before the landing — the
+        // place page's first tile, which the viewer has never seen — has no
+        // entry at all, so the reconcile that runs the instant the tile is
+        // unhidden stopped the loan it had just been handed: the player retired
+        // under the landing card and the page behind it (`INVALIDATE dropping
+        // [card:38, page:133]` in the same turn as `TRANSFER`), and the tile
+        // re-minted the clip from its resume point a frame later.
+        playingURLs[id] = url
         uncappedIDs.remove(id)
         cell.onReuse = { [weak self] in
             guard let self, let cell = loans[id] else { return }
@@ -882,6 +894,8 @@ public final class GridVideoPlaybackCoordinator {
         guard pool.unparkPlayback(to: view, mediaURL: url) else { return }
         pool.setPeakBitRate(Self.tileBitRateCap, in: view)
         loans[id] = cell
+        // The stream with the loan — see `adoptAttachedSurface`.
+        playingURLs[id] = url
         cell.onReuse = { [weak self] in
             guard let self, let cell = loans[id] else { return }
             stop(id: id, cell: cell)
@@ -924,6 +938,8 @@ public final class GridVideoPlaybackCoordinator {
         pool.setPeakBitRate(Self.tileBitRateCap, in: view)
         hostedSurfaces[id] = view
         loans[id] = cell
+        // The stream with the loan — see `adoptAttachedSurface`.
+        playingURLs[id] = url
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
             // Steady state: the flight is over, so this is the count that
