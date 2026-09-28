@@ -49,4 +49,14 @@ public protocol PostSoundProviding: Sendable {
     func sound(forPost postID: PostID, clip: URL?) -> PostSound?
     /// The posts set to `sound`, most relevant first — the sound page's grid.
     func postIDs(using sound: PostSound) -> [PostID]
+    /// The post `sound` was first published with — the clip it was cut from,
+    /// or the first post of the author it is credited to. Nil for a track
+    /// that came from outside the app (a named artist's song), or when
+    /// unknown. The sound page lists it first, marked "Original", when it is
+    /// a media post.
+    func originalPostID(of sound: PostSound) -> PostID?
+}
+
+public extension PostSoundProviding {
+    func originalPostID(of sound: PostSound) -> PostID? { nil }
 }

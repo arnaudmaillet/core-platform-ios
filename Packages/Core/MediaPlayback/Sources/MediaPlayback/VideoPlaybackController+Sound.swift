@@ -1,4 +1,5 @@
 import AVFoundation
+import QuartzCore
 
 extension VideoPlaybackController {
     /// What a player's current arrangement laid for its sound.
@@ -57,7 +58,23 @@ extension VideoPlaybackController {
     public func setAudibleSurface(_ view: VideoRenderView?) {
         audibleSurface = view
         refreshAudibleSurface()
+        #if DEBUG
+        traceSound("audible=\(view?.debugProducerName ?? "nil")"
+            + " heard=\(surfaceHeardPlayer.map { VideoProducerLog.name($0) } ?? "-")")
+        SoundCensusSampler.start(for: self)
+        #endif
     }
+
+    #if DEBUG
+    /// `-sound-log`: who is heard, as the audible surface moves — and a census
+    /// of every player's mute each time it changes (`debugSoundCensus`).
+    static let tracesSound = ProcessInfo.processInfo.arguments.contains("-sound-log")
+
+    func traceSound(_ message: @autoclosure () -> String) {
+        guard Self.tracesSound else { return }
+        print(String(format: "[sound] %.3f %@", CACurrentMediaTime(), message()))
+    }
+    #endif
 
     /// The surface `setAudibleSurface` last named, if it is still alive.
     public var currentAudibleSurface: VideoRenderView? { audibleSurface }
@@ -143,3 +160,33 @@ extension VideoPlaybackController {
         try? session.setCategory(wanted, mode: .moviePlayback)
     }
 }
+
+#if DEBUG
+/// `-sound-log`'s census, sampled once a second and printed only when it
+/// CHANGES — so what is still talking after a screen has gone (a close lands
+/// ~0.5 s later, and a grid starts its rows after that) is in the log even
+/// when nobody calls `setAudibleSurface` again, which is exactly the defect
+/// this exists to show.
+@MainActor
+private enum SoundCensusSampler {
+    private static var isRunning = false
+
+    static func start(for controller: VideoPlaybackController) {
+        guard VideoPlaybackController.tracesSound, !isRunning else { return }
+        isRunning = true
+        var last: [String] = []
+        // Never invalidated: a DEBUG instrument for the one pool the app
+        // keeps for its whole life.
+        Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak controller] _ in
+            MainActor.assumeIsolated {
+                guard let controller else { return }
+                let census = controller.debugSoundCensus()
+                guard census != last else { return }
+                last = census
+                controller.traceSound("census (\(census.count) players)")
+                for line in census { controller.traceSound("census \(line)") }
+            }
+        }
+    }
+}
+#endif

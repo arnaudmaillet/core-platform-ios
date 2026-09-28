@@ -3,11 +3,18 @@ import DesignSystem
 import MediaCore
 import UIKit
 
-/// One video made with the sound: its poster, and a mark on the one the
-/// viewer came from.
+/// One post made with the sound: its poster (or its words, for a text post),
+/// and the marks that say which one is which.
+///
+/// Two marks, both the same dark capsule in the top-leading corner — one
+/// family of labels on a thumbnail, stacked when a tile earns both:
+/// - **♪ Original**: the post the sound was first published with. The grid
+///   puts it first (`SoundSheetViewController.gridPostIDs`).
+/// - **Watching**: the post the sheet was opened from.
 final class SoundSheetTileCell: UICollectionViewCell {
     private let imageView = UIImageView()
-    private let currentBadge = UILabel()
+    private let originalBadge = TileBadge(text: "Original", symbol: "music.note")
+    private let currentBadge = TileBadge(text: "Watching", symbol: nil)
     private let captionLabel = UILabel()
     private var loading: Task<Void, Never>?
     private var postID: PostID?
@@ -37,22 +44,16 @@ final class SoundSheetTileCell: UICollectionViewCell {
             captionLabel.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
         ])
 
-        currentBadge.text = "Watching"
-        currentBadge.font = .preferredFont(forTextStyle: .caption2).withWeight(.semibold)
-        currentBadge.textColor = .white
-        currentBadge.backgroundColor = UIColor.black.withAlphaComponent(0.55)
-        currentBadge.textAlignment = .center
-        currentBadge.layer.cornerRadius = 9
-        currentBadge.clipsToBounds = true
-        currentBadge.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(currentBadge)
+        let badges = UIStackView(arrangedSubviews: [originalBadge, currentBadge])
+        badges.axis = .vertical
+        badges.alignment = .leading
+        badges.spacing = Spacing.xs
+        badges.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(badges)
         NSLayoutConstraint.activate([
-            currentBadge.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: Spacing.xs + 2),
-            currentBadge.topAnchor.constraint(equalTo: contentView.topAnchor, constant: Spacing.xs + 2),
-            currentBadge.heightAnchor.constraint(equalToConstant: 18),
-            currentBadge.widthAnchor.constraint(
-                equalToConstant: currentBadge.intrinsicContentSize.width + Spacing.md
-            ),
+            badges.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: Spacing.xs + 2),
+            badges.topAnchor.constraint(equalTo: contentView.topAnchor, constant: Spacing.xs + 2),
+            badges.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -Spacing.xs),
         ])
     }
 
@@ -69,6 +70,9 @@ final class SoundSheetTileCell: UICollectionViewCell {
     /// The picture on the tile, for the hero to take off with.
     var cover: UIImage? { imageView.image }
 
+    /// Whether the "Original" mark shows — what a test reads.
+    var showsOriginalBadge: Bool { !originalBadge.isHidden }
+
     /// Hides the tile while its post is in the air or open, so the card and
     /// the tile are never both on screen.
     func setConcealed(_ concealed: Bool) {
@@ -77,8 +81,12 @@ final class SoundSheetTileCell: UICollectionViewCell {
 
     func configure(_ tile: SoundSheetViewController.Tile, pipeline: ImagePipeline) {
         postID = tile.postID
+        originalBadge.isHidden = !tile.isOriginal
         currentBadge.isHidden = !tile.isCurrent
-        accessibilityLabel = tile.isCurrent ? "This video" : "Video"
+        accessibilityLabel = [
+            tile.isOriginal ? "Original" : nil,
+            tile.isCurrent ? "This post" : "Post",
+        ].compactMap { $0 }.joined(separator: ", ")
         isAccessibilityElement = true
         accessibilityTraits = .button
         loading?.cancel()
@@ -91,4 +99,91 @@ final class SoundSheetTileCell: UICollectionViewCell {
             self.imageView.image = image
         }
     }
+}
+
+/// A tile's mark: white caption2 on a dark capsule, readable over any poster
+/// in either appearance — a thumbnail is its own ground, not the sheet's.
+private final class TileBadge: UIView {
+    init(text: String, symbol: String?) {
+        super.init(frame: .zero)
+        backgroundColor = UIColor.black.withAlphaComponent(0.55)
+        layer.cornerRadius = 9
+        layer.cornerCurve = .continuous
+        let label = UILabel()
+        let font = UIFont.preferredFont(forTextStyle: .caption2).withWeight(.semibold)
+        let title = NSMutableAttributedString()
+        if let symbol, let glyph = UIImage(
+            systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(font: font, scale: .small)
+        )?.withTintColor(.white, renderingMode: .alwaysOriginal) {
+            title.append(NSAttributedString(attachment: NSTextAttachment(image: glyph)))
+            title.append(NSAttributedString(string: " "))
+        }
+        title.append(NSAttributedString(string: text))
+        title.addAttributes([.font: font, .foregroundColor: UIColor.white],
+                            range: NSRange(location: 0, length: title.length))
+        label.attributedText = title
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: 18),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Spacing.xs + 2),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -(Spacing.xs + 2)),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+}
+
+/// "View all N posts", under the grid's first row: the door to the rest.
+///
+/// Its own cell — in a section of its own between the first row and the
+/// others — so the collapsed detent can end right under it, above the
+/// toolbar, and so the large detent can take it out of the grid with the
+/// diffable snapshot's own animation (`SoundSheetViewController.Section.more`).
+final class SoundSheetMoreCell: UICollectionViewCell {
+    static let height: CGFloat = 44
+
+    var onTap: (() -> Void)?
+
+    private let button = UIButton(configuration: .plain())
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        var configuration = UIButton.Configuration.plain()
+        configuration.image = UIImage(systemName: "chevron.down")
+        configuration.preferredSymbolConfigurationForImage = .init(pointSize: 12, weight: .bold)
+        configuration.imagePlacement = .trailing
+        configuration.imagePadding = Spacing.xs + 2
+        configuration.baseForegroundColor = .secondaryLabel
+        button.configuration = configuration
+        // Centred: it is the sheet's hinge, not a column heading.
+        button.contentHorizontalAlignment = .center
+        button.accessibilityHint = "Shows every post with this sound"
+        button.addAction(UIAction { [weak self] _ in self?.onTap?() }, for: .primaryActionTriggered)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(button)
+        NSLayoutConstraint.activate([
+            button.topAnchor.constraint(equalTo: contentView.topAnchor),
+            button.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            button.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+            button.leadingAnchor.constraint(greaterThanOrEqualTo: contentView.leadingAnchor),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    func configure(title: String) {
+        var text = AttributedString(title)
+        text.font = UIFont.preferredFont(forTextStyle: .subheadline).withWeight(.semibold)
+        button.configuration?.attributedTitle = text
+    }
+
+    /// The title as shown — what a test reads.
+    var title: String? { button.configuration?.attributedTitle.map { String($0.characters) } }
+
+    /// Presses the control, as a tap would.
+    func sendTap() { onTap?() }
 }

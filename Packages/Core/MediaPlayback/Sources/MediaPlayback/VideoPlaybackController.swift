@@ -1580,6 +1580,9 @@ public final class VideoPlaybackController {
         if let previous, audibleSurface === previous {
             audibleSurface = view
             refreshAudibleSurface()
+            #if DEBUG
+            traceSound("audible MOVED \(previous.debugProducerName) -> \(view.debugProducerName)")
+            #endif
         }
         return true
     }
@@ -1971,6 +1974,31 @@ public final class VideoPlaybackController {
     }
 
     var idlePlayerCount: Int { idlePlayers.count }
+
+    /// `-sound-log`'s census: every player bound or parked, whether it is
+    /// muted and moving, and which surfaces own it — one line each.
+    ///
+    /// ⚠️ A RECORDING HAS NO SOUND TRACK, so a clip heard where it should not
+    /// be is invisible to every video QA this app has. This is the evidence
+    /// instead: after a feed closes, every advancing player reads `muted=1`.
+    func debugSoundCensus() -> [String] {
+        var owners: [ObjectIdentifier: [String]] = [:]
+        var players: [ObjectIdentifier: AVPlayer] = [:]
+        for (key, player) in activePlayers {
+            let id = ObjectIdentifier(player)
+            players[id] = player
+            owners[id, default: []].append(surfaces[key]?.view?.debugProducerName ?? "dead")
+        }
+        if let parked {
+            players[ObjectIdentifier(parked.player)] = parked.player
+            owners[ObjectIdentifier(parked.player), default: []].append("parked")
+        }
+        return players.map { id, player in
+            "\(VideoProducerLog.name(player)) muted=\(player.isMuted ? 1 : 0)"
+                + " rate=\(player.rate) heard=\(surfaceHeardPlayer === player ? 1 : 0)"
+                + " owners=\(owners[id, default: []].sorted())"
+        }.sorted()
+    }
 
     /// Census of the tables that must not outlive what they describe. Public
     /// because the hero-transition audit reads them from the app target; each
