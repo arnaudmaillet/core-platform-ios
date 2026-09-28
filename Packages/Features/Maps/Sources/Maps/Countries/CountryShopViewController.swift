@@ -102,7 +102,11 @@ public final class CountryShopViewController: UIViewController {
 
     override public func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemGroupedBackground
+        // ⚠️ CLEAR: the sheet's own ground is the surface — glass while
+        // collapsed, opaque once full height — exactly as the wallet sheet.
+        // A grouped colour here sat over the glass and defeated it (the
+        // collapsed Shop was a flat grey slab, 2026-09-28).
+        view.backgroundColor = .clear
         navigationItem.largeTitleDisplayMode = .never
 
         let search = UISearchController(searchResultsController: nil)

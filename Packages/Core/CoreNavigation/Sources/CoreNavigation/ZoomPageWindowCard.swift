@@ -102,6 +102,7 @@ final class ZoomPageWindowCard: UIView, ZoomFlightCard {
     var zoomLiveMediaTracksCardBounds: Bool { media.zoomLiveMediaTracksCardBounds }
     func adoptZoomLiveMedia(_ mirror: (UIView) -> Bool) { media.adoptZoomLiveMedia(mirror) }
     func adoptZoomLiveMediaView(_ view: UIView) { media.adoptZoomLiveMediaView(view) }
+    func zoomLiveMediaDidStall() { media.zoomLiveMediaDidStall() }
     func fadeInAdoptedLiveMedia(over duration: TimeInterval) { media.fadeInAdoptedLiveMedia(over: duration) }
     func holdAdoptedLiveMediaUntilLanding() { media.holdAdoptedLiveMediaUntilLanding() }
     func setZoomContentBlend(_ t: CGFloat) { media.setZoomContentBlend(t) }
