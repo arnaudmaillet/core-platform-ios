@@ -18,10 +18,10 @@ struct SoundSheetTests {
             ),
             authorHandle: "ava",
             fallbackArtworkURL: nil,
-            tiles: (0..<tiles).map {
+            tiles: (0..<tiles).map { (index: Int) in
                 SoundSheetViewController.Tile(
-                    postID: PostID("p\($0)"), thumbnailURL: nil, caption: nil,
-                    isCurrent: $0 == 0, isOriginal: $0 == original
+                    postID: PostID("p\(index)"), thumbnailURL: nil, caption: nil,
+                    isCurrent: index == 0, isOriginal: original == .some(index)
                 )
             },
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
