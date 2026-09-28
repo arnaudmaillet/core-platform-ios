@@ -207,7 +207,12 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 // format axis under `profile.gallery.*`; sharing the keys would
                 // make each surface yank the other's landing tab.
                 preferences: GalleryPreferences(keyPrefix: "foryou.gallery"),
-                contextStore: ContentContextStore()
+                contextStore: ContentContextStore(),
+                // Following is the people the viewer follows: asked of the
+                // graph as pages land, and kept live by the app's follow
+                // channel. Discover (everyone) reads neither.
+                followRelations: followRelations,
+                followEvents: followEvents
             ),
             imagePipeline: imagePipeline,
             // Deliberately the SAME pool the snap feed uses. The grid parks a

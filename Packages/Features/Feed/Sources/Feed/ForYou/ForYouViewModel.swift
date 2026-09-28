@@ -188,17 +188,32 @@ public final class ForYouViewModel {
     private var load: Task<Void, Never>?
     private var pageLoad: Task<Void, Never>?
 
+    /// Whether the viewer follows an author — what FOLLOWING is filtered by.
+    /// Nil (a test, a composition without the graph) leaves Following
+    /// unfiltered, which is what it was before it had a graph to ask.
+    private let followRelations: (any SocialGraphReading)?
+    /// Keeps the answers live: a follow or an unfollow ACCEPTED anywhere in
+    /// the app lands here (`FollowGraphEvents`, #300).
+    private var followSubscription: FollowGraphSubscription?
+
     public init(
         repository: any ForYouProviding,
         preferences: GalleryPreferences? = nil,
         unreadStore: ForYouUnreadStore = ForYouUnreadStore(),
-        contextStore: ContentContextStore? = nil
+        contextStore: ContentContextStore? = nil,
+        followRelations: (any SocialGraphReading)? = nil,
+        followEvents: FollowGraphEvents? = nil
     ) {
         self.repository = repository
         self.preferences = preferences
         self.unreadStore = unreadStore
         self.contextStore = contextStore
+        self.followRelations = followRelations
         if let contextStore { context = contextStore.context }
+        // Weak: the channel holds the handler, the handler must not hold this.
+        followSubscription = followEvents?.subscribeOnMain { [weak self] change in
+            self?.apply(change)
+        }
         // Two conditions, and both were learned the hard way.
         //
         // `hasStoredFormat` — because `preferences.format` answers `.activity`
@@ -298,38 +313,84 @@ public final class ForYouViewModel {
     /// does not follow is exactly what it is for. So the corpus is left whole
     /// and Following's derivation (`followingCorpus`) leaves the author out.
     ///
-    /// A local edit, deliberately, not a refetch: the client removes exactly
-    /// what it knows changed rather than making the viewer watch the whole
-    /// surface reload because they tapped one menu row. Remembered for the
-    /// session, so a refresh against a timeline that still serves the author
-    /// (the mock's does — see `followingCorpus`) does not bring them back.
+    /// It is the follow graph's own answer, folded in straight away: the same
+    /// change also arrives through `FollowGraphEvents` when the channel is
+    /// wired, and folding it twice changes nothing. This path is what serves
+    /// a composition without the channel.
     public func removeAuthor(_ authorID: ProfileID) {
-        guard let current = corpus,
-              current.contains(where: { $0.authorID == authorID }),
-              unfollowedAuthors.insert(authorID).inserted
+        apply(FollowChange(profileID: authorID, isFollowing: false))
+    }
+
+    /// Whether the viewer follows each author seen so far — `true` for the
+    /// viewer too (their own posts are part of their Following, as they always
+    /// were). Filled by `resolveFollows` as pages land, kept live by
+    /// `FollowGraphEvents`. An author with NO answer (no graph wired, or a
+    /// lookup that failed) is shown: Following fails open, which is what it
+    /// did before it had a graph to ask, rather than hiding posts on a hunch.
+    private var followsAuthor: [ProfileID: Bool] = [:]
+
+    /// A follow or unfollow ACCEPTED anywhere in the app. The author's posts
+    /// join or leave FOLLOWING; Discover, which is everyone, does not move.
+    ///
+    /// A re-derivation when it changes anything the viewer can see — the posts
+    /// land where their rank puts them, not after the list — so the pages are
+    /// told first (`onCorpusReset`), exactly as a lens change tells them.
+    private func apply(_ change: FollowChange) {
+        // What Following SHOWED for this author: an unanswered one is shown.
+        let wasShown = followsAuthor[change.profileID] ?? true
+        followsAuthor[change.profileID] = change.isFollowing
+        guard wasShown != change.isFollowing,
+              let corpus, corpus.contains(where: { $0.authorID == change.profileID })
         else { return }
-        // A REMOVAL is a re-derivation, not an extension — the pages diff
-        // incrementally and have to be told before they see it, exactly as a
-        // lens change tells them. Without this the rows are removed from the
-        // model and left on screen.
         onCorpusReset?()
         publish()
     }
 
-    /// Authors unfollowed from this screen this session — see `removeAuthor`.
-    private var unfollowedAuthors: Set<ProfileID> = []
-
-    /// FOLLOWING's corpus: the loaded corpus less the authors unfollowed here.
+    /// Asks the graph about every author in `posts` it has not answered for
+    /// yet, concurrently, BEFORE the page that carries them is published — so
+    /// Following is filtered from its first frame and a page landing stays an
+    /// append rather than a re-derivation a moment later.
     ///
-    /// ⚠️ The served timeline is NOT filtered by the follow graph —
-    /// `timeline.v1.GetFollowingFeed` promises no such thing, and the mock
-    /// serves every author's posts (the viewer follows 12 of its authors).
-    /// Following is kept exactly as it was; tightening it to the follow graph
-    /// is a separate product call, and a server one (BACKEND_GAPS §14).
+    /// Only answers are stored: a failed lookup leaves the author unanswered
+    /// (shown, see `followsAuthor`) and is asked again with the next page. An
+    /// answer that arrives after a follow EVENT for the same author never
+    /// overwrites it — the event is the newer truth.
+    private func resolveFollows(for posts: [GalleryPost]) async {
+        guard let followRelations else { return }
+        let unknown = Set(posts.compactMap(\.authorID)).filter { followsAuthor[$0] == nil }
+        guard !unknown.isEmpty else { return }
+        let answers = await withTaskGroup(of: (ProfileID, Bool?).self) { group in
+            for id in unknown {
+                group.addTask {
+                    guard let relation = try? await followRelations.followRelation(to: id) else {
+                        return (id, nil)
+                    }
+                    return (id, relation == .following || relation == .viewer)
+                }
+            }
+            var collected: [(ProfileID, Bool?)] = []
+            for await answer in group { collected.append(answer) }
+            return collected
+        }
+        for case let (id, follows?) in answers where followsAuthor[id] == nil {
+            followsAuthor[id] = follows
+        }
+    }
+
+    /// FOLLOWING's corpus: the loaded posts by authors the viewer follows,
+    /// and the viewer's own.
+    ///
+    /// ⚠️ Filtered HERE, by the follow graph, because the served timeline is
+    /// not: `timeline.v1.GetFollowingFeed` promises no such thing, and the
+    /// mock serves every author's posts (the viewer follows 12 of its
+    /// authors). The same corpus, unfiltered, is Discover's.
     private var followingCorpus: [GalleryPost] {
         let all = corpus ?? []
-        guard !unfollowedAuthors.isEmpty else { return all }
-        return all.filter { post in post.authorID.map { !unfollowedAuthors.contains($0) } ?? true }
+        guard !followsAuthor.isEmpty else { return all }
+        return all.filter { post in
+            guard let author = post.authorID else { return true }
+            return followsAuthor[author] ?? true
+        }
     }
 
     /// DISCOVER's corpus: every loaded post, every author and kind, under the
@@ -357,6 +418,9 @@ public final class ForYouViewModel {
                 self.onPagingChange?(false)
             }
             guard let page = try? await repository.page(after: token), !Task.isCancelled else { return }
+            // Following is filtered by the graph from the page's first frame.
+            await resolveFollows(for: page.posts)
+            guard !Task.isCancelled else { return }
             // Append, never reorder: the new page is ranked among ITSELF and
             // added to the end, so a page landing cannot renumber what is
             // already on screen.
@@ -424,6 +488,10 @@ public final class ForYouViewModel {
             defer { self.load = nil }
             do {
                 let page = try await repository.firstPage()
+                guard !Task.isCancelled else { return }
+                // Asked before the first publish, so Following never shows an
+                // author it is about to take away.
+                await resolveFollows(for: page.posts)
                 guard !Task.isCancelled else { return }
                 corpus = source.ordering(page.posts)
                 failure = nil
