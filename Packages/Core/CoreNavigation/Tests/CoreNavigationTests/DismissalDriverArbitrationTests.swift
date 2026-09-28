@@ -477,15 +477,27 @@ struct DismissalGrabArbitrationTests {
     private final class FakePan: UIPanGestureRecognizer {
         var fakeVelocity: CGPoint = CGPoint(x: 0, y: 900)
         var fakeLocation: CGPoint = CGPoint(x: 200, y: 400)
+        var fakeTranslation: CGPoint = .zero
         override func velocity(in view: UIView?) -> CGPoint { fakeVelocity }
         override func location(in view: UIView?) -> CGPoint { fakeLocation }
-        override func translation(in view: UIView?) -> CGPoint { .zero }
+        override func translation(in view: UIView?) -> CGPoint { fakeTranslation }
     }
 
     private final class StubFeed: UIViewController, ZoomTransitionDestination {
         var kind: ZoomDismissalKind = .hero
+        /// Stands for a tenant under the finger — a carousel with a photograph
+        /// to its left answers `false` here, which is exactly what the snap
+        /// feed's gate does.
+        var horizontalPermitted = true
+        /// Every location the horizontal question was asked at, so a test can
+        /// tell "refused" from "never asked".
+        private(set) var horizontalAsks: [CGPoint] = []
 
         var zoomDismissalKind: ZoomDismissalKind { kind }
+        func zoomHorizontalDismissalPermitted(at location: CGPoint, in view: UIView) -> Bool {
+            horizontalAsks.append(location)
+            return horizontalPermitted
+        }
         var isReadyForInteractiveDismissal: Bool { true }
         func zoomTargetFrame(in container: UICoordinateSpace) -> CGRect { .zero }
         func zoomFlightChrome() -> UIView? { nil }
@@ -673,5 +685,82 @@ struct DismissalGrabArbitrationTests {
 
         #expect(rig.hero.gestureRecognizerShouldBegin(pan) == false)
         #expect(rig.slide.gestureRecognizerShouldBegin(pan) == true)
+    }
+
+    // MARK: - The screen's tenants
+
+    /// ⚠️ A DRAG THE SCREEN GIVES TO A TENANT IS CLAIMED BY NO DRIVER — whoever
+    /// opened the screen, whatever the post travels as.
+    ///
+    /// The shipped regression: open For You's Following list on a TEXT row (the
+    /// window, this suite's slide), page down to a carousel, drag rightward on
+    /// its second photograph — the window was grabbed instead of going back a
+    /// photograph. The same carousel reached from a MEDIA row (the hero)
+    /// paged. The hero always asked the screen; the slide asked only when its
+    /// owner had opted in, and For You's text window, the map's card close and
+    /// every other card close had not.
+    ///
+    /// Swept over every configuration a slide is armed in across the app — lone,
+    /// arbitrating over a text post, arbitrating with a landing that refuses the
+    /// hero, arbitrating with an axis taken from the hero — because the defect
+    /// lived in the configurations nobody enumerated.
+    @Test func aDragTheScreenGivesToATenantIsClaimedByNoDriver() {
+        typealias Arming = (name: String, kind: ZoomDismissalKind, arbitrates: Bool,
+                            configure: (InteractiveSlideDismissal) -> Void)
+        let armings: [Arming] = [
+            ("lone slide", .hero, false, { _ in }),
+            ("text post (For You text window)", .card, true, { _ in }),
+            ("landing refuses the hero (list row)", .hero, true, { $0.heroLandingAcceptsHero = { false } }),
+            ("axis taken from the hero (map)", .hero, true, { $0.heroClaimsAxis = { _ in false } }),
+        ]
+        for arming in armings {
+            let rig = rig(kind: arming.kind, arbitrates: arming.arbitrates)
+            arming.configure(rig.slide)
+            rig.feed.horizontalPermitted = false
+            let pan = FakePan()
+            pan.fakeVelocity = CGPoint(x: 900, y: 0)
+
+            #expect(rig.hero.gestureRecognizerShouldBegin(pan) == false, "\(arming.name): hero")
+            #expect(rig.slide.gestureRecognizerShouldBegin(pan) == false,
+                    "\(arming.name): the slide grabbed a drag the screen gave to its carousel")
+        }
+    }
+
+    /// And the same drag with the tenant out of the way (the carousel's first
+    /// photograph, or no carousel at all) still has exactly one driver — the
+    /// veto must not become a gap.
+    @Test func aDragNoTenantWantsStillHasExactlyOneDriver() {
+        for kind in [ZoomDismissalKind.hero, .card] {
+            let rig = rig(kind: kind)
+            let pan = FakePan()
+            pan.fakeVelocity = CGPoint(x: 900, y: 0)
+
+            let claims = [
+                rig.hero.gestureRecognizerShouldBegin(pan),
+                rig.slide.gestureRecognizerShouldBegin(pan),
+            ].filter { $0 }
+            #expect(claims.count == 1, "kind \(kind) has \(claims.count) drivers")
+        }
+    }
+
+    /// ⚠️ BOTH DRIVERS ASK AT THE DRAG'S ORIGIN, not where the finger is by the
+    /// time the slop is spent. A drag that began in the leading strip (x=12) is
+    /// asked about as x=12 by each — read at the finger (x=52) it is "not the
+    /// edge", and a carousel past its first photograph would keep it.
+    @Test func everyDriverAsksAtTheDragsOrigin() {
+        for kind in [ZoomDismissalKind.hero, .card] {
+            let rig = rig(kind: kind)
+            let pan = FakePan()
+            pan.fakeVelocity = CGPoint(x: 900, y: 0)
+            pan.fakeLocation = CGPoint(x: 52, y: 400)
+            pan.fakeTranslation = CGPoint(x: 40, y: 3)
+
+            _ = rig.hero.gestureRecognizerShouldBegin(pan)
+            _ = rig.slide.gestureRecognizerShouldBegin(pan)
+
+            // The driver that stood down on the kind never reaches the
+            // question, so one ask per kind — and at the origin.
+            #expect(rig.feed.horizontalAsks == [CGPoint(x: 12, y: 397)], "kind \(kind)")
+        }
     }
 }

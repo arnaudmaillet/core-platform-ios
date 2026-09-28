@@ -944,33 +944,20 @@ extension ZoomDismissInteractionController: UIGestureRecognizerDelegate {
         else { return grabLog("transition settling", false) }
         guard let axis = ZoomDismissAxis.match(velocity: pan.velocity(in: view), axes: axes)
         else { return grabLog("no axis v=\(pan.velocity(in: view))", false) }
-        // The vertical axis carries one gate the horizontal never needed: the
-        // destination may host subsurfaces that own their own vertical
-        // gestures (a scrolling rail, an open comments panel), and a grab
-        // must not fight them. The destination answers per touch; horizontal
-        // grabs keep their historical behaviour unchanged.
-        if axis == .vertical,
-           destination?.zoomVerticalDismissalPermitted(at: pan.location(in: view), in: view) == false {
-            return false
-        }
-        // And the horizontal axis has tenants too, since a post's media became
-        // a carousel: a rightward drag on its pages means "previous photo" and
-        // not "dismiss". Same per-touch question, asked of the same authority —
-        // the destination is the only thing that knows which page it is on.
-        // ⚠️ The gesture's ORIGIN, not where the finger is now.
+        // And the destination's TENANTS: subsurfaces that own drags along this
+        // axis — a scrolling rail or an open comments panel vertically, a
+        // carousel with a photograph to its left horizontally (a rightward drag
+        // there means "previous photo", not "dismiss"). The destination is the
+        // only thing that knows which page it is on.
         //
-        // `gestureRecognizerShouldBegin` fires once a pan has already travelled
-        // its slop, so `location(in:)` here is tens of points along the drag —
-        // measured at x=52 for a drag that started at x=12. A rule about the
-        // screen's leading strip read that as "not the edge" and refused, which
-        // is the second wrong answer this bug produced.
-        let origin = CGPoint(
-            x: pan.location(in: view).x - pan.translation(in: view).x,
-            y: pan.location(in: view).y - pan.translation(in: view).y
-        )
-        if axis == .horizontal,
-           destination?.zoomHorizontalDismissalPermitted(at: origin, in: view) == false {
-            return grabLog("horizontal refused at x=\(origin.x)", false)
+        // ⚠️ Asked through the ONE predicate every dismissal driver shares
+        // (`permitsDismissalGrab`), which also owns the origin-not-finger rule.
+        // The card close's copy of this question was opt-in, and a window
+        // opened from a text row stole a carousel's drag on every screen that
+        // had not opted in.
+        let origin = pan.dragOrigin(in: view)
+        if destination?.permitsDismissalGrab(pan, along: axis, in: view) == false {
+            return grabLog("\(axis) refused by a tenant at x=\(origin.x)", false)
         }
         activeAxis = axis
         return grabLog("BEGIN \(axis) from x=\(origin.x)", true)

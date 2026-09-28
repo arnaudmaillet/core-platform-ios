@@ -514,10 +514,11 @@ public protocol ZoomTransitionDestination: AnyObject {
     /// Whether a VERTICAL grab may claim a touch at `location` (in `view`'s
     /// coordinates). The vertical axis shares the screen with subsurfaces
     /// that own their own vertical gestures — a scrolling rail, an open
-    /// comments panel — so the destination is asked per touch; the
-    /// horizontal axis has no such tenants and is never asked. Default is
-    /// "anywhere": a destination with no vertical tenants has nothing to
-    /// refuse.
+    /// comments panel — so the destination is asked per touch (the horizontal
+    /// axis has tenants too now, see below). Default is "anywhere": a
+    /// destination with no vertical tenants has nothing to refuse.
+    ///
+    /// Asked through `permitsDismissalGrab(_:along:in:)`, never directly.
     func zoomVerticalDismissalPermitted(at location: CGPoint, in view: UIView) -> Bool
 
     /// Whether a HORIZONTAL grab may claim a touch at `location`.
@@ -530,6 +531,10 @@ public protocol ZoomTransitionDestination: AnyObject {
     ///
     /// Default is "anywhere", so every destination without horizontal tenants
     /// keeps the behaviour it had.
+    ///
+    /// `location` is the drag's ORIGIN. Asked through
+    /// `permitsDismissalGrab(_:along:in:)`, never directly — see there for why
+    /// every driver has to ask it the same way.
     func zoomHorizontalDismissalPermitted(at location: CGPoint, in view: UIView) -> Bool
 
     /// Freeze/unfreeze the feed's own scrolling while a grab-to-dismiss drives,
@@ -555,4 +560,58 @@ public extension ZoomTransitionDestination {
     func setZoomDismissState(_ state: ZoomDismissState) {}
     @discardableResult
     func zoomParkLiveMediaForHandoff() -> Bool { false }
+}
+
+extension ZoomTransitionDestination {
+    /// ⚠️ WHETHER A SUBSURFACE UNDER THE FINGER OWNS THIS DRAG — the tenants'
+    /// half of EVERY dismissal driver's begin gate, in one place.
+    ///
+    /// Two drivers can grab a screen: the hero (`ZoomDismissInteractionController`)
+    /// and the card-shaped close (`InteractiveSlideDismissal`). The hero always
+    /// asked the destination about its horizontal tenants; the slide asked only
+    /// when its owner opted in, and only the place page did. So a post opened
+    /// from a TEXT row — a window, the slide's — paged onto a carousel, and a
+    /// rightward drag on its second photograph grabbed the window instead of
+    /// going back a photograph. The same carousel reached through a MEDIA row
+    /// (the hero's) paged correctly. Reported from a device, the two iterations
+    /// side by side. The same shape as #288: one rule written twice, and the
+    /// copies drifted.
+    ///
+    /// So the rule has one implementation and both drivers call it. It answers
+    /// for tenants only — who else the drag could belong to — never for which
+    /// DRIVER takes it; that is the kind arbitration each gate does first.
+    ///
+    /// * **vertical**: asked at the finger's current location, as both gates
+    ///   always did (a rail or an open comments panel is a region, and the
+    ///   finger has not left it after the slop);
+    /// * **horizontal**: asked at the drag's ORIGIN. `gestureRecognizerShouldBegin`
+    ///   fires once the pan has travelled its slop — measured at x=52 for a
+    ///   drag that started at x=12 — and the leading edge is a rule about where
+    ///   the drag BEGAN.
+    ///
+    /// ⚠️ Deliberately NOT a protocol requirement (the trap
+    /// `ZoomExistentialDispatchTests` guards is the opposite case): static
+    /// dispatch is the point. A conformer answers the two questions above; no
+    /// conformer gets to change how a driver asks them.
+    func permitsDismissalGrab(
+        _ pan: UIPanGestureRecognizer, along axis: ZoomDismissAxis, in view: UIView
+    ) -> Bool {
+        switch axis {
+        case .vertical:
+            return zoomVerticalDismissalPermitted(at: pan.location(in: view), in: view)
+        case .horizontal:
+            return zoomHorizontalDismissalPermitted(at: pan.dragOrigin(in: view), in: view)
+        }
+    }
+}
+
+extension UIPanGestureRecognizer {
+    /// Where this drag began, in `view`'s coordinates: the finger minus the
+    /// travel. What a begin gate means by "where the drag is" — see
+    /// `ZoomTransitionDestination.permitsDismissalGrab`.
+    func dragOrigin(in view: UIView) -> CGPoint {
+        let location = location(in: view)
+        let translation = translation(in: view)
+        return CGPoint(x: location.x - translation.x, y: location.y - translation.y)
+    }
 }
