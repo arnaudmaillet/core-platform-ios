@@ -358,6 +358,15 @@ final class VideoFrameSource {
     }
 
     #if DEBUG
+    /// Whether the output would hand over a frame at `hostTime` — asked
+    /// WITHOUT taking it, for the producer log.
+    func debugHasNewBuffer(atHostTime hostTime: CFTimeInterval) -> String {
+        guard let output else { return composed == nil ? "no-output" : "composed" }
+        let itemTime = output.itemTime(forHostTime: hostTime)
+        guard itemTime.isValid else { return "invalid-time" }
+        return output.hasNewPixelBuffer(forItemTime: itemTime) ? "Y" : "N"
+    }
+
     /// The player's own account of why it is or is not producing frames.
     ///
     /// A renderer that dispatches nothing has `copyFrame` returning nil, and

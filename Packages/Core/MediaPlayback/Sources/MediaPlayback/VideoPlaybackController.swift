@@ -314,6 +314,7 @@ public final class VideoPlaybackController {
             surfaces[key] = WeakSurface(view: view)
             playingURL[key] = mediaURL
             playingScope[key] = scope
+            VideoProducerLog.emit("JOIN \(VideoProducerLog.name(shared)) owner+=\(view.debugProducerName) \(mediaURL.lastPathComponent)")
             shared.play()
             return
         }
@@ -355,6 +356,7 @@ public final class VideoPlaybackController {
             surfaces[key] = WeakSurface(view: view)
             playingURL[key] = mediaURL
             playingScope[key] = scope
+            VideoProducerLog.emit("JOIN \(VideoProducerLog.name(shared)) owner+=\(view.debugProducerName) \(mediaURL.lastPathComponent)")
             shared.play()
             return
         }
@@ -413,6 +415,8 @@ public final class VideoPlaybackController {
         surfaces[key] = WeakSurface(view: view)
         playingURL[key] = url
         playingScope[key] = scope
+        VideoProducerLog.emit("MINT \(VideoProducerLog.name(player)) owner=\(view.debugProducerName) "
+            + "\(url?.lastPathComponent ?? "arrangement") start=\(start.map { String(format: "%.2fs", $0.seconds) } ?? "0")")
         player.play()
     }
 
@@ -811,6 +815,12 @@ public final class VideoPlaybackController {
             guard let player = activePlayers.removeValue(forKey: key) else { continue }
             let stillInUse = activePlayers.values.contains { $0 === player }
                 || parked.map { $0.player === player } ?? false
+            // ⚠️ A dead owner retires its player UNDER every surface that only
+            // joined it — named here, because from those surfaces' side it is
+            // a picture that stopped for no reason (see `adoptSurface`).
+            VideoProducerLog.emit("SWEEP dead owner \(VideoProducerLog.name(player)) "
+                + (stillInUse ? "(still owned elsewhere)"
+                   : "-> RETIRE with \(renderers[ObjectIdentifier(player)]?.surfaceCount ?? 0) joined surface(s)"))
             guard !stillInUse else { continue }
             retire(player)
         }
@@ -1495,6 +1505,85 @@ public final class VideoPlaybackController {
         view.detach(reason: reason)
     }
 
+    /// Makes `view` the OWNER of the playback it is drawing, as the surface
+    /// that replaces `previous` in its host.
+    ///
+    /// For a host that swaps its surface for one it was handed — a hero
+    /// landing adopting the flight card's live view. The adopted view arrives
+    /// JOINED: it draws, and holds no loan. The loan is still filed under the
+    /// view it replaces, which the host is about to throw away.
+    ///
+    /// ⚠️ **THAT WAS THE EARLY-GRAB STALL, and nothing about it was early.** A
+    /// discarded owner is not stopped, it is merely released; the loan stays
+    /// filed under a dead key until the next `play`/`stop`/`attachSurface`
+    /// runs `forgetDeadSurfaces`, which finds the owner gone and RETIRES the
+    /// player — under the page drawing it and any card that joined it. The
+    /// renderer is invalidated, both go dark, and the player goes back to the
+    /// pool to be loaned to a different clip in the same breath. On the map's
+    /// cluster feed the first sweep came from the place page the vertical grab
+    /// stages, so every grab ever made from an adopted page landed on it:
+    /// `INVALIDATE dropping [card:1, page:38]` one tick after the donation,
+    /// then a card at `frames=0` and a black page after the cancel.
+    ///
+    /// Resolved by IDENTITY: the loan taken is the one on the player `view`
+    /// actually draws — the replaced surface's first, then whoever else holds
+    /// it, then the park. A loan `previous` still holds on some OTHER player is
+    /// returned (`stop`), since nothing will ever draw it again. Nothing is
+    /// re-bound and the player's state is left alone: this moves bookkeeping,
+    /// not pixels. Returns whether `view` owns its playback afterwards.
+    @discardableResult
+    public func adoptSurface(_ view: VideoRenderView, replacing previous: VideoRenderView?) -> Bool {
+        let key = ObjectIdentifier(view)
+        let previousKey = previous.flatMap { $0 === view ? nil : ObjectIdentifier($0) }
+        defer {
+            // Whatever the replaced surface still holds is a loan nobody will
+            // ever stop — the exact orphan this method exists to prevent.
+            if let previous, let previousKey, activePlayers[previousKey] != nil {
+                stop(previous)
+            }
+        }
+        guard let player = view.boundPlayer else { return false }
+        if activePlayers[key] === player { return true }
+        let ownerKey = previousKey.flatMap { activePlayers[$0] === player ? $0 : nil }
+            ?? activePlayers.first(where: { $0.value === player })?.key
+        let url: URL?
+        let scope: String?
+        if let ownerKey {
+            url = playingURL[ownerKey]
+            scope = playingScope[ownerKey]
+            activePlayers[ownerKey] = nil
+            playingURL[ownerKey] = nil
+            playingScope[ownerKey] = nil
+            surfaces[ownerKey] = nil
+            // The replaced surface's pending resolution, if any, must not land
+            // a fresh item on a view that is being thrown away. Another
+            // owner's is its own business.
+            if ownerKey == previousKey { generation[ownerKey] = nil }
+        } else if let parked, parked.player === player {
+            url = parked.url
+            scope = nil
+            self.parked = nil
+        } else {
+            return false
+        }
+        #if DEBUG
+        VideoProducerLog.emit("ADOPT \(VideoProducerLog.name(player)) \(url?.lastPathComponent ?? "-") -> "
+            + "\(view.debugProducerName) from=\(ownerKey == nil ? "parked" : (ownerKey == previousKey ? "replaced" : "other"))")
+        #endif
+        generation[key] = nextGenerationToken()
+        activePlayers[key] = player
+        surfaces[key] = WeakSurface(view: view)
+        playingURL[key] = url
+        playingScope[key] = playingScope[key] ?? scope
+        // The page is heard through its surface; the one it swapped in is the
+        // one to hear now.
+        if let previous, audibleSurface === previous {
+            audibleSurface = view
+            refreshAudibleSurface()
+        }
+        return true
+    }
+
     /// How many surfaces are currently showing `mediaURL`.
     ///
     /// The direct evidence that a flight is flying live media rather than
@@ -1533,6 +1622,9 @@ public final class VideoPlaybackController {
             return false
         }
         VideoPlaybackTrace.emit("transferOwnership \(mediaURL.lastPathComponent)")
+        VideoProducerLog.emit("TRANSFER \(VideoProducerLog.name(player)) \(mediaURL.lastPathComponent) -> \(view.debugProducerName) from="
+            + (playingURL.first(where: { $0.value == mediaURL }).flatMap { surfaces[$0.key]?.view?.debugProducerName }
+               ?? (parked?.url == mediaURL ? "parked" : "-")))
         // ⚠️ THE SCOPE MOVES WITH THE LOAN, and for a long time it did not.
         //
         // This function moved `activePlayers`, `playingURL` and `surfaces` and
@@ -1721,6 +1813,9 @@ public final class VideoPlaybackController {
         // playback.
         let stillInUse = activePlayers.values.contains { $0 === player }
             || parked.map { $0.player === player } ?? false
+        VideoProducerLog.emit("STOP owner=\(view.debugProducerName) \(VideoProducerLog.name(player)) "
+            + (stillInUse ? "(still owned elsewhere)"
+               : "-> RETIRE with \(renderers[ObjectIdentifier(player)]?.surfaceCount ?? 0) joined surface(s)"))
         guard !stillInUse else { return }
         // ⚠️ THE ONE MOMENT THE PLAYHEAD IS STILL KNOWN. One line down `retire`
         // replaces the item with nil and the position is gone for good — which

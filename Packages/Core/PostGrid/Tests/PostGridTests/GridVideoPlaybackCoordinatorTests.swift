@@ -400,6 +400,37 @@ struct GridVideoPlaybackCoordinatorTests {
         #expect(coordinator.playingIDs.contains(candidate.id))
     }
 
+    /// ⚠️ A LANDING TILE KEEPS THE LOAN IT WAS HANDED, even when it never
+    /// played before the landing.
+    ///
+    /// The place page's first tile is exactly that: the viewer arrived from a
+    /// map marker, so the tile a dismissal lands on had no player of its own.
+    /// `adoptAttachedSurface` recorded the loan and not the stream, and the
+    /// reconcile that runs the instant the tile is unhidden read the missing
+    /// stream as "this row paged to another clip" — and STOPPED it, retiring
+    /// the player under the landing card and the page behind it, then minting
+    /// the same clip again from its resume point.
+    @Test func aLandingTileThatNeverPlayedKeepsTheLoanItAdopted() async {
+        let pool = makePool()
+        let coordinator = makeVisibleCoordinator(pool: pool, maxConcurrent: 3)
+        let candidate = makeCandidate(0, distance: 0)
+        // The feed page's playback, which the dismissal flies home.
+        let page = VideoRenderView()
+        await pool.play(candidate.url, in: page, scope: candidate.id.rawValue)
+        #expect(pool.itemCreations == 1)
+
+        #expect(coordinator.adoptAttachedSurface(for: candidate.id, url: candidate.url, cell: candidate.cell))
+        // The tile is unhidden, and the grid reconciles.
+        coordinator.update(candidates: [candidate])
+        await coordinator.debugAwaitStarts()
+
+        #expect(coordinator.playingIDs == [candidate.id])
+        // Still the playback the card flew: nothing stopped, nothing minted.
+        #expect(pool.itemCreations == 1)
+        #expect(pool.playerCountByURL[candidate.url] == 1)
+        #expect(pool.isAdvancing(in: page))
+    }
+
     /// ⚠️ AND IT IS ASKED EVERY FRAME, so it must cost nothing after the first.
     ///
     /// The retry calls the producer once per display refresh for the length of
