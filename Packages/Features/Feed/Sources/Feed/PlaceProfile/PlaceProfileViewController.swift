@@ -378,9 +378,10 @@ final class PlaceProfileViewController: UIViewController {
             let slide = InteractiveSlideDismissal()
             slide.resetForNewPresentation()
             slide.attach(to: self, axes: [.horizontal])
-            // The same territory the hero grab had: the first tab, the
-            // leading strip anywhere, and never a carousel's own drag.
-            slide.consultsHorizontalPermission = true
+            // The same territory the hero grab had — the first tab, the
+            // leading strip anywhere, and never a carousel's own drag — with
+            // nothing to set: every driver asks this screen's
+            // `zoomHorizontalDismissalPermitted` (`permitsDismissalGrab`).
             // No marker to close onto (it left the map): the plain slide.
             slide.fallbackSlideAxis = .horizontal
             slide.prepareForDismissal = { [weak self, weak slide] _ in

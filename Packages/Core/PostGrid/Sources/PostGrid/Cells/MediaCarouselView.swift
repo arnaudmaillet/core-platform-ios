@@ -1,3 +1,4 @@
+import DesignSystem
 import MediaCore
 import MediaPlayback
 import UIKit
@@ -877,9 +878,15 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
 /// SCREEN, and a carousel inside a card sits nowhere near it — which is exactly
 /// what should keep that rule from firing there.
 private final class EdgeYieldingScrollView: UIScrollView {
-    /// Matched to `HorizontalPagerScrollView`'s own zone, which yields the same
-    /// strip to the same gesture.
-    private static let backEdgeZone: CGFloat = 20
+    /// `HorizontalPagerScrollView`'s own zone, which yields the same strip to
+    /// the same gesture — and the snap feed's gate, which PERMITS the dismissal
+    /// there.
+    ///
+    /// ⚠️ It said "matched" over a literal 20 while the gate read 28: a drag
+    /// born 20–28pt in was the dismissal's by the gate and the carousel's by
+    /// this, both recognizers ran, and the window left with the carousel
+    /// half-paged under it. One definition, `PagedScreenDismissalPolicy.edgeZone`.
+    private static var backEdgeZone: CGFloat { PagedScreenDismissalPolicy.edgeZone }
 
     /// The carousel this box scrolls, so the pan can ask what it has left to
     /// travel. Weak, and set at construction — the scroll view is a subview and
