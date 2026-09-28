@@ -61,22 +61,13 @@ extension VideoPlaybackController {
         #if DEBUG
         traceSound("audible=\(view?.debugProducerName ?? "nil")"
             + " heard=\(surfaceHeardPlayer.map { VideoProducerLog.name($0) } ?? "-")")
-        // Sampled after the call as well, because what matters is what is
-        // still talking once the screen that asked has gone — a close lands
-        // ~0.5 s later, and a grid starts its rows after that.
-        guard Self.tracesSound else { return }
-        for delay in [1.0, 3.0] {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                guard let self else { return }
-                for line in debugSoundCensus() { traceSound("census +\(Int(delay))s \(line)") }
-            }
-        }
+        SoundCensusSampler.start(for: self)
         #endif
     }
 
     #if DEBUG
     /// `-sound-log`: who is heard, as the audible surface moves — and a census
-    /// of every player's mute a moment later (`debugSoundCensus`).
+    /// of every player's mute each time it changes (`debugSoundCensus`).
     static let tracesSound = ProcessInfo.processInfo.arguments.contains("-sound-log")
 
     func traceSound(_ message: @autoclosure () -> String) {
@@ -169,3 +160,33 @@ extension VideoPlaybackController {
         try? session.setCategory(wanted, mode: .moviePlayback)
     }
 }
+
+#if DEBUG
+/// `-sound-log`'s census, sampled once a second and printed only when it
+/// CHANGES — so what is still talking after a screen has gone (a close lands
+/// ~0.5 s later, and a grid starts its rows after that) is in the log even
+/// when nobody calls `setAudibleSurface` again, which is exactly the defect
+/// this exists to show.
+@MainActor
+private enum SoundCensusSampler {
+    private static var isRunning = false
+
+    static func start(for controller: VideoPlaybackController) {
+        guard VideoPlaybackController.tracesSound, !isRunning else { return }
+        isRunning = true
+        var last: [String] = []
+        // Never invalidated: a DEBUG instrument for the one pool the app
+        // keeps for its whole life.
+        Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak controller] _ in
+            MainActor.assumeIsolated {
+                guard let controller else { return }
+                let census = controller.debugSoundCensus()
+                guard census != last else { return }
+                last = census
+                controller.traceSound("census (\(census.count) players)")
+                for line in census { controller.traceSound("census \(line)") }
+            }
+        }
+    }
+}
+#endif
