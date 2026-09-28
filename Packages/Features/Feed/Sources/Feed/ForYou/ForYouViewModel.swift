@@ -130,12 +130,12 @@ public final class ForYouViewModel {
     /// read from `ForYouPagerView.pageOrder` because that static is `@MainActor`
     /// by inference (a `UIView` subclass's are) and this type answers off it in
     /// tests; `ForYouTabOrderTests` pins the two together.
-    nonisolated static let tabs: [GalleryFilter.Format] = [.activity, .media]
+    nonisolated static let tabs: [GalleryFilter.Format] = [.media, .activity]
 
-    /// Where the screen opens. Discover — the media grid — is the landing tab,
-    /// although it is no longer the FIRST one: the order is a question of
-    /// position, the landing one of format, and swapping the tabs (Following
-    /// now leads) was not a decision to change where the screen opens.
+    /// Where the screen opens: Discover, which is also the FIRST tab. The
+    /// order is a question of position and the landing one of format — they
+    /// happen to agree again since Discover moved back to the left
+    /// (2026-09-28), but nothing here assumes it.
     nonisolated static let defaultFormat: GalleryFilter.Format = .media
 
     public private(set) var format: GalleryFilter.Format = ForYouViewModel.defaultFormat

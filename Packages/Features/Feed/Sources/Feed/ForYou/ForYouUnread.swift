@@ -219,9 +219,10 @@ public final class ForYouUnreadStore {
         }
     }
 
-    /// `-foryou-badges 3,0` — one count per tab, in pager order
-    /// (`ForYouViewModel.tabs`: Following, then Discover). ⚠️ POSITIONAL: a
-    /// script written before the 2026-09-28 swap put Discover's number first.
+    /// `-foryou-badges 0,3` — one count per tab, in pager order
+    /// (`ForYouViewModel.tabs`: Discover, then Following). ⚠️ POSITIONAL: a
+    /// script written during #293's day of Following-first put Following's
+    /// number first.
     ///
     /// Exists because the honest derivation is very hard to *see* on demand: it
     /// needs posts published between two visits, which against a fixed mock

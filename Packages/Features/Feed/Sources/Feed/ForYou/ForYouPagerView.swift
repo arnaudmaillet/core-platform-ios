@@ -19,15 +19,15 @@ import UIKit
 final class ForYouPagerView: UIView {
     /// Pager order == selector order == the tabs the screen actually has.
     ///
-    /// **Two tabs, and the card list leads**: Following on the left, Discover
-    /// on the right (product call, 2026-09-28 — it was the other way round).
-    /// The screen still OPENS on Discover (`ForYouViewModel.defaultFormat`),
-    /// which is a format, not a position, so the swap moved the tab without
-    /// moving the landing. `GalleryFilter.Format` still has three cases
-    /// because the profile gallery uses all of them; For You simply does not
-    /// give each one a tab. `.short` (text-only posts) has no tab of its own
-    /// here — those posts still appear, under Following, which is the
-    /// unfiltered page.
+    /// **Two tabs, and Discover leads**: Discover on the left, Following on
+    /// the right (product call, 2026-09-28 — #293 had put Following first for
+    /// a day; the Discover redesign put it back). Discover is also where the
+    /// screen OPENS (`ForYouViewModel.defaultFormat`), so the first tab and
+    /// the landing tab are one tab again. `GalleryFilter.Format` still has
+    /// three cases because the profile gallery uses all of them; For You
+    /// simply does not give each one a tab. `.short` (text-only posts) has no
+    /// tab of its own here — those posts still appear, under Following (the
+    /// unfiltered page) and among Discover's rows.
     ///
     /// ⚠️ Every position on this screen is asked of this array — the strip's
     /// segments, the badges (`applyBadges`), `-foryou-badges`' numbers
@@ -39,7 +39,7 @@ final class ForYouPagerView: UIView {
     /// The enum names the CONTENT SHAPE (what is in the page), the titles name
     /// the PRODUCT IDEA (why you would go there), and those were never the same
     /// question.
-    static let pageOrder: [GalleryFilter.Format] = [.activity, .media]
+    static let pageOrder: [GalleryFilter.Format] = [.media, .activity]
 
     /// The tapped post's index into the *given format page's* posts.
     var onItemTapped: ((GalleryFilter.Format, Int) -> Void)?
