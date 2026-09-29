@@ -848,6 +848,10 @@ final class SoundSheetViewController: UIViewController {
     /// indicator a detent's value does not count. Nil off screen.
     private func measuredReveal() -> CGFloat? {
         guard let window = view.window, let collapsed = collapsedHeight else { return nil }
+        // ⚠️ RISING, IT IS COLLAPSED: the presentation draws the sheet taller
+        // than its detent on the way up (measured 451 against 392, iOS 27) —
+        // read as a height, the lower sections flashed in at 11% and out.
+        if navigationController?.isBeingPresented == true { return 0 }
         let drawn = (view.layer.presentation() ?? view.layer).bounds.height - window.safeAreaInsets.bottom
         // Before the sheet has stated its large value: the window's height
         // less its top inset is where large stands.
