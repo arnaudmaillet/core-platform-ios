@@ -25,22 +25,40 @@ public struct MapViewport: Sendable, Equatable {
         self.zoomLevel = zoomLevel
     }
 
+    /// Every coordinate on Earth, at the widest zoom.
+    public static let world = MapViewport(swLat: -90, swLng: -180, neLat: 90, neLng: 180, zoomLevel: 0)
+
     /// Builds a viewport from a MapKit region's center + span (all in degrees).
     /// The corners are the center offset by half the span on each axis; the zoom
     /// is derived from the longitude span (see `zoomLevel(forLongitudeSpan:)`).
+    ///
+    /// ⚠️ **A VIEW ACROSS THE ANTIMERIDIAN GETS EVERY LONGITUDE.** The box is
+    /// axis-aligned and cannot wrap, and clamping its edge to ±180 dropped
+    /// the far side: a camera over the Pacific (or any view wide enough to
+    /// reach the line, which the widest zoom often is) asked for Fiji's west
+    /// and never its east. Widened, the query covers both; the zoom still
+    /// comes from the real span, so the server bands it the same.
+    ///
+    /// A region with a non-finite value asks for the world rather than
+    /// sending NaN corners to the server.
     public static func make(
         centerLat: Double,
         centerLng: Double,
         latitudeSpan: Double,
         longitudeSpan: Double
     ) -> MapViewport {
+        guard centerLat.isFinite, centerLng.isFinite,
+              latitudeSpan.isFinite, longitudeSpan.isFinite else { return world }
         let halfLat = latitudeSpan / 2
         let halfLng = longitudeSpan / 2
+        let west = centerLng - halfLng
+        let east = centerLng + halfLng
+        let wraps = west < -180 || east > 180
         return MapViewport(
             swLat: (centerLat - halfLat).clamped(to: -90...90),
-            swLng: (centerLng - halfLng).clamped(to: -180...180),
+            swLng: wraps ? -180 : west,
             neLat: (centerLat + halfLat).clamped(to: -90...90),
-            neLng: (centerLng + halfLng).clamped(to: -180...180),
+            neLng: wraps ? 180 : east,
             zoomLevel: zoomLevel(forLongitudeSpan: longitudeSpan)
         )
     }
