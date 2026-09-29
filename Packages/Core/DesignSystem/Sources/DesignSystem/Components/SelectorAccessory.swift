@@ -808,3 +808,39 @@ public final class SelectorAccessory {
         hostView.setNeedsLayout()
     }
 }
+
+/// A screen's claim on the tab bar's scroll-driven collapse, WITHOUT a band.
+///
+/// `SelectorAccessory.install(minimizesOnScroll:)` arms the collapse for a
+/// host that docks a selector; a host with no selector (For You, since it lost
+/// its tabs) still registers its scroller with `setContentScrollView(_:for:
+/// .bottom)` and still wants the bar to collapse as it scrolls. The claim goes
+/// through the SAME counted store, so it hands over with an accessory's claim
+/// on a tab switch exactly as two accessories do — see
+/// `MinimizeBehaviourStore` for why a per-host saved value leaks.
+///
+/// Arm it where the screen appears and release it where it disappears: the
+/// behaviour is the TAB BAR CONTROLLER's, with no per-tab scope, and a claim
+/// left standing collapses the bar on every other tab.
+@MainActor
+public final class TabBarMinimizeClaim {
+    private weak var controller: UITabBarController?
+
+    public init() {}
+
+    /// Arms the collapse on `controller`. Idempotent.
+    public func arm(_ controller: UITabBarController?) {
+        guard let controller, self.controller == nil else { return }
+        self.controller = controller
+        MinimizeBehaviourStore.arm(controller)
+    }
+
+    /// Gives the claim back. Idempotent.
+    public func release() {
+        guard let controller else { return }
+        self.controller = nil
+        MinimizeBehaviourStore.release(controller)
+    }
+
+    public var isArmed: Bool { controller != nil }
+}

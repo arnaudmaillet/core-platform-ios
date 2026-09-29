@@ -1,8 +1,8 @@
 import Foundation
 import PostGrid
 
-/// "How much has arrived on this tab since you last looked at it" — the count
-/// the top tab capsule badges.
+/// "How much has arrived since you last looked" — the count For You's
+/// Following row wears on its header (a TAB's badge, while For You had tabs).
 ///
 /// **Derived, not stored as a count.** What persists is a *watermark* per
 /// format: the publication time of the newest post the viewer had in front of
@@ -219,31 +219,25 @@ public final class ForYouUnreadStore {
         }
     }
 
-    /// `-foryou-badges 0,3` — one count per tab, in pager order
-    /// (`ForYouViewModel.tabs`: Discover, then Following). ⚠️ POSITIONAL: a
-    /// script written during #293's day of Following-first put Following's
-    /// number first.
+    /// `-foryou-badges N` — the FOLLOWING row's header count, forced
+    /// (`ForYouViewModel.unreadKey`). ⚠️ ONE number now: it was one count per
+    /// tab, positional, while For You had tabs. The Friends row counts posts
+    /// the viewer has not opened, which `-foryou-mock-new-activity` stages as
+    /// real data. Cleared by opening the Following list, the way a tab change
+    /// cleared it.
     ///
     /// Exists because the honest derivation is very hard to *see* on demand: it
     /// needs posts published between two visits, which against a fixed mock
     /// corpus means editing fixtures and relaunching. This forces the render so
-    /// the capsule's badge geometry (which re-pins segment widths and moves the
-    /// lens) can be checked in both appearances, and clears through the real
-    /// `markSeen` path so the clearing is exercised too.
+    /// the pill's geometry can be checked at its widest.
     private static func forcedCounts(from arguments: [String]) -> [GalleryFilter.Format: Int] {
         #if DEBUG
         guard let position = arguments.firstIndex(of: "-foryou-badges"),
               position + 1 < arguments.count
         else { return [:] }
         let counts = arguments[position + 1].split(separator: ",").compactMap { Int($0) }
-        // Pager order: Discover, then Following. Taken from `ForYouViewModel`
-        // rather than `ForYouPagerView.pageOrder` because that one is
-        // `@MainActor` by inference (a `UIView` subclass's statics are) and this
-        // store is deliberately un-isolated so its logic stays testable off the
-        // main actor. `ForYouUnreadTests` pins the two orders together.
-        return zip(ForYouViewModel.tabs, counts).reduce(into: [:]) { result, pair in
-            if pair.1 > 0 { result[pair.0] = pair.1 }
-        }
+        guard let count = counts.first, count > 0 else { return [:] }
+        return [ForYouViewModel.unreadKey: count]
         #else
         return [:]
         #endif

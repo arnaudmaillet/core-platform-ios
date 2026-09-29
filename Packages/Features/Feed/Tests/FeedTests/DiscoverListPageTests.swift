@@ -51,30 +51,21 @@ struct DiscoverListPageTests {
         page.subviews.compactMap { $0 as? UICollectionView }.first!
     }
 
-    // MARK: - The tabs
+    // MARK: - The single page
 
-    /// Discover on the LEFT again, and the screen still opens on it.
-    @Test func theTabsReadDiscoverThenFollowing() {
-        #expect(ForYouPagerView.pageOrder == [.media, .activity])
-        #expect(ForYouViewModel.tabs == ForYouPagerView.pageOrder)
-        #expect(ForYouViewModel.defaultFormat == .media)
-        #expect(ForYouPagerView.style(for: .media) == .discover)
-        #expect(ForYouPagerView.style(for: .activity) == .list)
-    }
-
-    /// The Discover page is handed DISCOVER's state, not Following's; the
-    /// Following page keeps its own.
-    @Test func eachTabIsHandedItsOwnCorpus() {
+    /// The snapshot hands each surface its OWN corpus: Discover everyone, the
+    /// mosaic Discover's media, the pushed lists the people followed.
+    @Test func eachSurfaceIsHandedItsOwnCorpus() async {
         let all = corpus(9)
-        let following = Array(all.prefix(4))
-        let snapshot = ForYouViewModel.Snapshot(
-            activity: .content(following),
-            media: .content(all.filter { $0.kind != .text }),
-            short: .content(following.filter { $0.kind == .text }),
-            discover: .content(all)
-        )
-        #expect(ForYouPagerView.pageState(for: .media, in: snapshot) == .content(all))
-        #expect(ForYouPagerView.pageState(for: .activity, in: snapshot) == .content(following))
+        let model = ForYouViewModel(repository: DiscoverStubProvider(posts: all))
+        var latest: ForYouViewModel.Snapshot?
+        model.onSnapshotChange = { latest = $0 }
+        model.viewDidLoad()
+        for _ in 0..<40 where model.discoverPosts.isEmpty {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(latest?.discover == .content(all))
+        #expect(latest?.media == .content(all.filter { $0.kind != .text }))
     }
 
     /// Discover is everyone: an author unfollowed from the screen leaves
@@ -98,8 +89,8 @@ struct DiscoverListPageTests {
         model.removeAuthor(ProfileID("stranger"))
 
         #expect(latest?.discover == .content(posts))
-        #expect(model.posts(for: .activity).allSatisfy { $0.authorID == ProfileID("followed") })
-        #expect(model.posts(for: .media).contains { $0.authorID == ProfileID("stranger") })
+        #expect(model.followingPosts.allSatisfy { $0.authorID == ProfileID("followed") })
+        #expect(model.discoverPosts.contains { $0.authorID == ProfileID("stranger") })
 
         let empty = ForYouViewModel.discoverEmptyState(source: .trending)
         #expect(empty.title.contains("discover"))

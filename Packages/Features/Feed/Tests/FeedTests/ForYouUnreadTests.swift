@@ -1,5 +1,4 @@
 import CoreModels
-import DesignSystem
 import Foundation
 import PostGrid
 import Testing
@@ -17,6 +16,11 @@ private func post(_ id: String, kind: GalleryPost.Kind = .photo, at publishedAtM
         publishedAtMS: publishedAtMS,
         reactionCount: nil
     )
+}
+
+/// A seen-posts store over its own throwaway suite, for the same reason.
+private func makeSeenStore() -> ForYouSeenPostsStore {
+    ForYouSeenPostsStore(defaults: UserDefaults(suiteName: "foryou.seen.tests.\(UUID().uuidString)")!)
 }
 
 /// A store over its own throwaway defaults suite, so tests never touch — or
@@ -208,54 +212,37 @@ struct ForYouUnreadStoreTests {
 
 #if DEBUG
 struct ForYouBadgeOverrideTests {
-    @Test func theArgumentForcesCountsInPagerOrder() {
-        // Pager order is Discover then Following, so the first number is
-        // Discover's and the second is the unfiltered page's.
-        let store = makeStore(arguments: ["-foryou-badges", "3,7"])
-        #expect(store.count(for: .media, in: []) == 3)
-        #expect(store.count(for: .activity, in: []) == 7)
+    @Test func theArgumentForcesTheFollowingRowsCount() {
+        // One number now: For You has one badged row, keyed where the
+        // Following tab's badge was.
+        let store = makeStore(arguments: ["-foryou-badges", "7"])
+        #expect(store.count(for: ForYouViewModel.unreadKey, in: []) == 7)
+        #expect(store.count(for: .media, in: []) == 0)
     }
 
-    @Test func aCountPastTheTabsIsIgnored() {
-        // Three numbers for two tabs: the extra belongs to a tab that no longer
-        // exists, and must not land on one that does.
+    @Test func numbersPastTheFirstAreIgnored() {
         let store = makeStore(arguments: ["-foryou-badges", "3,7,9"])
-        #expect(store.count(for: .media, in: []) == 3)
-        #expect(store.count(for: .activity, in: []) == 7)
+        #expect(store.count(for: .activity, in: []) == 3)
+        #expect(store.count(for: .media, in: []) == 0)
         #expect(store.count(for: .short, in: []) == 0)
     }
 
-    @MainActor
-    @Test func theForcedOrderIsThePagerOrder() {
-        // `ForYouUnreadStore` reads `ForYouViewModel.tabs` because the pager's
-        // own static is MainActor-isolated. This is what stops the two drifting.
-        #expect(ForYouPagerView.pageOrder == ForYouViewModel.tabs)
-        // Discover on the LEFT, Following on the right (2026-09-28, after
-        // #293's day the other way round).
-        #expect(ForYouViewModel.tabs == [.media, .activity])
+    @Test func theRowsCountUnderFollowingsInstalledKey() {
+        // The persisted baseline installed apps already hold is the Following
+        // tab's; the rows count from it, so an update does not reset "new".
+        #expect(ForYouViewModel.unreadKey == .activity)
     }
 
-    @MainActor
-    @Test func theBadgedTabIsFollowingAndTheLandingTabIsDiscover() {
-        #expect(ForYouViewModel.badgedTab == .activity)
-        #expect(ForYouViewModel.defaultFormat == .media)
-        // The screen opens on Discover, which is the first tab again.
-        #expect(ForYouViewModel.tabs.firstIndex(of: ForYouViewModel.defaultFormat) == 0)
-        // The landing tab must not be the badged one, or the badge clears
-        // itself on the first publish and can never be seen.
-        #expect(ForYouViewModel.defaultFormat != ForYouViewModel.badgedTab)
-    }
-
-    @Test func aTabChangeRetiresItsOverride() {
-        let store = makeStore(arguments: ["-foryou-badges", "0,3"])
+    @Test func openingTheListRetiresItsOverride() {
+        let store = makeStore(arguments: ["-foryou-badges", "3"])
         #expect(store.count(for: .activity, in: []) == 3)
         store.markSeen(.activity, in: [post("a", at: 10)], clearingOverride: true)
         #expect(store.count(for: .activity, in: [post("a", at: 10)]) == 0)
     }
 
     @Test func anAutomaticAdvanceLeavesTheOverrideStanding() {
-        let store = makeStore(arguments: ["-foryou-badges", "0,3"])
-        // The view model advances the active tab's watermark on every publish,
+        let store = makeStore(arguments: ["-foryou-badges", "3"])
+        // The view model advances the rows' watermark on every publish,
         // including the first one. If that retired the override, a forced badge
         // would be wiped before it rendered a single frame.
         store.markSeen(.activity, in: [post("a", at: 10)])
@@ -268,44 +255,6 @@ struct ForYouBadgeOverrideTests {
 }
 #endif
 
-// MARK: - How the count is presented
-
-@MainActor
-struct ForYouBadgePresentationTests {
-    /// ⚠️ This used to assert the opposite — presence, never a number — on the
-    /// argument that three new posts are not three things to open. That held
-    /// while the count answered one question. It now sizes the "New" section
-    /// the viewer scrolls through and appears beside every mode in the context
-    /// menu, so a dot would be the badge disagreeing with two things on the
-    /// same screen.
-    @Test func unreadIsShownAsTheNumberItIs() {
-        #expect(ForYouViewController.badgeStyle(forUnread: 1) == .count(1))
-        #expect(ForYouViewController.badgeStyle(forUnread: 3) == .count(3))
-        #expect(ForYouViewController.badgeStyle(forUnread: 99) == .count(99))
-    }
-
-    @Test func nothingUnreadShowsNothing() {
-        // The presence signal the dot carried is not lost — `.count` renders
-        // nothing at zero — it just arrived with a size attached.
-        #expect(ForYouViewController.badgeStyle(forUnread: 0) == .count(0))
-        #expect(ForYouViewController.badgeStyle(forUnread: 0).isVisible == false)
-    }
-
-    @Test func aNegativeCountIsNotAnIndicator() {
-        // Defensive: no path produces one today, but a badge that draws for any
-        // non-zero value would turn a future arithmetic slip into a pill that
-        // cannot be cleared.
-        #expect(ForYouViewController.badgeStyle(forUnread: -1).isVisible == false)
-    }
-
-    @Test func theCountStyleStaysAvailableForHostsThatCount() {
-        // Messages renders numbers through the same component; removing that
-        // case is what this test exists to prevent.
-        #expect(PagedTabBar.BadgeStyle.count(11).isVisible)
-        #expect(PagedTabBar.BadgeStyle.count(0).isVisible == false)
-    }
-}
-
 // MARK: - Through the view model
 
 @MainActor
@@ -316,123 +265,75 @@ struct ForYouViewModelUnreadTests {
     ) -> (ForYouViewModel, Box) {
         let model = ForYouViewModel(
             repository: StubProvider(first: ForYouPage(posts: posts, nextPageToken: nil)),
-            preferences: nil,
-            unreadStore: store
+            unreadStore: store,
+            seenStore: makeSeenStore()
         )
         let box = Box()
-        model.onUnreadChange = { counts in box.counts.append(counts) }
+        model.onSnapshotChange = { snapshot in box.snapshots.append(snapshot) }
         return (model, box)
     }
 
     /// Keeps every emission, not just the last: a badge that appears and is
     /// immediately superseded is exactly the kind of thing "last" hides.
     private final class Box {
-        var counts: [[GalleryFilter.Format: Int]] = []
-        var latest: [GalleryFilter.Format: Int] { counts.last ?? [:] }
+        var snapshots: [ForYouViewModel.Snapshot] = []
+        var badge: Int? { snapshots.last?.rails.followingBadge }
     }
 
     @Test func theFirstLoadBadgesNothing() async {
-        let store = makeStore()
         let (model, box) = makeModel(
             posts: [post("a", at: 10), post("t", kind: .text, at: 20)],
-            store: store
+            store: makeStore()
         )
         model.viewDidLoad()
         await settle()
-        // Two tabs, both silent — and `.short` is absent entirely, because a
-        // count for a tab that does not exist has nowhere to be shown.
-        #expect(box.latest == [.media: 0, .activity: 0])
+        #expect(box.badge == 0)
+        #expect(box.snapshots.last?.followingNew.isEmpty == true)
     }
 
-    @Test func onlyFollowingIsEverBadged() async {
-        let store = makeStore()
-        // Both tabs have been visited, then a newer post lands on both of them
-        // (an unfiltered page shows the media page's posts too).
-        store.markSeen(.activity, in: [post("old", at: 1)])
-        store.markSeen(.media, in: [post("old", at: 1)])
-        let (model, box) = makeModel(posts: [post("a", at: 100)], store: store)
-        model.viewDidLoad()
-        await settle()
-        // Following counts it: the viewer is on Discover and has not seen it.
-        #expect(box.latest[.activity] == 1)
-        // Discover does not, whatever its watermark says — a ranked surface has
-        // no "since you last looked" to count against.
-        #expect(box.latest[.media] == 0)
-    }
-
-    /// ⚠️ **This trio replaces three tests that asserted the opposite** —
-    /// "the active tab never badges", "changing tabs clears that tab's badge",
-    /// "leaving a tab does not badge what was on screen". Each of them was true
-    /// of a badge derived from the PERSISTED cursor, which moves the moment the
-    /// viewer looks at the tab.
-    ///
-    /// The badge is now derived from a baseline frozen for the session, because
-    /// it has a second job: it is the size of the "New" section on the Following
-    /// list. A count that zeroed itself on arrival would leave that section
-    /// empty exactly when someone is looking at it, and the header and the badge
-    /// could never be the same number. What was lost is small and what replaced
-    /// it is visible: the count no longer means "unseen", it means "arrived
-    /// since you opened the app" — and the rows it counts are on screen under
-    /// their own header, which is a claim the viewer can check.
-    @Test func aCountHoldsForTheSessionEvenWhileItsTabIsWatched() async {
-        let store = makeStore()
-        store.markSeen(.activity, in: [post("old", at: 1)])
-        let (model, box) = makeModel(posts: [post("a", at: 100)], store: store)
-        // Sitting on Following when the load arrives.
-        model.setFormat(.activity)
-        model.viewDidLoad()
-        await settle()
-        #expect(box.latest[.activity] == 1)
-    }
-
-    @Test func changingTabsDoesNotClearTheCount() async {
+    /// ⚠️ A COUNT HOLDS FOR THE SESSION, even though the rows are on the very
+    /// screen the viewer is looking at. The badge is derived from a baseline
+    /// frozen for the session, because it is also the size of the "New"
+    /// section of the Following list — a count that zeroed itself on arrival
+    /// would leave that section empty exactly when someone opens it.
+    @Test func aCountHoldsForTheSession() async {
         let store = makeStore()
         store.markSeen(.activity, in: [post("old", at: 1)])
         let (model, box) = makeModel(posts: [post("a", at: 100)], store: store)
         model.viewDidLoad()
         await settle()
-        #expect(box.latest[.activity] == 1)
-        model.setFormat(.activity)
-        #expect(box.latest[.activity] == 1)
-        model.setFormat(.media)
-        #expect(box.latest[.activity] == 1)
+        #expect(box.badge == 1)
+        model.setContext(.all)
+        model.followingListOpened()
+        #expect(box.badge == 1, "opening the list reads it for NEXT time, not this one")
     }
 
     /// The persisted cursor still advances underneath, which is what keeps the
     /// count from being permanent: a session that has seen these posts hands
-    /// the NEXT one a baseline that excludes them. This is the half of the old
-    /// behaviour that survives, and the reason a badge is not forever.
+    /// the NEXT one a baseline that excludes them.
     @Test func theNextSessionStartsFromWhereThisOneFinished() async {
         let store = makeStore()
         store.markSeen(.activity, in: [post("old", at: 1)])
         let posts = [post("a", at: 100)]
         let (model, box) = makeModel(posts: posts, store: store)
-        model.setFormat(.activity)
         model.viewDidLoad()
         await settle()
-        #expect(box.latest[.activity] == 1)
+        #expect(box.badge == 1)
 
         // A relaunch: same store, a brand-new model, so a brand-new baseline.
         let (next, nextBox) = makeModel(posts: posts, store: store)
         next.viewDidLoad()
         await settle()
-        #expect(nextBox.latest[.activity] == 0)
-    }
-
-    @Test func theModelOpensOnDiscover() async {
-        let store = makeStore()
-        let (model, _) = makeModel(posts: [post("a", at: 100)], store: store)
-        #expect(model.format == .media)
+        #expect(nextBox.badge == 0)
     }
 
     @Test func noBadgeIsPublishedBeforeTheFirstPageLands() async {
-        let store = makeStore()
-        let (model, box) = makeModel(posts: [post("a", at: 100)], store: store)
-        // `publish()` runs once up front to put every page in `.loading`. A
+        let (model, box) = makeModel(posts: [post("a", at: 100)], store: makeStore())
+        // `publish()` runs once up front to put every surface in `.loading`. A
         // count derived from a corpus that does not exist yet would badge the
         // skeletons.
         model.viewDidLoad()
-        #expect(box.counts.isEmpty)
+        #expect(box.snapshots.allSatisfy { $0.rails == ForYouViewModel.Rails() })
     }
 }
 
@@ -556,8 +457,8 @@ struct ForYouContextCountTests {
     private func makeModel(posts: [GalleryPost], store: ForYouUnreadStore) -> ForYouViewModel {
         ForYouViewModel(
             repository: StubProvider(first: ForYouPage(posts: posts, nextPageToken: nil)),
-            preferences: nil,
-            unreadStore: store
+            unreadStore: store,
+            seenStore: makeSeenStore()
         )
     }
 
@@ -629,14 +530,12 @@ struct ForYouContextCountTests {
         let store = makeStore()
         store.markSeen(.activity, in: [post("old", at: 1)])
         let model = makeModel(posts: [post("a", at: 100), post("b", at: 200)], store: store)
-        var badge: Int?
-        var arrivals: Set<PostID>?
-        model.onUnreadChange = { badge = $0[.activity] }
-        model.onNewPostsChange = { arrivals = $0 }
+        var latest: ForYouViewModel.Snapshot?
+        model.onSnapshotChange = { latest = $0 }
         model.viewDidLoad()
         await settle()
-        #expect(badge == 2)
-        #expect(arrivals?.count == badge)
+        #expect(latest?.rails.followingBadge == 2)
+        #expect(latest?.followingNew.count == latest?.rails.followingBadge)
     }
 
     /// ⚠️ And it names WHICH posts, not just how many. The page used to take the
@@ -650,10 +549,12 @@ struct ForYouContextCountTests {
             posts: [post("seen", at: 100), post("fresh", at: 500), post("older", at: 50)],
             store: store
         )
-        var arrivals: Set<PostID>?
-        model.onNewPostsChange = { arrivals = $0 }
+        var latest: ForYouViewModel.Snapshot?
+        model.onSnapshotChange = { latest = $0 }
         model.viewDidLoad()
         await settle()
-        #expect(arrivals == [PostID("fresh")])
+        #expect(latest?.followingNew == [PostID("fresh")])
+        // And the row leads with it: unseen first.
+        #expect(latest?.rails.following.first?.id == PostID("fresh"))
     }
 }

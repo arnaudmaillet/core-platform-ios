@@ -668,11 +668,14 @@ public struct MockSocialDataset: Sendable {
 
     /// The viewer's social graph, shared by the social-graph and geo-discovery
     /// mocks so the map's "Friends"/"Following" filters and the following list
-    /// agree on one truth. The viewer follows the first four authors; the
-    /// first two follow back (mutual = the implicit "friend" state, per
-    /// social_graph.v1's `RelationStatus` doc).
+    /// agree on one truth. The viewer follows the first twelve authors; eight
+    /// of them follow back (`friendIndices` — mutual = the implicit "friend"
+    /// state, per social_graph.v1's `RelationStatus` doc).
     public let followedProfileIDs: Set<String>
     public let mutualProfileIDs: Set<String>
+    /// Which authors are the viewer's friends — see where `mutualProfileIDs`
+    /// is seeded for why these eight.
+    public static let friendIndices = [0, 1, 2, 4, 5, 8, 9, 10]
     /// Who follows the viewer: the mutuals (they follow back, by definition)
     /// plus one unrequited follower (prof-4) — so a client deriving friends
     /// as following ∩ followers lands exactly on `mutualProfileIDs`, and the
@@ -878,7 +881,18 @@ public struct MockSocialDataset: Sendable {
         // four-follow graph could never produce more than a handful of
         // suggestions — far too few to reach a second page.
         followedProfileIDs = Set(authors.prefix(12).map(\.profileID))
-        mutualProfileIDs = Set(authors.prefix(2).map(\.profileID))
+        // EIGHT friends, chosen rather than taken as a prefix (2026-09-29):
+        // For You's stories row lists the viewer's friends, and two avatars
+        // is not a row. Every one of them has a real avatar (indices 3, 7 and
+        // 11 have none — `avatarShape`), and the mix is deliberate: 0, 1, 2,
+        // 4 and 5 posted a just-arrived post (`justArrivedRecords` is authored
+        // by indices 0…7), so they lead with a ring; 8, 9 and 10 did not, so
+        // they sit after, bare. The four followed-but-not-friends (3, 6, 7,
+        // 11) are the Following row.
+        // Spelled from the index (`prof-N`, as `authors` is built above):
+        // reading `authors` inside the closure would capture a `self` that is
+        // not fully initialized yet.
+        mutualProfileIDs = Set(Self.friendIndices.map { "prof-\($0)" })
         // Unrequited followers are the STRONGEST suggestion tier ("follows
         // you"), and the compose picker filters out anyone already in Recent —
         // so they are drawn from the far end of the roster, clear of the

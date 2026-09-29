@@ -2,11 +2,16 @@ import CoreModels
 import Foundation
 import PostGrid
 
-/// Drives the For You grid: one accumulated corpus, three format pages
-/// computed from it, and a discovery ordering applied across all of them.
+/// Drives For You: one accumulated corpus, and every surface the screen and
+/// the screens it pushes draw from it.
 ///
-/// The pager shows neighbouring pages mid-swipe, so this always answers for
-/// all three formats at once — the same rule the profile gallery follows.
+/// **One page, no tabs** (2026-09-29). The screen is Discover's list, led by
+/// two rows — the viewer's FRIENDS (mutual follows) as story avatars, and the
+/// rest of the people they FOLLOW as cards — each of which pushes its own
+/// list. So this answers, from one corpus and in one publish, for five
+/// surfaces at once: the list, the two rows, and the two pushed lists (plus
+/// the pushed mosaic, which is Discover's media). One publish is what keeps a
+/// row, its badge and the list it pushes from ever disagreeing.
 @MainActor
 public final class ForYouViewModel {
     public nonisolated enum PageState: Equatable, Sendable {
@@ -38,31 +43,61 @@ public final class ForYouViewModel {
         }
     }
 
+    /// One friend in the stories row.
+    public nonisolated struct FriendStory: Equatable, Sendable {
+        public let authorID: ProfileID
+        public let name: String
+        public let handle: String
+        public let avatarURL: URL?
+        /// What a tap opens, newest first: the friend's UNSEEN posts when
+        /// there are any — "only those of the selected friend" — and their
+        /// recent ones otherwise, so a friend with nothing new still opens
+        /// onto something.
+        public let posts: [GalleryPost]
+        /// Whether any of `posts` is new to the viewer — what the ring says.
+        public let hasUnseen: Bool
+    }
+
+    /// The two rows that lead the list, and the counts on their headers.
+    public nonisolated struct Rails: Equatable, Sendable {
+        /// Every friend with something loaded, those with unseen posts first.
+        public var friends: [FriendStory] = []
+        /// The people the viewer follows who are NOT friends: their posts,
+        /// unseen first, as cards.
+        public var following: [GalleryPost] = []
+        /// The Friends header's count: friends' posts the viewer has not seen.
+        public var friendsBadge = 0
+        /// The Following header's count: arrivals since the session baseline —
+        /// the number the Following TAB's badge used to be.
+        public var followingBadge = 0
+
+        public init() {}
+    }
+
     public nonisolated struct Snapshot: Equatable, Sendable {
-        public var activity: PageState
-        public var media: PageState
-        public var short: PageState
-
-        public func state(for format: GalleryFilter.Format) -> PageState {
-            switch format {
-            case .activity: activity
-            case .media: media
-            case .short: short
-            }
-        }
-
         /// Discover's list: the DISCOVERY corpus — every author, every kind,
         /// in ranked order — from which the list decides for itself which
         /// posts become mosaic tiles (`MosaicChunkPlanner`).
-        ///
-        /// ⚠️ NOT Following's state. Following is the people the viewer
-        /// follows; Discover is everyone, so an author unfollowed here leaves
-        /// Following and stays discoverable (`removeAuthor`). `media` is the
-        /// discovery corpus too, narrowed to media — the pushed "View all"
-        /// mosaic, which is what the old Discover grid drew from.
-        ///
-        /// Defaulted so a snapshot built without it (a test's) still reads.
         public var discover: PageState = .loading
+        /// Discover narrowed to media: the pushed "View all" mosaic.
+        public var media: PageState = .loading
+        /// The pushed FOLLOWING list: the people the viewer follows who are
+        /// not friends. Its "New" section is `followingNew`.
+        public var following: PageState = .loading
+        /// The pushed FRIENDS list: mutual follows. Its "New" section is
+        /// `friendsUnseen`.
+        public var friends: PageState = .loading
+        /// Which of Following's posts arrived since the session baseline.
+        ///
+        /// ⚠️ **The identities, not the count** — a ranked list's "New"
+        /// header over "the leading N rows" sits over the wrong rows. The
+        /// badge is this set's size, so the two cannot disagree.
+        public var followingNew: Set<PostID> = []
+        /// Which of the friends' posts the viewer has not seen yet.
+        public var friendsUnseen: Set<PostID> = []
+        public var rails = Rails()
+
+        public init() {}
     }
 
     /// Whether another page of the corpus can still be fetched. What lets
@@ -82,39 +117,18 @@ public final class ForYouViewModel {
     /// refresh control on this rather than inferring it from a snapshot that
     /// may be identical to the last one.
     public var onLoadSettled: (() -> Void)?
-    /// The per-format "new since you last looked" counts, for the tab
-    /// capsule's badges.
-    ///
-    /// Published separately from the snapshot even though both are recomputed
-    /// in `publish()`: a badge changes a segment's pinned width and moves the
-    /// lens, so the bar has to be told explicitly rather than left to infer it
-    /// from content it never sees.
-    public var onUnreadChange: (([GalleryFilter.Format: Int]) -> Void)?
-    /// Every context's count, for the menu that offers them.
+    /// Every context's count, for the menu that offers them and the tab item.
     ///
     /// The menu names five modes, and the whole point of putting a number
     /// beside each is that a viewer can see where the activity is WITHOUT
     /// switching to find out. So this answers for all of them at once, against
-    /// the same session baseline the active one is counted against — the
-    /// selected mode's entry and the tab badge are then the same number
-    /// arriving by the same route.
+    /// the same session baseline the rows are counted against — the selected
+    /// mode's entry and the two headers are then the same numbers arriving by
+    /// the same route.
     public var onContextCountsChange: (([ContentContext: Int]) -> Void)?
-    /// WHICH of the badged tab's posts arrived since the session opened, so the
-    /// page can put exactly those under their own header.
-    ///
-    /// ⚠️ **The identities, not the count.** This published a count first, and
-    /// the page took "the leading N rows" — which is only the same thing when
-    /// the list is in date order. It is not: Trending ranks the corpus, so the
-    /// five newest posts sit wherever their reactions put them, and the "New"
-    /// header ended up over five arbitrary rows while the genuinely new ones
-    /// were somewhere below it. The badge was right and the section under it
-    /// was a lie, which is worse than either being wrong alone.
-    ///
-    /// The count the badge shows is this set's size, so the two still cannot
-    /// disagree — that property is what the whole design is for.
-    public var onNewPostsChange: ((Set<PostID>) -> Void)?
     /// Fires immediately BEFORE a publish whose corpus was re-derived rather
-    /// than extended — a lens change or a re-ordering.
+    /// than extended — a lens change, a re-ordering, a follow moving an author
+    /// between rows.
     ///
     /// ⚠️ The pages cannot work this out for themselves, and trying to crashed
     /// the app. A page treats "same posts plus some new ones" as an append and
@@ -130,33 +144,25 @@ public final class ForYouViewModel {
     public var onCorpusReset: (() -> Void)?
 
     private let repository: any ForYouProviding
-    /// Persists the format tab only. The discovery source is session state by
-    /// design: it is one screen, the tab coordinator retains it for the whole
-    /// session, and a stale "Trending" from three days ago is a worse landing
-    /// than the default.
-    private let preferences: GalleryPreferences?
-    /// The badge watermarks. Owned here rather than by the view controller
-    /// because every input it needs — the loaded corpus, the active format —
-    /// is already this type's, and a badge derived anywhere else would be a
-    /// second copy of the same fact.
+    /// The baseline "new" is counted from. Owned here rather than by the view
+    /// controller because every input it needs is already this type's.
     private let unreadStore: ForYouUnreadStore
+    /// The friends' posts the viewer has OPENED — what clears a story's ring.
+    private let seenStore: ForYouSeenPostsStore
     /// Persists the context lens. Optional so a test can run without touching
     /// the simulator's defaults.
     private let contextStore: ContentContextStore?
 
-    /// The tabs this screen has, in the pager's order. Stated here rather than
-    /// read from `ForYouPagerView.pageOrder` because that static is `@MainActor`
-    /// by inference (a `UIView` subclass's are) and this type answers off it in
-    /// tests; `ForYouTabOrderTests` pins the two together.
-    nonisolated static let tabs: [GalleryFilter.Format] = [.media, .activity]
+    /// The key the session baseline is persisted under — FOLLOWING's, which
+    /// is what the badged tab was called and what installed apps have stored.
+    /// One baseline serves both rows: a friend is someone the viewer follows,
+    /// and "since you last looked" is one instant for all of them.
+    nonisolated static let unreadKey: GalleryFilter.Format = .activity
 
-    /// Where the screen opens: Discover, which is also the FIRST tab. The
-    /// order is a question of position and the landing one of format — they
-    /// happen to agree again since Discover moved back to the left
-    /// (2026-09-28), but nothing here assumes it.
-    nonisolated static let defaultFormat: GalleryFilter.Format = .media
+    /// How many cards the Following row carries, and how many posts a story
+    /// opens onto. The row is a way INTO the list; the list is one tap away.
+    nonisolated static let railLimit = 20
 
-    public private(set) var format: GalleryFilter.Format = ForYouViewModel.defaultFormat
     public private(set) var source: DiscoverySource = .trending
     /// The active lens. Restored from the store at init, so the surface opens
     /// where the viewer left it.
@@ -170,15 +176,13 @@ public final class ForYouViewModel {
     /// appended page is ordered among itself and added to the end. Re-sorting
     /// the whole corpus on every page would renumber tiles the viewer is
     /// already looking at — caught in-sim as the grid visibly rearranging half
-    /// a second after a hero had landed on one of them, because the tab bar
-    /// coming back nudged the scroll view and that asked for the next page.
+    /// a second after a hero had landed on one of them.
     ///
     /// The cost is stated plainly: "trending" ranks within each page rather
-    /// than across the whole loaded corpus, so a later page's runaway hit sits
-    /// below an earlier page's modest one. That is the honest trade for a grid
-    /// that holds still, and it is moot once ranking is the server's job (see
-    /// `dev/BACKEND_GAPS.md` §14). A source change re-sorts everything, because
-    /// there the viewer asked for exactly that.
+    /// than across the whole loaded corpus. That is the honest trade for a
+    /// list that holds still, and it is moot once ranking is the server's job
+    /// (see `dev/BACKEND_GAPS.md` §14). A source change re-sorts everything,
+    /// because there the viewer asked for exactly that.
     private var corpus: [GalleryPost]?
     /// The instant this session counts from, frozen the first time a corpus
     /// lands and never moved again. See `ForYouSessionWatermark`.
@@ -188,9 +192,10 @@ public final class ForYouViewModel {
     private var load: Task<Void, Never>?
     private var pageLoad: Task<Void, Never>?
 
-    /// Whether the viewer follows an author — what FOLLOWING is filtered by.
-    /// Nil (a test, a composition without the graph) leaves Following
-    /// unfiltered, which is what it was before it had a graph to ask.
+    /// Where the viewer stands with each author — what splits FRIENDS from
+    /// FOLLOWING. Nil (a test, a composition without the graph) leaves every
+    /// author in Following and nobody a friend, which is what the surface was
+    /// before it had a graph to ask.
     private let followRelations: (any SocialGraphReading)?
     /// Keeps the answers live: a follow or an unfollow ACCEPTED anywhere in
     /// the app lands here (`FollowGraphEvents`, #300).
@@ -198,15 +203,15 @@ public final class ForYouViewModel {
 
     public init(
         repository: any ForYouProviding,
-        preferences: GalleryPreferences? = nil,
         unreadStore: ForYouUnreadStore = ForYouUnreadStore(),
+        seenStore: ForYouSeenPostsStore = ForYouSeenPostsStore(),
         contextStore: ContentContextStore? = nil,
         followRelations: (any SocialGraphReading)? = nil,
         followEvents: FollowGraphEvents? = nil
     ) {
         self.repository = repository
-        self.preferences = preferences
         self.unreadStore = unreadStore
+        self.seenStore = seenStore
         self.contextStore = contextStore
         self.followRelations = followRelations
         if let contextStore { context = contextStore.context }
@@ -214,39 +219,7 @@ public final class ForYouViewModel {
         followSubscription = followEvents?.subscribeOnMain { [weak self] change in
             self?.apply(change)
         }
-        // Two conditions, and both were learned the hard way.
-        //
-        // `hasStoredFormat` — because `preferences.format` answers `.activity`
-        // when NOTHING has been stored, which is indistinguishable from a
-        // viewer who chose Following. Without this every fresh install opened
-        // on Following rather than on Discover (seen in-sim after a clean
-        // reinstall, which is the only way to see it at all).
-        //
-        // `tabs.contains` — because an install that last sat on Short has a
-        // stored format this screen no longer has a tab for, and paging to a
-        // page the pager does not own would leave the capsule pointing at
-        // nothing.
-        if let preferences, preferences.hasStoredFormat, Self.tabs.contains(preferences.format) {
-            format = preferences.format
-        }
-        #if DEBUG
-        // The mock stages unread on FOLLOWING, and the tab you are looking at
-        // can never have unread by construction — everything on it has been
-        // seen. So the demo lands on Discover, which is what makes the badge it
-        // stages honest rather than a contradiction the code has to special-
-        // case. Not persisted: this is a launch argument's opinion, not the
-        // viewer's.
-        if ProcessInfo.processInfo.arguments.contains("-foryou-mock-new-activity"),
-           format == Self.badgedTab {
-            format = Self.defaultFormat
-        }
-        #endif
     }
-
-    /// The tab that carries the unread badge: Following, where new posts from
-    /// the accounts you follow land. Discover is a ranked surface with no
-    /// "since you last looked" to speak of, so it is not badged.
-    nonisolated static let badgedTab: GalleryFilter.Format = .activity
 
     public func viewDidLoad() {
         loadFirstPage(reset: false)
@@ -258,20 +231,7 @@ public final class ForYouViewModel {
         loadFirstPage(reset: true)
     }
 
-    /// Where the user is — a tab tap or a settled swipe. Pure state (every
-    /// page is always computed), persisted for the next launch.
-    ///
-    /// Landing on a tab is also *reading* it, so this clears that tab's badge.
-    public func setFormat(_ format: GalleryFilter.Format) {
-        self.format = format
-        preferences?.format = format
-        // Arriving on a tab IS reading it — and this is the one path a person
-        // drives, so it is also where a debug-forced badge is allowed to clear.
-        unreadStore.markSeen(format, in: posts(for: format), clearingOverride: true)
-        publishUnread()
-    }
-
-    /// The ordering modifier: recomputes every page locally, no round trip.
+    /// The ordering modifier: recomputes every surface locally, no round trip.
     public func setSource(_ source: DiscoverySource) {
         guard self.source != source else { return }
         self.source = source
@@ -284,34 +244,47 @@ public final class ForYouViewModel {
     /// The lens the whole surface is read through. Local, like the ordering —
     /// it narrows the corpus already in hand rather than asking for another.
     ///
-    /// Both tabs move together, because the context is a statement about the
-    /// surface rather than about one page of it.
+    /// Every surface moves together — the list, both rows, both pushed lists
+    /// — because the context is a statement about the surface rather than
+    /// about one part of it.
     public func setContext(_ context: ContentContext) {
         guard self.context != context else { return }
         self.context = context
         contextStore?.context = context
-        // The unread counts are derived from the VISIBLE corpus, so they have
-        // to be republished with it: a tab whose new posts are all filtered out
-        // is a tab with nothing new on it, and a count left over from the wider
-        // context would be pointing at posts this context does not admit.
-        //
-        // A lens change RE-DERIVES the corpus rather than extending it, and the
-        // pages have to be told before they see it — see `onCorpusReset`.
+        // The counts are derived from the VISIBLE corpus, so they have to be
+        // republished with it. A lens change RE-DERIVES the corpus rather than
+        // extending it, and the pages have to be told before they see it.
         onCorpusReset?()
         publish()
     }
 
-    /// Takes one author out of FOLLOWING, after an unfollow succeeds.
+    /// The viewer opened these posts from a friend's story: they are seen, and
+    /// the ring clears once the row hears it.
     ///
-    /// Following is the people the viewer follows, so an author they no
-    /// longer follow has nothing left to be doing there, and leaving their
-    /// rows in place makes the action look like it failed.
+    /// ⚠️ CALLED AT THE LANDING, not at the tap. The row re-sorts on it (a
+    /// friend with nothing unseen joins the ones after), and a close flying
+    /// home to an avatar that has just moved would land on another friend's
+    /// face — so the host marks them once the close is over.
+    public func markStoryPostsSeen(_ ids: [PostID]) {
+        guard seenStore.insert(ids) else { return }
+        publish()
+    }
+
+    /// The viewer opened the Following list — READING it, the way arriving on
+    /// the Following tab was. Retires a forced `-foryou-badges` count; the
+    /// session's own count does not move (nothing in a session retires it —
+    /// `ForYouSessionWatermark`).
+    public func followingListOpened() {
+        guard corpus != nil else { return }
+        unreadStore.markSeen(Self.unreadKey, in: followedCorpus, clearingOverride: true)
+        publish()
+    }
+
+    /// Takes one author out of the rows they no longer belong to, after an
+    /// unfollow succeeds.
     ///
-    /// ⚠️ DISCOVER KEEPS THEM. It used to lose them too, when Discover was an
-    /// ordering of the same following corpus; it is the discovery surface now
-    /// — everyone, followed or not (2026-09-28) — and an author the viewer
-    /// does not follow is exactly what it is for. So the corpus is left whole
-    /// and Following's derivation (`followingCorpus`) leaves the author out.
+    /// ⚠️ DISCOVER KEEPS THEM: it is everyone, followed or not, and an author
+    /// the viewer does not follow is exactly what it is for.
     ///
     /// It is the follow graph's own answer, folded in straight away: the same
     /// change also arrives through `FollowGraphEvents` when the channel is
@@ -321,77 +294,107 @@ public final class ForYouViewModel {
         apply(FollowChange(profileID: authorID, isFollowing: false))
     }
 
-    /// Whether the viewer follows each author seen so far — `true` for the
-    /// viewer too (their own posts are part of their Following, as they always
-    /// were). Filled by `resolveFollows` as pages land, kept live by
-    /// `FollowGraphEvents`. An author with NO answer (no graph wired, or a
-    /// lookup that failed) is shown: Following fails open, which is what it
-    /// did before it had a graph to ask, rather than hiding posts on a hunch.
-    private var followsAuthor: [ProfileID: Bool] = [:]
+    // MARK: - Who is who
+
+    /// Where an author sits on this screen.
+    nonisolated enum Circle: Equatable, Sendable {
+        /// The viewer themself: on Discover, never in a row.
+        case viewer
+        /// A mutual follow — the stories row.
+        case friend
+        /// Followed and not a friend — the cards row. Also an author the
+        /// graph could not answer for: the rows fail OPEN, which is what
+        /// Following did before it had a graph to ask, rather than hiding
+        /// posts on a hunch.
+        case following
+        /// Not followed: Discover only.
+        case other
+
+        nonisolated static func of(_ relation: FollowRelation?) -> Circle {
+            switch relation {
+            case nil: .following
+            case .viewer: .viewer
+            case .mutual: .friend
+            case .following: .following
+            case .notFollowing, .followedBy, .blocked: .other
+            }
+        }
+    }
+
+    /// Where the viewer stands with each author seen so far. Filled by
+    /// `resolveRelations` as pages land, kept live by `FollowGraphEvents`.
+    private var relations: [ProfileID: FollowRelation] = [:]
+
+    func circle(of author: ProfileID?) -> Circle {
+        guard let author else { return .following }
+        return Circle.of(relations[author])
+    }
 
     /// A follow or unfollow ACCEPTED anywhere in the app. The author's posts
-    /// join or leave FOLLOWING; Discover, which is everyone, does not move.
+    /// join or leave the rows (a follow of someone who follows the viewer
+    /// makes a FRIEND); Discover, which is everyone, does not move.
     ///
-    /// A re-derivation when it changes anything the viewer can see — the posts
-    /// land where their rank puts them, not after the list — so the pages are
-    /// told first (`onCorpusReset`), exactly as a lens change tells them.
+    /// A re-derivation when it changes anything the viewer can see, so the
+    /// pages are told first (`onCorpusReset`), exactly as a lens change tells
+    /// them.
     private func apply(_ change: FollowChange) {
-        // What Following SHOWED for this author: an unanswered one is shown.
-        let wasShown = followsAuthor[change.profileID] ?? true
-        followsAuthor[change.profileID] = change.isFollowing
-        guard wasShown != change.isFollowing,
+        let previous = relations[change.profileID]
+        let before = Circle.of(previous)
+        // The INBOUND half is kept (`settingFollow`), so following back makes
+        // a friend and unfollowing a friend leaves a follower. An author never
+        // answered for has no known inbound half: asked again below.
+        relations[change.profileID] = (previous ?? .notFollowing).settingFollow(change.isFollowing)
+        if previous == nil, change.isFollowing { reresolve(change.profileID) }
+        guard Circle.of(relations[change.profileID]) != before,
               let corpus, corpus.contains(where: { $0.authorID == change.profileID })
         else { return }
         onCorpusReset?()
         publish()
     }
 
-    /// Asks the graph about every author in `posts` it has not answered for
-    /// yet, concurrently, BEFORE the page that carries them is published — so
-    /// Following is filtered from its first frame and a page landing stays an
-    /// append rather than a re-derivation a moment later.
-    ///
-    /// Only answers are stored: a failed lookup leaves the author unanswered
-    /// (shown, see `followsAuthor`) and is asked again with the next page. An
-    /// answer that arrives after a follow EVENT for the same author never
-    /// overwrites it — the event is the newer truth.
-    private func resolveFollows(for posts: [GalleryPost]) async {
+    /// Asks the graph for one author again — for a follow event about someone
+    /// never answered for, whose inbound half (friend or not) is unknown.
+    private func reresolve(_ id: ProfileID) {
         guard let followRelations else { return }
-        let unknown = Set(posts.compactMap(\.authorID)).filter { followsAuthor[$0] == nil }
-        guard !unknown.isEmpty else { return }
-        let answers = await withTaskGroup(of: (ProfileID, Bool?).self) { group in
-            for id in unknown {
-                group.addTask {
-                    guard let relation = try? await followRelations.followRelation(to: id) else {
-                        return (id, nil)
-                    }
-                    return (id, relation == .following || relation == .viewer)
-                }
-            }
-            var collected: [(ProfileID, Bool?)] = []
-            for await answer in group { collected.append(answer) }
-            return collected
-        }
-        for case let (id, follows?) in answers where followsAuthor[id] == nil {
-            followsAuthor[id] = follows
+        Task { [weak self] in
+            guard let relation = try? await followRelations.followRelation(to: id),
+                  let self, relations[id] != relation else { return }
+            let before = circle(of: id)
+            relations[id] = relation
+            guard circle(of: id) != before,
+                  corpus?.contains(where: { $0.authorID == id }) == true else { return }
+            onCorpusReset?()
+            publish()
         }
     }
 
-    /// FOLLOWING's corpus: the loaded posts by authors the viewer follows,
-    /// and the viewer's own.
+    /// Asks the graph about every author in `posts` it has not answered for
+    /// yet, concurrently, BEFORE the page that carries them is published — so
+    /// the rows are split from their first frame and a page landing stays an
+    /// append rather than a re-derivation a moment later.
     ///
-    /// ⚠️ Filtered HERE, by the follow graph, because the served timeline is
-    /// not: `timeline.v1.GetFollowingFeed` promises no such thing, and the
-    /// mock serves every author's posts (the viewer follows 12 of its
-    /// authors). The same corpus, unfiltered, is Discover's.
-    private var followingCorpus: [GalleryPost] {
-        let all = corpus ?? []
-        guard !followsAuthor.isEmpty else { return all }
-        return all.filter { post in
-            guard let author = post.authorID else { return true }
-            return followsAuthor[author] ?? true
+    /// Only answers are stored: a failed lookup leaves the author unanswered
+    /// (Following, see `Circle`) and is asked again with the next page. An
+    /// answer that arrives after a follow EVENT for the same author never
+    /// overwrites it — the event is the newer truth.
+    private func resolveRelations(for posts: [GalleryPost]) async {
+        guard let followRelations else { return }
+        let unknown = Set(posts.compactMap(\.authorID)).filter { relations[$0] == nil }
+        guard !unknown.isEmpty else { return }
+        let answers = await withTaskGroup(of: (ProfileID, FollowRelation?).self) { group in
+            for id in unknown {
+                group.addTask { (id, try? await followRelations.followRelation(to: id)) }
+            }
+            var collected: [(ProfileID, FollowRelation?)] = []
+            for await answer in group { collected.append(answer) }
+            return collected
+        }
+        for case let (id, relation?) in answers where relations[id] == nil {
+            relations[id] = relation
         }
     }
+
+    // MARK: - The corpora
 
     /// DISCOVER's corpus: every loaded post, every author and kind, under the
     /// lens — the widest corpus the app has. There is no discovery RPC
@@ -401,9 +404,35 @@ public final class ForYouViewModel {
         context.filtering(corpus ?? [])
     }
 
-    /// Called as the active page nears its end. A no-op when a page is
-    /// already in flight, when the corpus is exhausted, or before the first
-    /// page has landed.
+    /// The loaded posts of one circle, under the lens, in display order.
+    private func posts(in circle: Circle) -> [GalleryPost] {
+        discoverPosts.filter { self.circle(of: $0.authorID) == circle }
+    }
+
+    /// FOLLOWING's posts: the people the viewer follows who are not friends.
+    ///
+    /// ⚠️ Split HERE, by the follow graph, because the served timeline is not:
+    /// `timeline.v1.GetFollowingFeed` promises no such thing, and the mock
+    /// serves every author's posts.
+    public var followingPosts: [GalleryPost] { posts(in: .following) }
+
+    /// FRIENDS' posts: mutual follows.
+    public var friendPosts: [GalleryPost] { posts(in: .friend) }
+
+    /// Both rows' authors, before any lens — what the session baseline is
+    /// frozen against and the persisted cursor advanced over. Unfiltered on
+    /// purpose: a baseline is an instant, not a subject, and freezing it while
+    /// a narrow context happened to be selected would date the whole session
+    /// from whatever that context's newest post was.
+    private var followedCorpus: [GalleryPost] {
+        (corpus ?? []).filter {
+            let circle = circle(of: $0.authorID)
+            return circle == .friend || circle == .following
+        }
+    }
+
+    /// Called as the list nears its end. A no-op when a page is already in
+    /// flight, when the corpus is exhausted, or before the first page landed.
     public func loadNextPageIfNeeded() {
         guard pageLoad == nil, load == nil, corpus != nil, let token = nextPageToken else { return }
         #if DEBUG
@@ -418,23 +447,19 @@ public final class ForYouViewModel {
                 self.onPagingChange?(false)
             }
             guard let page = try? await repository.page(after: token), !Task.isCancelled else { return }
-            // Following is filtered by the graph from the page's first frame.
-            await resolveFollows(for: page.posts)
+            // The rows are split by the graph from the page's first frame.
+            await resolveRelations(for: page.posts)
             guard !Task.isCancelled else { return }
             // Append, never reorder: the new page is ranked among ITSELF and
             // added to the end, so a page landing cannot renumber what is
             // already on screen.
             //
-            // Deduplicated against everything already loaded, as a second
-            // line of defense behind the announcement ordering below: a
-            // re-served row is never trusted into the corpus, whoever serves
-            // it — a re-entrant fetch like the one found here, or a real
-            // server re-serving a boundary row after the timeline grew under
-            // its cursor. A repeated id is not cosmetic — every id-keyed
-            // structure downstream assumes uniqueness, and the first one (the
-            // snap feed seeding `Dictionary(uniqueKeysWithValues:)` from a
-            // tapped tile's slice) took the whole app down when a duplicate
-            // reached it.
+            // Deduplicated against everything already loaded: a re-served row
+            // is never trusted into the corpus, whoever serves it. A repeated
+            // id is not cosmetic — every id-keyed structure downstream assumes
+            // uniqueness, and the first one (the snap feed seeding
+            // `Dictionary(uniqueKeysWithValues:)` from a tapped tile's slice)
+            // took the whole app down when a duplicate reached it.
             let existing = Set((corpus ?? []).map(\.id))
             let fresh = page.posts.filter { !existing.contains($0.id) }
             #if DEBUG
@@ -454,16 +479,12 @@ public final class ForYouViewModel {
             publish()
             onLoadSettled?()
         }
-        // Announced only past the guard (the common case is a scroll reaching
-        // the end of an exhausted corpus, and a spinner for a fetch that never
-        // starts would sit there forever) — and only AFTER `pageLoad` is
-        // assigned. Showing the footer runs a layout pass, a layout pass can
-        // fire `onNearEnd`, and a re-entrant call arriving before the
-        // assignment passed the `pageLoad == nil` guard and started a SECOND
-        // fetch with the same token. Measured live, triggered by a hero
-        // flight's staging layout: two `page(after: 20)` fetches back to
-        // back, the whole second page appended twice, and the next tile tap
-        // trapping on the duplicate id.
+        // Announced only past the guard, and only AFTER `pageLoad` is assigned.
+        // Showing the footer runs a layout pass, a layout pass can fire
+        // `onNearEnd`, and a re-entrant call arriving before the assignment
+        // passed the `pageLoad == nil` guard and started a SECOND fetch with
+        // the same token — the whole second page appended twice, and the next
+        // tile tap trapping on the duplicate id.
         onPagingChange?(true)
     }
 
@@ -482,16 +503,16 @@ public final class ForYouViewModel {
             nextPageToken = nil
         }
         guard load == nil else { return }
-        publish() // all pages report loading
+        publish() // every surface reports loading
         load = Task { [weak self] in
             guard let self else { return }
             defer { self.load = nil }
             do {
                 let page = try await repository.firstPage()
                 guard !Task.isCancelled else { return }
-                // Asked before the first publish, so Following never shows an
-                // author it is about to take away.
-                await resolveFollows(for: page.posts)
+                // Asked before the first publish, so no row ever shows an
+                // author it is about to move.
+                await resolveRelations(for: page.posts)
                 guard !Task.isCancelled else { return }
                 corpus = source.ordering(page.posts)
                 failure = nil
@@ -510,18 +531,6 @@ public final class ForYouViewModel {
         }
     }
 
-    /// The corpus under the active ordering, context and format — what a page
-    /// renders, and the ordered set a tile tap seeds its feed from.
-    ///
-    /// The CONTEXT is applied here, in the single read path, rather than by
-    /// narrowing `corpus` when it changes. Two reasons, and the second is the
-    /// one that matters: a stored corpus would have to be re-fetched to widen
-    /// again (switching back to Entertainment would show only what the narrower
-    /// lens had already admitted), and every derived answer in this type —
-    /// page states, empty messages, unread counts, the feed a tile seeds —
-    /// already comes through this method, so applying it once here is what
-    /// makes "the context filters both tabs" true by construction rather than
-    /// by remembering to filter in four places.
     /// One post out of the whole loaded corpus, BEFORE any lens.
     ///
     /// The dismissal's adoption is the caller: a post the viewer is closing has
@@ -533,64 +542,134 @@ public final class ForYouViewModel {
         corpus?.first { $0.id == id }
     }
 
-    public func posts(for format: GalleryFilter.Format) -> [GalleryPost] {
-        // `corpus` is already in display order — see its note. Reading is a
-        // pure filter, so nothing can reorder behind the viewer's back.
-        //
-        // `.media` is DISCOVER's format — its tab, and the pushed mosaic — so
-        // it reads the discovery corpus; the other formats are Following's.
-        let source = format == .media ? (corpus ?? []) : followingCorpus
-        return format.filtering(context.filtering(source))
-    }
+    // MARK: - Publishing
 
     private func publish() {
-        func discoverPage() -> PageState {
+        func state(_ posts: [GalleryPost], empty: EmptyState) -> PageState {
             if let failure { return .failed(message: failure) }
             guard corpus != nil else { return .loading }
-            let posts = discoverPosts
-            return posts.isEmpty
-                ? .empty(Self.discoverEmptyState(source: source, context: context))
-                : .content(posts)
+            return posts.isEmpty ? .empty(empty) : .content(posts)
         }
-        func page(_ format: GalleryFilter.Format) -> PageState {
-            if let failure { return .failed(message: failure) }
-            guard corpus != nil else { return .loading }
-            let posts = posts(for: format)
-            return posts.isEmpty
-                ? .empty(Self.emptyState(format: format, source: source, context: context))
-                : .content(posts)
+        applyMockNewActivityIfNeeded()
+        var snapshot = Snapshot()
+        snapshot.discover = state(
+            discoverPosts, empty: Self.discoverEmptyState(source: source, context: context)
+        )
+        snapshot.media = state(
+            GalleryFilter.Format.media.filtering(discoverPosts),
+            empty: Self.discoverEmptyState(source: source, context: context)
+        )
+        let following = followingPosts
+        let friends = friendPosts
+        snapshot.following = state(
+            following, empty: Self.emptyState(for: .following, context: context)
+        )
+        snapshot.friends = state(
+            friends, empty: Self.emptyState(for: .friend, context: context)
+        )
+        if corpus != nil {
+            // The session baseline is frozen here, BEFORE the visit advances
+            // the persisted cursor below — that ordering is the whole
+            // mechanism (`ForYouSessionWatermark`).
+            let watermark = sessionWatermark(against: followedCorpus)
+            let followingNew = watermark.map { mark in following.filter(mark.isNew) } ?? []
+            let friendsUnseen = watermark.map { mark in
+                friends.filter { mark.isNew($0) && !seenStore.contains($0.id) }
+            } ?? []
+            snapshot.followingNew = Set(followingNew.map(\.id))
+            snapshot.friendsUnseen = Set(friendsUnseen.map(\.id))
+            snapshot.rails = Self.rails(
+                following: following, followingNew: snapshot.followingNew,
+                friends: friends, friendsUnseen: snapshot.friendsUnseen,
+                limit: Self.railLimit
+            )
+            // A forced count is `-foryou-badges` only, and overrides the
+            // derivation for the BADGE alone — see `forcedCount`.
+            snapshot.rails.followingBadge = unreadStore.forcedCount(for: Self.unreadKey)
+                ?? followingNew.count
+            snapshot.rails.friendsBadge = friendsUnseen.count
+            // The rows are ON this screen: whatever is loaded has been in
+            // front of the viewer, so the NEXT session counts from here.
+            unreadStore.markSeen(Self.unreadKey, in: followedCorpus)
         }
-        // ⚠️ Counts FIRST, then content. The Following page splits its rows into
-        // "New" and "Recent" using the count published here, so a page that
-        // received content first would render one flat list and re-section
-        // itself a moment later — a visible restructure on every load. Nothing
-        // in `publishUnread` reads the snapshot, so the order is free.
-        publishUnread()
-        onSnapshotChange?(Snapshot(
-            activity: page(.activity), media: page(.media), short: page(.short),
-            discover: discoverPage()
-        ))
+        onSnapshotChange?(snapshot)
+        if corpus != nil {
+            onContextCountsChange?(
+                ContentContext.allCases.reduce(into: [:]) { result, lens in
+                    result[lens] = newCount(in: lens)
+                }
+            )
+        }
         #if DEBUG
-        debugLogFollowing()
+        debugLogCircles()
         #endif
+    }
+
+    /// The two rows, from the two corpora and what is new on each.
+    ///
+    /// Pure and static so a test can pin the ordering rules rather than a
+    /// screenshot: unseen first on both rows; within each half the newest
+    /// first; a friend opens onto their unseen posts, or their recent ones.
+    nonisolated static func rails(
+        following: [GalleryPost], followingNew: Set<PostID>,
+        friends: [GalleryPost], friendsUnseen: Set<PostID>,
+        limit: Int
+    ) -> Rails {
+        func newestFirst(_ posts: [GalleryPost]) -> [GalleryPost] {
+            posts.sorted { $0.publishedAtMS > $1.publishedAtMS }
+        }
+        var rails = Rails()
+        let unseenCards = newestFirst(following.filter { followingNew.contains($0.id) })
+        let seenCards = newestFirst(following.filter { !followingNew.contains($0.id) })
+        rails.following = Array((unseenCards + seenCards).prefix(limit))
+
+        var byAuthor: [ProfileID: [GalleryPost]] = [:]
+        var order: [ProfileID] = []
+        for post in friends {
+            guard let author = post.authorID else { continue }
+            if byAuthor[author] == nil { order.append(author) }
+            byAuthor[author, default: []].append(post)
+        }
+        let stories: [FriendStory] = order.compactMap { author in
+            guard let posts = byAuthor[author], let face = posts.first else { return nil }
+            let unseen = newestFirst(posts.filter { friendsUnseen.contains($0.id) })
+            return FriendStory(
+                authorID: author,
+                name: face.authorName ?? face.authorHandle ?? author.rawValue,
+                handle: face.authorHandle ?? "",
+                avatarURL: posts.lazy.compactMap(\.authorAvatarURL).first,
+                posts: Array((unseen.isEmpty ? newestFirst(posts) : unseen).prefix(limit)),
+                hasUnseen: !unseen.isEmpty
+            )
+        }
+        // Unseen first, and within each half the friend whose newest post is
+        // newest first — the order a viewer catches up in.
+        rails.friends = stories.sorted { lhs, rhs in
+            if lhs.hasUnseen != rhs.hasUnseen { return lhs.hasUnseen }
+            return (lhs.posts.first?.publishedAtMS ?? 0) > (rhs.posts.first?.publishedAtMS ?? 0)
+        }
+        return rails
     }
 
     #if DEBUG
     /// `-foryou-following-log`: one line per publish in
-    /// `Documents/foryou-following.log` — how many posts Following and
-    /// Discover hold, and which authors Following is leaving out. A file,
-    /// because the question ("did the follow I just made reach this list?")
-    /// is asked of a long list no screenshot can count, and a console capture
-    /// is the thing that fails quietly (see `sim-log-capture-traps`).
-    private func debugLogFollowing() {
+    /// `Documents/foryou-following.log` — how many posts each row's corpus
+    /// holds, and which authors are friends. A file, because the question
+    /// ("did the follow I just made reach this row?") is asked of a long list
+    /// no screenshot can count, and a console capture is the thing that fails
+    /// quietly (see `sim-log-capture-traps`).
+    private func debugLogCircles() {
         guard ProcessInfo.processInfo.arguments.contains("-foryou-following-log"),
               let corpus,
               let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
         else { return }
-        let hidden = Set(corpus.compactMap(\.authorID)).filter { followsAuthor[$0] == false }
-        let line = "following=\(followingCorpus.count) discover=\(corpus.count)"
-            + " answered=\(followsAuthor.count)"
-            + " hidden=\(hidden.map(\.rawValue).sorted().joined(separator: ","))\n"
+        let authors = Set(corpus.compactMap(\.authorID))
+        let friends = authors.filter { circle(of: $0) == .friend }
+        let others = authors.filter { circle(of: $0) == .other }
+        let line = "friends=\(friendPosts.count) following=\(followingPosts.count)"
+            + " discover=\(corpus.count) answered=\(relations.count)"
+            + " friendAuthors=\(friends.map(\.rawValue).sorted().joined(separator: ","))"
+            + " notFollowed=\(others.map(\.rawValue).sorted().joined(separator: ","))\n"
         let url = documents.appendingPathComponent("foryou-following.log")
         if let handle = try? FileHandle(forWritingTo: url) {
             handle.seekToEndOfFile()
@@ -602,102 +681,56 @@ public final class ForYouViewModel {
     }
     #endif
 
-    /// What the badged tab counts against this session, frozen on first sight.
+    /// What the rows count against this session, frozen on first sight.
     ///
     /// Taken from the persisted cursor BEFORE this visit advances it — see
-    /// `ForYouSessionWatermark`. Read against the UNFILTERED corpus on purpose:
-    /// a baseline is an instant, not a subject, and freezing it while a narrow
-    /// context happened to be selected would date the whole session from
-    /// whatever that context's newest post was.
+    /// `ForYouSessionWatermark`.
     private func sessionWatermark(against posts: [GalleryPost]) -> ForYouSessionWatermark? {
         if let sessionWatermark { return sessionWatermark }
-        guard let baseline = unreadStore.sessionBaseline(for: Self.badgedTab, in: posts) else { return nil }
+        guard let baseline = unreadStore.sessionBaseline(for: Self.unreadKey, in: posts) else { return nil }
         let watermark = ForYouSessionWatermark(baselineMS: baseline)
         sessionWatermark = watermark
         return watermark
     }
 
-    /// The badged tab's arrivals under a given lens, in display order.
-    private func newPosts(in context: ContentContext) -> [GalleryPost] {
-        guard corpus != nil,
-              let watermark = sessionWatermark(against: Self.badgedTab.filtering(followingCorpus))
-        else { return [] }
-        return watermark.partition(Self.badgedTab.filtering(context.filtering(followingCorpus))).new
-    }
-
-    /// The badged tab's count under a given lens — the size of the set above,
-    /// never derived separately.
-    private func newCount(in context: ContentContext) -> Int {
-        newPosts(in: context).count
-    }
-
-    /// Recomputes every tab's badge from the corpus in hand.
-    ///
-    /// The active tab's watermark is advanced FIRST, before anything is
-    /// counted. The viewer is looking at that page, so a fetch landing under
-    /// their eyes has been seen by definition — and advancing it here means the
-    /// active tab reads zero through the same derivation as every other tab
-    /// rather than being special-cased to it. It also means leaving the tab
-    /// later cannot badge content that was on screen the whole time.
-    private func publishUnread() {
-        guard corpus != nil else { return }
-        applyMockNewActivityIfNeeded()
-        // The session's baseline is frozen here, BEFORE the visit advances the
-        // persisted cursor — that ordering is the whole mechanism.
-        let arrivals = newPosts(in: context)
-        let count = arrivals.count
-        unreadStore.markSeen(format, in: posts(for: format))
-        // Only the tabs this screen HAS, not every case of the shared enum —
-        // `.short` has no tab here, and publishing a count for it would invite
-        // a badge with nowhere to sit.
-        var counts: [GalleryFilter.Format: Int] = [:]
-        for page in Self.tabs {
-            // Discover carries no badge by product decision, not by accident:
-            // a ranked feed has no "since you last looked" to count against.
-            // A forced count is `-foryou-badges` only, and overrides the
-            // derivation for the BADGE alone — see `forcedCount`.
-            counts[page] = page == Self.badgedTab
-                ? (unreadStore.forcedCount(for: page) ?? count)
-                : 0
+    /// Everything waiting under a lens: Following's arrivals plus the friends'
+    /// unseen posts — what the mode menu and the tab item show. The sum of the
+    /// two headers' numbers under the active lens, never derived separately.
+    private func newCount(in lens: ContentContext) -> Int {
+        guard corpus != nil, let watermark = sessionWatermark(against: followedCorpus) else { return 0 }
+        let all = lens.filtering(corpus ?? [])
+        let following = all.filter { circle(of: $0.authorID) == .following && watermark.isNew($0) }
+        let friends = all.filter {
+            circle(of: $0.authorID) == .friend && watermark.isNew($0) && !seenStore.contains($0.id)
         }
-        onUnreadChange?(counts)
-        onNewPostsChange?(Set(arrivals.map(\.id)))
-        onContextCountsChange?(
-            ContentContext.allCases.reduce(into: [:]) { result, lens in
-                result[lens] = newCount(in: lens)
-            }
-        )
+        return following.count + friends.count
     }
 
     #if DEBUG
     /// `-foryou-mock-new-activity [n]` (n defaults to 3): back-dates the
-    /// Activity watermark so the n newest activity posts read as new.
+    /// baseline so the n newest posts of the people the viewer follows read as
+    /// new — on either row, wherever their authors sit.
     ///
     /// Armed once per LOAD, not once per publish — every page that lands would
-    /// otherwise re-back-date and the badge would never settle. A pull-to-refresh
+    /// otherwise re-back-date and the badges would never settle. A pull
     /// re-arms it, which is the point: pull, and three new things are waiting.
-    ///
-    /// The badge it produces is a real derived count, so tapping Activity clears
-    /// it through `markSeen` exactly as a genuine one would.
     private var hasArmedMockActivity = false
 
     private func applyMockNewActivityIfNeeded() {
-        guard !hasArmedMockActivity else { return }
+        guard !hasArmedMockActivity, corpus != nil, sessionWatermark == nil else { return }
         let arguments = ProcessInfo.processInfo.arguments
         guard let position = arguments.firstIndex(of: "-foryou-mock-new-activity") else { return }
         let count = position + 1 < arguments.count ? Int(arguments[position + 1]) ?? 3 : 3
         hasArmedMockActivity = true
-        // Belt and braces: `init` already moves the landing tab off Following
-        // for exactly this reason, so reaching here on Following means someone
-        // navigated there — in which case the posts really have been seen and
-        // staging them as new would be a lie the badge tells.
-        guard format != Self.badgedTab else { return }
-        unreadStore.stageUnread(count, for: Self.badgedTab, in: posts(for: Self.badgedTab))
+        unreadStore.stageUnread(count, for: Self.unreadKey, in: followedCorpus)
     }
 
-    /// Re-arms the mock so a pull produces a fresh badge.
+    /// Re-arms the mock so a pull produces fresh badges — and re-freezes the
+    /// baseline, which is what the staging moves.
     private func rearmMockNewActivity() {
+        guard ProcessInfo.processInfo.arguments.contains("-foryou-mock-new-activity") else { return }
         hasArmedMockActivity = false
+        sessionWatermark = nil
     }
     #else
     private func applyMockNewActivityIfNeeded() {}
@@ -705,7 +738,7 @@ public final class ForYouViewModel {
     #endif
 
     /// Discover's empty list, in Discover's words — nothing to DISCOVER, not
-    /// "no activity": the tab is not anyone's activity.
+    /// "no activity": the list is not anyone's activity.
     nonisolated static func discoverEmptyState(
         source: DiscoverySource,
         context: ContentContext = .all
@@ -721,31 +754,13 @@ public final class ForYouViewModel {
         )
     }
 
-    /// Names the empty combination so the blank page reads as an answer.
-    nonisolated static func emptyState(
-        format: GalleryFilter.Format,
-        source: DiscoverySource,
-        context: ContentContext = .all
-    ) -> EmptyState {
-        let what = switch format {
-        case .activity: "activity"
-        case .media: "media"
-        case .short: "short posts"
-        }
-        // Both surviving sources are adjectives that qualify the noun. The
-        // removed `.following` case was the one that needed a trailing phrase
-        // ("...from people you follow"), which is why this used to have two
-        // shapes; if a source that is not an adjective returns, it will need
-        // its own slot again rather than being forced into this one.
-        let title = switch source {
-        case .trending: "No trending \(what) yet."
-        case .recent: "No recent \(what) yet."
-        }
+    /// A pushed list's empty page, named so the blank page reads as an answer.
+    nonisolated static func emptyState(for circle: Circle, context: ContentContext = .all) -> EmptyState {
+        let title = circle == .friend
+            ? "No posts from your friends yet."
+            : "No posts from people you follow yet."
         // A narrowed context is very often the REASON a page is empty, and a
-        // blank screen that does not say so reads as a broken feed. Naming the
-        // lens turns "this is broken" into "this is filtered", which is the
-        // difference between a bug report and a menu tap. All adds nothing,
-        // because it filters nothing.
+        // blank screen that does not say so reads as a broken feed.
         guard !context.isUnfiltered else { return EmptyState(title: title) }
         return EmptyState(
             title: title,

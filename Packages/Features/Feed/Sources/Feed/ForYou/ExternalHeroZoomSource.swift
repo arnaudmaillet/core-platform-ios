@@ -63,6 +63,15 @@ final class ExternalHeroZoomSource: ZoomTransitionSource {
     func zoomSourceWillStageDismissal() {
         isStagingDismissal = true
         defer { debugLogBlend() }
+        // ⚠️ A FACE IS NEVER THE POST. A source drawing something other than
+        // the post (`SnapFeedHeroOrigin.pagePicture`) blends on EVERY close —
+        // from whatever the page shows, back to the face — including a close
+        // from the very post it opened, which for a tile would be a picture
+        // dissolving into itself.
+        if let pagePicture = origin.pagePicture {
+            departurePicture = settle?().cover ?? pagePicture
+            return
+        }
         guard let settled = settle?(), let id = settled.id, id != origin.post.id else {
             departurePicture = nil
             return
@@ -102,9 +111,16 @@ final class ExternalHeroZoomSource: ZoomTransitionSource {
         let card = PostGridFlightCard(
             post: origin.post,
             cover: origin.cover,
-            style: origin.style == .tile ? .tile : .listMedia
+            style: origin.style == .tile ? .tile : .listMedia,
+            cornerRadius: origin.cornerRadius
         )
-        card.setDeparturePicture(departurePicture)
+        // On the OPENING the far end is the page's picture only when the
+        // source is not drawing the post (a face); on a close it is whatever
+        // staging resolved.
+        card.setDeparturePicture(isStagingDismissal ? departurePicture : origin.pagePicture)
+        if let overlay = origin.restingOverlay?() {
+            card.installRestingOverlay(overlay)
+        }
         // ⚠️ PRESENT ONLY. A dismissal must fly the PAGE's playhead, not the
         // row's — the two are seconds apart once the page has been playing, and
         // the dismissal's own donation resolves by identity from the page.

@@ -62,9 +62,9 @@ struct MapFavoritesRepositoryTests {
     }
 
     @Test func friendsAreTheFollowingFollowerIntersection() async {
-        // The mock graph: following = prof-0…3, followers = mutuals (0, 1)
-        // + prof-4 (unrequited) — so friends must land exactly on the
-        // seeded mutuals, in following order.
+        // The mock graph: following = prof-0…11, followers = the eight
+        // mutuals (`friendIndices`) + the unrequited tail — so friends must
+        // land exactly on the seeded mutuals, in following order.
         let dataset = MockSocialDataset()
         let bff = MockBFF()
         MockSocialGraphService(dataset: dataset).register(on: bff)
@@ -73,7 +73,10 @@ struct MapFavoritesRepositoryTests {
         let friends = await makeRepository(bff: bff).friends()
 
         #expect(Set(friends.map(\.profileID.rawValue)) == dataset.mutualProfileIDs)
-        #expect(friends.map(\.title) == ["Ava Moreau", "Kenji Tanaka"])
+        #expect(friends.map(\.title) == [
+            "Ava Moreau", "Kenji Tanaka", "Lena Klein", "Sofía Reyes",
+            "Tom Okafor", "Nina Varga", "Olu Adeyemi", "Priya Raman"
+        ])
     }
 
     @Test func failsOpenToEmptyWhenSocialGraphIsUnavailable() async {

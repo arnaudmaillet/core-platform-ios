@@ -141,7 +141,7 @@ struct ProfileShareTargetsTests {
         let targets = await makeRepository().shareTargets(limit: 2)
 
         #expect(targets.count == 2)
-        #expect(Set(targets.map(\.id.rawValue)) == dataset.mutualProfileIDs)
+        #expect(Set(targets.map(\.id.rawValue)).isSubset(of: dataset.mutualProfileIDs))
     }
 
     @Test func returnsNothingWithoutAViewer() async {

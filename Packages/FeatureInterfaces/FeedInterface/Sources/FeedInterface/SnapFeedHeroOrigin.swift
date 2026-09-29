@@ -306,6 +306,25 @@ public struct SnapFeedHeroOrigin {
     /// How to open this post as a REVEAL when there is no hero to fly — see
     /// `TextRevealOrigin`. `nil` keeps the plain push.
     public let textReveal: TextRevealOrigin?
+    /// The source's own rounding, when its style's is not it — a DISC passes
+    /// half its side, so the card leaves as a circle and lands as one. `nil`
+    /// keeps the style's.
+    public let cornerRadius: CGFloat?
+    /// The picture the PAGE opens on, for a source that is not drawing the
+    /// post at all — a friend's FACE opening onto their post.
+    ///
+    /// ⚠️ It changes what the card is at both ends. A tile IS the post, so its
+    /// card is one picture growing; a face is not, so the card cross-dissolves
+    /// from the face (`cover`) to this as it grows, and back to the face as a
+    /// close lands — whatever post the viewer ended on. `nil` is every tile
+    /// and row: the card is the source's own picture, and a close blends only
+    /// when it leaves from another post.
+    public let pagePicture: UIImage?
+    /// The source's FURNITURE, drawn fresh — what sits over the picture at
+    /// rest (a card's caption over its foot). The card wears it at the source
+    /// end and the flight fades it as the card grows, the way a brick's
+    /// counters leave. `nil`: the card is the picture alone.
+    public let restingOverlay: (() -> UIView?)?
 
     public init(
         post: GalleryPost,
@@ -319,7 +338,10 @@ public struct SnapFeedHeroOrigin {
         donateLiveMedia: (() -> UIView?)? = nil,
         opensComments: Bool = false,
         depthView: @escaping () -> UIView? = { nil },
-        textReveal: TextRevealOrigin? = nil
+        textReveal: TextRevealOrigin? = nil,
+        cornerRadius: CGFloat? = nil,
+        pagePicture: UIImage? = nil,
+        restingOverlay: (() -> UIView?)? = nil
     ) {
         self.post = post
         self.stream = stream
@@ -333,5 +355,8 @@ public struct SnapFeedHeroOrigin {
         self.opensComments = opensComments
         self.depthView = depthView
         self.textReveal = textReveal
+        self.cornerRadius = cornerRadius
+        self.pagePicture = pagePicture
+        self.restingOverlay = restingOverlay
     }
 }
