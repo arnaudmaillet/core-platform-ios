@@ -861,6 +861,10 @@ final class SnapFeedViewController: UIViewController {
         if ProcessInfo.processInfo.arguments.contains("-pill-probe") { authorIdentityView.debugProbe("didAppear") }
         #endif
         hasAppeared = true
+        observeDeviceAppearance()
+        // Again now that the toolbar's items are hosted: during a presentation
+        // their glass container may not have existed yet (`toolbarGlassHost`).
+        if let model = activeModel { applyChromeTheme(hasMedia: model.mediaURL != nil) }
         // The willAppear reconciliation's landing half — by now the bar's
         // containers are in the window and the walk-up reaches them.
         syncEngagementAfterAppearance()
@@ -3907,6 +3911,39 @@ final class SnapFeedViewController: UIViewController {
         view.window?.traitCollection.userInterfaceStyle ?? .unspecified
     }
 
+    /// Where the device's appearance is heard, for the one thing this screen
+    /// styles with it explicitly — the text page built ahead of time
+    /// (`prewarmRestingComments`). The pages themselves listen on their own
+    /// (`SnapFeedCell.observeDeviceAppearance`, whose note says why it has to
+    /// be the WINDOW); the bars need nothing, since a text page leaves them
+    /// `.unspecified` and a media page pins them dark whatever the device says.
+    private weak var appearanceWindow: UIWindow?
+    private var appearanceRegistration: (any UITraitChangeRegistration)?
+
+    private func observeDeviceAppearance() {
+        guard appearanceWindow !== view.window else { return }
+        if let registration = appearanceRegistration {
+            appearanceWindow?.unregisterForTraitChanges(registration)
+            appearanceRegistration = nil
+        }
+        appearanceWindow = view.window
+        appearanceRegistration = view.window?.registerForTraitChanges(
+            [UITraitUserInterfaceStyle.self]
+        ) { [weak self] (_: UIWindow, _: UITraitCollection) in
+            self?.deviceAppearanceDidChange()
+        }
+    }
+
+    /// A panel built ahead in the device's old style would otherwise arrive
+    /// in it and turn over at the mount, in front of the viewer — the one
+    /// thing building ahead exists to prevent. A handed-over loading page
+    /// already inherits (`.unspecified`) and is left alone.
+    private func deviceAppearanceDidChange() {
+        if let warmed = prewarmedRestingVC, warmed.overrideUserInterfaceStyle != .unspecified {
+            warmed.overrideUserInterfaceStyle = deviceInterfaceStyle
+        }
+    }
+
     /// Whether a page can be shown without the viewer watching it assemble.
     ///
     /// A MEDIA page is ready as soon as its model is: the cover arrives into a
@@ -4628,12 +4665,97 @@ final class SnapFeedViewController: UIViewController {
     ///
     /// Applied per settled page (`updateBarChrome`) and re-applied on
     /// appearance, since the bars are shared with whatever the feed pushes.
+    ///
+    /// ⚠️ THE TOOLBAR'S GLASS IS NOT IN THE TOOLBAR. On iOS 26/27 the bottom
+    /// toolbar's item platters are hosted in a floating-bar container that is
+    /// a SIBLING of `UIToolbar`, directly under the navigation controller's
+    /// view (`-dump-bars` prints the chain). So the override on `toolbar`
+    /// never reached them: on a light device a photograph wore a dark
+    /// navigation bar over a LIGHT toolbar — grey glass, black glyphs — the
+    /// "not always dark on media" that was reported. The nav bar's platters
+    /// do live under `UINavigationBar`, which is why only the bottom half was
+    /// wrong. See `toolbarGlassHost` for where the style goes instead.
     private func applyChromeTheme(hasMedia: Bool) {
         let style = SnapChromeTheme.style(hasMedia: hasMedia)
-        navigationController?.navigationBar.overrideUserInterfaceStyle = style
-        navigationController?.toolbar.overrideUserInterfaceStyle = style
+        guard let nav = navigationController else {
+            overrideUserInterfaceStyle = style
+            return
+        }
+        let host = toolbarGlassHost()
+        if let previous = themedToolbarGlassHost, previous !== host {
+            previous.overrideUserInterfaceStyle = .unspecified
+        }
+        themedToolbarGlassHost = host
+        // A CHANGE between two settled pages dissolves instead of snapping.
+        // Filmed: paging from a text page to a photograph kept the light bars
+        // over the incoming dark page for the whole scroll (right — they
+        // follow the SETTLED page) and then turned them dark in one frame at
+        // the settle. A cross-dissolve on the two bar views is UIKit's own
+        // transition over their rendered content — no alpha is written on
+        // either bar — and it is skipped whenever nothing is changing, or
+        // while a presentation's own bar animation owns them.
+        let changes = nav.navigationBar.overrideUserInterfaceStyle != style
+            || nav.toolbar.overrideUserInterfaceStyle != style
+            || (host.map { $0.overrideUserInterfaceStyle != style } ?? false)
+        let apply = {
+            nav.navigationBar.overrideUserInterfaceStyle = style
+            nav.toolbar.overrideUserInterfaceStyle = style
+            host?.overrideUserInterfaceStyle = style
+        }
+        if changes, canAnimateBarItems {
+            // Both transitions ride the one change: they are added in this
+            // turn, and the new style is what both layers commit with.
+            if let host {
+                UIView.transition(
+                    with: host, duration: 0.25,
+                    options: [.transitionCrossDissolve, .allowUserInteraction], animations: nil
+                )
+            }
+            UIView.transition(
+                with: nav.navigationBar, duration: 0.25,
+                options: [.transitionCrossDissolve, .allowUserInteraction], animations: apply
+            )
+        } else {
+            apply()
+        }
         overrideUserInterfaceStyle = style
     }
+
+    /// The view that hosts the toolbar items' glass: the ancestor of one of
+    /// this screen's own toolbar views that sits directly under the navigation
+    /// controller's view.
+    ///
+    /// Found by walking up from a view this screen owns, through public API
+    /// only, rather than by naming UIKit's private container. And NOT the
+    /// navigation controller itself, which was the first fix and is filmed
+    /// wrong: its override cascades into every controller in the stack, and
+    /// the For You list under an opening flight is ON SCREEN — the whole list
+    /// turned dark in the flight's first frames. The container holds the
+    /// toolbar and nothing else.
+    ///
+    /// Nil while no item has been hosted yet (early in a presentation); the
+    /// theme is re-applied once the screen has appeared. If UIKit ever hosts
+    /// the items inside `UIToolbar` again, the walk lands on the toolbar,
+    /// which is overridden anyway.
+    ///
+    /// ⚠️ ANY hosted item, not the first: the attribution is a FRESH view per
+    /// page (`showAttribution`), handed over in the same turn as this runs, and
+    /// not in any window yet — walking up from it found nothing, and the
+    /// toolbar stayed light after paging onto a photograph (filmed).
+    private func toolbarGlassHost() -> UIView? {
+        guard let root = navigationController?.view else { return themedToolbarGlassHost }
+        for item in toolbarItems ?? [] {
+            guard var view = item.customView else { continue }
+            while let parent = view.superview, parent !== root { view = parent }
+            if view.superview === root { return view }
+        }
+        // None hosted right now (a hand-over in flight): keep the one already
+        // found rather than dropping the style it carries.
+        return themedToolbarGlassHost
+    }
+
+    /// What `applyChromeTheme` styled, so the release hands back exactly that.
+    private weak var themedToolbarGlassHost: UIView?
 
     /// Hands the shared bars back before anything else uses them.
     ///
@@ -4642,6 +4764,8 @@ final class SnapFeedViewController: UIViewController {
     /// a dark-pinned bar because the feed happened to be showing a photo is
     /// exactly the kind of leak that shared chrome invites.
     private func releaseChromeTheme() {
+        themedToolbarGlassHost?.overrideUserInterfaceStyle = .unspecified
+        themedToolbarGlassHost = nil
         navigationController?.navigationBar.overrideUserInterfaceStyle = .unspecified
         navigationController?.toolbar.overrideUserInterfaceStyle = .unspecified
         overrideUserInterfaceStyle = .unspecified

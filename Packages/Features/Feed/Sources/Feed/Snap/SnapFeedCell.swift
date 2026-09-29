@@ -3131,7 +3131,39 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
+        observeDeviceAppearance()
         applyPageTheme()
+    }
+
+    /// The window this cell listens to for the DEVICE's appearance, and the
+    /// registration to take back when it leaves it.
+    ///
+    /// ⚠️ A TEXT PAGE'S THEME IS AN EXPLICIT STYLE, SO NOTHING UPDATES IT FOR
+    /// FREE. `applyPageTheme` writes the device's style as it was at the
+    /// moment it ran — `.light`, say — and an explicit override is exactly
+    /// what stops a later trait change from reaching the subtree: switching
+    /// the phone to dark left the page's ground and every label in its panel
+    /// light until the feed was closed and reopened. It cannot be
+    /// `.unspecified` instead (see `SnapChromeTheme.style(hasMedia:device:)`:
+    /// the screen above pins itself dark over a photograph), and the cell's
+    /// OWN traits never hear the device while the screen is pinned. The
+    /// window is the one place the device's style arrives unpinned, so the
+    /// page listens there.
+    private weak var appearanceWindow: UIWindow?
+    private var appearanceRegistration: (any UITraitChangeRegistration)?
+
+    private func observeDeviceAppearance() {
+        guard appearanceWindow !== window else { return }
+        if let registration = appearanceRegistration {
+            appearanceWindow?.unregisterForTraitChanges(registration)
+            appearanceRegistration = nil
+        }
+        appearanceWindow = window
+        appearanceRegistration = window?.registerForTraitChanges(
+            [UITraitUserInterfaceStyle.self]
+        ) { [weak self] (_: UIWindow, _: UITraitCollection) in
+            self?.applyPageTheme()
+        }
     }
 
     override func prepareForReuse() {
