@@ -8,9 +8,11 @@ import UIKit
 ///
 /// Two marks, both the same dark capsule in the top-leading corner — one
 /// family of labels on a thumbnail, stacked when a tile earns both:
-/// - **♪ Original**: the post the sound was first published with. The grid
-///   puts it first (`SoundSheetViewController.gridPostIDs`).
-/// - **Watching**: the post the sheet was opened from.
+/// - **♪ Original**: the post the sound was first published with. The
+///   "Popular" row puts it first (`SoundSheetSections`).
+/// - **Watching**: the post the sheet was opened from — second in "Popular".
+///
+/// The same cell in the rows, the grid and a pushed section's gallery.
 final class SoundSheetTileCell: UICollectionViewCell {
     private let imageView = UIImageView()
     private let originalBadge = TileBadge(text: "Original", symbol: "music.note")
@@ -149,54 +151,113 @@ private final class TileBadge: UIView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 }
 
-/// "View all N posts", under the grid's first row: the door to the rest.
+/// A section's head: its title on the left, "View all ›" on the right when
+/// the section holds more than the sheet shows (`SoundSheetSection.hasMore`).
 ///
-/// Its own cell — in a section of its own between the first row and the
-/// others — so the collapsed detent can end right under it, above the
-/// toolbar, and so the large detent can take it out of the grid with the
-/// diffable snapshot's own animation (`SoundSheetViewController.Section.more`).
-final class SoundSheetMoreCell: UICollectionViewCell {
-    static let height: CGFloat = 44
+/// "View all ›" is Discover's control in every respect the eye reads
+/// (`DiscoverViewAllFooterView`) — a plain secondary-label button in semibold
+/// subheadline, the chevron trailing and pointing RIGHT because it pushes a
+/// screen — so the app says "there is more of this" one way. It sits at the
+/// section's head rather than under it: a row scrolls sideways, and a door
+/// under it would be under the toolbar at the collapsed detent.
+///
+/// ⚠️ ITS HEIGHT IS COMPUTED (`height(traits:)`), and the layout gives it that
+/// height absolutely: it is part of the collapsed detent, which is never
+/// measured off a live layout.
+final class SoundSheetSectionHeaderView: UICollectionReusableView {
+    static let viewAllTitle = "View all"
 
-    var onTap: (() -> Void)?
+    var onViewAll: (() -> Void)?
 
+    private let titleLabel = UILabel()
     private let button = UIButton(configuration: .plain())
+
+    /// The header's height at `traits`' text size: the title's line with a
+    /// little air, never under the 44pt a control needs.
+    static func height(traits: UITraitCollection) -> CGFloat {
+        let title = UIFont.preferredFont(forTextStyle: .title3, compatibleWith: traits)
+        return max(44, (title.lineHeight + 2 * Spacing.sm).rounded(.up))
+    }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
+        titleLabel.font = .preferredFont(forTextStyle: .title3).withWeight(.bold)
+        titleLabel.adjustsFontForContentSizeCategory = true
+        titleLabel.accessibilityTraits = .header
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
         var configuration = UIButton.Configuration.plain()
-        configuration.image = UIImage(systemName: "chevron.down")
+        configuration.image = UIImage(systemName: "chevron.right")
         configuration.preferredSymbolConfigurationForImage = .init(pointSize: 12, weight: .bold)
         configuration.imagePlacement = .trailing
         configuration.imagePadding = Spacing.xs + 2
         configuration.baseForegroundColor = .secondaryLabel
+        // Flush with the tiles' right edge: the plain style's own side padding
+        // would stand the chevron off the gutter.
+        configuration.contentInsets = .init(top: 0, leading: Spacing.sm, bottom: 0, trailing: 0)
+        var text = AttributedString(Self.viewAllTitle)
+        text.font = UIFont.preferredFont(forTextStyle: .subheadline).withWeight(.semibold)
+        configuration.attributedTitle = text
         button.configuration = configuration
-        // Centred: it is the sheet's hinge, not a column heading.
-        button.contentHorizontalAlignment = .center
-        button.accessibilityHint = "Shows every post with this sound"
-        button.addAction(UIAction { [weak self] _ in self?.onTap?() }, for: .primaryActionTriggered)
+        button.addAction(UIAction { [weak self] _ in self?.onViewAll?() }, for: .primaryActionTriggered)
         button.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(button)
+        button.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        addSubview(titleLabel)
+        addSubview(button)
         NSLayoutConstraint.activate([
-            button.topAnchor.constraint(equalTo: contentView.topAnchor),
-            button.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
-            button.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
-            button.leadingAnchor.constraint(greaterThanOrEqualTo: contentView.leadingAnchor),
+            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor),
+            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: button.leadingAnchor, constant: -Spacing.sm),
+            button.trailingAnchor.constraint(equalTo: trailingAnchor),
+            button.topAnchor.constraint(equalTo: topAnchor),
+            button.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    func configure(title: String) {
-        var text = AttributedString(title)
-        text.font = UIFont.preferredFont(forTextStyle: .subheadline).withWeight(.semibold)
-        button.configuration?.attributedTitle = text
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        onViewAll = nil
+    }
+
+    func configure(title: String, hasMore: Bool) {
+        titleLabel.text = title
+        button.isHidden = !hasMore
+        button.accessibilityLabel = "View all: \(title)"
     }
 
     /// The title as shown — what a test reads.
-    var title: String? { button.configuration?.attributedTitle.map { String($0.characters) } }
+    var title: String? { titleLabel.text }
+    /// Whether "View all" is offered — what a test reads.
+    var offersViewAll: Bool { !button.isHidden }
 
-    /// Presses the control, as a tap would.
-    func sendTap() { onTap?() }
+    /// Presses "View all", as a tap would.
+    func sendViewAll() { onViewAll?() }
 }
+
+/// The sound's head (`SoundSheetHeaderView`) as the sheet's first item: a
+/// section of its own above the posts' sections, at the absolute height the
+/// collapsed detent counted.
+final class SoundSheetHeaderCell: UICollectionViewCell {
+    let header = SoundSheetHeaderView()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        header.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(header)
+        NSLayoutConstraint.activate([
+            header.topAnchor.constraint(equalTo: contentView.topAnchor),
+            header.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            header.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            header.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+}
+

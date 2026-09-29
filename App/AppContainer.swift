@@ -415,7 +415,7 @@ final class AppContainer {
 
     private var postSoundProvider: (any PostSoundProviding)? {
         switch environment {
-        case .mock: MockPostSoundProvider(dataset: mockBackend.dataset)
+        case .mock: MockPostSoundProvider(dataset: mockBackend.dataset, counters: mockBackend.counterStore)
         case .localFleet: nil
         }
     }

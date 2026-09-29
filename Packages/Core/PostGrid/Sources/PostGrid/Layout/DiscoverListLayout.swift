@@ -28,7 +28,7 @@ import UIKit
 public enum DiscoverListLayout {
     /// The element kind of a chunk's "View all" footer.
     public static let viewAllElementKind = "DiscoverListLayout.viewAll"
-    /// The footer's height — the sound sheet's "View all" row's.
+    /// The footer's height — a control's 44pt.
     public static let viewAllHeight: CGFloat = 44
     /// The feed mosaic's gutter, so a chunk reads as a window onto the same
     /// wall — see `ChaoticSliceLayout.harmonisedGutter`.
