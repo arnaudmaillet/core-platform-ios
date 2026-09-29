@@ -114,28 +114,111 @@ struct ForYouRowsTests {
         func fetchImageData(for url: URL) async throws -> Data { Data() }
     }
 
-    /// `[‹] ———— [points][search]`, no tab bar — the header every screen For
-    /// You pushes wears — over a plain run of posts: no "New" and "Recent"
-    /// halves (2026-09-29), the order they came in.
-    @Test func aPushedListWearsTheSharedHeaderAndNoTabBar() {
+    private func makeList(_ kind: ForYouPostListViewController.Kind = .friends) -> ForYouPostListViewController {
         let list = ForYouPostListViewController(
-            kind: .friends,
+            kind: kind,
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
             videoPlayback: nil, staking: nil,
             header: PushedScreenHeader(wallet: nil, makeWalletSheet: nil, router: nil),
             openPost: nil
         )
         list.loadViewIfNeeded()
+        list.view.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+        return list
+    }
+
+    /// `[‹] ———— [points][search]`, no tab bar — the header every screen For
+    /// You pushes wears. With nothing new the posts are one untitled run, in
+    /// the order they came.
+    @Test func aPushedListWearsTheSharedHeaderAndNoTabBar() {
+        let list = makeList()
         #expect(list.hidesBottomBarWhenPushed)
         #expect(list.title == nil)
         #expect(list.navigationItem.rightBarButtonItems?.map(\.identifier) == [
             PushedScreenHeader.searchItemIdentifier
         ])
         let posts = [post("a", by: "pal", at: 2), post("b", by: "pal", at: 1)]
-        list.view.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
-        list.render(.content(posts))
+        // Hosted, so "no header" is the layout's answer and not an off-screen
+        // collection view's (see the sectioned test below).
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 4000))
+        window.rootViewController = list
+        window.isHidden = false
+        defer { window.isHidden = true }
+        list.render(.content(posts), newPosts: [])
         list.view.layoutIfNeeded()
         #expect(list.posts.map(\.id.rawValue) == ["a", "b"], "one after another, nothing regrouped")
+        #expect(list.debugNewSectionCount == 0)
+        #expect(list.debugSectionHeaders().isEmpty, "a lone section goes untitled")
+    }
+
+    /// "New" over the unseen, "Recent" over the rest (2026-09-29): the new
+    /// rows lead, each half keeps the order it came in, and "New" carries the
+    /// size of the set it was handed — the For You header's number.
+    @Test func thePushedListLeadsWithItsNewPostsUnderACountedHeader() {
+        let list = makeList(.following)
+        let posts = [
+            post("old-1", by: "bo", at: 5), post("new-1", by: "bo", at: 9),
+            post("old-2", by: "cy", at: 4), post("new-2", by: "cy", at: 8)
+        ]
+        // In a WINDOW, tall enough for every row: a collection view off
+        // screen realizes no supplementary views, so there would be no header
+        // to read. Local, and hidden before it goes — a visible window held
+        // past the test dies with the suite (`visible-window-suite-release`).
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 4000))
+        window.rootViewController = list
+        window.isHidden = false
+        defer { window.isHidden = true }
+        list.render(.content(posts), newPosts: [PostID("new-1"), PostID("new-2")])
+        list.view.layoutIfNeeded()
+        #expect(list.posts.map(\.id.rawValue) == ["new-1", "new-2", "old-1", "old-2"])
+        #expect(list.debugNewSectionCount == 2)
+        let headers = list.debugSectionHeaders()
+        #expect(headers.map { $0.title } == ["New", "Recent"])
+        #expect(headers.map { $0.count } == [2, 0], "only New is counted")
+    }
+
+    /// A list that is ALL new is one section, and a lone header is a label
+    /// rather than a division — the inbox's rule.
+    @Test func aListThatIsAllNewGoesUntitled() {
+        let list = makeList(.following)
+        let posts = [post("n1", by: "bo", at: 2), post("n2", by: "bo", at: 1)]
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 4000))
+        window.rootViewController = list
+        window.isHidden = false
+        defer { window.isHidden = true }
+        list.render(.content(posts), newPosts: [PostID("n1"), PostID("n2")])
+        list.view.layoutIfNeeded()
+        #expect(list.debugNewSectionCount == 0)
+        #expect(list.debugSectionHeaders().isEmpty)
+    }
+
+    /// A post that stops being new (a friend's story watched while the list
+    /// is up) goes back to its own place in "Recent", not to the top of it.
+    @Test func aPostLeavingNewReturnsToItsPlace() {
+        let list = makeList(.friends)
+        let posts = [
+            post("a", by: "ana", at: 9), post("b", by: "ana", at: 8),
+            post("c", by: "dee", at: 7), post("d", by: "dee", at: 6)
+        ]
+        list.render(.content(posts), newPosts: [PostID("a"), PostID("c")])
+        list.view.layoutIfNeeded()
+        #expect(list.posts.map(\.id.rawValue) == ["a", "c", "b", "d"])
+        list.render(.content(posts), newPosts: [PostID("a")])
+        list.view.layoutIfNeeded()
+        #expect(list.posts.map(\.id.rawValue) == ["a", "b", "c", "d"])
+        #expect(list.debugNewSectionCount == 1)
+    }
+
+    /// An older page landing joins "Recent" and leaves "New" alone.
+    @Test func aPageLandingJoinsRecent() {
+        let list = makeList(.following)
+        let first = [post("new", by: "bo", at: 9), post("old", by: "bo", at: 5)]
+        list.render(.content(first), newPosts: [PostID("new")])
+        list.view.layoutIfNeeded()
+        list.render(.content(first + [post("older", by: "cy", at: 1)]), newPosts: [PostID("new")])
+        list.view.layoutIfNeeded()
+        #expect(list.posts.map(\.id.rawValue) == ["new", "old", "older"])
+        #expect(list.debugNewSectionCount == 1)
     }
 
     // MARK: - The rows' view

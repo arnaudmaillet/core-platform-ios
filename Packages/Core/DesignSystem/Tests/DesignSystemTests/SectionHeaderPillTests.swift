@@ -201,3 +201,69 @@ struct SectionHeaderPresentationTests {
         #expect(pill.presentation == first)
     }
 }
+
+/// The count a header can carry after its title — `New (23)` on For You's
+/// pushed lists (2026-09-29) — and the badge it shares with the section link
+/// that pushed them.
+@MainActor
+struct SectionHeaderCountTests {
+    /// The width the pill asks for, in one shape, at one count.
+    private func width(count: Int, presentation: SectionHeaderPillButton.Presentation) -> CGFloat {
+        let pill = SectionHeaderPillButton()
+        pill.setPillTitle("New")
+        pill.setCount(count)
+        pill.setPresentation(presentation, animated: false)
+        return pill.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
+    }
+
+    /// The badge's room is RESERVED by the button's own sizing, in both
+    /// shapes — so the glass capsule wraps "New" and its count together, and
+    /// the inline title never runs under the badge.
+    @Test func aCountWidensThePillInBothShapes() {
+        for shape in [SectionHeaderPillButton.Presentation.inline, .pinned] {
+            let bare = width(count: 0, presentation: shape)
+            let counted = width(count: 23, presentation: shape)
+            #expect(counted >= bare + NotificationCountBadge.height, "\(shape)")
+        }
+    }
+
+    /// No count is the header it always was — the Messages inbox never sets
+    /// one, and must not change by a point.
+    @Test func noCountLeavesTheHeaderAsItWas() {
+        let untouched = SectionHeaderPillButton()
+        untouched.setPillTitle("New")
+        let zeroed = SectionHeaderPillButton()
+        zeroed.setPillTitle("New")
+        zeroed.setCount(5)
+        zeroed.setCount(0)
+        let fitting = UIView.layoutFittingCompressedSize
+        #expect(untouched.systemLayoutSizeFitting(fitting) == zeroed.systemLayoutSizeFitting(fitting))
+        #expect(zeroed.accessibilityValue == nil)
+    }
+
+    /// VoiceOver hears the count with the header, not as a stray number.
+    @Test func theCountIsSpokenWithTheHeader() {
+        let pill = SectionHeaderPillButton()
+        pill.setPillTitle("New")
+        pill.setCount(23)
+        #expect(pill.count == 23)
+        #expect(pill.accessibilityValue == "23 new")
+    }
+
+    /// One digit is a circle, more digits a longer pill, past 99 "99+", and
+    /// zero is no badge at all.
+    @Test func theBadgeReadsLikeANotificationBadge() {
+        let badge = NotificationCountBadge()
+        #expect(badge.text == nil, "hidden until it has something to count")
+        badge.setCount(3)
+        #expect(badge.text == "3")
+        #expect(badge.intrinsicContentSize == CGSize(width: NotificationCountBadge.height,
+                                                     height: NotificationCountBadge.height))
+        badge.setCount(23)
+        #expect(badge.intrinsicContentSize.width > NotificationCountBadge.height)
+        badge.setCount(1200)
+        #expect(badge.text == "99+")
+        badge.setCount(0)
+        #expect(badge.isHidden)
+    }
+}
