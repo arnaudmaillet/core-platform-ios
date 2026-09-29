@@ -1,5 +1,6 @@
 import CoreModels
 import FeedInterface
+import MediaCore
 import PostGrid
 import UIKit
 
@@ -45,6 +46,7 @@ enum ForYouRowOrigins {
         page: ForYouGridPage,
         host: UIView,
         pagePicture: UIImage?,
+        pictures: StoryPictureSource? = nil,
         closeStaged: @escaping () -> Void = {}
     ) -> SnapFeedHeroOrigin? {
         guard let first = story.posts.first else { return nil }
@@ -75,10 +77,49 @@ enum ForYouRowOrigins {
             // the cross-dissolve. Without it the face grows into the page and
             // the page takes over at the landing — still the right motion.
             pagePicture: pagePicture,
+            // ⚠️ AND THE PICTURE OF ANY OF THEIR POSTS, loaded when the peek
+            // above misses — which it usually did: a friend's posts are drawn
+            // nowhere on this screen, so nothing had loaded them, and the face
+            // flew into the page and back without the post's media ever in the
+            // window. The media now dissolves over the face as it grows, and
+            // the face over the media the viewer ended on as it shrinks — the
+            // map marker's arrangement.
+            pagePictureOf: pictures.map { storyPictures(of: story.posts, from: $0) },
             willStageDismissal: { [weak rails, weak page] in
                 stageClose(page: page, then: closeStaged) { rails?.bringStoryIntoView(author) }
             }
         )
+    }
+
+    /// Where a story's pictures come from: the pipeline that loads them, and
+    /// the screen's own synchronous read of its cache.
+    ///
+    /// The read is the SCREEN's, not made here: every cell on For You peeks
+    /// the pipeline's cache from a UIKit-isolated method, which the compiler
+    /// accepts with a warning, and the same call from this plain main-actor
+    /// type is an error.
+    struct StoryPictureSource {
+        let pipeline: ImagePipeline
+        let peek: (URL) -> UIImage?
+    }
+
+    /// A story's post pictures: from memory when they are there, loaded — and
+    /// handed over late, once — when they are not
+    /// (`SnapFeedHeroOrigin.pagePictureOf`).
+    static func storyPictures(
+        of posts: [GalleryPost], from source: StoryPictureSource
+    ) -> (PostID, @escaping (UIImage) -> Void) -> UIImage? {
+        let pipeline = source.pipeline
+        let peek = source.peek
+        return { id, late in
+            guard let url = posts.first(where: { $0.id == id })?.thumbnailURL else { return nil }
+            if let cached = peek(url) { return cached }
+            Task { @MainActor in
+                guard let image = try? await pipeline.image(for: url) else { return }
+                late(image)
+            }
+            return nil
+        }
     }
 
     /// The window a story opens and closes through: the map marker's text-post
@@ -142,6 +183,9 @@ enum ForYouRowOrigins {
         let id = tapped.id
         let hasMedia = tapped.kind != .text
         let cover = rails.cardCover(for: id)
+        // Every card in the row is the same size, so the one measured at the
+        // tap stands in for a close that finds the card out of its row.
+        let tappedSize = rails.cardFrame(for: id, in: rails)?.size
         return SnapFeedHeroOrigin(
             post: tapped,
             stream: stream,
@@ -161,7 +205,17 @@ enum ForYouRowOrigins {
             textReveal: cardReveal(
                 for: tapped, cover: cover, rails: rails, page: page, closeStaged: closeStaged
             ),
-            restingOverlay: { ForYouFollowingCardCell.makeOverlay(for: tapped) },
+            // A close hands the page's playback to the card before the flight
+            // card goes, and waits for it to draw — no thumbnail between the
+            // two (`ForYouRailsView.adoptLandingPlayback`).
+            adoptLandingLiveMedia: { [weak rails] view in rails?.adoptLandingPlayback(view, for: id) },
+            landingMediaIsReady: { [weak rails] in rails?.isLandingPlaybackReady(for: id) ?? true },
+            // Wrapped at the card's own size, and only ever posed after — see
+            // `ForYouCardCaptionOverlay`.
+            restingOverlay: { [weak rails] in
+                let size = rails.flatMap { $0.cardFrame(for: id, in: $0)?.size } ?? tappedSize
+                return ForYouFollowingCardCell.makeOverlay(for: tapped, restingSize: size)
+            },
             willStageDismissal: { [weak rails, weak page] in
                 stageClose(page: page, then: closeStaged) { rails?.bringCardIntoView(id) }
             }

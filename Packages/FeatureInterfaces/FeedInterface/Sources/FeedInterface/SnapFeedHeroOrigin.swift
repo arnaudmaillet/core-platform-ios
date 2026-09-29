@@ -320,6 +320,39 @@ public struct SnapFeedHeroOrigin {
     /// and row: the card is the source's own picture, and a close blends only
     /// when it leaves from another post.
     public let pagePicture: UIImage?
+    /// The picture of ANY post in `stream`, for a source that is not drawing
+    /// the post (`pagePicture`'s case) — answered from memory when it can be,
+    /// and otherwise LOADED: `nil` now, and the picture handed to the callback
+    /// when it lands (at most once), so a card already in the air can still
+    /// dissolve into it.
+    ///
+    /// ⚠️ `pagePicture` ALONE WAS A PEEK AT A CACHE, and for the one source
+    /// that needs it the cache is usually cold: a friend's posts are drawn
+    /// nowhere on the screen their face sits on, so nothing had ever loaded
+    /// them. The face flew as a big disc into the page and back, the post's
+    /// media nowhere in the window at either end — filmed on For You's
+    /// stories. It also answers for the post the viewer ENDED on, which a
+    /// close needs whenever that page has no still of its own (a video).
+    ///
+    /// Setting it marks the source as not drawing the post, like
+    /// `pagePicture` does, whether or not it has an answer yet. `nil` is
+    /// every source that draws its post.
+    public let pagePictureOf: ((PostID, @escaping (UIImage) -> Void) -> UIImage?)?
+    /// Takes the flight's live surface at a CLOSE's landing, so the item the
+    /// card lands on is already playing the frame the card was showing when
+    /// the card is taken away — `ZoomTransitionSource.zoomAdoptLiveMediaView`,
+    /// for a source outside this feature.
+    ///
+    /// ⚠️ WITHOUT IT A PLAYING ITEM LANDS ON ITS THUMBNAIL. The card goes, the
+    /// item under it is still showing the poster it rested on while its row
+    /// was covered, and its own player starts only once the screen is back —
+    /// a flash of the thumbnail between two frames of video. Filmed on For
+    /// You's Following cards. `nil` keeps today's landing.
+    public let adoptLandingLiveMedia: ((UIView) -> Void)?
+    /// Whether the item the close lands on is drawing yet — the card is held
+    /// over it until it is (`ZoomTransitionSource.zoomLandingMediaIsReady`).
+    /// `nil`: nothing to wait for.
+    public let landingMediaIsReady: (() -> Bool)?
     /// The source's FURNITURE, drawn fresh — what sits over the picture at
     /// rest (a card's caption over its foot). The card wears it at the source
     /// end and the flight fades it as the card grows, the way a brick's
@@ -353,6 +386,9 @@ public struct SnapFeedHeroOrigin {
         textReveal: TextRevealOrigin? = nil,
         cornerRadius: CGFloat? = nil,
         pagePicture: UIImage? = nil,
+        pagePictureOf: ((PostID, @escaping (UIImage) -> Void) -> UIImage?)? = nil,
+        adoptLandingLiveMedia: ((UIView) -> Void)? = nil,
+        landingMediaIsReady: (() -> Bool)? = nil,
         restingOverlay: (() -> UIView?)? = nil,
         willStageDismissal: @escaping () -> Void = {}
     ) {
@@ -370,6 +406,9 @@ public struct SnapFeedHeroOrigin {
         self.textReveal = textReveal
         self.cornerRadius = cornerRadius
         self.pagePicture = pagePicture
+        self.pagePictureOf = pagePictureOf
+        self.adoptLandingLiveMedia = adoptLandingLiveMedia
+        self.landingMediaIsReady = landingMediaIsReady
         self.restingOverlay = restingOverlay
         self.willStageDismissal = willStageDismissal
     }
