@@ -138,6 +138,12 @@ struct ForYouRowsTests {
             PushedScreenHeader.searchItemIdentifier
         ])
         let posts = [post("a", by: "pal", at: 2), post("b", by: "pal", at: 1)]
+        // Hosted, so "no header" is the layout's answer and not an off-screen
+        // collection view's (see the sectioned test below).
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 4000))
+        window.rootViewController = list
+        window.isHidden = false
+        defer { window.isHidden = true }
         list.render(.content(posts), newPosts: [])
         list.view.layoutIfNeeded()
         #expect(list.posts.map(\.id.rawValue) == ["a", "b"], "one after another, nothing regrouped")
@@ -154,6 +160,14 @@ struct ForYouRowsTests {
             post("old-1", by: "bo", at: 5), post("new-1", by: "bo", at: 9),
             post("old-2", by: "cy", at: 4), post("new-2", by: "cy", at: 8)
         ]
+        // In a WINDOW, tall enough for every row: a collection view off
+        // screen realizes no supplementary views, so there would be no header
+        // to read. Local, and hidden before it goes — a visible window held
+        // past the test dies with the suite (`visible-window-suite-release`).
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 4000))
+        window.rootViewController = list
+        window.isHidden = false
+        defer { window.isHidden = true }
         list.render(.content(posts), newPosts: [PostID("new-1"), PostID("new-2")])
         list.view.layoutIfNeeded()
         #expect(list.posts.map(\.id.rawValue) == ["new-1", "new-2", "old-1", "old-2"])
@@ -168,6 +182,10 @@ struct ForYouRowsTests {
     @Test func aListThatIsAllNewGoesUntitled() {
         let list = makeList(.following)
         let posts = [post("n1", by: "bo", at: 2), post("n2", by: "bo", at: 1)]
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 4000))
+        window.rootViewController = list
+        window.isHidden = false
+        defer { window.isHidden = true }
         list.render(.content(posts), newPosts: [PostID("n1"), PostID("n2")])
         list.view.layoutIfNeeded()
         #expect(list.debugNewSectionCount == 0)
