@@ -15,6 +15,67 @@ import UIKit
 /// the flush-pill look, is that an author change re-negotiates the item's
 /// size — a settle-time event, never mid-scroll.
 final class SnapAuthorIdentityView: UIView {
+    /// What the pill's trailing glyph says about the viewer and the author.
+    ///
+    /// Only `.follow` is an ACTION (the "+"). The other two are STATE, drawn so
+    /// following someone does not simply make the pill forget it — and so a
+    /// friend (a mutual follow) reads apart from a one-way follow. A state
+    /// glyph takes no tap of its own: it falls through to the pill, which
+    /// opens the author's profile, where unfollowing lives.
+    enum FollowBadge: Equatable, Sendable {
+        /// Nothing drawn: the viewer themself, someone blocked, a relation not
+        /// known yet, or a host that offers no follow at all.
+        case none
+        /// "+": the viewer does not follow them. A tap follows.
+        case follow
+        /// The viewer follows them; they do not follow back.
+        case following
+        /// Both follow each other.
+        case friends
+
+        /// Part of the bar item's identifier: a different glyph is a different
+        /// item, so the bar morphs between them (`authorItemIdentifier`).
+        var identifierSuffix: String {
+            switch self {
+            case .none: ""
+            case .follow: ".follow"
+            case .following: ".following"
+            case .friends: ".friends"
+            }
+        }
+
+        /// The symbols, chosen from what iOS 26 ships:
+        /// - `plus` — the action, as before.
+        /// - `person.fill.checkmark` — a person, confirmed: the most literal
+        ///   "you follow them" in the catalogue (the `.badge.checkmark`
+        ///   variants read as a verified avatar, and their badge is too small
+        ///   to read at this size).
+        /// - `person.2.fill` — two people: the app already means "Friends" by
+        ///   it (the map's Friends filter), and it is the one symbol that says
+        ///   the relation goes BOTH ways.
+        var symbolName: String? {
+            switch self {
+            case .none: nil
+            case .follow: "plus"
+            case .following: "person.fill.checkmark"
+            case .friends: "person.2.fill"
+            }
+        }
+
+        /// The person symbols are wider than the "+" at the same point size;
+        /// a step smaller keeps them to the "+"'s optical weight in the pill.
+        var pointSize: CGFloat { self == .follow ? 15 : 13 }
+
+        var accessibilityLabel: String? {
+            switch self {
+            case .none: nil
+            case .follow: "Follow"
+            case .following: "Following"
+            case .friends: "Friends"
+            }
+        }
+    }
+
     /// Matches the bar's standard control height.
     private static let height: CGFloat = 40
     /// The fixed height of the bar's own item wrapper on iOS 26 — the box the
@@ -62,13 +123,13 @@ final class SnapAuthorIdentityView: UIView {
     /// allowed to be squeezed to nothing before the handle gives anything.
     var widthKeepingHandleWhole: CGFloat {
         let avatarBreathing = (Self.barItemWrapperHeight - AvatarImageView.barDiameter) / 2
-        // A hidden "+" takes no width and no spacing: the stack skips both.
+        // A hidden badge takes no width and no spacing: the stack skips both.
         let follow = followButton.isHidden
             ? 0
             : Spacing.sm + followButton.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
         let chrome = AvatarImageView.barDiameter
             + Spacing.sm                // avatar → labels
-            + follow                    // labels → follow, and the "+" itself
+            + follow                    // labels → badge, and the glyph itself
             + avatarBreathing + Spacing.sm   // the row's own leading/trailing insets
         return chrome + ceil(metaLabel.intrinsicContentSize.width)
     }
@@ -82,7 +143,8 @@ final class SnapAuthorIdentityView: UIView {
 
     /// Called when the identity is tapped, with the shown author.
     var onAuthorTapped: ((ProfileID) -> Void)?
-    /// Called when the follow icon is tapped, with the shown author.
+    /// Called when the "+" is tapped, with the shown author. Never for a
+    /// state glyph (`FollowBadge`): those take no tap of their own.
     var onFollowTapped: ((ProfileID) -> Void)?
 
     /// The author's INITIALS, always drawn — the app's avatar contract:
@@ -147,16 +209,10 @@ final class SnapAuthorIdentityView: UIView {
             label.layer.shadowOffset = .zero
         }
 
-        var followConfig = UIButton.Configuration.plain()
-        followConfig.image = UIImage(systemName: "plus")?
-            .withConfiguration(UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold))
-        followConfig.baseForegroundColor = .label
-        followConfig.contentInsets = .zero
-        followButton.configuration = followConfig
-        followButton.accessibilityLabel = "Follow"
+        applyFollowBadge()
         followButton.addAction(UIAction { [weak self] _ in
-            guard let id = self?.authorID else { return }
-            self?.onFollowTapped?(id)
+            guard let self, self.followBadge == .follow, let id = self.authorID else { return }
+            self.onFollowTapped?(id)
         }, for: .primaryActionTriggered)
 
         for view in [nameLabel, namePlaceholder, metaLabel, metaPlaceholder] {
@@ -298,18 +354,18 @@ final class SnapAuthorIdentityView: UIView {
     var shownAuthor: FeedItemDisplayModel? { renderedModel }
 
     /// Takes on everything the HOST decided about `other` — its width cap,
-    /// compactness, shadow, follow button and tap handlers — but not its
+    /// compactness, shadow, follow badge and tap handlers — but not its
     /// author. For a fresh pill replacing `other` in the bar.
     ///
-    /// The follow button's visibility is inherited as a DEFAULT only: whether
-    /// the "+" is offered is a fact about the author, so a host that knows
-    /// the new author's relation sets it again (`setFollowHidden`).
+    /// The badge is inherited as a DEFAULT only: what it says is a fact about
+    /// the author, so a host that knows the new author's relation sets it
+    /// again (`setFollowBadge`).
     func inheritChrome(from other: SnapAuthorIdentityView) {
         onAuthorTapped = other.onAuthorTapped
         onFollowTapped = other.onFollowTapped
-        isFollowHidden = other.isFollowHidden
+        followBadge = other.followBadge
         isCompact = other.isCompact
-        followButton.isHidden = isFollowHidden || isCompact
+        applyFollowBadge()
         applyLabelVisibility()
         maxWidthConstraint?.constant = other.maxWidthConstraint?.constant ?? Self.maxWidth
         minWidthConstraint?.isActive = other.minWidthConstraint?.isActive ?? true
@@ -394,19 +450,39 @@ final class SnapAuthorIdentityView: UIView {
     /// The face `setPerson` last asked for — the arrival guard for its fetch.
     private var personAvatarURL: URL?
 
-    /// Withholds the "+". A conversation offers no follow from its header
+    /// What the trailing glyph says. A conversation draws none from its header
     /// (the correspondent's profile is one tap away, and that is where
-    /// following lives); the snap feed withholds it from an author the viewer
-    /// already follows, from the viewer themself, and while it does not know.
-    func setFollowHidden(_ hidden: Bool) {
-        isFollowHidden = hidden
-        followButton.isHidden = hidden || isCompact
+    /// following lives); the snap feed draws the viewer's relation to the
+    /// author, and none for the viewer themself or while it does not know.
+    func setFollowBadge(_ badge: FollowBadge) {
+        guard badge != followBadge else { return }
+        followBadge = badge
+        applyFollowBadge()
     }
 
-    /// Whether the "+" is on offer — what `setFollowHidden` last said.
-    var offersFollow: Bool { !isFollowHidden }
+    /// Whether the "+" is on offer.
+    var offersFollow: Bool { followBadge == .follow }
 
-    private var isFollowHidden = false
+    /// The pill's own default is the "+", as it always was: a host that offers
+    /// no follow says so (`setFollowBadge(.none)`).
+    private(set) var followBadge: FollowBadge = .follow
+
+    /// Draws `followBadge`, in place. The glyph is a plain button: only the
+    /// "+" takes touches — a state glyph lets them through to the pill's own
+    /// tap (the author's profile), which is the natural reading of tapping
+    /// someone's "friends" mark and keeps unfollowing where it already lives.
+    private func applyFollowBadge() {
+        var config = UIButton.Configuration.plain()
+        config.image = followBadge.symbolName.flatMap { UIImage(systemName: $0) }?
+            .withConfiguration(UIImage.SymbolConfiguration(pointSize: followBadge.pointSize, weight: .semibold))
+        config.baseForegroundColor = .label
+        config.contentInsets = .zero
+        followButton.configuration = config
+        followButton.accessibilityLabel = followBadge.accessibilityLabel
+        followButton.isUserInteractionEnabled = followBadge == .follow
+        followButton.accessibilityTraits = followBadge == .follow ? .button : .staticText
+        followButton.isHidden = followBadge == .none || isCompact
+    }
 
     @objc private func authorTapped() {
         guard let authorID else { return }
@@ -430,7 +506,7 @@ final class SnapAuthorIdentityView: UIView {
     /// COMPACT: avatar + display name only, under a tighter width cap — the
     /// form the pill takes while the sort selector shares the trailing run.
     ///
-    /// It sheds the meta line (@handle · age) and the follow "+", both of
+    /// It sheds the meta line (@handle · age) and the follow badge, both of
     /// which belong to the resting page's chrome: with the comments open the
     /// author is context for what you are reading, not the thing you are
     /// acting on, and the affordances for acting on them are a tap away in
@@ -441,7 +517,7 @@ final class SnapAuthorIdentityView: UIView {
         isCompact = compact
         let apply = {
             self.applyLabelVisibility()
-            self.followButton.isHidden = compact || self.isFollowHidden
+            self.followButton.isHidden = compact || self.followBadge == .none
             self.maxWidthConstraint?.constant = compact ? Self.compactMaxWidth : Self.maxWidth
             // The cold-start floor is a RESTING metric (it holds the pill
             // open while the name hydrates). Compact is only ever entered

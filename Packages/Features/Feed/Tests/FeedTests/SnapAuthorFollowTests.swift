@@ -9,8 +9,10 @@ import UIKit
 /// It used to route to the author's profile, and it was drawn for everybody —
 /// the people the viewer follows and the viewer themself included. Now it is
 /// offered only when the graph says the viewer does not follow the author, and
-/// a tap follows them in place. The "+" is part of the item's identifier, so
-/// its coming and going is a new item to the bar: the native morph.
+/// a tap follows them in place. Once followed the pill does not forget it: the
+/// "+" becomes the followed mark, or the FRIENDS mark when the author follows
+/// back. The badge is part of the item's identifier, so every change of glyph
+/// is a new item to the bar: the native morph.
 @MainActor
 struct SnapAuthorFollowTests {
     private static func feed(
@@ -55,10 +57,10 @@ struct SnapAuthorFollowTests {
 
         #expect(try Self.pill(feed).offersFollow == false)
         #expect(try Self.authorItem(feed).identifier
-                == SnapFeedViewController.authorItemIdentifier(for: ProfileID("prof-1"), offersFollow: false))
+                == SnapFeedViewController.authorItemIdentifier(for: ProfileID("prof-1"), badge: .none))
     }
 
-    @Test(arguments: [FollowRelation.following, .viewer, .blocked])
+    @Test(arguments: [FollowRelation.following, .mutual, .viewer, .blocked])
     func anAuthorTheViewerCannotFollowOffersNoFollow(_ relation: FollowRelation) throws {
         let feed = Self.feed()
         feed.setFollowRelation(relation, for: ProfileID("prof-1"))
@@ -74,7 +76,7 @@ struct SnapAuthorFollowTests {
 
         #expect(try Self.pill(feed).offersFollow)
         #expect(try Self.authorItem(feed).identifier
-                == SnapFeedViewController.authorItemIdentifier(for: ProfileID("prof-2"), offersFollow: true))
+                == SnapFeedViewController.authorItemIdentifier(for: ProfileID("prof-2"), badge: .follow))
     }
 
     /// The answer arriving for the author ON the pill re-draws it: a fresh item,
@@ -127,13 +129,90 @@ struct SnapAuthorFollowTests {
         let followed = try Self.authorItem(feed)
         #expect(followed !== offered)
         #expect(followed.identifier
-                == SnapFeedViewController.authorItemIdentifier(for: ProfileID("prof-2"), offersFollow: false))
+                == SnapFeedViewController.authorItemIdentifier(for: ProfileID("prof-2"), badge: .following))
         #expect(try Self.pill(feed).offersFollow == false)
+        #expect(try Self.pill(feed).followBadge == .following, "a follow is drawn, not forgotten")
         for _ in 0..<200 where graph.follows.isEmpty {
             try await Task.sleep(for: .milliseconds(5))
         }
         #expect(graph.follows == [ProfileID("prof-2")])
         #expect(feed.followRelationsByAuthor[ProfileID("prof-2")] == .following)
+    }
+
+    /// Each relation draws its own badge, under its own identifier — so a
+    /// friend reads apart from a one-way follow, and the bar morphs between
+    /// any two of them.
+    @Test(arguments: [
+        (FollowRelation.notFollowing, SnapAuthorIdentityView.FollowBadge.follow),
+        (.followedBy, .follow),
+        (.following, .following),
+        (.mutual, .friends),
+        (.viewer, .none),
+        (.blocked, .none),
+    ])
+    func eachRelationDrawsItsOwnBadge(
+        _ relation: FollowRelation, _ badge: SnapAuthorIdentityView.FollowBadge
+    ) throws {
+        let feed = Self.feed()
+        feed.setFollowRelation(relation, for: ProfileID("prof-2"))
+        feed.showAuthor(Self.model(authorID: "prof-2"))
+
+        #expect(try Self.pill(feed).followBadge == badge)
+        #expect(try Self.authorItem(feed).identifier
+                == SnapFeedViewController.authorItemIdentifier(for: ProfileID("prof-2"), badge: badge))
+    }
+
+    @Test func theFourBadgesAreFourIdentifiers() {
+        let badges: [SnapAuthorIdentityView.FollowBadge] = [.none, .follow, .following, .friends]
+        let identifiers = Set(badges.map {
+            SnapFeedViewController.authorItemIdentifier(for: ProfileID("prof-2"), badge: $0)
+        })
+        #expect(identifiers.count == badges.count)
+    }
+
+    /// Following someone who already follows the viewer makes a FRIEND, and
+    /// the optimistic draw says so at once.
+    @Test func followingBackDrawsTheFriendsMark() async throws {
+        let graph = FollowGraphStub()
+        let feed = Self.feed(graph: graph)
+        feed.setFollowRelation(.followedBy, for: ProfileID("prof-2"))
+        feed.showAuthor(Self.model(authorID: "prof-2"))
+        #expect(try Self.pill(feed).offersFollow, "following back is a follow")
+
+        feed.followAuthor(ProfileID("prof-2"))
+
+        #expect(try Self.pill(feed).followBadge == .friends)
+        #expect(feed.followRelationsByAuthor[ProfileID("prof-2")] == .mutual)
+        for _ in 0..<200 where graph.follows.isEmpty {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(graph.follows == [ProfileID("prof-2")])
+    }
+
+    /// A state mark is not an action: it takes no touch, so a tap on it is a
+    /// tap on the pill (the profile), and it never follows.
+    @Test(arguments: [SnapAuthorIdentityView.FollowBadge.following, .friends])
+    func aStateMarkTakesNoTap(_ badge: SnapAuthorIdentityView.FollowBadge) throws {
+        let pill = SnapAuthorIdentityView()
+        pill.setFollowBadge(badge)
+        let glyph = try #require(Self.badgeButton(in: pill))
+
+        #expect(glyph.isHidden == false)
+        #expect(glyph.isUserInteractionEnabled == false)
+        #expect(glyph.accessibilityLabel == badge.accessibilityLabel)
+
+        pill.setFollowBadge(.follow)
+        #expect(glyph.isUserInteractionEnabled, "the \"+\" is the one badge that acts")
+        pill.setFollowBadge(.none)
+        #expect(glyph.isHidden)
+    }
+
+    private static func badgeButton(in view: UIView) -> UIButton? {
+        for sub in view.subviews {
+            if let button = sub as? UIButton { return button }
+            if let found = badgeButton(in: sub) { return found }
+        }
+        return nil
     }
 
     /// A refused follow puts the "+" back.
@@ -172,6 +251,29 @@ struct SnapAuthorFollowTests {
             try await Task.sleep(for: .milliseconds(5))
         }
         #expect(try Self.pill(feed).offersFollow)
+    }
+
+    /// A friend unfollowed elsewhere still follows the viewer: the "+" comes
+    /// back, and following again from anywhere makes a friend again.
+    @Test func aFriendUnfollowedElsewhereStillFollowsTheViewer() async throws {
+        let events = FollowGraphEvents()
+        let feed = Self.feed(events: events)
+        feed.setFollowRelation(.mutual, for: ProfileID("prof-2"))
+        feed.showAuthor(Self.model(authorID: "prof-2"))
+        #expect(try Self.pill(feed).followBadge == .friends)
+
+        events.publish(FollowChange(profileID: ProfileID("prof-2"), isFollowing: false))
+        for _ in 0..<200 where (try? Self.pill(feed).followBadge) == .friends {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(try Self.pill(feed).followBadge == .follow)
+        #expect(feed.followRelationsByAuthor[ProfileID("prof-2")] == .followedBy)
+
+        events.publish(FollowChange(profileID: ProfileID("prof-2"), isFollowing: true))
+        for _ in 0..<200 where (try? Self.pill(feed).followBadge) == .follow {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(try Self.pill(feed).followBadge == .friends)
     }
 
     /// An unfollow does not make the viewer themself, or someone they block,

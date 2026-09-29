@@ -305,33 +305,49 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileViewe
         // your own id) offers Edit, never Follow.
         guard viewer != profileID else { return .me }
 
+        let status = try await relationStatus(from: viewer, to: profileID)
+        // `.mutual` also means the viewer follows the target. `.blocking`
+        // is exclusive with the follow states on the wire (blocking tears
+        // the edges down), so a blocked profile reports isFollowing false —
+        // which is also what the UI wants: Unblock, not Unfollow.
+        let isFollowing = status == .following || status == .mutual
+        return .other(
+            isFollowing: isFollowing,
+            isMutual: status == .mutual,
+            isBlocked: status == .blocking
+        )
+    }
+
+    /// Read off the wire status directly rather than off `relationship(for:)`:
+    /// a follow affordance needs the INBOUND half too (`.followedBy` — following
+    /// them back makes a friend), which the profile header's relationship never
+    /// needed and does not carry.
+    public func followRelation(to profileID: ProfileID) async throws -> FollowRelation {
+        let viewer = try await resolveViewerProfileID()
+        guard viewer != profileID else { return .viewer }
+        return switch try await relationStatus(from: viewer, to: profileID) {
+        case .blocking: .blocked
+        case .mutual: .mutual
+        case .following: .following
+        case .followedBy: .followedBy
+        // `.blockedBy` is not surfaced (platforms don't tell you), and an
+        // unknown status is no edge at all.
+        default: .notFollowing
+        }
+    }
+
+    private func relationStatus(
+        from viewer: ProfileID, to profileID: ProfileID
+    ) async throws -> SocialGraph_V1_RelationStatus {
         var request = SocialGraph_V1_GetRelationStatusRequest()
         request.actorID = viewer.rawValue
         request.targetID = profileID.rawValue
         let response = await socialGraphClient.getRelationStatus(request: request, headers: [:])
         switch response.result {
         case .success(let view):
-            // `.mutual` also means the viewer follows the target. `.blocking`
-            // is exclusive with the follow states on the wire (blocking tears
-            // the edges down), so a blocked profile reports isFollowing false —
-            // which is also what the UI wants: Unblock, not Unfollow.
-            let isFollowing = view.status == .following || view.status == .mutual
-            return .other(
-                isFollowing: isFollowing,
-                isMutual: view.status == .mutual,
-                isBlocked: view.status == .blocking
-            )
+            return view.status
         case .failure(let error):
             throw ProfileError.transport(message: error.message ?? "code \(error.code)")
-        }
-    }
-
-    public func followRelation(to profileID: ProfileID) async throws -> FollowRelation {
-        switch try await relationship(for: profileID) {
-        case .me: .viewer
-        case .other(_, _, isBlocked: true): .blocked
-        case .other(isFollowing: true, _, _): .following
-        case .other: .notFollowing
         }
     }
 

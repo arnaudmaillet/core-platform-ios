@@ -229,6 +229,106 @@ struct SnapPageRenderSpecTests {
         #expect(isLight(sample) == false, "the ground behind a media page is light: \(sample)")
     }
 
+    /// ⚠️ A TEXT PAGE FOLLOWS THE DEVICE LIVE, not only when it is built.
+    ///
+    /// The reported defect: switching the phone to dark on a text page left the
+    /// ground and the text light until the feed was closed and reopened — the
+    /// page's theme is an EXPLICIT style copied off the window when it was
+    /// applied, and an explicit style is exactly what a later trait change
+    /// cannot get through. Both directions, so a page that simply went dark
+    /// and stayed there cannot pass.
+    @Test func aSettledTextPageFollowsTheDeviceWhenItChanges() {
+        let (feed, window) = feed([text("a"), text("b")])
+        defer { takeDown(window) }
+        _ = feed
+        #expect(isLight(colour(of: window, at: CGPoint(x: 195, y: 500))), "precondition: light device")
+
+        window.overrideUserInterfaceStyle = .dark
+        window.layoutIfNeeded()
+        let dark = colour(of: window, at: CGPoint(x: 195, y: 500))
+        #expect(isLight(dark) == false, "the text page stayed light on a dark device: \(dark)")
+
+        window.overrideUserInterfaceStyle = .light
+        window.layoutIfNeeded()
+        let light = colour(of: window, at: CGPoint(x: 195, y: 500))
+        #expect(isLight(light), "the text page stayed dark on a light device: \(light)")
+    }
+
+    /// And the page's CONTENT follows with it — the panel hosted inside the page
+    /// resolves its colours from the page, so it is asked directly rather than
+    /// through a pixel that the ground alone could answer.
+    @Test func aTextPagesPanelFollowsTheDeviceWhenItChanges() throws {
+        let (feed, window) = feed([text("a"), text("b")])
+        defer { takeDown(window) }
+        let panel = try #require(feed.children.first { $0.view.isDescendant(of: feed.view) })
+        #expect(panel.traitCollection.userInterfaceStyle == .light, "precondition: light device")
+
+        window.overrideUserInterfaceStyle = .dark
+        window.layoutIfNeeded()
+
+        #expect(panel.traitCollection.userInterfaceStyle == .dark)
+    }
+
+    /// A media page is dark whatever the device says — the other half of the
+    /// rule, which the live update must not undo.
+    @Test func aMediaPageStaysDarkWhenTheDeviceTurnsLight() {
+        let (feed, window) = feed([media("a"), text("b")])
+        defer { takeDown(window) }
+        _ = feed
+        window.overrideUserInterfaceStyle = .dark
+        window.layoutIfNeeded()
+        window.overrideUserInterfaceStyle = .light
+        window.layoutIfNeeded()
+
+        let sample = colour(of: window, at: CGPoint(x: 195, y: 500))
+        #expect(isLight(sample) == false, "a media page turned light with the device: \(sample)")
+    }
+
+    /// ⚠️ THE TOOLBAR'S GLASS IS DARK OVER A PHOTOGRAPH ON A LIGHT DEVICE.
+    ///
+    /// Its item platters are not hosted inside `UIToolbar` (iOS 26/27: a
+    /// floating-bar container beside it, under the navigation controller's
+    /// view), so a style set on the toolbar alone left them light — the
+    /// reported "chrome not always dark on media". Asked of the traits every
+    /// toolbar item actually RESOLVES with, wherever UIKit put it.
+    @Test func aMediaPagesToolbarItemsResolveDarkOnALightDevice() throws {
+        let controller = SnapFeedViewController(
+            viewModel: FeedViewModel(repository: QuietProvider()),
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+        )
+        let nav = UINavigationController(rootViewController: controller)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        defer { takeDown(window) }
+        window.overrideUserInterfaceStyle = .light
+        window.rootViewController = nav
+        window.isHidden = false
+        controller.loadViewIfNeeded()
+        controller.seedProjection([media("a"), text("b")])
+        window.layoutIfNeeded()
+        controller.debugRealizeVisibleCells()
+        window.layoutIfNeeded()
+        // The theme is re-applied at appearance, once the items are hosted.
+        controller.viewDidAppear(false)
+        window.layoutIfNeeded()
+
+        let items = (controller.toolbarItems ?? []).compactMap(\.customView)
+        try #require(!items.isEmpty)
+        for item in items where item.window != nil {
+            #expect(item.traitCollection.userInterfaceStyle == .dark,
+                    "a toolbar item over a photograph resolved \(item.traitCollection.userInterfaceStyle.rawValue)")
+        }
+        #expect(items.contains { $0.window != nil }, "no toolbar item was hosted: nothing was asked")
+    }
+
+    /// Hidden and emptied before the test returns: a visible window outliving
+    /// its test is laid out after it is freed (see the suites that crashed on
+    /// exactly that).
+    private func takeDown(_ window: UIWindow) {
+        window.isHidden = true
+        window.rootViewController = nil
+        window.layoutIfNeeded()
+    }
+
     /// The same, one page further on: the defect was reported after several
     /// changes, and a rule that only holds for the first is not the rule.
     @Test func theSecondPageChangeLooksLikeTheFirst() {
