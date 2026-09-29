@@ -3,10 +3,10 @@ import UIKit
 
 /// The sound sheet's head: the artwork that plays and pauses the sound, and
 /// what the sound is — nothing else. "Use this sound" and share are bar items
-/// of the sheet's native TOOLBAR, and the grid's door is "View all" under its
-/// first row (`SoundSheetMoreCell`).
+/// of the sheet's native TOOLBAR, and each section of posts has its own
+/// "View all" (`SoundSheetSectionHeaderView`).
 ///
-/// Laid out inside the section's side insets, as the first row's header — one
+/// Laid out inside its section's side insets (`SoundSheetHeaderCell`) — one
 /// gutter from the sheet's edge, on the tiles' left edge — at the ABSOLUTE
 /// height `fittingHeight` computes.
 final class SoundSheetHeaderView: UICollectionReusableView {

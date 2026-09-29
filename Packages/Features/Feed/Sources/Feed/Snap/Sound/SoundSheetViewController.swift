@@ -9,62 +9,73 @@ import PostGrid
 import UIKit
 
 /// The sound a post is set to, opened from the attribution at the foot of
-/// the feed: what it is, a listen, the posts set to it, and — in the sheet's
-/// native toolbar — "Use this sound", save and share.
+/// the feed: what it is, a listen, the posts set to it in three sections,
+/// and — in the sheet's native toolbar — "Use this sound", save and share.
 ///
 /// ```
 ///  ┌──────────────────────────────────────┐
 ///  │ ▔▔                                   │
 ///  │╭────╮  Veridis Quo                   │  the round artwork = play/pause
 ///  ││ ▶︎  │  Daft Punk                     │  (it turns while the sound plays)
-///  │╰────╯  0:30 · 7 posts                │
-///  │▢♪Original ▢Watching ▢                │  the first row
-///  │         View all 7 posts ⌄           │
-///  │(   Use this sound         )(🔖)(↑)   │  ← collapsed detent ends here:
-///  ├──────────────────────────────────────┤    the toolbar, row 2 under it
-///  │▢ ▢ ▢                                 │  large: the grid, whole
+///  │╰────╯  0:30 · 23 posts               │
+///  │Popular                   View all ›  │
+///  │▢♪Original ▢Watching ▢ ▢┆→            │  a horizontal row
+///  │(   Use this sound         )(🔖)(↑)   │  ← collapsed detent ends here
+///  ├──────────────────────────────────────┤
+///  │New                       View all ›  │  hidden at collapsed, fading in
+///  │▢ ▢ ▢ ▢┆→                             │  as the sheet grows (a row)
+///  │For you                   View all ›  │
+///  │▢ ▢ ▢                                 │  the rest, in the recommendation's
+///  │▢ ▢ ▢                                 │  order: a grid
 ///  └──────────────────────────────────────┘
 /// ```
 ///
+/// **THREE SECTIONS** (`SoundSheetSections`): the POPULAR posts (the
+/// original first, then the post watched), the NEW ones, then everything
+/// else FOR YOU. Each post once on the sheet. Each section's "View all"
+/// PUSHES its whole ranking as a grid INSIDE the sheet
+/// (`SoundSheetGalleryViewController`) and raises the sheet to large.
+///
 /// **ONE GUTTER** (`gutter`) is the sheet's side margin, the gap between tiles
-/// and the gap between rows, and the header stands on it too: sound, tiles and
-/// "View all" share one left edge. Every tile wears the same FIXED corner,
-/// never one concentric with the sheet's: the grid scrolls past the screen's
+/// and the gap between rows, and the header stands on it too: sound, titles
+/// and tiles share one left edge. Every tile wears the same FIXED corner,
+/// never one concentric with the sheet's: the posts scroll past the screen's
 /// corners at large (`SoundSheetTileCell.cornerRadius`).
 ///
 /// **PRESENTED INSIDE A NAVIGATION CONTROLLER** (`wrappedInSheet()`), for its
-/// toolbar alone — the bar is hidden. The actions are bar items, so they are
-/// UIKit's glass, not buttons of ours pinned to the bottom, and the grid
-/// scrolls on UNDER them behind the system's scroll-edge effect. Nothing here
-/// writes an alpha on that chrome (see memory `native-chrome-uikit-only`).
+/// toolbar and for the sections' pushes. The bar is hidden on this screen and
+/// shown on a pushed section (UIKit's `setNavigationBarHidden`). The actions
+/// are bar items, so they are UIKit's glass, not buttons of ours pinned to the
+/// bottom, and the posts scroll on UNDER them behind the system's scroll-edge
+/// effect. Nothing here writes an alpha on that chrome (see memory
+/// `native-chrome-uikit-only`).
 ///
 /// **THE COLLAPSED DETENT IS COMPUTED, NEVER MEASURED OFF THE LIVE SHEET**
-/// (`collapsedDetentHeight`): the sound's header, the first row and "View
-/// all" are pure arithmetic on the sheet's WIDTH and the text size, plus the
-/// toolbar's band — nothing that depends on how tall the sheet is right now.
-/// So the answer is the same at every visit to collapsed, and it is asked
-/// again (`invalidateDetents`) only when an INPUT changes: the post count
-/// crossing a row, the text size, the width, the band once known.
+/// (`collapsedDetentHeight`): the sound's header, the "Popular" title and its
+/// row are pure arithmetic on the sheet's WIDTH and the text size, plus the
+/// toolbar's band — nothing that depends on how tall the sheet is right now,
+/// nor on how many posts there are. So the answer is the same at every visit
+/// to collapsed, and it is asked again (`invalidateDetents`) only when an
+/// INPUT changes: the text size, the width, the band once known.
 ///
 /// ⚠️ **NEVER FROM A LAYOUT CALLBACK.** #296 re-measured the fold in
 /// `viewDidLayoutSubviews` and invalidated the detents inside `animateChanges`
 /// when it moved. A drag from the grabber lays the sheet out on every frame,
-/// the fold read there moved with the sheet (the "View all" row coming back
-/// mid-flight, a safe area caught between detents), and each re-resolve laid
-/// the sheet out again: a stack overflow (`EXC_BAD_ACCESS` code 2 in
+/// the fold read there moved with the sheet, and each re-resolve laid the
+/// sheet out again: a stack overflow (`EXC_BAD_ACCESS` code 2 in
 /// `invalidateDetents`), and between crashes a collapsed height that drifted
-/// from one visit to the next.
+/// from one visit to the next. The one thing a layout pass does here is WAKE
+/// the reveal (below), which writes an opacity and nothing else.
+///
+/// **THE REST FADES IN AS THE SHEET GROWS** (`SoundSheetReveal`): at the
+/// collapsed detent only the sound and the Popular row show; everything under
+/// them follows the sheet's DRAWN height — the finger, then the spring — to
+/// whole at 60% of the way to large. What is hidden cannot be tapped.
 ///
 /// **THE FEED STAYS ALIVE UNDER THE SHEET, AT EVERY DETENT.** Neither detent
 /// pauses the clip behind: a detent is where the sheet sits, not a choice to
 /// stop listening. (Large paused it for a while; the viewer asked for the post
 /// to keep playing, 2026-09-28.)
-///
-/// **"VIEW ALL" LEAVES THE GRID AT LARGE.** At large every post is on screen,
-/// so a control promising more would promise nothing — and one left between
-/// the first row and the second would cut the grid in two. It goes (the
-/// snapshot drops its section, animated) and comes back with the collapsed
-/// detent. The way down is the platform's: the grabber, or a drag.
 ///
 /// **FROM LARGE, A DRAG DOWN COMES BACK TO COLLAPSED**; a second one closes.
 ///
@@ -80,12 +91,13 @@ final class SoundSheetViewController: UIViewController {
         let caption: String?
         /// The post the sheet was opened from.
         let isCurrent: Bool
-        /// The post the sound was first published with — first in the grid.
+        /// The post the sound was first published with — first in "Popular".
         let isOriginal: Bool
-        /// Whether the post itself is known yet. The grid lists EVERY post set
+        /// Whether the post itself is known yet. The sheet lists EVERY post set
         /// to the sound, most of them outside the feed behind: those arrive as
         /// placeholders — so the sheet rises at once, at its final size — and
-        /// are filled in by `update(tiles:)` once the repository has them.
+        /// are filled in by `update(sections:tiles:)` once the repository has
+        /// them.
         let isLoaded: Bool
 
         init(
@@ -101,19 +113,18 @@ final class SoundSheetViewController: UIViewController {
         }
     }
 
-    /// The grid in three sections, so the fold has a place of its own: the
-    /// first row (under the sound, as its header), "View all" while there is
-    /// more to view and the sheet is collapsed, then the rest.
+    /// The sound's head, then the posts' sections in order.
     enum Section: Hashable, Sendable {
-        case firstRow, more, rest
+        case sound
+        case posts(SoundSheetSection.Kind)
     }
 
     /// ⚠️ A tile is identified by its POST, not by its content: a placeholder
-    /// filled in is the same item reconfigured, and an original that moves is
-    /// the same item moved.
+    /// filled in is the same item reconfigured. A post is on the sheet once
+    /// (`SoundSheetSections`), so its id is unique across the sections.
     enum Item: Hashable, Sendable {
+        case sound
         case tile(PostID)
-        case more
     }
 
     /// Whether the clip behind should pause: the preview is playing, or a
@@ -127,13 +138,13 @@ final class SoundSheetViewController: UIViewController {
     /// where it is and a dismissal flies back into the tile. Nil falls back to
     /// `onSelectPost`.
     var openFeedHero: ((_ postIDs: [PostID], _ host: UIViewController, _ origin: SnapFeedHeroOrigin) -> Void)?
-    /// The tiles' posts as the grid knows them — what the hero flies and the
+    /// The tiles' posts as the sheet knows them — what the hero flies and the
     /// new feed is seeded with.
     var galleryPost: ((PostID) -> GalleryPost?)?
     /// "Use this sound"; the sheet is already on its way out. Nil leaves the
     /// toolbar with share alone.
     var onUseSound: ((PostSound) -> Void)? {
-        didSet { if isViewLoaded { toolbarItems = makeToolbarItems() } }
+        didSet { if isViewLoaded { toolbarItems = makeToolbarItems(primary: true) } }
     }
     /// The sheet is gone, however it went.
     var onDismissed: (() -> Void)?
@@ -143,19 +154,22 @@ final class SoundSheetViewController: UIViewController {
     /// Under the grabber, before the sound starts.
     static let topInset: CGFloat = 24
     /// THE gutter: the sheet's side margin, between tiles, between rows — the
-    /// Upload picker's rule (`Spacing.sm` both ways), so the grid reads as
+    /// Upload picker's rule (`Spacing.sm` both ways), so the posts read as
     /// tiles on the sheet rather than a wall with a frame around it.
     static let gutter: CGFloat = Spacing.sm
-    /// Between the fold — "View all", or the first row when there is nothing
-    /// more — and the toolbar's band.
-    static let foldGap: CGFloat = Spacing.sm
-    /// Under the first row when there is no "View all": a little more than a
-    /// gutter, so the row does not sit on the bar.
-    static let singleRowFoldGap: CGFloat = Spacing.lg
+    /// Under a section's last tiles, before the next section's title.
+    static let sectionGap: CGFloat = Spacing.xl
+    /// Under the Popular row, above the toolbar's band: where the collapsed
+    /// detent ends.
+    static let foldGap: CGFloat = Spacing.lg
+    /// Tiles across a row's width: three whole and the fourth peeking — the
+    /// peek is what says the row scrolls.
+    static let rowTilesAcross: CGFloat = 3.4
 
     private let sound: PostSound
     private let authorHandle: String
     private let fallbackArtworkURL: URL?
+    private(set) var sections: [SoundSheetSection]
     private(set) var tiles: [Tile]
     private var tileByID: [PostID: Tile]
     private let imagePipeline: ImagePipeline
@@ -167,11 +181,19 @@ final class SoundSheetViewController: UIViewController {
     private weak var shareItem: UIBarButtonItem?
     private weak var useItem: UIBarButtonItem?
     private(set) weak var bookmarkItem: UIBarButtonItem?
+    /// Every bookmark item made — this screen's and a pushed section's — so a
+    /// save made on one shows on the other.
+    private let bookmarkItems = NSHashTable<UIBarButtonItem>.weakObjects()
+    /// The section a "View all" pushed, while it is up.
+    private(set) weak var pushedGallery: SoundSheetGalleryViewController?
 
     /// What the collapsed detent is made of, and its value (`collapsedHeight`)
     /// — set only by `refreshCollapsedMetrics`, never by a layout pass.
     private(set) var collapsedMetrics: CollapsedMetrics?
     private(set) var collapsedHeight: CGFloat?
+    /// The large detent's value, as the sheet's own resolution states it
+    /// (`maximumDetentValue`) — the far end of the reveal.
+    private var largeHeight: CGFloat?
     /// How often the collapsed detent was re-asked — what a test reads to
     /// prove that laying the sheet out never does it.
     private(set) var detentInvalidations = 0
@@ -183,6 +205,9 @@ final class SoundSheetViewController: UIViewController {
     private static var measuredToolbarBand: CGFloat?
     private var headerHeightCache: (key: String, height: CGFloat)?
     private(set) var isExpanded = false
+    /// What lies under the Popular row, fading with the sheet's height.
+    let reveal = SoundSheetReveal()
+    private var lastTracedReveal: Int?
     private var isPreviewing = false
     private var isCovering = false
     private var preview: AVPlayer?
@@ -194,6 +219,7 @@ final class SoundSheetViewController: UIViewController {
         sound: PostSound,
         authorHandle: String,
         fallbackArtworkURL: URL?,
+        sections: [SoundSheetSection],
         tiles: [Tile],
         imagePipeline: ImagePipeline,
         savedSounds: SavedSoundStore = SavedSoundStore()
@@ -201,6 +227,7 @@ final class SoundSheetViewController: UIViewController {
         self.sound = sound
         self.authorHandle = authorHandle
         self.fallbackArtworkURL = fallbackArtworkURL
+        self.sections = sections
         self.tiles = tiles
         self.tileByID = Dictionary(tiles.map { ($0.postID, $0) }, uniquingKeysWith: { first, _ in first })
         self.imagePipeline = imagePipeline
@@ -222,13 +249,18 @@ final class SoundSheetViewController: UIViewController {
         navigation.setNavigationBarHidden(true, animated: false)
         navigation.setToolbarHidden(false, animated: false)
         navigation.modalPresentationStyle = .pageSheet
+        // A pushed section's back button is the bare chevron: this screen has
+        // no title to lend it.
+        navigationItem.backButtonDisplayMode = .minimal
         if let sheet = navigation.sheetPresentationController {
             sheet.detents = [
                 // ⚠️ READS A STORED ANSWER, NOTHING ELSE: a resolver that lays
                 // out or loads a view runs inside the sheet's own resolution
-                // (memory `upload-media-picker`).
+                // (memory `upload-media-picker`). Keeping the large value it
+                // is handed is a plain store — it moves nothing.
                 .custom(identifier: Self.collapsedDetent) { [weak self] context in
-                    min(self?.collapsedHeight ?? 420, context.maximumDetentValue)
+                    self?.largeHeight = context.maximumDetentValue
+                    return min(self?.collapsedHeight ?? 420, context.maximumDetentValue)
                 },
                 .large(),
             ]
@@ -252,7 +284,7 @@ final class SoundSheetViewController: UIViewController {
         collectionView.delegate = self
         collectionView.contentInset.top = Self.topInset
         collectionView.translatesAutoresizingMaskIntoConstraints = false
-        // To the bottom edge, UNDER the toolbar: the grid goes on behind the
+        // To the bottom edge, UNDER the toolbar: the posts go on behind the
         // bar's glass, and the safe area (the bar's band) is its inset.
         view.addSubview(collectionView)
         NSLayoutConstraint.activate([
@@ -267,13 +299,23 @@ final class SoundSheetViewController: UIViewController {
         // presenter's window gives the width the sheet will have.
         sheetWidth = presentingViewController?.view.window?.bounds.width ?? view.bounds.width
         refreshCollapsedMetrics(reason: "load")
-        toolbarItems = makeToolbarItems()
+        toolbarItems = makeToolbarItems(primary: true)
         configureDataSource()
+        reveal.attach(to: view)
+        reveal.measure = { [weak self] in self?.measuredReveal() }
+        reveal.onChange = { [weak self] progress in self?.traceReveal(progress) }
         // A text size change moves the header and so the fold: an input.
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) {
             (controller: SoundSheetViewController, _: UITraitCollection) in
             controller.refreshCollapsedMetrics(reason: "text size")
         }
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        // Back from a pushed section: the bar goes with it — UIKit's API,
+        // animated with the pop.
+        navigationController?.setNavigationBarHidden(true, animated: animated)
     }
 
     override func viewIsAppearing(_ animated: Bool) {
@@ -293,6 +335,25 @@ final class SoundSheetViewController: UIViewController {
             }
         }
         refreshCollapsedMetrics(reason: "appearing")
+        // A pushed section left the sheet where the viewer took it.
+        reveal.set(isExpanded ? 1 : 0)
+        updateRevealLine()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        reveal.wake()
+    }
+
+    /// ⚠️ ONLY WAKES THE REVEAL AND PLACES ITS LINE — never a detent, never a
+    /// measure the detents read (see the type's note). A drag lays the sheet
+    /// out on every frame, and the release sets its final frame: either is
+    /// the sheet moving, and the reveal watches the drawn height until it is
+    /// still. Neither call lays anything out.
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        updateRevealLine()
+        reveal.wake()
     }
 
     override func viewWillTransition(to size: CGSize, with coordinator: any UIViewControllerTransitionCoordinator) {
@@ -304,9 +365,6 @@ final class SoundSheetViewController: UIViewController {
             refreshCollapsedMetrics(reason: "size")
         }
     }
-
-    // ⚠️ NO `viewDidLayoutSubviews` HERE, DELIBERATELY — see the type's note.
-    // The collapsed height is never re-read from a layout.
 
     // ⚠️ NO `preferredCornerRadius`: UIKit's own. Setting the device's radius
     // once the sheet had appeared made the corners pop from one value to the
@@ -336,6 +394,8 @@ final class SoundSheetViewController: UIViewController {
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
+        // Off screen (a section pushed over it, or gone): nothing to watch.
+        reveal.sleep()
         guard isSheetBeingDismissed else { return }
         setCovering(false)
         onDismissed?()
@@ -349,6 +409,10 @@ final class SoundSheetViewController: UIViewController {
     /// shared glass platter. Without a way to use the sound, save and share
     /// keep the trailing edge.
     ///
+    /// Made afresh for each screen that shows the toolbar — this one
+    /// (`primary`, the items a test reads) and a pushed section: a bar item
+    /// lives in one bar.
+    ///
     /// **"USE THIS SOUND" FILLS THE BAR BY AUTO LAYOUT, NOT BY ARITHMETIC.**
     /// There is no flexible-width bar item, and a `.prominent` title item's
     /// `width` is IGNORED on iOS 27 (set to 266, drawn at its title's ~144).
@@ -358,25 +422,26 @@ final class SoundSheetViewController: UIViewController {
     /// size or the OS's bar margins. Its own `.prominentGlass()` capsule is
     /// its background, so the item hides the shared one (no bubble in a
     /// bubble).
-    private func makeToolbarItems() -> [UIBarButtonItem] {
-        let share = UIBarButtonItem(
-            systemItem: .action,
-            primaryAction: UIAction { [weak self] _ in self?.share() }
-        )
+    private func makeToolbarItems(primary: Bool) -> [UIBarButtonItem] {
+        let share = UIBarButtonItem(systemItem: .action)
+        share.primaryAction = UIAction { [weak self, weak share] _ in self?.share(from: share) }
         share.accessibilityLabel = "Share sound"
-        shareItem = share
         // ⚠️ AN ACTION WITHOUT AN IMAGE, the glyph on the ITEM: an action's
         // image is re-applied to its item when it fires, and put the
         // "bookmark" outline back over the fill just set (measured: the fill
         // flashed during the press and was gone at rest).
         let bookmark = UIBarButtonItem(primaryAction: UIAction { [weak self] _ in self?.toggleSaved() })
-        bookmarkItem = bookmark
+        bookmarkItems.add(bookmark)
+        if primary {
+            shareItem = share
+            bookmarkItem = bookmark
+        }
         refreshBookmark()
         let trailing: [UIBarButtonItem] = [bookmark, .fixedSpace(), share]
         guard onUseSound != nil else { return [.flexibleSpace()] + trailing }
         let use = UIBarButtonItem(customView: makeUseButton())
         use.hidesSharedBackground = true
-        useItem = use
+        if primary { useItem = use }
         return [use, .fixedSpace()] + trailing
     }
 
@@ -430,10 +495,12 @@ final class SoundSheetViewController: UIViewController {
 
     private func refreshBookmark() {
         let saved = savedSounds.isSaved(sound.id)
-        bookmarkItem?.image = UIImage(systemName: bookmarkSymbol)
-        // The label follows the state, like the feed's: "Save" and "Saved"
-        // are different offers to a reader who cannot see the fill.
-        bookmarkItem?.accessibilityLabel = saved ? "Sound saved" : "Save sound"
+        for item in bookmarkItems.allObjects {
+            item.image = UIImage(systemName: bookmarkSymbol)
+            // The label follows the state, like the feed's: "Save" and "Saved"
+            // are different offers to a reader who cannot see the fill.
+            item.accessibilityLabel = saved ? "Sound saved" : "Save sound"
+        }
     }
 
     #if DEBUG
@@ -445,42 +512,59 @@ final class SoundSheetViewController: UIViewController {
 
     private func makeLayout() -> UICollectionViewCompositionalLayout {
         UICollectionViewCompositionalLayout { [weak self] index, environment in
-            switch self?.dataSource?.sectionIdentifier(for: index) ?? .firstRow {
-            case .firstRow:
-                // Row two follows one gutter down once "View all" has left
-                // (large). ⚠️ The header is ABSOLUTE, at the height the
-                // collapsed detent was computed with — a self-sizing header
-                // settles after an estimate, and the fold would move with it.
-                let section = Self.gridSection(environment, bottom: Self.gutter)
-                let header = NSCollectionLayoutBoundarySupplementaryItem(
+            // ⚠️ Every height is ABSOLUTE, at the value the collapsed detent
+            // was computed with — a self-sizing header settles after an
+            // estimate, and the fold would move with it.
+            let metrics = self?.collapsedMetrics
+            switch self?.dataSource?.sectionIdentifier(for: index) ?? .sound {
+            case .sound:
+                return Self.soundSection(height: metrics?.headerHeight ?? 112)
+            case .posts(let kind):
+                let section = kind.isRow
+                    ? Self.rowSection(environment)
+                    : Self.gridSection(environment, bottom: Spacing.xl)
+                section.boundarySupplementaryItems = [NSCollectionLayoutBoundarySupplementaryItem(
                     layoutSize: .init(
                         widthDimension: .fractionalWidth(1),
-                        heightDimension: .absolute(self?.collapsedMetrics?.headerHeight ?? 112)
+                        heightDimension: .absolute(metrics?.sectionHeaderHeight ?? 44)
                     ),
                     elementKind: UICollectionView.elementKindSectionHeader, alignment: .top
-                )
-                section.boundarySupplementaryItems = [header]
+                )]
                 return section
-            case .more:
-                let size = NSCollectionLayoutSize(
-                    widthDimension: .fractionalWidth(1), heightDimension: .absolute(SoundSheetMoreCell.height)
-                )
-                let section = NSCollectionLayoutSection(
-                    group: .horizontal(layoutSize: size, subitems: [NSCollectionLayoutItem(layoutSize: size)])
-                )
-                section.contentInsets = .init(
-                    top: 0, leading: Self.gutter, bottom: Self.foldGap, trailing: Self.gutter
-                )
-                return section
-            case .rest:
-                return Self.gridSection(environment, bottom: Spacing.xl)
             }
         }
     }
 
+    /// The sound's head, on the gutter.
+    private static func soundSection(height: CGFloat) -> NSCollectionLayoutSection {
+        let size = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .absolute(height))
+        let section = NSCollectionLayoutSection(
+            group: .vertical(layoutSize: size, subitems: [NSCollectionLayoutItem(layoutSize: size)])
+        )
+        section.contentInsets = .init(top: 0, leading: gutter, bottom: 0, trailing: gutter)
+        return section
+    }
+
+    /// A horizontal row of 3:4 tiles, one gutter apart, three and a peek
+    /// across; it snaps to a tile's leading edge.
+    private static func rowSection(_ environment: NSCollectionLayoutEnvironment) -> NSCollectionLayoutSection {
+        let width = environment.container.effectiveContentSize.width
+        let size = NSCollectionLayoutSize(
+            widthDimension: .absolute(rowTileWidth(width: width)),
+            heightDimension: .absolute(rowTileHeight(width: width))
+        )
+        let section = NSCollectionLayoutSection(
+            group: .horizontal(layoutSize: size, subitems: [NSCollectionLayoutItem(layoutSize: size)])
+        )
+        section.orthogonalScrollingBehavior = .continuousGroupLeadingBoundary
+        section.interGroupSpacing = gutter
+        section.contentInsets = .init(top: 0, leading: gutter, bottom: sectionGap, trailing: gutter)
+        return section
+    }
+
     /// Three columns of 3:4 tiles, one gutter from the sheet's sides and from
-    /// each other.
-    private static func gridSection(
+    /// each other — the "For you" grid, and a pushed section's gallery.
+    static func gridSection(
         _ environment: NSCollectionLayoutEnvironment, bottom: CGFloat
     ) -> NSCollectionLayoutSection {
         let item = NSCollectionLayoutItem(layoutSize: .init(
@@ -498,12 +582,23 @@ final class SoundSheetViewController: UIViewController {
         return section
     }
 
-    /// A tile's height on a sheet `width` wide: three columns and four
-    /// gutters across, each tile 3:4. What the grid lays out AND what the
-    /// collapsed detent counts — one function, so they cannot disagree.
+    /// A grid tile's height on a sheet `width` wide: three columns and four
+    /// gutters across, each tile 3:4.
     static func tileHeight(width: CGFloat) -> CGFloat {
         let column = (width - CGFloat(columns + 1) * gutter) / CGFloat(columns)
         return (max(0, column) * 4 / 3).rounded()
+    }
+
+    /// A row tile's width on a sheet `width` wide: a gutter at the leading
+    /// edge and between tiles, `rowTilesAcross` tiles across what is left.
+    static func rowTileWidth(width: CGFloat) -> CGFloat {
+        (max(0, width - 4 * gutter) / rowTilesAcross).rounded(.down)
+    }
+
+    /// A row tile's height: 3:4. What the rows lay out AND what the collapsed
+    /// detent counts — one function, so they cannot disagree.
+    static func rowTileHeight(width: CGFloat) -> CGFloat {
+        (rowTileWidth(width: width) * 4 / 3).rounded()
     }
 
     private func configureDataSource() {
@@ -513,22 +608,25 @@ final class SoundSheetViewController: UIViewController {
             guard let tile = self?.tileByID[id] else { return }
             cell.configure(tile, pipeline: pipeline)
         }
-        let moreRegistration = UICollectionView.CellRegistration<SoundSheetMoreCell, Item> { [weak self] cell, _, _ in
-            cell.configure(title: Self.moreTitle(posts: self?.tiles.count ?? 0))
-            cell.onTap = { [weak self] in self?.expand() }
+        let soundRegistration = UICollectionView.CellRegistration<SoundSheetHeaderCell, Item> {
+            [weak self] cell, _, _ in
+            self?.configure(cell.header)
         }
-        let headerRegistration = UICollectionView.SupplementaryRegistration<SoundSheetHeaderView>(
+        let headerRegistration = UICollectionView.SupplementaryRegistration<SoundSheetSectionHeaderView>(
             elementKind: UICollectionView.elementKindSectionHeader
-        ) { [weak self] header, _, _ in
-            guard let self else { return }
-            self.configure(header)
+        ) { [weak self] header, _, path in
+            guard let self, case .posts(let kind) = dataSource.sectionIdentifier(for: path.section),
+                  let section = sections.first(where: { $0.kind == kind })
+            else { return }
+            header.configure(title: section.title, hasMore: section.hasMore)
+            header.onViewAll = { [weak self] in self?.showSection(kind) }
         }
         dataSource = UICollectionViewDiffableDataSource(collectionView: collectionView) { view, path, item in
             switch item {
+            case .sound:
+                view.dequeueConfiguredReusableCell(using: soundRegistration, for: path, item: item)
             case .tile(let id):
                 view.dequeueConfiguredReusableCell(using: tileRegistration, for: path, item: id)
-            case .more:
-                view.dequeueConfiguredReusableCell(using: moreRegistration, for: path, item: item)
             }
         }
         dataSource.supplementaryViewProvider = { view, _, path in
@@ -537,39 +635,53 @@ final class SoundSheetViewController: UIViewController {
         dataSource.apply(makeSnapshot(), animatingDifferences: false)
     }
 
-    /// The first row; "View all" while collapsed with more to show; the rest.
+    /// The sound, then each section with posts to show.
     private func makeSnapshot() -> NSDiffableDataSourceSnapshot<Section, Item> {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
-        snapshot.appendSections([.firstRow])
-        snapshot.appendItems(tiles.prefix(Self.columns).map { .tile($0.postID) }, toSection: .firstRow)
-        let rest = tiles.dropFirst(Self.columns)
-        guard !rest.isEmpty else { return snapshot }
-        if !isExpanded {
-            snapshot.appendSections([.more])
-            snapshot.appendItems([.more], toSection: .more)
+        snapshot.appendSections([.sound])
+        snapshot.appendItems([.sound], toSection: .sound)
+        for section in sections {
+            let ids = section.ids.filter { tileByID[$0] != nil }
+            guard !ids.isEmpty else { continue }
+            snapshot.appendSections([.posts(section.kind)])
+            snapshot.appendItems(ids.map { .tile($0) }, toSection: .posts(section.kind))
         }
-        snapshot.appendSections([.rest])
-        snapshot.appendItems(rest.map { .tile($0.postID) }, toSection: .rest)
         return snapshot
     }
 
-    /// The grid's posts as now known: placeholders filled in, a post that could
-    /// not be loaded gone, the original moved if it turned out not to be one.
-    /// Tiles whose content changed are reconfigured in place; the count on the
-    /// header and on "View all" follows.
-    func update(tiles newTiles: [Tile]) {
-        let changed = newTiles.filter { tileByID[$0.postID] != nil && tileByID[$0.postID] != $0 }
+    /// The posts as now known: placeholders filled in, a post that could not
+    /// be loaded gone, the sections re-dealt around it. Tiles whose content
+    /// changed are reconfigured in place — on the sheet and in a pushed
+    /// section — and the header's count follows. Nothing here moves the
+    /// collapsed detent: it counts no posts.
+    func update(sections newSections: [SoundSheetSection], tiles newTiles: [Tile]) {
+        let changed = newTiles.filter { tileByID[$0.postID] != nil && tileByID[$0.postID] != $0 }.map(\.postID)
+        sections = newSections
         tiles = newTiles
         tileByID = Dictionary(newTiles.map { ($0.postID, $0) }, uniquingKeysWith: { first, _ in first })
         guard dataSource != nil else { return }
         var snapshot = makeSnapshot()
-        snapshot.reconfigureItems(changed.map { .tile($0.postID) })
-        if snapshot.indexOfSection(.more) != nil { snapshot.reconfigureItems([.more]) }
+        snapshot.reconfigureItems(changed.map { .tile($0) }.filter { snapshot.indexOfItem($0) != nil })
         dataSource.apply(snapshot, animatingDifferences: view.window != nil)
+        // A section's "View all" follows what it now holds — its head
+        // reconfigured where it stands, not its section reloaded (which
+        // would re-dequeue every tile under it, pictures blinking).
+        for path in collectionView.indexPathsForVisibleSupplementaryElements(
+            ofKind: UICollectionView.elementKindSectionHeader
+        ) {
+            guard let head = collectionView.supplementaryView(
+                forElementKind: UICollectionView.elementKindSectionHeader, at: path
+            ) as? SoundSheetSectionHeaderView,
+                case .posts(let kind) = dataSource.sectionIdentifier(for: path.section),
+                let section = newSections.first(where: { $0.kind == kind })
+            else { continue }
+            head.configure(title: section.title, hasMore: section.hasMore)
+        }
         if !isPreviewing { header?.setMeta(Self.meta(duration: sound.duration, posts: tiles.count)) }
-        // A count crossing the first row adds or removes "View all": the one
-        // content change that moves the fold.
-        refreshCollapsedMetrics(reason: "tiles")
+        if let gallery = pushedGallery {
+            let ids = newSections.first { $0.kind == gallery.kind }?.all.filter { tileByID[$0] != nil } ?? []
+            gallery.update(ids: ids, reconfiguring: changed)
+        }
     }
 
     private func configure(_ header: SoundSheetHeaderView) {
@@ -592,12 +704,13 @@ final class SoundSheetViewController: UIViewController {
     // MARK: - Collapsed detent
 
     /// Everything the collapsed height is made of. Each is an INPUT — the
-    /// sheet's width, the header at the text size, whether "View all" is
-    /// there, the toolbar's band — and none depends on how tall the sheet is.
+    /// sheet's width, the header and a section title at the text size, the
+    /// toolbar's band — and none depends on how tall the sheet is, nor on how
+    /// many posts it lists.
     struct CollapsedMetrics: Equatable {
         var width: CGFloat
         var headerHeight: CGFloat
-        var hasMore: Bool
+        var sectionHeaderHeight: CGFloat
         var toolbarBand: CGFloat
     }
 
@@ -609,19 +722,27 @@ final class SoundSheetViewController: UIViewController {
     /// that safe area, so what the detent owes it is its band ABOVE it:
     /// counting the whole inset rested the fold 34pt too high.
     static func collapsedDetentHeight(_ metrics: CollapsedMetrics) -> CGFloat {
-        (foldBottom(width: metrics.width, headerHeight: metrics.headerHeight, hasMore: metrics.hasMore)
-            + metrics.toolbarBand).rounded(.up)
+        (foldBottom(metrics) + metrics.toolbarBand).rounded(.up)
     }
 
-    /// Where the fold ends, from the sheet's top edge, with the grid at rest:
-    /// the inset under the grabber, the sound, the first row, then "View all"
-    /// and its gap — or, with nothing more to view, the first row's own gap.
-    /// The grid's layout is built from the same numbers (`tileHeight`, the
-    /// absolute header, the `.more` section's insets).
-    static func foldBottom(width: CGFloat, headerHeight: CGFloat, hasMore: Bool) -> CGFloat {
-        let rowBottom = topInset + headerHeight + tileHeight(width: width)
-        guard hasMore else { return rowBottom + singleRowFoldGap }
-        return rowBottom + gutter + SoundSheetMoreCell.height + foldGap
+    /// Where the fold ends, from the sheet's top edge, with the posts at
+    /// rest: the inset under the grabber, the sound, the "Popular" title, its
+    /// row, and the gap above the toolbar. The layout is built from the same
+    /// numbers (`rowTileHeight`, the absolute heights).
+    static func foldBottom(_ metrics: CollapsedMetrics) -> CGFloat {
+        topInset + popularRowBottom(metrics) + foldGap
+    }
+
+    /// The Popular row's foot in CONTENT coordinates (the sound starts at 0).
+    static func popularRowBottom(_ metrics: CollapsedMetrics) -> CGFloat {
+        metrics.headerHeight + metrics.sectionHeaderHeight + rowTileHeight(width: metrics.width)
+    }
+
+    /// Where the reveal's always-shown part ends, in CONTENT coordinates:
+    /// halfway down the gap under the Popular row — clear of its tiles, well
+    /// above the next section's title.
+    static func revealLine(_ metrics: CollapsedMetrics) -> CGFloat {
+        popularRowBottom(metrics) + foldGap / 2
     }
 
     /// The toolbar's band above the home indicator: the view's bottom safe
@@ -644,9 +765,9 @@ final class SoundSheetViewController: UIViewController {
 
     /// Recomputes the collapsed height from its inputs and re-asks the sheet
     /// ONLY when the answer moved. Called when an input changes — loading,
-    /// appearing (the real width and band), the text size, the width, the
-    /// tiles — and from nowhere else. ⚠️ Never from a layout callback: see the
-    /// type's note.
+    /// appearing (the real width and band), the text size, the width — and
+    /// from nowhere else. ⚠️ Never from a layout callback: see the type's
+    /// note.
     private func refreshCollapsedMetrics(reason: String) {
         guard let width = sheetWidth, width > 0 else { return }
         let traits = view.window != nil
@@ -655,20 +776,21 @@ final class SoundSheetViewController: UIViewController {
         let metrics = CollapsedMetrics(
             width: width,
             headerHeight: headerHeight(width: width, traits: traits),
-            hasMore: tiles.count > Self.columns,
+            sectionHeaderHeight: SoundSheetSectionHeaderView.height(traits: traits),
             toolbarBand: Self.measuredToolbarBand ?? estimatedToolbarBand(width: width)
         )
         guard metrics != collapsedMetrics else { return }
-        let headerMoved = metrics.headerHeight != collapsedMetrics?.headerHeight
+        let heightsMoved = metrics.headerHeight != collapsedMetrics?.headerHeight
+            || metrics.sectionHeaderHeight != collapsedMetrics?.sectionHeaderHeight
         let previous = collapsedHeight
         collapsedMetrics = metrics
         let height = Self.collapsedDetentHeight(metrics)
         collapsedHeight = height
         trace("""
-            \(reason): width \(metrics.width) header \(metrics.headerHeight) more \(metrics.hasMore) \
+            \(reason): width \(metrics.width) header \(metrics.headerHeight) title \(metrics.sectionHeaderHeight) \
             band \(metrics.toolbarBand) → \(height) (was \(previous.map { "\($0)" } ?? "nil"))
             """)
-        if headerMoved, isViewLoaded { collectionView.collectionViewLayout.invalidateLayout() }
+        if heightsMoved, isViewLoaded { collectionView.collectionViewLayout.invalidateLayout() }
         guard let previous, abs(previous - height) >= 0.5 else { return }
         invalidateCollapsedDetent()
     }
@@ -719,6 +841,44 @@ final class SoundSheetViewController: UIViewController {
         return height
     }
 
+    // MARK: - Reveal
+
+    /// The reveal's progress for the height the sheet is DRAWN at now: the
+    /// presentation layer's (the spring's in-between frames), less the home
+    /// indicator a detent's value does not count. Nil off screen.
+    private func measuredReveal() -> CGFloat? {
+        guard let window = view.window, let collapsed = collapsedHeight else { return nil }
+        let drawn = (view.layer.presentation() ?? view.layer).bounds.height - window.safeAreaInsets.bottom
+        // Before the sheet has stated its large value: the window's height
+        // less its top inset is where large stands.
+        let large = largeHeight ?? (window.bounds.height - window.safeAreaInsets.top - window.safeAreaInsets.bottom)
+        return SoundSheetReveal.progress(height: drawn, collapsed: collapsed, large: large)
+    }
+
+    /// Places the reveal's line under the Popular row, where the content is
+    /// scrolled to now. A layer's frame: it lays nothing out.
+    private func updateRevealLine() {
+        guard let metrics = collapsedMetrics, isViewLoaded else { return }
+        let line = Self.revealLine(metrics) - collectionView.contentOffset.y
+        reveal.setLine(line, width: view.bounds.width)
+    }
+
+    /// Whether a section can be touched: the Popular row always, the others
+    /// once they are more than half there — what is hidden cannot be tapped.
+    private func isRevealed(_ kind: SoundSheetSection.Kind) -> Bool {
+        kind == .popular || reveal.progress >= 0.5
+    }
+
+    private func traceReveal(_ progress: CGFloat) {
+        #if DEBUG
+        let step = Int((progress * 10).rounded(.down))
+        guard step != lastTracedReveal else { return }
+        lastTracedReveal = step
+        let drawn = view.layer.presentation().map { "\($0.bounds.height)" } ?? "?"
+        trace("reveal \(String(format: "%.2f", progress)) at drawn height \(drawn)")
+        #endif
+    }
+
     /// `-sound-sheet-trace`: the height the sheet SETTLED at after a detent
     /// change, read once the spring is over — collapsed must read the same
     /// value at every visit. Read-only: it moves nothing.
@@ -729,7 +889,10 @@ final class SoundSheetViewController: UIViewController {
             guard let self, let window = view.window else { return }
             let settled = view.bounds.height - window.safeAreaInsets.bottom
             let detent = collapsedHeight.map { "\($0)" } ?? "nil"
-            trace("settled \(expanded ? "large" : "collapsed"): \(settled) (detent \(detent), invalidations \(detentInvalidations))")
+            trace("""
+                settled \(expanded ? "large" : "collapsed"): \(settled) (detent \(detent), \
+                invalidations \(detentInvalidations), reveal \(reveal.progress))
+                """)
             // Geometry, in the WINDOW: a collapsed sheet floats inset and is
             // drawn SCALED (measured 402 wide in its own space, 386 on
             // screen), so the view's bounds stay the width the grid and the
@@ -773,12 +936,6 @@ final class SoundSheetViewController: UIViewController {
         return "\(Self.clock(duration)) · \(count)"
     }
 
-    /// "View all 7 posts": the whole grid is what it opens, and the count
-    /// says how much of it the first row is not.
-    static func moreTitle(posts: Int) -> String {
-        "View all \(posts) posts"
-    }
-
     static func clock(_ seconds: TimeInterval) -> String {
         let whole = Int(seconds.rounded())
         return String(format: "%d:%02d", whole / 60, whole % 60)
@@ -786,7 +943,7 @@ final class SoundSheetViewController: UIViewController {
 
     // MARK: - Order
 
-    /// The grid's posts, in order, and which of them is MARKED "Original":
+    /// The head of the "Popular" ranking, and which post is MARKED "Original":
     /// 1. the post the sound was first published with, unless it is known to
     ///    be a text post (a text post's words are no "original" of a sound: it
     ///    then keeps its place among the others);
@@ -797,7 +954,7 @@ final class SoundSheetViewController: UIViewController {
     ///
     /// `isMedia` is nil for a post not loaded yet. An unknown original still
     /// leads — it is a clip's post far more often than not, and holding its
-    /// place keeps the grid from reshuffling when it loads — but it is marked
+    /// place keeps the row from reshuffling when it loads — but it is marked
     /// only once it is KNOWN to be a media post.
     static func gridPostIDs(
         current: PostID,
@@ -814,9 +971,49 @@ final class SoundSheetViewController: UIViewController {
         return (ids, leading.flatMap { isMedia($0) == true ? $0 : nil })
     }
 
+    // MARK: - Sections
+
+    /// A section's "View all": its whole ranking as a grid, pushed inside the
+    /// sheet, and the sheet up to large — a grid in a one-row sheet would show
+    /// a sliver of it.
+    func showSection(_ kind: SoundSheetSection.Kind) {
+        guard isRevealed(kind), let navigation = navigationController, navigation.topViewController === self,
+              let section = sections.first(where: { $0.kind == kind })
+        else { return }
+        let gallery = SoundSheetGalleryViewController(
+            kind: kind,
+            ids: section.all.filter { tileByID[$0] != nil },
+            tile: { [weak self] id in self?.tileByID[id] },
+            imagePipeline: imagePipeline
+        )
+        gallery.toolbarItems = makeToolbarItems(primary: false)
+        gallery.onSelect = { [weak self, weak gallery] id in
+            guard let self, let gallery else { return }
+            select(id, order: gallery.ids, source: .gallery(gallery))
+        }
+        pushedGallery = gallery
+        trace("view all \(kind.rawValue): \(gallery.ids.count) posts")
+        expand()
+        navigation.pushViewController(gallery, animated: true)
+    }
+
+    #if DEBUG
+    /// `-snap-sound-sheet push`: a section's "View all", without the tap.
+    func debugShowSection(_ kind: SoundSheetSection.Kind) {
+        reveal.set(1)
+        showSection(kind)
+    }
+
+    /// `-snap-sound-sheet push`: back from the pushed section, as the back
+    /// button would.
+    func debugPopSection() {
+        navigationController?.popToRootViewController(animated: true)
+    }
+    #endif
+
     // MARK: - Expansion
 
-    /// "View all": up to the whole grid.
+    /// Up to large.
     private func expand() {
         guard let sheet = navigationController?.sheetPresentationController, !isExpanded else { return }
         // A programmatic change is not reported to the delegate.
@@ -825,7 +1022,7 @@ final class SoundSheetViewController: UIViewController {
     }
 
     #if DEBUG
-    /// `-snap-sound-sheet large`: "View all", without the tap.
+    /// `-snap-sound-sheet large`: up to large, as the grabber would take it.
     func debugExpand() { expand() }
 
     /// `-snap-sound-sheet roundtrip`: back down to collapsed, as the grabber
@@ -855,19 +1052,47 @@ final class SoundSheetViewController: UIViewController {
     /// included: that page pauses for the trip and plays again on the return.
     private var isShowingFeed = false
 
-    /// The tapped tile's posts, from it on, as a new vertical feed with the
-    /// hero. Falls back to scrolling the feed behind (`onSelectPost`) when the
-    /// host did not hand over a way to open one.
-    private func openFeed(from tile: Tile) -> Bool {
+    /// Where a tapped tile is: on this screen, or in a pushed section.
+    enum TileSource {
+        case sheet
+        case gallery(SoundSheetGalleryViewController)
+    }
+
+    /// A tile's tap: its post opened as a new feed with the hero, the posts
+    /// after it in `order` following. Falls back to scrolling the feed behind
+    /// (`onSelectPost`) when the host did not hand over a way to open one.
+    private func select(_ id: PostID, order: [PostID], source: TileSource) {
+        // A placeholder leads nowhere yet: its post is still on its way.
+        guard let tile = tileByID[id], tile.isLoaded else { return }
+        if openFeed(from: tile, order: order, source: source) { return }
+        // Scrolling the feed behind reaches only ITS posts; any other stays
+        // put rather than closing the sheet on nothing.
+        guard openFeedHero == nil else { return }
+        let select = onSelectPost
+        dismiss(animated: true) { select?(id) }
+    }
+
+    private func openFeed(from tile: Tile, order: [PostID], source: TileSource) -> Bool {
         guard let openFeedHero, let galleryPost,
               (navigationController ?? self).presentedViewController == nil,
               let post = galleryPost(tile.postID)
         else { return false }
-        let ordered = tiles.compactMap { galleryPost($0.postID) }
+        let ordered = order.compactMap { galleryPost($0) }
         guard let start = ordered.firstIndex(where: { $0.id == post.id }) else { return false }
         let stream = Array(ordered[start...])
         let id = tile.postID
-        let cover = tileCell(for: id)?.cover
+        // Weak, both: the hero keeps these closures for the whole trip.
+        weak var gallery: SoundSheetGalleryViewController?
+        if case .gallery(let pushed) = source { gallery = pushed }
+        let fromGallery = gallery != nil
+        let cell: () -> SoundSheetTileCell? = { [weak self] in
+            fromGallery ? gallery?.tileCell(for: id) : self?.tileCell(for: id)
+        }
+        let frame: (UICoordinateSpace) -> CGRect? = { [weak self] space in
+            fromGallery ? gallery?.tileFrame(for: id, in: space) : self?.tileFrame(for: id, in: space)
+        }
+        let cover = cell()?.cover
+        let presenter: UIViewController = gallery ?? self
         let origin = SnapFeedHeroOrigin(
             post: post,
             stream: stream,
@@ -875,18 +1100,18 @@ final class SoundSheetViewController: UIViewController {
             hasHero: post.kind != .text && cover != nil,
             cover: cover,
             style: .tile,
-            frame: { [weak self] space in self?.tileFrame(for: id, in: space) },
-            isOnScreen: { [weak self] in
-                guard let self else { return false }
-                return tileFrame(for: id, in: view) != nil
+            frame: { space in frame(space) },
+            isOnScreen: { [weak presenter] in
+                guard let presenter else { return false }
+                return frame(presenter.view) != nil
             },
-            setConcealed: { [weak self] concealed in self?.tileCell(for: id)?.setConcealed(concealed) }
+            setConcealed: { concealed in cell()?.setConcealed(concealed) }
         )
         trace("open \(id.rawValue) (\(post.kind)) stream \(stream.prefix(3).map(\.id.rawValue))")
         stopPreview()
         isShowingFeed = true
         refreshCover()
-        OverSheetFeedHost.present(over: self, onFinished: { [weak self] in
+        OverSheetFeedHost.present(over: presenter, onFinished: { [weak self] in
             self?.isShowingFeed = false
             self?.refreshCover()
         }) { host in
@@ -901,12 +1126,16 @@ final class SoundSheetViewController: UIViewController {
     }
 
     /// The tile's rect in `space` while it is on screen — nil once it has
-    /// scrolled out (under the toolbar included), so the hero falls back
-    /// instead of flying to nowhere.
+    /// scrolled out (under the toolbar included, or off a row's side), so the
+    /// hero falls back instead of flying to nowhere.
+    ///
+    /// ⚠️ A ROW'S cell lives in the row's own scroll view: its `frame` is in
+    /// that view's coordinates, not the grid's — converted before it is
+    /// compared with what the grid shows.
     private func tileFrame(for id: PostID, in space: UICoordinateSpace) -> CGRect? {
         guard let cell = tileCell(for: id) else { return nil }
         let visible = collectionView.bounds.inset(by: collectionView.adjustedContentInset)
-        guard visible.intersects(cell.frame) else { return nil }
+        guard visible.intersects(cell.convert(cell.bounds, to: collectionView)) else { return nil }
         return cell.convert(cell.bounds, to: space)
     }
 
@@ -976,15 +1205,15 @@ final class SoundSheetViewController: UIViewController {
         dismiss(animated: true) { onUseSound(sound) }
     }
 
-    private func share() {
+    private func share(from item: UIBarButtonItem?) {
         let text = [sound.title ?? "Original sound", sound.artist ?? "@\(authorHandle)"].joined(separator: " — ")
         let activity = UIActivityViewController(activityItems: ["♫ \(text)"], applicationActivities: nil)
-        if let shareItem {
-            activity.popoverPresentationController?.sourceItem = shareItem
+        if let item {
+            activity.popoverPresentationController?.sourceItem = item
         } else {
             activity.popoverPresentationController?.sourceView = view
         }
-        present(activity, animated: true)
+        (navigationController ?? self).present(activity, animated: true)
     }
 }
 
@@ -998,44 +1227,43 @@ extension SoundSheetViewController: UISheetPresentationControllerDelegate {
     }
 
     /// The one place a detent change is acted on — a drag reports it through
-    /// the delegate, "View all" does not report it at all. It takes "View all"
-    /// out of the grid at large and puts it back (with the grid at its top)
-    /// at collapsed, and nothing else: the clip behind plays on at either.
+    /// the delegate, "View all" does not report it at all. It puts the posts
+    /// back at their top at collapsed (the Popular row under the sound, the
+    /// reveal's line where the fold is), and wakes the reveal to follow the
+    /// sheet's spring; nothing else: the clip behind plays on at either.
     fileprivate func detentChanged(to identifier: UISheetPresentationController.Detent.Identifier?) {
         let expanded = identifier == .large
         guard expanded != isExpanded else { return }
         isExpanded = expanded
         traceSettledHeight(expanded: expanded)
-        guard dataSource != nil else { return }
-        dataSource.apply(makeSnapshot(), animatingDifferences: true)
-        if !expanded {
-            collectionView.setContentOffset(
-                CGPoint(x: collectionView.contentOffset.x, y: -collectionView.adjustedContentInset.top),
-                animated: true
-            )
-        }
+        reveal.wake()
+        guard dataSource != nil, !expanded else { return }
+        collectionView.setContentOffset(
+            CGPoint(x: collectionView.contentOffset.x, y: -collectionView.adjustedContentInset.top),
+            animated: true
+        )
     }
 }
 
-// MARK: - Grid
+// MARK: - Posts
 
 extension SoundSheetViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         collectionView.deselectItem(at: indexPath, animated: true)
-        switch dataSource.itemIdentifier(for: indexPath) {
-        case .tile(let id):
-            // A placeholder leads nowhere yet: its post is still on its way.
-            guard let tile = tileByID[id], tile.isLoaded else { return }
-            if openFeed(from: tile) { return }
-            // Scrolling the feed behind reaches only ITS posts; any other
-            // stays put rather than closing the sheet on nothing.
-            guard openFeedHero == nil else { return }
-            let select = onSelectPost
-            dismiss(animated: true) { select?(id) }
-        case .more:
-            expand()
-        case nil:
-            break
-        }
+        guard case .tile(let id) = dataSource.itemIdentifier(for: indexPath),
+              case .posts(let kind) = dataSource.sectionIdentifier(for: indexPath.section),
+              isRevealed(kind),
+              let section = sections.first(where: { $0.kind == kind })
+        else { return }
+        // A row is a window on its whole ranking: the feed goes on past the
+        // row's end. The grid's own order is the one it shows.
+        select(id, order: kind.isRow ? section.all : section.ids, source: .sheet)
+    }
+
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        // The line follows the Popular row as the posts scroll. Only this
+        // collection's own scroll: a row's sideways scroll moves no line.
+        guard scrollView === collectionView, reveal.progress < 1 else { return }
+        updateRevealLine()
     }
 }

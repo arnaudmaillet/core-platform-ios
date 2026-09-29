@@ -4,17 +4,16 @@ import UIKit
 /// "View all ›" under each of Discover's mosaic chunks: pushes the whole
 /// mosaic (`DiscoverGalleryViewController`).
 ///
-/// The sound sheet's "View all" control in every respect the eye reads — a
-/// plain, centred, secondary-label button in semibold subheadline, the glyph
-/// trailing — so the app says "there is more of this" one way. The glyph is
-/// the one difference, and it is the platform's: the sheet's chevron points
-/// DOWN because it unfolds the sheet in place, this one points RIGHT because
-/// it pushes a screen.
+/// The sound sheet's sections' "View all" control in every respect the eye
+/// reads (`SoundSheetSectionHeaderView`) — a plain secondary-label button in
+/// semibold subheadline, the chevron trailing and pointing RIGHT because it
+/// pushes a screen — so the app says "there is more of this" one way.
 ///
 /// Under the chunk rather than over it: the chunk is content, not a section
 /// that needs a title to be understood, and the control belongs where the
-/// eye arrives having looked through it — the sheet's placement, for the same
-/// reason.
+/// eye arrives having looked through it. (The sheet's sections carry theirs
+/// at their titled head: a row scrolls sideways, and there the head is
+/// where the eye starts.)
 final class DiscoverViewAllFooterView: UICollectionReusableView {
     static let reuseID = "DiscoverViewAllFooterView"
     static let title = "View all"
