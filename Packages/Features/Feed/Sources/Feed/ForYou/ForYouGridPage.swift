@@ -113,7 +113,7 @@ final class ForYouGridPage: UIView {
 
     /// WHICH posts arrived since the session opened. The page is TOLD this
     /// rather than deriving it, so the header and the tab badge cannot be two
-    /// answers to one question — see `ForYouViewModel.onNewPostsChange`.
+    /// answers to one question — see `ForYouViewModel.Snapshot.followingNew`.
     private var newPostIDs: Set<PostID> = []
 
     /// Where the "New" section ends, or 0 for a list that is one plain run.
@@ -558,6 +558,11 @@ final class ForYouGridPage: UIView {
             forSupplementaryViewOfKind: DiscoverListLayout.viewAllElementKind,
             withReuseIdentifier: DiscoverViewAllFooterView.reuseID
         )
+        collectionView.register(
+            LeadHostView.self,
+            forSupplementaryViewOfKind: DiscoverListLayout.leadElementKind,
+            withReuseIdentifier: LeadHostView.reuseID
+        )
         collectionView.dataSource = self
         collectionView.delegate = self
         refreshControl.addAction(UIAction { [weak self] _ in self?.onRefresh?() }, for: .valueChanged)
@@ -621,6 +626,40 @@ final class ForYouGridPage: UIView {
         collectionView.verticalScrollIndicatorInsets.bottom =
             trayInset + footerInset + hostedBottomInset
     }
+
+    // MARK: - The leading header (Discover only)
+
+    /// What leads Discover's list — For You's Friends and Following rows.
+    /// Held weakly: the host owns it and hands it to whichever reusable view
+    /// the layout realizes for it (`LeadHostView`), so its state — a row's
+    /// scroll position, a card's player — survives the header being recycled.
+    private weak var leadView: UIView?
+    private var leadHeight: CGFloat = 0
+
+    /// Puts `view` above the list at `height`; nil or zero removes it. Only
+    /// Discover has a lead: the other styles' layouts have no slot for one.
+    func setLead(_ view: UIView?, height: CGFloat) {
+        guard style == .discover,
+              let layout = collectionView.collectionViewLayout as? UICollectionViewCompositionalLayout
+        else { return }
+        leadView = view
+        let height = view == nil ? 0 : height
+        // Re-host into a realized header at once: a view can have one parent,
+        // and the one it had may have been recycled.
+        for case let host as LeadHostView in collectionView.visibleSupplementaryViews(
+            ofKind: DiscoverListLayout.leadElementKind
+        ) {
+            host.host(view)
+        }
+        guard abs(height - leadHeight) > 0.5 else { return }
+        leadHeight = height
+        DiscoverListLayout.setLeadHeight(height, on: layout)
+    }
+
+    /// The reconcile ran — every scroll tick (throttled), every visibility
+    /// change. What lets a lead with players of its own keep time with the
+    /// list: a row scrolling out of the band must stop as the list's tiles do.
+    var onAutoplayReconcile: ((_ allowingStarts: Bool) -> Void)?
 
     // MARK: - Hosted collapsible header (the Place Profile's mechanics)
 
@@ -787,6 +826,7 @@ final class ForYouGridPage: UIView {
     /// frame.
     func updateAutoplay(allowingStarts: Bool = true) {
         requestWarm(allowingStarts)
+        onAutoplayReconcile?(allowingStarts)
         guard let playback else { return }
         let viewport = autoplayViewport
         let centreY = viewport.midY
@@ -2754,6 +2794,13 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         viewForSupplementaryElementOfKind kind: String,
         at indexPath: IndexPath
     ) -> UICollectionReusableView {
+        if kind == DiscoverListLayout.leadElementKind {
+            let host = collectionView.dequeueReusableSupplementaryView(
+                ofKind: kind, withReuseIdentifier: LeadHostView.reuseID, for: indexPath
+            ) as! LeadHostView
+            host.host(leadView)
+            return host
+        }
         if kind == DiscoverListLayout.viewAllElementKind {
             let footer = collectionView.dequeueReusableSupplementaryView(
                 ofKind: kind,
@@ -3095,5 +3142,23 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         // player back whatever the scroll is doing, or the pool starves.
         guard let playable = cell as? any GridPlaybackCell else { return }
         playback?.stop(cell: playable)
+    }
+}
+
+/// The reusable view the layout realizes for Discover's leading header. It
+/// owns nothing: it HOSTS the page's lead view, which outlives it — see
+/// `ForYouGridPage.setLead`.
+private final class LeadHostView: UICollectionReusableView {
+    static let reuseID = "ForYouLeadHostView"
+
+    func host(_ view: UIView?) {
+        for stale in subviews where stale !== view { stale.removeFromSuperview() }
+        guard let view else { return }
+        if view.superview !== self {
+            view.removeFromSuperview()
+            addSubview(view)
+        }
+        view.frame = bounds
+        view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     }
 }

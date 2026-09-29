@@ -69,6 +69,9 @@ final class PostGridFlightCard: UIView {
     static let tileCornerRadius = ChaoticSliceLayout.harmonisedCornerRadius
 
     private let style: Style
+    /// The source's own rounding when it is not the style's — a disc's half
+    /// side (`SnapFeedHeroOrigin.cornerRadius`). Nil keeps the style's.
+    private let restingCornerRadius: CGFloat?
     /// Whether a live surface has been adopted, tracked explicitly rather than
     /// inferred from `videoRenderView.isHidden`.
     ///
@@ -138,8 +141,9 @@ final class PostGridFlightCard: UIView {
         symbol: "eye.fill", font: metaFont, color: .white, shadowed: true
     )
 
-    init(post: GalleryPost, cover: UIImage?, style: Style) {
+    init(post: GalleryPost, cover: UIImage?, style: Style, cornerRadius: CGFloat? = nil) {
         self.style = style
+        restingCornerRadius = cornerRadius
         // Video bricks keep a dark floor, exactly as the tile cell does: the
         // poster may be unrenderable and the glyph needs a stage.
         restingBackground = PostGridTileCell.fillColor(for: post)
@@ -151,8 +155,10 @@ final class PostGridFlightCard: UIView {
         #endif
         clipsToBounds = true
         backgroundColor = restingBackground
-        layer.cornerRadius = style.cornerRadius
-        layer.cornerCurve = .continuous
+        layer.cornerRadius = cornerRadius ?? style.cornerRadius
+        // A disc is a circle, not a squircle: its curve must match the
+        // avatar it leaves from or the corners pinch at takeoff.
+        layer.cornerCurve = cornerRadius == nil ? .continuous : .circular
 
         imageView.contentMode = .scaleAspectFill
         imageView.clipsToBounds = true
@@ -270,6 +276,17 @@ final class PostGridFlightCard: UIView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// Lays the SOURCE's furniture over the card — a Following card's caption
+    /// over its foot (`SnapFeedHeroOrigin.restingOverlay`). It joins the
+    /// resting chrome, so the flight fades it with the counters: whole at the
+    /// source, gone by the page.
+    func installRestingOverlay(_ overlay: UIView) {
+        overlay.isUserInteractionEnabled = false
+        overlay.frame = restingChromeView.bounds
+        overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        restingChromeView.insertSubview(overlay, at: 0)
+    }
 
     #if DEBUG
     deinit {
@@ -527,7 +544,7 @@ final class PostGridFlightCard: UIView {
 // MARK: - ZoomFlightCard
 
 extension PostGridFlightCard: ZoomFlightCard {
-    var zoomRestingCornerRadius: CGFloat { style.cornerRadius }
+    var zoomRestingCornerRadius: CGFloat { restingCornerRadius ?? style.cornerRadius }
 
 
     var zoomRestingChrome: UIView? { restingChromeView }

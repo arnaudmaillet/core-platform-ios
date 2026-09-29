@@ -41,6 +41,34 @@ public enum DiscoverListLayout {
     /// height already carries most of the air; this is the remainder.
     public static let gapBelowChunk: CGFloat = 4
 
+    /// The element kind of the list's LEADING header — whatever a host puts
+    /// above the first stretch (For You's Friends and Following rows).
+    ///
+    /// A layout-wide boundary item rather than a section of its own, on
+    /// purpose: every index path, chunk plan and flight on the list counts in
+    /// its SECTIONS, and a header that scrolls with them changes none of that
+    /// arithmetic.
+    public static let leadElementKind = "DiscoverListLayout.lead"
+
+    /// Sizes the leading header — zero removes it. Setting the configuration
+    /// is what invalidates the layout, so this is also how a host that grew
+    /// or shrank its header says so.
+    public static func setLeadHeight(_ height: CGFloat, on layout: UICollectionViewCompositionalLayout) {
+        let configuration = UICollectionViewCompositionalLayoutConfiguration()
+        configuration.scrollDirection = layout.configuration.scrollDirection
+        configuration.interSectionSpacing = layout.configuration.interSectionSpacing
+        if height > 0 {
+            configuration.boundarySupplementaryItems = [
+                NSCollectionLayoutBoundarySupplementaryItem(
+                    layoutSize: .init(widthDimension: .fractionalWidth(1), heightDimension: .absolute(height)),
+                    elementKind: leadElementKind,
+                    alignment: .top
+                )
+            ]
+        }
+        layout.configuration = configuration
+    }
+
     /// `chunk(section)` answers the chunk a section holds, or nil for a run of
     /// cards (and for any section the model does not know — a skeleton, a
     /// reload in flight — which is laid out as cards).
