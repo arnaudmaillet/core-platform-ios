@@ -19,15 +19,15 @@ import UIKit
 final class ForYouPagerView: UIView {
     /// Pager order == selector order == the tabs the screen actually has.
     ///
-    /// **Two tabs, and the card list leads**: Following on the left, Discover
-    /// on the right (product call, 2026-09-28 — it was the other way round).
-    /// The screen still OPENS on Discover (`ForYouViewModel.defaultFormat`),
-    /// which is a format, not a position, so the swap moved the tab without
-    /// moving the landing. `GalleryFilter.Format` still has three cases
-    /// because the profile gallery uses all of them; For You simply does not
-    /// give each one a tab. `.short` (text-only posts) has no tab of its own
-    /// here — those posts still appear, under Following, which is the
-    /// unfiltered page.
+    /// **Two tabs, and Discover leads**: Discover on the left, Following on
+    /// the right (product call, 2026-09-28 — #293 had put Following first for
+    /// a day; the Discover redesign put it back). Discover is also where the
+    /// screen OPENS (`ForYouViewModel.defaultFormat`), so the first tab and
+    /// the landing tab are one tab again. `GalleryFilter.Format` still has
+    /// three cases because the profile gallery uses all of them; For You
+    /// simply does not give each one a tab. `.short` (text-only posts) has no
+    /// tab of its own here — those posts still appear, under Following (the
+    /// unfiltered page) and among Discover's rows.
     ///
     /// ⚠️ Every position on this screen is asked of this array — the strip's
     /// segments, the badges (`applyBadges`), `-foryou-badges`' numbers
@@ -39,7 +39,7 @@ final class ForYouPagerView: UIView {
     /// The enum names the CONTENT SHAPE (what is in the page), the titles name
     /// the PRODUCT IDEA (why you would go there), and those were never the same
     /// question.
-    static let pageOrder: [GalleryFilter.Format] = [.activity, .media]
+    static let pageOrder: [GalleryFilter.Format] = [.media, .activity]
 
     /// The tapped post's index into the *given format page's* posts.
     var onItemTapped: ((GalleryFilter.Format, Int) -> Void)?
@@ -116,11 +116,31 @@ final class ForYouPagerView: UIView {
         didSet { pages.forEach { $0.staking = staking } }
     }
 
+    /// Discover's "View all" — push the whole mosaic.
+    var onViewAllTapped: (() -> Void)?
+
+    /// The shape each tab's page takes. Discover — keyed `.media` because the
+    /// format is what the tab is persisted and badged under — is no longer the
+    /// media grid but a list of cards with pieces of that grid set between
+    /// them (2026-09-28); the grid itself is one tap away, pushed
+    /// (`DiscoverGalleryViewController`).
+    static func style(for format: GalleryFilter.Format) -> ForYouGridPage.Style {
+        format == .media ? .discover : .list
+    }
+
+    /// What each tab's page is handed: Discover takes the whole corpus (see
+    /// `ForYouViewModel.Snapshot.discover`), every other tab its format's.
+    static func pageState(
+        for format: GalleryFilter.Format, in snapshot: ForYouViewModel.Snapshot
+    ) -> ForYouViewModel.PageState {
+        format == .media ? snapshot.discover : snapshot.state(for: format)
+    }
+
     init(imagePipeline: ImagePipeline, videoPlayback: VideoPlaybackController? = nil) {
         pages = Self.pageOrder.map { format in
             ForYouGridPage(
                 imagePipeline: imagePipeline,
-                style: format == .media ? .grid : .list,
+                style: Self.style(for: format),
                 videoPlayback: videoPlayback
             )
         }
@@ -159,6 +179,7 @@ final class ForYouPagerView: UIView {
             }
             page.onWarmRequested = { [weak self] posts in self?.onWarmRequested?(posts) }
             page.onRefresh = { [weak self] in self?.onRefresh?() }
+            page.onViewAllTapped = { [weak self] in self?.onViewAllTapped?() }
             page.onAuthorTapped = { [weak self] post in self?.onAuthorTapped?(post) }
             page.authorMenuActions = { [weak self] context in
                 self?.authorMenuActions?(context) ?? []
@@ -182,8 +203,14 @@ final class ForYouPagerView: UIView {
 
     func render(_ snapshot: ForYouViewModel.Snapshot) {
         for (index, format) in Self.pageOrder.enumerated() {
-            pages[index].render(snapshot.state(for: format))
+            pages[index].render(Self.pageState(for: format, in: snapshot))
         }
+    }
+
+    /// Whether the corpus is all loaded — Discover plans its tail on it (see
+    /// `ForYouGridPage.setCorpusComplete`). Told BEFORE the render it is for.
+    func setCorpusComplete(_ complete: Bool) {
+        pages.forEach { $0.setCorpusComplete(complete) }
     }
 
     /// The next snapshot is a re-derived corpus, not an extended one — told to

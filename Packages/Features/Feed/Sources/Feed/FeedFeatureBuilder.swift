@@ -207,7 +207,12 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 // format axis under `profile.gallery.*`; sharing the keys would
                 // make each surface yank the other's landing tab.
                 preferences: GalleryPreferences(keyPrefix: "foryou.gallery"),
-                contextStore: ContentContextStore()
+                contextStore: ContentContextStore(),
+                // Following is the people the viewer follows: asked of the
+                // graph as pages land, and kept live by the app's follow
+                // channel. Discover (everyone) reads neither.
+                followRelations: followRelations,
+                followEvents: followEvents
             ),
             imagePipeline: imagePipeline,
             // Deliberately the SAME pool the snap feed uses. The grid parks a
@@ -217,6 +222,12 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             videoPlayback: videoPlayback,
             // The same seeded surface a Maps pin opens, from a tile instead.
             makeSnapFeed: { postIDs in makeSnapFeedViewController(postIDs: postIDs) },
+            // Discover's pushed mosaic opens its tiles through the shared
+            // flight, the one the place page and the search results use —
+            // see `DiscoverGalleryViewController`.
+            openPostHero: { presenter, origin, ids in
+                presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)
+            },
             prewarm: { ids in await repository.prewarm(ids) },
             // Text posts open straight into comment layout, so their first
             // page is warmed while the grid is still on screen — see

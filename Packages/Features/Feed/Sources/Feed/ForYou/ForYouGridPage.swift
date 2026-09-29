@@ -37,7 +37,19 @@ final class ForYouGridPage: UIView {
     enum Style {
         case grid
         case list
+        /// For You's Discover: the list's cards with pieces of the mosaic set
+        /// between them — see `MosaicChunkPlanner` for where they go and what
+        /// they hold, `DiscoverListLayout` for how they are drawn.
+        ///
+        /// A card and a tile on ONE page, so every question the other two
+        /// styles answer once for the page ("does this autoplay", "can a hero
+        /// land here", "what does a landing conceal") is answered here per
+        /// POST, by whether it sits in a chunk — see `drawsAsTile`.
+        case discover
     }
+
+    /// Discover's "View all" under a chunk was pressed: show the whole mosaic.
+    var onViewAllTapped: (() -> Void)?
 
     /// The tapped item's index into `posts`.
     var onItemTapped: ((Int) -> Void)?
@@ -89,6 +101,11 @@ final class ForYouGridPage: UIView {
 
     /// Display order — the mosaic's arrangement of `rawPosts`. What the cells,
     /// the hero, and a tile tap all read.
+    ///
+    /// On Discover it is the stretches flattened: each run's cards, then each
+    /// chunk's tiles in reading order — which is also the order a tap seeds
+    /// the feed with, so paging from a tile runs through the rest of its chunk
+    /// and on down the list, exactly as the viewer sees it.
     private(set) var posts: [GalleryPost] = []
     /// The order the view model handed over, kept so an append can be
     /// recognised as one before arrangement permutes it.
@@ -163,8 +180,77 @@ final class ForYouGridPage: UIView {
         }
     }
 
+    // MARK: Discover's stretches
+
+    /// Discover only: the list's stretches, one collection-view SECTION each.
+    /// Empty on the other styles, and while a skeleton shows.
+    private(set) var segments: [DiscoverSegment] = []
+    /// Where each stretch begins in `posts` — the flat index of its first post.
+    private var segmentStarts: [Int] = []
+    /// The posts Discover draws as mosaic tiles rather than as cards.
+    private var tilePostIDs: Set<PostID> = []
+    /// Keeps the chunk tilings it has generated, for the page's whole life.
+    private var chunkPlanner = MosaicChunkPlanner()
+    /// Whether the corpus behind this page is ALL of it — no further page is
+    /// coming. What lets a chunk at the tail be decided rather than held back
+    /// (see `MosaicChunkPlanner`). Told by the host before each delivery.
+    private var isCorpusComplete = false
+    /// The completeness the current stretches were planned under, so a
+    /// delivery that changes only that is still a change worth applying.
+    private var plannedCorpusComplete = false
+
+    /// No further page is coming (or one is). Read by the next `render`.
+    func setCorpusComplete(_ complete: Bool) {
+        isCorpusComplete = complete
+    }
+
+    /// Whether `postID` is drawn as a mosaic TILE on this page — a whole
+    /// rectangle that is its media — rather than as a card of which the media
+    /// is one part. Per page on the grid and the list, per post on Discover.
+    func drawsAsTile(_ postID: PostID) -> Bool {
+        switch style {
+        case .grid: true
+        case .list: false
+        case .discover: tilePostIDs.contains(postID)
+        }
+    }
+
+    /// The chunk `section` holds, or nil for a run of cards. Asked by the
+    /// layout, which is why it is not private.
+    func chunk(inSection section: Int) -> MosaicChunk? {
+        guard style == .discover, !showsSkeleton, segments.indices.contains(section) else { return nil }
+        return segments[section].chunk
+    }
+
+    /// Adopts a planned list: the stretches, their starts, the flat order and
+    /// which posts are tiles — derived from one value so they cannot disagree.
+    private func adoptSegments(_ planned: [DiscoverSegment]) {
+        segments = planned
+        var starts: [Int] = []
+        var flat: [GalleryPost] = []
+        var tiles: Set<PostID> = []
+        for segment in planned {
+            starts.append(flat.count)
+            flat += segment.posts
+            if segment.chunk != nil { tiles.formUnion(segment.posts.map(\.id)) }
+        }
+        segmentStarts = starts
+        posts = flat
+        tilePostIDs = tiles
+    }
+
     /// Where a flat index into `posts` lives in the sectioned list.
     private func indexPath(for index: Int) -> IndexPath {
+        if style == .discover, !segmentStarts.isEmpty {
+            // The last stretch starting at or before `index`.
+            var low = 0
+            var high = segmentStarts.count - 1
+            while low < high {
+                let mid = (low + high + 1) / 2
+                if segmentStarts[mid] <= index { low = mid } else { high = mid - 1 }
+            }
+            return IndexPath(item: index - segmentStarts[low], section: low)
+        }
         let split = split
         guard split > 0 else { return IndexPath(item: index, section: 0) }
         return index < split
@@ -174,7 +260,10 @@ final class ForYouGridPage: UIView {
 
     /// The flat index into `posts` an index path names.
     private func flatIndex(for indexPath: IndexPath) -> Int {
-        indexPath.section == 0 ? indexPath.item : split + indexPath.item
+        if style == .discover, segmentStarts.indices.contains(indexPath.section) {
+            return segmentStarts[indexPath.section] + indexPath.item
+        }
+        return indexPath.section == 0 ? indexPath.item : split + indexPath.item
     }
 
     /// Armed when the next content to arrive is a re-derived corpus rather than
@@ -231,7 +320,9 @@ final class ForYouGridPage: UIView {
     }
 
     /// The rounding this page's tiles take, paired with the layout's gutter.
-    /// List pages fall back to the tile default, which they never use.
+    /// List pages fall back to the tile default, which they never use; Discover's
+    /// chunks take the feed mosaic's pairing, the gutter `DiscoverListLayout`
+    /// lays them out with.
     ///
     /// ⚠️ NOT `private`, because a landing has to ask rather than restate it.
     /// The chaotic slice layout rounds its bricks more than the mosaic default
@@ -239,7 +330,8 @@ final class ForYouGridPage: UIView {
     /// window sprang to a 10pt corner over a 16pt brick, a step in the one
     /// channel the eye is most sensitive to, on the last frame of the close.
     var tileCornerRadius: CGFloat {
-        sliceLayout?.tileCornerRadius ?? PostGridTileCell.mosaicCornerRadius
+        if style == .discover { return ChaoticSliceLayout.harmonisedCornerRadius }
+        return sliceLayout?.tileCornerRadius ?? PostGridTileCell.mosaicCornerRadius
     }
 
     /// Re-places every post against slot shapes that have just changed — a
@@ -284,7 +376,8 @@ final class ForYouGridPage: UIView {
     /// timeline rather than the mosaic's six because a column fits fewer
     /// previews on screen at once, so the sixth slot would go to a row well
     /// outside the viewport — and the idle-player cache is six, which the two
-    /// pages share.
+    /// pages share. Discover counts as a timeline: a chunk on screen is a few
+    /// tiles among cards, and its tiles compete on the same distance.
     static func concurrentPlayers(for style: Style) -> Int {
         style == .grid ? 6 : 5
     }
@@ -298,6 +391,11 @@ final class ForYouGridPage: UIView {
     /// ranking change under a gesture they made. The product rule is that a
     /// close lands back on the post the OPENING left from, and a list keeps its
     /// order.
+    ///
+    /// Discover is a list, chunks included: a tile swapped for the post the
+    /// viewer paged to would put a card's post in a tile's place (or a text
+    /// post in a picture's), and the chunks' posts were chosen to fit their
+    /// slots. A close from a tile lands back on that tile.
     var landsByAdoption: Bool { style == .grid }
     private let collectionView: UICollectionView
 
@@ -411,14 +509,20 @@ final class ForYouGridPage: UIView {
         // after `super.init`. The box is filled in below, and the layout only
         // ever asks during a layout pass — long after that.
         let headerHost = WeakPageBox()
-        collectionView = UICollectionView(
-            frame: .zero,
-            collectionViewLayout: style == .grid
-                ? ChaoticSliceLayout()
-                : PostGridListLayout.layout(hasHeader: { [headerHost] index in
-                    headerHost.page?.hasHeader(inSection: index) ?? false
-                })
-        )
+        let layout: UICollectionViewLayout = switch style {
+        case .grid:
+            ChaoticSliceLayout()
+        case .list:
+            PostGridListLayout.layout(hasHeader: { [headerHost] index in
+                headerHost.page?.hasHeader(inSection: index) ?? false
+            })
+        case .discover:
+            // Same box, other question: which sections are chunks.
+            DiscoverListLayout.layout(chunk: { [headerHost] section in
+                headerHost.page?.chunk(inSection: section)
+            })
+        }
+        collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
         super.init(frame: .zero)
         headerHost.page = self
 
@@ -448,6 +552,11 @@ final class ForYouGridPage: UIView {
             ForYouSectionHeaderView.self,
             forSupplementaryViewOfKind: PostGridListLayout.headerElementKind,
             withReuseIdentifier: ForYouSectionHeaderView.reuseID
+        )
+        collectionView.register(
+            DiscoverViewAllFooterView.self,
+            forSupplementaryViewOfKind: DiscoverListLayout.viewAllElementKind,
+            withReuseIdentifier: DiscoverViewAllFooterView.reuseID
         )
         collectionView.dataSource = self
         collectionView.delegate = self
@@ -973,8 +1082,11 @@ final class ForYouGridPage: UIView {
     /// aspect-fills whatever it is handed, so a square source is no different
     /// there to any other, and applying the grid's rule would leave those rows
     /// permanently still for a reason that never applied to them.
+    ///
+    /// Asked per POST (`drawsAsTile`), because Discover draws both: a chunk's
+    /// tiles follow the mosaic's rule and its cards the timeline's.
     private func autoplays(_ post: GalleryPost) -> Bool {
-        style == .grid ? post.autoplaysInGrid : post.hasPlayableVideo
+        drawsAsTile(post.id) ? post.autoplaysInGrid : post.hasPlayableVideo
     }
 
     /// The stream this cell should be playing right now, or nil for none.
@@ -1053,9 +1165,12 @@ final class ForYouGridPage: UIView {
     /// prefetching every thumbnail in range would trade this narrow fix for
     /// bandwidth the grid did not ask for.
     private func preloadAutoplayCovers(around visible: [IndexPath]) {
+        // FLAT indices, not `item`: on a sectioned page (Discover's stretches,
+        // the list's "New"/"Recent") an item number restarts every section.
+        let flat = visible.map(flatIndex(for:))
         guard !showsSkeleton, !posts.isEmpty,
-              let first = visible.map(\.item).min(),
-              let last = visible.map(\.item).max()
+              let first = flat.min(),
+              let last = flat.max()
         else { return }
         let lower = max(0, first - Self.autoplayCoverLookahead)
         let upper = min(posts.count - 1, last + Self.autoplayCoverLookahead)
@@ -1506,7 +1621,7 @@ final class ForYouGridPage: UIView {
     /// Takes the POST rather than its id, because the caller may be holding one
     /// this page does not have yet — the adoption can insert it.
     func canLandHero(on post: GalleryPost) -> Bool {
-        style == .grid || post.kind != .text
+        drawsAsTile(post.id) || post.kind != .text
     }
 
     /// The next post in the RENDERED order after `postID` that a close can
@@ -1847,6 +1962,14 @@ final class ForYouGridPage: UIView {
     /// it would leave a hole in the mosaic for the length of the flight.
     var landingConcealsMedia: Bool { style == .list }
 
+    /// The same question for ONE landing — what the flight actually asks,
+    /// because Discover answers it both ways: a card's preview is concealed,
+    /// a chunk's tile is not (a hole in a chunk is as much a hole as one in
+    /// the mosaic).
+    func landingConcealsMedia(for postID: PostID) -> Bool {
+        !drawsAsTile(postID)
+    }
+
     /// The post's whole cell, whatever kind of cell it is.
     ///
     /// ⚠️ THE ANSWER OF LAST RESORT FOR A CLOSE, and it exists because the two
@@ -1975,7 +2098,12 @@ final class ForYouGridPage: UIView {
     func adoptPost(
         _ postID: PostID, intoSlotOf occupantID: PostID, orInsert model: GalleryPost? = nil
     ) -> Bool {
-        guard !showsSkeleton,
+        // ⚠️ NEVER ON DISCOVER. Its stretches are planned — which posts are
+        // cards, which are tiles, in which chunk — and a swap would put a card's
+        // post into a tile's slot (a text post into a picture's) behind the
+        // planner's back, where `segments` and `posts` would then disagree about
+        // what is where. Nothing asks: `landsByAdoption` is false there.
+        guard style != .discover, !showsSkeleton,
               let slot = posts.firstIndex(where: { $0.id == occupantID })
         else { return false }
         // ⚠️ MOVE IF IT IS HERE, INSERT IF IT IS NOT — never a second copy.
@@ -2418,7 +2546,13 @@ final class ForYouGridPage: UIView {
             // A refresh keeps the existing rows under the spinner rather than
             // blanking to skeletons — the content is still valid until the
             // new page lands.
-            apply(posts, skeleton: !refreshControl.isRefreshing && posts.isEmpty)
+            //
+            // ⚠️ Discover hands back the CORPUS, not `posts`: its display
+            // order has the chunks' media pulled forward, and re-planning that
+            // as if it were the ranking would lay out a different list under a
+            // spinner that promised to change nothing.
+            apply(style == .discover ? rawPosts : posts,
+                  skeleton: !refreshControl.isRefreshing && posts.isEmpty)
         case .content(let posts):
             emptyState.isHidden = true
             apply(posts, skeleton: false)
@@ -2450,7 +2584,10 @@ final class ForYouGridPage: UIView {
         // leaving it armed would force the next genuine page landing to reload.
         let mustReload = mustReload
         self.mustReload = false
-        guard rawPosts != incoming || showsSkeleton != skeleton else { return }
+        // On Discover the corpus's COMPLETENESS is an input too: the last page
+        // can land with nothing new in it and still decide the tail's chunk.
+        let completenessMoved = style == .discover && plannedCorpusComplete != isCorpusComplete
+        guard rawPosts != incoming || showsSkeleton != skeleton || completenessMoved else { return }
         // ⚠️ **SETTLE ANY PENDING RELOAD AGAINST THE OLD MODEL FIRST.** A batch
         // insert below takes its "before" counts from the collection view — and
         // a `reloadData` still pending (the slice layout's first-geometry
@@ -2479,6 +2616,10 @@ final class ForYouGridPage: UIView {
         // matching unhide, so a flight that never delivered one would hide its
         // post's cell on every future dequeue — for the life of the page.
         if !posts.contains(where: { $0.id == heroHiddenPostID }) { heroHiddenPostID = nil }
+        if style == .discover {
+            applyDiscover(incoming, skeleton: skeleton, dissolving: dissolving, mustReload: mustReload)
+            return
+        }
         let added = Self.addedPosts(from: rawPosts, to: incoming)
         rawPosts = incoming
         showsSkeleton = skeleton
@@ -2510,6 +2651,50 @@ final class ForYouGridPage: UIView {
             return
         }
         posts = partitioned(arrange(incoming, startingAt: 0))
+        reloadAll(dissolving: dissolving)
+    }
+
+    /// Discover's delivery: the stretches are re-planned over the whole corpus
+    /// (the planner is cheap once its tilings are cached), and the difference
+    /// is expressed as an INSERT whenever it is one — a page landing grows the
+    /// last run of cards and appends stretches after it, and must leave every
+    /// realized cell, and its playback, alone. See `MosaicChunkPlanner` for why
+    /// a landing can only ever extend the list.
+    private func applyDiscover(
+        _ incoming: [GalleryPost], skeleton: Bool, dissolving: Bool, mustReload: Bool
+    ) {
+        let before = segments
+        let postsBefore = posts
+        let wasSkeleton = showsSkeleton
+        rawPosts = incoming
+        showsSkeleton = skeleton
+        plannedCorpusComplete = isCorpusComplete
+        let planned = skeleton ? [] : chunkPlanner.segments(for: incoming, isComplete: isCorpusComplete)
+        let change = MosaicChunkPlanner.change(from: before, to: planned)
+        adoptSegments(planned)
+        if !wasSkeleton, !skeleton, !dissolving, !mustReload,
+           case .extended(let grown, let appended) = change {
+            let last = before.count - 1
+            collectionView.performBatchUpdates {
+                if !grown.isEmpty {
+                    collectionView.insertItems(at: grown.map { IndexPath(item: $0, section: last) })
+                }
+                if !appended.isEmpty {
+                    collectionView.insertSections(IndexSet(integersIn: appended))
+                }
+            }
+            DispatchQueue.main.async { [weak self] in self?.updateAutoplay() }
+            return
+        }
+        // The same posts in the same places: nothing to redraw. (A post whose
+        // counters moved is NOT this case — `posts` compares whole models.)
+        if change == .identical, wasSkeleton == skeleton, !mustReload, postsBefore == posts { return }
+        reloadAll(dissolving: dissolving)
+    }
+
+    /// The whole-table path every style ends on when a delivery is not an
+    /// append.
+    private func reloadAll(dissolving: Bool) {
         // Kick the leading covers before any cell exists. `preloadAutoplayCovers`
         // keys off visible index paths, which are empty on a first load — the
         // one moment the grid is coldest and the fetch has the most latency to
@@ -2539,12 +2724,26 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         split > 0 && sections.indices.contains(index)
     }
 
+    /// What one post is drawn as. The page's `Style` answers it for the grid
+    /// and the list; Discover answers it per post.
+    private enum CellShape {
+        case card
+        case tile
+    }
+
     func numberOfSections(in collectionView: UICollectionView) -> Int {
-        showsSkeleton ? 1 : sections.count
+        guard !showsSkeleton else { return 1 }
+        // One section per stretch — and one empty one for an empty list, the
+        // shape the other styles have when there is nothing to show.
+        if style == .discover { return max(1, segments.count) }
+        return sections.count
     }
 
     func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
         guard !showsSkeleton else { return skeletonCount }
+        if style == .discover {
+            return segments.indices.contains(section) ? segments[section].posts.count : 0
+        }
         let split = split
         guard split > 0 else { return posts.count }
         return section == 0 ? split : posts.count - split
@@ -2555,6 +2754,15 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         viewForSupplementaryElementOfKind kind: String,
         at indexPath: IndexPath
     ) -> UICollectionReusableView {
+        if kind == DiscoverListLayout.viewAllElementKind {
+            let footer = collectionView.dequeueReusableSupplementaryView(
+                ofKind: kind,
+                withReuseIdentifier: DiscoverViewAllFooterView.reuseID,
+                for: indexPath
+            ) as! DiscoverViewAllFooterView
+            footer.onTap = { [weak self] in self?.onViewAllTapped?() }
+            return footer
+        }
         let header = collectionView.dequeueReusableSupplementaryView(
             ofKind: kind,
             withReuseIdentifier: ForYouSectionHeaderView.reuseID,
@@ -2587,7 +2795,9 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
         if showsSkeleton {
             switch style {
-            case .list:
+            // Discover waits as cards: most of what it shows is cards, and a
+            // chunk's shape is not known until its posts are.
+            case .list, .discover:
                 let cell = collectionView.dequeueReusableCell(
                     withReuseIdentifier: PostGridSkeletonListCell.reuseID, for: indexPath
                 ) as! PostGridSkeletonListCell
@@ -2609,8 +2819,9 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         // another tile.
         // Either flight hides it, and neither knows about the other.
         let isFlying = post.id == heroHiddenPostID || post.id == revealConcealedPostID
-        switch style {
-        case .list:
+        // Asked per post, because Discover draws both — see `drawsAsTile`.
+        switch drawsAsTile(post.id) ? CellShape.tile : .card {
+        case .card:
             let cell = collectionView.dequeueReusableCell(
                 withReuseIdentifier: PostGridListRowCell.reuseID, for: indexPath
             ) as! PostGridListRowCell
@@ -2714,7 +2925,7 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
             }
             Self.applyHeroConcealment(isFlying, to: cell)
             return cell
-        case .grid:
+        case .tile:
             let cell = collectionView.dequeueReusableCell(
                 withReuseIdentifier: PostGridTileCell.reuseID, for: indexPath
             ) as! PostGridTileCell

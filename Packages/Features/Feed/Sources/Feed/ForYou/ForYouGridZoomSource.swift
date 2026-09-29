@@ -460,7 +460,12 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         // gap where the photograph belongs, and the flying media fills it. With
         // the preview left showing, the same photograph was on screen twice for
         // the whole return, and the card's arrival had nothing to arrive into.
-        page?.setHeroHidden(true, for: anchorID, conceals: page?.landingConcealsMedia == true)
+        //
+        // Asked of the LANDING POST, not the page: Discover's list holds both,
+        // a card's preview and a chunk's tile.
+        page?.setHeroHidden(
+            true, for: anchorID, conceals: page?.landingConcealsMedia(for: anchorID) == true
+        )
     }
 
     /// A tile whose post is no longer in the grid still needs a card to fly —

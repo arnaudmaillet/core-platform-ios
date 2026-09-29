@@ -6,10 +6,9 @@ import Testing
 
 /// What an unfollow does to the surface it was raised from.
 ///
-/// This screen IS the following feed — both its tabs are orderings of
-/// `timeline.v1.GetFollowingFeed`, there is no discovery corpus — so an author
-/// the viewer no longer follows has nothing left to be doing on it. Leaving
-/// their rows in place is the version of this that reads as a failed tap.
+/// Following is the people the viewer follows, so an author they no longer
+/// follow has nothing left to be doing there — leaving their rows in place
+/// reads as a failed tap. Discover is everyone, so it keeps them.
 @MainActor
 struct ForYouUnfollowTests {
     private func post(_ id: String, by author: String, kind: GalleryPost.Kind = .photo) -> GalleryPost {
@@ -47,10 +46,10 @@ struct ForYouUnfollowTests {
         #expect(model.posts(for: .activity).map(\.id.rawValue) == ["b1"])
     }
 
-    /// Both pages, because Discover is an ORDERING of the following corpus and
-    /// not a second one: a post that does not belong on one does not belong on
-    /// the other.
-    @Test func everyPageLosesThemTogether() async {
+    /// Following loses them; DISCOVER KEEPS THEM — it is everyone, followed
+    /// or not, so an author the viewer just stopped following is still
+    /// discoverable there, in the list and in the pushed mosaic (`.media`).
+    @Test func onlyFollowingLosesThem() async {
         let (model, _) = await loaded([
             post("photo", by: "sofia", kind: .photo),
             post("text", by: "sofia", kind: .text),
@@ -59,11 +58,24 @@ struct ForYouUnfollowTests {
 
         model.removeAuthor(ProfileID("sofia"))
 
-        // Media keeps the other author's photo and loses this one's; Short held
-        // only this author's text, so it empties.
-        #expect(model.posts(for: .media).map(\.id.rawValue) == ["kept"])
-        #expect(model.posts(for: .short).isEmpty)
+        // Following's pages: Short held only this author's text, so it empties.
         #expect(model.posts(for: .activity).map(\.id.rawValue) == ["kept"])
+        #expect(model.posts(for: .short).isEmpty)
+        // Discover's: untouched.
+        // (Sets: the trending order breaks these fixtures' ties on id.)
+        #expect(Set(model.discoverPosts.map(\.id.rawValue)) == ["photo", "text", "kept"])
+        #expect(Set(model.posts(for: .media).map(\.id.rawValue)) == ["photo", "kept"])
+    }
+
+    /// Unfollowing twice is one removal: the second changes nothing.
+    @Test func aSecondUnfollowChangesNothing() async {
+        let (model, resets) = await loaded([post("a1", by: "sofia"), post("b1", by: "marcus")])
+        model.removeAuthor(ProfileID("sofia"))
+        let before = resets()
+
+        model.removeAuthor(ProfileID("sofia"))
+
+        #expect(resets() == before)
     }
 
     /// A removal RE-DERIVES the corpus rather than extending it, and the pages

@@ -50,7 +50,25 @@ public final class ForYouViewModel {
             case .short: short
             }
         }
+
+        /// Discover's list: the DISCOVERY corpus — every author, every kind,
+        /// in ranked order — from which the list decides for itself which
+        /// posts become mosaic tiles (`MosaicChunkPlanner`).
+        ///
+        /// ⚠️ NOT Following's state. Following is the people the viewer
+        /// follows; Discover is everyone, so an author unfollowed here leaves
+        /// Following and stays discoverable (`removeAuthor`). `media` is the
+        /// discovery corpus too, narrowed to media — the pushed "View all"
+        /// mosaic, which is what the old Discover grid drew from.
+        ///
+        /// Defaulted so a snapshot built without it (a test's) still reads.
+        public var discover: PageState = .loading
     }
+
+    /// Whether another page of the corpus can still be fetched. What lets
+    /// Discover decide the chunk at its tail instead of holding the posts
+    /// behind it back for a page that is never coming.
+    public var hasMorePages: Bool { nextPageToken != nil }
 
     public var onSnapshotChange: ((Snapshot) -> Void)?
     /// Fires when a NEXT-PAGE fetch starts and again when it settles.
@@ -130,12 +148,12 @@ public final class ForYouViewModel {
     /// read from `ForYouPagerView.pageOrder` because that static is `@MainActor`
     /// by inference (a `UIView` subclass's are) and this type answers off it in
     /// tests; `ForYouTabOrderTests` pins the two together.
-    nonisolated static let tabs: [GalleryFilter.Format] = [.activity, .media]
+    nonisolated static let tabs: [GalleryFilter.Format] = [.media, .activity]
 
-    /// Where the screen opens. Discover — the media grid — is the landing tab,
-    /// although it is no longer the FIRST one: the order is a question of
-    /// position, the landing one of format, and swapping the tabs (Following
-    /// now leads) was not a decision to change where the screen opens.
+    /// Where the screen opens: Discover, which is also the FIRST tab. The
+    /// order is a question of position and the landing one of format — they
+    /// happen to agree again since Discover moved back to the left
+    /// (2026-09-28), but nothing here assumes it.
     nonisolated static let defaultFormat: GalleryFilter.Format = .media
 
     public private(set) var format: GalleryFilter.Format = ForYouViewModel.defaultFormat
@@ -170,17 +188,32 @@ public final class ForYouViewModel {
     private var load: Task<Void, Never>?
     private var pageLoad: Task<Void, Never>?
 
+    /// Whether the viewer follows an author — what FOLLOWING is filtered by.
+    /// Nil (a test, a composition without the graph) leaves Following
+    /// unfiltered, which is what it was before it had a graph to ask.
+    private let followRelations: (any SocialGraphReading)?
+    /// Keeps the answers live: a follow or an unfollow ACCEPTED anywhere in
+    /// the app lands here (`FollowGraphEvents`, #300).
+    private var followSubscription: FollowGraphSubscription?
+
     public init(
         repository: any ForYouProviding,
         preferences: GalleryPreferences? = nil,
         unreadStore: ForYouUnreadStore = ForYouUnreadStore(),
-        contextStore: ContentContextStore? = nil
+        contextStore: ContentContextStore? = nil,
+        followRelations: (any SocialGraphReading)? = nil,
+        followEvents: FollowGraphEvents? = nil
     ) {
         self.repository = repository
         self.preferences = preferences
         self.unreadStore = unreadStore
         self.contextStore = contextStore
+        self.followRelations = followRelations
         if let contextStore { context = contextStore.context }
+        // Weak: the channel holds the handler, the handler must not hold this.
+        followSubscription = followEvents?.subscribeOnMain { [weak self] change in
+            self?.apply(change)
+        }
         // Two conditions, and both were learned the hard way.
         //
         // `hasStoredFormat` — because `preferences.format` answers `.activity`
@@ -268,32 +301,104 @@ public final class ForYouViewModel {
         publish()
     }
 
-    /// Drops everything by one author from the corpus in hand.
+    /// Takes one author out of FOLLOWING, after an unfollow succeeds.
     ///
-    /// Called after an unfollow succeeds. This surface IS the following feed —
-    /// both its tabs are served by `timeline.v1.GetFollowingFeed` — so an
-    /// author the viewer no longer follows has nothing left to be doing on it,
-    /// and leaving their rows in place makes the action look like it failed.
+    /// Following is the people the viewer follows, so an author they no
+    /// longer follow has nothing left to be doing there, and leaving their
+    /// rows in place makes the action look like it failed.
     ///
-    /// Both pages lose them together, for that same reason: Discover is an
-    /// ORDERING of the following corpus, not a second one, so a post that does
-    /// not belong on one page does not belong on the other either.
+    /// ⚠️ DISCOVER KEEPS THEM. It used to lose them too, when Discover was an
+    /// ordering of the same following corpus; it is the discovery surface now
+    /// — everyone, followed or not (2026-09-28) — and an author the viewer
+    /// does not follow is exactly what it is for. So the corpus is left whole
+    /// and Following's derivation (`followingCorpus`) leaves the author out.
     ///
-    /// A local edit, deliberately, not a refetch. The next real load answers
-    /// with the server's own list; until then the client removes exactly what
-    /// it knows changed rather than dropping the corpus and making the viewer
-    /// watch the whole surface reload because they tapped one menu row.
+    /// It is the follow graph's own answer, folded in straight away: the same
+    /// change also arrives through `FollowGraphEvents` when the channel is
+    /// wired, and folding it twice changes nothing. This path is what serves
+    /// a composition without the channel.
     public func removeAuthor(_ authorID: ProfileID) {
-        guard let current = corpus else { return }
-        let remaining = current.filter { $0.authorID != authorID }
-        guard remaining.count != current.count else { return }
-        corpus = remaining
-        // A REMOVAL is a re-derivation, not an extension — the pages diff
-        // incrementally and have to be told before they see it, exactly as a
-        // lens change tells them. Without this the rows are removed from the
-        // model and left on screen.
+        apply(FollowChange(profileID: authorID, isFollowing: false))
+    }
+
+    /// Whether the viewer follows each author seen so far — `true` for the
+    /// viewer too (their own posts are part of their Following, as they always
+    /// were). Filled by `resolveFollows` as pages land, kept live by
+    /// `FollowGraphEvents`. An author with NO answer (no graph wired, or a
+    /// lookup that failed) is shown: Following fails open, which is what it
+    /// did before it had a graph to ask, rather than hiding posts on a hunch.
+    private var followsAuthor: [ProfileID: Bool] = [:]
+
+    /// A follow or unfollow ACCEPTED anywhere in the app. The author's posts
+    /// join or leave FOLLOWING; Discover, which is everyone, does not move.
+    ///
+    /// A re-derivation when it changes anything the viewer can see — the posts
+    /// land where their rank puts them, not after the list — so the pages are
+    /// told first (`onCorpusReset`), exactly as a lens change tells them.
+    private func apply(_ change: FollowChange) {
+        // What Following SHOWED for this author: an unanswered one is shown.
+        let wasShown = followsAuthor[change.profileID] ?? true
+        followsAuthor[change.profileID] = change.isFollowing
+        guard wasShown != change.isFollowing,
+              let corpus, corpus.contains(where: { $0.authorID == change.profileID })
+        else { return }
         onCorpusReset?()
         publish()
+    }
+
+    /// Asks the graph about every author in `posts` it has not answered for
+    /// yet, concurrently, BEFORE the page that carries them is published — so
+    /// Following is filtered from its first frame and a page landing stays an
+    /// append rather than a re-derivation a moment later.
+    ///
+    /// Only answers are stored: a failed lookup leaves the author unanswered
+    /// (shown, see `followsAuthor`) and is asked again with the next page. An
+    /// answer that arrives after a follow EVENT for the same author never
+    /// overwrites it — the event is the newer truth.
+    private func resolveFollows(for posts: [GalleryPost]) async {
+        guard let followRelations else { return }
+        let unknown = Set(posts.compactMap(\.authorID)).filter { followsAuthor[$0] == nil }
+        guard !unknown.isEmpty else { return }
+        let answers = await withTaskGroup(of: (ProfileID, Bool?).self) { group in
+            for id in unknown {
+                group.addTask {
+                    guard let relation = try? await followRelations.followRelation(to: id) else {
+                        return (id, nil)
+                    }
+                    return (id, relation == .following || relation == .viewer)
+                }
+            }
+            var collected: [(ProfileID, Bool?)] = []
+            for await answer in group { collected.append(answer) }
+            return collected
+        }
+        for case let (id, follows?) in answers where followsAuthor[id] == nil {
+            followsAuthor[id] = follows
+        }
+    }
+
+    /// FOLLOWING's corpus: the loaded posts by authors the viewer follows,
+    /// and the viewer's own.
+    ///
+    /// ⚠️ Filtered HERE, by the follow graph, because the served timeline is
+    /// not: `timeline.v1.GetFollowingFeed` promises no such thing, and the
+    /// mock serves every author's posts (the viewer follows 12 of its
+    /// authors). The same corpus, unfiltered, is Discover's.
+    private var followingCorpus: [GalleryPost] {
+        let all = corpus ?? []
+        guard !followsAuthor.isEmpty else { return all }
+        return all.filter { post in
+            guard let author = post.authorID else { return true }
+            return followsAuthor[author] ?? true
+        }
+    }
+
+    /// DISCOVER's corpus: every loaded post, every author and kind, under the
+    /// lens — the widest corpus the app has. There is no discovery RPC
+    /// (BACKEND_GAPS §14), and the timeline is the whole population this
+    /// screen sees; followed and not.
+    public var discoverPosts: [GalleryPost] {
+        context.filtering(corpus ?? [])
     }
 
     /// Called as the active page nears its end. A no-op when a page is
@@ -313,6 +418,9 @@ public final class ForYouViewModel {
                 self.onPagingChange?(false)
             }
             guard let page = try? await repository.page(after: token), !Task.isCancelled else { return }
+            // Following is filtered by the graph from the page's first frame.
+            await resolveFollows(for: page.posts)
+            guard !Task.isCancelled else { return }
             // Append, never reorder: the new page is ranked among ITSELF and
             // added to the end, so a page landing cannot renumber what is
             // already on screen.
@@ -381,6 +489,10 @@ public final class ForYouViewModel {
             do {
                 let page = try await repository.firstPage()
                 guard !Task.isCancelled else { return }
+                // Asked before the first publish, so Following never shows an
+                // author it is about to take away.
+                await resolveFollows(for: page.posts)
+                guard !Task.isCancelled else { return }
                 corpus = source.ordering(page.posts)
                 failure = nil
                 nextPageToken = page.nextPageToken
@@ -424,10 +536,22 @@ public final class ForYouViewModel {
     public func posts(for format: GalleryFilter.Format) -> [GalleryPost] {
         // `corpus` is already in display order — see its note. Reading is a
         // pure filter, so nothing can reorder behind the viewer's back.
-        format.filtering(context.filtering(corpus ?? []))
+        //
+        // `.media` is DISCOVER's format — its tab, and the pushed mosaic — so
+        // it reads the discovery corpus; the other formats are Following's.
+        let source = format == .media ? (corpus ?? []) : followingCorpus
+        return format.filtering(context.filtering(source))
     }
 
     private func publish() {
+        func discoverPage() -> PageState {
+            if let failure { return .failed(message: failure) }
+            guard corpus != nil else { return .loading }
+            let posts = discoverPosts
+            return posts.isEmpty
+                ? .empty(Self.discoverEmptyState(source: source, context: context))
+                : .content(posts)
+        }
         func page(_ format: GalleryFilter.Format) -> PageState {
             if let failure { return .failed(message: failure) }
             guard corpus != nil else { return .loading }
@@ -442,8 +566,41 @@ public final class ForYouViewModel {
         // itself a moment later — a visible restructure on every load. Nothing
         // in `publishUnread` reads the snapshot, so the order is free.
         publishUnread()
-        onSnapshotChange?(Snapshot(activity: page(.activity), media: page(.media), short: page(.short)))
+        onSnapshotChange?(Snapshot(
+            activity: page(.activity), media: page(.media), short: page(.short),
+            discover: discoverPage()
+        ))
+        #if DEBUG
+        debugLogFollowing()
+        #endif
     }
+
+    #if DEBUG
+    /// `-foryou-following-log`: one line per publish in
+    /// `Documents/foryou-following.log` — how many posts Following and
+    /// Discover hold, and which authors Following is leaving out. A file,
+    /// because the question ("did the follow I just made reach this list?")
+    /// is asked of a long list no screenshot can count, and a console capture
+    /// is the thing that fails quietly (see `sim-log-capture-traps`).
+    private func debugLogFollowing() {
+        guard ProcessInfo.processInfo.arguments.contains("-foryou-following-log"),
+              let corpus,
+              let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+        else { return }
+        let hidden = Set(corpus.compactMap(\.authorID)).filter { followsAuthor[$0] == false }
+        let line = "following=\(followingCorpus.count) discover=\(corpus.count)"
+            + " answered=\(followsAuthor.count)"
+            + " hidden=\(hidden.map(\.rawValue).sorted().joined(separator: ","))\n"
+        let url = documents.appendingPathComponent("foryou-following.log")
+        if let handle = try? FileHandle(forWritingTo: url) {
+            handle.seekToEndOfFile()
+            handle.write(Data(line.utf8))
+            try? handle.close()
+        } else {
+            try? Data(line.utf8).write(to: url)
+        }
+    }
+    #endif
 
     /// What the badged tab counts against this session, frozen on first sight.
     ///
@@ -462,10 +619,10 @@ public final class ForYouViewModel {
 
     /// The badged tab's arrivals under a given lens, in display order.
     private func newPosts(in context: ContentContext) -> [GalleryPost] {
-        guard let corpus, let watermark = sessionWatermark(against: Self.badgedTab.filtering(corpus)) else {
-            return []
-        }
-        return watermark.partition(Self.badgedTab.filtering(context.filtering(corpus))).new
+        guard corpus != nil,
+              let watermark = sessionWatermark(against: Self.badgedTab.filtering(followingCorpus))
+        else { return [] }
+        return watermark.partition(Self.badgedTab.filtering(context.filtering(followingCorpus))).new
     }
 
     /// The badged tab's count under a given lens — the size of the set above,
@@ -546,6 +703,23 @@ public final class ForYouViewModel {
     private func applyMockNewActivityIfNeeded() {}
     private func rearmMockNewActivity() {}
     #endif
+
+    /// Discover's empty list, in Discover's words — nothing to DISCOVER, not
+    /// "no activity": the tab is not anyone's activity.
+    nonisolated static func discoverEmptyState(
+        source: DiscoverySource,
+        context: ContentContext = .all
+    ) -> EmptyState {
+        let title = switch source {
+        case .trending: "Nothing trending to discover yet."
+        case .recent: "Nothing new to discover yet."
+        }
+        guard !context.isUnfiltered else { return EmptyState(title: title) }
+        return EmptyState(
+            title: title,
+            subtitle: "Showing \(context.title) only. Change the context to see everything."
+        )
+    }
 
     /// Names the empty combination so the blank page reads as an answer.
     nonisolated static func emptyState(

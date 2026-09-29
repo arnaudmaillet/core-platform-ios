@@ -23,10 +23,10 @@ import UIKit
 ///
 /// Only reachable when the restored format is NOT the pager's FIRST page:
 /// restoring that one returns at the `index != activeIndex` guard and moves
-/// neither index. That is why the default path looked fine while Discover
-/// led — and why these tests speak in `pageOrder` rather than in formats:
-/// since Following moved to the left (2026-09-28) the DEFAULT restore
-/// (Discover) is the one that takes the early return.
+/// neither index. That is why the default path looked fine — Discover leads,
+/// and is the default — and why these tests speak in `pageOrder` rather than
+/// in formats: the order has changed twice (2026-09-28, #293 and back), and
+/// which restore takes the early return changes with it.
 @MainActor
 struct ForYouPagerActivePageTests {
     private func pager() -> ForYouPagerView {
@@ -78,9 +78,8 @@ struct ForYouPagerActivePageTests {
                 "settling on the page already active is a no-op, not a repeat announcement")
     }
 
-    /// A restore — the default one included, which is Discover and no longer
-    /// the first page — must not announce a page change nobody made: every
-    /// launch goes through it.
+    /// A restore — of either page, the default included — must not announce a
+    /// page change nobody made: every launch goes through it.
     @Test func restoringAFormatBeforeLayoutAnnouncesNothing() {
         for format in ForYouPagerView.pageOrder {
             let pager = pager()

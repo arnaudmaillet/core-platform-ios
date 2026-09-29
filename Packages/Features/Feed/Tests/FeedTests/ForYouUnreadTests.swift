@@ -209,19 +209,19 @@ struct ForYouUnreadStoreTests {
 #if DEBUG
 struct ForYouBadgeOverrideTests {
     @Test func theArgumentForcesCountsInPagerOrder() {
-        // Pager order is Following then Discover, so the first number is the
-        // unfiltered page's and the second is the media page's.
+        // Pager order is Discover then Following, so the first number is
+        // Discover's and the second is the unfiltered page's.
         let store = makeStore(arguments: ["-foryou-badges", "3,7"])
-        #expect(store.count(for: .activity, in: []) == 3)
-        #expect(store.count(for: .media, in: []) == 7)
+        #expect(store.count(for: .media, in: []) == 3)
+        #expect(store.count(for: .activity, in: []) == 7)
     }
 
     @Test func aCountPastTheTabsIsIgnored() {
         // Three numbers for two tabs: the extra belongs to a tab that no longer
         // exists, and must not land on one that does.
         let store = makeStore(arguments: ["-foryou-badges", "3,7,9"])
-        #expect(store.count(for: .activity, in: []) == 3)
-        #expect(store.count(for: .media, in: []) == 7)
+        #expect(store.count(for: .media, in: []) == 3)
+        #expect(store.count(for: .activity, in: []) == 7)
         #expect(store.count(for: .short, in: []) == 0)
     }
 
@@ -230,31 +230,31 @@ struct ForYouBadgeOverrideTests {
         // `ForYouUnreadStore` reads `ForYouViewModel.tabs` because the pager's
         // own static is MainActor-isolated. This is what stops the two drifting.
         #expect(ForYouPagerView.pageOrder == ForYouViewModel.tabs)
-        // Following on the LEFT, Discover on the right (2026-09-28).
-        #expect(ForYouViewModel.tabs == [.activity, .media])
+        // Discover on the LEFT, Following on the right (2026-09-28, after
+        // #293's day the other way round).
+        #expect(ForYouViewModel.tabs == [.media, .activity])
     }
 
     @MainActor
     @Test func theBadgedTabIsFollowingAndTheLandingTabIsDiscover() {
         #expect(ForYouViewModel.badgedTab == .activity)
         #expect(ForYouViewModel.defaultFormat == .media)
-        // The swap moved the TAB, not the landing: the screen still opens on
-        // Discover, which now sits second.
-        #expect(ForYouViewModel.tabs.firstIndex(of: ForYouViewModel.defaultFormat) == 1)
+        // The screen opens on Discover, which is the first tab again.
+        #expect(ForYouViewModel.tabs.firstIndex(of: ForYouViewModel.defaultFormat) == 0)
         // The landing tab must not be the badged one, or the badge clears
         // itself on the first publish and can never be seen.
         #expect(ForYouViewModel.defaultFormat != ForYouViewModel.badgedTab)
     }
 
     @Test func aTabChangeRetiresItsOverride() {
-        let store = makeStore(arguments: ["-foryou-badges", "3,0"])
+        let store = makeStore(arguments: ["-foryou-badges", "0,3"])
         #expect(store.count(for: .activity, in: []) == 3)
         store.markSeen(.activity, in: [post("a", at: 10)], clearingOverride: true)
         #expect(store.count(for: .activity, in: [post("a", at: 10)]) == 0)
     }
 
     @Test func anAutomaticAdvanceLeavesTheOverrideStanding() {
-        let store = makeStore(arguments: ["-foryou-badges", "3,0"])
+        let store = makeStore(arguments: ["-foryou-badges", "0,3"])
         // The view model advances the active tab's watermark on every publish,
         // including the first one. If that retired the override, a forced badge
         // would be wiped before it rendered a single frame.
