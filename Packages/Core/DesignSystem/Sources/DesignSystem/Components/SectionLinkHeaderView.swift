@@ -9,8 +9,8 @@ import UIKit
 /// ```
 ///
 /// The title leads; the trailing edge carries the count of what is new in the
-/// section — a notification-red pill, the count the tab badges have always
-/// worn — and a chevron, the platform's sign that a screen will be PUSHED. The
+/// section — a `NotificationCountBadge`, the count the tab badges have always
+/// worn and the pushed list's "New" header repeats — and a chevron, the platform's sign that a screen will be PUSHED. The
 /// whole bar is the control, not just the chevron: a row of content under a
 /// heading reads "tap the heading to see all of it", and a 20pt glyph is a
 /// target nobody should have to aim for.
@@ -48,17 +48,13 @@ public final class SectionLinkHeaderView: UIView {
     public static let height: CGFloat = 44
 
     private let titleLabel = UILabel()
-    private let countPill = UIView()
-    private let countLabel = UILabel()
+    private let countBadge = NotificationCountBadge()
     private let chevron = UIImageView(
         image: UIImage(
             systemName: "chevron.right",
             withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
         )
     )
-
-    /// The pill's height — also its minimum width, so one digit draws a circle.
-    private static let pillHeight: CGFloat = 22
 
     public var title: String? {
         get { titleLabel.text }
@@ -69,7 +65,7 @@ public final class SectionLinkHeaderView: UIView {
     }
 
     /// What the pill says. Zero hides it.
-    public private(set) var count = 0
+    public var count: Int { countBadge.count }
 
     /// Whether the bar is a way in: a chevron, a button to VoiceOver, a tap.
     public let isLink: Bool
@@ -89,36 +85,18 @@ public final class SectionLinkHeaderView: UIView {
         titleLabel.textColor = .label
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        countLabel.font = .monospacedDigitSystemFont(
-            ofSize: UIFont.preferredFont(forTextStyle: .caption1).pointSize, weight: .semibold
-        )
-        // White in both appearances, on notification red — the tab badges' own
-        // pairing (see `PagedTabBar`'s badge for why a semantic colour here can
-        // vanish).
-        countLabel.textColor = .white
-        countLabel.textAlignment = .center
-        countPill.backgroundColor = .systemRed
-        countPill.layer.cornerRadius = Self.pillHeight / 2
-        countPill.layer.cornerCurve = .continuous
-        countPill.isHidden = true
-        countLabel.constrain(in: countPill) { parent in
-            countLabel.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
-            countLabel.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: 7)
-            countLabel.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -7)
-        }
-
         chevron.tintColor = .secondaryLabel
         chevron.contentMode = .center
         chevron.setContentHuggingPriority(.required, for: .horizontal)
 
-        let trailing = UIStackView(arrangedSubviews: [countPill, chevron])
+        let trailing = UIStackView(arrangedSubviews: [countBadge, chevron])
         trailing.axis = .horizontal
         trailing.alignment = .center
         trailing.spacing = Spacing.sm
         // ⚠️ THE TITLE TAKES THE SLACK, the trailing run hugs its content:
         // left to the defaults the stack stretched the PILL across the bar.
         titleLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        for view in [trailing, countPill, countLabel] as [UIView] {
+        for view in [trailing, countBadge] as [UIView] {
             view.setContentHuggingPriority(.required, for: .horizontal)
             view.setContentCompressionResistancePriority(.required, for: .horizontal)
         }
@@ -134,11 +112,7 @@ public final class SectionLinkHeaderView: UIView {
             row.topAnchor.constraint(equalTo: parent.topAnchor)
             row.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
         }
-        NSLayoutConstraint.activate([
-            countPill.heightAnchor.constraint(equalToConstant: Self.pillHeight),
-            countPill.widthAnchor.constraint(greaterThanOrEqualToConstant: Self.pillHeight),
-            heightAnchor.constraint(greaterThanOrEqualToConstant: Self.height)
-        ])
+        heightAnchor.constraint(greaterThanOrEqualToConstant: Self.height).isActive = true
 
         chevron.isHidden = !isLink
         isAccessibilityElement = true
@@ -165,12 +139,9 @@ public final class SectionLinkHeaderView: UIView {
     @available(*, unavailable)
     public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    /// The pill's number. Past 99 it reads "99+": a heading is read at a
-    /// glance, and a fourth digit is a number nobody acts on differently.
+    /// The pill's number — "99+" past 99 (`NotificationCountBadge`).
     public func setCount(_ count: Int) {
-        self.count = max(0, count)
-        countLabel.text = self.count > 99 ? "99+" : String(self.count)
-        countPill.isHidden = self.count == 0
+        countBadge.setCount(count)
         updateAccessibility()
     }
 
@@ -181,7 +152,7 @@ public final class SectionLinkHeaderView: UIView {
 
     #if DEBUG
     /// What the pill reads, nil while hidden — what a test pins.
-    public var debugCountText: String? { countPill.isHidden ? nil : countLabel.text }
+    public var debugCountText: String? { countBadge.text }
     /// Whether the chevron is drawn.
     public var debugShowsChevron: Bool { !chevron.isHidden }
     /// Fires the bar's own recogniser action — the path a finger takes, which

@@ -111,6 +111,92 @@ final class ForYouGridPage: UIView {
     /// recognised as one before arrangement permutes it.
     private var rawPosts: [GalleryPost] = []
 
+    /// WHICH posts are new — the pushed Following and Friends lists' "New"
+    /// (2026-09-29, re-introduced after #313 dropped it: the product call is
+    /// that the list the row's header pushes is divided the way the Messages
+    /// inbox is). The page is TOLD this rather than deriving it, so the "New"
+    /// header's count and the badge on the For You header the viewer tapped
+    /// cannot be two answers to one question — see
+    /// `ForYouViewModel.Snapshot.followingNew` / `.friendsUnseen`. Empty on
+    /// every other page, which is therefore one plain run.
+    private var newPostIDs: Set<PostID> = []
+
+    /// Where the "New" section ends, or 0 for a list that is one plain run.
+    ///
+    /// Read off `posts` rather than stored, because `posts` is kept partitioned
+    /// — the arrivals lead it. Three conditions, and each removes a header that
+    /// would say nothing: a grid page is a ranked mosaic with no "since" to
+    /// divide on; a skeleton has no posts to have arrived; and a corpus that is
+    /// ENTIRELY new would put "New" over everything and "Recent" over nothing,
+    /// which is a label rather than a division. The inbox lists follow the same
+    /// rule for the same reason.
+    private var split: Int {
+        guard style == .list, !showsSkeleton, !newPostIDs.isEmpty else { return 0 }
+        let leading = posts.prefix { newPostIDs.contains($0.id) }.count
+        return leading < posts.count ? leading : 0
+    }
+
+    #if DEBUG
+    /// How many rows the "New" header currently covers — the number UIKit
+    /// checks an update against, so a test can assert the shape rather than
+    /// the contents.
+    var debugArrivalsRunLength: Int { split }
+
+    /// The section headers laid out right now, top to bottom: the title each
+    /// wears and the count its badge shows.
+    func debugSectionHeaders() -> [(title: String?, count: Int)] {
+        collectionView.visibleSupplementaryViews(ofKind: PostGridListLayout.headerElementKind)
+            .compactMap { $0 as? SectionHeaderCapsuleView }
+            .sorted { $0.frame.minY < $1.frame.minY }
+            .map { header in
+                let title = header.debugPill.configuration?.attributedTitle.map { String($0.characters) }
+                return (title, header.debugPill.count)
+            }
+    }
+    #endif
+
+    /// Arrivals first, everything else after, each half keeping the order it
+    /// arrived in.
+    ///
+    /// ⚠️ **This reorders the list, and it has to.** The display order is
+    /// whatever the discovery source ranked — Trending puts the most-reacted
+    /// posts on top — so the arrivals are scattered through it. A "New" header
+    /// over the leading rows would then be over the wrong rows. Sections mean
+    /// the list is grouped, and grouping is a reordering; the inbox's lists do
+    /// exactly this. Within each half nothing moves, so the ranking still
+    /// decides everything it can still decide.
+    private func partitioned(_ list: [GalleryPost]) -> [GalleryPost] {
+        guard style == .list, !newPostIDs.isEmpty else { return list }
+        var arrivals: [GalleryPost] = []
+        var earlier: [GalleryPost] = []
+        for post in list {
+            if newPostIDs.contains(post.id) { arrivals.append(post) } else { earlier.append(post) }
+        }
+        return arrivals + earlier
+    }
+
+    /// The sections this page currently has, in order.
+    private var sections: [Section] {
+        split > 0 ? [.new, .earlier] : [.earlier]
+    }
+
+    /// The two halves of a sectioned list, and the words they wear.
+    ///
+    /// The SAME pair the inbox uses — "New" and "Recent". A viewer moving
+    /// between Messages and For You should not have to re-read a header to
+    /// learn that it means what the last one meant.
+    private enum Section {
+        case new
+        case earlier
+
+        var title: String {
+            switch self {
+            case .new: "New"
+            case .earlier: "Recent"
+            }
+        }
+    }
+
     // MARK: Discover's stretches
 
     /// Discover only: the list's stretches, one collection-view SECTION each.
@@ -182,7 +268,11 @@ final class ForYouGridPage: UIView {
             }
             return IndexPath(item: index - segmentStarts[low], section: low)
         }
-        return IndexPath(item: index, section: 0)
+        let split = split
+        guard split > 0 else { return IndexPath(item: index, section: 0) }
+        return index < split
+            ? IndexPath(item: index, section: 0)
+            : IndexPath(item: index - split, section: 1)
     }
 
     /// The flat index into `posts` an index path names.
@@ -190,7 +280,7 @@ final class ForYouGridPage: UIView {
         if style == .discover, segmentStarts.indices.contains(indexPath.section) {
             return segmentStarts[indexPath.section] + indexPath.item
         }
-        return indexPath.item
+        return indexPath.section == 0 ? indexPath.item : split + indexPath.item
     }
 
     /// Armed when the next content to arrive is a re-derived corpus rather than
@@ -202,6 +292,36 @@ final class ForYouGridPage: UIView {
     /// screen is a coincidence, not an append. See `ForYouViewModel.onCorpusReset`.
     func invalidateIncrementalUpdates() {
         mustReload = true
+    }
+
+    /// Whether appending `count` posts leaves the section structure alone, so
+    /// the append can stay an insert rather than becoming a reload.
+    ///
+    /// A page landing is ordinarily OLDER content, so it joins the second half
+    /// and the leading run of arrivals is untouched. Two structural moves are
+    /// not an append: a list that was entirely new gaining its first non-new
+    /// row, and a newcomer that is itself NEW — it belongs in the first half,
+    /// and an insert would put it at the foot of the second.
+    private func splitWouldHold(afterAppending added: [GalleryPost], to current: Int) -> Bool {
+        guard style == .list else { return true }
+        guard !added.contains(where: { newPostIDs.contains($0.id) }) else { return false }
+        let leading = posts.prefix { newPostIDs.contains($0.id) }.count
+        let after = leading < posts.count + added.count ? leading : 0
+        return after == current
+    }
+
+    /// Adopts a new set of arrivals. Re-groups the rows and reloads, because
+    /// both which section a row is in and how many sections there are can move.
+    ///
+    /// Re-grouped from the order the rows ARRIVED in (`rawPosts`), not from
+    /// the current grouping: a post leaving the set (a friend's story watched
+    /// meanwhile) goes back to its own place in "Recent", not to the top of it.
+    func setNewPosts(_ ids: Set<PostID>) {
+        guard newPostIDs != ids else { return }
+        newPostIDs = ids
+        guard style == .list, !showsSkeleton else { return }
+        posts = partitioned(rawPosts)
+        collectionView.reloadData()
     }
 
     /// Grid pages steer each post into the block whose shape crops it least;
@@ -411,17 +531,20 @@ final class ForYouGridPage: UIView {
             GridVideoPlaybackCoordinator(pool: $0, maxConcurrent: Self.concurrentPlayers(for: style))
         }
         self.style = style
-        // `headerHost` breaks the chicken-and-egg: Discover's layout needs to
-        // ask the page which sections are chunks, and the page does not exist
-        // until after `super.init`. The box is filled in below, and the layout
-        // only ever asks during a layout pass — long after that.
+        // `headerHost` breaks the chicken-and-egg: the layout needs to ask the
+        // page which sections are titled, and the page does not exist until
+        // after `super.init`. The box is filled in below, and the layout only
+        // ever asks during a layout pass — long after that.
         let headerHost = WeakPageBox()
         let layout: UICollectionViewLayout = switch style {
         case .grid:
             ChaoticSliceLayout()
         case .list:
-            PostGridListLayout.layout()
+            PostGridListLayout.layout(hasHeader: { [headerHost] index in
+                headerHost.page?.hasHeader(inSection: index) ?? false
+            })
         case .discover:
+            // Same box, other question: which sections are chunks.
             DiscoverListLayout.layout(chunk: { [headerHost] section in
                 headerHost.page?.chunk(inSection: section)
             })
@@ -451,6 +574,11 @@ final class ForYouGridPage: UIView {
         )
         collectionView.register(
             PostGridSkeletonListCell.self, forCellWithReuseIdentifier: PostGridSkeletonListCell.reuseID
+        )
+        collectionView.register(
+            SectionHeaderCapsuleView.self,
+            forSupplementaryViewOfKind: PostGridListLayout.headerElementKind,
+            withReuseIdentifier: Self.sectionHeaderReuseID
         )
         collectionView.register(
             DiscoverViewAllFooterView.self,
@@ -1599,9 +1727,10 @@ final class ForYouGridPage: UIView {
     /// — `ForYouViewController.openFeed` hands it `posts[index...]` — so the
     /// post after the anchor here is literally the one the viewer would have
     /// reached with one more swipe. The view model's corpus is neither
-    /// ordered nor filtered the same way (`arrange` permutes it into slots and
-    /// Discover's planner pulls media into chunks), so the same question asked there
-    /// answers about a different list.
+    /// ordered nor filtered the same way (`arrange` permutes it into slots,
+    /// `partitioned` groups the arrivals, Discover's planner pulls media into
+    /// chunks), so the same question asked there answers about a different
+    /// list.
     ///
     /// Wraps to the HEAD of the page only when nothing after the anchor
     /// qualifies — the last post on a page still has to land somewhere, and
@@ -1906,7 +2035,8 @@ final class ForYouGridPage: UIView {
     /// "what is on screen" must not be told what the bookkeeping believes.
     ///
     /// The index mapping lives here because the sections do: a caller walking
-    /// the collection view itself would have to re-derive Discover's stretches.
+    /// the collection view itself would have to re-derive Discover's stretches
+    /// or the lists' arrivals split.
     func concealedPosts() -> Set<PostID> {
         var hidden: Set<PostID> = []
         for cell in collectionView.visibleCells {
@@ -2094,10 +2224,21 @@ final class ForYouGridPage: UIView {
             return insertPost(model, at: slot)
         }
         guard slot != current else { return false }
-        // (A swap used to be able to re-form the list's "New" / "Recent"
-        // sections, and took a whole-table reload when it did. Those sections
-        // are gone: a swap moves two items and changes no section's count.)
+        // ⚠️ A SWAP CAN RE-FORM THE SECTIONS, and the update has to know.
         //
+        // `split` is not a stored number: it is the length of the leading RUN
+        // of arrivals. Move an old post into that run and the run stops there,
+        // so both sections' counts change — while `reloadItems` promises UIKit
+        // they did not. It crashes: "the number of items in section 0 after the
+        // update (1) must be equal to the number before (6)". Invisible while
+        // the adoption was gated to the mosaic, which has one section.
+        //
+        // Refusing the swap was tried and is the wrong trade: the arrivals sit
+        // at the top, so paging a few posts down crosses the boundary almost
+        // immediately, and declining there means the viewer lands on the card
+        // they left — the exact thing the adoption exists to prevent. So the
+        // swap stands and the UPDATE changes shape below.
+        let splitBefore = split
         // The pixels each cell is showing RIGHT NOW, carried across the reload.
         //
         // `configure` clears the image and re-asks the cache, so a cell whose
@@ -2115,10 +2256,25 @@ final class ForYouGridPage: UIView {
         // without `prepareForReuse`, so a tile would keep the previous post's
         // video surface and play one post's motion under another's cover.
         UIView.performWithoutAnimation {
-            collectionView.reloadItems(at: [
-                indexPath(for: slot),
-                indexPath(for: current)
-            ])
+            if split == splitBefore {
+                collectionView.reloadItems(at: [
+                    indexPath(for: slot),
+                    indexPath(for: current)
+                ])
+            } else {
+                // ⚠️ THE WHOLE TABLE, because the sections themselves moved.
+                //
+                // A targeted update carries a promise about the counts, and
+                // this swap has just broken it. `reloadData` makes no such
+                // promise — it is the honest verb for "the shape changed".
+                //
+                // What it costs is one header's worth of shift for the rows
+                // below the boundary, and that is affordable exactly here: the
+                // grid is covered by the post being dismissed, and the landing
+                // rect is read AFTER the layout pass below, so the flight aims
+                // at where the slot actually ended up rather than where it was.
+                collectionView.reloadData()
+            }
             // Force the pass NOW. `reloadItems` only marks the items dirty; the
             // cells are rebuilt on the next layout, and the caller reads the
             // landing rect from a realized cell immediately after this returns.
@@ -2176,9 +2332,11 @@ final class ForYouGridPage: UIView {
 
     /// Puts a post the list no longer holds INTO it, at the departure slot.
     ///
-    /// Whole-table, unconditionally: `reloadData` makes no promise about
-    /// section counts, where a targeted insert would have to describe them
-    /// exactly. The cost is paid under a screen the post being dismissed is
+    /// Whole-table, unconditionally: an insert changes the count of whichever
+    /// section it lands in, and `split` — the leading run of arrivals — can
+    /// change with it, so there is no targeted update that can honestly
+    /// describe this. The cost is the same one the swap pays when the run
+    /// moves, and it is paid under a screen the post being dismissed is
     /// covering.
     private func insertPost(_ post: GalleryPost, at slot: Int) -> Bool {
         posts.insert(post, at: slot)
@@ -2562,7 +2720,15 @@ final class ForYouGridPage: UIView {
         let added = Self.addedPosts(from: rawPosts, to: incoming)
         rawPosts = incoming
         showsSkeleton = skeleton
-        if let added, !added.isEmpty, !showsSkeleton, !skeleton, !dissolving, !mustReload {
+        // ⚠️ An append can change the SECTIONING, not just the item count: a
+        // corpus that was entirely new is one unlabelled run, and the first
+        // older page landing under it splits the list in two. Inserting items
+        // into a collection view whose section count changed in the same pass
+        // is the classic inconsistency exception, so that case takes the
+        // reload path below instead.
+        let splitBefore = split
+        if let added, !added.isEmpty, !showsSkeleton, !skeleton, !dissolving, !mustReload,
+           splitWouldHold(afterAppending: added, to: splitBefore) {
             // Arrange only the newcomers, against the absolute slots they will
             // occupy. Placement depends solely on the absolute index, so the
             // items already on screen cannot move — which is what keeps this an
@@ -2581,7 +2747,7 @@ final class ForYouGridPage: UIView {
             DispatchQueue.main.async { [weak self] in self?.updateAutoplay() }
             return
         }
-        posts = arrange(incoming, startingAt: 0)
+        posts = partitioned(arrange(incoming, startingAt: 0))
         reloadAll(dissolving: dissolving)
     }
 
@@ -2649,6 +2815,12 @@ final class ForYouGridPage: UIView {
 // MARK: - Data source / delegate
 
 extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
+    /// Whether a section carries a pill. False for a single unlabelled run —
+    /// see `split`. Asked by the LAYOUT, which is why it is not private.
+    func hasHeader(inSection index: Int) -> Bool {
+        split > 0 && sections.indices.contains(index)
+    }
+
     /// What one post is drawn as. The page's `Style` answers it for the grid
     /// and the list; Discover answers it per post.
     private enum CellShape {
@@ -2661,7 +2833,7 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         // One section per stretch — and one empty one for an empty list, the
         // shape the other styles have when there is nothing to show.
         if style == .discover { return max(1, segments.count) }
-        return 1
+        return sections.count
     }
 
     func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
@@ -2669,7 +2841,9 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         if style == .discover {
             return segments.indices.contains(section) ? segments[section].posts.count : 0
         }
-        return posts.count
+        let split = split
+        guard split > 0 else { return posts.count }
+        return section == 0 ? split : posts.count - split
     }
 
     func collectionView(
@@ -2684,17 +2858,49 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
             host.host(leadView)
             return host
         }
-        // The only other kind any of the layouts declares: Discover's "View
-        // all" under a chunk. (The list's "New" / "Recent" headers went with
-        // the Following tab — its pushed list is one plain run.)
-        assert(kind == DiscoverListLayout.viewAllElementKind, "undeclared supplementary kind \(kind)")
-        let footer = collectionView.dequeueReusableSupplementaryView(
-            ofKind: DiscoverListLayout.viewAllElementKind,
-            withReuseIdentifier: DiscoverViewAllFooterView.reuseID,
+        if kind == DiscoverListLayout.viewAllElementKind {
+            let footer = collectionView.dequeueReusableSupplementaryView(
+                ofKind: kind,
+                withReuseIdentifier: DiscoverViewAllFooterView.reuseID,
+                for: indexPath
+            ) as! DiscoverViewAllFooterView
+            footer.onTap = { [weak self] in self?.onViewAllTapped?() }
+            return footer
+        }
+        // The Messages inbox's own header (`SectionHeaderPillButton`, here in
+        // its collection-view host): a large title in the flow that becomes a
+        // Liquid Glass capsule once it pins under the bar.
+        let header = collectionView.dequeueReusableSupplementaryView(
+            ofKind: kind,
+            withReuseIdentifier: Self.sectionHeaderReuseID,
             for: indexPath
-        ) as! DiscoverViewAllFooterView
-        footer.onTap = { [weak self] in self?.onViewAllTapped?() }
-        return footer
+        ) as! SectionHeaderCapsuleView
+        let section = sections.indices.contains(indexPath.section) ? sections[indexPath.section] : .earlier
+        // "New (8)": the header says how much is new, so the viewer knows the
+        // size of the run before scrolling it — the number the For You header
+        // they came from carries, in the same red badge, on the section it
+        // describes. Every header leads (`leadsList: true`): the separation
+        // between sections is the layout's bottom inset on the one above.
+        header.setTitle(section.title, count: section == .new ? split : 0, leadsList: true)
+        // Tapping a header means "show me this part" — the same gesture the
+        // inbox's pills answer.
+        header.onTap = { [weak self] in self?.scrollToSection(indexPath.section) }
+        return header
+    }
+
+    private static let sectionHeaderReuseID = "ForYouGridPage.sectionHeader"
+
+    /// Puts a section's first row directly under its header.
+    ///
+    /// A no-op for a list too short to scroll: `scrollToItem` cannot invent
+    /// content, so a two-section list that already fits stays where it is.
+    private func scrollToSection(_ index: Int) {
+        guard collectionView.numberOfSections > index,
+              collectionView.numberOfItems(inSection: index) > 0
+        else { return }
+        collectionView.scrollToItem(
+            at: IndexPath(item: 0, section: index), at: .top, animated: true
+        )
     }
 
     func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {

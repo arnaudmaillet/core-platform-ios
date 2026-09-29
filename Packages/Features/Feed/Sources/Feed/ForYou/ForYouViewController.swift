@@ -360,8 +360,8 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             rails.render(snapshot.rails)
             lastSnapshot = snapshot
             discoverGallery?.render(snapshot.media)
-            followingList?.render(snapshot.following)
-            friendsList?.render(snapshot.friends)
+            followingList?.render(snapshot.following, newPosts: snapshot.followingNew)
+            friendsList?.render(snapshot.friends, newPosts: snapshot.friendsUnseen)
             prewarmVisible()
             #if DEBUG
             auditPostMenu()
@@ -2160,8 +2160,8 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // skeleton waiting for the next publish.
         if let lastSnapshot {
             switch kind {
-            case .following: list.render(lastSnapshot.following)
-            case .friends: list.render(lastSnapshot.friends)
+            case .following: list.render(lastSnapshot.following, newPosts: lastSnapshot.followingNew)
+            case .friends: list.render(lastSnapshot.friends, newPosts: lastSnapshot.friendsUnseen)
             }
         }
         switch kind {
@@ -2171,6 +2171,15 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         case .friends:
             friendsList = list
         }
+        #if DEBUG
+        // The two numbers the product rule says are one: the header's badge and
+        // the list's "New" (0 when the list is one untitled run).
+        if let lastSnapshot {
+            let badge = kind == .following ? lastSnapshot.rails.followingBadge : lastSnapshot.rails.friendsBadge
+            print("[qa] push-list \(kind.rawValue): badge=\(badge) new=\(list.debugNewSectionCount)"
+                + " posts=\(list.posts.count)")
+        }
+        #endif
         navigationController.pushViewController(list, animated: true)
     }
 

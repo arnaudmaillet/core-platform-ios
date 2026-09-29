@@ -12,16 +12,31 @@ import UIKit
 ///
 /// # What it is
 ///
-/// A plain list of posts, one after another: the profile's Activity tab
-/// without the profile — the same timeline cards (`PostGridListRowCell`) on
-/// the same list layout, through a `ForYouGridPage` in its `.list` style. No
-/// sections and no mosaic chunks (the product call of 2026-09-29: the "New" /
-/// "Recent" halves the Following TAB had are gone with the tab; what is new
-/// is the row's badge, not a division of this list). Driven by
+/// A list of posts: the profile's Activity tab without the profile — the same
+/// timeline cards (`PostGridListRowCell`) on the same list layout, through a
+/// `ForYouGridPage` in its `.list` style, no mosaic chunks. Driven by
 /// `ForYouViewController`, which forwards each snapshot, the paging spinner
 /// and the refresh while this screen is on the stack — one view model, so the
 /// row, its badge and this list never disagree about what is loaded. Friends
 /// is the same screen over the friends' posts.
+///
+/// # Its sections
+///
+/// "New" over what the viewer has not seen, "Recent" over the rest — the
+/// Messages inbox's split, with its headers: a large title in the flow that
+/// pins under the bar as a Liquid Glass capsule (`SectionHeaderPillButton`,
+/// tap to scroll to the section). "New" carries its count in the red badge
+/// (`NotificationCountBadge`) the For You header this list was pushed from
+/// wears, and it is the same number by construction: both are the size of the
+/// set the view model hands over (`Snapshot.followingNew` for Following,
+/// `.friendsUnseen` for Friends). #313 had made this list one plain run; the
+/// sections came back on 2026-09-29 by product call, on BOTH lists because
+/// they are one screen whose header badges answer the same question.
+///
+/// The inbox's rules come with the headers: a section with nothing in it is
+/// not drawn, and a list that would be all one section — nothing new, or
+/// nothing but new — goes untitled, since a lone header is a label rather
+/// than a division.
 ///
 /// # How it opens posts
 ///
@@ -111,10 +126,12 @@ final class ForYouPostListViewController: UIViewController {
 
     // MARK: - Content, from the host
 
-    /// The posts, one after another, in the order they come — no "New" and
-    /// "Recent" halves (see the type's note).
-    func render(_ state: ForYouViewModel.PageState) {
+    /// `newPosts` are the rows headed "New" — the SAME set the For You
+    /// header's badge counts, handed over rather than re-derived, so the "New"
+    /// count and the number on the header the viewer came from are one answer.
+    func render(_ state: ForYouViewModel.PageState, newPosts: Set<PostID>) {
         loadViewIfNeeded()
+        page.setNewPosts(newPosts)
         page.render(state)
     }
 
@@ -135,6 +152,14 @@ final class ForYouPostListViewController: UIViewController {
     /// The posts on screen, in display order — what a test and a debug hook
     /// read.
     var posts: [GalleryPost] { page.posts }
+
+    #if DEBUG
+    /// How many rows sit under the "New" header — zero for an untitled list.
+    var debugNewSectionCount: Int { page.debugArrivalsRunLength }
+    /// The headers on screen, top to bottom — see
+    /// `ForYouGridPage.debugSectionHeaders`.
+    func debugSectionHeaders() -> [(title: String?, count: Int)] { page.debugSectionHeaders() }
+    #endif
 
     // MARK: - Appearance
 

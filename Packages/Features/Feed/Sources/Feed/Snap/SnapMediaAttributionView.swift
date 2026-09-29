@@ -15,12 +15,10 @@ import UIKit
 ///   circle), the labels compress first (749, one under UIKit's default), so
 ///   a long author name truncates under the width cap instead of pushing the
 ///   trailing actions.
-/// - Page-fed, ONE VIEW PER CONTENT in the snap feed: a page that draws
-///   something else gets a fresh attribution in a fresh item under its own
-///   `identifier` (`SnapFeedViewController.showAttribution`), so the toolbar
-///   runs iOS 26's own item transition — the identity pill's mechanism. A view
-///   rewritten in place (`setPost` on a live pill, the Text Post composer's
-///   use) cross-fades its labels instead, and the bar has nothing to morph.
+/// - Page-fed, ONE VIEW IN ONE ITEM for the screen's life: a page that draws
+///   something else blurs the old content out and the new in, inside the
+///   item (`BarItemContentTransition`) — the identity pill's mechanism. The
+///   glass platter never morphs; only the width glides when it changes.
 final class SnapMediaAttributionView: UIView {
     /// The bar-bubble invariant: every bubble on the feed's bars — back
     /// button, identity pill wrapper, and all three toolbar bubbles — renders
@@ -61,6 +59,22 @@ final class SnapMediaAttributionView: UIView {
     private var renderedCover: Cover = .post
     private var renderedSoundLine: String?
     private var coverTask: Task<Void, Never>?
+    /// Everything the pill draws, edge-pinned: the one view a content change
+    /// fades — a CONTAINER, because a platter flattens a label's own partial
+    /// alpha to opaque.
+    private let contentView = UIView()
+    /// Blurs one attribution out and the next in, inside the one toolbar item.
+    private lazy var contentTransition: BarItemContentTransition = {
+        let transition = BarItemContentTransition(host: self, content: contentView)
+        transition.remeasure = { [weak self] duration in
+            guard let self else { return }
+            BarItemRemeasure.run(self, duration: duration)
+        }
+        transition.didSettle = { [weak self] in self?.onContentSettled?() }
+        return transition
+    }()
+    /// Once a content change has fully landed.
+    var onContentSettled: (() -> Void)?
 
     init() {
         super.init(frame: .zero)
@@ -98,7 +112,8 @@ final class SnapMediaAttributionView: UIView {
         // The cover's uniform breathing inside the item wrapper, matching the
         // identity pill's inset math on the opposite bar.
         let breathing = (Self.height - AvatarImageView.barDiameter) / 2
-        row.constrain(in: self) { parent in
+        contentView.pin(to: self)
+        row.constrain(in: contentView) { parent in
             row.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: breathing)
             row.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -Spacing.sm)
             row.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
@@ -153,7 +168,7 @@ final class SnapMediaAttributionView: UIView {
     func setMaximumWidth(_ width: CGFloat) {
         guard let maxWidthConstraint, abs(maxWidthConstraint.constant - width) > 0.5 else { return }
         maxWidthConstraint.constant = width
-        animateBarRemeasure()
+        BarItemRemeasure.run(self, duration: 0.22)
     }
 
     /// The SHADOW only — the identity pill's rule, for the same reason: the
@@ -164,7 +179,7 @@ final class SnapMediaAttributionView: UIView {
         }
     }
 
-    /// Shows `model`'s attribution. A page change cross-fades the labels and
+    /// Shows `model`'s attribution. A page change blurs the content across and
     /// reloads the cover (guarded against fast page-past); the same CONTENT is
     /// a no-op. Called from the settle-quantized activation seam only — never
     /// mid-scroll.
@@ -176,7 +191,7 @@ final class SnapMediaAttributionView: UIView {
     /// early-out reads the second call as "same post, nothing to do" and keeps
     /// the projection's anonymous author for the life of the screen. The
     /// purpose of the guard is unharmed: a re-settle on an unchanged page still
-    /// skips the cross-dissolve and the cover refetch, because an unchanged page
+    /// skips the transition and the cover refetch, because an unchanged page
     /// has an unchanged model.
     /// What the second line says about the post's sound.
     enum SoundCredit: Equatable {
@@ -222,12 +237,11 @@ final class SnapMediaAttributionView: UIView {
     /// Everything the pill DRAWS for this post, as one string: the name, the
     /// sound line, whether a tap opens anything, and the cover.
     ///
-    /// It is the snap feed's bar item identity. Two pages that draw the same
-    /// pill (one person's posts set to one song with its own artwork) are one
-    /// item, and paging between them changes nothing on the bar; anything that
-    /// draws differently is a new item, which is what gets the native morph.
-    /// A post's own id is deliberately NOT in it: the cover already carries the
-    /// post whenever the post is what it shows.
+    /// It is what the snap feed compares before transitioning. Two pages that
+    /// draw the same pill (one person's posts set to one song with its own
+    /// artwork) change nothing on the bar; anything that draws differently
+    /// blurs across. A post's own id is deliberately NOT in it: the cover
+    /// already carries the post whenever the post is what it shows.
     static func contentKey(
         for model: FeedItemDisplayModel, sound: SoundCredit = .unresolved, cover: Cover = .post
     ) -> String {
@@ -242,19 +256,8 @@ final class SnapMediaAttributionView: UIView {
     /// `contentKey` of what the pill shows now; nil before its first post.
     private(set) var shownContentKey: String?
 
-    /// Takes on everything the HOST decided about `other` — its width cap, its
-    /// shadow and its tap — but not its post. For a fresh pill replacing
-    /// `other` in the toolbar.
-    func inheritChrome(from other: SnapMediaAttributionView) {
-        onTap = other.onTap
-        if let theirs = other.maxWidthConstraint?.constant { maxWidthConstraint?.constant = theirs }
-        for (mine, theirs) in zip([titleLabel, trackLabel], [other.titleLabel, other.trackLabel]) {
-            mine.layer.shadowOpacity = theirs.layer.shadowOpacity
-        }
-    }
-
     /// Fetches `model`'s cover into the pill's cache ahead of need — the next
-    /// page's — so a fresh pill for it is drawn with it.
+    /// page's — so the pill's swap to it is drawn with it.
     static func warmCover(
         for model: FeedItemDisplayModel, cover: Cover, pipeline: ImagePipeline
     ) {
@@ -266,9 +269,11 @@ final class SnapMediaAttributionView: UIView {
         }
     }
 
-    /// - Parameter animated: false for a FRESH pill that is not in the bar yet
-    ///   (the snap feed's content change), where the bar's own item transition
-    ///   is the animation and a cross-dissolve inside it would play twice.
+    /// - Parameter animated: whether a change blurs across
+    ///   (`BarItemContentTransition`); false, or a pill not in a window, swaps
+    ///   in one frame. The pill's STATE (what a tap opens, what the cover
+    ///   fetch is for) is the new post at once; only the drawing waits for the
+    ///   transition's midpoint.
     func setPost(
         _ model: FeedItemDisplayModel, sound: SoundCredit = .unresolved, cover: Cover = .post,
         pipeline: ImagePipeline, animated: Bool = true
@@ -280,32 +285,27 @@ final class SnapMediaAttributionView: UIView {
         renderedSound = sound
         renderedCover = cover
         shownContentKey = Self.contentKey(for: model, sound: sound, cover: cover)
-        // A new post's record starts upright; the same one keeps its angle.
-        if isNewPost { resetSpin() }
         renderedSoundLine = soundLine
         let line = Self.line(for: model, sound: sound)
         postID = model.id
         let url = Self.coverURL(for: model, cover: cover)
         // A cover already in hand is drawn in the same pass as the labels:
-        // nothing to fade in after a fresh pill appears.
+        // the blur's new still pictures it, nothing fades in after the swap.
         let cached: UIImage? = switch cover {
         case .note: Self.noteImage
         case .artwork, .post: url.flatMap(SnapAttributionCoverCache.cover(for:))
         }
 
-        let apply = {
+        contentTransition.perform(animated: animated) {
+            // A new post's record starts upright; the same one keeps its angle.
+            // At the swap, not before: the old cover must not snap upright
+            // while it is blurring out.
+            if isNewPost { self.resetSpin() }
             self.titleLabel.text = model.authorName
             self.trackLabel.text = line
             self.accessibilityLabel = "\(model.authorName), \(line)"
             self.accessibilityHint = soundLine == nil ? nil : "Opens the sound"
             self.coverView.image = cached
-        }
-        if animated {
-            defer { animateBarRemeasure() }
-            UIView.transition(with: self, duration: 0.18,
-                              options: [.transitionCrossDissolve, .allowUserInteraction], animations: apply)
-        } else {
-            apply()
         }
 
         coverTask?.cancel()
@@ -324,8 +324,13 @@ final class SnapMediaAttributionView: UIView {
             guard let image else { return }
             if !url.isFileURL { SnapAttributionCoverCache.store(image, for: url) }
             guard let self, self.postID == id else { return }
-            UIView.transition(with: self.coverView, duration: 0.15, options: [.transitionCrossDissolve]) {
-                self.coverView.image = image
+            // Onto the NEW post's content: mid-blur, the old cover is still
+            // what the live view draws.
+            self.contentTransition.afterSwap { [weak self] in
+                guard let self, self.postID == id else { return }
+                UIView.transition(with: self.coverView, duration: 0.15, options: [.transitionCrossDissolve]) {
+                    self.coverView.image = image
+                }
             }
         }
     }
@@ -358,25 +363,12 @@ final class SnapMediaAttributionView: UIView {
         }
     }()
 
-    /// Content changes resize the item (content-sized by design); glide the
-    /// bar's re-measure instead of letting it snap — the toolbar counterpart
-    /// of the identity pill's remeasure.
-    private func animateBarRemeasure() {
-        setNeedsLayout()
-        var bar: UIView? = superview
-        while let view = bar, !(view is UIToolbar) { bar = view.superview }
-        let host = bar ?? superview
-        host?.setNeedsLayout()
-        UIView.animate(withDuration: 0.22, delay: 0, options: [.curveEaseInOut, .allowUserInteraction]) {
-            host?.layoutIfNeeded()
-        }
-    }
 }
 
 /// The covers the attribution pill has drawn lately, readable SYNCHRONOUSLY —
-/// `SnapAuthorFaceCache`'s twin, for the same reason: a pill built to go into
-/// the toolbar on this turn has to arrive wearing its cover, not swap to it a
-/// frame into the bar's own item transition.
+/// `SnapAuthorFaceCache`'s twin, for the same reason: a swap made on this turn
+/// has to draw the new post wearing its cover, not pop to it once the blur
+/// has landed.
 ///
 /// Smaller than the face cache: a cover can be a post's whole thumbnail.
 @MainActor
