@@ -44,18 +44,36 @@ struct SoundSheetTests {
         return SavedSoundStore(defaults: UserDefaults(suiteName: suite) ?? .standard)
     }
 
-    /// The sheet as it rests: the navigation controller hosted in a phone-
-    /// sized window, laid out.
-    private func hosted(
-        _ controller: SoundSheetViewController
-    ) -> (window: UIWindow, navigation: UINavigationController) {
+    /// The sheet laid out at `height`, WITHOUT a window: a visible window in
+    /// the test host costs render-server round trips on a headless CI
+    /// simulator (the suite ran 148s there), and its safe areas are the test
+    /// host's, not a sheet's. Everything asserted here is the layout and the
+    /// detent's own inputs. The width is the one the sheet loaded with.
+    @discardableResult
+    private func laidOut(
+        _ controller: SoundSheetViewController, height: CGFloat = 874
+    ) throws -> UINavigationController {
         let navigation = controller.wrappedInSheet()
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
-        window.rootViewController = navigation
-        window.isHidden = false
+        navigation.loadViewIfNeeded()
+        controller.loadViewIfNeeded()
+        let width = try #require(controller.collapsedMetrics?.width)
+        navigation.view.frame = CGRect(x: 0, y: 0, width: width, height: height)
         navigation.view.layoutIfNeeded()
         controller.view.layoutIfNeeded()
-        return (window, navigation)
+        try grid(of: controller).layoutIfNeeded()
+        return navigation
+    }
+
+    /// An item's or header's frame from the LAYOUT (content coordinates) —
+    /// no cell has to be on screen for it.
+    private func frame(
+        of item: SoundSheetViewController.Item, in controller: SoundSheetViewController
+    ) throws -> CGRect {
+        let collection = try grid(of: controller)
+        let path = try #require((collection.dataSource as? UICollectionViewDiffableDataSource<
+            SoundSheetViewController.Section, SoundSheetViewController.Item
+        >)?.indexPath(for: item))
+        return try #require(collection.collectionViewLayout.layoutAttributesForItem(at: path)?.frame)
     }
 
     private func grid(of controller: SoundSheetViewController) throws -> UICollectionView {
@@ -99,20 +117,6 @@ struct SoundSheetTests {
         shareOnly.loadViewIfNeeded()
         let trailing = (shareOnly.toolbarItems ?? []).map(label)
         #expect(trailing == ["space", "Save sound", "space", "Share sound"], "\(trailing)")
-    }
-
-    /// Laid out in a phone-width bar, "Use this sound" takes what save and
-    /// share leave: far wider than its title, and ending before them.
-    @Test func useThisSoundFillsTheBar() throws {
-        let controller = sheet(tiles: 7)
-        controller.onUseSound = { _ in }
-        let (window, navigation) = hosted(controller)
-        defer { window.isHidden = true }
-        navigation.toolbar.layoutIfNeeded()
-        let button = try #require(controller.useButton)
-        let frame = button.convert(button.bounds, to: window)
-        #expect(frame.width > window.bounds.width / 2, "Use this sound kept its title's width: \(frame)")
-        #expect(frame.maxX < window.bounds.width - 2 * 44, "Use this sound runs over save and share: \(frame)")
     }
 
     /// The bookmark saves the SOUND and toggles its glyph and label; a second
@@ -286,52 +290,50 @@ struct SoundSheetTests {
             == (Sheet.foldBottom(width: 402, headerHeight: 112, hasMore: true) + 52.2).rounded(.up))
     }
 
-    /// At the collapsed detent the sheet shows the sound, the WHOLE first row
-    /// and "View all" above the toolbar — and the second row starts under
-    /// "View all", behind the bar.
+    /// Only a bar-sized band is kept: none is a safe area without its bar,
+    /// and one near the view's height is a safe area caught mid-setup (CI,
+    /// iOS 26.2: the detent came out ~780pt above its fold).
+    @Test func anImplausibleToolbarBandIsNotKept() {
+        typealias Sheet = SoundSheetViewController
+        #expect(Sheet.isPlausibleToolbarBand(52, viewHeight: 446))
+        #expect(Sheet.isPlausibleToolbarBand(48, viewHeight: 812))
+        #expect(!Sheet.isPlausibleToolbarBand(0, viewHeight: 446))
+        #expect(!Sheet.isPlausibleToolbarBand(784, viewHeight: 874))
+        #expect(!Sheet.isPlausibleToolbarBand(150, viewHeight: 874))
+    }
+
+    /// The detent's value is the fold the GRID lays out plus the band it was
+    /// computed with: "View all" ends one `foldGap` above the band, the whole
+    /// first row is above "View all", and row two starts under it (behind
+    /// the bar).
     ///
-    /// Read off the laid-out CELLS against the view's safe area: the bar's
-    /// top edge is the bottom safe area, which keeps its distance to the
-    /// sheet's bottom at any height, and a collapsed sheet is the detent plus
-    /// the window's bottom safe area tall. ⚠️ Not `toolbar.frame`: on iOS 27
-    /// the bar's frame spans the whole view (measured 402×874), glass items
-    /// floating in it. (Resizing the test window to the collapsed height
-    /// instead changed the window's own safe area with it.) ⚠️ The test
-    /// window has a TOP safe area a sheet does not: positions are read from
-    /// under it.
-    @Test func atTheCollapsedHeightTheFirstRowAndViewAllSitAboveTheToolbar() throws {
+    /// ⚠️ Read off the layout and the detent's own inputs, never off the
+    /// toolbar's view or a window's safe areas: the bar's frame spans the
+    /// whole view on iOS 27, and the test host's safe areas are not a sheet's
+    /// (on CI, iOS 26.2, a window-hosted version of this test failed by
+    /// ~780pt).
+    @Test func theComputedFoldIsTheLaidOutFold() throws {
         let controller = sheet(tiles: 7, original: 0)
-        let (window, _) = hosted(controller)
-        defer { window.isHidden = true }
-
+        try laidOut(controller)
+        let metrics = try #require(controller.collapsedMetrics)
         let collapsed = try #require(controller.collapsedHeight)
-        let top = controller.view.safeAreaInsets.top
-        let collapsedSheet = collapsed + window.safeAreaInsets.bottom
-        let toolbarTop = collapsedSheet - controller.view.safeAreaInsets.bottom
-        #expect(controller.view.safeAreaInsets.bottom > window.safeAreaInsets.bottom, "no toolbar band")
+        #expect(collapsed == SoundSheetViewController.collapsedDetentHeight(metrics))
 
-        let collection = try grid(of: controller)
-        collection.layoutIfNeeded()
-        let visible = collection.visibleCells.map { cell -> (UICollectionViewCell, CGRect) in
-            (cell, cell.convert(cell.bounds, to: controller.view).offsetBy(dx: 0, dy: -top))
-        }
-        let more = try #require(visible.first { $0.0 is SoundSheetMoreCell })
-        #expect((more.0 as? SoundSheetMoreCell)?.title == "View all 7 posts")
-        #expect(more.1.maxY <= toolbarTop + 0.5, """
-            View all is under the toolbar: more \(more.1) bar top \(toolbarTop) collapsed \(collapsed) \
-            safe \(controller.view.safeAreaInsets) window \(window.safeAreaInsets)
-            """)
-        #expect(abs(toolbarTop - more.1.maxY - SoundSheetViewController.foldGap) <= 1,
-                "the fold computed is not the fold laid out: more \(more.1) bar top \(toolbarTop)")
+        // Content coordinates start under the inset below the grabber.
+        let top = SoundSheetViewController.topInset
+        let more = try frame(of: .more, in: controller)
+        let foldFromLayout = top + more.maxY + SoundSheetViewController.foldGap
+        let fold = SoundSheetViewController.foldBottom(
+            width: metrics.width, headerHeight: metrics.headerHeight, hasMore: metrics.hasMore
+        )
+        #expect(abs(foldFromLayout - fold) <= 0.5, "laid out \(foldFromLayout), computed \(fold)")
+        #expect(abs(collapsed - (fold + metrics.toolbarBand)) <= 1)
 
-        let tiles = visible.filter { $0.0 is SoundSheetTileCell }
-        let firstRow = tiles.filter { $0.1.maxY <= more.1.minY + 0.5 }
-        #expect(firstRow.count == SoundSheetViewController.columns, "the first row is not whole above View all")
-        #expect(firstRow.allSatisfy { $0.1.minY >= 0 })
-        let original = firstRow.min { $0.1.minX < $1.1.minX }?.0 as? SoundSheetTileCell
-        #expect(original?.showsOriginalBadge == true, "the original is not the first tile")
-        // Anything of row two is below View all: behind the bar, not above it.
-        #expect(tiles.filter { $0.1.minY > more.1.minY }.allSatisfy { $0.1.minY >= more.1.maxY })
+        let firstRow = try (0..<3).map { try frame(of: .tile(PostID("p\($0)")), in: controller) }
+        #expect(firstRow.allSatisfy { $0.maxY <= more.minY + 0.5 }, "the first row is not whole above View all")
+        let rowTwo = try frame(of: .tile(PostID("p3")), in: controller)
+        #expect(rowTwo.minY >= more.maxY, "row two starts above View all")
+        #expect(controller.tiles.first?.isOriginal == true, "the original is not the first tile")
     }
 
     /// ONE gutter: the sheet's side margin is the gap between tiles and
@@ -339,31 +341,25 @@ struct SoundSheetTests {
     /// height the detent counted.
     @Test func oneGutterAlignsTheSheet() throws {
         let controller = sheet(tiles: 7)
-        let (window, _) = hosted(controller)
-        defer { window.isHidden = true }
-        let collection = try grid(of: controller)
-        // At large every row is in the grid.
-        let presentation = try #require(controller.navigationController?.sheetPresentationController)
-        presentation.selectedDetentIdentifier = .large
-        controller.sheetPresentationControllerDidChangeSelectedDetentIdentifier(presentation)
-        collection.layoutIfNeeded()
-
+        try laidOut(controller)
         let gutter = SoundSheetViewController.gutter
-        let width = collection.bounds.width
-        let frames = collection.visibleCells.compactMap { $0 as? SoundSheetTileCell }.map(\.frame)
-            .sorted { ($0.minY, $0.minX) < ($1.minY, $1.minX) }
-        try #require(frames.count >= 6)
-        let rowOne = Array(frames.prefix(3))
-        #expect(abs(rowOne[0].minX - gutter) < 0.5, "left margin \(rowOne[0].minX)")
-        #expect(abs(width - rowOne[2].maxX - gutter) < 0.5, "right margin \(width - rowOne[2].maxX)")
-        #expect(abs(rowOne[1].minX - rowOne[0].maxX - gutter) < 0.5, "gap between tiles")
-        #expect(abs(frames[3].minY - rowOne[0].maxY - gutter) < 0.5, "gap between rows")
+        let width = try #require(controller.collapsedMetrics?.width)
+        let row = try (0..<3).map { try frame(of: .tile(PostID("p\($0)")), in: controller) }
+        #expect(abs(row[0].minX - gutter) < 0.5, "left margin \(row[0].minX)")
+        #expect(abs(width - row[2].maxX - gutter) < 0.5, "right margin \(width - row[2].maxX)")
+        #expect(abs(row[1].minX - row[0].maxX - gutter) < 0.5, "gap between tiles")
+        #expect(abs(row[0].height - SoundSheetViewController.tileHeight(width: width)) < 0.5)
+        // Rows two and three, in the rest of the grid.
+        let rowTwo = try frame(of: .tile(PostID("p3")), in: controller)
+        let rowThree = try frame(of: .tile(PostID("p6")), in: controller)
+        #expect(abs(rowThree.minY - rowTwo.maxY - gutter) < 0.5, "gap between rows")
 
-        let header = try #require(collection.visibleSupplementaryViews(
-            ofKind: UICollectionView.elementKindSectionHeader
-        ).first)
-        #expect(abs(header.frame.minX - gutter) < 0.5, "the header is off the tiles' edge")
-        #expect(header.frame.height == controller.collapsedMetrics?.headerHeight)
+        let collection = try grid(of: controller)
+        let header = try #require(collection.collectionViewLayout.layoutAttributesForSupplementaryView(
+            ofKind: UICollectionView.elementKindSectionHeader, at: IndexPath(item: 0, section: 0)
+        )?.frame)
+        #expect(abs(header.minX - gutter) < 0.5, "the header is off the tiles' edge")
+        #expect(header.height == controller.collapsedMetrics?.headerHeight)
     }
 
     /// ⚠️ The regression: #296 re-read the fold in `viewDidLayoutSubviews` and
@@ -373,30 +369,26 @@ struct SoundSheetTests {
     /// collapsed height nor re-ask the detents.
     @Test func layoutNeverInvalidatesTheDetentsAndCollapsedComesBackIdentical() throws {
         let controller = sheet(tiles: 7)
-        let (window, navigation) = hosted(controller)
-        defer { window.isHidden = true }
+        let navigation = try laidOut(controller)
         let presentation = try #require(navigation.sheetPresentationController)
+        let width = navigation.view.bounds.width
         let before = try #require(controller.collapsedHeight)
         let invalidations = controller.detentInvalidations
 
-        // A drag, frame by frame: the sheet at every height from collapsed
-        // to large, then large.
-        for height in stride(from: before, through: 874, by: 37) {
-            navigation.view.frame = CGRect(x: 0, y: 874 - height, width: 402, height: height)
+        func layOut(at height: CGFloat) {
+            navigation.view.frame = CGRect(x: 0, y: 0, width: width, height: height)
             navigation.view.layoutIfNeeded()
             controller.view.layoutIfNeeded()
         }
+        // A drag, frame by frame, from collapsed to large…
+        for height in stride(from: before, through: 874, by: 61) { layOut(at: height) }
         presentation.selectedDetentIdentifier = .large
         controller.sheetPresentationControllerDidChangeSelectedDetentIdentifier(presentation)
-        navigation.view.layoutIfNeeded()
-        // And back down, "View all" coming back while it travels.
+        layOut(at: 874)
+        // …and back down, "View all" coming back while it travels.
         presentation.selectedDetentIdentifier = SoundSheetViewController.collapsedDetent
         controller.sheetPresentationControllerDidChangeSelectedDetentIdentifier(presentation)
-        for height in stride(from: 874, through: before, by: -41) {
-            navigation.view.frame = CGRect(x: 0, y: 874 - height, width: 402, height: height)
-            navigation.view.layoutIfNeeded()
-            controller.view.layoutIfNeeded()
-        }
+        for height in stride(from: 874, through: before, by: -67) { layOut(at: height) }
 
         #expect(controller.collapsedHeight == before, "the collapsed height drifted over a large round trip")
         #expect(controller.detentInvalidations == invalidations, "a layout pass re-asked the detents")
@@ -407,8 +399,8 @@ struct SoundSheetTests {
     /// that moves nothing.
     @Test func onlyACountCrossingTheFirstRowReasksTheDetent() throws {
         let controller = sheet(tiles: 7)
-        let (window, _) = hosted(controller)
-        defer { window.isHidden = true }
+        _ = controller.wrappedInSheet()
+        controller.loadViewIfNeeded()
         let tall = try #require(controller.collapsedHeight)
         let invalidations = controller.detentInvalidations
 

@@ -287,8 +287,9 @@ final class SoundSheetViewController: UIViewController {
             let band = Self.toolbarBand(
                 bottomSafeArea: view.safeAreaInsets.bottom, windowBottomSafeArea: window.safeAreaInsets.bottom
             )
-            // No band is a safe area caught without its bar, not a bar of none.
-            if band > 0 { Self.measuredToolbarBand = band }
+            if Self.isPlausibleToolbarBand(band, viewHeight: view.bounds.height) {
+                Self.measuredToolbarBand = band
+            }
         }
         refreshCollapsedMetrics(reason: "appearing")
     }
@@ -626,6 +627,18 @@ final class SoundSheetViewController: UIViewController {
     /// area less the window's.
     static func toolbarBand(bottomSafeArea: CGFloat, windowBottomSafeArea: CGFloat) -> CGFloat {
         max(0, bottomSafeArea - windowBottomSafeArea)
+    }
+
+    /// Whether a band read off the safe area can be the toolbar's, to be KEPT
+    /// (it is kept for every sheet after). No band is a safe area caught
+    /// without its bar, not a bar of none; and a band as tall as a quarter of
+    /// the view is a safe area caught mid-setup: on CI (iOS 26.2, iPhone 16e
+    /// test host) the detent came out ~780pt above its fold — a band of
+    /// nearly the whole view, which, kept, would rest every later sheet at
+    /// full height. A bar is ~50pt; anything implausible leaves the estimate
+    /// in place.
+    static func isPlausibleToolbarBand(_ band: CGFloat, viewHeight: CGFloat) -> Bool {
+        band > 0 && band < min(120, viewHeight / 4)
     }
 
     /// Recomputes the collapsed height from its inputs and re-asks the sheet
