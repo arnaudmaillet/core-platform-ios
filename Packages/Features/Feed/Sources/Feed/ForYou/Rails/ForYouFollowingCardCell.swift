@@ -13,6 +13,30 @@ import UIKit
 /// COPY of it: the card that flies out of the row wears this as its resting
 /// furniture and the flight fades it as the card grows into the page, the way
 /// a mosaic brick's counters leave (`SnapFeedHeroOrigin.restingOverlay`).
+///
+/// ## ⚠️ Laid out ONCE, at the card's size — then posed, never re-laid out
+///
+/// A copy that rides a transition window is resized every frame of it, from
+/// the card to the whole screen and back. Laid out against those sizes the
+/// way a cell lays out, the caption re-wrapped at every width, and whatever
+/// pass ran first ran inside the flight's animation block: every label grew
+/// out of the window's top-left corner towards its place, the whole length
+/// of a close. Filmed on a Following video card and on text cards alike — "the
+/// text appears from the top-left and extends to the bottom-right, as if it
+/// were not anchored".
+///
+/// So a copy is built with its `referenceSize` — the card's resting size —
+/// and wraps its words there, exactly as the card in the row does. At any
+/// other size each piece keeps that layout and is POSED, by a uniform scale of
+/// the window's width to the card's, onto the edge it belongs to: the foot for
+/// a picture's author and caption, the top for a text card's words, the foot
+/// for its author. The window's corners carry them from the first frame, and
+/// only the fade the flight gives the whole overlay changes what is seen —
+/// the arrangement the flight already gives the page's chrome replica, laid
+/// out once and scaled into the card.
+///
+/// The cell's own overlay passes no reference: it IS the card, and lays out
+/// at whatever size the card is, like any view.
 final class ForYouCardCaptionOverlay: UIView {
     enum Placement {
         /// Over media: white text on a dark scrim rising from the foot.
@@ -28,28 +52,37 @@ final class ForYouCardCaptionOverlay: UIView {
     /// A text card's words fill it.
     static let textCaptionLines = 7
 
-    private let scrim = CAGradientLayer()
+    /// The scrim, as a VIEW: a bare sublayer's frame does not ride a UIKit
+    /// animation block, so a scrim posed inside one jumped to its landing
+    /// rect while the window it belongs to was still travelling.
+    private let scrim = ScrimView()
     private let authorLabel = UILabel()
     /// An `EmoteLabel`: the caption's emoji and `:code:` emotes animate on the
     /// card as they do on the list's cards (`PostGridListRowCell`), and only
     /// while the card is actually on screen (`EmoteVisibility`).
     private let captionLabel = EmoteLabel()
     private let placement: Placement
+    /// The size the words are wrapped at — see the note on this type. Nil:
+    /// whatever size the overlay is.
+    private let referenceSize: CGSize?
+    /// The layout at the reference size, kept so a pose re-derives it only
+    /// when the reference itself changes (the cell's, as the card resizes).
+    private var restingLayout: RestingLayout?
+    /// Whether the pieces have been posed at all. The first pose is never
+    /// animated, whoever's block it lands in: a label with no frame yet would
+    /// grow into its place out of a zero rect — the unfold this type exists to
+    /// end.
+    private var hasPosed = false
 
-    init(post: GalleryPost, placement: Placement) {
+    init(post: GalleryPost, placement: Placement, referenceSize: CGSize? = nil) {
         self.placement = placement
-        super.init(frame: .zero)
+        let reference = referenceSize.flatMap { $0.width > 0 && $0.height > 0 ? $0 : nil }
+        self.referenceSize = reference
+        super.init(frame: CGRect(origin: .zero, size: reference ?? .zero))
         isUserInteractionEnabled = false
         let onMedia = placement == .onMedia
-        if onMedia {
-            scrim.colors = [
-                UIColor.black.withAlphaComponent(0).cgColor,
-                UIColor.black.withAlphaComponent(0.35).cgColor,
-                UIColor.black.withAlphaComponent(0.72).cgColor
-            ]
-            scrim.locations = [0, 0.45, 1]
-            layer.addSublayer(scrim)
-        }
+        scrim.isHidden = !onMedia
+        addSubview(scrim)
         authorLabel.font = .systemFont(
             ofSize: UIFont.preferredFont(forTextStyle: .caption1).pointSize, weight: .semibold
         )
@@ -77,47 +110,123 @@ final class ForYouCardCaptionOverlay: UIView {
 
     private static let inset: CGFloat = 10
 
-    override func layoutSubviews() {
-        super.layoutSubviews()
+    /// Where each piece sits on a card of `size`, in that card's space.
+    private struct RestingLayout {
+        let size: CGSize
+        let caption: CGRect
+        let author: CGRect
+        /// The scrim's top edge; it always runs to the card's foot.
+        let scrimTop: CGFloat
+    }
+
+    private func restingLayout(for size: CGSize) -> RestingLayout {
         let inset = Self.inset
-        let width = max(0, bounds.width - inset * 2)
+        let width = max(0, size.width - inset * 2)
         let authorHeight = authorLabel.font.lineHeight.rounded(.up)
+        let fitted = captionLabel.sizeThatFits(
+            CGSize(width: width, height: .greatestFiniteMagnitude)
+        ).height.rounded(.up)
         switch placement {
         case .onMedia:
             // From the foot up: the caption's two lines, the author above them.
-            let captionHeight = captionLabel.sizeThatFits(
-                CGSize(width: width, height: .greatestFiniteMagnitude)
-            ).height.rounded(.up)
-            captionLabel.frame = CGRect(
-                x: inset, y: bounds.height - inset - captionHeight,
-                width: width, height: captionHeight
+            let caption = CGRect(
+                x: inset, y: size.height - inset - fitted, width: width, height: fitted
             )
-            authorLabel.frame = CGRect(
-                x: inset, y: captionLabel.frame.minY - 2 - authorHeight,
-                width: width, height: authorHeight
+            let author = CGRect(
+                x: inset, y: caption.minY - 2 - authorHeight, width: width, height: authorHeight
             )
             // The scrim reaches a little above the author, so the text never
             // sits on the picture's own brightness.
-            let scrimTop = max(0, authorLabel.frame.minY - 36)
-            CATransaction.begin()
-            CATransaction.setDisableActions(true)
-            scrim.frame = CGRect(x: 0, y: scrimTop, width: bounds.width, height: bounds.height - scrimTop)
-            CATransaction.commit()
+            return RestingLayout(
+                size: size, caption: caption, author: author, scrimTop: max(0, author.minY - 36)
+            )
         case .onCard:
             // The words from the top, the author at the foot.
-            authorLabel.frame = CGRect(
-                x: inset, y: bounds.height - inset - authorHeight,
-                width: width, height: authorHeight
+            let author = CGRect(
+                x: inset, y: size.height - inset - authorHeight, width: width, height: authorHeight
             )
-            let available = authorLabel.frame.minY - inset * 2
-            let fitted = captionLabel.sizeThatFits(
-                CGSize(width: width, height: .greatestFiniteMagnitude)
-            ).height.rounded(.up)
-            captionLabel.frame = CGRect(
+            let available = author.minY - inset * 2
+            let caption = CGRect(
                 x: inset, y: inset + 2, width: width, height: min(fitted, max(0, available))
             )
+            return RestingLayout(size: size, caption: caption, author: author, scrimTop: size.height)
         }
     }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard bounds.width > 0, bounds.height > 0 else { return }
+        let reference = referenceSize ?? bounds.size
+        if restingLayout?.size != reference {
+            restingLayout = restingLayout(for: reference)
+        }
+        guard let resting = restingLayout, resting.size.width > 0 else { return }
+        if hasPosed {
+            pose(resting)
+        } else {
+            hasPosed = true
+            UIView.performWithoutAnimation { pose(resting) }
+        }
+    }
+
+    /// Every piece at its resting layout, scaled by the window's width over
+    /// the card's and pinned to the edge it belongs to — which is exactly the
+    /// resting layout when the overlay is the card's own size.
+    ///
+    /// By `bounds`/`center`/`transform`, never `frame`: a label keeps the
+    /// bounds it wrapped its words in, so nothing re-wraps and nothing is
+    /// redrawn stretched. Only where a piece is and how large it is drawn
+    /// move, and both ride whatever animation block is posing the window.
+    private func pose(_ resting: RestingLayout) {
+        let scale = bounds.width / resting.size.width
+        func fromFoot(_ y: CGFloat) -> CGFloat { bounds.height - (resting.size.height - y) * scale }
+        func place(_ view: UIView, _ rect: CGRect, atFoot: Bool) {
+            view.bounds = CGRect(origin: .zero, size: rect.size)
+            view.center = CGPoint(
+                x: rect.midX * scale, y: atFoot ? fromFoot(rect.midY) : rect.midY * scale
+            )
+            view.transform = CGAffineTransform(scaleX: scale, y: scale)
+        }
+        switch placement {
+        case .onMedia:
+            place(captionLabel, resting.caption, atFoot: true)
+            place(authorLabel, resting.author, atFoot: true)
+            let top = fromFoot(resting.scrimTop)
+            scrim.frame = CGRect(x: 0, y: top, width: bounds.width, height: bounds.height - top)
+        case .onCard:
+            place(captionLabel, resting.caption, atFoot: false)
+            place(authorLabel, resting.author, atFoot: true)
+        }
+    }
+
+    /// The scrim: a gradient that rides its view's animated frame.
+    private final class ScrimView: UIView {
+        override class var layerClass: AnyClass { CAGradientLayer.self }
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            isUserInteractionEnabled = false
+            guard let gradient = layer as? CAGradientLayer else { return }
+            gradient.colors = [
+                UIColor.black.withAlphaComponent(0).cgColor,
+                UIColor.black.withAlphaComponent(0.35).cgColor,
+                UIColor.black.withAlphaComponent(0.72).cgColor
+            ]
+            gradient.locations = [0, 0.45, 1]
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    }
+
+    #if DEBUG
+    /// Where the words are drawn, in this overlay's space — the anchoring a
+    /// suite pins.
+    var debugCaptionFrame: CGRect { captionLabel.frame }
+    var debugAuthorFrame: CGRect { authorLabel.frame }
+    /// The width the caption is wrapped at — the card's, never the window's.
+    var debugCaptionWrapWidth: CGFloat { captionLabel.bounds.width }
+    #endif
 }
 
 /// One card in For You's Following row: a post, equal-sized with its
@@ -214,8 +323,18 @@ final class ForYouFollowingCardCell: UICollectionViewCell {
 
     /// The flight carries a copy of the overlay as its resting furniture —
     /// see `ForYouCardCaptionOverlay`.
-    static func makeOverlay(for post: GalleryPost) -> ForYouCardCaptionOverlay {
-        ForYouCardCaptionOverlay(post: post, placement: post.kind == .text ? .onCard : .onMedia)
+    ///
+    /// ⚠️ BUILT AT THE CARD'S SIZE AND LAID OUT NOW, outside any animation.
+    /// The flight resizes it every frame from here on; a copy that met its
+    /// first layout pass inside the flight's block grew out of the window's
+    /// top-left corner. `restingSize` nil (the card is not in its row) keeps
+    /// the overlay laying out at whatever size it is given, as before.
+    static func makeOverlay(for post: GalleryPost, restingSize: CGSize?) -> ForYouCardCaptionOverlay {
+        let overlay = ForYouCardCaptionOverlay(
+            post: post, placement: post.kind == .text ? .onCard : .onMedia, referenceSize: restingSize
+        )
+        UIView.performWithoutAnimation { overlay.layoutIfNeeded() }
+        return overlay
     }
 
     /// The card as it rests, drawn fresh at `size` — what a window opening from
@@ -240,10 +359,7 @@ final class ForYouFollowingCardCell: UICollectionViewCell {
         picture.image = cover
         picture.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         card.addSubview(picture)
-        let overlay = ForYouCardCaptionOverlay(post: post, placement: .onMedia)
-        overlay.frame = card.bounds
-        overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        card.addSubview(overlay)
+        addAnchoredOverlay(for: post, placement: .onMedia, to: card)
         return card
     }
 
@@ -255,11 +371,29 @@ final class ForYouFollowingCardCell: UICollectionViewCell {
         card.layer.cornerRadius = cornerRadius
         card.layer.cornerCurve = .continuous
         card.clipsToBounds = true
-        let overlay = ForYouCardCaptionOverlay(post: post, placement: .onCard)
+        addAnchoredOverlay(for: post, placement: .onCard, to: card)
+        return card
+    }
+
+    /// The caption a stand-in wears, pinned to all four of its edges and
+    /// wrapped at the card's own size — see `ForYouCardCaptionOverlay`.
+    ///
+    /// ⚠️ LAID OUT HERE, at the card's size and outside any animation. The
+    /// reveal resizes a stand-in with the window and lays it out inside its
+    /// own block (`RevealStage.apply`); a caption meeting its FIRST pass there
+    /// grew out of the window's top-left corner for the whole close — the
+    /// text cards' half of the defect the flight's overlay had. From here on
+    /// every pass only re-poses what this one wrapped.
+    private static func addAnchoredOverlay(
+        for post: GalleryPost, placement: ForYouCardCaptionOverlay.Placement, to card: UIView
+    ) {
+        let overlay = ForYouCardCaptionOverlay(
+            post: post, placement: placement, referenceSize: card.bounds.size
+        )
         overlay.frame = card.bounds
         overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         card.addSubview(overlay)
-        return card
+        UIView.performWithoutAnimation { card.layoutIfNeeded() }
     }
 
     // MARK: - GridPlaybackCell

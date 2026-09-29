@@ -60,6 +60,20 @@ final class ExternalHeroZoomSource: ZoomTransitionSource {
     /// indistinguishable from a soft landing when it does not.
     private var isStagingDismissal = false
 
+    /// The card in the air, so a picture that loads after take-off can still
+    /// reach it (`SnapFeedHeroOrigin.pagePictureOf`). Weak: the flight owns
+    /// it, and a landed flight must not be revived by a late image.
+    private weak var flyingCard: PostGridFlightCard?
+
+    /// Whether the source draws something OTHER than the post — a friend's
+    /// face. Asked of both picture fields, because the peek (`pagePicture`)
+    /// is nil whenever the cache was cold at the tap, and a face with a cold
+    /// cache is still a face: reading its absence as "a tile" skipped the
+    /// close's blend entirely and flew the face alone.
+    private var drawsFace: Bool {
+        origin.pagePicture != nil || origin.pagePictureOf != nil
+    }
+
     func zoomSourceWillStageDismissal() {
         isStagingDismissal = true
         // FIRST, before anything here or in the flight reads a rect: the
@@ -73,8 +87,21 @@ final class ExternalHeroZoomSource: ZoomTransitionSource {
         // from whatever the page shows, back to the face — including a close
         // from the very post it opened, which for a tile would be a picture
         // dissolving into itself.
-        if let pagePicture = origin.pagePicture {
-            departurePicture = settle?().cover ?? pagePicture
+        //
+        // The page's own still first (the picture on screen, whatever page
+        // of a carousel); a VIDEO page has none, so then the post's own
+        // picture — of the post the viewer ENDED on, not the one the face
+        // opened — and only then the opening's peek, which is that post's.
+        // The page's live surface, when it flies, covers this operand anyway;
+        // it is the floor under a surface that has not drawn.
+        if drawsFace {
+            let settled = settle?()
+            let id = settled?.id ?? origin.post.id
+            departurePicture = settled?.cover
+                ?? origin.pagePictureOf?(id) { [weak self] late in
+                    self?.departurePictureArrived(late)
+                }
+                ?? (id == origin.post.id ? origin.pagePicture : nil)
             return
         }
         guard let settled = settle?(), let id = settled.id, id != origin.post.id else {
@@ -82,6 +109,14 @@ final class ExternalHeroZoomSource: ZoomTransitionSource {
             return
         }
         departurePicture = settled.cover
+    }
+
+    /// A close's departure picture that loaded after staging: kept for any
+    /// card built from here on, and handed to the one already in the air.
+    private func departurePictureArrived(_ image: UIImage) {
+        guard isStagingDismissal, departurePicture == nil else { return }
+        departurePicture = image
+        flyingCard?.setLateDeparturePicture(image)
     }
 
     /// `-zoom-blend-log`: the same channel the map's flight reports on, because
@@ -117,12 +152,25 @@ final class ExternalHeroZoomSource: ZoomTransitionSource {
             post: origin.post,
             cover: origin.cover,
             style: origin.style == .tile ? .tile : .listMedia,
-            cornerRadius: origin.cornerRadius
+            cornerRadius: origin.cornerRadius,
+            drawsPost: !drawsFace
         )
+        flyingCard = card
         // On the OPENING the far end is the page's picture only when the
         // source is not drawing the post (a face); on a close it is whatever
         // staging resolved.
-        card.setDeparturePicture(isStagingDismissal ? departurePicture : origin.pagePicture)
+        //
+        // ⚠️ A face's opening ASKS for the picture when the tap's peek missed,
+        // and takes it mid-air when it lands — the map's late departure cover
+        // (`MapPinZoomSource.awaitDepartureCover`), for the same reason: the
+        // flight is never held for a picture, and a picture that arrives in
+        // time is never thrown away.
+        let picture = isStagingDismissal
+            ? departurePicture
+            : origin.pagePicture ?? origin.pagePictureOf?(origin.post.id) { [weak card] late in
+                card?.setLateDeparturePicture(late)
+            }
+        card.setDeparturePicture(picture)
         if let overlay = origin.restingOverlay?() {
             card.installRestingOverlay(overlay)
         }
@@ -144,6 +192,19 @@ final class ExternalHeroZoomSource: ZoomTransitionSource {
     func zoomLiveMediaSurfaceIfReady() -> UIView? {
         guard !isStagingDismissal else { return nil }
         return origin.donateLiveMedia?()
+    }
+
+    /// A close's landing: the item takes the surface the card was flying, so
+    /// it is drawing before the card is taken away — see
+    /// `SnapFeedHeroOrigin.adoptLandingLiveMedia`. A no-op for an origin that
+    /// cannot, which is today's landing.
+    func zoomAdoptLiveMediaView(_ view: UIView) {
+        origin.adoptLandingLiveMedia?(view)
+    }
+
+    /// The card is held over the landing until the item is drawing.
+    var zoomLandingMediaIsReady: Bool {
+        origin.landingMediaIsReady?() ?? true
     }
 
     func setZoomSourceHidden(_ hidden: Bool) {

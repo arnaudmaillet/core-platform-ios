@@ -138,8 +138,23 @@ final class PostGridFlightCard: UIView {
         symbol: "eye.fill", font: metaFont, color: .white, shadowed: true
     )
 
-    init(post: GalleryPost, cover: UIImage?, style: Style, cornerRadius: CGFloat? = nil) {
+    /// Whether the card's own picture IS the post — every tile and row. False
+    /// for a source that draws something else in the post's place: a friend's
+    /// FACE (`SnapFeedHeroOrigin.pagePicture`).
+    ///
+    /// ⚠️ It changes what counts as the far end of the blend. A tile flying
+    /// the page's live video home is flying its OWN post, which the landing
+    /// adopts — nothing to blend. A face flying it is not: the video is the
+    /// page, the face is somewhere else, and with no still to hand in (a
+    /// video page has none, and the post's thumbnail may not be in memory)
+    /// the card flew the clip all the way into the disc and cut to the face
+    /// in the landing frame. For a face, a live surface is a departure
+    /// operand on its own, and the face rises over it.
+    private let drawsPost: Bool
+
+    init(post: GalleryPost, cover: UIImage?, style: Style, cornerRadius: CGFloat? = nil, drawsPost: Bool = true) {
         self.style = style
+        self.drawsPost = drawsPost
         restingCornerRadius = cornerRadius
         // Video bricks keep a dark floor, exactly as the tile cell does: the
         // poster may be unrenderable and the glyph needs a stage.
@@ -258,13 +273,20 @@ final class PostGridFlightCard: UIView {
     /// over its foot (`SnapFeedHeroOrigin.restingOverlay`). It joins the
     /// resting chrome, so the flight fades it with the count: whole at the
     /// source, gone by the page.
+    ///
+    /// ⚠️ The overlay arrives LAID OUT, at the source's size
+    /// (`ForYouFollowingCardCell.makeOverlay`), and is only ever posed from
+    /// here — see `poseRestingChrome`. The card is usually still 0x0 when this
+    /// runs, so nothing is laid out now: a pass at zero would be the pose the
+    /// flight's first frame animates FROM.
     func installRestingOverlay(_ overlay: UIView) {
         overlay.isUserInteractionEnabled = false
-        overlay.frame = restingChromeView.bounds
-        overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        overlay.autoresizingMask = []
         restingChromeView.insertSubview(overlay, at: 0)
         restingOverlayView = overlay
-        setNeedsLayout()
+        if bounds.width > 0, bounds.height > 0 {
+            UIView.performWithoutAnimation { poseRestingChrome() }
+        }
     }
 
     /// The overlay `installRestingOverlay` laid in, posed with the chrome.
@@ -275,9 +297,21 @@ final class PostGridFlightCard: UIView {
     /// a chrome still at the size it was built at holds the count, and a row
     /// card's caption, in the card's top-left corner instead of where the
     /// source wears them.
+    ///
+    /// ⚠️ AND THE OVERLAY IS LAID OUT HERE, in whatever block is posing the
+    /// card, for `RevealStage.apply`'s reason: its pieces are placed in its
+    /// own `layoutSubviews`, and a layout pass UIKit defers to the end of the
+    /// turn runs OUTSIDE the flight's animation. Its frame then travelled with
+    /// the window while the caption inside jumped to where it lands — riding
+    /// the window's top-left corner, the "text growing from the top-left" of
+    /// a Following card's close. Laid out inside the pose, every piece rides
+    /// the same curve as the window's corners. Never at zero: a card built
+    /// before it has bounds has nothing to pose onto yet.
     private func poseRestingChrome() {
         restingChromeView.frame = bounds
-        restingOverlayView?.frame = restingChromeView.bounds
+        guard let overlay = restingOverlayView, bounds.width > 0, bounds.height > 0 else { return }
+        overlay.frame = restingChromeView.bounds
+        overlay.layoutIfNeeded()
     }
 
     #if DEBUG
@@ -336,11 +370,7 @@ final class PostGridFlightCard: UIView {
     func setDeparturePicture(_ image: UIImage?) {
         departureCoverView.image = image
         departureCoverView.isHidden = image == nil
-        // The landing operand exists only opposite a departure one. Hidden
-        // rather than merely transparent, so a card with nothing to blend has
-        // exactly the subview tree it had before this channel existed.
-        landingPane.isHidden = image == nil
-            || (landingCoverView.image == nil && landingLiveView == nil)
+        refreshLandingPane()
         if image == nil { departureBaseSize = nil }
         // Autoresizing and a transform do not compose; from here the cover is
         // posed by hand — see `DepartureCoverLayout`.
@@ -348,6 +378,61 @@ final class PostGridFlightCard: UIView {
         setNeedsLayout()
         applyContentFloor()
         applyBlend()
+    }
+
+    /// The page's picture, arriving AFTER the card took off — a face's post
+    /// whose thumbnail was not in memory at the tap and has just loaded.
+    ///
+    /// ⚠️ A CUT IF HANDED IN LIKE ANY OTHER. On the way OUT the blend is
+    /// already at its page end, where the landing pane is transparent: the
+    /// picture would appear whole over the face in the frame it landed, mid
+    /// flight. So the pane is put back where the viewer sees it — the face,
+    /// whole — and dissolves to the page over a short beat of its own. On the
+    /// way HOME (blend at 1) the face is already on top and the picture only
+    /// becomes the operand it fades from, which needs no help.
+    ///
+    /// A card that already has a departure picture keeps it: the flight is
+    /// blending that one, and swapping the operand mid-fade is the jump this
+    /// exists to avoid.
+    func setLateDeparturePicture(_ image: UIImage) {
+        guard departureCoverView.image == nil else { return }
+        let target = blend
+        setDeparturePicture(image)
+        guard window != nil, target < 1, !landingPane.isHidden else { return }
+        UIView.performWithoutAnimation {
+            landingPane.alpha = 1
+            layoutIfNeeded()
+        }
+        UIView.animate(
+            withDuration: Self.lateDepartureFade, delay: 0,
+            options: [.curveEaseOut, .allowUserInteraction]
+        ) {
+            self.landingPane.alpha = target
+        }
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-blend-log") {
+            print("[zoom-blend] late departure picture — dissolving to blend=\(target)")
+        }
+        #endif
+    }
+
+    /// The beat a late picture dissolves in over — short against the flight's
+    /// 0.42s spring, since whatever is left of the flight is all it has.
+    static let lateDepartureFade: TimeInterval = 0.22
+
+    /// Whether the card has anything at the page end to blend AGAINST: a
+    /// still, or — for a face only — the page's live surface (see
+    /// `drawsPost`).
+    private var hasDepartureOperand: Bool {
+        departureCoverView.image != nil || (!drawsPost && hasAdoptedLiveMedia)
+    }
+
+    /// The landing operand exists only opposite a departure one. Hidden
+    /// rather than merely transparent, so a card with nothing to blend has
+    /// exactly the subview tree it had before this channel existed.
+    private func refreshLandingPane() {
+        landingPane.isHidden = !hasDepartureOperand
+            || (landingCoverView.image == nil && landingLiveView == nil)
     }
 
     /// The departure size carried between layout passes — see
@@ -458,7 +543,7 @@ final class PostGridFlightCard: UIView {
     private func applyBlend() {
         // No second operand: back to the resting value, which is the un-blended
         // card exactly as it was.
-        guard departureCoverView.image != nil,
+        guard hasDepartureOperand,
               landingCoverView.image != nil || landingLiveView != nil
         else {
             departureCoverView.alpha = 1
@@ -505,7 +590,7 @@ final class PostGridFlightCard: UIView {
         poseLandingLiveMedia()
         // Re-derived rather than assigned: the landing operand and the departure
         // picture arrive independently, and whichever lands second decides.
-        landingPane.isHidden = departureCoverView.image == nil
+        refreshLandingPane()
         applyBlend()
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
@@ -641,6 +726,10 @@ extension PostGridFlightCard: ZoomFlightCard {
         // them whichever order they arrive in.
         if view.hasFrame { fliesHotLiveMedia = true }
         applyContentFloor()
+        // A FACE flying the page's video has its far end now, still or no
+        // still — see `drawsPost`. Inert for every card that draws its post.
+        refreshLandingPane()
+        applyBlend()
         // Not `isHidden = false`. On a cold flight this surface has no frame
         // yet, and showing it would replace the cover — the very pixels the
         // tile is displaying — with an empty surface for one decode interval.

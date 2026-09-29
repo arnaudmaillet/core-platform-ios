@@ -358,6 +358,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             page.setCorpusComplete(!viewModel.hasMorePages)
             page.render(snapshot.discover)
             rails.render(snapshot.rails)
+            prefetchStoryPictures(snapshot.rails.friends)
             lastSnapshot = snapshot
             discoverGallery?.render(snapshot.media)
             followingList?.render(snapshot.following, newPosts: snapshot.followingNew)
@@ -1855,13 +1856,22 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         page.clearRevealConcealment()
         page.clearHeroConcealment()
         rails.clearConcealments()
-        // A row's flight is over: its card is one among others again.
-        rails.endPlaybackHandoff()
         // `viewWillAppear` is too early to be the only reconcile: no cell is
         // realized yet. This is the first moment both are true — surface
         // active, cells realized — so the reconcile here cannot be raced.
         page.setAutoplayActive(true)
         rails.setAutoplayActive(true)
+        // A row's flight is over: its card is one among others again.
+        //
+        // ⚠️ AFTER THE ROW IS ACTIVE, NEVER BEFORE. Closing the handoff
+        // reconciles, and a reconcile of a row still inactive (covered since
+        // `viewWillDisappear`) stops EVERY card — including the one the close
+        // just handed the page's playback to (`adoptLandingPlayback`), which
+        // the next line then restarted from its poster: the thumbnail flash,
+        // a beat after the landing instead of at it. Active first, the handoff
+        // still shields that card while the others start; closed second, the
+        // card is simply chosen again and keeps the player it holds.
+        rails.endPlaybackHandoff()
         // ⚠️ THE RING CLEARS HERE, after the close has landed — not at the
         // tap: a close must fly home to the face as it was when it left.
         // Marking the posts seen puts the friend among the ones with nothing
@@ -2072,6 +2082,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
               let origin = ForYouRowOrigins.story(
                   story, rails: rails, page: page, host: view,
                   pagePicture: first.thumbnailURL.flatMap { imagePipeline.cachedImage(for: $0) },
+                  pictures: .init(pipeline: imagePipeline, peek: { [weak self] in self?.cachedPicture($0) }),
                   closeStaged: rowCloseStaged
               )
         else { return }
@@ -2081,6 +2092,36 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         page.setAutoplayActive(false)
         rails.setAutoplayActive(false)
         openPostHero(self, origin, story.posts.map(\.id))
+    }
+
+    /// Loads the pictures a story's flight dissolves into, before anyone taps.
+    ///
+    /// ⚠️ NOTHING ELSE ON THIS SCREEN WOULD. The Friends row draws faces; the
+    /// friends' posts appear nowhere until a story opens, so a flight asking
+    /// the cache for their picture at the tap found it cold every time, and
+    /// the face grew into the page with no media in the window at either end.
+    /// The flight also loads a missing picture itself and takes it mid-air
+    /// (`ForYouRowOrigins.storyPictures`), but a picture there from the first
+    /// frame is the transition as designed; a late one is only its rescue.
+    ///
+    /// Bounded: the first few posts of each story — a story opens on its
+    /// first, and a close leaves from wherever the viewer paged to, which is
+    /// rarely far.
+    private func prefetchStoryPictures(_ stories: [ForYouViewModel.FriendStory]) {
+        let urls = stories.prefix(Self.storyPicturePrefetch.stories).flatMap {
+            $0.posts.prefix(Self.storyPicturePrefetch.postsPerStory).compactMap(\.thumbnailURL)
+        }
+        guard !urls.isEmpty else { return }
+        let pipeline = imagePipeline
+        Task { await pipeline.prefetch(urls) }
+    }
+
+    private static let storyPicturePrefetch = (stories: 12, postsPerStory: 4)
+
+    /// The pipeline's memory, read synchronously — see
+    /// `ForYouRowOrigins.StoryPictureSource`.
+    private func cachedPicture(_ url: URL) -> UIImage? {
+        imagePipeline.cachedImage(for: url)
     }
 
     /// A Following card was tapped: the row's posts from it on, flown out of

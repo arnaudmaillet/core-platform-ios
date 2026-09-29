@@ -494,12 +494,14 @@ final class ForYouRailsView: UIView {
     /// reconcile must neither restart nor stop its player while it is in the
     /// air.
     func beginPlaybackHandoff(of id: PostID) {
+        landingCard = nil
         playback?.focus(id)
         updateAutoplay()
         playback?.beginHandoff(id)
     }
 
     func endPlaybackHandoff() {
+        landingCard = nil
         playback?.endHandoff()
         playback?.focus(nil)
         updateAutoplay()
@@ -618,6 +620,63 @@ final class ForYouRailsView: UIView {
             playback.demandFlightPlayback(of: id, url: url, in: cell)
         }
         return nil
+    }
+
+    /// A close is landing on card `id` with the page's live `view`: the card
+    /// takes that playback onto its OWN surface — the list's own landing
+    /// (`ForYouGridPage.adoptLivePlayback`), for the row.
+    ///
+    /// ⚠️ THE THUMBNAIL FLASH AT THE END OF A CLOSE. Without this the flight
+    /// card was removed over a card still showing what it rested on while the
+    /// feed covered the row — its poster, or a frame from before the open —
+    /// and its player only resumed once the screen had appeared and the row
+    /// reconciled: a beat of thumbnail between the flight's video and the
+    /// card's. Here the card's surface is primed with the page's current
+    /// frame and takes the pool loan before the flight card goes, and
+    /// `isLandingPlaybackReady` holds the flight card over it until it draws.
+    ///
+    /// Unconcealed FIRST: a surface outside a visible hierarchy is skipped by
+    /// the renderer and would never report drawing. The flight card is still
+    /// on top, at the same rect, so revealing the card under it shows nothing.
+    func adoptLandingPlayback(_ view: UIView, for id: PostID) {
+        guard let playback, let post = cards.first(where: { $0.id == id }),
+              let url = post.videoURL, let cell = cardCell(for: id)
+        else { return }
+        setCardConcealed(false, for: id)
+        if VideoRenderFlags.usesSampleBufferLayer {
+            // One playback, several surfaces: the card gets its own, primed on
+            // attach, and the flight card's is released once it leaves the
+            // window. Nothing is re-parented.
+            if playback.adoptAttachedSurface(for: id, url: url, cell: cell) { landingCard = id }
+            return
+        }
+        guard let view = view as? VideoRenderView else { return }
+        playback.adoptLiveSurface(view, for: id, url: url, cell: cell)
+        landingCard = id
+    }
+
+    /// The card a close's live surface was handed to, until the handoff ends
+    /// — the one whose landing waits on its clip rather than on its cover.
+    private var landingCard: PostID?
+
+    /// Whether card `id` is showing what the landing needs it to: its clip
+    /// drawing, for a card that took the flight's playback; its cover,
+    /// otherwise — `ForYouGridPage.isLandingPlaybackReady`'s rule, for the
+    /// row. The flight card's hold has a ceiling, so a card that never gets
+    /// there costs a pause, not a stuck card.
+    ///
+    /// ⚠️ ONLY A CARD THAT ADOPTED waits on its clip. A close that flew no
+    /// video (a photo page, a donation that did not happen) left nothing
+    /// playing here until the row reconciles on appearing, so asking the pool
+    /// would hold every such landing for the hold's whole ceiling.
+    func isLandingPlaybackReady(for id: PostID) -> Bool {
+        guard let post = cards.first(where: { $0.id == id }) else { return true }
+        let cell = cardCell(for: id)
+        if let playback, landingCard == id {
+            return playback.isSurfaceRendering(for: id)
+        }
+        guard let cell, post.thumbnailURL != nil else { return true }
+        return cell.renderedCover != nil
     }
 
     /// Scrolls the row so an item is wholly in view — before a close measures
