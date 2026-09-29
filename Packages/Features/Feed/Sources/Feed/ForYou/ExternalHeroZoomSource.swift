@@ -62,6 +62,11 @@ final class ExternalHeroZoomSource: ZoomTransitionSource {
 
     func zoomSourceWillStageDismissal() {
         isStagingDismissal = true
+        // FIRST, before anything here or in the flight reads a rect: the
+        // origin may have to pin a scroll view or bring itself back into view
+        // (`SnapFeedHeroOrigin.willStageDismissal`). The flight asks `frame`
+        // straight after this returns.
+        origin.willStageDismissal()
         defer { debugLogBlend() }
         // ⚠️ A FACE IS NEVER THE POST. A source drawing something other than
         // the post (`SnapFeedHeroOrigin.pagePicture`) blends on EVERY close —

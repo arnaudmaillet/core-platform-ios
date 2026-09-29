@@ -1994,7 +1994,16 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// on top means there is nothing left to finish.
     private func sweepAbandonedTransition() {
         // A row's flight is the builder's, and ends the same way whatever
-        // route it took: the screen is back.
+        // route it took: the screen is back. So is the list's inset, which a
+        // row's close pinned (`ForYouRowOrigins`) and its own completion
+        // normally hands back — this is the backstop for a close finished by
+        // anything else.
+        if flyingStory != nil || flyingCard != nil {
+            #if DEBUG
+            logRowSource("landed")
+            #endif
+            page.endHeroFreeze()
+        }
         flyingStory = nil
         flyingCard = nil
         guard activeTransition != nil, navigationController?.topViewController === self else {
@@ -2055,33 +2064,18 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// whatever post the viewer ended on — the map marker's arrangement, the
     /// app's other small source. A friend whose first post is TEXT has no
     /// picture to fly: it opens as a window out of the disc instead, the
-    /// marker's text-post window (`storyReveal`).
+    /// marker's text-post window — and every story carries that window, since
+    /// a media one closes through it once the viewer pages onto words
+    /// (`ForYouRowOrigins`).
     func openStory(_ story: ForYouViewModel.FriendStory) {
-        guard canOpenFromRow, let openPostHero, let first = story.posts.first else { return }
-        let rails = self.rails
-        let author = story.authorID
-        let face = rails.storyFace(for: author)
-        let hasMedia = first.kind != .text
-        let origin = SnapFeedHeroOrigin(
-            post: first,
-            stream: story.posts,
-            hasHero: hasMedia && rails.storyFrame(for: author, in: view) != nil,
-            cover: face,
-            style: .listMedia,
-            frame: { [weak rails] space in rails?.storyFrame(for: author, in: space) },
-            isOnScreen: { [weak rails] in rails?.isStoryOnScreen(author) ?? false },
-            setConcealed: { [weak rails] concealed in
-                rails?.setStoryConcealed(concealed, for: author)
-            },
-            depthView: { [weak page] in page },
-            textReveal: hasMedia ? nil : storyReveal(for: author, face: face),
-            cornerRadius: ForYouStoryCell.Metrics.avatarDiameter / 2,
-            // The post's own picture, if the pipeline has it: the far end of
-            // the cross-dissolve. Without it the face grows into the page and
-            // the page takes over at the landing — still the right motion.
-            pagePicture: first.thumbnailURL.flatMap { imagePipeline.cachedImage(for: $0) }
-        )
-        flyingStory = author
+        guard canOpenFromRow, let openPostHero, let first = story.posts.first,
+              let origin = ForYouRowOrigins.story(
+                  story, rails: rails, page: page, host: view,
+                  pagePicture: first.thumbnailURL.flatMap { imagePipeline.cachedImage(for: $0) },
+                  closeStaged: rowCloseStaged
+              )
+        else { return }
+        flyingStory = story.authorID
         openedStoryPosts = story.posts.map(\.id)
         // Everything under the feed stops: it is about to be covered.
         page.setAutoplayActive(false)
@@ -2089,98 +2083,60 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         openPostHero(self, origin, story.posts.map(\.id))
     }
 
-    /// The window a TEXT story opens through: the map marker's text-post
-    /// window, out of a disc. Nothing to align (a face has no caption), the
-    /// page covering the window whatever its shape, the face as the stand-in
-    /// at both ends.
-    private func storyReveal(for author: ProfileID, face: UIImage?) -> TextRevealOrigin {
-        let rails = self.rails
-        let radius = ForYouStoryCell.Metrics.avatarDiameter / 2
-        func standIn() -> UIView? {
-            guard let face else { return nil }
-            let view = UIImageView(image: face)
-            view.contentMode = .scaleAspectFill
-            view.clipsToBounds = true
-            view.layer.cornerRadius = radius
-            return view
-        }
-        return TextRevealOrigin(
-            rowFrame: { [weak rails] space in rails?.storyFrame(for: author, in: space) },
-            captionEnd: nil,
-            depthView: { [weak page] in page },
-            makeDismissStandIn: { _ in standIn() },
-            makePresentStandIn: { standIn() },
-            alignsPageToSource: false,
-            pageFit: .covering,
-            cornerRadius: radius,
-            fill: nil,
-            setConcealed: { [weak rails] concealed in
-                rails?.setStoryConcealed(concealed, for: author)
-            },
-            willStageDismissal: { [weak rails] _ in rails?.bringStoryIntoView(author) }
-        )
-    }
-
     /// A Following card was tapped: the row's posts from it on, flown out of
     /// the card — a list row's media flight (`.listMedia`, the card's own
     /// corner), wearing the card's caption as furniture that fades as it grows.
-    /// A text card opens as a window instead, the pushed lists' way.
+    /// A text card opens as a window instead, the pushed lists' way, and every
+    /// card carries that window for its close (`ForYouRowOrigins`).
     func openCard(at index: Int) {
         let cards = rails.cards
         guard canOpenFromRow, let openPostHero, cards.indices.contains(index) else { return }
-        let rails = self.rails
         let tapped = cards[index]
         let stream = Array(cards[index...].prefix(Self.seedWindow))
-        let id = tapped.id
-        let hasMedia = tapped.kind != .text
         // The card's player is the flight's from here; the list stops.
-        rails.beginPlaybackHandoff(of: id)
+        rails.beginPlaybackHandoff(of: tapped.id)
         page.setAutoplayActive(false)
-        let origin = SnapFeedHeroOrigin(
-            post: tapped,
-            stream: stream,
-            hasHero: hasMedia && rails.cardFrame(for: id, in: view) != nil,
-            cover: rails.cardCover(for: id),
-            style: .listMedia,
-            frame: { [weak rails] space in rails?.cardFrame(for: id, in: space) },
-            isOnScreen: { [weak rails] in rails?.isCardOnScreen(id) ?? false },
-            setConcealed: { [weak rails] concealed in rails?.setCardConcealed(concealed, for: id) },
-            // The card takes off PLAYING, joining its own surface.
-            donateLiveMedia: { [weak rails] in rails?.liveCardSurface(for: id) },
-            depthView: { [weak page] in page },
-            textReveal: hasMedia ? nil : cardReveal(for: tapped),
-            restingOverlay: { ForYouFollowingCardCell.makeOverlay(for: tapped) }
+        let origin = ForYouRowOrigins.card(
+            tapped, stream: stream, rails: rails, page: page, host: view,
+            closeStaged: rowCloseStaged
         )
-        flyingCard = id
+        flyingCard = tapped.id
         openPostHero(self, origin, stream.map(\.id))
     }
 
-    /// The window a TEXT card opens through — marker-shaped, for the place
-    /// page's reason (`PlaceProfileViewController.textRowReveal`): the feed is
-    /// a pager, so the card and the page are the same post only until the
-    /// first swipe. The card itself, drawn fresh, is the stand-in.
-    private func cardReveal(for post: GalleryPost) -> TextRevealOrigin {
-        let rails = self.rails
-        let id = post.id
-        return TextRevealOrigin(
-            rowFrame: { [weak rails] space in rails?.cardFrame(for: id, in: space) },
-            captionEnd: nil,
-            depthView: { [weak page] in page },
-            makeDismissStandIn: { [weak rails, weak view] _ in
-                guard let size = view.flatMap({ rails?.cardFrame(for: id, in: $0)?.size }) else { return nil }
-                return ForYouFollowingCardCell.makeTextStandIn(for: post, size: size)
-            },
-            makePresentStandIn: { [weak rails, weak view] in
-                guard let size = view.flatMap({ rails?.cardFrame(for: id, in: $0)?.size }) else { return nil }
-                return ForYouFollowingCardCell.makeTextStandIn(for: post, size: size)
-            },
-            alignsPageToSource: false,
-            pageFit: .covering,
-            cornerRadius: ForYouFollowingCardCell.cornerRadius,
-            setConcealed: { [weak rails] concealed in rails?.setCardConcealed(concealed, for: id) },
-            willStageDismissal: { [weak rails] _ in rails?.bringCardIntoView(id) }
-        )
+    /// What a row's close does once it has staged — nothing, but say where the
+    /// item is under `-grab-log`.
+    private var rowCloseStaged: () -> Void {
+        #if DEBUG
+        return { [weak self] in self?.logRowSource("close staged") }
+        #else
+        return {}
+        #endif
     }
+
+    #if DEBUG
+    /// `-grab-log`: where the item a row's flight left from is, in the
+    /// window — printed as the close is staged and again once it has landed,
+    /// so a landing that misses its item reads as two different rects rather
+    /// than as a feeling about a video.
+    private func logRowSource(_ moment: String) {
+        guard ProcessInfo.processInfo.arguments.contains("-grab-log"), let window = view.window
+        else { return }
+        let rect: CGRect?
+        let what: String
+        if let flyingStory {
+            rect = rails.storyFrame(for: flyingStory, in: window)
+            what = "story=\(flyingStory.rawValue)"
+        } else if let flyingCard {
+            rect = rails.cardFrame(for: flyingCard, in: window)
+            what = "card=\(flyingCard.rawValue)"
+        } else {
+            return
+        }
+        print("[rows] \(moment) \(what) source=\(rect.map { NSCoder.string(for: $0) } ?? "off screen")"
+            + " list=\(page.debugInsetState)")
+    }
+    #endif
 
     /// A row's header: its whole list, pushed — Following is the tab it used
     /// to be, Friends the same screen over the friends' posts.

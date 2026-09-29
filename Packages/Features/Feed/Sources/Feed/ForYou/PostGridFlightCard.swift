@@ -14,9 +14,9 @@ import UIKit
 /// counter overlay's glyphs, font and inset.
 ///
 /// Layer order (bottom → top): cover image, DEPARTURE cover image, live video
-/// surface, resting chrome (counters + play badge). The flight fades the resting
-/// chrome out as the card leaves the grid and back in as it returns, so a landed
-/// brick never pops its furniture on.
+/// surface, resting chrome (the brick's view count, or a row card's caption).
+/// The flight fades the resting chrome out as the card leaves the grid and back
+/// in as it returns, so a landed brick never pops its furniture on.
 ///
 /// **Which half of the card belongs to which end of the flight.** The card's own
 /// cover, its floor colour and its rounding are the TILE — the source end, and
@@ -25,15 +25,14 @@ import UIKit
 /// picture the viewer is actually watching and the cover is that page's poster,
 /// which is why the cover sits beneath it. Only the cover is in the FADE, though
 /// — the surface owns its own alpha and needs no help covering the card, so the
-/// blend leaves it alone (`applyBlend`). The counters and the play badge belong
-/// to neither end.
+/// blend leaves it alone (`applyBlend`). The counter belongs to neither end.
 final class PostGridFlightCard: UIView {
     /// Which surface the card is impersonating. The two pages present media
     /// differently, and a hero that flew from both with one set of constants
     /// would be a twin of neither.
     enum Style {
-        /// A grid brick: the layout's tile corners, counters and badge overlaid
-        /// on the media.
+        /// A grid brick: the layout's tile corners, its view count overlaid on
+        /// the media.
         case tile
         /// The preview inside a timeline row: 12pt corners, and NO counters —
         /// that row shows its metrics in a line *below* the media, so overlaying
@@ -48,13 +47,6 @@ final class PostGridFlightCard: UIView {
         }
 
         var showsCounters: Bool { self == .tile }
-        /// The play badge's inset, matched to each cell's own.
-        var badgeInset: CGFloat {
-            switch self {
-            case .tile: 8
-            case .listMedia: 10
-            }
-        }
     }
 
     /// Matches the rounding the For You grid gives its tiles, so the card is
@@ -127,15 +119,20 @@ final class PostGridFlightCard: UIView {
         #endif
         return view
     }()
-    /// The tile's furniture: the counter pair and the play badge, in one view
-    /// so the flight can fade them as a unit.
+    /// The source's furniture — a brick's view count, a row card's caption —
+    /// in one view so the flight can fade it as a unit.
+    ///
+    /// ⚠️ NO PLAY GLYPH, ON ANY CARD, AT EITHER END. The card used to carry a
+    /// `play.fill` badge for a single-video brick, a copy of a badge the tile
+    /// itself dropped long ago (`PostGridTileCell` draws its count and nothing
+    /// else). So the one place a viewer ever saw that glyph was the transition
+    /// window — lit at the source end of every video open and of every close
+    /// back onto one, over a tile that never wore it. Reported, and removed
+    /// rather than re-gated: the card is the tile's twin, and a twin draws
+    /// nothing its original does not.
     private let restingChromeView = UIView()
-    private let playBadge = UIImageView(image: UIImage(systemName: "play.fill"))
     private static let metaFont = UIFont.systemFont(
         ofSize: UIFont.preferredFont(forTextStyle: .caption2).pointSize, weight: .semibold
-    )
-    private let reactions = PostMetricLabel(
-        symbol: "heart.fill", font: metaFont, color: .white, shadowed: true
     )
     private let views = PostMetricLabel(
         symbol: "eye.fill", font: metaFont, color: .white, shadowed: true
@@ -238,39 +235,19 @@ final class PostGridFlightCard: UIView {
         restingChromeView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         addSubview(restingChromeView)
 
-        playBadge.tintColor = .white
-        // ⚠️ THE CARD WEARS WHAT THE ROW WORE, and the two rules had drifted.
-        //
-        // The row hides its badge for a collection AND the flight fades its
-        // furniture out — but this card's rule was `kind != .video` alone, so a
-        // single-video post flew with a play badge lit in the transition window
-        // while a collection flew without one. Reported as the badge appearing
-        // during a dismissal, on single media only.
-        //
-        // A timeline row shows no furniture on the card at all — the note on
-        // `showsCounters` states the reason and it applies to the badge for
-        // exactly the same reason: conjuring furniture the flight never had is
-        // the defect, whichever piece it is.
-        playBadge.isHidden = post.kind != .video || post.isCollection || !style.showsCounters
-        playBadge.layer.shadowColor = UIColor.black.cgColor
-        playBadge.layer.shadowOpacity = 0.55
-        playBadge.layer.shadowRadius = 4
-        playBadge.layer.shadowOffset = .zero
-        playBadge.constrain(in: restingChromeView) { parent in
-            playBadge.topAnchor.constraint(equalTo: parent.topAnchor, constant: style.badgeInset)
-            playBadge.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -style.badgeInset)
-        }
-
+        // ⚠️ THE CARD WEARS WHAT THE SOURCE WORE, and nothing else. A timeline
+        // row shows no furniture on its media at all (the note on
+        // `showsCounters`); a brick shows ONE count, reach, closing the row at
+        // its trailing foot — `PostGridTileCell`'s `views`, same glyph, font,
+        // insets. The card used to wear the heart-and-eye pair the tile once
+        // had, on the other side, so every landing swapped one set of
+        // furniture for another in the frame the card was removed.
         guard style.showsCounters else { return }
-        reactions.set(post.reactionCount)
         views.set(post.viewCount)
-        let counters = UIStackView(arrangedSubviews: [views, reactions])
-        counters.axis = .horizontal
-        counters.spacing = 8
-        counters.constrain(in: restingChromeView) { parent in
-            counters.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: 8)
-            counters.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -7)
-            counters.trailingAnchor.constraint(lessThanOrEqualTo: parent.trailingAnchor, constant: -8)
+        views.constrain(in: restingChromeView) { parent in
+            views.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -8)
+            views.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -7)
+            views.leadingAnchor.constraint(greaterThanOrEqualTo: parent.leadingAnchor, constant: 8)
         }
     }
 
@@ -279,13 +256,28 @@ final class PostGridFlightCard: UIView {
 
     /// Lays the SOURCE's furniture over the card — a Following card's caption
     /// over its foot (`SnapFeedHeroOrigin.restingOverlay`). It joins the
-    /// resting chrome, so the flight fades it with the counters: whole at the
+    /// resting chrome, so the flight fades it with the count: whole at the
     /// source, gone by the page.
     func installRestingOverlay(_ overlay: UIView) {
         overlay.isUserInteractionEnabled = false
         overlay.frame = restingChromeView.bounds
         overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         restingChromeView.insertSubview(overlay, at: 0)
+        restingOverlayView = overlay
+        setNeedsLayout()
+    }
+
+    /// The overlay `installRestingOverlay` laid in, posed with the chrome.
+    private weak var restingOverlayView: UIView?
+
+    /// The furniture, over the whole card — posed, not autoresized, for the
+    /// landing pane's reason (the note where `poseLandingLiveMedia` is called):
+    /// a chrome still at the size it was built at holds the count, and a row
+    /// card's caption, in the card's top-left corner instead of where the
+    /// source wears them.
+    private func poseRestingChrome() {
+        restingChromeView.frame = bounds
+        restingOverlayView?.frame = restingChromeView.bounds
     }
 
     #if DEBUG
@@ -387,6 +379,7 @@ final class PostGridFlightCard: UIView {
         landingPane.frame = bounds
         landingCoverView.frame = landingPane.bounds
         poseLandingLiveMedia()
+        poseRestingChrome()
     }
 
     /// The blend channel: `t == 0` is the page's picture, `t == 1` the tile's.
@@ -394,10 +387,10 @@ final class PostGridFlightCard: UIView {
     /// rest of the flight.
     ///
     /// ⚠️ DELIBERATELY DISJOINT FROM `zoomRestingChrome`. That channel is the
-    /// flight's own, it owns the counters and the play badge, and it runs on a
+    /// flight's own, it owns the resting furniture, and it runs on a
     /// different clock on purpose — `ZoomFlight.poseInterpolated` excludes the
     /// chrome alphas and swaps them inside the release spring instead. A blend
-    /// riding it would drag the counters onto the pictures' clock and vice versa.
+    /// riding it would drag the count onto the pictures' clock and vice versa.
     func setBlend(_ t: CGFloat) {
         blend = min(max(t, 0), 1)
         applyBlend()
@@ -414,15 +407,16 @@ final class PostGridFlightCard: UIView {
     /// operand behind, every intermediate frame is an opaque sum of two
     /// photographs — a whole picture, never two transparent ones.
     ///
-    /// ⚠️ THE COUNTERS AND THE BADGE ARE IN NEITHER OPERAND, and the counters are
-    /// why. They are a run of TEXT over the media, and text is exactly what the
-    /// fade law is about; they are also the TILE's furniture rather than a
-    /// picture of anything, so there is no page-side half for them to cross-fade
-    /// against. They keep the owner they already have — `zoomRestingChrome`,
-    /// posed by the flight. `.listMedia` has no furniture at all: a timeline
-    /// row's caption, author line and metrics are drawn by the row BELOW the
-    /// media and the card never carries them, which is what leaves both styles
-    /// with two pictures and nothing else to blend.
+    /// ⚠️ THE COUNT IS IN NEITHER OPERAND, and for a reason. It is a run of TEXT
+    /// over the media, and text is exactly what the fade law is about; it is
+    /// also the TILE's furniture rather than a picture of anything, so there is
+    /// no page-side half for it to cross-fade against. It keeps the owner it
+    /// already has — `zoomRestingChrome`, posed by the flight. `.listMedia` has
+    /// no furniture of its own: a timeline row's caption, author line and
+    /// metrics are drawn by the row BELOW the media and the card never carries
+    /// them (a source that DOES draw over its picture hands its furniture in
+    /// through `installRestingOverlay`, into the same chrome), which is what
+    /// leaves both styles with two pictures and nothing else to blend.
     ///
     /// ⚠️ AND THE LIVE SURFACE IS NOT IN THE FADE, which is where this card and
     /// `PinCardView` genuinely differ rather than merely being spelt differently.
@@ -724,6 +718,7 @@ extension PostGridFlightCard: ZoomFlightCard {
         landingPane.frame = bounds
         landingCoverView.frame = landingPane.bounds
         poseLandingLiveMedia()
+        poseRestingChrome()
     }
 
     /// The surface fills the card and resizes with it, so `resizeAspectFill`
