@@ -76,6 +76,13 @@ final class SnapMediaAttributionView: UIView {
     /// Once a content change has fully landed.
     var onContentSettled: (() -> Void)?
 
+    /// Blurs the pill by `amount` (0…1) as the SCROLL says — the author
+    /// pill's `setScrubBlur`, for the toolbar.
+    func setScrubBlur(_ amount: CGFloat) { contentTransition.setScrubBlur(amount) }
+
+    /// Renders the blurred still a scroll may need, before the page moves.
+    func prepareScrub() { contentTransition.prepareScrub() }
+
     init() {
         super.init(frame: .zero)
 
@@ -181,8 +188,8 @@ final class SnapMediaAttributionView: UIView {
 
     /// Shows `model`'s attribution. A page change blurs the content across and
     /// reloads the cover (guarded against fast page-past); the same CONTENT is
-    /// a no-op. Called from the settle-quantized activation seam only — never
-    /// mid-scroll.
+    /// a no-op. Called at the paging's midpoint under the scroll-driven blur
+    /// (`setScrubBlur`), and again — a no-op then — at the settle.
     ///
     /// ⚠️ The guard compares the MODEL, not its id, and that is the whole
     /// difference between a pill that fills in and one that does not. A page

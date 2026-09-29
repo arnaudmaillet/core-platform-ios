@@ -137,6 +137,114 @@ struct BarItemContentTransitionTests {
         #expect(host.transition.isRunning == false)
     }
 
+    // MARK: - Scroll-driven
+
+    /// The scroll sets the blur: the live content fades against ONE still of
+    /// itself, by exactly the amount asked, frame after frame — and a frame
+    /// adds nothing to the host.
+    @Test func theScrollSetsTheBlur() {
+        let host = Host()
+        let window = Self.window(showing: host)
+        defer { window.isHidden = true }
+
+        host.transition.setScrubBlur(0.4)
+        #expect(abs(host.content.alpha - 0.6) < 1e-6)
+        #expect(host.transition.isRunning)
+        if !UIAccessibility.isReduceMotionEnabled {
+            #expect(host.stills.count == 1)
+            #expect(abs((host.stills.first?.alpha ?? 0) - 0.4) < 1e-6)
+        }
+        let still = host.stills.first
+
+        host.transition.setScrubBlur(0.9)
+        #expect(abs(host.content.alpha - 0.1) < 1e-6)
+        #expect(host.stills.first === still, "a frame re-rendered the still")
+        #expect(host.stills.count == (still == nil ? 0 : 1))
+    }
+
+    /// A change asked for under the scroll's blur lands at the next frame,
+    /// UNDER the blur — never on the clock's timeline — and the blur keeps
+    /// following the scroll.
+    @Test func aChangeUnderTheScrollLandsUnderTheBlur() {
+        let host = Host()
+        let window = Self.window(showing: host)
+        defer { window.isHidden = true }
+        var applied = 0
+        host.transition.didApply = { applied += 1 }
+
+        host.transition.setScrubBlur(1)
+        host.transition.perform(animated: true) { host.label.text = "New" }
+        host.transition.setScrubBlur(1)
+
+        #expect(host.label.text == "New")
+        #expect(applied == 1)
+        #expect(host.content.alpha == 0, "the swap showed the live content")
+        #expect(host.transition.scrubBlur == 1)
+    }
+
+    /// Back at 0 the stills go and the live content is alone — and the host
+    /// hears of a landing only when the scrub swapped something.
+    @Test func backAtZeroTheContentIsAloneAgain() {
+        let host = Host()
+        let window = Self.window(showing: host)
+        defer { window.isHidden = true }
+        var settled = 0
+        host.transition.didSettle = { settled += 1 }
+
+        host.transition.setScrubBlur(0.5)
+        host.transition.setScrubBlur(0)
+        #expect(settled == 0, "a scrub that swapped nothing reported a landing")
+        #expect(host.stills.isEmpty)
+        #expect(host.content.alpha == 1)
+        #expect(host.transition.isRunning == false)
+
+        host.transition.setScrubBlur(1)
+        host.transition.perform(animated: true) { host.label.text = "New" }
+        host.transition.setScrubBlur(1)
+        host.transition.setScrubBlur(0.3)
+        host.transition.setScrubBlur(0)
+        #expect(settled == 1)
+        #expect(host.stills.isEmpty)
+        #expect(host.content.alpha == 1)
+    }
+
+    /// A still prepared at a drag's start is the one the scrub shows, and a
+    /// drag that never blurred leaves nothing behind.
+    @Test func aPreparedStillIsUsedOrDropped() {
+        let host = Host()
+        let window = Self.window(showing: host)
+        defer { window.isHidden = true }
+        guard !UIAccessibility.isReduceMotionEnabled else { return }
+
+        host.transition.prepareScrub()
+        #expect(host.stills.count == 1)
+        #expect(host.stills.first?.alpha == 0)
+        let prepared = host.stills.first
+        host.transition.setScrubBlur(0.2)
+        #expect(host.stills.first === prepared)
+        host.transition.setScrubBlur(0)
+        #expect(host.stills.isEmpty)
+
+        host.transition.prepareScrub()
+        host.transition.setScrubBlur(0)
+        #expect(host.stills.isEmpty, "a prepared still outlived the drag")
+    }
+
+    /// A scroll that starts blurring while the clock's swap is fading out
+    /// takes over from its end: the change applied, one owner.
+    @Test func theScrollTakesOverATimedSwap() {
+        let host = Host()
+        let window = Self.window(showing: host)
+        defer { window.isHidden = true }
+
+        host.transition.perform(animated: true) { host.label.text = "New" }
+        host.transition.setScrubBlur(0.5)
+
+        #expect(host.label.text == "New")
+        #expect(abs(host.content.alpha - 0.5) < 1e-6)
+        #expect(host.stills.count <= 1)
+    }
+
     /// The still is the view's bounds grown by the blur's reach, so the blur
     /// fades out instead of being cut at the view's edge.
     @Test func theStillCoversTheBlursReach() throws {

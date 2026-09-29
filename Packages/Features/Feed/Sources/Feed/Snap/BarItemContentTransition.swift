@@ -1,4 +1,4 @@
-import CoreImage
+import Accelerate
 import UIKit
 
 /// Changes what a bar item's custom view DRAWS through a blur — the old
@@ -19,7 +19,7 @@ import UIKit
 /// `UIVisualEffectView` over the content would blur the GLASS behind it too
 /// and lay its own material over the platter. What is left is a blurred
 /// BITMAP of each state: the live content is rendered (`CALayer.render`),
-/// blurred with Core Image, and the two stills are cross-faded against the
+/// blurred (vImage, at 1x), and the two stills are cross-faded against the
 /// live content —
 ///
 ///   live old ──fades──▶ blurred old ──▶ blurred new ──fades──▶ live new
@@ -36,7 +36,18 @@ import UIKit
 /// old content visibly blurs out over ~7 frames, the glass holds its shape and
 /// only glides its width, and the new content sharpens over ~8.
 ///
-/// Reduce Motion drops the stills: the same timeline, as a plain fade.
+/// TWO DRIVERS, ONE MECHANISM.
+/// - The CLOCK (`perform`): the timeline above, 0.12s out and 0.2s in — a
+///   follow tap turning the "+" into the followed mark, a page reached
+///   without a scroll (a jump, a landing).
+/// - The SCROLL (`setScrubBlur`, asked 2026-09-30): the snap feed's paging
+///   sets the blur amount frame by frame (`BarPillScrub`: rising from 30%,
+///   full at the midpoint, gone at 70%) and the content swaps under the full
+///   blur at the midpoint. Per frame only two container alphas are written;
+///   a still is rendered when the scrub begins (or the drag that may start
+///   one) and at each swap, never per frame.
+///
+/// Reduce Motion drops the stills: the same timelines, as a plain fade.
 @MainActor
 final class BarItemContentTransition {
     /// The two halves of the timeline. Together about the length of iOS 26's
@@ -86,7 +97,7 @@ final class BarItemContentTransition {
     }
 
     /// Whether a swap is under way.
-    var isRunning: Bool { isFadingOut || !stills.isEmpty }
+    var isRunning: Bool { isFadingOut || !stills.isEmpty || scrubBlur > 0 }
 
     /// Applies `change` to the live content — through the blur when `animated`
     /// and the host is on screen, at once otherwise.
@@ -95,7 +106,15 @@ final class BarItemContentTransition {
     /// swap. One asked for later interrupts: the running timeline jumps to its
     /// end and a new one starts from the sharp content, which is the one frame
     /// a feed paged faster than 0.3s a page can show.
+    ///
+    /// Under a scroll-driven blur (`setScrubBlur`) the change belongs to the
+    /// SCROLL: it lands under that blur, whatever `animated` says.
     func perform(animated: Bool, _ change: @escaping () -> Void) {
+        if scrubBlur > 0 {
+            pending.append(change)
+            scheduleScrubCommit()
+            return
+        }
         if isFadingOut {
             pending.append(change)
             return
@@ -129,10 +148,18 @@ final class BarItemContentTransition {
     /// Runs `change` with the NEW content: at the midpoint when a swap is
     /// fading the old content out (so a late arrival — a picture fetched for
     /// the new author — is never drawn onto the old one), at once otherwise.
+    /// Under a scroll-driven blur it lands like any change there — under the
+    /// blur, with a fresh still — so the still never pictures a face the live
+    /// content no longer draws.
     func afterSwap(_ change: @escaping () -> Void) {
-        if isFadingOut {
+        if scrubBlur > 0 {
+            pending.append(change)
+            scheduleScrubCommit()
+        } else if isFadingOut {
             pending.append(change)
         } else {
+            // A still prepared for a scrub pictures the content before this.
+            dropPreparedScrub()
             change()
         }
     }
@@ -141,18 +168,150 @@ final class BarItemContentTransition {
     /// stills gone, the live content opaque.
     func finish() {
         generation += 1
-        if isFadingOut {
-            isFadingOut = false
+        if !pending.isEmpty {
             let changes = pending
             pending = []
             changes.forEach { $0() }
             didApply?()
             remeasure?(nil)
         }
+        isFadingOut = false
         content?.layer.removeAllAnimations()
         content?.alpha = 1
         stills.forEach { $0.removeFromSuperview() }
         stills = []
+        scrubStill = nil
+        scrubBlur = 0
+        scrubSwapped = false
+    }
+
+    // MARK: - Scroll-driven
+
+    /// How blurred the content is under the scroll right now (`setScrubBlur`).
+    private(set) var scrubBlur: CGFloat = 0
+    /// The blurred still of what the live content draws while the scroll owns
+    /// the blur — rendered ONCE per content (when the scrub begins, when the
+    /// drag that may start one begins, or at a swap), never per frame.
+    private var scrubStill: UIView?
+    /// Whether this scrub swapped the content — so its end is a landing the
+    /// host hears about (`didSettle`), and a scrub that only blurred and came
+    /// back is not.
+    private var scrubSwapped = false
+    private var scrubCommitScheduled = false
+
+    /// The two stills' cross-fade at a scroll-driven swap. The swap itself is
+    /// the scroll's (at the midpoint, under the full blur); the hand-over
+    /// between two blurred pictures is a short fade, because a hard cut
+    /// between two stills of different lengths reads as a flash.
+    static let scrubSwapCrossfade: TimeInterval = 0.1
+    /// The width glide at a scroll-driven swap. Short: past the plateau the
+    /// scroll is already sharpening the new content, and a glide still
+    /// running then clips its labels against a platter that has not finished
+    /// growing (the timed swap's lesson, below).
+    static let scrubWidthGlide: TimeInterval = 0.1
+
+    /// Renders the still a scroll-driven blur will show, ahead of the first
+    /// frame that needs it — at the start of a drag, so the render is paid
+    /// before the page moves rather than on a frame of the scroll. Invisible
+    /// until `setScrubBlur` raises it; dropped by the scroll's end.
+    func prepareScrub() {
+        guard scrubStill == nil, scrubBlur == 0, !isFadingOut, stills.isEmpty,
+              let host, host.window != nil, let content, content.bounds.width > 0 else { return }
+        scrubStill = still(of: content)
+    }
+
+    private func dropPreparedScrub() {
+        guard scrubBlur == 0, let prepared = scrubStill else { return }
+        prepared.removeFromSuperview()
+        stills.removeAll { $0 === prepared }
+        scrubStill = nil
+    }
+
+    /// Blurs the content by `amount` (0 sharp … 1 fully blurred), set by the
+    /// SCROLL rather than by a clock: the live content fades against a blurred
+    /// still of itself, and nothing else runs per call — two alphas.
+    ///
+    /// A content change asked for while `amount > 0` (`perform`) is applied at
+    /// the next call (or at the end of this turn, when no call follows), under
+    /// the blur: the live content swaps, the item takes its new width, and a
+    /// still of the NEW content cross-fades over the old one. Back at 0 the
+    /// stills go and the live content is alone again.
+    ///
+    /// A timed transition still running when the scroll starts blurring jumps
+    /// to its end first: one owner at a time.
+    func setScrubBlur(_ amount: CGFloat) {
+        let amount = min(max(amount, 0), 1)
+        guard amount != scrubBlur || !pending.isEmpty || (amount == 0 && scrubStill != nil) else { return }
+        guard let host, let content else { return }
+        if amount > 0, scrubBlur == 0 {
+            // A timed swap mid-flight gives way to a fresh start from the
+            // sharp content (its pending change applied).
+            if isFadingOut || stills.contains(where: { $0 !== scrubStill }) { finish() }
+            guard host.window != nil, content.bounds.width > 0 else { return }
+            if scrubStill == nil { scrubStill = still(of: content) }
+            scrubSwapped = false
+        }
+        commitScrub(to: amount)
+    }
+
+    private func scheduleScrubCommit() {
+        guard !scrubCommitScheduled else { return }
+        scrubCommitScheduled = true
+        // A change that arrives with no scroll behind it (an answer landing
+        // while a finger holds the blur) is not left waiting for the finger.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.scrubCommitScheduled = false
+            guard !self.pending.isEmpty else { return }
+            self.commitScrub(to: self.scrubBlur)
+        }
+    }
+
+    private func commitScrub(to amount: CGFloat) {
+        guard let host, let content else { return }
+        if !pending.isEmpty {
+            let changes = pending
+            pending = []
+            changes.forEach { $0() }
+            didApply?()
+            scrubSwapped = true
+            if amount > 0 {
+                // As in the timed swap: the new width first, so the new still
+                // is rendered at the size it lands at.
+                remeasure?(Self.scrubWidthGlide)
+                host.layoutIfNeeded()
+                let previous = scrubStill
+                let next = still(of: content)
+                scrubStill = next
+                UIView.animate(
+                    withDuration: Self.scrubSwapCrossfade, delay: 0,
+                    options: [.curveEaseInOut, .allowUserInteraction]
+                ) {
+                    previous?.alpha = 0
+                    next?.alpha = amount
+                } completion: { [weak self] _ in
+                    previous?.removeFromSuperview()
+                    self?.stills.removeAll { $0 === previous }
+                }
+            } else {
+                remeasure?(nil)
+            }
+        }
+        scrubBlur = amount
+        UIView.performWithoutAnimation {
+            content.alpha = 1 - amount
+            // A still being cross-faded in keeps its fade: an alpha written
+            // under a running animation is what it lands on.
+            scrubStill?.alpha = amount
+        }
+        guard amount == 0 else { return }
+        stills.forEach { $0.removeFromSuperview() }
+        stills = []
+        scrubStill = nil
+        if scrubSwapped {
+            scrubSwapped = false
+            didSettle?()
+        }
     }
 
     private func swap(generation: Int, old: UIView?) {
@@ -198,8 +357,17 @@ final class BarItemContentTransition {
     /// width glides under it while it shows, and everything in these pills is
     /// leading-aligned, so the still stays over what it pictures.
     private func still(of view: UIView) -> UIView? {
-        guard let host, !UIAccessibility.isReduceMotionEnabled,
-              let (image, frame) = Self.blurredSnapshot(of: view, radius: Self.blurRadius) else { return nil }
+        guard let host, !UIAccessibility.isReduceMotionEnabled else { return nil }
+        #if DEBUG
+        let started = CACurrentMediaTime()
+        defer {
+            if ProcessInfo.processInfo.arguments.contains("-pill-probe") {
+                print(String(format: "[pill-probe] still %@ %.2fms",
+                             "\(type(of: host))", (CACurrentMediaTime() - started) * 1000))
+            }
+        }
+        #endif
+        guard let (image, frame) = Self.blurredSnapshot(of: view, radius: Self.blurRadius) else { return nil }
         let container = UIView(frame: view.convert(frame, to: host))
         container.isUserInteractionEnabled = false
         container.alpha = 0
@@ -215,7 +383,16 @@ final class BarItemContentTransition {
 
     // MARK: - Rendering
 
-    private static let context = CIContext(options: [.cacheIntermediates: false])
+    /// Pixels per point of a still.
+    ///
+    /// ⚠️ ONE, NOT THE SCREEN'S THREE. A still is blurred by `blurRadius`
+    /// points, which leaves nothing finer than a few points to sample, so a 3x
+    /// render only paid 9x the pixels for detail the blur then erased — and
+    /// the scroll-driven swap renders its stills on a frame of the drag.
+    /// Measured on the iPhone 18 Pro simulator with `-pill-probe`: 14–20ms a
+    /// still (one 61ms) at 3x through Core Image; see `blurredSnapshot` for
+    /// what replaced it.
+    static let stillScale: CGFloat = 1
 
     /// `view` rendered as it draws now and blurred by `radius` points, with the
     /// frame (in `view`'s own space) the image covers: its bounds, grown so the
@@ -226,28 +403,60 @@ final class BarItemContentTransition {
     /// mid-fade, and every layer is displayed first, so text set in this very
     /// turn — or a colour that just changed with the bar's theme — is what
     /// gets pictured.
+    ///
+    /// Blurred on the CPU (vImage: three box passes, a Gaussian to the eye)
+    /// rather than through Core Image, whose GPU round trip — and its cold
+    /// first render — cost more than the whole blur of a pill-sized bitmap.
     static func blurredSnapshot(of view: UIView, radius: CGFloat) -> (UIImage, CGRect)? {
         let bounds = view.bounds
         guard bounds.width > 0, bounds.height > 0 else { return nil }
         view.layoutIfNeeded()
         displayTree(view.layer)
+        let scale = stillScale
         let pad = ceil(radius * 3)
-        let canvas = bounds.insetBy(dx: -pad, dy: -pad)
-        let format = UIGraphicsImageRendererFormat.preferred()
-        format.opaque = false
-        format.preferredRange = .standard
+        var canvas = bounds.insetBy(dx: -pad, dy: -pad)
+        let width = Int(ceil(canvas.width * scale))
+        let height = Int(ceil(canvas.height * scale))
+        canvas.size = CGSize(width: CGFloat(width) / scale, height: CGFloat(height) / scale)
+        let bytesPerRow = width * 4
+        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(
+                data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: bytesPerRow,
+                space: space,
+                bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+              ),
+              let data = context.data else { return nil }
+        // UIKit's orientation: origin top-left, in points.
+        context.translateBy(x: 0, y: CGFloat(height))
+        context.scaleBy(x: scale, y: -scale)
+        context.translateBy(x: -canvas.minX, y: -canvas.minY)
         let alpha = view.alpha
         view.alpha = 1
-        let sharp = UIGraphicsImageRenderer(size: canvas.size, format: format).image { context in
-            context.cgContext.translateBy(x: -canvas.minX, y: -canvas.minY)
-            view.layer.render(in: context.cgContext)
-        }
+        UIGraphicsPushContext(context)
+        view.layer.render(in: context)
+        UIGraphicsPopContext()
         view.alpha = alpha
-        guard let cgImage = sharp.cgImage else { return nil }
-        let input = CIImage(cgImage: cgImage)
-        let blurred = input.applyingGaussianBlur(sigma: Double(radius * sharp.scale)).cropped(to: input.extent)
-        guard let output = context.createCGImage(blurred, from: input.extent) else { return nil }
-        return (UIImage(cgImage: output, scale: sharp.scale, orientation: .up), canvas)
+
+        // Three box passes of width k approximate a Gaussian of variance
+        // 3(k²−1)/12, so k ≈ √(4σ² + 1), odd.
+        let sigma = radius * scale
+        var kernel = UInt32(max(3, Int((4 * sigma * sigma + 1).squareRoot().rounded())))
+        if kernel % 2 == 0 { kernel += 1 }
+        guard let scratch = malloc(bytesPerRow * height) else { return nil }
+        defer { free(scratch) }
+        var source = vImage_Buffer(data: data, height: vImagePixelCount(height), width: vImagePixelCount(width),
+                                   rowBytes: bytesPerRow)
+        var target = vImage_Buffer(data: scratch, height: vImagePixelCount(height), width: vImagePixelCount(width),
+                                   rowBytes: bytesPerRow)
+        for _ in 0..<3 {
+            vImageBoxConvolve_ARGB8888(&source, &target, nil, 0, 0, kernel, kernel, nil,
+                                       vImage_Flags(kvImageEdgeExtend))
+            Swift.swap(&source, &target)
+        }
+        // After an odd number of passes the result is in `scratch`.
+        if source.data != data { memcpy(data, source.data, bytesPerRow * height) }
+        guard let image = context.makeImage() else { return nil }
+        return (UIImage(cgImage: image, scale: scale, orientation: .up), canvas)
     }
 
     private static func displayTree(_ layer: CALayer) {

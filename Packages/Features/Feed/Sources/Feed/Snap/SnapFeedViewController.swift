@@ -1199,6 +1199,8 @@ final class SnapFeedViewController: UIViewController {
         cancelIdleCommentsWarm()
         // Hand the shared bars back on the way out (see `releaseChromeTheme`).
         releaseChromeTheme()
+        // And the pills sharp: nothing scrubs them under a presentation.
+        endBarPillScrub()
         // Unlike the visibility bookkeeping below, the toolbar choreography
         // runs for every disappearance: it registers on the coordinator when
         // one exists (fade, restore-on-cancel) and hides instantly otherwise.
@@ -4298,6 +4300,12 @@ final class SnapFeedViewController: UIViewController {
     private func updateBarChrome(at index: Int) {
         guard orderedIDs.indices.contains(index),
               let model = modelsByID[orderedIDs[index]] else { return }
+        // Usually a no-op for the pills: the scroll that brought this page in
+        // already swapped them to it, under its blur (`updateBarPillScrub`).
+        // A page reached without passing through the middle of the screen (a
+        // jump, a landing) blurs across here, on the clock.
+        barPillScrub.settle(at: index)
+        barPillScrubPair = nil
         showAuthor(model)
         // The neighbours' faces, so the pill paged to next arrives wearing one.
         for neighbour in [index - 1, index + 1] where orderedIDs.indices.contains(neighbour) {
@@ -4401,6 +4409,116 @@ final class SnapFeedViewController: UIViewController {
         guard var items = toolbarItems, let index = items.firstIndex(of: previousItem) else { return }
         items[index] = attributionItem
         setToolbarItems(items, animated: false)
+    }
+
+    // MARK: - Bar pills under the scroll
+
+    /// Which page the pills draw, as the SCROLL has it — see `BarPillScrub`.
+    private var barPillScrub = BarPillScrub()
+    /// The pair of pages the pills' blur was last decided for, and whether
+    /// each pill draws the two differently — asked once per pair, not per
+    /// frame.
+    private var barPillScrubPair: (upper: Int, author: Bool, attribution: Bool)?
+    #if DEBUG
+    private var debugLastScrubBlur: CGFloat = 0
+    #endif
+
+    /// The pills follow the FINGER from one post to the next (asked
+    /// 2026-09-30): they start blurring once the page being left is 30% off
+    /// screen, change to the incoming post's author and sound when it covers
+    /// more than half, and sharpen again as it reaches 70% — every step read
+    /// off the scroll offset, so a held finger holds the blur and a drag back
+    /// plays it backwards. It used to be a timed blur at the SETTLE, after the
+    /// page had already arrived.
+    ///
+    /// Runs on every scroll callback, so the frame's work is an offset, a
+    /// cached comparison and two alphas per pill; the blurred stills are
+    /// rendered only when a scrub begins and at the swap
+    /// (`BarItemContentTransition.setScrubBlur`). Programmatic paging (an
+    /// animated `setContentOffset`, `-snap-fling`) comes through the same
+    /// callback, so it scrubs the same way.
+    ///
+    /// A pill whose two pages draw the SAME content (one person's posts, one
+    /// song) is left sharp. Nothing scrubs while a presentation owns the bars
+    /// (`canAnimateBarItems`): the flight's landing settles the pills, as
+    /// before.
+    private func updateBarPillScrub() {
+        let page = collectionView.bounds.height
+        guard page > 0, canAnimateBarItems else { return endBarPillScrub() }
+        let position = collectionView.contentOffset.y / page
+        let count = orderedIDs.count
+        let frame = BarPillScrub.frame(position: position, itemCount: count)
+        let differs = frame.map { barPillsDiffer(upper: $0.upper) } ?? (author: false, attribution: false)
+        let blur = frame?.blur ?? 0
+        let authorBlur = differs.author ? blur : 0
+        let attributionBlur = differs.attribution ? blur : 0
+        // Blur first — a scrub that starts on this frame pictures the content
+        // being left — then the swap, which lands under that blur on the
+        // second call.
+        authorIdentityView.setScrubBlur(authorBlur)
+        mediaAttributionView.setScrubBlur(attributionBlur)
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-pill-probe"),
+           (authorBlur * 10).rounded() != (debugLastScrubBlur * 10).rounded() {
+            debugLastScrubBlur = authorBlur
+            print(String(format: "[pill-probe] scrub pos=%.3f blur=%.2f/%.2f alpha=%.2f",
+                         position, authorBlur, attributionBlur, authorIdentityView.subviews.first?.alpha ?? -1))
+        }
+        #endif
+        guard let index = barPillScrub.update(position: position, itemCount: count),
+              orderedIDs.indices.contains(index), let model = modelsByID[orderedIDs[index]] else { return }
+        showAuthor(model)
+        let attribution = attributionContent(for: model)
+        showAttribution(model, sound: attribution.sound, cover: attribution.cover)
+        authorIdentityView.setScrubBlur(authorBlur)
+        mediaAttributionView.setScrubBlur(attributionBlur)
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-pill-probe") {
+            print(String(format: "[pill-probe] scrub swap -> %d at %.3f blur=%.2f/%.2f",
+                         index, position, authorBlur, attributionBlur))
+        }
+        #endif
+    }
+
+    /// Whether the author pill and the audio capsule draw pages `upper` and
+    /// `upper + 1` differently. Unknown (a page without its model yet) is
+    /// "no": the pill stays sharp, and the settle blurs it across on the
+    /// clock once the page has arrived.
+    private func barPillsDiffer(upper: Int) -> (author: Bool, attribution: Bool) {
+        if let pair = barPillScrubPair, pair.upper == upper { return (pair.author, pair.attribution) }
+        guard orderedIDs.indices.contains(upper), orderedIDs.indices.contains(upper + 1),
+              let first = modelsByID[orderedIDs[upper]],
+              let second = modelsByID[orderedIDs[upper + 1]] else { return (false, false) }
+        // What the author pill DRAWS: the face, the name, the meta line
+        // (the post's age) and the follow badge.
+        let author = first.authorID != second.authorID
+            || first.authorName != second.authorName
+            || first.avatarURL != second.avatarURL
+            || first.metaText != second.metaText
+            || followBadge(for: first.authorID) != followBadge(for: second.authorID)
+        let firstContent = attributionContent(for: first)
+        let secondContent = attributionContent(for: second)
+        let attribution = SnapMediaAttributionView.contentKey(
+            for: first, sound: firstContent.sound, cover: firstContent.cover
+        ) != SnapMediaAttributionView.contentKey(for: second, sound: secondContent.sound, cover: secondContent.cover)
+        barPillScrubPair = (upper, author, attribution)
+        return (author, attribution)
+    }
+
+    /// Renders the stills a drag may need before the page moves.
+    private func prepareBarPillScrub() {
+        barPillScrubPair = nil
+        guard canAnimateBarItems else { return }
+        authorIdentityView.prepareScrub()
+        mediaAttributionView.prepareScrub()
+    }
+
+    /// Both pills sharp and alone: the scroll has stopped, or stopped owning
+    /// them.
+    private func endBarPillScrub() {
+        barPillScrubPair = nil
+        authorIdentityView.setScrubBlur(0)
+        mediaAttributionView.setScrubBlur(0)
     }
 
     /// ⚠️ THE WRAPPER'S WIDTH, checked after every content swap. A kept bar
@@ -5216,6 +5334,9 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         if commentsEngagedID != nil {
             dismissComments()
         }
+        // The pills' blurred stills, rendered now rather than on a frame of
+        // the drag (`updateBarPillScrub`).
+        prepareBarPillScrub()
     }
 
     /// ⚠️ THE FLICK STOPS AT THE LAST PAGE THAT IS READY.
@@ -5255,9 +5376,14 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         // nothing else on the screen.
         updateViewportPlayback()
         updatePagingFooter(for: scrollView)
+        // The bar pills ride the scroll too — two alphas a frame, and the
+        // content they draw only at the midpoint. Unlike activation, this
+        // moves nothing on the page.
+        updateBarPillScrub()
     }
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        endBarPillScrub()
         updateActiveItem()
         updatePagingFooter(for: scrollView)
     }
@@ -5266,12 +5392,16 @@ extension SnapFeedViewController: UICollectionViewDelegate {
     /// in the drag callbacks — without it the page it lands on is never
     /// settled.
     func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
+        endBarPillScrub()
         updateActiveItem()
         updatePagingFooter(for: scrollView)
     }
 
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
-        if !decelerate { updateActiveItem() }
+        if !decelerate {
+            endBarPillScrub()
+            updateActiveItem()
+        }
         updatePagingFooter(for: scrollView)
     }
 }

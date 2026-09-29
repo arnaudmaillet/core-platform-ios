@@ -13,7 +13,8 @@ import UIKit
 /// wraps the avatar and text exactly. A hard width cap keeps long display
 /// names truncating instead of crowding the bar; the trade-off, accepted for
 /// the flush-pill look, is that an author change re-negotiates the item's
-/// size — a settle-time event, never mid-scroll.
+/// size — at the paging's midpoint, under the full blur of the scroll-driven
+/// swap (`setScrubBlur`), where only blurred stills are showing.
 final class SnapAuthorIdentityView: UIView {
     /// What the pill's trailing glyph says about the viewer and the author.
     ///
@@ -172,6 +173,14 @@ final class SnapAuthorIdentityView: UIView {
     var onContentApplied: (() -> Void)?
     /// Once a content change has fully landed.
     var onContentSettled: (() -> Void)?
+
+    /// Blurs the pill by `amount` (0…1) as the SCROLL says — the feed's paging
+    /// drives it (`BarPillScrub`), and an author set meanwhile lands under
+    /// the blur (`BarItemContentTransition.setScrubBlur`).
+    func setScrubBlur(_ amount: CGFloat) { contentTransition.setScrubBlur(amount) }
+
+    /// Renders the blurred still a scroll may need, before the page moves.
+    func prepareScrub() { contentTransition.prepareScrub() }
 
     /// Whose face the avatar task is loading — compared on arrival so a fast
     /// page-past cannot land a picture on the wrong pill.
@@ -338,7 +347,8 @@ final class SnapAuthorIdentityView: UIView {
         #endif
         let id = model.authorID
         avatarTask = Task { [weak self] in
-            guard let image = try? await pipeline.image(for: url) else { return }
+            guard let fetched = try? await pipeline.image(for: url) else { return }
+            let image = await SnapAuthorFaceCache.prepared(fetched)
             SnapAuthorFaceCache.store(image, for: url)
             guard let self, self.authorID == id else { return }
             // Onto the NEW author's content: mid-blur, the old one is still
@@ -373,7 +383,7 @@ final class SnapAuthorIdentityView: UIView {
         guard SnapAuthorFaceCache.face(for: url) == nil else { return }
         Task { @MainActor in
             guard let image = try? await pipeline.image(for: url) else { return }
-            SnapAuthorFaceCache.store(image, for: url)
+            SnapAuthorFaceCache.store(await SnapAuthorFaceCache.prepared(image), for: url)
         }
     }
 
@@ -635,6 +645,33 @@ enum SnapAuthorFaceCache {
     private static var order: [URL] = []
 
     static func face(for url: URL) -> UIImage? { faces[url] }
+
+    /// `image` as the pill draws it: a small, already-DECODED square bitmap,
+    /// made off the main thread.
+    ///
+    /// ⚠️ Because the pill is also drawn by `CALayer.render` — the blurred
+    /// stills of `BarItemContentTransition` — and that CPU path decodes and
+    /// scales a full-size picture itself, on the main thread, on a frame of
+    /// the scroll: the first still of each new face cost 22–40ms on the
+    /// iPhone 18 Pro simulator (`-pill-probe`), the same pill 3–7ms once the
+    /// face had been drawn.
+    static func prepared(_ image: UIImage) async -> UIImage {
+        let side = AvatarImageView.barDiameter
+        return await Task.detached(priority: .userInitiated) {
+            let size = image.size
+            guard size.width > 0, size.height > 0 else { return image }
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 3
+            format.opaque = false
+            // Aspect FILL into the disc's square, as the avatar view draws it.
+            let fill = max(side / size.width, side / size.height)
+            let drawn = CGSize(width: size.width * fill, height: size.height * fill)
+            return UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format).image { _ in
+                image.draw(in: CGRect(x: (side - drawn.width) / 2, y: (side - drawn.height) / 2,
+                                      width: drawn.width, height: drawn.height))
+            }
+        }.value
+    }
 
     static func store(_ image: UIImage, for url: URL) {
         if faces.updateValue(image, forKey: url) != nil {
