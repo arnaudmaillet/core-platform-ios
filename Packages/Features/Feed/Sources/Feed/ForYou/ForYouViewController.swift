@@ -3000,6 +3000,19 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
                 }
                 return
             }
+            // ⚠️ BROUGHT ON SCREEN FIRST: a person taps a post they can see.
+            // On Discover the scripts open index 3 — the first chunk's first
+            // tile, under three cards — which is below the fold at launch; an
+            // unrealized cell has no cover to wait for and no hero to fly, so
+            // the open fell back to the plain push and the case measured the
+            // wrong transition. Minimal, and a no-op for a post already in view.
+            if let page = pager.page(for: format), !page.isPostVisible(posts[index].id) {
+                page.revealPost(
+                    posts[index].id,
+                    clearing: UIEdgeInsets(top: view.safeAreaInsets.top, left: 0,
+                                           bottom: floatingBarCover, right: 0)
+                )
+            }
             let ready = pager.page(for: format)?.heroAppearance(for: posts[index].id)?.cover != nil
             guard ready || attempts >= 60 else {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: attempt)

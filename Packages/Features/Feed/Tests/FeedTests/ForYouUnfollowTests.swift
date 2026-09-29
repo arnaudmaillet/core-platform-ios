@@ -62,8 +62,9 @@ struct ForYouUnfollowTests {
         #expect(model.posts(for: .activity).map(\.id.rawValue) == ["kept"])
         #expect(model.posts(for: .short).isEmpty)
         // Discover's: untouched.
-        #expect(model.discoverPosts.map(\.id.rawValue) == ["photo", "text", "kept"])
-        #expect(model.posts(for: .media).map(\.id.rawValue) == ["photo", "kept"])
+        // (Sets: the trending order breaks these fixtures' ties on id.)
+        #expect(Set(model.discoverPosts.map(\.id.rawValue)) == ["photo", "text", "kept"])
+        #expect(Set(model.posts(for: .media).map(\.id.rawValue)) == ["photo", "kept"])
     }
 
     /// Unfollowing twice is one removal: the second changes nothing.

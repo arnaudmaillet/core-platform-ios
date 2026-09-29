@@ -570,7 +570,37 @@ public final class ForYouViewModel {
             activity: page(.activity), media: page(.media), short: page(.short),
             discover: discoverPage()
         ))
+        #if DEBUG
+        debugLogFollowing()
+        #endif
     }
+
+    #if DEBUG
+    /// `-foryou-following-log`: one line per publish in
+    /// `Documents/foryou-following.log` — how many posts Following and
+    /// Discover hold, and which authors Following is leaving out. A file,
+    /// because the question ("did the follow I just made reach this list?")
+    /// is asked of a long list no screenshot can count, and a console capture
+    /// is the thing that fails quietly (see `sim-log-capture-traps`).
+    private func debugLogFollowing() {
+        guard ProcessInfo.processInfo.arguments.contains("-foryou-following-log"),
+              let corpus,
+              let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+        else { return }
+        let hidden = Set(corpus.compactMap(\.authorID)).filter { followsAuthor[$0] == false }
+        let line = "following=\(followingCorpus.count) discover=\(corpus.count)"
+            + " answered=\(followsAuthor.count)"
+            + " hidden=\(hidden.map(\.rawValue).sorted().joined(separator: ","))\n"
+        let url = documents.appendingPathComponent("foryou-following.log")
+        if let handle = try? FileHandle(forWritingTo: url) {
+            handle.seekToEndOfFile()
+            handle.write(Data(line.utf8))
+            try? handle.close()
+        } else {
+            try? Data(line.utf8).write(to: url)
+        }
+    }
+    #endif
 
     /// What the badged tab counts against this session, frozen on first sight.
     ///
