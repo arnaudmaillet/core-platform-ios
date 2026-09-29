@@ -94,12 +94,14 @@ final class SnapFeedViewController: UIViewController {
     /// author (the landing install, a better projection) keeps it and lands
     /// without a flicker.
     ///
-    /// The "+" is part of what the pill IS, so it is part of the identifier
-    /// too: following the author (or learning that the viewer already does)
-    /// is a fresh pill under the identifier without `.follow`, and the bar
-    /// morphs the capsule down to its narrower self instead of snapping.
-    static func authorItemIdentifier(for author: ProfileID?, offersFollow: Bool = false) -> String {
-        "feed.snap.author-pill." + (author?.rawValue ?? "none") + (offersFollow ? ".follow" : "")
+    /// The follow badge is part of what the pill IS, so it is part of the
+    /// identifier too: following the author turns the "+" into the followed
+    /// (or friends) mark as a fresh pill under another identifier, and the bar
+    /// morphs the capsule between the two glyphs instead of snapping.
+    static func authorItemIdentifier(
+        for author: ProfileID?, badge: SnapAuthorIdentityView.FollowBadge = .none
+    ) -> String {
+        "feed.snap.author-pill." + (author?.rawValue ?? "none") + badge.identifierSuffix
     }
 
     /// The attribution item's identifier — the author pill's rule applied to
@@ -439,14 +441,13 @@ final class SnapFeedViewController: UIViewController {
     /// Files a post's Report. Nil withholds the row entirely: an action that
     /// cannot act is not offered — the grid's card menu follows the same rule.
     private let reporting: (any ContentReporting)?
-    /// Follows an author from the pill's "+", and says whether the "+" is on
-    /// offer at all. The pill offers it only when BOTH are wired and the
-    /// reader has said the viewer does not follow the author — see
-    /// `offersFollow(to:)`.
+    /// Follows an author from the pill's "+", and says what the pill's badge
+    /// draws. The pill draws one only when BOTH are wired and the reader has
+    /// answered for the author — see `followBadge(for:)`.
     private let socialGraph: (any SocialGraphWriting)?
     private let followRelations: (any SocialGraphReading)?
     /// What the reader answered, per author, overlaid by this screen's own
-    /// follows. Absent: not known yet, which offers no "+".
+    /// follows. Absent: not known yet, which draws no badge.
     private(set) var followRelationsByAuthor: [ProfileID: FollowRelation] = [:]
     /// Lookups in flight, so paging back and forth asks once per author.
     private var followLookups: Set<ProfileID> = []
@@ -1748,7 +1749,7 @@ final class SnapFeedViewController: UIViewController {
     private func makeAuthorItem(_ pill: SnapAuthorIdentityView) -> UIBarButtonItem {
         let item = UIBarButtonItem(customView: pill)
         item.identifier = Self.authorItemIdentifier(
-            for: pill.shownAuthor?.authorID, offersFollow: pill.offersFollow
+            for: pill.shownAuthor?.authorID, badge: pill.followBadge
         )
         return item
     }
@@ -1770,7 +1771,7 @@ final class SnapFeedViewController: UIViewController {
     /// populated feed.
     func showAuthor(_ model: FeedItemDisplayModel) {
         if authorIdentityView.showsSameFace(as: model),
-           authorIdentityView.offersFollow == offersFollow(to: model.authorID) {
+           authorIdentityView.followBadge == followBadge(for: model.authorID) {
             authorIdentityView.setAuthor(model, pipeline: imagePipeline)
             return
         }
@@ -1803,8 +1804,8 @@ final class SnapFeedViewController: UIViewController {
         if let shown {
             fresh.setAuthor(shown, pipeline: imagePipeline, animated: false)
         }
-        // Before the item is made: the "+" is in its identifier.
-        fresh.setFollowHidden(!offersFollow(to: shown?.authorID))
+        // Before the item is made: the badge is in its identifier.
+        fresh.setFollowBadge(followBadge(for: shown?.authorID))
         authorIdentityView = fresh
         let previousItem = authorItem
         authorItem = makeAuthorItem(fresh)
@@ -1817,7 +1818,7 @@ final class SnapFeedViewController: UIViewController {
         if ProcessInfo.processInfo.arguments.contains("-pill-probe") {
             print("[pill-probe] install \(fresh.shownAuthor?.authorName ?? "-") animated=\(animated)"
                   + " window=\(view.window != nil) coordinator=\(transitionCoordinator != nil) flight=\(isAwaitingAnyFlight)"
-                  + " follow=\(fresh.offersFollow) id=\(authorItem.identifier ?? "-")")
+                  + " badge=\(fresh.followBadge) id=\(authorItem.identifier ?? "-")")
         }
         #endif
         items[index] = authorItem
@@ -1855,11 +1856,11 @@ final class SnapFeedViewController: UIViewController {
             guard let self, self.view.window != nil else { return }
             // Unseen when nothing changed. But a follow relation that arrived
             // during the flight was left for this install (`followRelation
-            // DidChange`), and a "+" coming or going is a different item — the
-            // bar's own morph, not a snap.
+            // DidChange`), and another badge is a different item — the bar's
+            // own morph, not a snap.
             let author = self.authorIdentityView.shownAuthor?.authorID
             let changes = self.authorItem.identifier != Self.authorItemIdentifier(
-                for: author, offersFollow: self.offersFollow(to: author)
+                for: author, badge: self.followBadge(for: author)
             )
             self.installAuthorPill(for: nil, animated: changes && self.canAnimateBarItems)
         }
@@ -1867,14 +1868,29 @@ final class SnapFeedViewController: UIViewController {
 
     // MARK: - Follow
 
-    /// Whether the pill offers "+" for `author`: a follow seam to act through,
-    /// and an answer saying the viewer does not follow them yet. Unknown is
-    /// NO — a "+" drawn for someone the viewer follows and then withdrawn is
-    /// worse than one that arrives late, and on the Following feed every
-    /// author is followed. The viewer's own posts answer `.viewer`, no "+".
+    /// What the pill's badge draws for `author`: "+" for someone the viewer
+    /// does not follow, the followed mark for a one-way follow, the friends
+    /// mark for a mutual one — and nothing for the viewer's own posts, someone
+    /// blocked, or without a follow seam to act through.
+    ///
+    /// Unknown is NOTHING — a "+" drawn for someone the viewer follows and
+    /// then withdrawn is worse than a badge that arrives late (the neighbours'
+    /// answers are asked for at every settle, so a paged-to author is usually
+    /// known already).
+    func followBadge(for author: ProfileID?) -> SnapAuthorIdentityView.FollowBadge {
+        guard socialGraph != nil, let author,
+              let relation = followRelationsByAuthor[author] else { return .none }
+        return switch relation {
+        case .notFollowing, .followedBy: .follow
+        case .following: .following
+        case .mutual: .friends
+        case .viewer, .blocked: .none
+        }
+    }
+
+    /// Whether the pill offers "+" for `author`.
     func offersFollow(to author: ProfileID?) -> Bool {
-        guard socialGraph != nil, let author else { return false }
-        return followRelationsByAuthor[author]?.offersFollow ?? false
+        followBadge(for: author) == .follow
     }
 
     /// Asks the graph where the viewer stands with `author`, once per author
@@ -1902,15 +1918,13 @@ final class SnapFeedViewController: UIViewController {
     /// screen's own tap comes back through here too, and changes nothing: the
     /// answer is already the one it drew. The viewer themself, and someone
     /// they block, keep their answer — an unfollow does not make either
-    /// followable.
+    /// followable (`settingFollow`). Whether the author follows the viewer
+    /// BACK is kept too: following a follower makes a friend.
     private func followGraphDidChange(_ change: FollowChange) {
         let author = change.profileID
         guard !followsInFlight.contains(author) else { return }
-        switch followRelationsByAuthor[author] {
-        case .viewer?, .blocked?: return
-        default: break
-        }
-        setFollowRelation(change.isFollowing ? .following : .notFollowing, for: author)
+        let known = followRelationsByAuthor[author] ?? .notFollowing
+        setFollowRelation(known.settingFollow(change.isFollowing), for: author)
     }
 
     /// Internal for tests.
@@ -1920,30 +1934,33 @@ final class SnapFeedViewController: UIViewController {
         followRelationDidChange(for: author)
     }
 
-    /// Re-draws the pill when its author's "+" changed. During a presentation
+    /// Re-draws the pill when its author's badge changed. During a presentation
     /// the landing install is armed and will read the new answer — installing
     /// now would put a fresh item inside the flight's bar transition.
     private func followRelationDidChange(for author: ProfileID) {
         guard authorIdentityView.shownAuthor?.authorID == author,
-              authorIdentityView.offersFollow != offersFollow(to: author) else { return }
+              authorIdentityView.followBadge != followBadge(for: author) else { return }
         if authorPillAwaitsLandingInstall, isAwaitingAnyFlight || transitionCoordinator != nil { return }
         installAuthorPill(for: nil, animated: canAnimateBarItems)
     }
 
     /// The pill's "+": follows the author, OPTIMISTICALLY — the profile's
-    /// Follow button's rule (`ProfileViewModel.toggleFollow`). The "+" goes at
-    /// once, through the bar's own morph, and comes back if the graph refuses.
+    /// Follow button's rule (`ProfileViewModel.toggleFollow`). The "+" turns
+    /// at once into the followed mark — the FRIENDS mark for someone who
+    /// already follows the viewer — through the bar's own morph, and comes
+    /// back if the graph refuses.
     ///
     /// Internal for tests.
     func followAuthor(_ author: ProfileID) {
-        guard let socialGraph, offersFollow(to: author), !followsInFlight.contains(author) else { return }
+        guard let socialGraph, offersFollow(to: author), !followsInFlight.contains(author),
+              let before = followRelationsByAuthor[author] else { return }
         followsInFlight.insert(author)
-        setFollowRelation(.following, for: author)
+        setFollowRelation(before.settingFollow(true), for: author)
         Task { [weak self] in
             let accepted = (try? await socialGraph.setFollowing(true, for: author)) != nil
             guard let self else { return }
             self.followsInFlight.remove(author)
-            if !accepted { self.setFollowRelation(.notFollowing, for: author) }
+            if !accepted { self.setFollowRelation(before, for: author) }
         }
     }
 
@@ -1967,9 +1984,9 @@ final class SnapFeedViewController: UIViewController {
         // wallet badge (when a wallet is wired) — the feed's chrome stays
         // identical on every entry path (menu push and pin flight), so
         // nothing else may install items, here or from outside.
-        // No "+" until the graph has answered for an author — and it is in
+        // No badge until the graph has answered for an author — and it is in
         // the item's identifier, so it is decided before the item is made.
-        authorIdentityView.setFollowHidden(true)
+        authorIdentityView.setFollowBadge(.none)
         authorItem = makeAuthorItem(authorIdentityView)
         sortItem = UIBarButtonItem(customView: commentSortButton)
         if wallet != nil {
@@ -2048,9 +2065,10 @@ final class SnapFeedViewController: UIViewController {
         // Set once, on the first pill; every fresh pill inherits them
         // (`SnapAuthorIdentityView.inheritChrome`).
         authorIdentityView.onAuthorTapped = { [weak self] id in self?.viewModel.didTapAuthor(id) }
-        // The "+" follows, in place (`followAuthor`). It is only ever drawn
-        // for an author the viewer does not follow yet, so there is no
-        // unfollow here: that is the profile's Following button.
+        // The "+" follows, in place (`followAuthor`). The followed and friends
+        // marks take no tap of their own — a tap on them is a tap on the pill,
+        // which opens the profile — so there is no unfollow here: that is the
+        // profile's Following button, one tap away.
         authorIdentityView.onFollowTapped = { [weak self] id in self?.followAuthor(id) }
 
         // Keep `title` (it feeds pushed screens' back labels) but suppress its
@@ -4310,7 +4328,7 @@ final class SnapFeedViewController: UIViewController {
             }
         }
         // And where the viewer stands with this author and the neighbours', so
-        // the pill's "+" is decided before the page is.
+        // the pill's follow badge is decided before the page is.
         for neighbour in [index, index - 1, index + 1] where orderedIDs.indices.contains(neighbour) {
             if let author = modelsByID[orderedIDs[neighbour]]?.authorID {
                 resolveFollowRelation(for: author)

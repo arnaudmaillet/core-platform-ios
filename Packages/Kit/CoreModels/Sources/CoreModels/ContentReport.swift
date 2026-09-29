@@ -67,20 +67,50 @@ public protocol SocialGraphWriting: Sendable {
 }
 
 /// Where the viewer stands with one person, as far as a follow affordance
-/// cares — the answer a surface needs to decide whether to offer "Follow".
+/// cares — the answer a surface needs to decide whether to offer "Follow",
+/// and what to draw once it is no longer on offer.
+///
+/// Both DIRECTIONS of the edge are here, not just the viewer's: a mutual
+/// follow is a FRIEND (social_graph.v1's `RelationStatus.mutual`, the map's
+/// "Friends" filter), and it is drawn differently from a one-way follow. The
+/// inbound half also has to be known while the viewer does NOT follow back —
+/// following someone who already follows the viewer makes a friend, not a
+/// one-way follow, and a surface that follows optimistically has to draw the
+/// right one before the graph confirms (`settingFollow(_:)`).
 public enum FollowRelation: Equatable, Sendable {
     /// The person IS the viewer: there is nobody to follow.
     case viewer
-    /// The viewer already follows them (a mutual included).
+    /// The viewer follows them, and they do not follow back.
     case following
-    /// The viewer does not follow them: the one case that offers "Follow".
+    /// Both follow each other: a friend.
+    case mutual
+    /// Neither follows the other. Offers "Follow".
     case notFollowing
+    /// They follow the viewer, who does not follow back. Offers "Follow" too
+    /// — following back is what makes a friend.
+    case followedBy
     /// The viewer blocks them. Following is not on offer until the block is
     /// lifted, which is the profile screen's business.
     case blocked
 
     /// Whether a follow affordance should be drawn for this person.
-    public var offersFollow: Bool { self == .notFollowing }
+    public var offersFollow: Bool { self == .notFollowing || self == .followedBy }
+
+    /// Whether the viewer follows them — a friend included.
+    public var isFollowing: Bool { self == .following || self == .mutual }
+
+    /// This relation after the viewer follows (`true`) or unfollows them —
+    /// the INBOUND half is kept, so following someone who follows the viewer
+    /// makes a friend, and unfollowing a friend leaves someone who still
+    /// follows the viewer. The viewer themself and a blocked person do not
+    /// move: neither is followable.
+    public func settingFollow(_ follows: Bool) -> FollowRelation {
+        switch self {
+        case .viewer, .blocked: self
+        case .following, .notFollowing: follows ? .following : .notFollowing
+        case .mutual, .followedBy: follows ? .mutual : .followedBy
+        }
+    }
 }
 
 /// Reads the viewer's relation to one person.
