@@ -5,30 +5,30 @@ import FeedInterface
 /// the whole ranking its "View all" opens.
 struct SoundSheetSection: Hashable, Sendable {
     enum Kind: String, Hashable, Sendable, CaseIterable {
-        /// A horizontal row — the one the collapsed detent shows.
+        /// A horizontal row — the one the collapsed detent shows — whose
+        /// "View all" pushes its whole ranking.
         case popular
-        /// A horizontal row, newest first.
+        /// The vertical grid under the row, newest first: the rest of the
+        /// posts, all of them — it has no "View all".
         case new
-        /// The vertical grid under the rows, in the recommendation's order.
-        case forYou
 
         var title: String {
             switch self {
             case .popular: "Popular"
             case .new: "New"
-            case .forYou: "For you"
             }
         }
 
         /// Whether the sheet lays it out as a horizontal row rather than a
         /// grid.
-        var isRow: Bool { self != .forYou }
+        var isRow: Bool { self == .popular }
     }
 
     let kind: Kind
-    /// On the sheet, in order: a row's first posts, or the grid.
+    /// On the sheet, in order: the row's first posts, or the grid.
     let ids: [PostID]
-    /// The section's whole ranking — what "View all" pushes.
+    /// The section's whole ranking — what "View all" pushes. The grid's is
+    /// what it shows.
     let all: [PostID]
 
     var title: String { kind.title }
@@ -38,13 +38,13 @@ struct SoundSheetSection: Hashable, Sendable {
     var hasMore: Bool { all.count > ids.count }
 }
 
-/// The sound sheet's sections, built from the provider's three rankings.
+/// The sound sheet's sections, built from the provider's two rankings.
 ///
-/// **EACH POST ONCE ON THE SHEET.** The two rows and the grid share no post:
-/// "New" skips what "Popular" shows, and "For you" whatever either row shows
-/// — so at large, scrolling the sheet never meets a tile twice. A section's
-/// "View all" is its WHOLE ranking, though, the posts shown elsewhere on the
-/// sheet included: "all the popular posts" means all of them.
+/// **EACH POST ONCE ON THE SHEET, EVERY POST SOMEWHERE.** The "Popular" row
+/// shows the first posts of its ranking; the "New" grid is every other post,
+/// newest first — so at large, scrolling the sheet never meets a tile twice,
+/// and never misses one. "Popular"'s "View all" is its WHOLE ranking, though,
+/// the posts in the grid included: "all the popular posts" means all of them.
 ///
 /// **"POPULAR" LEADS WITH THE ORIGINAL, THEN THE POST WATCHED.** The row the
 /// collapsed detent shows keeps the rule the grid had (`gridPostIDs`): the
@@ -56,7 +56,7 @@ struct SoundSheetSection: Hashable, Sendable {
 /// holds at least the post the sheet was opened from.
 @MainActor
 enum SoundSheetSections {
-    /// How many posts a row shows before "View all": three and a peek on
+    /// How many posts the row shows before "View all": three and a peek on
     /// screen, a few more for the swipe.
     static let rowLimit = 8
 
@@ -79,19 +79,13 @@ enum SoundSheetSections {
         let popularRow = Array(popularAll.prefix(rowLimit))
         let onPopular = Set(popularRow)
 
-        let newAll = kept(rankings.newest)
-        let newRow = Array(newAll.filter { !onPopular.contains($0) }.prefix(rowLimit))
-        let onRows = onPopular.union(newRow)
-
-        // Every post somewhere: one the recommendation leaves out (the post
-        // the sheet was opened from, a ranking that lags) joins its end.
-        let recommendedAll = kept(rankings.recommended + popularAll + newAll)
-        let grid = recommendedAll.filter { !onRows.contains($0) }
+        // Every post somewhere: one the date order leaves out (the post the
+        // sheet was opened from, a ranking that lags) joins the grid's end.
+        let grid = kept(rankings.newest + popularAll).filter { !onPopular.contains($0) }
 
         let sections = [
             SoundSheetSection(kind: .popular, ids: popularRow, all: popularAll),
-            SoundSheetSection(kind: .new, ids: newRow, all: newAll),
-            SoundSheetSection(kind: .forYou, ids: grid, all: recommendedAll),
+            SoundSheetSection(kind: .new, ids: grid, all: grid),
         ].filter { !$0.ids.isEmpty }
         return (sections, head.original)
     }

@@ -36,11 +36,15 @@ public extension UIScrollView {
     /// configured, and a NEW list under a header must too: one that does not
     /// gets the system's band back under its bar.
     ///
-    /// ## The one exception: the notifications drawer
+    /// ## The exceptions: the notifications drawer, the sound sheet's gallery
     ///
-    /// Its list keeps UIKit's soft top-edge blur on purpose (asked for on
-    /// 2026-09-28): it is a panel of its own beside the app, not one of the
-    /// app's pages, and does not call this. See `NotificationsViewController`.
+    /// The notifications list keeps UIKit's soft top-edge blur on purpose
+    /// (asked for on 2026-09-28): it is a panel of its own beside the app, not
+    /// one of the app's pages, and does not call this. See
+    /// `NotificationsViewController`. The grid the sound sheet's "View all"
+    /// pushes wears the same soft blur under its title (asked for on
+    /// 2026-09-29, lighter than the automatic one it had) — see
+    /// `SoundSheetGalleryViewController`.
     ///
     /// Only the TOP edge. The bottom edge — above the tab bar, a toolbar, a
     /// composer — stays `.automatic`; nobody has asked for it to change.

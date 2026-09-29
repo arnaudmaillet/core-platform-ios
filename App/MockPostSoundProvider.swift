@@ -90,25 +90,20 @@ struct MockPostSoundProvider: PostSoundProviding {
         return clips.clip(id: id).map { sound(clip: $0) }
     }
 
+    /// Most engaged first — the popular order.
     func postIDs(using sound: PostSound) -> [PostID] {
-        rankings(using: sound).recommended
+        rankings(using: sound).popular
     }
 
-    /// The three orders of the sound page, over the same posts:
+    /// The two orders of the sound page, over the same posts:
     /// - **popular**: views plus ten per like (a like is worth ten looks) —
     ///   the counters the feed itself shows;
-    /// - **newest**: by publication date, newest first;
-    /// - **recommended**: what a recommender does, in miniature and
-    ///   deterministic — engagement (45%), freshness (35%) and an AFFINITY
-    ///   (20%) standing in for the viewer's taste: a per-post roll hashed on
-    ///   the post and the sound (FNV-1a, stable across launches). So it
-    ///   neither repeats the popular order nor the date order, and the same
-    ///   sound reads the same way on every run.
+    /// - **newest**: by publication date, newest first.
     ///
     /// Ties fall back to the dataset's order.
     func rankings(using sound: PostSound) -> PostSoundRankings {
         let posts = postsBySound[sound.id] ?? []
-        guard posts.count > 1 else { return PostSoundRankings(popular: posts, newest: posts, recommended: posts) }
+        guard posts.count > 1 else { return PostSoundRankings(popular: posts, newest: posts) }
         let position = Dictionary(posts.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
         let engagement: [PostID: Int64] = Dictionary(posts.map { id in
             let views = counters?.viewCount(for: id.rawValue) ?? 0
@@ -118,24 +113,7 @@ struct MockPostSoundProvider: PostSoundProviding {
         func ranked(_ key: (PostID) -> Int64) -> [PostID] {
             posts.sorted { key($0) != key($1) ? key($0) > key($1) : position[$0, default: 0] < position[$1, default: 0] }
         }
-        let popular = ranked { engagement[$0] ?? 0 }
-        let newest = ranked { publishedAt[$0] ?? 0 }
-        // Each rank as a share: 1 for the first, 0 for the last.
-        func share(_ order: [PostID]) -> [PostID: Double] {
-            let last = Double(order.count - 1)
-            return Dictionary(order.enumerated().map { ($1, 1 - Double($0) / last) }, uniquingKeysWith: { a, _ in a })
-        }
-        let popularity = share(popular)
-        let freshness = share(newest)
-        let score: [PostID: Double] = Dictionary(posts.map { id in
-            let affinity = Double(Self.fnv1a("\(sound.id)|\(id.rawValue)") % 1000) / 999
-            return (id, 0.45 * popularity[id, default: 0] + 0.35 * freshness[id, default: 0] + 0.2 * affinity)
-        }, uniquingKeysWith: { first, _ in first })
-        let recommended = posts.sorted {
-            let (a, b) = (score[$0, default: 0], score[$1, default: 0])
-            return a != b ? a > b : position[$0, default: 0] < position[$1, default: 0]
-        }
-        return PostSoundRankings(popular: popular, newest: newest, recommended: recommended)
+        return PostSoundRankings(popular: ranked { engagement[$0] ?? 0 }, newest: ranked { publishedAt[$0] ?? 0 })
     }
 
     /// A clip's sound is its clip's; a song is its first poster's only when

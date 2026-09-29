@@ -72,7 +72,7 @@ enum ForYouRowOrigins {
             textReveal: storyReveal(
                 for: author, face: face, rails: rails, page: page, closeStaged: closeStaged
             ),
-            cornerRadius: ForYouStoryCell.Metrics.avatarDiameter / 2,
+            cornerRadius: rails.storyFaceDiameter / 2,
             // The post's own picture, if the pipeline has it: the far end of
             // the cross-dissolve. Without it the face grows into the page and
             // the page takes over at the landing — still the right motion.
@@ -133,7 +133,7 @@ enum ForYouRowOrigins {
         page: ForYouGridPage,
         closeStaged: @escaping () -> Void = {}
     ) -> TextRevealOrigin {
-        let radius = ForYouStoryCell.Metrics.avatarDiameter / 2
+        let radius = rails.storyFaceDiameter / 2
         func standIn() -> UIView? {
             guard let face else { return nil }
             let view = UIImageView(image: face)

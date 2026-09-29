@@ -9,8 +9,26 @@ import UIKit
 /// Laid out inside its section's side insets (`SoundSheetHeaderCell`) — one
 /// gutter from the sheet's edge, on the tiles' left edge — at the ABSOLUTE
 /// height `fittingHeight` computes.
+///
+/// ```
+///  ╭────╮  Veridis Quo Veridis Qu…   (✕)   the sheet's close button, a bar
+///  │ ▶︎  │  Daft Punk                      item floating over this header
+///  ╰────╯  0:30 · 23 posts
+/// ```
+///
+/// **IT STANDS UNDER THE SHEET'S NAVIGATION BAR**, whose one item is the
+/// close button at the top trailing corner: the lines stop short of it
+/// (`closeClearance`) and each is ONE line, truncated — so the header's
+/// height never depends on how long the sound's name is.
 final class SoundSheetHeaderView: UICollectionReusableView {
     static let artworkSide: CGFloat = 96
+    /// What the lines leave free at the header's trailing edge for the
+    /// sheet's close button: the bar's glass circle (44) and its margin (16),
+    /// less the gutter the header is already inset by (8), plus a gutter of
+    /// air before the circle. Measured on iOS 27 (iPhone 18 Pro, sheet at
+    /// large, 402 wide): the circle is drawn from x 341 to 386, the lines end
+    /// at 334.
+    static let closeClearance: CGFloat = 44 + 16 - 8 + 8
 
     var onTogglePreview: (() -> Void)?
 
@@ -70,7 +88,7 @@ final class SoundSheetHeaderView: UICollectionReusableView {
         ])
 
         titleLabel.font = .preferredFont(forTextStyle: .title3).withWeight(.semibold)
-        titleLabel.numberOfLines = 2
+        titleLabel.numberOfLines = 1
         titleLabel.adjustsFontForContentSizeCategory = true
         subtitleLabel.font = .preferredFont(forTextStyle: .subheadline)
         subtitleLabel.textColor = .secondaryLabel
@@ -105,7 +123,7 @@ final class SoundSheetHeaderView: UICollectionReusableView {
         NSLayoutConstraint.activate([
             identity.topAnchor.constraint(equalTo: topAnchor),
             identity.leadingAnchor.constraint(equalTo: leadingAnchor),
-            identity.trailingAnchor.constraint(equalTo: trailingAnchor),
+            identity.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.closeClearance),
             bottom,
             record.widthAnchor.constraint(equalToConstant: Self.artworkSide),
             record.heightAnchor.constraint(equalToConstant: Self.artworkSide),

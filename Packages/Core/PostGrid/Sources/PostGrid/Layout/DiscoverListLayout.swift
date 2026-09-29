@@ -28,7 +28,12 @@ import UIKit
 public enum DiscoverListLayout {
     /// The element kind of a chunk's "View all" footer.
     public static let viewAllElementKind = "DiscoverListLayout.viewAll"
-    /// The footer's height — a control's 44pt.
+    /// The footer's height — a control's 44pt, which is its hit target.
+    ///
+    /// It starts FLUSH WITH THE CHUNK'S FOOT (no inset between them) and its
+    /// control draws its title at its top (`DiscoverViewAllFooterView`), so
+    /// the words sit just under the tiles they belong to and the rest of the
+    /// 44pt is the air before the next card — no separate gap below.
     public static let viewAllHeight: CGFloat = 44
     /// The feed mosaic's gutter, so a chunk reads as a window onto the same
     /// wall — see `ChaoticSliceLayout.harmonisedGutter`.
@@ -37,9 +42,6 @@ public enum DiscoverListLayout {
     /// two cards keep between them, so the chunk reads as a shelf of its own
     /// rather than as one more card.
     public static let gapAboveChunk: CGFloat = 20
-    /// Below the "View all" footer, before the next card. The footer's own
-    /// height already carries most of the air; this is the remainder.
-    public static let gapBelowChunk: CGFloat = 4
 
     /// The element kind of the list's LEADING header — whatever a host puts
     /// above the first stretch (For You's Friends and Following rows).
@@ -106,9 +108,13 @@ public enum DiscoverListLayout {
                 frames.map { NSCollectionLayoutGroupCustomItem(frame: $0) }
             }
             let section = NSCollectionLayoutSection(group: group)
+            // Nothing between the chunk's foot and its footer; the footer
+            // spans the chunk's width, margin to margin, so a control on its
+            // trailing edge ends where the tiles do.
             section.contentInsets = NSDirectionalEdgeInsets(
-                top: 0, leading: margin, bottom: gapBelowChunk, trailing: margin
+                top: 0, leading: margin, bottom: 0, trailing: margin
             )
+            section.supplementariesFollowContentInsets = true
             section.boundarySupplementaryItems = [
                 NSCollectionLayoutBoundarySupplementaryItem(
                     layoutSize: .init(

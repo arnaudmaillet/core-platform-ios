@@ -35,6 +35,15 @@ import UIKit
 /// the viewer comes back to it moves the face they just tapped out from under
 /// their eyes.
 ///
+/// **Both rows rest on an item's edge, the gesture picking the edge**
+/// (2026-09-29): a swipe forward lands an item flush with the right margin,
+/// the one before it cropped on the left and nothing on the right; a swipe
+/// back lands one flush with the left margin, the next cropped on the right
+/// and nothing on the left (`ForYouRowSnap`). Hence the sizes: a gap no
+/// narrower than the margin, so the side a snap empties is empty, and items
+/// sized from the width (`Metrics.itemWidth`) so the other side always crops
+/// one — the faces included, which are no longer a fixed size.
+///
 /// Hosted as the list's LEADING HEADER (`ForYouGridPage.setLead`), not as
 /// sections of its own: every index path, chunk plan, hero and reveal on the
 /// list is counted in its sections, and a header that scrolls with them
@@ -57,11 +66,20 @@ import UIKit
 final class ForYouRailsView: UIView {
     enum Metrics {
         static var sideMargin: CGFloat { PostGridListLayout.sideMargin }
-        static let storySpacing: CGFloat = 6
-        static let cardSpacing: CGFloat = 8
-        /// Cards per screen width: two whole, and a third peeking to say the
-        /// row goes on.
+        /// Between two items of a row, in both rows — and NO LESS THAN THE
+        /// SIDE MARGIN, which is what lets a snap hide a side entirely: an item
+        /// flush with one margin leaves its neighbour `itemGap - sideMargin`
+        /// points off that edge of the screen (`ForYouRowSnap`). Any tighter
+        /// and a sliver of the item the snap put away stays on screen.
+        static var itemGap: CGFloat { sideMargin }
+        /// Cards per screen width, counted from the left margin: two whole,
+        /// and a third peeking to say the row goes on.
         static let cardsPerWidth: CGFloat = 2.3
+        /// Faces per screen width, the same way: four whole and a fifth
+        /// cropped by the right edge — on every width, which is why the face
+        /// is sized from the width rather than fixed (at this gap, no one size
+        /// leaves a crop on 375, 402 and 440 alike).
+        static let storiesPerWidth: CGFloat = 4.4
         /// Height over width: portrait, tall enough that two lines of caption
         /// sit over the picture without burying it.
         static let cardAspect: CGFloat = 4.0 / 3.0
@@ -70,9 +88,28 @@ final class ForYouRailsView: UIView {
         /// Below "For you", before the list's first card.
         static let listGap: CGFloat = 4
 
+        /// The width of one item when `perWidth` of them — gaps included —
+        /// fill `width` from the left margin: `perWidth.rounded(.down)` whole
+        /// items, the rest of one cropped by the screen's right edge. The
+        /// mirror holds at the far end, flush right with one cropped on the
+        /// left, since the gaps and margins are the same on both sides.
+        ///
+        /// Whole points, so every item's edges — and every offset a snap
+        /// computes from them — fall on the pixel grid.
+        static func itemWidth(forWidth width: CGFloat, perWidth: CGFloat) -> CGFloat {
+            let whole = perWidth.rounded(.down)
+            return max(0, ((width - sideMargin - whole * itemGap) / perWidth).rounded(.down))
+        }
+
         static func cardSize(forWidth width: CGFloat) -> CGSize {
-            let cardWidth = ((width - sideMargin * 2) / cardsPerWidth).rounded(.down)
+            let cardWidth = itemWidth(forWidth: width, perWidth: cardsPerWidth)
             return CGSize(width: cardWidth, height: (cardWidth * cardAspect).rounded())
+        }
+
+        /// A story cell at `width`: the disc (face and ring), and the name
+        /// under it no wider than the disc.
+        static func storySize(forWidth width: CGFloat) -> CGSize {
+            ForYouStoryCell.Metrics.size(discSide: itemWidth(forWidth: width, perWidth: storiesPerWidth))
         }
     }
 
@@ -80,7 +117,7 @@ final class ForYouRailsView: UIView {
     static func height(forWidth width: CGFloat, friends: Int, following: Int) -> CGFloat {
         var height: CGFloat = 0
         if friends > 0 {
-            height += SectionLinkHeaderView.height + ForYouStoryCell.Metrics.size.height
+            height += SectionLinkHeaderView.height + Metrics.storySize(forWidth: width).height
         }
         if following > 0 {
             if friends > 0 { height += Metrics.rowGap }
@@ -161,16 +198,22 @@ final class ForYouRailsView: UIView {
     /// The card a flight is carrying.
     private var concealedCard: PostID?
 
+    /// The row under the finger and which way it last moved — what a release
+    /// with no speed left snaps by (`ForYouRowSnap`). Nil between drags.
+    private var drag: (row: UIScrollView, tracker: ForYouRowDragTracker)?
+
     init(imagePipeline: ImagePipeline, videoPlayback: VideoPlaybackController?) {
         self.imagePipeline = imagePipeline
         playback = videoPlayback.map {
             GridVideoPlaybackCoordinator(pool: $0, maxConcurrent: Self.concurrentPlayers)
         }
+        // Placeholder sizes: both rows' items are sized from the width, which
+        // `layoutSubviews` knows and this does not.
         storiesView = UICollectionView(frame: .zero, collectionViewLayout: Self.rowLayout(
-            itemSize: ForYouStoryCell.Metrics.size, spacing: Metrics.storySpacing
+            itemSize: ForYouStoryCell.Metrics.size(discSide: 70)
         ))
         cardsView = UICollectionView(frame: .zero, collectionViewLayout: Self.rowLayout(
-            itemSize: CGSize(width: 150, height: 200), spacing: Metrics.cardSpacing
+            itemSize: CGSize(width: 150, height: 200)
         ))
         super.init(frame: .zero)
         for row in [storiesView, cardsView] {
@@ -178,6 +221,10 @@ final class ForYouRailsView: UIView {
             row.showsHorizontalScrollIndicator = false
             row.alwaysBounceHorizontal = true
             row.alwaysBounceVertical = false
+            // A row comes to rest on an item's edge (`scrollViewWillEndDragging`);
+            // the quicker deceleration makes that one decided motion rather
+            // than a long glide bent to its stop at the end.
+            row.decelerationRate = .fast
             // The row sits inside the list's own scroll view, which already
             // accounts for the bars; its horizontal scroll has none to add.
             row.contentInsetAdjustmentBehavior = .never
@@ -227,11 +274,11 @@ final class ForYouRailsView: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    private static func rowLayout(itemSize: CGSize, spacing: CGFloat) -> UICollectionViewFlowLayout {
+    private static func rowLayout(itemSize: CGSize) -> UICollectionViewFlowLayout {
         let layout = UICollectionViewFlowLayout()
         layout.scrollDirection = .horizontal
         layout.itemSize = itemSize
-        layout.minimumLineSpacing = spacing
+        layout.minimumLineSpacing = Metrics.itemGap
         layout.minimumInteritemSpacing = 0
         layout.sectionInset = UIEdgeInsets(top: 0, left: Metrics.sideMargin, bottom: 0, right: Metrics.sideMargin)
         return layout
@@ -346,9 +393,13 @@ final class ForYouRailsView: UIView {
                 x: margin, y: y, width: width - margin * 2, height: SectionLinkHeaderView.height
             )
             y += SectionLinkHeaderView.height
-            let height = ForYouStoryCell.Metrics.size.height
-            storiesView.frame = CGRect(x: 0, y: y, width: width, height: height)
-            y += height
+            let size = Metrics.storySize(forWidth: width)
+            if let layout = storiesView.collectionViewLayout as? UICollectionViewFlowLayout,
+               layout.itemSize != size {
+                layout.itemSize = size
+            }
+            storiesView.frame = CGRect(x: 0, y: y, width: width, height: size.height)
+            y += size.height
         }
         if hasCards {
             if hasStories { y += Metrics.rowGap }
@@ -474,6 +525,14 @@ final class ForYouRailsView: UIView {
     func storyFrame(for id: ProfileID, in space: UICoordinateSpace) -> CGRect? {
         guard let cell = storyCell(for: id), isInRow(cell, storiesView) else { return nil }
         return cell.discFrame(in: space, restingBelow: storiesView)
+    }
+
+    /// The face's diameter as the row draws it at its current width — the
+    /// round a flight out of a face starts from. Sized from the width
+    /// (`Metrics.storiesPerWidth`), so there is no constant to read.
+    var storyFaceDiameter: CGFloat {
+        let width = bounds.width > 0 ? bounds.width : 393
+        return ForYouStoryCell.Metrics.faceDiameter(discSide: Metrics.storySize(forWidth: width).width)
     }
 
     func storyFace(for id: ProfileID) -> UIImage? {
@@ -816,11 +875,84 @@ extension ForYouRailsView: UICollectionViewDelegate {
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        if let drag, drag.row === scrollView {
+            self.drag?.tracker.track(scrollView.contentOffset.x)
+        }
         guard scrollView === cardsView else { return }
         // A horizontal row is short: reconciling on every tick costs a diff
         // of three cards, and a card that comes half into view should start
         // as it arrives, not when the finger lifts.
         updateAutoplay()
+    }
+
+    // MARK: - Snapping
+
+    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        guard scrollView === storiesView || scrollView === cardsView else { return }
+        drag = (scrollView, ForYouRowDragTracker(offset: scrollView.contentOffset.x))
+    }
+
+    /// The row comes to rest on an item's edge, the side picked by the
+    /// gesture's direction — see `ForYouRowSnap`.
+    ///
+    /// ⚠️ A RELEASE WITH NO SPEED IS ANIMATED BY HAND. Handed a new target
+    /// with a zero velocity, UIScrollView jumps to it rather than gliding, so
+    /// a slow drag lifted from a standstill would teleport the row. There the
+    /// row is told to stay where it is and is then animated to the snap.
+    func scrollViewWillEndDragging(
+        _ scrollView: UIScrollView,
+        withVelocity velocity: CGPoint,
+        targetContentOffset: UnsafeMutablePointer<CGPoint>
+    ) {
+        guard let row = scrollView as? UICollectionView, row === storiesView || row === cardsView else { return }
+        let lastMovement = drag?.row === row ? drag?.tracker.lastMovement : nil
+        drag = nil
+        let target = snapTarget(
+            in: row,
+            projected: targetContentOffset.pointee.x,
+            direction: ForYouRowSnap.direction(velocity: velocity.x, lastMovement: lastMovement)
+        )
+        let offsets = Self.offsetRange(of: row)
+        let current = row.contentOffset.x
+        guard abs(velocity.x) < ForYouRowSnap.flickVelocity, offsets.contains(current) else {
+            // Moving — or pulled past an end, where UIKit's own spring back is
+            // the motion wanted: the deceleration is bent onto the snap.
+            targetContentOffset.pointee.x = target
+            return
+        }
+        targetContentOffset.pointee.x = current
+        guard target != current else { return }
+        DispatchQueue.main.async { [weak row] in
+            guard let row, !row.isTracking else { return }
+            row.setContentOffset(CGPoint(x: target, y: row.contentOffset.y), animated: true)
+        }
+    }
+
+    /// Where `row` rests after a release — its items' extents, read from its
+    /// layout, handed to `ForYouRowSnap`.
+    func snapTarget(
+        in row: UICollectionView, projected: CGFloat, direction: ForYouRowSnap.Direction?
+    ) -> CGFloat {
+        let content = CGRect(origin: .zero, size: row.collectionViewLayout.collectionViewContentSize)
+        let items = (row.collectionViewLayout.layoutAttributesForElements(in: content) ?? [])
+            .filter { $0.representedElementCategory == .cell }
+            .map { $0.frame.minX...$0.frame.maxX }
+            .sorted { $0.lowerBound < $1.lowerBound }
+        return ForYouRowSnap.target(
+            projected: projected,
+            direction: direction,
+            items: items,
+            viewport: row.bounds.width,
+            margin: Metrics.sideMargin,
+            offsets: Self.offsetRange(of: row)
+        )
+    }
+
+    /// Every content offset `row` can rest at.
+    private static func offsetRange(of row: UIScrollView) -> ClosedRange<CGFloat> {
+        let low = -row.adjustedContentInset.left
+        let high = row.contentSize.width + row.adjustedContentInset.right - row.bounds.width
+        return low...max(low, high)
     }
 
     // MARK: - Long press: the native preview

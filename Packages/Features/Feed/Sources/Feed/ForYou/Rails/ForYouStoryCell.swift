@@ -21,20 +21,29 @@ import UIKit
 final class ForYouStoryCell: UICollectionViewCell {
     static let reuseID = "ForYouStoryCell"
 
+    /// ⚠️ NO FIXED FACE SIZE. The row sizes its cells from the screen's width
+    /// (`ForYouRailsView.Metrics.storiesPerWidth`) so a face is always cropped
+    /// at the right edge; the cell takes the disc as its width and derives the
+    /// face from it (`faceDiameter`).
     enum Metrics {
-        /// The face.
-        static let avatarDiameter: CGFloat = 64
         /// The unseen ring, and the air between it and the face — the ring
         /// reads as a frame around the picture, not as its edge.
         static let ringWidth: CGFloat = 2.5
         static let ringGap: CGFloat = 2.5
-        /// Face + gap + ring on both sides.
-        static var discSide: CGFloat { avatarDiameter + 2 * (ringWidth + ringGap) }
         static let nameGap: CGFloat = 4
         static let nameHeight: CGFloat = 16
-        /// The cell: the disc, and a name line no wider than a short name.
-        static var size: CGSize {
-            CGSize(width: discSide + 4, height: discSide + nameGap + nameHeight)
+
+        /// The face inside a disc `discSide` across: the disc less the ring
+        /// and its air on both sides.
+        static func faceDiameter(discSide: CGFloat) -> CGFloat {
+            max(0, discSide - 2 * (ringWidth + ringGap))
+        }
+
+        /// The cell for a disc `discSide` across: exactly the disc's width —
+        /// so a snap lining the cell up on a margin lines up the ring — and
+        /// the name line under it, truncated to that width.
+        static func size(discSide: CGFloat) -> CGSize {
+            CGSize(width: discSide, height: discSide + nameGap + nameHeight)
         }
     }
 
@@ -47,7 +56,9 @@ final class ForYouStoryCell: UICollectionViewCell {
     private let disc = UIView()
     private let ring = CAGradientLayer()
     private let ringMask = CAShapeLayer()
-    private let monogram = MonogramAvatarView(diameter: Metrics.avatarDiameter)
+    /// Re-sized to the cell's disc in `layoutSubviews` — its own width and
+    /// height constraints must agree with the frame given it there.
+    private let monogram = MonogramAvatarView(diameter: Metrics.faceDiameter(discSide: 70))
     private let picture = AvatarImageView()
     private let nameLabel = UILabel()
     private var pictureTask: Task<Void, Never>?
@@ -91,8 +102,8 @@ final class ForYouStoryCell: UICollectionViewCell {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        let side = Metrics.discSide
-        disc.frame = CGRect(x: (bounds.width - side) / 2, y: 0, width: side, height: side)
+        let side = bounds.width
+        disc.frame = CGRect(x: 0, y: 0, width: side, height: side)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         ring.frame = disc.bounds
@@ -102,6 +113,7 @@ final class ForYouStoryCell: UICollectionViewCell {
         ).cgPath
         CATransaction.commit()
         let inset = Metrics.ringWidth + Metrics.ringGap
+        monogram.setDiameter(Metrics.faceDiameter(discSide: side))
         monogram.frame = disc.bounds.insetBy(dx: inset, dy: inset)
         picture.frame = monogram.bounds
         nameLabel.frame = CGRect(
