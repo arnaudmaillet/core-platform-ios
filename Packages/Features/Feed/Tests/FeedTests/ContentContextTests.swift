@@ -177,9 +177,9 @@ struct ForYouContextTests {
         // as a broken filter rather than as a scope anyone chose.
         #expect(last.media == .content([corpus[0]]))
         #expect(last.following == .content([corpus[0], corpus[2]]))
-        #expect(last.rails.following.map(\.id).sorted { $0.rawValue < $1.rawValue }
-            == [corpus[0], corpus[2]].map(\.id).sorted { $0.rawValue < $1.rawValue },
-            "the Following row reads the same lens")
+        let rowIDs: Set<PostID> = Set(last.rails.following.map(\.id))
+        let lensIDs: Set<PostID> = [corpus[0].id, corpus[2].id]
+        #expect(rowIDs == lensIDs, "the Following row reads the same lens")
     }
 
     @Test func widensAgainWhenTheContextIsCleared() async {
