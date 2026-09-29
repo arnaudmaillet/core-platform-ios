@@ -31,7 +31,10 @@ import UIKit
 /// `platter-flattens-label-alpha`), so a fade written on the labels would read
 /// as a one-frame switch. The live content is faded through the host's
 /// `content` container and each still sits in a plain container of its own,
-/// and a container's group opacity survives the platter.
+/// and a container's group opacity survives the platter. Filmed at 60fps on
+/// iOS 27 (iPhone 18 Pro, light and dark, both bars, the follow badge): the
+/// old content visibly blurs out over ~7 frames, the glass holds its shape and
+/// only glides its width, and the new content sharpens over ~8.
 ///
 /// Reduce Motion drops the stills: the same timeline, as a plain fade.
 @MainActor
@@ -155,8 +158,11 @@ final class BarItemContentTransition {
         didApply?()
         // The item takes its new width FIRST, so the new content is laid out
         // — and its still rendered — at the size it will land at. The glide
-        // runs while only stills are showing.
-        remeasure?(Self.fadeInDuration)
+        // runs while only stills are showing: over the first HALF of the
+        // fade-in, because a glide as long as the fade-in was filmed clipping
+        // the sharpening labels of a wider author against a platter still
+        // growing to fit them.
+        remeasure?(Self.fadeInDuration / 2)
         host.layoutIfNeeded()
         let new = still(of: content)
         UIView.animateKeyframes(

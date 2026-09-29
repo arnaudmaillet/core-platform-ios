@@ -4415,12 +4415,22 @@ final class SnapFeedViewController: UIViewController {
     ///
     /// Read a moment after the swap has landed, so the bar's own pass (an
     /// unanimated change only ASKS for one) has run.
+    ///
+    /// Measured on iOS 27 (iPhone 18 Pro, 32 pages): the NAV bar follows an
+    /// in-place width change on its own — view, fitted and wrapper agree on
+    /// every page. The one disagreement is the author set while a flight
+    /// owns the bar (unanimated): the bar kept the previous author's width
+    /// (158.7 for a 193.3 pill) until this re-mint.
     private func checkBarItemWidth(_ pill: UIView, slot: String, reinstall: @escaping () -> Void) {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self, weak pill] in
             guard let self, let pill, pill.window != nil, self.view.window != nil else { return }
             let fitted = pill.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
             let drawn = pill.bounds.width
-            let drifted = abs(drawn - fitted) > 0.5
+            // A point, not half of one: an engaged width budget lands the
+            // pill a fraction of a point off its fitted width (134.7 vs 135.3,
+            // measured on a text page), and that is pixel rounding, not the
+            // drift — which moved in whole +9pt steps.
+            let drifted = abs(drawn - fitted) > 1
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-pill-probe") {
                 print(String(format: "[pill-probe] width %@ view=%.1f fitted=%.1f wrapper=%.1f%@",
