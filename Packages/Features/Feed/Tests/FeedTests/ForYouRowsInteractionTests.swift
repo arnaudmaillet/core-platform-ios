@@ -76,7 +76,7 @@ struct ForYouRowsInteractionTests {
         rails.render(railsState(friends: [story("ana", unseen: false)]))
         rails.layoutIfNeeded()
         #expect(rails.debugShowsListHeader)
-        let rowsOnly = SectionLinkHeaderView.height + ForYouStoryCell.Metrics.size.height
+        let rowsOnly = SectionLinkHeaderView.height + ForYouRailsView.Metrics.storySize(forWidth: 393).height
         #expect(ForYouRailsView.height(forWidth: 393, friends: 1, following: 0)
                 >= rowsOnly + SectionLinkHeaderView.height, "room for the title")
     }

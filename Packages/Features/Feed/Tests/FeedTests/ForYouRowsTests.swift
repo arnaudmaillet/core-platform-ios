@@ -236,7 +236,7 @@ struct ForYouRowsTests {
         let width: CGFloat = 393
         let card = ForYouRailsView.Metrics.cardSize(forWidth: width)
         let margin = ForYouRailsView.Metrics.sideMargin
-        let spacing = ForYouRailsView.Metrics.cardSpacing
+        let spacing = ForYouRailsView.Metrics.itemGap
         let twoCards = margin + card.width * 2 + spacing * 2
         #expect(twoCards < width, "a third card starts on screen")
         #expect(twoCards + card.width > width, "and does not fit")
