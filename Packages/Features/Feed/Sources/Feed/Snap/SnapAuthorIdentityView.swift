@@ -13,7 +13,8 @@ import UIKit
 /// wraps the avatar and text exactly. A hard width cap keeps long display
 /// names truncating instead of crowding the bar; the trade-off, accepted for
 /// the flush-pill look, is that an author change re-negotiates the item's
-/// size — a settle-time event, never mid-scroll.
+/// size — at the paging's midpoint, under the full blur of the scroll-driven
+/// swap (`setScrubBlur`), where only blurred stills are showing.
 final class SnapAuthorIdentityView: UIView {
     /// What the pill's trailing glyph says about the viewer and the author.
     ///
@@ -172,6 +173,14 @@ final class SnapAuthorIdentityView: UIView {
     var onContentApplied: (() -> Void)?
     /// Once a content change has fully landed.
     var onContentSettled: (() -> Void)?
+
+    /// Blurs the pill by `amount` (0…1) as the SCROLL says — the feed's paging
+    /// drives it (`BarPillScrub`), and an author set meanwhile lands under
+    /// the blur (`BarItemContentTransition.setScrubBlur`).
+    func setScrubBlur(_ amount: CGFloat) { contentTransition.setScrubBlur(amount) }
+
+    /// Renders the blurred still a scroll may need, before the page moves.
+    func prepareScrub() { contentTransition.prepareScrub() }
 
     /// Whose face the avatar task is loading — compared on arrival so a fast
     /// page-past cannot land a picture on the wrong pill.
