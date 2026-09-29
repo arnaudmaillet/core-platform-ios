@@ -12,14 +12,16 @@ import UIKit
 ///
 /// # What it is
 ///
-/// The Following TAB as it was, now a screen: a `ForYouGridPage` in its `.list`
-/// style over For You's own corpus, with the arrivals under a "New" header and
-/// the rest under "Recent" — driven by `ForYouViewController`, which forwards
-/// each snapshot, the paging spinner and the refresh while this screen is on
-/// the stack. One view model, so the row, its badge and this list never
-/// disagree about what is loaded or what is new. Friends is the same screen
-/// over the friends' posts: "reuse the same base" was the product call, and
-/// the only differences are the corpus and the words.
+/// A plain list of posts, one after another: the profile's Activity tab
+/// without the profile — the same timeline cards (`PostGridListRowCell`) on
+/// the same list layout, through a `ForYouGridPage` in its `.list` style. No
+/// sections and no mosaic chunks (the product call of 2026-09-29: the "New" /
+/// "Recent" halves the Following TAB had are gone with the tab; what is new
+/// is the row's badge, not a division of this list). Driven by
+/// `ForYouViewController`, which forwards each snapshot, the paging spinner
+/// and the refresh while this screen is on the stack — one view model, so the
+/// row, its badge and this list never disagree about what is loaded. Friends
+/// is the same screen over the friends' posts.
 ///
 /// # How it opens posts
 ///
@@ -109,12 +111,10 @@ final class ForYouPostListViewController: UIViewController {
 
     // MARK: - Content, from the host
 
-    /// `newPosts` are the rows headed "New" — the SAME set the row's badge
-    /// counts, handed over rather than re-derived, so the header and the
-    /// number on the row the viewer came from are one answer.
-    func render(_ state: ForYouViewModel.PageState, newPosts: Set<PostID>) {
+    /// The posts, one after another, in the order they come — no "New" and
+    /// "Recent" halves (see the type's note).
+    func render(_ state: ForYouViewModel.PageState) {
         loadViewIfNeeded()
-        page.setNewPosts(newPosts)
         page.render(state)
     }
 

@@ -1,5 +1,6 @@
 import CoreModels
 import DesignSystem
+import EmoteKit
 import MediaCore
 import MediaPlayback
 import PostGrid
@@ -29,7 +30,10 @@ final class ForYouCardCaptionOverlay: UIView {
 
     private let scrim = CAGradientLayer()
     private let authorLabel = UILabel()
-    private let captionLabel = UILabel()
+    /// An `EmoteLabel`: the caption's emoji and `:code:` emotes animate on the
+    /// card as they do on the list's cards (`PostGridListRowCell`), and only
+    /// while the card is actually on screen (`EmoteVisibility`).
+    private let captionLabel = EmoteLabel()
     private let placement: Placement
 
     init(post: GalleryPost, placement: Placement) {
@@ -117,8 +121,8 @@ final class ForYouCardCaptionOverlay: UIView {
 }
 
 /// One card in For You's Following row: a post, equal-sized with its
-/// neighbours, playing when it is the row's lead, with its first two lines
-/// over the bottom of it.
+/// neighbours, playing (muted) whenever it is half on screen, with its first
+/// two lines over the bottom of it.
 ///
 /// A mosaic brick's twin in everything the playback and the flight ask
 /// (`GridPlaybackCell`, like `PostGridTileCell`): a cover image, a video
@@ -149,7 +153,8 @@ final class ForYouFollowingCardCell: UICollectionViewCell {
         imageView.pin(to: contentView)
         isAccessibilityElement = true
         accessibilityTraits = .button
-        PressFeedback.attach(toView: contentView, dims: true)
+        // No press feedback — see `ForYouStoryCell`: a tap opens, a long press
+        // lifts the native preview.
     }
 
     @available(*, unavailable)

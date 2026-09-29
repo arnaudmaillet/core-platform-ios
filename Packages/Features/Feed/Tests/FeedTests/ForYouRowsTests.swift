@@ -115,7 +115,8 @@ struct ForYouRowsTests {
     }
 
     /// `[‹] ———— [points][search]`, no tab bar — the header every screen For
-    /// You pushes wears — and the "New" rows the row's badge counts.
+    /// You pushes wears — over a plain run of posts: no "New" and "Recent"
+    /// halves (2026-09-29), the order they came in.
     @Test func aPushedListWearsTheSharedHeaderAndNoTabBar() {
         let list = ForYouPostListViewController(
             kind: .friends,
@@ -132,9 +133,9 @@ struct ForYouRowsTests {
         ])
         let posts = [post("a", by: "pal", at: 2), post("b", by: "pal", at: 1)]
         list.view.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
-        list.render(.content(posts), newPosts: [PostID("b")])
+        list.render(.content(posts))
         list.view.layoutIfNeeded()
-        #expect(list.posts.map(\.id.rawValue) == ["b", "a"], "the new rows lead, under New")
+        #expect(list.posts.map(\.id.rawValue) == ["a", "b"], "one after another, nothing regrouped")
     }
 
     // MARK: - The rows' view

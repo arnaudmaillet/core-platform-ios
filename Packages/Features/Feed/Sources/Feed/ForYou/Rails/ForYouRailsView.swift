@@ -12,12 +12,28 @@ import UIKit
 ///   ◉ ◉ ◉ ○ ○ ○ ○          stories: unseen first, with a ring
 ///   Following                                 (5) ›
 ///   ┌──────┐ ┌──────┐ ┌───       cards, the third peeking;
-///   │ ▶    │ │      │ │           the lead one plays, and
-///   │ Ana  │ │ Bo   │ │           each wears its first two
+///   │ ▶    │ │ ▶    │ │ ▶         every card on screen plays,
+///   │ Ana  │ │ Bo   │ │           and each wears its first two
 ///   │ two… │ │ two… │ │           lines over its foot
 ///   └──────┘ └──────┘ └───
+///   For you                       ← a heading, not a way in
 ///   ─── Discover's list ─────────────────────────────
 /// ```
+///
+/// **A tap opens, a long press previews, and nothing gives under a finger.**
+/// No press feedback on a face, a card or a heading (the product call of
+/// 2026-09-29: it fired on the touch-down that starts every scroll of the
+/// row). A tap is the collection view's own selection, which a scroll never
+/// makes; a long press lifts UIKit's native context-menu preview
+/// (`ForYouPostPreviewViewController`), and tapping the preview opens the post
+/// the way a tap would — see `willPerformPreviewActionForMenuWith`.
+///
+/// **The Friends row holds its order while the screen is the viewer's.** A
+/// friend whose posts were just watched loses their ring at once but keeps
+/// their place; the row re-sorts (unseen first) only once the viewer has left
+/// — another tab, or the app (`releaseStoryOrder`). A row that reshuffles as
+/// the viewer comes back to it moves the face they just tapped out from under
+/// their eyes.
 ///
 /// Hosted as the list's LEADING HEADER (`ForYouGridPage.setLead`), not as
 /// sections of its own: every index path, chunk plan, hero and reveal on the
@@ -28,8 +44,11 @@ import UIKit
 /// the inbox's rule for its sections — and with both empty the header is zero
 /// tall and the list starts at the top.
 ///
-/// Each header is a way in (`SectionLinkHeaderView`): the whole bar pushes its
-/// screen, and its pill counts what is new in the row.
+/// Each row's header is a way in (`SectionLinkHeaderView`): the whole bar
+/// pushes its screen, and its pill counts what is new in the row. The third,
+/// "For you", names the list under the rows and pushes nothing; it is drawn
+/// only under rows, since alone at the top of the screen it would title the
+/// only thing there.
 ///
 /// ⚠️ NOT `@MainActor` in so many words, and not for want of it: a `UIView`
 /// subclass is main-actor by inference already, and the explicit attribute
@@ -46,9 +65,10 @@ final class ForYouRailsView: UIView {
         /// Height over width: portrait, tall enough that two lines of caption
         /// sit over the picture without burying it.
         static let cardAspect: CGFloat = 4.0 / 3.0
-        /// Between the two rows, and below the second before the list.
+        /// Between the two rows, and between the last row and "For you".
         static let rowGap: CGFloat = 10
-        static let listGap: CGFloat = 14
+        /// Below "For you", before the list's first card.
+        static let listGap: CGFloat = 4
 
         static func cardSize(forWidth width: CGFloat) -> CGSize {
             let cardWidth = ((width - sideMargin * 2) / cardsPerWidth).rounded(.down)
@@ -66,7 +86,9 @@ final class ForYouRailsView: UIView {
             if friends > 0 { height += Metrics.rowGap }
             height += SectionLinkHeaderView.height + Metrics.cardSize(forWidth: width).height
         }
-        return height > 0 ? height + Metrics.listGap : 0
+        // "For you" under whatever rows there are; nothing at all without them.
+        guard height > 0 else { return 0 }
+        return height + Metrics.rowGap + SectionLinkHeaderView.height + Metrics.listGap
     }
 
     var preferredHeight: CGFloat {
@@ -77,29 +99,59 @@ final class ForYouRailsView: UIView {
     var onStoryTapped: ((ForYouViewModel.FriendStory) -> Void)?
     /// A card was tapped: its index into `cards`.
     var onCardTapped: ((Int) -> Void)?
-    var onFriendsHeaderTapped: (() -> Void)?
-    var onFollowingHeaderTapped: (() -> Void)?
+    var onFriendsHeaderTapped: (() -> Void)? {
+        didSet { friendsHeader.onTap = onFriendsHeaderTapped }
+    }
+    var onFollowingHeaderTapped: (() -> Void)? {
+        didSet { followingHeader.onTap = onFollowingHeaderTapped }
+    }
+    /// What a long press on a friend offers under the preview, after "Open"
+    /// — the host's rows (View Profile, Unfollow), since this view can service
+    /// none of them.
+    var storyMenuElements: ((ForYouViewModel.FriendStory) -> [UIMenuElement])?
+    /// The same for a card (View Profile, Unfollow, Report).
+    var cardMenuElements: ((GalleryPost) -> [UIMenuElement])?
     /// The rows changed which of them are drawn — the host re-sizes its header.
     var onHeightChange: (() -> Void)?
     /// The part of the screen the viewer can see, in THIS view's space, for
     /// autoplay: a card under the navigation bar is not one they are looking
     /// at. Nil (no host yet) plays nothing.
     var visibleBand: (() -> CGRect?)?
+    /// The row's claim on the pool changed on its OWN account — it scrolled, a
+    /// cover landed — so the list under it must re-divide the budget now, not
+    /// at its next scroll tick. See `claimedPlayers`.
+    var onPlayerClaimChange: (() -> Void)?
 
     private(set) var stories: [ForYouViewModel.FriendStory] = []
     private(set) var cards: [GalleryPost] = []
+    /// The friends as the view model last ordered them — what the row shows
+    /// once it is free to re-sort (`releaseStoryOrder`).
+    private var latestStories: [ForYouViewModel.FriendStory] = []
+    /// The order the viewer has been SHOWN, held while the screen is theirs —
+    /// nil until the row is first drawn in a window, and again once released.
+    private var heldStoryOrder: [ProfileID]?
 
     private let friendsHeader = SectionLinkHeaderView(title: "Friends")
     private let followingHeader = SectionLinkHeaderView(title: "Following")
+    /// The list's own title, under the rows: a heading, not a way in.
+    private let listHeader = SectionLinkHeaderView(title: "For you", isLink: false)
     private let storiesView: UICollectionView
     private let cardsView: UICollectionView
     private let imagePipeline: ImagePipeline
-    /// The Following row's own playback — ONE card at a time, the row's lead.
-    /// The list below keeps five: six is the pool's budget
-    /// (`VideoPlaybackController.capacity`), and a seventh clip starves one of
-    /// the six already playing.
+    /// The Following row's own playback: EVERY card on screen plays, muted —
+    /// "all the visible video cards", the product call of 2026-09-29 (it used
+    /// to be the lead card alone). A card must be half on screen to count
+    /// (`GridPlaybackVisibility`), and at 2.3 cards per width no more than
+    /// three can be — which is the row's budget.
+    ///
+    /// The pool is shared with the list below (six decoders,
+    /// `VideoPlaybackController.capacity`): the list plays what the row's
+    /// claim leaves it (`ForYouGridPage.playerReserve`, fed `claimedPlayers`).
     private let playback: GridVideoPlaybackCoordinator?
-    static let concurrentPlayers = 1
+    static let concurrentPlayers = 3
+    /// How many players the row holds as of its last reconcile — what the
+    /// list under it subtracts from the pool's budget.
+    private(set) var claimedPlayers = 0
 
     private var storySource: UICollectionViewDiffableDataSource<Int, ProfileID>!
     private var cardSource: UICollectionViewDiffableDataSource<Int, PostID>!
@@ -160,12 +212,12 @@ final class ForYouRailsView: UIView {
             cell.isHidden = id == concealedCard
             return cell
         }
-        friendsHeader.addAction(UIAction { [weak self] _ in self?.onFriendsHeaderTapped?() }, for: .primaryActionTriggered)
-        followingHeader.addAction(UIAction { [weak self] _ in self?.onFollowingHeaderTapped?() }, for: .primaryActionTriggered)
         addSubview(friendsHeader)
         addSubview(followingHeader)
+        addSubview(listHeader)
         friendsHeader.isHidden = true
         followingHeader.isHidden = true
+        listHeader.isHidden = true
         storiesView.isHidden = true
         cardsView.isHidden = true
         friendsHeader.accessibilityHint = "Shows your friends' posts"
@@ -189,29 +241,84 @@ final class ForYouRailsView: UIView {
 
     func render(_ rails: ForYouViewModel.Rails) {
         let oldHeight = preferredHeight
-        let storiesChanged = rails.friends != stories
+        latestStories = rails.friends
+        // The friends in the order the viewer was shown, while it is held.
+        let ordered = heldStoryOrder.map { Self.holding(rails.friends, in: $0) } ?? rails.friends
+        let storiesChanged = ordered != stories
         let cardsChanged = rails.following != cards
-        stories = rails.friends
+        stories = ordered
         cards = rails.following
         friendsHeader.setCount(rails.friendsBadge)
         followingHeader.setCount(rails.followingBadge)
-        if storiesChanged { applyStories() }
+        if storiesChanged { applyStories(animated: window != nil) }
         if cardsChanged { applyCards() }
+        holdStoryOrderIfShown()
         setNeedsLayout()
         if preferredHeight != oldHeight { onHeightChange?() }
     }
 
-    /// Animated, so a ring clearing reads as the friend moving over to the
-    /// others rather than as the row being rebuilt — keyed by FRIEND, so a
-    /// friend whose ring changed is the same item, reconfigured in place.
-    private func applyStories() {
+    /// Keyed by FRIEND, so a friend whose ring changed is the same item,
+    /// reconfigured in place; animated while on screen, so a friend joining
+    /// or leaving the row slides rather than the row being rebuilt.
+    private func applyStories(animated: Bool) {
         var snapshot = NSDiffableDataSourceSnapshot<Int, ProfileID>()
         snapshot.appendSections([0])
         snapshot.appendItems(stories.map(\.authorID))
         snapshot.reconfigureItems(snapshot.itemIdentifiers.filter {
             storySource.snapshot().itemIdentifiers.contains($0)
         })
-        storySource.apply(snapshot, animatingDifferences: window != nil)
+        storySource.apply(snapshot, animatingDifferences: animated)
+    }
+
+    // MARK: - The Friends row's held order
+
+    /// `fresh`, with the friends the viewer has already been shown kept in
+    /// the order they were shown.
+    ///
+    /// The slots those friends hold in `fresh` are refilled in `order`'s
+    /// order; a friend who is new to the row keeps the slot the view model
+    /// gave them, and one who left (an unfollow) simply goes. So a ring that
+    /// clears moves nobody, and a follow-back still arrives where it belongs.
+    static func holding(
+        _ fresh: [ForYouViewModel.FriendStory], in order: [ProfileID]
+    ) -> [ForYouViewModel.FriendStory] {
+        let rank = Dictionary(order.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
+        var known = fresh
+            .filter { rank[$0.authorID] != nil }
+            .sorted { rank[$0.authorID, default: 0] < rank[$1.authorID, default: 0] }
+            .makeIterator()
+        return fresh.map { story in
+            guard rank[story.authorID] != nil, let next = known.next() else { return story }
+            return next
+        }
+    }
+
+    /// Starts holding the order once the row has been drawn where the viewer
+    /// can see it — before that, nobody has been shown anything to keep.
+    private func holdStoryOrderIfShown() {
+        guard window != nil, !stories.isEmpty else { return }
+        heldStoryOrder = stories.map(\.authorID)
+    }
+
+    /// The viewer LEFT — another tab, or the app — so the row may take the
+    /// view model's order again: friends with something unseen first. Applied
+    /// at once and without animation, since nobody is watching it now.
+    func releaseStoryOrder() {
+        heldStoryOrder = nil
+        if latestStories != stories {
+            stories = latestStories
+            applyStories(animated: false)
+        }
+        // Still in a window (the app went to the background under it): the
+        // re-sorted row is what the viewer will be shown when they return,
+        // so it is the order to hold from here. Out of one (a tab switch),
+        // the hold resumes when the row is back on screen.
+        holdStoryOrderIfShown()
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        holdStoryOrderIfShown()
     }
 
     private func applyCards() {
@@ -255,6 +362,14 @@ final class ForYouRailsView: UIView {
                 layout.itemSize = size
             }
             cardsView.frame = CGRect(x: 0, y: y, width: width, height: size.height)
+            y += size.height
+        }
+        listHeader.isHidden = !(hasStories || hasCards)
+        if !listHeader.isHidden {
+            y += Metrics.rowGap
+            listHeader.frame = CGRect(
+                x: margin, y: y, width: width - margin * 2, height: SectionLinkHeaderView.height
+            )
         }
     }
 
@@ -270,14 +385,25 @@ final class ForYouRailsView: UIView {
         if active { updateAutoplay() }
     }
 
-    /// Reconciles the row's one player against what is on screen. Cheap and
+    /// Reconciles the row's players against what is on screen. Cheap and
     /// idempotent; the host calls it as the LIST scrolls (the row moving in or
     /// out of the band) and the row calls it as ITSELF scrolls.
-    func updateAutoplay(allowingStarts: Bool = true) {
-        guard let playback else { return }
+    ///
+    /// - Parameter notifiesClaimChange: false from the list's own reconcile,
+    ///   which reads `claimedPlayers` straight after — telling it to reconcile
+    ///   again from inside that reconcile would re-enter it.
+    func updateAutoplay(allowingStarts: Bool = true, notifiesClaimChange: Bool = true) {
+        let before = claimedPlayers
+        claimedPlayers = reconcilePlayback(allowingStarts: allowingStarts)
+        if notifiesClaimChange, claimedPlayers != before { onPlayerClaimChange?() }
+    }
+
+    /// The reconcile proper; answers how many players the row now holds.
+    private func reconcilePlayback(allowingStarts: Bool) -> Int {
+        guard let playback else { return 0 }
         guard isAutoplayActive, !cardsView.isHidden, let band = visibleBand?() else {
             playback.update(candidates: [], allowingStarts: allowingStarts)
-            return
+            return 0
         }
         // The band, in the row's CONTENT space: the scroll view's bounds are
         // its content offset, so a card's frame compares directly.
@@ -293,11 +419,13 @@ final class ForYouRailsView: UIView {
             else { return nil }
             let frame = cell.frame
             guard !viewport.isNull, GridPlaybackVisibility.autoplays(frame, in: viewport) else { return nil }
-            // The LEAD card wins: the row is read from its leading edge, so the
-            // card nearest it is the one being looked at.
+            // Every card half on screen plays; the ranking only matters when
+            // the budget is short, and then the row is read from its leading
+            // edge, so the card nearest it keeps its player.
             return .init(id: id, url: url, cell: cell, distanceFromCentre: abs(frame.minX - viewport.minX))
         }
         playback.update(candidates: candidates, allowingStarts: allowingStarts)
+        return min(candidates.count, Self.concurrentPlayers)
     }
 
     /// A card may play only once it has a face behind its surface — the
@@ -425,7 +553,118 @@ final class ForYouRailsView: UIView {
         return row.bounds.intersects(cell.frame)
     }
 
+    // MARK: - Long press
+
+    /// What a context menu is about — carried in its configuration's
+    /// identifier, since the menu outlives the index path it was asked for.
+    enum MenuTarget: Equatable {
+        case story(ProfileID)
+        case card(PostID)
+
+        var identifier: NSString {
+            switch self {
+            case .story(let id): "story:\(id.rawValue)" as NSString
+            case .card(let id): "card:\(id.rawValue)" as NSString
+            }
+        }
+
+        init?(_ identifier: NSCopying) {
+            guard let raw = identifier as? NSString as String? else { return nil }
+            if raw.hasPrefix("story:") {
+                self = .story(ProfileID(String(raw.dropFirst("story:".count))))
+            } else if raw.hasPrefix("card:") {
+                self = .card(PostID(String(raw.dropFirst("card:".count))))
+            } else {
+                return nil
+            }
+        }
+    }
+
+    /// Opens what a menu was about, the way a tap on it would — nothing if it
+    /// left the row while the menu was up.
+    private func open(_ target: MenuTarget) {
+        switch target {
+        case .story(let id):
+            guard let story = stories.first(where: { $0.authorID == id }) else { return }
+            onStoryTapped?(story)
+        case .card(let id):
+            guard let index = cards.firstIndex(where: { $0.id == id }) else { return }
+            onCardTapped?(index)
+        }
+    }
+
+    private static func openAction(_ handler: @escaping () -> Void) -> UIAction {
+        UIAction(title: "Open", image: UIImage(systemName: "arrow.up.left.and.arrow.down.right")) { _ in
+            handler()
+        }
+    }
+
+    private func storyMenu(for story: ForYouViewModel.FriendStory) -> UIMenu {
+        let id = story.authorID
+        var children: [UIMenuElement] = []
+        if !story.posts.isEmpty {
+            children.append(Self.openAction { [weak self] in self?.open(.story(id)) })
+        }
+        children += storyMenuElements?(story) ?? []
+        return UIMenu(children: children)
+    }
+
+    private func cardMenu(for post: GalleryPost) -> UIMenu {
+        let id = post.id
+        let open = Self.openAction { [weak self] in self?.open(.card(id)) }
+        return UIMenu(children: [open] + (cardMenuElements?(post) ?? []))
+    }
+
+    /// The view the lift is made of, and its outline.
+    private func targetedPreview(in row: UICollectionView, at indexPath: IndexPath) -> UITargetedPreview? {
+        guard let cell = row.cellForItem(at: indexPath), cell.window != nil else { return nil }
+        let parameters = UIPreviewParameters()
+        parameters.backgroundColor = .clear
+        if let story = cell as? ForYouStoryCell {
+            let face = story.faceView
+            parameters.visiblePath = UIBezierPath(ovalIn: face.bounds)
+            return UITargetedPreview(view: face, parameters: parameters)
+        }
+        let card = cell.contentView
+        parameters.visiblePath = UIBezierPath(
+            roundedRect: card.bounds, cornerRadius: ForYouFollowingCardCell.cornerRadius
+        )
+        return UITargetedPreview(view: card, parameters: parameters)
+    }
+
     #if DEBUG
+    /// The menu a long press on story `index` would show — its rows' titles.
+    func debugStoryMenuTitles(at index: Int) -> [String] {
+        guard stories.indices.contains(index) else { return [] }
+        return storyMenu(for: stories[index]).children.map(\.title)
+    }
+
+    /// The same for card `index`.
+    func debugCardMenuTitles(at index: Int) -> [String] {
+        guard cards.indices.contains(index) else { return [] }
+        return cardMenu(for: cards[index]).children.map(\.title)
+    }
+
+    /// The long-press configuration for card `index`, through the row's own
+    /// delegate path.
+    func debugCardMenuConfiguration(at index: Int) -> UIContextMenuConfiguration? {
+        guard cards.indices.contains(index) else { return nil }
+        return collectionView(
+            cardsView, contextMenuConfigurationForItemsAt: [IndexPath(item: index, section: 0)], point: .zero
+        )
+    }
+
+    /// Opens what a committed preview would — the commit's own path, minus
+    /// UIKit's animator.
+    func debugCommitPreview(_ configuration: UIContextMenuConfiguration) {
+        guard let target = MenuTarget(configuration.identifier) else { return }
+        open(target)
+    }
+
+    /// The friends' order as drawn.
+    var debugStoryOrder: [ProfileID] { stories.map(\.authorID) }
+    var debugShowsListHeader: Bool { !listHeader.isHidden }
+
     /// Taps story `index` through the row's own selection path.
     func debugTapStory(at index: Int) -> Bool {
         guard stories.indices.contains(index) else { return false }
@@ -448,8 +687,10 @@ final class ForYouRailsView: UIView {
         return cardCell(for: post.id)?.renderedCover != nil
     }
 
-    func debugTapFriendsHeader() { onFriendsHeaderTapped?() }
-    func debugTapFollowingHeader() { onFollowingHeaderTapped?() }
+    /// The headers' OWN tap path (`SectionLinkHeaderView.debugTap`), not the
+    /// host's closure: calling the closure is how #312's dead chevron passed.
+    func debugTapFriendsHeader() { friendsHeader.debugTap() }
+    func debugTapFollowingHeader() { followingHeader.debugTap() }
     var debugFriendsBadge: String? { friendsHeader.debugCountText }
     var debugFollowingBadge: String? { followingHeader.debugCountText }
     #endif
@@ -472,9 +713,92 @@ extension ForYouRailsView: UICollectionViewDelegate {
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         guard scrollView === cardsView else { return }
         // A horizontal row is short: reconciling on every tick costs a diff
-        // of three cards, and a card that crosses the lead position should
-        // start as it arrives, not when the finger lifts.
+        // of three cards, and a card that comes half into view should start
+        // as it arrives, not when the finger lifts.
         updateAutoplay()
+    }
+
+    // MARK: - Long press: the native preview
+
+    /// A long press lifts the post — a card's own, or the one a friend's face
+    /// opens first — with the menu under it. Keyed by an identifier that says
+    /// which row and which item, so the commit below finds it again even if
+    /// the row changed while the menu was up.
+    func collectionView(
+        _ collectionView: UICollectionView,
+        contextMenuConfigurationForItemsAt indexPaths: [IndexPath],
+        point: CGPoint
+    ) -> UIContextMenuConfiguration? {
+        guard let indexPath = indexPaths.first else { return nil }
+        let width = max(0, bounds.width - Metrics.sideMargin * 2)
+        let pipeline = imagePipeline
+        if collectionView === storiesView {
+            guard let id = storySource.itemIdentifier(for: indexPath),
+                  let story = stories.first(where: { $0.authorID == id }) else { return nil }
+            let first = story.posts.first
+            return UIContextMenuConfiguration(
+                identifier: MenuTarget.story(id).identifier,
+                // A friend with nothing loaded lifts their face alone.
+                previewProvider: first.map { post in
+                    { ForYouPostPreviewViewController(post: post, imagePipeline: pipeline, width: width) }
+                },
+                actionProvider: { [weak self] _ in self?.storyMenu(for: story) }
+            )
+        }
+        guard let id = cardSource.itemIdentifier(for: indexPath),
+              let post = cards.first(where: { $0.id == id }) else { return nil }
+        return UIContextMenuConfiguration(
+            identifier: MenuTarget.card(id).identifier,
+            previewProvider: {
+                ForYouPostPreviewViewController(post: post, imagePipeline: pipeline, width: width)
+            },
+            actionProvider: { [weak self] _ in self?.cardMenu(for: post) }
+        )
+    }
+
+    /// Where the preview lifts from and settles back to: the FACE for a
+    /// friend (round, without its name), the card for a card — not the whole
+    /// cell, whose rectangle would flash its square corners under the lift.
+    func collectionView(
+        _ collectionView: UICollectionView,
+        contextMenuConfiguration configuration: UIContextMenuConfiguration,
+        highlightPreviewForItemAt indexPath: IndexPath
+    ) -> UITargetedPreview? {
+        targetedPreview(in: collectionView, at: indexPath)
+    }
+
+    func collectionView(
+        _ collectionView: UICollectionView,
+        contextMenuConfiguration configuration: UIContextMenuConfiguration,
+        dismissalPreviewForItemAt indexPath: IndexPath
+    ) -> UITargetedPreview? {
+        targetedPreview(in: collectionView, at: indexPath)
+    }
+
+    /// Tapping the lifted preview opens the post — the same open as a tap on
+    /// the item, through the same flight.
+    ///
+    /// ⚠️ `.dismiss`, THEN OUR HERO — not UIKit's `.pop`. The row's open is a
+    /// flight OUT OF THE CARD (or the face): it conceals the source, hands the
+    /// card's player to the page, and the close lands back on that same card.
+    /// A `.pop` commit grows the preview into a destination UIKit presents
+    /// itself, and none of that would hold: no source concealed, no player
+    /// handed over, and a close flying home to a card the opening never left.
+    /// So the preview settles back into its card first and the flight takes
+    /// off from there — one extra beat, and the open and the close are the
+    /// same pair of motions whichever way in the viewer used. The open waits
+    /// one turn past the completion so UIKit has put the card back before the
+    /// flight measures and hides it.
+    func collectionView(
+        _ collectionView: UICollectionView,
+        willPerformPreviewActionForMenuWith configuration: UIContextMenuConfiguration,
+        animator: UIContextMenuInteractionCommitAnimating
+    ) {
+        guard let target = MenuTarget(configuration.identifier) else { return }
+        animator.preferredCommitStyle = .dismiss
+        animator.addCompletion { [weak self] in
+            DispatchQueue.main.async { self?.open(target) }
+        }
     }
 
     func collectionView(

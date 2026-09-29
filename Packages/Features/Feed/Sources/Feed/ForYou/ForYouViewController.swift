@@ -110,12 +110,11 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     private let wallet: WalletStore?
     private let makeWalletSheet: (@MainActor () -> UIViewController)?
 
-    /// The tab bar's scroll-driven collapse, claimed while this screen is up —
-    /// it registers its list with `setContentScrollView(_:for: .bottom)`, and
-    /// the behaviour is shell-wide, so it is given back when the screen goes.
-    /// It used to ride the tab strip's accessory; the strip is gone, the
-    /// collapse is not.
-    private let minimizeClaim = TabBarMinimizeClaim()
+    // ⚠️ NO TAB BAR COLLAPSE. The bar used to minimize as the list scrolled —
+    // it rode the tab strip's accessory, and #312 kept it alive with a claim
+    // of its own once the strip was gone. The product call (2026-09-29): with
+    // no tabs on the screen there is nothing for the collapse to make room
+    // for, so the bar stays put. Nothing arms `tabBarMinimizeBehavior` here.
 
     /// Search. The trailing EDGE item — an action, so a plain glyph with a
     /// target and no menu.
@@ -311,17 +310,30 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         rails.onCardTapped = { [weak self] index in self?.openCard(at: index) }
         rails.onFriendsHeaderTapped = { [weak self] in self?.pushList(.friends) }
         rails.onFollowingHeaderTapped = { [weak self] in self?.pushList(.following) }
+        rails.storyMenuElements = { [weak self] story in self?.storyMenuElements(for: story) ?? [] }
+        rails.cardMenuElements = { [weak self] post in self?.cardMenuElements(for: post) ?? [] }
         // The rows' players keep time with the list's: the list's reconcile
         // runs as it scrolls, which is also when a row enters or leaves the
-        // band.
+        // band. The rows are reconciled FIRST and the list plays what the
+        // pool has left after them (`ForYouGridPage.playerReserve`).
         page.onAutoplayReconcile = { [weak self] allowingStarts in
-            self?.rails.updateAutoplay(allowingStarts: allowingStarts)
+            self?.rails.updateAutoplay(allowingStarts: allowingStarts, notifiesClaimChange: false)
         }
+        page.playerReserve = { [weak self] in self?.rails.claimedPlayers ?? 0 }
+        rails.onPlayerClaimChange = { [weak self] in self?.page.updateAutoplay() }
+        // Leaving the APP frees the Friends row to re-sort — see
+        // `ForYouRailsView.releaseStoryOrder`. (Leaving for another tab is
+        // `viewDidDisappear`'s.)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(appDidEnterBackground),
+            name: UIApplication.didEnterBackgroundNotification, object: nil
+        )
 
         // ⚠️ NAMED, not left to UIKit's heuristic search: the list's scroll
         // view is nested in the page, and the search was measured not to find
         // a nested scroller (it missed For You's pages inside the old pager).
-        // The tab bar's collapse follows this one.
+        // The bars' scroll-edge treatment follows this one. The tab bar does
+        // NOT collapse with it: nothing on this screen arms the minimize.
         setContentScrollView(page.minimizeScrollView, for: .bottom)
         page.onItemTapped = { [weak self] index in
             self?.openFeed(at: index)
@@ -348,8 +360,8 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             rails.render(snapshot.rails)
             lastSnapshot = snapshot
             discoverGallery?.render(snapshot.media)
-            followingList?.render(snapshot.following, newPosts: snapshot.followingNew)
-            friendsList?.render(snapshot.friends, newPosts: snapshot.friendsUnseen)
+            followingList?.render(snapshot.following)
+            friendsList?.render(snapshot.friends)
             prewarmVisible()
             #if DEBUG
             auditPostMenu()
@@ -935,6 +947,47 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             })
         }
         return actions
+    }
+
+    // MARK: - The rows' long press
+
+    /// What a long press on a Following card offers under its preview, after
+    /// the row's own "Open": the author's profile, then the card's "..." rows
+    /// (Unfollow, Report) in their own section — the same rows, gated on the
+    /// same seams, as the list's cards.
+    private func cardMenuElements(for post: GalleryPost) -> [UIMenuElement] {
+        guard let authorID = post.authorID else { return [] }
+        var elements: [UIMenuElement] = [profileAction { [weak self] in self?.openAuthor(of: post) }]
+        let rows = authorMenuActions(
+            for: ForYouGridPage.AuthorMenuContext(post: post, authorID: authorID, anchor: rails)
+        )
+        if let menu = PostCardMenu.menu(for: rows) {
+            elements.append(UIMenu(options: .displayInline, children: menu.children))
+        }
+        return elements
+    }
+
+    /// The same for a friend's face: their profile, and Unfollow. No Report —
+    /// a face is a person, not a post, and a post is reported from the post.
+    private func storyMenuElements(for story: ForYouViewModel.FriendStory) -> [UIMenuElement] {
+        let author = story.authorID
+        let stub = ProfileIdentityStub(handle: story.handle, displayName: story.name)
+        var elements: [UIMenuElement] = [profileAction { [weak self] in
+            self?.router?.route(to: .profile(author, stub: stub))
+        }]
+        if socialGraph != nil {
+            let unfollow = PostCardMenuAction.unfollow { [weak self] in
+                self?.unfollow(author, handle: story.handle)
+            }
+            if let menu = PostCardMenu.menu(for: [unfollow]) {
+                elements.append(UIMenu(options: .displayInline, children: menu.children))
+            }
+        }
+        return elements
+    }
+
+    private func profileAction(_ handler: @escaping () -> Void) -> UIAction {
+        UIAction(title: "View Profile", image: UIImage(systemName: "person.crop.circle")) { _ in handler() }
     }
 
     /// Unfollows, clears the author off the surface, and says so.
@@ -1742,8 +1795,11 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     }
 
     #if DEBUG
-    /// `-foryou-tab-away <seconds>`: switch to another tab after a delay — the
-    /// way to see what is still drawing or playing once the tab is left.
+    /// `-foryou-tab-away <seconds> [<back after seconds>]`: switch to another
+    /// tab after a delay — the way to see what is still drawing or playing
+    /// once the tab is left — and, with the second number, come back to For
+    /// You that long after (the Friends row re-sorts across the round trip,
+    /// `ForYouRailsView.releaseStoryOrder`).
     private var hasScheduledTabAway = false
 
     private func scheduleTabAwayIfNeeded() {
@@ -1754,19 +1810,24 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
               let delay = Double(arguments[position + 1])
         else { return }
         hasScheduledTabAway = true
+        let back = position + 2 < arguments.count ? Double(arguments[position + 2]) : nil
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-            guard let tabs = self?.tabBarController else { return }
+            guard let self, let tabs = tabBarController else { return }
+            // For You's own index: it is the selected tab until this switch.
+            let home = tabs.selectedIndex
             print("[zoom-live] TAB AWAY -> index 2")
             tabs.selectedIndex = 2
+            guard let back else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + back) {
+                print("[foryou] TAB BACK -> index \(home)")
+                tabs.selectedIndex = home
+            }
         }
     }
     #endif
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        // The tab bar's collapse follows this screen's list — see
-        // `minimizeClaim`. Given back in `viewWillDisappear`.
-        minimizeClaim.arm(tabBarController)
         // ⚠️ MEASURED WHILE THE BAR IS UP, because the one moment the reveal
         // needs the number is the one moment it cannot read it: a push takes
         // the bar down, and `applyPendingReveal` runs on the way out.
@@ -1802,9 +1863,12 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         page.setAutoplayActive(true)
         rails.setAutoplayActive(true)
         // ⚠️ THE RING CLEARS HERE, after the close has landed — not at the
-        // tap. Marking the story's posts seen re-sorts the row (a friend with
-        // nothing unseen joins the ones after), and a close flying home to an
-        // avatar that had already moved would land on someone else's face.
+        // tap: a close must fly home to the face as it was when it left.
+        // Marking the posts seen puts the friend among the ones with nothing
+        // unseen in the view model's order, but the row does NOT move them
+        // while the viewer is still here (`ForYouRailsView.heldStoryOrder`);
+        // only the ring goes. The re-sort waits until they leave the screen
+        // (`viewDidDisappear`) or the app (`appDidEnterBackground`).
         if let viewed = viewedStoryPosts {
             viewedStoryPosts = nil
             viewModel.markStoryPostsSeen(viewed)
@@ -1833,6 +1897,18 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             openedStoryPosts = nil
             viewedStoryPosts = opened
         }
+        // Still the top of its stack, so nothing was PUSHED over it: the
+        // viewer went to another tab (or something full screen covered the
+        // tab bar). They left the screen, so the Friends row may re-sort
+        // before they are back. A push — a friend's posts, a list — is not
+        // leaving: the row keeps the order they tapped from.
+        if navigationController?.topViewController === self {
+            rails.releaseStoryOrder()
+        }
+    }
+
+    @objc private func appDidEnterBackground() {
+        rails.releaseStoryOrder()
     }
 
     /// Suspends the list's and the rows' media when something covers them.
@@ -1845,9 +1921,6 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// push from a tab switch: on a push it is already the pushed screen.
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        // The collapse is shell-wide: whatever comes next — another tab, a
-        // pushed screen — must not inherit it.
-        minimizeClaim.release()
         rails.setAutoplayActive(false)
         if !(navigationController?.topViewController is any ZoomTransitionDestination) {
             page.setAutoplayActive(false)
@@ -2131,8 +2204,8 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // skeleton waiting for the next publish.
         if let lastSnapshot {
             switch kind {
-            case .following: list.render(lastSnapshot.following, newPosts: lastSnapshot.followingNew)
-            case .friends: list.render(lastSnapshot.friends, newPosts: lastSnapshot.friendsUnseen)
+            case .following: list.render(lastSnapshot.following)
+            case .friends: list.render(lastSnapshot.friends)
             }
         }
         switch kind {

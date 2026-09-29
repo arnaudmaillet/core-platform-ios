@@ -47,7 +47,10 @@ final class HeaderSelectorAudit {
     /// selector too, and it was left off while the strip lived in the scroll
     /// view — where this audit could never have found it anyway. It is in the
     /// bottom accessory now, which is somewhere the audit looks.
-    private let mustHaveSelector: Set<AppTab> = [.forYou, .messages, .profile]
+    ///
+    /// `.forYou` is NOT: since #312 For You is one page with no tabs, so a
+    /// selector there would be the bug.
+    private let mustHaveSelector: Set<AppTab> = [.messages, .profile]
 
     func run(tabs: [AppTab]) async {
         print("[header-audit] begin: \(tabs.count) surfaces")
