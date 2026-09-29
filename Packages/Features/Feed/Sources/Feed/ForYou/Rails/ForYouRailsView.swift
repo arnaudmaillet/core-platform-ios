@@ -470,7 +470,7 @@ final class ForYouRailsView: UIView {
     /// flight answers with a centred collapse rather than a trip to a rect
     /// nobody can see.
     func storyFrame(for id: ProfileID, in space: UICoordinateSpace) -> CGRect? {
-        guard let cell = storyCell(for: id), isVisible(cell, in: storiesView) else { return nil }
+        guard let cell = storyCell(for: id), isInRow(cell, storiesView) else { return nil }
         return cell.discFrame(in: space, restingBelow: storiesView)
     }
 
@@ -489,7 +489,7 @@ final class ForYouRailsView: UIView {
 
     /// The card's rect in `space`, at rest — see `restingFrame`.
     func cardFrame(for id: PostID, in space: UICoordinateSpace) -> CGRect? {
-        guard let cell = cardCell(for: id), isVisible(cell, in: cardsView) else { return nil }
+        guard let cell = cardCell(for: id), isInRow(cell, cardsView) else { return nil }
         return Self.restingFrame(of: cell, below: cardsView, in: space)
     }
 
@@ -582,9 +582,21 @@ final class ForYouRailsView: UIView {
         row.layoutIfNeeded()
     }
 
+    /// On screen: in a window, and within its row's visible bounds.
     private func isVisible(_ cell: UICollectionViewCell, in row: UICollectionView) -> Bool {
-        guard cell.window != nil, !row.isHidden else { return false }
-        return row.bounds.intersects(cell.frame)
+        cell.window != nil && isInRow(cell, row)
+    }
+
+    /// Within its row's visible bounds — what a RECT is asked, window or not.
+    ///
+    /// ⚠️ NOT `isVisible`. A card-shaped close (`RowCardCloseLanding`) asks
+    /// whether the row exists BEFORE the pop has put this screen back in the
+    /// window — the swipe stages at its begin — and a window check there
+    /// answered "no row", so the close fell to a plain slide
+    /// (`geometry=false`, measured). The rect is re-asked in the transition's
+    /// own space once the screen is back, as every list's is.
+    private func isInRow(_ cell: UICollectionViewCell, _ row: UICollectionView) -> Bool {
+        !row.isHidden && row.bounds.intersects(cell.frame)
     }
 
     // MARK: - Long press

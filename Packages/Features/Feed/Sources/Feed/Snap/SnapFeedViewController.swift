@@ -695,6 +695,16 @@ final class SnapFeedViewController: UIViewController {
     /// interactive-capable zoom-out on the map's stack), dismiss when
     /// presented.
     private func closeFeed() {
+        #if DEBUG
+        // `-grab-log`: a chevron tap, and whether the stack could act on it —
+        // a pop asked for while a transition is still running is dropped by
+        // UIKit without a word, which reads as "the chevron needed two taps".
+        if ProcessInfo.processInfo.arguments.contains("-grab-log") {
+            print(String(format: "[close] %.3f chevron top=%@ coordinator=%@", CACurrentMediaTime(),
+                         navigationController?.topViewController === self ? "self" : "other",
+                         navigationController?.transitionCoordinator == nil ? "none" : "LIVE"))
+        }
+        #endif
         onWillCloseFeed?()
         if let nav = navigationController, nav.viewControllers.first !== self {
             revealDockBeforePop(on: nav)

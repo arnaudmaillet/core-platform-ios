@@ -102,7 +102,12 @@ enum ForYouRowOrigins {
             return view
         }
         return TextRevealOrigin(
-            rowFrame: { [weak rails] space in rails?.storyFrame(for: author, in: space) },
+            rowFrame: { [weak rails] space in
+                inView(rails?.storyFrame(for: author, in: space)) {
+                    rails?.bringStoryIntoView(author)
+                    return rails?.storyFrame(for: author, in: space)
+                }
+            },
             captionEnd: nil,
             depthView: { [weak page] in page },
             makeDismissStandIn: { _ in standIn() },
@@ -186,7 +191,12 @@ enum ForYouRowOrigins {
             return ForYouFollowingCardCell.makeStandIn(for: post, cover: picture, size: size)
         }
         return TextRevealOrigin(
-            rowFrame: { [weak rails] space in rails?.cardFrame(for: id, in: space) },
+            rowFrame: { [weak rails] space in
+                inView(rails?.cardFrame(for: id, in: space)) {
+                    rails?.bringCardIntoView(id)
+                    return rails?.cardFrame(for: id, in: space)
+                }
+            },
             captionEnd: nil,
             depthView: { [weak page] in page },
             makeDismissStandIn: { [weak rails] _ in rails.flatMap(standIn) },
@@ -211,6 +221,19 @@ enum ForYouRowOrigins {
     /// inset, then bring the item back into its row's view — the list VC's own
     /// order (`ForYouPostListViewController.textRowReveal`). `then` runs once
     /// both are done — the moment the close is about to measure.
+    /// A window's row rect: the item where it is, or — only when it has
+    /// scrolled out of its row — where bringing it back puts it.
+    ///
+    /// ⚠️ ASKED BEFORE `willStageDismissal`. `RowCardCloseLanding` checks that
+    /// the row exists before it builds the geometry whose staging would bring
+    /// the item back, so an item the viewer scrolled away under the open post
+    /// read as "no row" and the close fell to a plain slide. Moving the row
+    /// only when the item is out of it keeps the opening — asked while the
+    /// item is under the finger — from nudging a peeking card.
+    static func inView(_ current: CGRect?, bringingBack: () -> CGRect?) -> CGRect? {
+        current ?? bringingBack()
+    }
+
     static func stageClose(
         page: ForYouGridPage?, then staged: () -> Void, bringIntoView: () -> Void
     ) {

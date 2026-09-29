@@ -126,6 +126,29 @@ struct ForYouRowsCloseTests {
         #expect(rails.minX <= landed.minX && landed.maxX <= rails.maxX, "\(landed) is not wholly in view")
     }
 
+    /// ⚠️ THE CARD CLOSE ASKS FOR THE ROW BEFORE THIS SCREEN IS BACK. A swipe
+    /// stages at its begin, while For You is still out of the window, and
+    /// before the window's own staging has brought the item back into its row.
+    /// Answered "no row" there, the close fell to a plain slide (measured:
+    /// `geometry=false`). The rect is found without a window, and a card
+    /// scrolled away is brought back to be found.
+    @Test func aCardsWindowFindsItsRowOutOfTheWindowAndScrolledAway() throws {
+        let cards = (0..<8).map { Self.post("c\($0)", kind: $0 == 0 ? .video : .text) }
+        let fixture = Fixture(cards: cards)
+        let row = try #require(fixture.cardsRow)
+        let reveal = try #require(ForYouRowOrigins.card(
+            cards[0], stream: cards, rails: fixture.rails, page: fixture.page, host: fixture.host.view
+        ).textReveal)
+        row.contentOffset.x = row.contentSize.width - row.bounds.width
+        row.layoutIfNeeded()
+        fixture.rails.removeFromSuperview()
+        #expect(fixture.rails.window == nil, "precondition: the screen is covered")
+
+        #expect(reveal.rowFrame(fixture.rails) != nil, "the close would find no row")
+        #expect(RowCardCloseLanding(origin: reveal, pipeline: nil)
+            .cardCloseGeometry(dismissing: UIViewController()) != nil)
+    }
+
     /// ⚠️ A PRESS SCALES THE ITEM; THE LANDING IS WHERE IT RESTS. A card whose
     /// cell (or content) wears a transform reports the rect it has at identity.
     @Test func aCardsLandingIgnoresATransformOnIt() throws {
