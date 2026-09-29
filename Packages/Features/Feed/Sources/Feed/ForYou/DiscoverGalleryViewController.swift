@@ -37,13 +37,17 @@ import UIKit
 /// swapping the post they ended on into that slot. The same answer every other
 /// pushed gallery in the app gives.
 ///
-/// The tab bar stays up (no `hidesBottomBarWhenPushed`): this is a place to
-/// browse, one level into the tab, and the bar is how the viewer leaves it.
+/// # Its chrome
+///
+/// No tab bar (`hidesBottomBarWhenPushed`, UIKit's own choreography) and no
+/// title: the header is `[‹] ———— [points][search]`, the one every screen For
+/// You pushes wears (`PushedScreenHeader`, product call 2026-09-29). The back
+/// chevron is how the viewer leaves; the mosaic has the whole screen.
 @MainActor
 final class DiscoverGalleryViewController: UIViewController {
-    static let title = "Discover"
-
     private let page: ForYouGridPage
+    /// `[points][search]`, held for the screen's life — see `PushedScreenHeader`.
+    private let header: PushedScreenHeader
 
     /// Opens a post WITH a flight — the builder's `presentSnapFeedHero`,
     /// handed down through For You. Nil leaves a tap doing nothing, which is
@@ -62,13 +66,19 @@ final class DiscoverGalleryViewController: UIViewController {
     init(
         imagePipeline: ImagePipeline,
         videoPlayback: VideoPlaybackController?,
+        header: PushedScreenHeader,
         openPost: ((UIViewController, SnapFeedHeroOrigin, [PostID]) -> Void)?
     ) {
         page = ForYouGridPage(imagePipeline: imagePipeline, style: .grid, videoPlayback: videoPlayback)
+        self.header = header
         self.openPost = openPost
         super.init(nibName: nil, bundle: nil)
-        title = Self.title
-        navigationItem.largeTitleDisplayMode = .never
+        // UIKit takes the bar down with the push and brings it back with the
+        // pop — the pushed profile's arrangement. A post opened from here then
+        // finds no dock to give back (`showsAppTabBar(for:)` reads this flag),
+        // which is right: this screen never shows one.
+        hidesBottomBarWhenPushed = true
+        header.install(on: self)
     }
 
     @available(*, unavailable)
@@ -104,25 +114,17 @@ final class DiscoverGalleryViewController: UIViewController {
 
     // MARK: - Appearance
 
-    override func viewWillAppear(_ animated: Bool) {
-        super.viewWillAppear(animated)
-        // Coming back from a post: the dock is UIKit's to bring back, at the
-        // moment the policy allows (the feed normally has already asked —
-        // this is the backstop). Only where this stack shows the app's bar.
-        guard let navigationController, navigationController.showsAppTabBar(for: self) else { return }
-        revealBottomChromeWhenAllowed(animated: animated) { [weak self] animated in
-            guard let tabs = self?.tabBarController, tabs.isTabBarHidden else { return }
-            if animated { tabs.showTabBarNatively() } else { tabs.setTabBarHidden(false, animated: false) }
-        }
-    }
+    // NO DOCK REVEAL on the way back from a post, and none is owed: this screen
+    // is pushed with `hidesBottomBarWhenPushed`, so there is no bar here to
+    // give back — the flight's backstop asks `showsAppTabBar(for:)` and gets
+    // the same answer.
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        // The bar floats over the grid without insetting it; measured now,
-        // while it is up, for the reveal that runs when the next post covers
-        // this screen. See `ForYouGridPage.footChromeCover`.
-        tabBarController?.view.layoutIfNeeded()
-        page.footChromeCover = floatingBarCover
+        // Nothing floats over this grid's foot — the tab bar is down for the
+        // screen's whole life — so the safe area is the whole cover. See
+        // `ForYouGridPage.footChromeCover`.
+        page.footChromeCover = view.safeAreaInsets.bottom
         // Nothing on this screen may be invisible once it is back, whoever
         // finished the close — see `ForYouViewController.viewDidAppear`, which
         // makes the same sweep for the same reason.
@@ -148,14 +150,6 @@ final class DiscoverGalleryViewController: UIViewController {
         // the grid — where the move costs nothing to look at, and before a
         // close reads the tile's rect.
         page.applyPendingReveal()
-    }
-
-    /// How much of this screen's foot the tab bar covers.
-    private var floatingBarCover: CGFloat {
-        guard let bar = tabBarController?.tabBar, !bar.isHidden, let host = bar.superview
-        else { return view.safeAreaInsets.bottom }
-        let inPage = view.convert(bar.frame, from: host)
-        return max(view.safeAreaInsets.bottom, view.bounds.maxY - inPage.minY)
     }
 
     // MARK: - Opening a tile

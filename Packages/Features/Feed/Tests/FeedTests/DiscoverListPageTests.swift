@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import FeedInterface
 import Foundation
 import MediaCore
@@ -259,13 +260,50 @@ struct DiscoverGalleryTests {
         func fetchImageData(for url: URL) async throws -> Data { Data() }
     }
 
-    @Test func aTileOpensThroughTheSharedFlight() {
-        var opened: (origin: SnapFeedHeroOrigin, ids: [PostID])?
-        let gallery = DiscoverGalleryViewController(
+    private static func wallet() -> WalletStore {
+        let suite = "discover-gallery-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        return WalletStore(defaults: defaults)
+    }
+
+    private static func gallery(
+        wallet: WalletStore? = nil,
+        openPost: ((UIViewController, SnapFeedHeroOrigin, [PostID]) -> Void)? = nil
+    ) -> DiscoverGalleryViewController {
+        DiscoverGalleryViewController(
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
             videoPlayback: nil,
-            openPost: { _, origin, ids in opened = (origin, ids) }
+            header: PushedScreenHeader(wallet: wallet, makeWalletSheet: nil, router: nil),
+            openPost: openPost
         )
+    }
+
+    /// `[‹] ———— [points][search]`: no title, no tab bar, and the root's two
+    /// trailing items in the root's order — search at the edge.
+    @Test func theHeaderIsBackThenPointsAndSearch() {
+        let gallery = Self.gallery(wallet: Self.wallet())
+        gallery.loadViewIfNeeded()
+        #expect(gallery.title == nil)
+        #expect(gallery.navigationItem.title == nil)
+        #expect(gallery.hidesBottomBarWhenPushed, "the tab bar leaves with the push, UIKit's way")
+        #expect(gallery.navigationItem.rightBarButtonItems?.map(\.identifier) == [
+            PushedScreenHeader.searchItemIdentifier, PushedScreenHeader.walletItemIdentifier
+        ])
+        #expect(gallery.navigationItem.rightBarButtonItems?.allSatisfy { !$0.sharesBackground } == true)
+    }
+
+    /// No wallet wired: search alone, rather than a balance that reads nothing.
+    @Test func withoutAWalletOnlySearchIsOffered() {
+        let gallery = Self.gallery()
+        #expect(gallery.navigationItem.rightBarButtonItems?.map(\.identifier) == [
+            PushedScreenHeader.searchItemIdentifier
+        ])
+    }
+
+    @Test func aTileOpensThroughTheSharedFlight() {
+        var opened: (origin: SnapFeedHeroOrigin, ids: [PostID])?
+        let gallery = Self.gallery(openPost: { _, origin, ids in opened = (origin, ids) })
         let posts = (0..<30).map { index in
             GalleryPost(
                 id: PostID("m\(index)"), kind: .photo, isRepost: false,
@@ -277,7 +315,7 @@ struct DiscoverGalleryTests {
         gallery.view.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
         gallery.render(.content(posts))
         gallery.view.layoutIfNeeded()
-        #expect(gallery.title == DiscoverGalleryViewController.title)
+        #expect(gallery.title == nil, "the pushed mosaic wears no title")
         #expect(gallery.debugOpenTile(at: 2))
         let shown = gallery.posts
         #expect(opened?.ids.first == shown[2].id, "the feed starts on the tapped tile")
