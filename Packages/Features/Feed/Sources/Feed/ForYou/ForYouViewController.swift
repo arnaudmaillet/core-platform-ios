@@ -76,6 +76,12 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// screen is one the viewer follows, which is what makes UNFOLLOW the
     /// honest verb rather than a toggle that has to ask first.
     private let socialGraph: (any SocialGraphWriting)?
+    /// The balance and the sheet behind it, for the header every screen this
+    /// one pushes wears (`PushedScreenHeader`). This screen's OWN badge is the
+    /// shell's (`setTrailingAccessoryItem`); these reach the pushed ones, which
+    /// the shell never sees.
+    private let wallet: WalletStore?
+    private let makeWalletSheet: (@MainActor () -> UIViewController)?
 
     /// The tab titles, in `ForYouPagerView.pageOrder` order: Discover (the
     /// post list with mosaic chunks) then Following (the unfiltered page).
@@ -131,6 +137,10 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             primaryAction: UIAction { [weak self] _ in self?.router?.route(to: .search) }
         )
         item.accessibilityLabel = "Search"
+        // Shared with the screens this one pushes, so iOS 26 keeps search in
+        // place across the push rather than cross-fading two copies — see
+        // `PushedScreenHeader`.
+        item.identifier = PushedScreenHeader.searchItemIdentifier
         return item
     }()
 
@@ -469,8 +479,11 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         router: (any Router)? = nil,
         reporting: (any ContentReporting)? = nil,
         socialGraph: (any SocialGraphWriting)? = nil,
-        wallet: WalletStore? = nil
+        wallet: WalletStore? = nil,
+        makeWalletSheet: (@MainActor () -> UIViewController)? = nil
     ) {
+        self.wallet = wallet
+        self.makeWalletSheet = makeWalletSheet
         self.viewModel = viewModel
         self.makeSnapFeed = makeSnapFeed
         self.openPostHero = openPostHero
@@ -1370,7 +1383,8 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
               navigationController.transitionCoordinator == nil
         else { return }
         let gallery = DiscoverGalleryViewController(
-            imagePipeline: imagePipeline, videoPlayback: videoPlayback, openPost: openPostHero
+            imagePipeline: imagePipeline, videoPlayback: videoPlayback,
+            header: makePushedHeader(), openPost: openPostHero
         )
         gallery.onNearEnd = { [weak self] in self?.viewModel.loadNextPageIfNeeded() }
         gallery.onRefresh = { [weak self] in self?.viewModel.refresh() }
@@ -1379,6 +1393,12 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         if let lastSnapshot { gallery.render(lastSnapshot.media) }
         discoverGallery = gallery
         navigationController.pushViewController(gallery, animated: true)
+    }
+
+    /// The `[‹] ———— [points][search]` header for a screen this one pushes —
+    /// one per screen, since a badge is a view and lives in one bar.
+    func makePushedHeader() -> PushedScreenHeader {
+        PushedScreenHeader(wallet: wallet, makeWalletSheet: makeWalletSheet, router: router)
     }
 
     private func openFeed(

@@ -245,7 +245,10 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             socialGraph: socialGraph,
             // The cards' like chips stake from the SAME wallet the badge and
             // the feed's rail spend from — one instance app-wide.
-            wallet: wallet
+            wallet: wallet,
+            // The sheet the balance opens on every screen For You pushes —
+            // the shell's, the same one the root header's badge presents.
+            makeWalletSheet: makeWalletSheet
         )
         forYou.onTabPresentationChange = onTabPresentationChange
         return forYou
