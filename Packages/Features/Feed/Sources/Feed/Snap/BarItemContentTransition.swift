@@ -1,4 +1,4 @@
-import CoreImage
+import Accelerate
 import UIKit
 
 /// Changes what a bar item's custom view DRAWS through a blur — the old
@@ -19,7 +19,7 @@ import UIKit
 /// `UIVisualEffectView` over the content would blur the GLASS behind it too
 /// and lay its own material over the platter. What is left is a blurred
 /// BITMAP of each state: the live content is rendered (`CALayer.render`),
-/// blurred with Core Image, and the two stills are cross-faded against the
+/// blurred (vImage, at 1x), and the two stills are cross-faded against the
 /// live content —
 ///
 ///   live old ──fades──▶ blurred old ──▶ blurred new ──fades──▶ live new
@@ -383,7 +383,16 @@ final class BarItemContentTransition {
 
     // MARK: - Rendering
 
-    private static let context = CIContext(options: [.cacheIntermediates: false])
+    /// Pixels per point of a still.
+    ///
+    /// ⚠️ ONE, NOT THE SCREEN'S THREE. A still is blurred by `blurRadius`
+    /// points, which leaves nothing finer than a few points to sample, so a 3x
+    /// render only paid 9x the pixels for detail the blur then erased — and
+    /// the scroll-driven swap renders its stills on a frame of the drag.
+    /// Measured on the iPhone 18 Pro simulator with `-pill-probe`: 14–20ms a
+    /// still (one 61ms) at 3x through Core Image; see `blurredSnapshot` for
+    /// what replaced it.
+    static let stillScale: CGFloat = 1
 
     /// `view` rendered as it draws now and blurred by `radius` points, with the
     /// frame (in `view`'s own space) the image covers: its bounds, grown so the
@@ -394,28 +403,60 @@ final class BarItemContentTransition {
     /// mid-fade, and every layer is displayed first, so text set in this very
     /// turn — or a colour that just changed with the bar's theme — is what
     /// gets pictured.
+    ///
+    /// Blurred on the CPU (vImage: three box passes, a Gaussian to the eye)
+    /// rather than through Core Image, whose GPU round trip — and its cold
+    /// first render — cost more than the whole blur of a pill-sized bitmap.
     static func blurredSnapshot(of view: UIView, radius: CGFloat) -> (UIImage, CGRect)? {
         let bounds = view.bounds
         guard bounds.width > 0, bounds.height > 0 else { return nil }
         view.layoutIfNeeded()
         displayTree(view.layer)
+        let scale = stillScale
         let pad = ceil(radius * 3)
-        let canvas = bounds.insetBy(dx: -pad, dy: -pad)
-        let format = UIGraphicsImageRendererFormat.preferred()
-        format.opaque = false
-        format.preferredRange = .standard
+        var canvas = bounds.insetBy(dx: -pad, dy: -pad)
+        let width = Int(ceil(canvas.width * scale))
+        let height = Int(ceil(canvas.height * scale))
+        canvas.size = CGSize(width: CGFloat(width) / scale, height: CGFloat(height) / scale)
+        let bytesPerRow = width * 4
+        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(
+                data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: bytesPerRow,
+                space: space,
+                bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+              ),
+              let data = context.data else { return nil }
+        // UIKit's orientation: origin top-left, in points.
+        context.translateBy(x: 0, y: CGFloat(height))
+        context.scaleBy(x: scale, y: -scale)
+        context.translateBy(x: -canvas.minX, y: -canvas.minY)
         let alpha = view.alpha
         view.alpha = 1
-        let sharp = UIGraphicsImageRenderer(size: canvas.size, format: format).image { context in
-            context.cgContext.translateBy(x: -canvas.minX, y: -canvas.minY)
-            view.layer.render(in: context.cgContext)
-        }
+        UIGraphicsPushContext(context)
+        view.layer.render(in: context)
+        UIGraphicsPopContext()
         view.alpha = alpha
-        guard let cgImage = sharp.cgImage else { return nil }
-        let input = CIImage(cgImage: cgImage)
-        let blurred = input.applyingGaussianBlur(sigma: Double(radius * sharp.scale)).cropped(to: input.extent)
-        guard let output = context.createCGImage(blurred, from: input.extent) else { return nil }
-        return (UIImage(cgImage: output, scale: sharp.scale, orientation: .up), canvas)
+
+        // Three box passes of width k approximate a Gaussian of variance
+        // 3(k²−1)/12, so k ≈ √(4σ² + 1), odd.
+        let sigma = radius * scale
+        var kernel = UInt32(max(3, Int((4 * sigma * sigma + 1).squareRoot().rounded())))
+        if kernel % 2 == 0 { kernel += 1 }
+        guard let scratch = malloc(bytesPerRow * height) else { return nil }
+        defer { free(scratch) }
+        var source = vImage_Buffer(data: data, height: vImagePixelCount(height), width: vImagePixelCount(width),
+                                   rowBytes: bytesPerRow)
+        var target = vImage_Buffer(data: scratch, height: vImagePixelCount(height), width: vImagePixelCount(width),
+                                   rowBytes: bytesPerRow)
+        for _ in 0..<3 {
+            vImageBoxConvolve_ARGB8888(&source, &target, nil, 0, 0, kernel, kernel, nil,
+                                       vImage_Flags(kvImageEdgeExtend))
+            Swift.swap(&source, &target)
+        }
+        // After an odd number of passes the result is in `scratch`.
+        if source.data != data { memcpy(data, source.data, bytesPerRow * height) }
+        guard let image = context.makeImage() else { return nil }
+        return (UIImage(cgImage: image, scale: scale, orientation: .up), canvas)
     }
 
     private static func displayTree(_ layer: CALayer) {

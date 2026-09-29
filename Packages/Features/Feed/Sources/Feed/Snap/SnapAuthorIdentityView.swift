@@ -347,7 +347,8 @@ final class SnapAuthorIdentityView: UIView {
         #endif
         let id = model.authorID
         avatarTask = Task { [weak self] in
-            guard let image = try? await pipeline.image(for: url) else { return }
+            guard let fetched = try? await pipeline.image(for: url) else { return }
+            let image = await SnapAuthorFaceCache.prepared(fetched)
             SnapAuthorFaceCache.store(image, for: url)
             guard let self, self.authorID == id else { return }
             // Onto the NEW author's content: mid-blur, the old one is still
@@ -382,7 +383,7 @@ final class SnapAuthorIdentityView: UIView {
         guard SnapAuthorFaceCache.face(for: url) == nil else { return }
         Task { @MainActor in
             guard let image = try? await pipeline.image(for: url) else { return }
-            SnapAuthorFaceCache.store(image, for: url)
+            SnapAuthorFaceCache.store(await SnapAuthorFaceCache.prepared(image), for: url)
         }
     }
 
@@ -644,6 +645,33 @@ enum SnapAuthorFaceCache {
     private static var order: [URL] = []
 
     static func face(for url: URL) -> UIImage? { faces[url] }
+
+    /// `image` as the pill draws it: a small, already-DECODED square bitmap,
+    /// made off the main thread.
+    ///
+    /// ⚠️ Because the pill is also drawn by `CALayer.render` — the blurred
+    /// stills of `BarItemContentTransition` — and that CPU path decodes and
+    /// scales a full-size picture itself, on the main thread, on a frame of
+    /// the scroll: the first still of each new face cost 22–40ms on the
+    /// iPhone 18 Pro simulator (`-pill-probe`), the same pill 3–7ms once the
+    /// face had been drawn.
+    static func prepared(_ image: UIImage) async -> UIImage {
+        let side = AvatarImageView.barDiameter
+        return await Task.detached(priority: .userInitiated) {
+            let size = image.size
+            guard size.width > 0, size.height > 0 else { return image }
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 3
+            format.opaque = false
+            // Aspect FILL into the disc's square, as the avatar view draws it.
+            let fill = max(side / size.width, side / size.height)
+            let drawn = CGSize(width: size.width * fill, height: size.height * fill)
+            return UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format).image { _ in
+                image.draw(in: CGRect(x: (side - drawn.width) / 2, y: (side - drawn.height) / 2,
+                                      width: drawn.width, height: drawn.height))
+            }
+        }.value
+    }
 
     static func store(_ image: UIImage, for url: URL) {
         if faces.updateValue(image, forKey: url) != nil {
