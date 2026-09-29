@@ -5,13 +5,13 @@ import Testing
 import UIKit
 @testable import Feed
 
-/// THE AUTHOR PILL IS AN ITEM PER AUTHOR.
+/// THE AUTHOR PILL IS ONE ITEM FOR THE SLOT.
 ///
-/// The bar animates a change of item, never a change inside one: a pill
-/// rewritten in place under the same item gave iOS 26 nothing to transition
-/// between. A new author is a new pill in a new item under the NEW author's
-/// identifier — iOS 26 treats two items with one identifier as one item and
-/// swaps them in a single frame, so only a changed identifier animates.
+/// It was an item per author under a per-author identifier, which bought iOS
+/// 26's native item replacement — and a glass platter that morphed on every
+/// page. Now the item, its identifier and its pill stay; a new author is drawn
+/// IN PLACE, through the pill's own blur (`BarItemContentTransition`), and the
+/// item is re-minted only invisibly (same pill, same identifier).
 @MainActor
 struct SnapAuthorPillItemTests {
     private static func feed() -> (nav: UINavigationController, feed: SnapFeedViewController) {
@@ -48,7 +48,7 @@ struct SnapAuthorPillItemTests {
         }
     }
 
-    @Test func aNewAuthorIsAFreshItemUnderItsOwnIdentifier() throws {
+    @Test func aNewAuthorIsDrawnInTheSameItem() throws {
         let (_, feed) = Self.feed()
         feed.showAuthor(Self.model(id: "p1", author: "Ada Lovelace", authorID: "prof-1", meta: "@ada · 2h"))
         let first = try #require(Self.authorItem(feed))
@@ -58,12 +58,11 @@ struct SnapAuthorPillItemTests {
         let second = try #require(Self.authorItem(feed))
         let secondPill = try #require(second.customView as? SnapAuthorIdentityView)
 
-        #expect(second !== first, "the same item was reused: the bar has nothing to transition between")
-        #expect(secondPill !== firstPill, "one view mutated in place can never be transitioned")
-        #expect(first.identifier == SnapFeedViewController.authorItemIdentifier(for: ProfileID("prof-1")))
-        #expect(second.identifier == SnapFeedViewController.authorItemIdentifier(for: ProfileID("prof-2")))
-        #expect(second.identifier != first.identifier, "one identifier is one item to iOS 26: no transition")
+        #expect(second === first, "a new item for a new author: iOS 26 morphs the glass between them")
+        #expect(secondPill === firstPill)
+        #expect(second.identifier == SnapFeedViewController.authorItemIdentifier)
         #expect(Self.labels(in: secondPill).contains("Grace Hopper"))
+        #expect(Self.labels(in: secondPill).contains("Ada Lovelace") == false)
         // Exactly one author item in the run, however many authors went by.
         let pills = (feed.navigationItem.rightBarButtonItems ?? []).filter { $0.customView is SnapAuthorIdentityView }
         #expect(pills.count == 1)
@@ -83,9 +82,9 @@ struct SnapAuthorPillItemTests {
         #expect(Self.labels(in: try #require(second.customView)).contains("@ada · 3d"))
     }
 
-    /// The fresh pill is the same component the host configured: its taps
-    /// still route, and its width cap is the one the run arithmetic set.
-    @Test func aFreshPillInheritsTheHostsWiring() throws {
+    /// Across authors the pill keeps what the host configured: its taps still
+    /// route, and its width cap is the one the run arithmetic set.
+    @Test func thePillKeepsTheHostsWiringAcrossAuthors() throws {
         let (_, feed) = Self.feed()
         feed.showAuthor(Self.model(id: "p1", author: "Ada Lovelace", authorID: "prof-1", meta: "@ada · 2h"))
         let first = try #require(Self.authorItem(feed)?.customView as? SnapAuthorIdentityView)
@@ -140,12 +139,13 @@ struct SnapAuthorPillItemTests {
 
         let landed = try #require(Self.authorItem(feed))
         #expect(landed !== rode)
-        // Same author, same identifier: the swap is one item to the bar, unseen.
+        // Same pill, same identifier: the swap is one item to the bar, unseen.
+        #expect(landed.customView === rode.customView)
         #expect(landed.identifier == rode.identifier)
         #expect(Self.labels(in: try #require(landed.customView)).contains("Ada Lovelace"))
     }
 
-    /// A fresh pill built for the bar is a disc at its FIRST layout: the
+    /// A pill (re)installed in the bar is a disc at its FIRST layout: the
     /// plate is its 32pt diameter, round by corner and by mask, before any
     /// later pass has had a chance to fix anything.
     @Test func theMonogramIsRoundAtTheFirstLayout() throws {
