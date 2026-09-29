@@ -695,6 +695,21 @@ public final class GridVideoPlaybackCoordinator {
         view.debugLabel = "card"
         view.debugTracksFlight = true
         #endif
+        // ⚠️ A FLIGHT CARD'S SURFACE PAINTS NO GROUND — the feed's own card
+        // twin says why (`SnapFeedCell.donateLiveRenderView`,
+        // `VideoRenderView.paintsOpaqueGround`), and this is the same surface
+        // minted by the other side.
+        //
+        // "Primed" means a frame was ENQUEUED, not composited: a fresh
+        // sample-buffer layer shows its first frame a pass or two after its
+        // commit, and its ground composites WITH the commit. Opaque, that
+        // ground was the first thing the card drew at take-off — the two
+        // black frames of a Following video card's opening, over a card that
+        // had gone transparent for the very surface drawing them. Clear, the
+        // same passes show what is underneath: the tile itself, still on
+        // screen and playing the same clip until the flight's first-frame
+        // gate hides it.
+        view.paintsOpaqueGround = false
         guard pool.attachSurface(view, to: url) else { return nil }
         // Refuse a surface that could not be primed.
         //
@@ -784,6 +799,9 @@ public final class GridVideoPlaybackCoordinator {
         view.debugLabel = "landing"
         view.debugTracksFlight = true
         #endif
+        // Over the landing's still, never over black — see
+        // `makeAttachedSurface`.
+        view.paintsOpaqueGround = false
         guard pool.attachSurface(view, alongsideSurface: sibling) else { return nil }
         guard view.hasFrame else {
             pool.detachSurface(view, reason: "unprimedLanding")

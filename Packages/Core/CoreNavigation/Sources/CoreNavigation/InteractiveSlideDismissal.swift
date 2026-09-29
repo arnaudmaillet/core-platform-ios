@@ -527,6 +527,23 @@ extension InteractiveSlideDismissal: UINavigationControllerDelegate {
            let revealGeometry {
             return RevealPresentAnimator(geometry: revealGeometry)
         }
+        // ⚠️ AND OUR FEED'S PUSH GOES TO WHOEVER THIS DRIVER DISPLACED.
+        //
+        // A card-shaped close is installed right AFTER a flight's push
+        // (`FeedFeatureBuilder.attachTileCardClose`), on the premise that
+        // UIKit has already asked the flight for the push's animator. It has
+        // not always: a stack presented a moment earlier — the sound sheet's
+        // over-sheet host, pushed from its presentation's completion — asks
+        // on its next turn, by which time the slot is this driver's. It
+        // answered nil, UIKit slid the feed in, and a tile with a perfectly
+        // good hero opened as a plain push. Measured on the sound sheet: no
+        // `BUILD present flight` at all, the page arriving from the right.
+        if operation == .push, toVC === feedViewController, let savedDelegate,
+           let forwarded = savedDelegate.navigationController?(
+               navigationController, animationControllerFor: operation, from: fromVC, to: toVC
+           ) {
+            return forwarded
+        }
         guard operation == .pop, fromVC === feedViewController else { return nil }
         // ⚠️ A POP WITH NO GESTURE BEHIND IT still has to be prepared.
         //

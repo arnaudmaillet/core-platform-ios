@@ -179,7 +179,25 @@ final class DiscoverGalleryViewController: UIViewController {
             },
             // The card takes off PLAYING, joining the tile's own surface.
             donateLiveMedia: { [weak page] in page?.liveFlightSurface(for: tapped.id) },
-            depthView: { [weak page] in page }
+            depthView: { [weak page] in page },
+            // ⚠️ THE CLOSE FROM A TEXT PAGE. The feed is a pager: page from
+            // the tile's picture onto a post with only words, and there is no
+            // picture left to fly — both grabs refuse the `.card` page and the
+            // flight declines the chevron. The tile's own window is what that
+            // close lands through (`RowCardCloseLanding`), as the tile's
+            // picture rather than as a post card.
+            textReveal: page.tileWindow(
+                for: tapped,
+                willStageDismissal: { [weak page] in
+                    // Pinned before the landing is measured, the list's order.
+                    page?.beginHeroFreeze()
+                    page?.revealPost(tapped.id)
+                },
+                dismissalDidEnd: { [weak page] committed in
+                    page?.endHeroFreeze()
+                    if !committed { page?.clearRevealConcealment() }
+                }
+            )
         )
         openPost(self, origin, stream.map(\.id))
     }

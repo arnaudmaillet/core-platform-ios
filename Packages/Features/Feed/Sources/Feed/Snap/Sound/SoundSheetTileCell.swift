@@ -59,16 +59,35 @@ final class SoundSheetTileCell: UICollectionViewCell {
             captionLabel.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
         ])
 
-        let badges = UIStackView(arrangedSubviews: [originalBadge, currentBadge])
-        badges.axis = .vertical
-        badges.alignment = .leading
-        badges.spacing = Spacing.xs
-        badges.translatesAutoresizingMaskIntoConstraints = false
+        let badges = Self.badgeStack([originalBadge, currentBadge])
         contentView.addSubview(badges)
+        Self.pinBadges(badges, in: contentView)
+    }
+
+    /// The marks' column — one arrangement for the tile and the overlay a
+    /// flight card wears (`makeBadgeOverlay`), so the two cannot drift.
+    private static func badgeStack(_ badges: [UIView]) -> UIStackView {
+        let stack = UIStackView(arrangedSubviews: badges)
+        stack.axis = .vertical
+        stack.alignment = .leading
+        stack.spacing = Spacing.xs
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        return stack
+    }
+
+    private static func makeBadgeStack(original: Bool, current: Bool) -> UIStackView {
+        let originalBadge = TileBadge(text: "Original", symbol: "music.note")
+        let currentBadge = TileBadge(text: "Watching", symbol: nil)
+        originalBadge.isHidden = !original
+        currentBadge.isHidden = !current
+        return badgeStack([originalBadge, currentBadge])
+    }
+
+    private static func pinBadges(_ badges: UIView, in parent: UIView) {
         NSLayoutConstraint.activate([
-            badges.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: Spacing.xs + 2),
-            badges.topAnchor.constraint(equalTo: contentView.topAnchor, constant: Spacing.xs + 2),
-            badges.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -Spacing.xs),
+            badges.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: Spacing.xs + 2),
+            badges.topAnchor.constraint(equalTo: parent.topAnchor, constant: Spacing.xs + 2),
+            badges.trailingAnchor.constraint(lessThanOrEqualTo: parent.trailingAnchor, constant: -Spacing.xs),
         ])
     }
 
@@ -84,6 +103,107 @@ final class SoundSheetTileCell: UICollectionViewCell {
 
     /// The picture on the tile, for the hero to take off with.
     var cover: UIImage? { imageView.image }
+
+    // MARK: - Transition twins
+
+    /// The tile as it rests, drawn fresh — what a WINDOW out of it starts as
+    /// and what a close lands as, whatever the viewer ended on
+    /// (`SnapFeedHeroOrigin.textReveal`). For You's Following card's twin
+    /// (`ForYouFollowingCardCell.makeStandIn`), for this sheet's tile.
+    ///
+    /// Two arrangements, because the window grows from the tile to the whole
+    /// screen and the two kinds of tile stand that differently:
+    /// - a PICTURE fills the window and re-crops as it grows — the
+    ///   `PostGridTileStandInView` rule, since a picture pinned at the tile's
+    ///   size would be a postage stamp in a large grey card for most of the
+    ///   flight;
+    /// - WORDS stay at the tile's own size, centred, on the tile's ground —
+    ///   `RevealDismissCardView`'s rule, since stretching them would re-wrap
+    ///   the caption on every frame. Around them is ground on ground.
+    ///
+    /// ⚠️ ON AN OPAQUE GROUND. The tile's own fill is translucent — it rests
+    /// on the sheet — and a window carries it over the PAGE, which would show
+    /// through it. `standInGround` is that fill already composed over the
+    /// sheet.
+    static func makeStandIn(
+        for tile: SoundSheetViewController.Tile,
+        cover: UIImage?,
+        size: CGSize,
+        traits: UITraitCollection
+    ) -> UIView {
+        let card = UIView(frame: CGRect(origin: .zero, size: size))
+        card.backgroundColor = standInGround(traits: traits)
+        card.layer.cornerRadius = cornerRadius
+        card.layer.cornerCurve = .continuous
+        card.clipsToBounds = true
+        let twin = SoundSheetTileCell(frame: card.bounds)
+        twin.isUserInteractionEnabled = false
+        // Its own ground is the translucent one; the card above already wears
+        // the composed one.
+        twin.contentView.backgroundColor = .clear
+        twin.show(tile, cover: cover)
+        let words = tile.thumbnailURL == nil
+        twin.autoresizingMask = words
+            ? [.flexibleLeftMargin, .flexibleRightMargin, .flexibleTopMargin, .flexibleBottomMargin]
+            : [.flexibleWidth, .flexibleHeight]
+        card.addSubview(twin)
+        // Laid out HERE, at the tile's size and outside any animation — the
+        // reveal lays a stand-in out inside its own block, and a first pass
+        // there grows the badges and words out of the window's top-left
+        // corner (`ForYouFollowingCardCell.addAnchoredOverlay`).
+        UIView.performWithoutAnimation { card.layoutIfNeeded() }
+        return card
+    }
+
+    /// The tile's marks alone, for a FLIGHT card to wear over its picture and
+    /// fade as it grows (`SnapFeedHeroOrigin.restingOverlay`) — so a close
+    /// does not land a bare picture and pop "Original" / "Watching" on in the
+    /// frame the card is taken away. Nil for a tile that wears neither.
+    ///
+    /// Laid out once at `size`, then only re-posed by the card: the badges are
+    /// pinned to the top-leading corner and never re-wrap.
+    static func makeBadgeOverlay(
+        for tile: SoundSheetViewController.Tile, size: CGSize
+    ) -> UIView? {
+        guard tile.isOriginal || tile.isCurrent else { return nil }
+        let overlay = UIView(frame: CGRect(origin: .zero, size: size))
+        overlay.isUserInteractionEnabled = false
+        let badges = makeBadgeStack(original: tile.isOriginal, current: tile.isCurrent)
+        overlay.addSubview(badges)
+        pinBadges(badges, in: overlay)
+        UIView.performWithoutAnimation { overlay.layoutIfNeeded() }
+        return overlay
+    }
+
+    /// The tile's fill composed over the sheet it rests on — an opaque colour
+    /// for a surface that is not resting on the sheet. Resolved against the
+    /// tile's own traits (the sheet is ELEVATED in dark mode, which is part of
+    /// what the tile looks like).
+    static func standInGround(traits: UITraitCollection) -> UIColor {
+        let fill = UIColor.secondarySystemFill.resolvedColor(with: traits)
+        let base = UIColor.systemBackground.resolvedColor(with: traits)
+        var (fr, fg, fb, fa): (CGFloat, CGFloat, CGFloat, CGFloat) = (0, 0, 0, 0)
+        var (br, bg, bb, ba): (CGFloat, CGFloat, CGFloat, CGFloat) = (0, 0, 0, 0)
+        guard fill.getRed(&fr, green: &fg, blue: &fb, alpha: &fa),
+              base.getRed(&br, green: &bg, blue: &bb, alpha: &ba)
+        else { return base }
+        return UIColor(
+            red: fr * fa + br * (1 - fa),
+            green: fg * fa + bg * (1 - fa),
+            blue: fb * fa + bb * (1 - fa),
+            alpha: 1
+        )
+    }
+
+    /// What `configure` shows, set synchronously — a twin has its picture
+    /// already and must draw it on its first frame.
+    private func show(_ tile: SoundSheetViewController.Tile, cover: UIImage?) {
+        postID = tile.postID
+        originalBadge.isHidden = !tile.isOriginal
+        currentBadge.isHidden = !tile.isCurrent
+        captionLabel.text = tile.thumbnailURL == nil ? tile.caption : nil
+        imageView.image = cover
+    }
 
     /// Whether the "Original" mark shows — what a test reads.
     var showsOriginalBadge: Bool { !originalBadge.isHidden }

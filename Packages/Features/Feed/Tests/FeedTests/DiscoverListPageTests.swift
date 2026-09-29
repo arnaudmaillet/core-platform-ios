@@ -1,4 +1,5 @@
 import CoreModels
+import CoreNavigation
 import CoreStorage
 import FeedInterface
 import Foundation
@@ -273,6 +274,25 @@ struct DiscoverListPageTests {
         #expect(page.landsByAdoption == false)
         #expect(page.adoptPost(tile.id, intoSlotOf: mediaCard.id) == false)
     }
+
+    /// ⚠️ The regression: a chunk's MEDIA tile, paged onto a text post and
+    /// closed, landed through a window holding a whole post CARD — author,
+    /// caption, actions — squeezed into the tile's rect. The close lands as
+    /// the tile, at the tile's size; a card still lands as a card.
+    @Test func aChunkTilesCloseLandsAsTheTileNotAPostCard() throws {
+        let page = page(corpus(60))
+        collectionView(of: page).layoutIfNeeded()
+        let cards = try #require(page.segments.first?.posts)
+        let tiles = try #require(page.segments.first(where: { $0.chunk != nil })?.posts)
+        let tile = try #require(tiles.first)
+        let card = try #require(cards.first { $0.kind != .text })
+
+        let landing = try #require(page.makeDismissStandIn(for: tile.id))
+        #expect(landing is PostGridTileStandInView, "a tile's close landed as \(type(of: landing))")
+        let slot = try #require(page.rowFrame(for: tile.id, in: page))
+        #expect(abs(landing.bounds.width - slot.width) < 0.5 && abs(landing.bounds.height - slot.height) < 0.5)
+        #expect(!(page.makeDismissStandIn(for: card.id) is PostGridTileStandInView), "a card lost its card")
+    }
 }
 
 /// The pushed mosaic: it opens its tiles through the shared flight, with the
@@ -345,6 +365,32 @@ struct DiscoverGalleryTests {
         #expect(opened?.ids == Array(shown[2...].prefix(40)).map(\.id))
         #expect(opened?.origin.hasHero == true)
         #expect(opened?.origin.style == .tile)
+    }
+
+    /// Every tile carries its own window, so a tile opened by a flight and
+    /// paged onto a text post closes back onto it — as the TILE: its picture,
+    /// its corner, nothing aligned to a caption it does not have.
+    @Test func aTileClosesFromAWordsPageThroughItsOwnWindow() throws {
+        var opened: SnapFeedHeroOrigin?
+        let gallery = Self.gallery(openPost: { _, origin, _ in opened = origin })
+        let posts = (0..<30).map { index in
+            GalleryPost(
+                id: PostID("m\(index)"), kind: .photo, isRepost: false,
+                thumbnailURL: URL(string: "https://example.com/\(index).jpg"),
+                caption: "", publishedAtMS: 0
+            )
+        }
+        gallery.loadViewIfNeeded()
+        gallery.view.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+        gallery.render(.content(posts))
+        gallery.view.layoutIfNeeded()
+        #expect(gallery.debugOpenTile(at: 2))
+        let window = try #require(opened?.textReveal, "a tile opened with no way to close from words")
+        #expect(window.alignsPageToSource == false)
+        #expect(window.pageFit == .covering)
+        #expect(window.cornerRadius == ChaoticSliceLayout.harmonisedCornerRadius)
+        #expect(window.rowFrame(gallery.view) != nil)
+        #expect(window.makeDismissStandIn(nil) is PostGridTileStandInView)
     }
 }
 

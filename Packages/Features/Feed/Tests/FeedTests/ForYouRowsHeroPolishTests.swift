@@ -267,6 +267,62 @@ struct ForYouRowsHeroPolishTests {
         #expect(Self.landingPane(of: tile).isHidden, "a tile flying its own video started blending")
     }
 
+    // MARK: - 4. A story's opening is live, not a poster
+
+    /// A face that can donate nothing flies no player, so it says so and the
+    /// page decodes from take-off; every source that can donate — a Following
+    /// card — and every source that draws its own post keeps the default.
+    @Test func aStoryFliesNoPlayerSoThePageDecodesFromTakeOff() {
+        let post = Self.post("s", kind: .video)
+        func origin(face: Bool, donates: Bool) -> SnapFeedHeroOrigin {
+            SnapFeedHeroOrigin(
+                post: post, cover: Self.picture(.systemYellow), style: .listMedia,
+                frame: { _ in nil }, isOnScreen: { false }, setConcealed: { _ in },
+                donateLiveMedia: donates ? { nil } : nil,
+                cornerRadius: face ? 32 : nil,
+                pagePictureOf: face ? { _, _ in nil } : nil
+            )
+        }
+        #expect(ExternalHeroZoomSource(origin: origin(face: true, donates: false))
+            .zoomFlightCarriesLivePlayer == false, "a story held the page's playback back for a player it never flies")
+        #expect(ExternalHeroZoomSource(origin: origin(face: false, donates: true)).zoomFlightCarriesLivePlayer)
+        #expect(ExternalHeroZoomSource(origin: origin(face: false, donates: false)).zoomFlightCarriesLivePlayer)
+    }
+
+    /// The page's player, MIRRORED onto a face's card mid-flight, is the far
+    /// end of the blend: the face rises over it, it is held out of sight while
+    /// the card travels, and it arrives by fading up once it has a frame —
+    /// never by cutting in.
+    @Test func aFaceMirroringThePagesPlayerDissolvesToIt() throws {
+        let face = PostGridFlightCard(
+            post: Self.post("s", kind: .video), cover: Self.picture(.systemYellow),
+            style: .listMedia, cornerRadius: 32, drawsPost: false
+        )
+        face.frame = CGRect(origin: .zero, size: Self.card)
+        face.adoptZoomLiveMedia { _ in true }
+        let surface = try #require(face.zoomLiveMediaSurface as? VideoRenderView)
+        face.setZoomContentBlend(1)
+        #expect(!Self.landingPane(of: face).isHidden, "the face has nothing to rise over")
+        #expect(abs(Self.landingPane(of: face).alpha - 1) < 0.0001)
+        face.setZoomContentBlend(0)
+        #expect(abs(Self.landingPane(of: face).alpha) < 0.0001, "the page end still shows the face")
+
+        face.holdAdoptedLiveMediaUntilLanding()
+        #expect(surface.isHidden, "a surface adopted mid-flight was shown before the landing")
+        face.fadeInAdoptedLiveMedia(over: 0.2)
+        #expect(!surface.isHidden, "the arrival left the surface hidden")
+        #expect(surface.alpha < 0.0001, "the surface showed before it had a frame")
+
+        // A card that draws its own post does not start blending over it.
+        let tile = PostGridFlightCard(
+            post: Self.post("t", kind: .video), cover: Self.picture(.systemYellow), style: .listMedia
+        )
+        tile.frame = CGRect(origin: .zero, size: Self.card)
+        tile.adoptZoomLiveMedia { _ in true }
+        tile.setZoomContentBlend(1)
+        #expect(Self.landingPane(of: tile).isHidden, "a tile mirroring its own post started blending")
+    }
+
     // MARK: - Fixtures
 
     private static func near(_ a: CGRect, _ b: CGRect) -> Bool {

@@ -1,7 +1,9 @@
 import CoreModels
+import CoreNavigation
 import CoreStorage
 import FeedInterface
 import MediaCore
+import PostGrid
 import Testing
 import UIKit
 @testable import Feed
@@ -283,6 +285,93 @@ struct SoundSheetTests {
         #expect(cell.contentView.layer.cornerRadius == SoundSheetTileCell.cornerRadius)
         #expect(cell.contentView.layer.cornerCurve == .continuous)
         #expect(cell.contentView.clipsToBounds)
+    }
+
+    // MARK: - Hero
+
+    private static func galleryPost(_ id: String, kind: GalleryPost.Kind) -> GalleryPost {
+        GalleryPost(
+            id: PostID(id), kind: kind, isRepost: false,
+            thumbnailURL: kind == .text ? nil : URL(string: "https://example.com/\(id).jpg"),
+            caption: "words \(id)", publishedAtMS: 1
+        )
+    }
+
+    private static func tile(for post: GalleryPost) -> Sheet.Tile {
+        Sheet.Tile(
+            postID: post.id, thumbnailURL: post.thumbnailURL, caption: post.caption,
+            isCurrent: false, isOriginal: true
+        )
+    }
+
+    /// ⚠️ The regression: the flight card rounded as a For You brick (16pt)
+    /// and landed on a 12pt tile, so the corners jumped in the frame the card
+    /// was taken away — the flash at the end of every close. The card lands
+    /// on the tile's own corner AND curve.
+    @Test func aTilesFlightLandsOnTheTilesOwnCorner() throws {
+        let controller = sheet(tiles: 3)
+        try laidOut(controller)
+        let post = Self.galleryPost("p1", kind: .photo)
+        let origin = controller.heroOrigin(for: Self.tile(for: post), post: post, stream: [post], source: .sheet)
+        #expect(origin.cornerRadius == SoundSheetTileCell.cornerRadius)
+        #expect(origin.cornerCurve == .continuous)
+        let card = try #require(ExternalHeroZoomSource(origin: origin).makeZoomFlightCard() as? PostGridFlightCard)
+        #expect(card.zoomRestingCornerRadius == SoundSheetTileCell.cornerRadius)
+        #expect(card.layer.cornerRadius == SoundSheetTileCell.cornerRadius)
+        #expect(card.layer.cornerCurve == .continuous, "the card landed a circle's corner on a squircle")
+    }
+
+    /// A TEXT tile opens as a window out of the tile and closes back onto it
+    /// — For You's Following cards' arrangement — and a MEDIA tile keeps its
+    /// flight but carries the same window for a close from a words page.
+    @Test func everyTileCarriesItsWindowAndOnlyWordsOpenThroughIt() throws {
+        let controller = sheet(tiles: 3)
+        try laidOut(controller)
+        let text = Self.galleryPost("p1", kind: .text)
+        let words = controller.heroOrigin(for: Self.tile(for: text), post: text, stream: [text], source: .sheet)
+        #expect(words.hasHero == false, "a text tile has no picture to fly")
+        let window = try #require(words.textReveal, "a text tile opened with the plain push")
+        #expect(window.cornerRadius == SoundSheetTileCell.cornerRadius)
+        #expect(window.alignsPageToSource == false)
+        #expect(window.pageFit == .covering)
+        #expect(window.fill.map { Self.alpha(of: $0) } == 1, "the window's ground is see-through")
+
+        let photo = Self.galleryPost("p2", kind: .photo)
+        let media = controller.heroOrigin(for: Self.tile(for: photo), post: photo, stream: [photo], source: .sheet)
+        #expect(media.textReveal != nil, "a media tile paged onto words has nowhere to close")
+    }
+
+    /// The stand-in is the tile at both ends: on an OPAQUE ground (the tile's
+    /// own is translucent over the sheet), a picture filling the window as it
+    /// grows, words staying at the tile's size and wrap, centred.
+    @Test func aTilesStandInFillsWithAPictureAndKeepsItsWords() throws {
+        let size = CGSize(width: 120, height: 160)
+        let page = CGRect(x: 0, y: 0, width: 402, height: 874)
+        let traits = UITraitCollection(userInterfaceStyle: .dark)
+
+        let words = SoundSheetTileCell.makeStandIn(
+            for: Self.tile(for: Self.galleryPost("t", kind: .text)), cover: nil, size: size, traits: traits
+        )
+        #expect(words.backgroundColor.map { Self.alpha(of: $0) } == 1)
+        #expect(words.layer.cornerRadius == SoundSheetTileCell.cornerRadius)
+        words.frame = page
+        words.layoutIfNeeded()
+        let wordsTwin = try #require(words.subviews.first)
+        #expect(wordsTwin.bounds.size == size, "the words re-wrapped at the window's size")
+        #expect(abs(wordsTwin.center.x - page.midX) < 0.5 && abs(wordsTwin.center.y - page.midY) < 0.5)
+
+        let picture = SoundSheetTileCell.makeStandIn(
+            for: Self.tile(for: Self.galleryPost("m", kind: .photo)), cover: UIImage(), size: size, traits: traits
+        )
+        picture.frame = page
+        picture.layoutIfNeeded()
+        #expect(try #require(picture.subviews.first).frame == page, "the picture did not fill the window")
+    }
+
+    private static func alpha(of color: UIColor) -> CGFloat {
+        var alpha: CGFloat = 0
+        color.getRed(nil, green: nil, blue: nil, alpha: &alpha)
+        return alpha
     }
 
     // MARK: - Order

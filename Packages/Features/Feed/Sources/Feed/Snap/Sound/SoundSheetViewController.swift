@@ -370,6 +370,9 @@ final class SoundSheetViewController: UIViewController {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         reveal.wake()
+        #if DEBUG
+        debugOpenTileIfRequested()
+        #endif
     }
 
     /// ⚠️ ONLY WAKES THE REVEAL AND PLACES ITS LINE — never a detent, never a
@@ -1073,6 +1076,12 @@ final class SoundSheetViewController: UIViewController {
     func debugPopSection() {
         navigationController?.popToRootViewController(animated: true)
     }
+
+    /// `-sound-sheet-open`: a tile's tap, through the same `select` a finger
+    /// reaches — see `SoundSheetViewController+QA`.
+    func debugSelect(_ id: PostID, order: [PostID]) {
+        select(id, order: order, source: .sheet)
+    }
     #endif
 
     // MARK: - Expansion
@@ -1142,6 +1151,32 @@ final class SoundSheetViewController: UIViewController {
         guard let start = ordered.firstIndex(where: { $0.id == post.id }) else { return false }
         let stream = Array(ordered[start...])
         let id = tile.postID
+        let presenter: UIViewController
+        if case .gallery(let pushed) = source { presenter = pushed } else { presenter = self }
+        let origin = heroOrigin(for: tile, post: post, stream: stream, source: source)
+        trace("open \(id.rawValue) (\(post.kind)) stream \(stream.prefix(3).map(\.id.rawValue))")
+        stopPreview()
+        isShowingFeed = true
+        refreshCover()
+        OverSheetFeedHost.present(over: presenter, onFinished: { [weak self] in
+            self?.isShowingFeed = false
+            self?.refreshCover()
+        }) { host in
+            #if DEBUG
+            Self.debugFeedHost = host
+            #endif
+            openFeedHero(stream.map(\.id), host, origin)
+        }
+        return true
+    }
+
+    /// The tile, described for the shared flight (`presentSnapFeedHero`): its
+    /// hero, and the window it opens through (a text post) or closes through
+    /// (any post, once the feed is on words). Internal for the suite.
+    func heroOrigin(
+        for tile: Tile, post: GalleryPost, stream: [GalleryPost], source: TileSource
+    ) -> SnapFeedHeroOrigin {
+        let id = tile.postID
         // Weak, both: the hero keeps these closures for the whole trip.
         weak var gallery: SoundSheetGalleryViewController?
         if case .gallery(let pushed) = source { gallery = pushed }
@@ -1154,10 +1189,21 @@ final class SoundSheetViewController: UIViewController {
         }
         let cover = cell()?.cover
         let presenter: UIViewController = gallery ?? self
-        let origin = SnapFeedHeroOrigin(
+        // Every tile is the same shape, and the one measured at the tap
+        // stands in for a close that finds it scrolled out.
+        let tappedSize = cell()?.bounds.size
+        let traits = cell()?.traitCollection ?? traitCollection
+        let standIn: () -> UIView? = {
+            guard let size = cell()?.bounds.size ?? tappedSize else { return nil }
+            // The picture the tile shows NOW, or the one it showed at the tap.
+            return SoundSheetTileCell.makeStandIn(
+                for: tile, cover: cell()?.cover ?? cover, size: size, traits: traits
+            )
+        }
+        return SnapFeedHeroOrigin(
             post: post,
             stream: stream,
-            // A text post has no picture to fly: it opens with the plain push.
+            // A text post has no picture to fly: it opens through its window.
             hasHero: post.kind != .text && cover != nil,
             cover: cover,
             style: .tile,
@@ -1166,19 +1212,39 @@ final class SoundSheetViewController: UIViewController {
                 guard let presenter else { return false }
                 return frame(presenter.view) != nil
             },
-            setConcealed: { concealed in cell()?.setConcealed(concealed) }
+            setConcealed: { concealed in cell()?.setConcealed(concealed) },
+            // ⚠️ EVERY TILE, and For You's Following cards are why
+            // (`ForYouRowOrigins`): a TEXT post opens as a window out of its
+            // tile and closes back onto it — it used to open with the plain
+            // push — and a MEDIA post, which opens with its flight, closes
+            // through the same window once the viewer has paged onto words,
+            // where there is no picture left to fly. Marker-shaped: the feed
+            // is a pager, so nothing is aligned; the tile, drawn fresh, is the
+            // stand-in at both ends.
+            textReveal: TextRevealOrigin(
+                rowFrame: { space in frame(space) },
+                captionEnd: nil,
+                makeDismissStandIn: { _ in standIn() },
+                makePresentStandIn: standIn,
+                alignsPageToSource: false,
+                pageFit: .covering,
+                cornerRadius: SoundSheetTileCell.cornerRadius,
+                fill: SoundSheetTileCell.standInGround(traits: traits),
+                setConcealed: { concealed in cell()?.setConcealed(concealed) }
+            ),
+            // ⚠️ THE TILE'S OWN CORNER, AND ITS CURVE. Left to the style, the
+            // card rounded as a For You brick (16pt) and landed on a 12pt tile:
+            // the corners jumped in the frame the card was taken away — the
+            // flash at the end of every close. A 12pt SQUIRCLE, like the tile.
+            cornerRadius: SoundSheetTileCell.cornerRadius,
+            cornerCurve: .continuous,
+            // The tile's marks, worn at the source end and faded as the card
+            // grows, so a close does not pop them on at the landing.
+            restingOverlay: {
+                guard let size = cell()?.bounds.size ?? tappedSize else { return nil }
+                return SoundSheetTileCell.makeBadgeOverlay(for: tile, size: size)
+            }
         )
-        trace("open \(id.rawValue) (\(post.kind)) stream \(stream.prefix(3).map(\.id.rawValue))")
-        stopPreview()
-        isShowingFeed = true
-        refreshCover()
-        OverSheetFeedHost.present(over: presenter, onFinished: { [weak self] in
-            self?.isShowingFeed = false
-            self?.refreshCover()
-        }) { host in
-            openFeedHero(stream.map(\.id), host, origin)
-        }
-        return true
     }
 
     private func tileCell(for id: PostID) -> SoundSheetTileCell? {

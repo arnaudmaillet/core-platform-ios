@@ -153,6 +153,7 @@ final class ExternalHeroZoomSource: ZoomTransitionSource {
             cover: origin.cover,
             style: origin.style == .tile ? .tile : .listMedia,
             cornerRadius: origin.cornerRadius,
+            cornerCurve: origin.cornerCurve,
             drawsPost: !drawsFace
         )
         flyingCard = card
@@ -192,6 +193,26 @@ final class ExternalHeroZoomSource: ZoomTransitionSource {
     func zoomLiveMediaSurfaceIfReady() -> UIView? {
         guard !isStagingDismissal else { return nil }
         return origin.donateLiveMedia?()
+    }
+
+    /// ⚠️ FALSE FOR A FACE THAT CAN DONATE NOTHING — a friend's story.
+    ///
+    /// The destination stands its own playback down for a presenting flight
+    /// on the premise that the card is flying ITS player (see the requirement).
+    /// A face flies no player and never will: nothing on its screen draws the
+    /// friend's post, so there is no surface to donate at the tap and no row
+    /// to be granted one mid-air. The premise was false, and what it bought
+    /// was a story opening on a poster — the card dissolved from the face to
+    /// the post's still and the clip started only once the page had landed.
+    ///
+    /// Answering false lets the page decode from take-off, and the flight's
+    /// mirroring retry (`ZoomLiveMediaRetry.arm(mirroring:)`) brings its
+    /// first frame into the card mid-air — the marker's route, which is the
+    /// other source that flies no player of its own. Every source that CAN
+    /// donate keeps the default: its card is, or is about to be, flying the
+    /// page's player, and a page starting its own would blank it.
+    var zoomFlightCarriesLivePlayer: Bool {
+        !(drawsFace && origin.donateLiveMedia == nil)
     }
 
     /// A close's landing: the item takes the surface the card was flying, so

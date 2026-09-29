@@ -793,6 +793,21 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // the geometry rather than derived from it, because a media post will
         // carry a geometry too and must still open with its flight.
         textSlideDismissal.revealPresents = presenting
+        // ⚠️ A WINDOW ONTO A TILE IS THE TILE'S SHAPE, not a card's.
+        //
+        // Discover draws a chunk's posts as bricks, and a brick opened by a
+        // flight closes through this window once the viewer has paged onto a
+        // text post. Every card-shaped answer below — the row's caption to
+        // align to, its borrowed author band, the card's rounding and fill —
+        // described a card that is not there: the window closed as a card onto
+        // a tile. The tile answers for itself instead, the way a marker does:
+        // nothing to align, no band, its own corner and floor. The stand-in is
+        // the tile's twin (`ForYouGridPage.makeDismissStandIn`).
+        //
+        // Stable for the window's life: on a list the anchor never moves, and
+        // on a mosaic — which may re-point it — every post is a tile.
+        let landsOnTile = page.drawsAsTile(postID)
+        let landingPost = page.posts.first { $0.id == postID }
         textSlideDismissal.revealGeometry = TextRevealInstaller.geometry(
             feed: feed,
             origin: TextRevealOrigin(
@@ -809,13 +824,17 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
                 depthView: { [weak page] in page },
                 captionTop: page.textRowCaptionTop(for: postID),
                 // Borrowed by the destination for the flight, so the window
-                // shows the header the card does instead of a blank strip.
-                authorBand: page.textRowAuthorBand(for: postID),
+                // shows the header the card does instead of a blank strip. A
+                // tile shows none, so none is borrowed.
+                authorBand: landsOnTile ? nil : page.textRowAuthorBand(for: postID),
                 // What the CLOSE carries home. Built from the post rather than
                 // read off the page, so a viewer who scrolled the comments
                 // still lands on the card they came from — see
                 // `RevealDismissCardView`.
                 makeDismissStandIn: { [weak page] _ in page?.makeDismissStandIn(for: anchorID) },
+                // A tile has no caption for the page's to land on — the
+                // marker's reason (`TextRevealOrigin.alignsPageToSource`).
+                alignsPageToSource: !landsOnTile,
                 // ⚠️ THE DEPARTING PAGE TRAVELS TO THE ARRIVAL ROW — see
                 // `RevealPageFit.covering`.
                 //
@@ -828,6 +847,11 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
                 // to the release, which is what the viewer asked for and what
                 // the marker and the place page already do.
                 pageFit: .covering,
+                // The tile's own corner and floor; a row keeps the card's.
+                cornerRadius: landsOnTile ? page.tileCornerRadius : nil,
+                fill: landsOnTile
+                    ? landingPost.map(PostGridTileCell.fillColor(for:)) ?? PostGridListRowCell.cardFillColor
+                    : PostGridListRowCell.cardFillColor,
                 // The reveal's OWN concealment slot, not the hero's — see
                 // `ForYouGridPage.revealConcealedPostID`. Applied on every
                 // dequeue too, so a row that recycles mid-flight comes back
@@ -2551,6 +2575,10 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             } else if !page.debugSelectItem(at: index) {
                 openFeed(at: index)
             }
+            // `-foryou-demo-close`: the chevron's close, as the rows' hooks
+            // schedule it — with `-snap-fling N`, the close from wherever the
+            // feed was paged to (a chunk tile's close from a words page).
+            scheduleDemoCloseIfRequested()
             // `-zoom-repeat`: open, pop, open again (twice over). The hero's
             // stall has only ever been measured on the FIRST push of a
             // process, which cannot distinguish per-push cost from one-time
