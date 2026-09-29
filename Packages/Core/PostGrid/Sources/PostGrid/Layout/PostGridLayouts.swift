@@ -218,6 +218,7 @@ public enum PostGridListLayout {
         hasHeader: (@MainActor (Int) -> Bool)? = nil
     ) -> UICollectionViewCompositionalLayout {
         UICollectionViewCompositionalLayout { index, _ in
+            let isHeaded = hasHeader?(index) == true
             let item = NSCollectionLayoutItem(layoutSize: .init(
                 widthDimension: .fractionalWidth(1),
                 heightDimension: .estimated(88)
@@ -249,9 +250,12 @@ public enum PostGridListLayout {
             // capsule — there is nothing above it to be separated from, and a
             // gap there reads as the screen failing to fill.
             //
-            // Only for sectioned lists. The profile gallery hosts this same
+            // Only for a HEADED section. The profile gallery hosts this same
             // layout as a non-scrolling self-sizing grid, where a trailing
-            // margin is height it did not ask for.
+            // margin is height it did not ask for — and so is a list that
+            // CAN be sectioned but currently is one unlabelled run (the place
+            // page's Activity list, the pushed Following list with nothing
+            // new): asked per section, it gets no stray band at its foot.
             //
             // The SAME constant the pill applies as its own top margin in the
             // inbox's tables — one number for one rule, expressed through
@@ -262,10 +266,10 @@ public enum PostGridListLayout {
             section.contentInsets = NSDirectionalEdgeInsets(
                 top: 0,
                 leading: sideMargin,
-                bottom: hasHeader == nil ? 0 : SectionHeaderPillButton.Metrics.sectionGap,
+                bottom: isHeaded ? SectionHeaderPillButton.Metrics.sectionGap : 0,
                 trailing: sideMargin
             )
-            if hasHeader?(index) == true {
+            if isHeaded {
                 let header = NSCollectionLayoutBoundarySupplementaryItem(
                     layoutSize: .init(
                         widthDimension: .fractionalWidth(1),

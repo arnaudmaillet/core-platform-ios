@@ -18,10 +18,15 @@ import UIKit
 /// spring, the highlight, the accessibility treatment of a control — none of
 /// which a recognizer over an effect view would produce.
 ///
-/// It lives here rather than in any one feature because five lists across two
+/// It lives here rather than in any one feature because six lists across two
 /// features need the same header: the inbox's two tables, the compose picker's
-/// and the search screen's collection views, and For You's Following list. All
-/// of them host it; none of them owns how it looks.
+/// and the search screen's collection views, and For You's pushed Following and
+/// Friends lists. All of them host it; none of them owns how it looks.
+///
+/// **An optional count** (`setCount`) rides after the title in both shapes —
+/// `New (23)` — as a `NotificationCountBadge`, the count the section's way in
+/// (`SectionLinkHeaderView`) wore on the screen before. Zero draws nothing, so
+/// a header nobody gives a count is exactly the header it always was.
 public final class SectionHeaderPillButton: UIButton {
     /// Which shape the header is currently wearing.
     public enum Presentation: Equatable, Sendable {
@@ -58,6 +63,8 @@ public final class SectionHeaderPillButton: UIButton {
         /// The crossfade. Short enough to feel like a consequence of the scroll
         /// rather than an animation playing over it.
         public static let morphDuration: TimeInterval = 0.22
+        /// Title to count badge.
+        public static let badgeGap: CGFloat = 6
     }
 
     /// Fires when the capsule is tapped. Re-assigned on every configure, since
@@ -77,6 +84,17 @@ public final class SectionHeaderPillButton: UIButton {
     /// two, keeps the box still while its contents change.
     private var heightConstraint: NSLayoutConstraint?
     private var title: String?
+    /// The count after the title — a SUBVIEW, not part of the configuration.
+    ///
+    /// ⚠️ Not an image in the configuration nor a text attachment: on glass
+    /// both are rendered as vibrant content, and a red-and-white image comes
+    /// out as a flat monochrome shape (`platter-flattens-label-alpha`, the
+    /// hearts and gems that turned black). The configuration only RESERVES the
+    /// badge's width, through its trailing inset.
+    private let countBadge = NotificationCountBadge()
+    /// The badge's distance from the button's trailing edge — which differs
+    /// per shape, see `badgeTrailingInset`.
+    private var badgeTrailing: NSLayoutConstraint?
     /// Watches the enclosing scroll view so the header decides its own shape.
     /// See `beginObservingScroll`.
     private var scrollObservation: NSKeyValueObservation?
@@ -85,6 +103,17 @@ public final class SectionHeaderPillButton: UIButton {
         super.init(frame: .zero)
         applyConfiguration(for: presentation)
         addAction(UIAction { [weak self] _ in self?.onTap?() }, for: .primaryActionTriggered)
+        countBadge.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(countBadge)
+        let badgeTrailing = trailingAnchor.constraint(
+            equalTo: countBadge.trailingAnchor,
+            constant: Self.badgeTrailingInset(for: presentation, traits: traitCollection)
+        )
+        self.badgeTrailing = badgeTrailing
+        NSLayoutConstraint.activate([
+            countBadge.centerYAnchor.constraint(equalTo: centerYAnchor),
+            badgeTrailing
+        ])
         // Hugging horizontally so the header wraps its title rather than
         // stretching: it is sized by its label, and the space either side of it
         // is the list showing through.
@@ -99,6 +128,18 @@ public final class SectionHeaderPillButton: UIButton {
         applyConfiguration(for: presentation)
         accessibilityHint = title.map { "Scrolls to the \($0) section" }
     }
+
+    /// The count after the title. Zero (the default) draws none. Set on every
+    /// configure, like the title: header views are recycled across sections.
+    public func setCount(_ count: Int) {
+        guard count != countBadge.count else { return }
+        countBadge.setCount(count)
+        accessibilityValue = countBadge.count > 0 ? "\(countBadge.count) new" : nil
+        applyConfiguration(for: presentation)
+    }
+
+    /// The count on the badge, zero while none shows.
+    public var count: Int { countBadge.count }
 
     /// Pins the header into a host: leading-aligned on the host's margins,
     /// floating clear of its top and bottom, and free to be narrower than the
@@ -301,6 +342,13 @@ public final class SectionHeaderPillButton: UIButton {
         }
     }
 
+    public override func layoutSubviews() {
+        super.layoutSubviews()
+        // Over whatever the configuration draws — the glass is a background
+        // UIKit may re-insert.
+        bringSubviewToFront(countBadge)
+    }
+
     public override func traitCollectionDidChange(_ previous: UITraitCollection?) {
         super.traitCollectionDidChange(previous)
         guard traitCollection.preferredContentSizeCategory != previous?.preferredContentSizeCategory
@@ -328,6 +376,14 @@ public final class SectionHeaderPillButton: UIButton {
             configuration.contentInsets = .zero
             configuration.baseForegroundColor = .label
         }
+        // Room for the badge after the title, reserved in the configuration so
+        // the button's own sizing — and the capsule — include it.
+        if countBadge.count > 0 {
+            let trailing = Self.badgeTrailingInset(for: presentation, traits: traitCollection)
+            configuration.contentInsets.trailing = trailing
+                + countBadge.intrinsicContentSize.width + Metrics.badgeGap
+            badgeTrailing?.constant = trailing
+        }
         configuration.attributedTitle = title.flatMap { title in
             guard !title.isEmpty else { return nil }
             var attributes = AttributeContainer()
@@ -335,6 +391,19 @@ public final class SectionHeaderPillButton: UIButton {
             return AttributedString(title, attributes: attributes)
         }
         self.configuration = configuration
+    }
+
+    /// How far the badge sits from the trailing edge: flush with the title's
+    /// margin inline, and CONCENTRIC in the capsule — the same distance from
+    /// the capsule's end as from its top and bottom, so the badge nests in the
+    /// curve rather than floating a text inset away from it.
+    private static func badgeTrailingInset(
+        for presentation: Presentation, traits: UITraitCollection
+    ) -> CGFloat {
+        switch presentation {
+        case .inline: 0
+        case .pinned: max(Spacing.xs, (reservedHeight(for: traits) - NotificationCountBadge.height) / 2)
+        }
     }
 
     private static func font(for presentation: Presentation, traits: UITraitCollection) -> UIFont {

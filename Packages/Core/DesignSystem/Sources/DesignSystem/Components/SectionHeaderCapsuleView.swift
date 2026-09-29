@@ -29,10 +29,17 @@ public final class SectionHeaderCapsuleView: UICollectionReusableView {
         onTap = nil
     }
 
-    /// `leadsList` decides the header's top margin — see
-    /// `SectionHeaderPillButton.setLeadsList`.
-    public func setTitle(_ title: String?, leadsList: Bool = true) {
+    /// `count` is the badge after the title, zero for none — see
+    /// `SectionHeaderPillButton.setCount`. `leadsList` decides the header's top
+    /// margin — see `SectionHeaderPillButton.setLeadsList`.
+    public func setTitle(_ title: String?, count: Int = 0, leadsList: Bool = true) {
         pill.setPillTitle(title)
+        pill.setCount(count)
         pill.setLeadsList(leadsList)
     }
+
+    #if DEBUG
+    /// The pill this header hosts — what a test reads its shape and count off.
+    public var debugPill: SectionHeaderPillButton { pill }
+    #endif
 }
