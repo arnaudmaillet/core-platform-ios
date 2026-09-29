@@ -213,6 +213,38 @@ struct DiscoverListPageTests {
         #expect(asked == 1)
     }
 
+    /// "View all ›" sits right-aligned and close under its chunk (2026-09-29):
+    /// the footer flush with the chunk's foot and as wide as the chunk, the
+    /// chevron ending on the chunk's right edge, the title just under the
+    /// tiles — and the control still the footer's full 44pt tall.
+    @Test func viewAllSitsRightAlignedJustUnderItsChunk() throws {
+        let page = page(corpus(60))
+        let view = collectionView(of: page)
+        view.layoutIfNeeded()
+        let footer = try #require(
+            view.visibleSupplementaryViews(ofKind: DiscoverListLayout.viewAllElementKind)
+                .compactMap { $0 as? DiscoverViewAllFooterView }.first
+        )
+        footer.layoutIfNeeded()
+        let section = try #require(
+            view.indexPathsForVisibleSupplementaryElements(ofKind: DiscoverListLayout.viewAllElementKind)
+                .first { view.supplementaryView(forElementKind: DiscoverListLayout.viewAllElementKind, at: $0) === footer }
+        ).section
+        let tiles = (0..<view.numberOfItems(inSection: section)).compactMap {
+            view.layoutAttributesForItem(at: IndexPath(item: $0, section: section))?.frame
+        }
+        let chunk = try #require(tiles.dropFirst().reduce(tiles.first) { $0?.union($1) })
+
+        #expect(abs(footer.frame.minY - chunk.maxY) < 0.5, "the footer starts at the chunk's foot: \(footer.frame) under \(chunk)")
+        #expect(abs(footer.frame.minX - chunk.minX) < 0.5 && abs(footer.frame.maxX - chunk.maxX) < 0.5, "as wide as the chunk")
+        let control = footer.debugControlFrame
+        #expect(control.maxX == footer.bounds.maxX, "the chevron ends on the chunk's right edge")
+        #expect(control.minX > footer.bounds.midX, "right-aligned, not centred: \(control)")
+        #expect(control.height >= 44, "the hit target stays a control's")
+        let title = try #require(footer.debugTitleFrame)
+        #expect(title.minY <= DiscoverViewAllFooterView.titleTopInset + 2, "the title sits at the top: \(title)")
+    }
+
     // MARK: - The hero's questions, per post
 
     @Test func heroQuestionsAreAnsweredPerPost() throws {
