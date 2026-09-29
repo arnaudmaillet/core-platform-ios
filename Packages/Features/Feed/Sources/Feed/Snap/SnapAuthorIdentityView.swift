@@ -159,9 +159,12 @@ final class SnapAuthorIdentityView: UIView {
     /// (`BarItemContentTransition`).
     private lazy var contentTransition: BarItemContentTransition = {
         let transition = BarItemContentTransition(host: self, content: contentView)
-        transition.remeasure = { [unowned self] duration in BarItemRemeasure.run(self, duration: duration) }
-        transition.didApply = { [unowned self] in self.onContentApplied?() }
-        transition.didSettle = { [unowned self] in self.onContentSettled?() }
+        transition.remeasure = { [weak self] duration in
+            guard let self else { return }
+            BarItemRemeasure.run(self, duration: duration)
+        }
+        transition.didApply = { [weak self] in self?.onContentApplied?() }
+        transition.didSettle = { [weak self] in self?.onContentSettled?() }
         return transition
     }()
     /// After a content change has been APPLIED — at once, or at the midpoint

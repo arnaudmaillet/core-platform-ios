@@ -66,8 +66,11 @@ final class SnapMediaAttributionView: UIView {
     /// Blurs one attribution out and the next in, inside the one toolbar item.
     private lazy var contentTransition: BarItemContentTransition = {
         let transition = BarItemContentTransition(host: self, content: contentView)
-        transition.remeasure = { [unowned self] duration in BarItemRemeasure.run(self, duration: duration) }
-        transition.didSettle = { [unowned self] in self.onContentSettled?() }
+        transition.remeasure = { [weak self] duration in
+            guard let self else { return }
+            BarItemRemeasure.run(self, duration: duration)
+        }
+        transition.didSettle = { [weak self] in self?.onContentSettled?() }
         return transition
     }()
     /// Once a content change has fully landed.

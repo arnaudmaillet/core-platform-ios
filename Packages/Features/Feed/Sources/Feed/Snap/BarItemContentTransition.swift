@@ -48,8 +48,12 @@ final class BarItemContentTransition {
     /// line; a heavier blur smears into the glass as a grey bar.
     static let blurRadius: CGFloat = 4
 
-    private unowned let host: UIView
-    private unowned let content: UIView
+    // WEAK, not unowned: the fade's completion blocks retain this object, and
+    // UIKit can run them after the bar item's view has gone (a screen torn
+    // down mid-fade — a CI test did exactly that and trapped reading an
+    // unowned reference). A transition whose views are gone does nothing.
+    private weak var host: UIView?
+    private weak var content: UIView?
 
     /// Resizes the bar item for content that has just been swapped in: with a
     /// duration it glides (the new content is invisible for the whole glide),
@@ -97,6 +101,7 @@ final class BarItemContentTransition {
             return
         }
         finish()
+        guard let host, let content else { return change() }
         guard animated, host.window != nil, content.bounds.width > 0 else {
             change()
             didApply?()
@@ -113,7 +118,7 @@ final class BarItemContentTransition {
             withDuration: Self.fadeOutDuration, delay: 0,
             options: [.curveEaseIn, .allowUserInteraction]
         ) {
-            self.content.alpha = 0
+            self.content?.alpha = 0
             old?.alpha = 1
         } completion: { _ in
             guard generation == self.generation else { return }
@@ -144,8 +149,8 @@ final class BarItemContentTransition {
             didApply?()
             remeasure?(nil)
         }
-        content.layer.removeAllAnimations()
-        content.alpha = 1
+        content?.layer.removeAllAnimations()
+        content?.alpha = 1
         stills.forEach { $0.removeFromSuperview() }
         stills = []
     }
@@ -163,6 +168,7 @@ final class BarItemContentTransition {
         // the sharpening labels of a wider author against a platter still
         // growing to fit them.
         remeasure?(Self.fadeInDuration / 2)
+        guard let host, let content else { return }
         host.layoutIfNeeded()
         let new = still(of: content)
         UIView.animateKeyframes(
@@ -175,7 +181,7 @@ final class BarItemContentTransition {
             }
             UIView.addKeyframe(withRelativeStartTime: 0.4, relativeDuration: 0.6) {
                 new?.alpha = 0
-                self.content.alpha = 1
+                content.alpha = 1
             }
         } completion: { _ in
             guard generation == self.generation else { return }
@@ -192,7 +198,7 @@ final class BarItemContentTransition {
     /// width glides under it while it shows, and everything in these pills is
     /// leading-aligned, so the still stays over what it pictures.
     private func still(of view: UIView) -> UIView? {
-        guard !UIAccessibility.isReduceMotionEnabled,
+        guard let host, !UIAccessibility.isReduceMotionEnabled,
               let (image, frame) = Self.blurredSnapshot(of: view, radius: Self.blurRadius) else { return nil }
         let container = UIView(frame: view.convert(frame, to: host))
         container.isUserInteractionEnabled = false
