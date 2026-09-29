@@ -28,8 +28,9 @@ import UIKit
 ///
 /// **ONE GUTTER** (`gutter`) is the sheet's side margin, the gap between tiles
 /// and the gap between rows, and the header stands on it too: sound, tiles and
-/// "View all" share one left edge. The tiles' corners are CONCENTRIC with the
-/// sheet's (`SoundSheetTileCell`).
+/// "View all" share one left edge. Every tile wears the same FIXED corner,
+/// never one concentric with the sheet's: the grid scrolls past the screen's
+/// corners at large (`SoundSheetTileCell.cornerRadius`).
 ///
 /// **PRESENTED INSIDE A NAVIGATION CONTROLLER** (`wrappedInSheet()`), for its
 /// toolbar alone — the bar is hidden. The actions are bar items, so they are

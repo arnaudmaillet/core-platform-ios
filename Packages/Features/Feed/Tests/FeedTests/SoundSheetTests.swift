@@ -177,6 +177,16 @@ struct SoundSheetTests {
         #expect(covered.isEmpty)
     }
 
+    /// ⚠️ The regression: #304's tiles were concentric with the sheet, and at
+    /// large a tile scrolling past the screen's bottom corners took their
+    /// radius and looked cropped. Every tile keeps one fixed corner.
+    @Test func tilesKeepOneFixedCorner() {
+        let cell = SoundSheetTileCell(frame: CGRect(x: 0, y: 0, width: 123, height: 164))
+        #expect(cell.contentView.layer.cornerRadius == SoundSheetTileCell.cornerRadius)
+        #expect(cell.contentView.layer.cornerCurve == .continuous)
+        #expect(cell.contentView.clipsToBounds)
+    }
+
     @Test func theMetaLineIsDurationAndCount() {
         #expect(SoundSheetViewController.meta(duration: 30, posts: 1) == "0:30 · 1 post")
         #expect(SoundSheetViewController.meta(duration: 75.4, posts: 3) == "1:15 · 3 posts")

@@ -19,21 +19,24 @@ final class SoundSheetTileCell: UICollectionViewCell {
     private var loading: Task<Void, Never>?
     private var postID: PostID?
 
-    /// The radius a tile keeps wherever the sheet's corners are far: in scale
-    /// with the grid's gutter (`SoundSheetViewController.gutter`, 8pt) — a
-    /// radius much larger than the gap between tiles opens a light "rosette"
-    /// where four corners meet, wider than the gap itself (the Upload
-    /// picker's measured lesson, `MediaPickerGridCell.Metrics.corner`).
+    /// Every corner of every tile, wherever it is: in scale with the grid's
+    /// gutter (`SoundSheetViewController.gutter`, 8pt) — a radius much larger
+    /// than the gap between tiles opens a light "rosette" where four corners
+    /// meet, wider than the gap itself (the Upload picker's measured lesson,
+    /// `MediaPickerGridCell.Metrics.corner`).
     static let cornerRadius: CGFloat = Spacing.md
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         contentView.backgroundColor = .secondarySystemFill
-        // CONCENTRIC WITH THE SHEET: a tile corner that comes near one of the
-        // sheet's is rounded to the sheet's radius less the distance between
-        // them — the Liquid Glass rule, resolved by UIKit from the geometry —
-        // and every other corner keeps `cornerRadius`.
-        contentView.cornerConfiguration = .corners(radius: .containerConcentric(minimum: Self.cornerRadius))
+        // ⚠️ A FIXED RADIUS, NEVER `.containerConcentric`. #304 made the tiles
+        // concentric with the sheet; at large the sheet's corners ARE the
+        // screen's, so a tile scrolling past the bottom corners took the
+        // screen's radius less the few points between them and read as
+        // cropped — then square again a row later. Concentricity is for what
+        // STAYS near a corner (chrome), not for content that scrolls past it.
+        contentView.layer.cornerRadius = Self.cornerRadius
+        contentView.layer.cornerCurve = .continuous
         contentView.clipsToBounds = true
 
         imageView.contentMode = .scaleAspectFill
