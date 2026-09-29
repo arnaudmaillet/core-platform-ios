@@ -652,8 +652,17 @@ final class ForYouGridPage: UIView {
             host.host(view)
         }
         guard abs(height - leadHeight) > 0.5 else { return }
+        // ⚠️ A LIST AT ITS TOP STAYS AT ITS TOP. A new configuration keeps the
+        // content offset while the content above the first stretch grows, so
+        // the rows arriving on a list already laid out slid in UNDER the
+        // navigation bar and the screen opened scrolled past them — filmed.
+        let top = -collectionView.adjustedContentInset.top
+        let wasAtTop = collectionView.contentOffset.y <= top + 1
         leadHeight = height
         DiscoverListLayout.setLeadHeight(height, on: layout)
+        guard wasAtTop else { return }
+        collectionView.layoutIfNeeded()
+        collectionView.contentOffset.y = -collectionView.adjustedContentInset.top
     }
 
     /// The reconcile ran — every scroll tick (throttled), every visibility

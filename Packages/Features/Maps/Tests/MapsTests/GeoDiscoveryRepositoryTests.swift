@@ -159,7 +159,7 @@ struct GeoDiscoveryRepositoryTests {
         // MockBFF → MockGeoDiscoveryService, viewport wide enough to cover the
         // whole mock scatter. "Friends" must return a non-empty strict subset
         // of "following", which is a strict subset of "all" — the seeded graph
-        // (2 mutuals ⊂ 4 followed ⊂ 8 authors) guarantees the gaps.
+        // (8 mutuals ⊂ 12 followed ⊂ every author) guarantees the gaps.
         let dataset = MockSocialDataset()
         let bff = MockBFF()
         MockGeoDiscoveryService(dataset: dataset).register(on: bff)

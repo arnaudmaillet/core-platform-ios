@@ -87,6 +87,13 @@ public final class SectionLinkHeaderView: UIControl {
         trailing.axis = .horizontal
         trailing.alignment = .center
         trailing.spacing = Spacing.sm
+        // ⚠️ THE TITLE TAKES THE SLACK, the trailing run hugs its content:
+        // left to the defaults the stack stretched the PILL across the bar.
+        titleLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        for view in [trailing, countPill, countLabel] as [UIView] {
+            view.setContentHuggingPriority(.required, for: .horizontal)
+            view.setContentCompressionResistancePriority(.required, for: .horizontal)
+        }
         let row = UIStackView(arrangedSubviews: [titleLabel, trailing])
         row.axis = .horizontal
         row.alignment = .center
