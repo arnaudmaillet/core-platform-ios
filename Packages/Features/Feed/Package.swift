@@ -55,6 +55,7 @@ let package = Package(
                 "EmoteKit",
                 "CoreNavigation",
                 "CoreNetworking",
+                "CoreStorage",
                 "PostGrid",
                 .product(name: "CoreNetworkingMocks", package: "CoreNetworking"),
                 .product(name: "CoreRealtimeMocks", package: "CoreRealtime")
