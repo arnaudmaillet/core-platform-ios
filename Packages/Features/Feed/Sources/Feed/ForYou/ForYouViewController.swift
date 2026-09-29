@@ -1795,8 +1795,11 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     }
 
     #if DEBUG
-    /// `-foryou-tab-away <seconds>`: switch to another tab after a delay — the
-    /// way to see what is still drawing or playing once the tab is left.
+    /// `-foryou-tab-away <seconds> [<back after seconds>]`: switch to another
+    /// tab after a delay — the way to see what is still drawing or playing
+    /// once the tab is left — and, with the second number, come back to For
+    /// You that long after (the Friends row re-sorts across the round trip,
+    /// `ForYouRailsView.releaseStoryOrder`).
     private var hasScheduledTabAway = false
 
     private func scheduleTabAwayIfNeeded() {
@@ -1807,10 +1810,18 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
               let delay = Double(arguments[position + 1])
         else { return }
         hasScheduledTabAway = true
+        let back = position + 2 < arguments.count ? Double(arguments[position + 2]) : nil
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-            guard let tabs = self?.tabBarController else { return }
+            guard let self, let tabs = tabBarController else { return }
+            // For You's own index: it is the selected tab until this switch.
+            let home = tabs.selectedIndex
             print("[zoom-live] TAB AWAY -> index 2")
             tabs.selectedIndex = 2
+            guard let back else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + back) {
+                print("[foryou] TAB BACK -> index \(home)")
+                tabs.selectedIndex = home
+            }
         }
     }
     #endif
