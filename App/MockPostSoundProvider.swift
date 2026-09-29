@@ -30,10 +30,22 @@ struct MockPostSoundProvider: PostSoundProviding {
     /// a clip (a borrower earlier in the dataset does not count — the sound
     /// was cut from the clip), or the first post set to a song.
     private let originals: [String: PostID]
+    /// When each post was published — the "New" row's order.
+    private let publishedAt: [PostID: Int64]
+    /// The corpus's views and likes — the "Popular" row's order. Read when a
+    /// sheet opens, so a like given in the session counts.
+    private let counters: MockCounterStore?
 
-    init(clips: MockClipCatalog = .shared, songs: MockSongCatalog = .shared, dataset: MockSocialDataset) {
+    init(
+        clips: MockClipCatalog = .shared, songs: MockSongCatalog = .shared,
+        dataset: MockSocialDataset, counters: MockCounterStore? = nil
+    ) {
         self.clips = clips
         self.songs = songs
+        self.counters = counters
+        self.publishedAt = Dictionary(
+            dataset.posts.map { (PostID($0.postID), $0.publishedAtMS) }, uniquingKeysWith: { first, _ in first }
+        )
         var borrowed: [PostID: String] = [:]
         var postsBySound: [String: [PostID]] = [:]
         var creators: [String: String] = [:]
@@ -79,7 +91,51 @@ struct MockPostSoundProvider: PostSoundProviding {
     }
 
     func postIDs(using sound: PostSound) -> [PostID] {
-        postsBySound[sound.id] ?? []
+        rankings(using: sound).recommended
+    }
+
+    /// The three orders of the sound page, over the same posts:
+    /// - **popular**: views plus ten per like (a like is worth ten looks) —
+    ///   the counters the feed itself shows;
+    /// - **newest**: by publication date, newest first;
+    /// - **recommended**: what a recommender does, in miniature and
+    ///   deterministic — engagement (45%), freshness (35%) and an AFFINITY
+    ///   (20%) standing in for the viewer's taste: a per-post roll hashed on
+    ///   the post and the sound (FNV-1a, stable across launches). So it
+    ///   neither repeats the popular order nor the date order, and the same
+    ///   sound reads the same way on every run.
+    ///
+    /// Ties fall back to the dataset's order.
+    func rankings(using sound: PostSound) -> PostSoundRankings {
+        let posts = postsBySound[sound.id] ?? []
+        guard posts.count > 1 else { return PostSoundRankings(popular: posts, newest: posts, recommended: posts) }
+        let position = Dictionary(posts.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
+        let engagement: [PostID: Int64] = Dictionary(posts.map { id in
+            let views = counters?.viewCount(for: id.rawValue) ?? 0
+            let likes = counters?.likeCount(for: id.rawValue) ?? 0
+            return (id, views + 10 * likes)
+        }, uniquingKeysWith: { first, _ in first })
+        func ranked(_ key: (PostID) -> Int64) -> [PostID] {
+            posts.sorted { key($0) != key($1) ? key($0) > key($1) : position[$0, default: 0] < position[$1, default: 0] }
+        }
+        let popular = ranked { engagement[$0] ?? 0 }
+        let newest = ranked { publishedAt[$0] ?? 0 }
+        // Each rank as a share: 1 for the first, 0 for the last.
+        func share(_ order: [PostID]) -> [PostID: Double] {
+            let last = Double(order.count - 1)
+            return Dictionary(order.enumerated().map { ($1, 1 - Double($0) / last) }, uniquingKeysWith: { a, _ in a })
+        }
+        let popularity = share(popular)
+        let freshness = share(newest)
+        let score: [PostID: Double] = Dictionary(posts.map { id in
+            let affinity = Double(Self.fnv1a("\(sound.id)|\(id.rawValue)") % 1000) / 999
+            return (id, 0.45 * popularity[id, default: 0] + 0.35 * freshness[id, default: 0] + 0.2 * affinity)
+        }, uniquingKeysWith: { first, _ in first })
+        let recommended = posts.sorted {
+            let (a, b) = (score[$0, default: 0], score[$1, default: 0])
+            return a != b ? a > b : position[$0, default: 0] < position[$1, default: 0]
+        }
+        return PostSoundRankings(popular: popular, newest: newest, recommended: recommended)
     }
 
     /// A clip's sound is its clip's; a song is its first poster's only when
