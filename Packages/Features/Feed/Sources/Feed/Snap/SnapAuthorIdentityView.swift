@@ -33,17 +33,6 @@ final class SnapAuthorIdentityView: UIView {
         /// Both follow each other.
         case friends
 
-        /// Part of the bar item's identifier: a different glyph is a different
-        /// item, so the bar morphs between them (`authorItemIdentifier`).
-        var identifierSuffix: String {
-            switch self {
-            case .none: ""
-            case .follow: ".follow"
-            case .following: ".following"
-            case .friends: ".friends"
-            }
-        }
-
         /// The symbols, chosen from what iOS 26 ships:
         /// - `plus` — the action, as before.
         /// - `person.fill.checkmark` — a person, confirmed: the most literal
@@ -162,6 +151,24 @@ final class SnapAuthorIdentityView: UIView {
     private let namePlaceholder = SnapAuthorIdentityView.makeRedactionBar(width: 96, height: 12)
     private let metaPlaceholder = SnapAuthorIdentityView.makeRedactionBar(width: 64, height: 9)
     private let labelsStack = UIStackView()
+    /// Everything the pill draws, edge-pinned: the one view a content change
+    /// fades (`contentTransition`) — a CONTAINER, because a platter flattens a
+    /// label's own partial alpha to opaque.
+    private let contentView = UIView()
+    /// Blurs one author out and the next in, inside the one bar item
+    /// (`BarItemContentTransition`).
+    private lazy var contentTransition: BarItemContentTransition = {
+        let transition = BarItemContentTransition(host: self, content: contentView)
+        transition.remeasure = { [unowned self] duration in BarItemRemeasure.run(self, duration: duration) }
+        transition.didApply = { [unowned self] in self.onContentApplied?() }
+        transition.didSettle = { [unowned self] in self.onContentSettled?() }
+        return transition
+    }()
+    /// After a content change has been APPLIED — at once, or at the midpoint
+    /// of the blur — for host arithmetic that reads the pill's labels.
+    var onContentApplied: (() -> Void)?
+    /// Once a content change has fully landed.
+    var onContentSettled: (() -> Void)?
 
     /// Whose face the avatar task is loading — compared on arrival so a fast
     /// page-past cannot land a picture on the wrong pill.
@@ -250,7 +257,8 @@ final class SnapAuthorIdentityView: UIView {
         // Auto Layout; the height pin and width cap are the only external
         // metrics.
         let avatarBreathing = (Self.barItemWrapperHeight - AvatarImageView.barDiameter) / 2
-        row.constrain(in: self) { parent in
+        contentView.pin(to: self)
+        row.constrain(in: contentView) { parent in
             row.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: avatarBreathing)
             row.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -Spacing.sm)
             row.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
@@ -279,30 +287,35 @@ final class SnapAuthorIdentityView: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    /// Shows `model`'s author. A change of author cross-fades the container
-    /// and reloads the avatar (guarded against fast page-past); paging between
-    /// posts by the same author only refreshes the per-post meta line, with no
-    /// fade. The view is content-sized, so a new author re-negotiates the bar
-    /// item's width — a settle-time event by construction.
+    /// Shows `model`'s author, IN PLACE: the pill is one view in one bar item
+    /// for the screen's life, and a change of what it draws blurs the old
+    /// content out and the new in (`BarItemContentTransition`) while the
+    /// item's glass stays where it is. The view is content-sized, so a new
+    /// author re-negotiates the item's width — glided under the blur, at a
+    /// settle-time event by construction.
     ///
-    /// `animated: false` is for a pill that is not on screen yet: a FRESH
-    /// pill built for a new bar item (the snap feed's author change), where
-    /// the bar's own item transition is the animation and anything the pill
-    /// animated inside itself would play under it, twice.
+    /// Paging between posts by the same author moves only the per-post meta
+    /// line (the post's age) — through the same blur, and without refetching
+    /// a face.
+    ///
+    /// The pill's STATE (`shownAuthor`, the tap target) is the new author at
+    /// once; only the drawing waits for the transition's midpoint.
+    /// `animated: false`, or a pill not in a window, swaps in one frame.
     func setAuthor(_ model: FeedItemDisplayModel, pipeline: ImagePipeline, animated: Bool = true) {
         guard model != renderedModel else { return }
         // The fast path is for PAGING between posts by one person: the face and
         // the name are already right, so only the time moves and there is no
-        // reason to cross-dissolve or refetch an avatar.
+        // reason to refetch an avatar.
         let sameFace = showsSameFace(as: model)
         renderedModel = model
         authorID = model.authorID
         guard !sameFace else {
-            metaLabel.text = model.metaText
+            guard metaLabel.text != model.metaText else { return }
+            contentTransition.perform(animated: animated) { self.metaLabel.text = model.metaText }
             return
         }
         let cached = model.avatarURL.flatMap(SnapAuthorFaceCache.face(for:))
-        let apply = {
+        contentTransition.perform(animated: animated) {
             self.setRedacted(false)
             self.nameLabel.text = model.authorName
             self.metaLabel.text = model.metaText
@@ -310,13 +323,6 @@ final class SnapAuthorIdentityView: UIView {
             self.monogramView.setMonogram(MonogramAvatarView.monogram(
                 name: model.authorName, handle: Self.handle(fromMeta: model.metaText)
             ))
-        }
-        if animated {
-            defer { animateBarRemeasure() }
-            UIView.transition(with: self, duration: 0.18,
-                              options: [.transitionCrossDissolve, .allowUserInteraction], animations: apply)
-        } else {
-            apply()
         }
 
         avatarTask?.cancel()
@@ -332,7 +338,12 @@ final class SnapAuthorIdentityView: UIView {
             guard let image = try? await pipeline.image(for: url) else { return }
             SnapAuthorFaceCache.store(image, for: url)
             guard let self, self.authorID == id else { return }
-            self.showFace(image)
+            // Onto the NEW author's content: mid-blur, the old one is still
+            // what the live views draw.
+            self.contentTransition.afterSwap { [weak self] in
+                guard let self, self.authorID == id else { return }
+                self.showFace(image)
+            }
         }
     }
 
@@ -353,29 +364,8 @@ final class SnapAuthorIdentityView: UIView {
     /// The author on the pill, if one has been set with `setAuthor`.
     var shownAuthor: FeedItemDisplayModel? { renderedModel }
 
-    /// Takes on everything the HOST decided about `other` — its width cap,
-    /// compactness, shadow, follow badge and tap handlers — but not its
-    /// author. For a fresh pill replacing `other` in the bar.
-    ///
-    /// The badge is inherited as a DEFAULT only: what it says is a fact about
-    /// the author, so a host that knows the new author's relation sets it
-    /// again (`setFollowBadge`).
-    func inheritChrome(from other: SnapAuthorIdentityView) {
-        onAuthorTapped = other.onAuthorTapped
-        onFollowTapped = other.onFollowTapped
-        followBadge = other.followBadge
-        isCompact = other.isCompact
-        applyFollowBadge()
-        applyLabelVisibility()
-        maxWidthConstraint?.constant = other.maxWidthConstraint?.constant ?? Self.maxWidth
-        minWidthConstraint?.isActive = other.minWidthConstraint?.isActive ?? true
-        for (mine, theirs) in zip([nameLabel, metaLabel], [other.nameLabel, other.metaLabel]) {
-            mine.layer.shadowOpacity = theirs.layer.shadowOpacity
-        }
-    }
-
     /// Fetches `url`'s face into the pill's cache ahead of need — the next
-    /// page's author — so a fresh pill for them is drawn with it.
+    /// page's author — so the pill's swap to them is drawn with it.
     static func warmFace(_ url: URL, pipeline: ImagePipeline) {
         guard SnapAuthorFaceCache.face(for: url) == nil else { return }
         Task { @MainActor in
@@ -394,7 +384,7 @@ final class SnapAuthorIdentityView: UIView {
         renderedModel = nil
         authorID = id
         personAvatarURL = avatarURL
-        defer { animateBarRemeasure() }
+        defer { BarItemRemeasure.run(self, duration: 0.22) }
 
         UIView.transition(with: self, duration: 0.18,
                           options: [.transitionCrossDissolve, .allowUserInteraction]) {
@@ -454,10 +444,14 @@ final class SnapAuthorIdentityView: UIView {
     /// (the correspondent's profile is one tap away, and that is where
     /// following lives); the snap feed draws the viewer's relation to the
     /// author, and none for the viewer themself or while it does not know.
-    func setFollowBadge(_ badge: FollowBadge) {
+    ///
+    /// `animated`: the glyph changes through the author's own blur (the "+"
+    /// turning into the followed mark after a tap), and a badge set in the
+    /// same turn as a new author lands in the SAME swap.
+    func setFollowBadge(_ badge: FollowBadge, animated: Bool = false) {
         guard badge != followBadge else { return }
         followBadge = badge
-        applyFollowBadge()
+        contentTransition.perform(animated: animated) { self.applyFollowBadge() }
     }
 
     /// Whether the "+" is on offer.
@@ -555,21 +549,6 @@ final class SnapAuthorIdentityView: UIView {
         labelsStack.spacing = isRedacted ? 5 : 0
     }
 
-    /// Content changes resize the pill (content-sized by design). A snap here
-    /// is the one thing that reads as jank, so drive the bar's re-measure
-    /// through a short eased layout pass: the pill glides between widths —
-    /// hydration and author changes alike.
-    private func animateBarRemeasure() {
-        setNeedsLayout()
-        var bar: UIView? = superview
-        while let view = bar, !(view is UINavigationBar) { bar = view.superview }
-        let host = bar ?? superview
-        host?.setNeedsLayout()
-        UIView.animate(withDuration: 0.22, delay: 0, options: [.curveEaseInOut, .allowUserInteraction]) {
-            host?.layoutIfNeeded()
-        }
-    }
-
     private static func makeRedactionBar(width: CGFloat, height: CGFloat) -> UIView {
         let bar = UIView()
         bar.backgroundColor = UIColor.white.withAlphaComponent(0.3)
@@ -640,10 +619,10 @@ enum SnapNavControls {
 /// The faces the author pill has drawn lately, readable SYNCHRONOUSLY.
 ///
 /// The image pipeline is an actor, so its cache answers only across an await —
-/// too late for a pill built to go into the bar on this turn: it would appear
-/// with its initials and swap to the picture a frame later, under the bar's
-/// own item transition. A handful of decoded faces on the main actor is what
-/// lets a fresh pill arrive already wearing the right one.
+/// too late for a swap made on this turn: the new author would blur in with
+/// their initials and pop to the picture once the blur had landed. A handful
+/// of decoded faces on the main actor is what lets the swap draw the new
+/// author already wearing the right one.
 @MainActor
 enum SnapAuthorFaceCache {
     /// A few pages either way is all paging ever asks for.

@@ -11,8 +11,8 @@ import UIKit
 /// offered only when the graph says the viewer does not follow the author, and
 /// a tap follows them in place. Once followed the pill does not forget it: the
 /// "+" becomes the followed mark, or the FRIENDS mark when the author follows
-/// back. The badge is part of the item's identifier, so every change of glyph
-/// is a new item to the bar: the native morph.
+/// back. Every change of glyph is drawn IN PLACE, through the pill's own blur:
+/// the item and its identifier never change.
 @MainActor
 struct SnapAuthorFollowTests {
     private static func feed(
@@ -56,8 +56,7 @@ struct SnapAuthorFollowTests {
         feed.showAuthor(Self.model(authorID: "prof-1"))
 
         #expect(try Self.pill(feed).offersFollow == false)
-        #expect(try Self.authorItem(feed).identifier
-                == SnapFeedViewController.authorItemIdentifier(for: ProfileID("prof-1"), badge: .none))
+        #expect(try Self.authorItem(feed).identifier == SnapFeedViewController.authorItemIdentifier)
     }
 
     @Test(arguments: [FollowRelation.following, .mutual, .viewer, .blocked])
@@ -69,19 +68,18 @@ struct SnapAuthorFollowTests {
         #expect(try Self.pill(feed).offersFollow == false)
     }
 
-    @Test func anAuthorTheViewerDoesNotFollowOffersFollowUnderItsOwnIdentifier() throws {
+    @Test func anAuthorTheViewerDoesNotFollowOffersFollowInTheSameItem() throws {
         let feed = Self.feed()
         feed.setFollowRelation(.notFollowing, for: ProfileID("prof-2"))
         feed.showAuthor(Self.model(authorID: "prof-2"))
 
         #expect(try Self.pill(feed).offersFollow)
-        #expect(try Self.authorItem(feed).identifier
-                == SnapFeedViewController.authorItemIdentifier(for: ProfileID("prof-2"), badge: .follow))
+        #expect(try Self.authorItem(feed).identifier == SnapFeedViewController.authorItemIdentifier)
     }
 
-    /// The answer arriving for the author ON the pill re-draws it: a fresh item,
-    /// under the identifier that says "+", so the bar morphs it in.
-    @Test func theGraphsAnswerInstallsAFreshItemWithTheFollow() async throws {
+    /// The answer arriving for the author ON the pill re-draws its badge — in
+    /// the same item, so the glass does not morph.
+    @Test func theGraphsAnswerDrawsTheFollowInPlace() async throws {
         let graph = FollowGraphStub(relations: [ProfileID("prof-2"): .notFollowing])
         let feed = Self.feed(graph: graph)
         feed.showAuthor(Self.model(authorID: "prof-2"))
@@ -89,13 +87,13 @@ struct SnapAuthorFollowTests {
         #expect(try Self.pill(feed).offersFollow == false, "precondition: not known yet")
 
         feed.resolveFollowRelation(for: ProfileID("prof-2"))
-        for _ in 0..<200 where (try? Self.authorItem(feed)) === before {
+        for _ in 0..<200 where (try? Self.pill(feed).offersFollow) == false {
             try await Task.sleep(for: .milliseconds(5))
         }
 
         let after = try Self.authorItem(feed)
-        #expect(after !== before)
-        #expect(after.identifier != before.identifier, "one identifier is one item to iOS 26: no morph")
+        #expect(after === before, "a new item for a badge: iOS 26 morphs the glass between them")
+        #expect(after.identifier == SnapFeedViewController.authorItemIdentifier)
         #expect(try Self.pill(feed).offersFollow)
     }
 
@@ -114,7 +112,7 @@ struct SnapAuthorFollowTests {
     }
 
     /// The tap follows OPTIMISTICALLY (the profile's rule): the "+" goes at
-    /// once, in a fresh item, and the graph hears the follow.
+    /// once, in the same item, and the graph hears the follow.
     @Test func tappingFollowFollowsAndTheFollowGoes() async throws {
         let graph = FollowGraphStub()
         let feed = Self.feed(graph: graph)
@@ -127,9 +125,8 @@ struct SnapAuthorFollowTests {
         pill.onFollowTapped?(ProfileID("prof-2"))
 
         let followed = try Self.authorItem(feed)
-        #expect(followed !== offered)
-        #expect(followed.identifier
-                == SnapFeedViewController.authorItemIdentifier(for: ProfileID("prof-2"), badge: .following))
+        #expect(followed === offered)
+        #expect(followed.identifier == SnapFeedViewController.authorItemIdentifier)
         #expect(try Self.pill(feed).offersFollow == false)
         #expect(try Self.pill(feed).followBadge == .following, "a follow is drawn, not forgotten")
         for _ in 0..<200 where graph.follows.isEmpty {
@@ -139,9 +136,8 @@ struct SnapAuthorFollowTests {
         #expect(feed.followRelationsByAuthor[ProfileID("prof-2")] == .following)
     }
 
-    /// Each relation draws its own badge, under its own identifier — so a
-    /// friend reads apart from a one-way follow, and the bar morphs between
-    /// any two of them.
+    /// Each relation draws its own badge — so a friend reads apart from a
+    /// one-way follow — under the slot's one identifier.
     @Test(arguments: [
         (FollowRelation.notFollowing, SnapAuthorIdentityView.FollowBadge.follow),
         (.followedBy, .follow),
@@ -158,16 +154,15 @@ struct SnapAuthorFollowTests {
         feed.showAuthor(Self.model(authorID: "prof-2"))
 
         #expect(try Self.pill(feed).followBadge == badge)
-        #expect(try Self.authorItem(feed).identifier
-                == SnapFeedViewController.authorItemIdentifier(for: ProfileID("prof-2"), badge: badge))
+        #expect(try Self.authorItem(feed).identifier == SnapFeedViewController.authorItemIdentifier)
     }
 
-    @Test func theFourBadgesAreFourIdentifiers() {
-        let badges: [SnapAuthorIdentityView.FollowBadge] = [.none, .follow, .following, .friends]
-        let identifiers = Set(badges.map {
-            SnapFeedViewController.authorItemIdentifier(for: ProfileID("prof-2"), badge: $0)
-        })
-        #expect(identifiers.count == badges.count)
+    /// The three drawn badges are three glyphs — the difference the blur
+    /// carries now that the identifier no longer does.
+    @Test func theThreeDrawnBadgesAreThreeGlyphs() {
+        let badges: [SnapAuthorIdentityView.FollowBadge] = [.follow, .following, .friends]
+        #expect(Set(badges.compactMap(\.symbolName)).count == badges.count)
+        #expect(SnapAuthorIdentityView.FollowBadge.none.symbolName == nil)
     }
 
     /// Following someone who already follows the viewer makes a FRIEND, and
@@ -304,12 +299,12 @@ struct SnapAuthorFollowTests {
     }
 }
 
-/// THE ATTRIBUTION IS AN ITEM PER THING IT DRAWS — the author pill's contract,
-/// in the toolbar.
+/// THE ATTRIBUTION IS ONE ITEM FOR THE SLOT — the author pill's contract, in
+/// the toolbar.
 ///
-/// It was one view in one identifier-less item for the screen's life, rewritten
-/// in place: the toolbar had nothing to transition between, so the capsule
-/// never morphed the way the header's does.
+/// It was a fresh item per thing it drew (#295), under a per-content
+/// identifier, so iOS 26 morphed the capsule's glass on every page. Now the
+/// item, its identifier and its view stay, and the content blurs across.
 @MainActor
 struct SnapAttributionItemTests {
     private static func feed() -> SnapFeedViewController {
@@ -334,7 +329,15 @@ struct SnapAttributionItemTests {
         (feed.toolbarItems ?? []).filter { $0.customView is SnapMediaAttributionView }
     }
 
-    @Test func aDifferentAttributionIsAFreshItemUnderItsOwnIdentifier() throws {
+    private static func labels(in view: UIView) -> [String] {
+        view.subviews.flatMap { subview -> [String] in
+            var found = labels(in: subview)
+            if let label = subview as? UILabel, let text = label.text, !text.isEmpty { found.append(text) }
+            return found
+        }
+    }
+
+    @Test func aDifferentAttributionIsDrawnInTheSameItem() throws {
         let feed = Self.feed()
         let song = SnapMediaAttributionView.SoundCredit.sound("Haru Haru · BIGBANG")
         feed.showAttribution(Self.model(id: "p1", author: "Ada"), sound: song, cover: .note)
@@ -344,15 +347,12 @@ struct SnapAttributionItemTests {
         feed.showAttribution(Self.model(id: "p2", author: "Grace"), sound: other, cover: .note)
         let second = try #require(Self.attributionItems(feed).first)
 
-        #expect(second !== first, "the same item was reused: the bar has nothing to transition between")
-        #expect(second.customView !== first.customView, "one view mutated in place can never be transitioned")
-        #expect(first.identifier != nil)
-        #expect(second.identifier != first.identifier, "one identifier is one item to iOS 26: no transition")
-        #expect(second.identifier == SnapFeedViewController.attributionItemIdentifier(
-            forContent: SnapMediaAttributionView.contentKey(
-                for: Self.model(id: "p2", author: "Grace"), sound: other, cover: .note
-            )
-        ))
+        #expect(second === first, "a new item per content: iOS 26 morphs the glass between them")
+        #expect(second.customView === first.customView)
+        #expect(second.identifier == SnapFeedViewController.attributionItemIdentifier)
+        let drawn = Self.labels(in: try #require(second.customView))
+        #expect(drawn.contains("Original sound · @grace"))
+        #expect(drawn.contains("Haru Haru · BIGBANG") == false)
         // Exactly one attribution in the bar, however many pages went by, and
         // still in the leading slot.
         #expect(Self.attributionItems(feed).count == 1)
@@ -371,8 +371,8 @@ struct SnapAttributionItemTests {
         #expect(Self.attributionItems(feed).first === first)
     }
 
-    /// The fresh pill is the host's pill: its tap still opens the sound.
-    @Test func aFreshAttributionInheritsTheHostsWiring() throws {
+    /// Across pages the pill keeps the host's wiring: its tap opens the sound.
+    @Test func theAttributionKeepsTheHostsWiring() throws {
         let feed = Self.feed()
         feed.showAttribution(Self.model(id: "p1", author: "Ada"), sound: .sound("A"), cover: .note)
         feed.showAttribution(Self.model(id: "p2", author: "Grace"), sound: .sound("B"), cover: .note)
