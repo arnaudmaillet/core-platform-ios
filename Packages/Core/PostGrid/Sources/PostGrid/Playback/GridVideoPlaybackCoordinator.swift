@@ -91,7 +91,12 @@ public final class GridVideoPlaybackCoordinator {
     public static let uncapped: Double = 0
 
     private let pool: VideoPlaybackController
-    private let maxConcurrent: Int
+    /// How many candidates may hold a player. Settable because two
+    /// coordinators can share one screen's budget: For You's rows claim
+    /// their visible cards first and the list below takes what the pool
+    /// has left (`ForYouGridPage.playerReserve`). A lower number takes
+    /// effect at the next `update`, which stops the farthest candidates.
+    public var maxConcurrent: Int
     /// Posts this coordinator has taken a loan for → the cell it gave it to.
     ///
     /// ⚠️ A REGISTRY OF LOANS, not the truth about playback. The distinction is

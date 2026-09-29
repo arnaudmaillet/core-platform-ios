@@ -18,10 +18,31 @@ import UIKit
 /// Zero draws no pill (`.count` has always meant that), so a section with
 /// nothing new reads as a plain heading with a way in.
 ///
-/// Built for For You's two rows (Friends, Following) and kept free of either:
-/// any section that is a preview of a screen can wear it.
+/// A header that is NOT a way in (`isLink: false`) is the same title in the
+/// same place with nothing trailing and nothing to tap — For You's "For you"
+/// over its list, which reads as the page's third section and pushes nothing.
+///
+/// ⚠️ **A TAP RECOGNISER, NOT A `UIControl` — BOTH HALVES OF THAT WERE BUGS
+/// (2026-09-29).**
+/// - A plain `UIControl` never sends `.primaryActionTriggered`; only its
+///   subclasses (`UIButton`, …) do. The header #312 shipped as a control
+///   answered `addAction(_:for: .primaryActionTriggered)` with nothing: the
+///   chevron "did nothing" on device, and the tests passed because they called
+///   the host's closure directly.
+/// - The bar lives inside a scroll view (For You's list). A scroll view does
+///   not cancel a touch a `UIControl` is tracking (`touchesShouldCancel(in:)`
+///   is false for controls), so a scroll that began on a held header belonged
+///   to the header. A tap recogniser fails as soon as the finger travels, and
+///   the scroll keeps the touch.
+///
+/// And NO press feedback: the product call is that a heading gives none under
+/// a finger. It used to fire at the start of every scroll that happened to
+/// begin on it.
+///
+/// Built for For You's rows (Friends, Following) and kept free of either: any
+/// section that is a preview of a screen can wear it.
 @MainActor
-public final class SectionLinkHeaderView: UIControl {
+public final class SectionLinkHeaderView: UIView {
     /// The bar's height: a title3 line with room to breathe, and a tap target
     /// past the 44pt minimum.
     public static let height: CGFloat = 44
@@ -50,7 +71,14 @@ public final class SectionLinkHeaderView: UIControl {
     /// What the pill says. Zero hides it.
     public private(set) var count = 0
 
-    public init(title: String? = nil) {
+    /// Whether the bar is a way in: a chevron, a button to VoiceOver, a tap.
+    public let isLink: Bool
+
+    /// The bar was tapped. Never called on a header that is not a link.
+    public var onTap: (() -> Void)?
+
+    public init(title: String? = nil, isLink: Bool = true) {
+        self.isLink = isLink
         super.init(frame: .zero)
         titleLabel.text = title
         titleLabel.font = UIFontMetrics(forTextStyle: .title3).scaledFont(
@@ -98,7 +126,7 @@ public final class SectionLinkHeaderView: UIControl {
         row.axis = .horizontal
         row.alignment = .center
         row.spacing = Spacing.sm
-        // Touches belong to the control: the stacks are layout only.
+        // Touches belong to the bar: the stacks are layout only.
         row.isUserInteractionEnabled = false
         row.constrain(in: self) { parent in
             row.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
@@ -112,10 +140,26 @@ public final class SectionLinkHeaderView: UIControl {
             heightAnchor.constraint(greaterThanOrEqualToConstant: Self.height)
         ])
 
+        chevron.isHidden = !isLink
         isAccessibilityElement = true
-        accessibilityTraits = .button
-        PressFeedback.attach(to: self, dims: true)
+        accessibilityTraits = isLink ? .button : .header
+        if isLink {
+            addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(tapped)))
+        } else {
+            // A heading and nothing more: its touches are the list's.
+            isUserInteractionEnabled = false
+        }
         updateAccessibility()
+    }
+
+    @objc private func tapped() {
+        onTap?()
+    }
+
+    override public func accessibilityActivate() -> Bool {
+        guard isLink, let onTap else { return false }
+        onTap()
+        return true
     }
 
     @available(*, unavailable)
@@ -138,5 +182,13 @@ public final class SectionLinkHeaderView: UIControl {
     #if DEBUG
     /// What the pill reads, nil while hidden — what a test pins.
     public var debugCountText: String? { countPill.isHidden ? nil : countLabel.text }
+    /// Whether the chevron is drawn.
+    public var debugShowsChevron: Bool { !chevron.isHidden }
+    /// Fires the bar's own recogniser action — the path a finger takes, which
+    /// is the one #312's tests skipped by calling the host's closure.
+    public func debugTap() {
+        guard gestureRecognizers?.contains(where: { $0 is UITapGestureRecognizer }) == true else { return }
+        tapped()
+    }
     #endif
 }

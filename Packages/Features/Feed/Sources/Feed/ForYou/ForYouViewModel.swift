@@ -82,16 +82,13 @@ public final class ForYouViewModel {
         /// Discover narrowed to media: the pushed "View all" mosaic.
         public var media: PageState = .loading
         /// The pushed FOLLOWING list: the people the viewer follows who are
-        /// not friends. Its "New" section is `followingNew`.
+        /// not friends — one plain run of posts, no sections.
         public var following: PageState = .loading
-        /// The pushed FRIENDS list: mutual follows. Its "New" section is
-        /// `friendsUnseen`.
+        /// The pushed FRIENDS list: mutual follows, one plain run too.
         public var friends: PageState = .loading
-        /// Which of Following's posts arrived since the session baseline.
-        ///
-        /// ⚠️ **The identities, not the count** — a ranked list's "New"
-        /// header over "the leading N rows" sits over the wrong rows. The
-        /// badge is this set's size, so the two cannot disagree.
+        /// Which of Following's posts arrived since the session baseline —
+        /// what orders the row's cards (unseen first) and what its badge
+        /// counts, so the two cannot disagree.
         public var followingNew: Set<PostID> = []
         /// Which of the friends' posts the viewer has not seen yet.
         public var friendsUnseen: Set<PostID> = []

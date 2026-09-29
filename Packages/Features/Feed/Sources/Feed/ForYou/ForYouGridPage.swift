@@ -399,7 +399,9 @@ final class ForYouGridPage: UIView {
     var landsByAdoption: Bool { style == .grid }
     private let collectionView: UICollectionView
 
-    /// The scroll view whose offset drives the tab bar's minimize.
+    /// The scroll view the host names to the bars (`setContentScrollView`) —
+    /// their scroll-edge treatment, and the tab bar's minimize on a screen
+    /// that arms one (For You does not, since it lost its tabs).
     ///
     /// ⚠️ NAMED FOR ITS JOB, not opened up. Reading an offset through this is
     /// what `verticalOffset` is for; this exists because
@@ -670,6 +672,20 @@ final class ForYouGridPage: UIView {
     /// list: a row scrolling out of the band must stop as the list's tiles do.
     var onAutoplayReconcile: ((_ allowingStarts: Bool) -> Void)?
 
+    /// Players a lead is holding from the SAME pool right now — asked right
+    /// after `onAutoplayReconcile`, so it is the lead's answer to this very
+    /// reconcile. The list plays at most what the pool's budget
+    /// (`VideoPlaybackController.capacity`) leaves it, never more than its own
+    /// style's number.
+    ///
+    /// ⚠️ ONE BUDGET FOR TWO COORDINATORS. For You's Following row plays every
+    /// card on screen (up to three) and the list under it plays five: eight
+    /// decoders against a budget of six, and a seventh clip does not stutter
+    /// politely, it starves one of the six. The row is claimed first — it is
+    /// the part of the screen the viewer is reading when it is up — and the
+    /// list's farthest candidates give way.
+    var playerReserve: (() -> Int)?
+
     // MARK: - Hosted collapsible header (the Place Profile's mechanics)
 
     /// The page's distance from its content top, every scroll tick — what a
@@ -837,6 +853,11 @@ final class ForYouGridPage: UIView {
         requestWarm(allowingStarts)
         onAutoplayReconcile?(allowingStarts)
         guard let playback else { return }
+        if let playerReserve, let videoPool {
+            playback.maxConcurrent = max(0, min(
+                Self.concurrentPlayers(for: style), videoPool.capacity - playerReserve()
+            ))
+        }
         let viewport = autoplayViewport
         let centreY = viewport.midY
         let candidates = collectionView.indexPathsForVisibleItems.compactMap {

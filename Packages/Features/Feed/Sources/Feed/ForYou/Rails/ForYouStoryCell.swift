@@ -80,7 +80,10 @@ final class ForYouStoryCell: UICollectionViewCell {
 
         isAccessibilityElement = true
         accessibilityTraits = .button
-        PressFeedback.attach(toView: contentView, moving: disc, dims: true)
+        // ⚠️ NO PRESS FEEDBACK (2026-09-29). The give-and-dim fired on the
+        // touch-down that starts every scroll of the row, and the product call
+        // is no feedback at all under a finger: a tap opens, a long press
+        // lifts the native preview (`ForYouRailsView`'s context menu).
     }
 
     @available(*, unavailable)
@@ -156,6 +159,10 @@ final class ForYouStoryCell: UICollectionViewCell {
     }
 
     // MARK: - As a flight's source
+
+    /// The face alone — no ring, no name — which a long press lifts into the
+    /// context menu's preview.
+    var faceView: UIView { monogram }
 
     /// The face's rect — the disc without its ring — in `space`.
     func discFrame(in space: UICoordinateSpace) -> CGRect {

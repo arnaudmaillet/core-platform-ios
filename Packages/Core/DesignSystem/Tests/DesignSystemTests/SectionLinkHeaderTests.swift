@@ -2,8 +2,8 @@ import Testing
 import UIKit
 @testable import DesignSystem
 
-/// `Title … [3] ›`: the section header that is a way in, and the tab bar's
-/// collapse claimed by a screen with no selector band.
+/// `Title … [3] ›`: the section header that is a way in — and the plain
+/// heading it becomes when it is not one.
 @MainActor
 struct SectionLinkHeaderTests {
     @Test func nothingNewDrawsNoPill() {
@@ -26,29 +26,41 @@ struct SectionLinkHeaderTests {
         #expect(header.debugCountText == nil, "a negative count is not an indicator")
     }
 
-    /// The whole bar is the control — a target, and a button to VoiceOver.
-    @Test func theWholeBarIsAButton() {
+    /// The whole bar is the target, a button to VoiceOver — and a TAP
+    /// recogniser answers it. #312 shipped the bar as a plain `UIControl`
+    /// listening for `.primaryActionTriggered`, which a plain control never
+    /// sends: the chevron did nothing on device.
+    @Test func theWholeBarIsATapTarget() {
         let header = SectionLinkHeaderView(title: "Friends")
         #expect(header.isAccessibilityElement)
         #expect(header.accessibilityTraits.contains(.button))
         header.frame = CGRect(x: 0, y: 0, width: 360, height: SectionLinkHeaderView.height)
         header.layoutIfNeeded()
         #expect(header.hitTest(CGPoint(x: 180, y: 22), with: nil) === header)
+        #expect(header.gestureRecognizers?.contains { $0 is UITapGestureRecognizer } == true)
+        #expect(header.debugShowsChevron)
+
+        var taps = 0
+        header.onTap = { taps += 1 }
+        header.debugTap()
+        #expect(taps == 1)
+        #expect(header.accessibilityActivate())
+        #expect(taps == 2)
     }
 
-    /// A claim with no band still counts in the shared store: it arms the
-    /// collapse, and giving it back restores what the shell had.
-    @Test func aBandlessClaimArmsAndRestoresTheCollapse() {
-        let controller = UITabBarController()
-        controller.tabBarMinimizeBehavior = .never
-        let claim = TabBarMinimizeClaim()
-        claim.arm(controller)
-        claim.arm(controller)
-        #expect(claim.isArmed)
-        #expect(controller.tabBarMinimizeBehavior == .onScrollDown)
-        claim.release()
-        claim.release()
-        #expect(!claim.isArmed)
-        #expect(controller.tabBarMinimizeBehavior == .never)
+    /// "For you" over the list: a heading, not a way in — no chevron, nothing
+    /// to tap, and its touches left to the list under it.
+    @Test func aHeadingThatIsNotALinkTakesNoTouch() {
+        let header = SectionLinkHeaderView(title: "For you", isLink: false)
+        header.frame = CGRect(x: 0, y: 0, width: 360, height: SectionLinkHeaderView.height)
+        header.layoutIfNeeded()
+        #expect(!header.debugShowsChevron)
+        #expect(header.accessibilityTraits.contains(.header))
+        #expect(!header.accessibilityTraits.contains(.button))
+        #expect(header.hitTest(CGPoint(x: 180, y: 22), with: nil) == nil)
+        var taps = 0
+        header.onTap = { taps += 1 }
+        #expect(!header.accessibilityActivate())
+        #expect(taps == 0)
     }
 }
