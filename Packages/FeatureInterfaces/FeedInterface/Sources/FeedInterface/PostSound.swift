@@ -40,25 +40,22 @@ public struct PostSound: Sendable, Equatable, Identifiable {
     public var isOriginal: Bool { title == nil }
 }
 
-/// The posts set to a sound, ranked the three ways the sound page shows them:
-/// its "Popular" row, its "New" row and its "For you" grid. Each list holds
-/// every post (a section's "View all" shows the whole of it); the page
-/// decides what each section shows of it.
+/// The posts set to a sound, ranked the two ways the sound page shows them:
+/// its "Popular" row and its "New" grid. Each list holds every post
+/// ("Popular"'s "View all" shows the whole of it); the page decides what each
+/// section shows of it.
 public struct PostSoundRankings: Sendable, Equatable {
     /// Most engaged first.
     public let popular: [PostID]
     /// Most recently published first.
     public let newest: [PostID]
-    /// The recommendation's order for this viewer.
-    public let recommended: [PostID]
 
-    public init(popular: [PostID], newest: [PostID], recommended: [PostID]) {
+    public init(popular: [PostID], newest: [PostID]) {
         self.popular = popular
         self.newest = newest
-        self.recommended = recommended
     }
 
-    public static let empty = PostSoundRankings(popular: [], newest: [], recommended: [])
+    public static let empty = PostSoundRankings(popular: [], newest: [])
 }
 
 /// Answers which sound a post is set to, and which posts use it.
@@ -68,8 +65,7 @@ public protocol PostSoundProviding: Sendable {
     /// when this provider does not know one — for a clip, the feed then treats
     /// it as the clip's original sound; for anything else, the post has none.
     func sound(forPost postID: PostID, clip: URL?) -> PostSound?
-    /// The posts set to `sound`, most relevant first — the recommendation's
-    /// order (`PostSoundRankings.recommended`).
+    /// The posts set to `sound`, most relevant first.
     func postIDs(using sound: PostSound) -> [PostID]
     /// The posts set to `sound`, ranked for each of the sound page's sections.
     func rankings(using sound: PostSound) -> PostSoundRankings
@@ -84,10 +80,10 @@ public protocol PostSoundProviding: Sendable {
 public extension PostSoundProviding {
     func originalPostID(of sound: PostSound) -> PostID? { nil }
 
-    /// With no ranking of its own, a provider's one order stands for all
-    /// three: the page then shows its posts once each, in that order.
+    /// With no ranking of its own, a provider's one order stands for both:
+    /// the page then shows its posts once each, in that order.
     func rankings(using sound: PostSound) -> PostSoundRankings {
         let posts = postIDs(using: sound)
-        return PostSoundRankings(popular: posts, newest: posts, recommended: posts)
+        return PostSoundRankings(popular: posts, newest: posts)
     }
 }
