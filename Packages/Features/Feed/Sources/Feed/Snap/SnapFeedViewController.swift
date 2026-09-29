@@ -26,23 +26,20 @@ final class SnapFeedViewController: UIViewController {
     /// The author identity, hosted as the trailing bar item's custom view —
     /// content-hugging, so the system glass pill wraps it flush.
     ///
-    /// ⚠️ NOT ONE VIEW FOR THE SCREEN'S LIFE. A new author gets a NEW pill in a
-    /// NEW item under that author's own `identifier` (`installAuthorPill`),
-    /// because that is the only change the bar animates: a view mutated in
-    /// place gives it nothing to transition between.
-    private var authorIdentityView = SnapAuthorIdentityView()
+    /// ONE VIEW FOR THE SCREEN'S LIFE, in one item under one stable
+    /// `identifier` (`authorItemIdentifier`): an author change blurs the pill's
+    /// CONTENT across (`BarItemContentTransition`) and the glass stays put. It
+    /// was a fresh pill in a fresh item per author (#277), which bought iOS
+    /// 26's native item replacement — and with it a glass platter that
+    /// visibly morphed on every page, which read as UIKit's machinery rather
+    /// than the screen's own transition.
+    private let authorIdentityView = SnapAuthorIdentityView()
     /// The media attribution (cover + author + audio line), hosted as the
-    /// native bottom toolbar's leading item.
-    ///
-    /// ⚠️ NOT ONE VIEW FOR THE SCREEN'S LIFE either, for the identity pill's
-    /// reason: a page that draws a different attribution gets a NEW view in a
-    /// NEW item under its own `identifier` (`showAttribution`). It used to be
-    /// one view in one identifier-less item, rewritten in place under its own
-    /// cross-dissolve and a hand-driven toolbar relayout — so the toolbar never
-    /// ran the native morph the header's pill gets: to the bar nothing had
-    /// changed.
-    private var mediaAttributionView = SnapMediaAttributionView()
-    /// The toolbar item wearing `mediaAttributionView`.
+    /// native bottom toolbar's leading item — one view in one item for the
+    /// screen's life, the author pill's contract (`showAttribution`).
+    private let mediaAttributionView = SnapMediaAttributionView()
+    /// The toolbar item wearing `mediaAttributionView`, under
+    /// `attributionItemIdentifier`.
     private var attributionItem = UIBarButtonItem()
     /// Mutes and unmutes the feed for the session (`FeedSound`), shown on
     /// clips only. It sits in the ATTRIBUTION'S capsule, on purpose: adjacent
@@ -72,46 +69,34 @@ final class SnapFeedViewController: UIViewController {
     /// bookmark/share/more cluster yields — those live in the engaged
     /// card; the audio attribution stays anchored on the left).
     private let commentSortButton = SnapCommentSortButton()
-    /// The one living toolbar's items (keep-and-stack): built once, and only
-    /// the leading attribution is ever swapped — for a fresh item per content
-    /// (`showAttribution`). The engagement no longer touches the footer — see
+    /// The one living toolbar's items (keep-and-stack): built once. The
+    /// attribution's content changes inside its item (`showAttribution`), and
+    /// the item is re-minted only to heal a drifted wrapper
+    /// (`checkBarItemWidth`). The engagement no longer touches the footer — see
     /// `configureToolbarItems` for why the trailing ✕ left it.
     private var defaultToolbarItems: [UIBarButtonItem] = []
     /// The nav bar's two trailing items, held so comment mode can add the
     /// sort selector beside the author pill and take it away again.
     private var authorItem = UIBarButtonItem()
     private var sortItem = UIBarButtonItem()
-    /// The author item's identifier: one PER AUTHOR, and both halves of that
-    /// are measured behaviour (iPhone 18 Pro, iOS 27), not taste.
+    /// The author item's identifier: ONE for the slot, whoever the author and
+    /// whatever the follow badge — measured behaviour (iPhone 18 Pro, iOS 27)
+    /// is why that means "no native transition".
     ///
-    /// iOS 26 treats two items with one identifier as ONE item. Swapping in a
-    /// new item under the SAME identifier — even through
-    /// `setRightBarButtonItems(_:animated: true)` — therefore swaps the content
-    /// in a single frame: to the bar nothing was replaced. Under a DIFFERENT
-    /// identifier the bar runs its own transition (the glass morphs between
-    /// the two widths while the old content blurs out and the new blurs in).
-    /// So a new AUTHOR changes the identifier, and a fresh item for the same
-    /// author (the landing install, a better projection) keeps it and lands
-    /// without a flicker.
-    ///
-    /// The follow badge is part of what the pill IS, so it is part of the
-    /// identifier too: following the author turns the "+" into the followed
-    /// (or friends) mark as a fresh pill under another identifier, and the bar
-    /// morphs the capsule between the two glyphs instead of snapping.
-    static func authorItemIdentifier(
-        for author: ProfileID?, badge: SnapAuthorIdentityView.FollowBadge = .none
-    ) -> String {
-        "feed.snap.author-pill." + (author?.rawValue ?? "none") + badge.identifierSuffix
-    }
+    /// iOS 26 treats two items with one identifier as ONE item: a fresh item
+    /// under the SAME identifier — even through
+    /// `setRightBarButtonItems(_:animated: true)` — swaps in a single frame,
+    /// while a DIFFERENT identifier gets the bar's own replacement (the glass
+    /// morphs between the two platters while the contents blur). #277/#295/#305
+    /// used a per-author, per-badge identifier to get that morph; the morph is
+    /// what was asked away. So the identifier never changes, the item is
+    /// re-minted only invisibly (`reinstallAuthorItem`), and every change of
+    /// what the pill draws is the pill's own blur.
+    static let authorItemIdentifier = "feed.snap.author-pill"
 
     /// The attribution item's identifier — the author pill's rule applied to
-    /// the toolbar: one per thing DRAWN (`SnapMediaAttributionView.contentKey`),
-    /// so a page that draws a different pill is a different item and the bar
-    /// runs its own transition, and a page that draws the same one is the same
-    /// item and nothing moves. `nil` is the empty pill the screen opens with.
-    static func attributionItemIdentifier(forContent key: String?) -> String {
-        "feed.snap.attribution." + (key ?? "none")
-    }
+    /// the toolbar: one for the slot, and the content blurs across inside it.
+    static let attributionItemIdentifier = "feed.snap.attribution"
     /// The viewer's balance, closing the trailing run on its left —
     /// [‹ back] … [🪙 solde] [author pill] — so a spend made on this very
     /// screen is visibly paid for. DISPLAY-ONLY here: the map's badge is
@@ -1566,7 +1551,16 @@ final class SnapFeedViewController: UIViewController {
         //
         // A TEXT post keeps its author here, because its comments ARE the page:
         // there is nothing to close, so nothing to put in the slot.
-        var navItems: [UIBarButtonItem] = [engaged && hasMedia ? closeCommentsItem : authorItem]
+        //
+        // ⚠️ A RETURNING author is a FRESH item (the same pill, the same
+        // identifier). Re-handing the kept item after the ✕ held its slot is
+        // the re-hand that drifts UIKit's wrapper off the pill's width (memory
+        // `bar-item-wrapper-drift`); a fresh item is a fresh wrapper.
+        let wearsAuthor = !(engaged && hasMedia)
+        if wearsAuthor, !(navigationItem.rightBarButtonItems ?? []).contains(authorItem) {
+            authorItem = makeAuthorItem()
+        }
+        var navItems: [UIBarButtonItem] = [wearsAuthor ? authorItem : closeCommentsItem]
         if let walletBadgeItem {
             navItems += [.fixedSpace(Spacing.sm), walletBadgeItem]
         }
@@ -1769,36 +1763,26 @@ final class SnapFeedViewController: UIViewController {
 
     // MARK: - Author pill
 
-    private func makeAuthorItem(_ pill: SnapAuthorIdentityView) -> UIBarButtonItem {
-        let item = UIBarButtonItem(customView: pill)
-        item.identifier = Self.authorItemIdentifier(
-            for: pill.shownAuthor?.authorID, badge: pill.followBadge
-        )
+    /// A fresh item wearing THE pill, under the slot's one identifier.
+    private func makeAuthorItem() -> UIBarButtonItem {
+        let item = UIBarButtonItem(customView: authorIdentityView)
+        item.identifier = Self.authorItemIdentifier
         return item
     }
 
-    /// Puts `model`'s author in the bar.
+    /// Puts `model`'s author in the bar — IN PLACE: same item, same pill, and
+    /// the pill blurs its old content out and the new in
+    /// (`SnapAuthorIdentityView.setAuthor`). The badge is set first so a new
+    /// author and their relation land in ONE swap.
     ///
-    /// ⚠️ A NEW AUTHOR IS A NEW ITEM, and that is the whole mechanism. The pill
-    /// used to be one view for the screen's life, rewritten in place under its
-    /// own cross-dissolve — and the bar never animated an author change, because
-    /// from the bar's side nothing had changed: same item, same view. A fresh
-    /// pill in a fresh item under the new author's `identifier`, set through
-    /// `setRightBarButtonItems(_:animated:)`, is a replacement the bar animates
-    /// with its own item transition (see `authorItemIdentifier(for:)`).
-    ///
-    /// Paging between two posts by the same person moves only the post's age,
-    /// in place: there is no new identity to announce.
+    /// Paging between two posts by the same person moves only the post's age.
     ///
     /// Internal, not private, so the item contract is testable without a
     /// populated feed.
     func showAuthor(_ model: FeedItemDisplayModel) {
-        if authorIdentityView.showsSameFace(as: model),
-           authorIdentityView.followBadge == followBadge(for: model.authorID) {
-            authorIdentityView.setAuthor(model, pipeline: imagePipeline)
-            return
-        }
-        installAuthorPill(for: model, animated: canAnimateBarItems)
+        let animated = canAnimateBarItems
+        authorIdentityView.setFollowBadge(followBadge(for: model.authorID), animated: animated)
+        authorIdentityView.setAuthor(model, pipeline: imagePipeline, animated: animated)
     }
 
     /// Whether a bar-item change may animate now: on screen, and not inside a
@@ -1808,48 +1792,26 @@ final class SnapFeedViewController: UIViewController {
         view.window != nil && transitionCoordinator == nil && !isAwaitingAnyFlight
     }
 
-    /// Replaces the pill with a fresh one showing `model` (or, with nil, the
-    /// same author the current one shows), in a fresh item under the author's
-    /// identifier. The fresh pill inherits every host decision — width cap,
-    /// shadow, callbacks — from the one it replaces.
+    /// Re-mints the author item — the SAME pill in a fresh item under the same
+    /// identifier, so the bar swaps it in one unseen frame — and swaps it into
+    /// the trailing run when the run is WEARING it: with a media post's thread
+    /// open the ✕ holds the slot, and the new item simply waits in `authorItem`
+    /// for the run to be rebuilt.
     ///
-    /// Swapped into the trailing run only when the run is WEARING the pill: with
-    /// a media post's thread open the ✕ holds the slot, and the new item simply
-    /// waits in `authorItem` for the run to be rebuilt.
-    ///
-    /// Nothing piles up however fast the feed is paged: the bar holds the one
-    /// installed item, and this controller holds the one current pill.
-    private func installAuthorPill(for model: FeedItemDisplayModel?, animated: Bool) {
-        let previous = authorIdentityView
-        let fresh = SnapAuthorIdentityView()
-        fresh.inheritChrome(from: previous)
-        let shown = model ?? previous.shownAuthor
-        if let shown {
-            fresh.setAuthor(shown, pipeline: imagePipeline, animated: false)
-        }
-        // Before the item is made: the badge is in its identifier.
-        fresh.setFollowBadge(followBadge(for: shown?.authorID))
-        authorIdentityView = fresh
+    /// A fresh item is a fresh custom-view wrapper, measured at hand-over — the
+    /// cure for a wrapper whose width drifted from the pill's (memory
+    /// `bar-item-wrapper-drift`), and the landing install's second guard.
+    private func reinstallAuthorItem() {
         let previousItem = authorItem
-        authorItem = makeAuthorItem(fresh)
-        // The engaged fit reads the PILL's own handle width; the fresh pill has
-        // a different handle.
-        if commentsEngagedID != nil { applyEngagedTrailingRunFit() }
+        authorItem = makeAuthorItem()
         guard var items = navigationItem.rightBarButtonItems,
               let index = items.firstIndex(of: previousItem) else { return }
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-pill-probe") {
-            print("[pill-probe] install \(fresh.shownAuthor?.authorName ?? "-") animated=\(animated)"
-                  + " window=\(view.window != nil) coordinator=\(transitionCoordinator != nil) flight=\(isAwaitingAnyFlight)"
-                  + " badge=\(fresh.followBadge) id=\(authorItem.identifier ?? "-")")
-        }
-        #endif
         items[index] = authorItem
-        navigationItem.setRightBarButtonItems(items, animated: animated)
+        navigationItem.setRightBarButtonItems(items, animated: false)
     }
 
     /// Set by an appearance, spent once the screen has LANDED: the pill that
-    /// rode the presentation in is replaced by a fresh item.
+    /// rode the presentation in is re-installed in a fresh item.
     ///
     /// ⚠️ THE SQUARE PLATE. A post opened by a flight showed the pill's initials
     /// plate as a rounded SQUARE (filmed on a device; reproduced on the iPhone
@@ -1864,7 +1826,7 @@ final class SnapFeedViewController: UIViewController {
     /// path, no fill background). This install is the second guard, and costs
     /// one item swap per appearance: every entry path ends the way the
     /// comments round trip did, with an item installed on a settled screen.
-    /// Same author, same identifier — the swap is not animated and not seen.
+    /// Same pill, same identifier — the swap is not animated and not seen.
     private var authorPillAwaitsLandingInstall = false
 
     private func installAuthorPillAfterLanding() {
@@ -1877,15 +1839,13 @@ final class SnapFeedViewController: UIViewController {
         // animation context it closes in.
         DispatchQueue.main.async { [weak self] in
             guard let self, self.view.window != nil else { return }
-            // Unseen when nothing changed. But a follow relation that arrived
-            // during the flight was left for this install (`followRelation
-            // DidChange`), and another badge is a different item — the bar's
-            // own morph, not a snap.
+            self.reinstallAuthorItem()
+            // A follow relation that arrived during the flight was left for
+            // this moment (`followRelationDidChange`): it blurs in now.
             let author = self.authorIdentityView.shownAuthor?.authorID
-            let changes = self.authorItem.identifier != Self.authorItemIdentifier(
-                for: author, badge: self.followBadge(for: author)
+            self.authorIdentityView.setFollowBadge(
+                self.followBadge(for: author), animated: self.canAnimateBarItems
             )
-            self.installAuthorPill(for: nil, animated: changes && self.canAnimateBarItems)
         }
     }
 
@@ -1957,20 +1917,21 @@ final class SnapFeedViewController: UIViewController {
         followRelationDidChange(for: author)
     }
 
-    /// Re-draws the pill when its author's badge changed. During a presentation
-    /// the landing install is armed and will read the new answer — installing
-    /// now would put a fresh item inside the flight's bar transition.
+    /// Re-draws the pill's badge when its author's relation changed, through
+    /// the pill's own blur. During a presentation the landing install is armed
+    /// and will read the new answer — the badge changes once the screen has
+    /// landed, where it can be seen to change.
     private func followRelationDidChange(for author: ProfileID) {
         guard authorIdentityView.shownAuthor?.authorID == author,
               authorIdentityView.followBadge != followBadge(for: author) else { return }
         if authorPillAwaitsLandingInstall, isAwaitingAnyFlight || transitionCoordinator != nil { return }
-        installAuthorPill(for: nil, animated: canAnimateBarItems)
+        authorIdentityView.setFollowBadge(followBadge(for: author), animated: canAnimateBarItems)
     }
 
     /// The pill's "+": follows the author, OPTIMISTICALLY — the profile's
     /// Follow button's rule (`ProfileViewModel.toggleFollow`). The "+" turns
     /// at once into the followed mark — the FRIENDS mark for someone who
-    /// already follows the viewer — through the bar's own morph, and comes
+    /// already follows the viewer — through the pill's own blur, and comes
     /// back if the graph refuses.
     ///
     /// Internal for tests.
@@ -2000,17 +1961,27 @@ final class SnapFeedViewController: UIViewController {
         navigationItem.compactAppearance = appearance
 
         // The author identity rides the *trailing* bar item (right-aligned,
-        // like a system floating action), not the centered titleView. An
-        // author change installs a fresh pill in a fresh item under that
-        // author's identifier (`installAuthorPill`), so the bar runs its own
-        // item transition between them. The run is closed on its left by the
-        // wallet badge (when a wallet is wired) — the feed's chrome stays
-        // identical on every entry path (menu push and pin flight), so
+        // like a system floating action), not the centered titleView. One
+        // pill in one item under one identifier: an author change blurs the
+        // pill's content across (`showAuthor`). The run is closed on its left
+        // by the wallet badge (when a wallet is wired) — the feed's chrome
+        // stays identical on every entry path (menu push and pin flight), so
         // nothing else may install items, here or from outside.
-        // No badge until the graph has answered for an author — and it is in
-        // the item's identifier, so it is decided before the item is made.
+        // No badge until the graph has answered for an author.
         authorIdentityView.setFollowBadge(.none)
-        authorItem = makeAuthorItem(authorIdentityView)
+        authorItem = makeAuthorItem()
+        // The engaged fit reads the pill's own handle width, which is the new
+        // author's only once the blur has swapped it in.
+        authorIdentityView.onContentApplied = { [weak self] in
+            guard let self, self.commentsEngagedID != nil else { return }
+            self.applyEngagedTrailingRunFit()
+        }
+        authorIdentityView.onContentSettled = { [weak self] in
+            guard let self else { return }
+            self.checkBarItemWidth(self.authorIdentityView, slot: "author") { [weak self] in
+                self?.reinstallAuthorItem()
+            }
+        }
         sortItem = UIBarButtonItem(customView: commentSortButton)
         if wallet != nil {
             // Tappable exactly when a sheet is wired: the badge opens the
@@ -2085,8 +2056,6 @@ final class SnapFeedViewController: UIViewController {
         close.accessibilityLabel = "Close comments"
         close.addAction(UIAction { [weak self] _ in self?.dismissComments() }, for: .primaryActionTriggered)
         closeCommentsItem = UIBarButtonItem(customView: close)
-        // Set once, on the first pill; every fresh pill inherits them
-        // (`SnapAuthorIdentityView.inheritChrome`).
         authorIdentityView.onAuthorTapped = { [weak self] id in self?.viewModel.didTapAuthor(id) }
         // The "+" follows, in place (`followAuthor`). The followed and friends
         // marks take no tap of their own — a tap on them is a tap on the pill,
@@ -2107,9 +2076,10 @@ final class SnapFeedViewController: UIViewController {
     /// bar-bubble invariant the top bar's controls already follow.
     ///
     /// Items are installed once; the bookmark glyph follows the active page in
-    /// place, and the attribution follows it as a fresh item per content
-    /// (`showAttribution` — the identity pill's contract). Every action resolves the active post at
-    /// action time, so none can act on a page the user has scrolled past.
+    /// place, and so does the attribution, blurring across inside its item
+    /// (`showAttribution` — the identity pill's contract). Every action
+    /// resolves the active post at action time, so none can act on a page the
+    /// user has scrolled past.
     private func configureToolbarItems() {
         bookmarkButton.accessibilityLabel = "Save"
         bookmarkButton.addAction(UIAction { [weak self] _ in
@@ -2182,14 +2152,18 @@ final class SnapFeedViewController: UIViewController {
         // The sort selector is not here either — it moved to the nav bar
         // beside the author pill (`setEngagedChrome`).
         soundButton.addAction(UIAction { [weak self] _ in self?.toggleSound() }, for: .primaryActionTriggered)
-        // Set once, on the first pill; every fresh pill inherits it
-        // (`SnapMediaAttributionView.inheritChrome`).
         mediaAttributionView.onTap = { [weak self] in self?.presentSoundSheet() }
+        mediaAttributionView.onContentSettled = { [weak self] in
+            guard let self else { return }
+            self.checkBarItemWidth(self.mediaAttributionView, slot: "attribution") { [weak self] in
+                self?.reinstallAttributionItem()
+            }
+        }
         refreshSoundButton()
-        attributionItem = makeAttributionItem(mediaAttributionView)
-        // The items that are never replaced carry stable identifiers too, so a
-        // re-handed set (`showAttribution`) is matched item for item and
-        // only the attribution transitions.
+        attributionItem = makeAttributionItem()
+        // Every item carries a stable identifier, so a re-handed set (a healed
+        // attribution, `reinstallAttributionItem`) is matched item for item and
+        // nothing transitions.
         soundItem.identifier = "feed.snap.sound"
         let leading: [UIBarButtonItem] = [
             attributionItem,
@@ -4390,21 +4364,17 @@ final class SnapFeedViewController: UIViewController {
         return (soundLine(for: model).map { .sound($0) } ?? .none, cover)
     }
 
-    private func makeAttributionItem(_ pill: SnapMediaAttributionView) -> UIBarButtonItem {
-        let item = UIBarButtonItem(customView: pill)
-        item.identifier = Self.attributionItemIdentifier(forContent: pill.shownContentKey)
+    /// A fresh item wearing THE attribution, under the slot's one identifier.
+    private func makeAttributionItem() -> UIBarButtonItem {
+        let item = UIBarButtonItem(customView: mediaAttributionView)
+        item.identifier = Self.attributionItemIdentifier
         return item
     }
 
     /// Puts `model`'s attribution in the toolbar — the author pill's mechanism
-    /// (`showAuthor`), for the same reason: the bar animates a change of ITEM,
-    /// never a change inside one.
-    ///
-    /// A page that draws the same pill (`contentKey`) changes nothing. One that
-    /// draws another gets a fresh pill in a fresh item under that content's
-    /// identifier, handed over through `setToolbarItems(_:animated:)`, and
-    /// iOS 26 runs its own item transition: the glass morphs between the two
-    /// widths while the old content blurs out and the new blurs in.
+    /// (`showAuthor`): same item, same view, and the content blurs across
+    /// inside it while the glass stays put. A page that draws the same pill
+    /// (`contentKey`) changes nothing.
     ///
     /// Internal, not private, so the item contract is testable without a
     /// populated feed.
@@ -4415,26 +4385,61 @@ final class SnapFeedViewController: UIViewController {
     ) {
         let key = SnapMediaAttributionView.contentKey(for: model, sound: sound, cover: cover)
         guard key != mediaAttributionView.shownContentKey else { return }
-        let fresh = SnapMediaAttributionView()
-        fresh.inheritChrome(from: mediaAttributionView)
-        fresh.setPost(model, sound: sound, cover: cover, pipeline: imagePipeline, animated: false)
-        mediaAttributionView = fresh
+        mediaAttributionView.setPost(
+            model, sound: sound, cover: cover, pipeline: imagePipeline, animated: canAnimateBarItems
+        )
+        refreshCoverSpin()
+    }
+
+    /// The author item's `reinstallAuthorItem`, for the toolbar: the same
+    /// attribution in a fresh item under the same identifier, handed over
+    /// unanimated — one unseen frame — in the live set and the held one.
+    private func reinstallAttributionItem() {
         let previousItem = attributionItem
-        attributionItem = makeAttributionItem(fresh)
-        // The held set too: it is what a disengage or a re-appearance re-hands.
+        attributionItem = makeAttributionItem()
         if let index = defaultToolbarItems.firstIndex(of: previousItem) {
             defaultToolbarItems[index] = attributionItem
         }
-        // The record picks up where the page's media is, once it is in the bar.
-        defer { refreshCoverSpin() }
         guard var items = toolbarItems, let index = items.firstIndex(of: previousItem) else { return }
         items[index] = attributionItem
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-pill-probe") {
-            print("[pill-probe] attribution animated=\(canAnimateBarItems) id=\(attributionItem.identifier ?? "-")")
+        setToolbarItems(items, animated: false)
+    }
+
+    /// ⚠️ THE WRAPPER'S WIDTH, checked after every content swap. A kept bar
+    /// item hosts its view in a UIKit wrapper whose width has been measured
+    /// DRIFTING from the view's (memory `bar-item-wrapper-drift`: +9pt per
+    /// round trip, cumulative, until the bar folded a group into `•••`). The
+    /// pills keep their item now, so each swap is checked: the width the bar
+    /// gave the view against the width it fits, and on any disagreement the
+    /// item is re-minted, which is a fresh wrapper measured at hand-over.
+    ///
+    /// Read a moment after the swap has landed, so the bar's own pass (an
+    /// unanimated change only ASKS for one) has run.
+    ///
+    /// Measured on iOS 27 (iPhone 18 Pro, 32 pages): the NAV bar follows an
+    /// in-place width change on its own — view, fitted and wrapper agree on
+    /// every page. The one disagreement is the author set while a flight
+    /// owns the bar (unanimated): the bar kept the previous author's width
+    /// (158.7 for a 193.3 pill) until this re-mint.
+    private func checkBarItemWidth(_ pill: UIView, slot: String, reinstall: @escaping () -> Void) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self, weak pill] in
+            guard let self, let pill, pill.window != nil, self.view.window != nil else { return }
+            let fitted = pill.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
+            let drawn = pill.bounds.width
+            // A point, not half of one: an engaged width budget lands the
+            // pill a fraction of a point off its fitted width (134.7 vs 135.3,
+            // measured on a text page), and that is pixel rounding, not the
+            // drift — which moved in whole +9pt steps.
+            let drifted = abs(drawn - fitted) > 1
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-pill-probe") {
+                print(String(format: "[pill-probe] width %@ view=%.1f fitted=%.1f wrapper=%.1f%@",
+                             slot, drawn, fitted, pill.superview?.bounds.width ?? -1,
+                             drifted ? " DRIFT -> reinstall" : ""))
+            }
+            #endif
+            if drifted { reinstall() }
         }
-        #endif
-        setToolbarItems(items, animated: canAnimateBarItems)
     }
 
     // MARK: - Sound
@@ -4792,10 +4797,10 @@ final class SnapFeedViewController: UIViewController {
     /// the items inside `UIToolbar` again, the walk lands on the toolbar,
     /// which is overridden anyway.
     ///
-    /// ⚠️ ANY hosted item, not the first: the attribution is a FRESH view per
-    /// page (`showAttribution`), handed over in the same turn as this runs, and
-    /// not in any window yet — walking up from it found nothing, and the
-    /// toolbar stayed light after paging onto a photograph (filmed).
+    /// ⚠️ ANY hosted item, not the first: an item handed over in the same turn
+    /// as this runs is not in any window yet — when the attribution was a fresh
+    /// view per page, walking up from it found nothing, and the toolbar stayed
+    /// light after paging onto a photograph (filmed).
     private func toolbarGlassHost() -> UIView? {
         guard let root = navigationController?.view else { return themedToolbarGlassHost }
         for item in toolbarItems ?? [] {
