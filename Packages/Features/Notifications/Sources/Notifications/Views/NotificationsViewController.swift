@@ -107,10 +107,20 @@ final class NotificationsViewController: UIViewController {
     private func configureCollectionView() {
         collectionView.backgroundColor = .clear
         collectionView.delegate = self
-        // No effect under the bar: the rows run up under the header untouched
-        // — see `prefersClearTopEdge`.
-        collectionView.prefersClearTopEdge()
+        // THE ONE LIST THAT KEEPS UIKIT'S EDGE EFFECT under its bar (asked for,
+        // 2026-09-28): rows scrolling up under "Notifications" soften into the
+        // system's own top-edge blur. Every other list hides it — see
+        // `prefersClearTopEdge` — so this is deliberately NOT called here, and
+        // the style is stated rather than left `.automatic`, so a change of
+        // UIKit default cannot silently turn it into the hard band.
+        collectionView.topEdgeEffect.style = .soft
         collectionView.pin(to: view)
+        // Named, not searched for: the effect is drawn where the navigation
+        // bar's pocket meets the scroll view it TRACKS, and the skeleton and
+        // the empty state are siblings of this list. Registering it also
+        // keeps the large title collapsing with the rows inside the drawer's
+        // custom container, whatever order the views end up in.
+        setContentScrollView(collectionView, for: .top)
 
         refreshControl.addAction(UIAction { [weak self] _ in self?.viewModel.refresh() }, for: .valueChanged)
         collectionView.refreshControl = refreshControl
