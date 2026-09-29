@@ -979,20 +979,18 @@ final class SnapFeedViewController: UIViewController {
                 }
             }
         }
-        // `-snap-sound-sheet [large|roundtrip|push [popular|new|forYou]]`:
-        // opens the active page's sound sheet — the attribution's tap — once
-        // the page (or `-snap-start-index`'s target) is settled; `large` then
-        // raises it to large 2s later, `roundtrip` also comes back to
-        // collapsed 2.5s after that; `push` presses a section's "View all"
-        // (Popular unless named) 2s later and comes back 3s after that.
-        // Pair with `-sound-sheet-trace` for the collapsed detent's measures
-        // and the reveal's progress.
+        // `-snap-sound-sheet [large|roundtrip|push]`: opens the active page's
+        // sound sheet — the attribution's tap — once the page (or
+        // `-snap-start-index`'s target) is settled; `large` then raises it to
+        // large 2s later, `roundtrip` also comes back to collapsed 2.5s after
+        // that; `push` presses Popular's "View all" 2s later (at collapsed:
+        // the sheet must not move) and comes back 3s after that. Pair with
+        // `-sound-sheet-trace` for the collapsed detent's measures and the
+        // reveal's progress.
         if !Self.didDebugSoundSheet, let position = arguments.firstIndex(of: "-snap-sound-sheet") {
             Self.didDebugSoundSheet = true
             let mode = arguments.indices.contains(position + 1) ? arguments[position + 1] : ""
             let expands = mode == "large" || mode == "roundtrip"
-            let pushed = arguments.indices.contains(position + 2)
-                ? SoundSheetSection.Kind(rawValue: arguments[position + 2]) : nil
             let jumpTarget = arguments.firstIndex(of: "-snap-start-index")
                 .flatMap { arguments.indices.contains($0 + 1) ? Int(arguments[$0 + 1]) : nil }
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
@@ -1009,7 +1007,7 @@ final class SnapFeedViewController: UIViewController {
                     print("[qa] -snap-sound-sheet: opened")
                     if mode == "push" {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak sheet] in
-                            sheet?.debugShowSection(pushed ?? .popular)
+                            sheet?.debugShowPopular()
                         }
                         DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak sheet] in
                             sheet?.debugPopSection()
@@ -4604,9 +4602,9 @@ final class SnapFeedViewController: UIViewController {
         guard presentedViewController == nil, let model = activeModel,
               let sound = sound(for: model) else { return }
         // The sheet lists EVERY post set to this sound, not only this feed's,
-        // in three sections (`SoundSheetSections`): popular — the sound's
+        // in two sections (`SoundSheetSections`): popular — the sound's
         // original post first when it is a media post, then the page it was
-        // opened from — new, and the rest in the recommendation's order.
+        // opened from — and every other post, newest first.
         let rankings = soundProvider?.rankings(using: sound) ?? .empty
         // With nobody to ask, a clip's own sound (`sound(for:)`) is this
         // page's: it is its own original.
@@ -4684,7 +4682,7 @@ final class SnapFeedViewController: UIViewController {
             }
             return nil
         }
-        let everyPost = Set(rankings.popular + rankings.newest + rankings.recommended + [original].compactMap { $0 })
+        let everyPost = Set(rankings.popular + rankings.newest + [original].compactMap { $0 })
         let dropped = droppingUnknown ? Set(everyPost.filter { $0 != current && known($0) == nil }) : []
         let dealt = SoundSheetSections.make(
             rankings: rankings, current: current, original: original,
