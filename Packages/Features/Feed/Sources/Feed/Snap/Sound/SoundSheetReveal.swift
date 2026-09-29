@@ -1,13 +1,13 @@
 import QuartzCore
 import UIKit
 
-/// What lies under the sound sheet's "Popular" row — "New", "For you" —
-/// fades in as the sheet grows from collapsed toward large, and out as it
-/// comes back down.
+/// What lies under the sound sheet's "New" title — its grid — fades in as the
+/// sheet grows from collapsed toward large, and out as it comes back down.
 ///
 /// **A MASK ON THE SHEET'S SCREEN, NOT AN ALPHA PER CELL.** Two opaque bands:
-/// everything above `line` (the sound, the Popular row) always shows; the
-/// band below shows at `progress`. A collection view re-applies its layout
+/// everything above `line` (the sound, the Popular row, the "New" title
+/// peeking over the toolbar) always shows; the band below shows at
+/// `progress`. A collection view re-applies its layout
 /// attributes' alpha to a cell on every layout pass, and cells come and go
 /// as rows scroll — so an alpha per cell would be fought over by the layout
 /// and rebuilt per cell. The mask is one layer, whatever is under it. At

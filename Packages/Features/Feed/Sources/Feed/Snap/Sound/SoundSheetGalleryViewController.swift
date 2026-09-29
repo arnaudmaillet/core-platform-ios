@@ -3,9 +3,16 @@ import DesignSystem
 import MediaCore
 import UIKit
 
-/// What a section's "View all" pushes INSIDE the sound sheet: that section's
-/// whole ranking as the sheet's three-column grid, under a navigation bar
-/// with UIKit's back button and the section's title.
+/// What "Popular"'s "View all" pushes INSIDE the sound sheet: its whole
+/// ranking as the sheet's three-column grid, under a navigation bar with
+/// UIKit's back button and the section's title — at whatever detent the sheet
+/// stands: the push never moves it.
+///
+/// **UIKIT'S SOFT TOP EDGE UNDER THE TITLE**, the notifications drawer's
+/// (`NotificationsViewController`), stated rather than left `.automatic`:
+/// left automatic, the blur under the title read too heavy (asked for
+/// lighter, 2026-09-29). The sheet's own screen hides its edge instead — its
+/// sound sits UNDER the bar at rest.
 ///
 /// The sheet's toolbar stays — [Use this sound][🔖][↑] is about the sound,
 /// and the sound is still what this screen is about; the items are fresh ones
@@ -59,7 +66,10 @@ final class SoundSheetGalleryViewController: UIViewController {
             collectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             collectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
-        setContentScrollView(collectionView, for: .bottom)
+        collectionView.topEdgeEffect.style = .soft
+        // Named for both edges: the bar's soft blur and the toolbar's read
+        // THIS scroll view.
+        setContentScrollView(collectionView, for: [.top, .bottom])
         let pipeline = imagePipeline
         let registration = UICollectionView.CellRegistration<SoundSheetTileCell, PostID> { [weak self] cell, _, id in
             guard let tile = self?.tile(id) else { return }
@@ -69,14 +79,6 @@ final class SoundSheetGalleryViewController: UIViewController {
             view.dequeueConfiguredReusableCell(using: registration, for: path, item: id)
         }
         dataSource.apply(snapshot(), animatingDifferences: false)
-    }
-
-    /// The bar shows here, for the back button and the title; the sheet's own
-    /// screen hides it again on the way back. UIKit's API, animated with the
-    /// push — never an alpha (memory `native-chrome-uikit-only`).
-    override func viewWillAppear(_ animated: Bool) {
-        super.viewWillAppear(animated)
-        navigationController?.setNavigationBarHidden(false, animated: animated)
     }
 
     private func makeLayout() -> UICollectionViewCompositionalLayout {
