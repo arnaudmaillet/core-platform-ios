@@ -189,9 +189,6 @@ final class MapsViewController: UIViewController {
     #endif
 
     private let mapView = MKMapView()
-    /// The camera is far enough out that the map is drawn as MapKit's globe
-    /// (hybrid imagery) rather than the standard map — see `MapGlobe`.
-    private var showsGlobe = false
     /// The world's country borders and the chosen one — see `CountryLayer`.
     private let countryLayer = CountryLayer()
     /// Which countries this account has unlocked — only their posts are on
@@ -380,7 +377,7 @@ final class MapsViewController: UIViewController {
         installIconDebugHUD()
         installNavigationSweep()
         installNavigationDrag()
-        installGlobeDemo()
+        installZoomSweep()
         #endif
         // No title, deliberately: the map is the tab's whole surface and
         // names itself; the header band belongs to its controls — the
@@ -465,11 +462,11 @@ final class MapsViewController: UIViewController {
             }
         }
         // `-maps-camera-distance <metres>`: pull the camera back to that
-        // distance above the current centre — how the globe is reached in the
-        // sim (no pinch), and past what a region's span can say (a span is
-        // capped at 180°/360°, a camera is not). The standard map clamps it
-        // at ~26 300 km, which the globe frames as a hemisphere (see
-        // `MapGlobe`). Applied after `-maps-set-region`, so the two compose,
+        // distance above the current centre — how the widest zoom is reached
+        // in the sim (no pinch), and past what a region's span can say (a span
+        // is capped at 180°/360°, a camera is not). The standard map clamps
+        // it at ~26 300 km (see `MapBaseConfiguration`). Applied after
+        // `-maps-set-region`, so the two compose,
         // and a second after launch: written in `viewDidLoad`, before the map
         // has a size, MapKit framed a continent instead. Logs what MapKit
         // kept. `-maps-camera-pitch <degrees>` tilts the same camera.
@@ -895,7 +892,8 @@ final class MapsViewController: UIViewController {
 
     private func configureMapView() {
         mapView.delegate = self
-        mapView.preferredConfiguration = MapGlobe.configuration(globe: false)
+        // Once, and never again — see `MapBaseConfiguration`.
+        mapView.preferredConfiguration = MapBaseConfiguration.make()
         mapView.showsCompass = true
         mapView.register(
             MapAnnotationView.self,
@@ -913,33 +911,22 @@ final class MapsViewController: UIViewController {
         configureCountries()
     }
 
-    /// Standard map up close, MapKit's 3D globe far out — see `MapGlobe`.
-    /// Runs at every settle; a no-op unless the camera crossed a threshold.
-    ///
-    /// `-maps-no-globe` (DEBUG): the standard map at every distance, for
-    /// side-by-sides.
-    private func updateGlobe() {
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-maps-no-globe") { return }
-        #endif
-        let distance = mapView.camera.centerCoordinateDistance
-        let wanted = MapGlobe.showsGlobe(atDistance: distance, showingGlobe: showsGlobe)
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-maps-globe-log") {
-            print(String(format: "[maps-globe] distance=%.0f worldFraction=%.3f span=%.2f globe=%@ -> %@",
-                         distance, mapView.visibleMapRect.width / MKMapRect.world.width,
-                         mapView.region.span.latitudeDelta, showsGlobe ? "Y" : "N", wanted ? "Y" : "N"))
-        }
-        #endif
-        // An offer's flight is a detour the app took, not a zoom the viewer
-        // made: a big country framed above its sheet can land past the entry
-        // distance (Libya: ~12 500 km), and the map must not change its face
-        // under the offer. Its close flies back, and that settle decides.
-        guard offerSheet == nil else { return }
-        guard wanted != showsGlobe else { return }
-        showsGlobe = wanted
-        mapView.preferredConfiguration = MapGlobe.configuration(globe: wanted)
+    #if DEBUG
+    /// `-maps-camera-log`: the settled camera — distance, pitch, how much of
+    /// the world's width is on screen, the region MapKit reports (and so the
+    /// viewport the query is built from). Pairs with `-maps-zoom-sweep`.
+    private func logSettledCamera() {
+        guard ProcessInfo.processInfo.arguments.contains("-maps-camera-log") else { return }
+        let region = mapView.region
+        print(String(
+            format: "[maps-camera] settled distance=%.0f pitch=%.0f worldFraction=%.3f center=%.2f,%.2f span=%.2fx%.2f",
+            mapView.camera.centerCoordinateDistance, mapView.camera.pitch,
+            mapView.visibleMapRect.width / MKMapRect.world.width,
+            region.center.latitude, region.center.longitude,
+            region.span.latitudeDelta, region.span.longitudeDelta
+        ))
     }
+    #endif
 
     // MARK: - Countries
 
@@ -2551,7 +2538,9 @@ extension MapsViewController: MKMapViewDelegate {
         // the settled projection), fold in anything a mid-flight diff staged,
         // then request the next page.
         isRegionTransitioning = false
-        updateGlobe()
+        #if DEBUG
+        logSettledCamera()
+        #endif
         reconcileClustersForSettle()
         flushPendingDiffs()
         scheduleQuery()
@@ -3660,23 +3649,42 @@ extension MapsViewController {
         }
     }
 
-    /// `-maps-globe-demo`: zooms the camera out to the globe and back in, one
-    /// animated step every 2.5s, each step a settle — the path a pinch takes,
-    /// filmable in the sim where a pinch cannot be injected. Crosses
-    /// `MapGlobe`'s entry on the way out, rests BETWEEN the two thresholds on
-    /// the way in (10 000 km: still the globe — the hysteresis), then crosses
-    /// the exit. No step sits on a threshold.
-    fileprivate func installGlobeDemo() {
-        guard ProcessInfo.processInfo.arguments.contains("-maps-globe-demo") else { return }
-        let distances: [CLLocationDistance] = [
-            300_000, 3_000_000, 14_000_000, 25_000_000, 10_000_000, 6_000_000, 300_000
+    /// `-maps-zoom-sweep`: zooms the camera from a city out to the widest
+    /// view MapKit allows and back in, one animated step every 2.5s, each
+    /// step a settle — the path a pinch takes, filmable in the sim where a
+    /// pinch cannot be injected. Every settle runs the clustering, the query
+    /// and the country badges at that distance.
+    ///
+    /// 40 000 km is past the standard map's ~26 300 km clamp on purpose: the
+    /// step asks for more than MapKit gives, as a finger pinching out keeps
+    /// doing. At the widest view the camera also crosses to the Pacific and
+    /// back — a viewport across the antimeridian (`MapViewport.make`).
+    fileprivate func installZoomSweep() {
+        guard ProcessInfo.processInfo.arguments.contains("-maps-zoom-sweep") else { return }
+        // `.stay` keeps the camera where it is; `.home` is where it was at
+        // the first step (read then: this runs before the opening region).
+        enum Centre { case stay, pacific, home }
+        let steps: [(distance: CLLocationDistance, centre: Centre)] = [
+            (300_000, .stay), (3_000_000, .stay), (14_000_000, .stay), (25_000_000, .stay),
+            (40_000_000, .stay), (40_000_000, .pacific), (40_000_000, .home),
+            (10_000_000, .stay), (3_000_000, .stay), (300_000, .stay),
         ]
         var step = 0
+        var home: CLLocationCoordinate2D?
         Timer.scheduledTimer(withTimeInterval: 2.5, repeats: true) { [weak self] timer in
-            guard let self, step < distances.count else { timer.invalidate(); return }
+            guard let self, step < steps.count else { timer.invalidate(); return }
             let camera = self.mapView.camera.copy() as? MKMapCamera ?? MKMapCamera()
-            camera.centerCoordinateDistance = distances[step]
-            print(String(format: "[maps-globe] demo step %d -> %.0f", step, distances[step]))
+            if home == nil { home = camera.centerCoordinate }
+            camera.centerCoordinateDistance = steps[step].distance
+            switch steps[step].centre {
+            case .stay: break
+            case .pacific: camera.centerCoordinate = CLLocationCoordinate2D(latitude: -17, longitude: 179)
+            case .home: if let home { camera.centerCoordinate = home }
+            }
+            print(String(
+                format: "[maps-camera] sweep step %d -> %.0f at %.2f,%.2f", step, steps[step].distance,
+                camera.centerCoordinate.latitude, camera.centerCoordinate.longitude
+            ))
             step += 1
             self.mapView.setCamera(camera, animated: true)
         }
