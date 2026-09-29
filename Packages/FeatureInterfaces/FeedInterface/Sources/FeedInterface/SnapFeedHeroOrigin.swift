@@ -325,6 +325,18 @@ public struct SnapFeedHeroOrigin {
     /// end and the flight fades it as the card grows, the way a brick's
     /// counters leave. `nil`: the card is the picture alone.
     public let restingOverlay: (() -> UIView?)?
+    /// Last chance to move before a CLOSE measures where it lands — the hero's
+    /// twin of `TextRevealOrigin.willStageDismissal`, called as the flight
+    /// home is staged and before `frame` is asked for it.
+    ///
+    /// ⚠️ A source NESTED in something that scrolls needs it. A grid's own
+    /// source pins its inset and brings its tile back here
+    /// (`ForYouGridZoomSource.zoomSourceWillStageDismissal`); a source outside
+    /// this feature had no such moment, so a row that scrolled under the open
+    /// post — or a list whose inset the pop animates — was measured wherever
+    /// it happened to be, and the card landed beside it. Filmed on For You's
+    /// Friends and Following rows.
+    public let willStageDismissal: () -> Void
 
     public init(
         post: GalleryPost,
@@ -341,7 +353,8 @@ public struct SnapFeedHeroOrigin {
         textReveal: TextRevealOrigin? = nil,
         cornerRadius: CGFloat? = nil,
         pagePicture: UIImage? = nil,
-        restingOverlay: (() -> UIView?)? = nil
+        restingOverlay: (() -> UIView?)? = nil,
+        willStageDismissal: @escaping () -> Void = {}
     ) {
         self.post = post
         self.stream = stream
@@ -358,5 +371,6 @@ public struct SnapFeedHeroOrigin {
         self.cornerRadius = cornerRadius
         self.pagePicture = pagePicture
         self.restingOverlay = restingOverlay
+        self.willStageDismissal = willStageDismissal
     }
 }

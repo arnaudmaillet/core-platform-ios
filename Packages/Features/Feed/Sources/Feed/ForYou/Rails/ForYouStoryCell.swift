@@ -164,9 +164,16 @@ final class ForYouStoryCell: UICollectionViewCell {
     /// context menu's preview.
     var faceView: UIView { monogram }
 
-    /// The face's rect — the disc without its ring — in `space`.
-    func discFrame(in space: UICoordinateSpace) -> CGRect {
-        monogram.convert(monogram.bounds, to: space)
+    /// The face's rect — the disc without its ring — in `space`, AT REST:
+    /// with no transform between the face and `row` counted.
+    ///
+    /// ⚠️ NOT `monogram.convert(monogram.bounds, to:)`. A press (or anything
+    /// else) that scales the disc makes UIKit's conversion report the SCALED
+    /// rect, and a flight measuring that lands a few points inside and off
+    /// centre of the face it is returning to — filmed on a close. Where a
+    /// flight goes is where the face RESTS; see `ForYouRailsView.restingFrame`.
+    func discFrame(in space: UICoordinateSpace, restingBelow row: UIView) -> CGRect {
+        ForYouRailsView.restingFrame(of: monogram, below: row, in: space)
     }
 
     /// The face exactly as drawn: the picture when it has landed, the initials

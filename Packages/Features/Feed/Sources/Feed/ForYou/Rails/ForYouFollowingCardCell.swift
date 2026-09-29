@@ -218,6 +218,35 @@ final class ForYouFollowingCardCell: UICollectionViewCell {
         ForYouCardCaptionOverlay(post: post, placement: post.kind == .text ? .onCard : .onMedia)
     }
 
+    /// The card as it rests, drawn fresh at `size` — what a window opening from
+    /// it starts as and a close lands on, whatever kind of post it is.
+    ///
+    /// ⚠️ A MEDIA CARD CLOSES AS A WINDOW TOO. It opens with a flight, but the
+    /// feed is a pager: page from its photograph onto a TEXT post and there is
+    /// no picture left to fly, so the close is the card-shaped window
+    /// (`RowCardCloseLanding`) — and what that window lands as has to be this
+    /// card, picture and caption, not a text card that never sat in the row.
+    /// `cover` is the picture the card was showing; nil draws its floor.
+    static func makeStandIn(for post: GalleryPost, cover: UIImage?, size: CGSize) -> UIView {
+        guard post.kind != .text else { return makeTextStandIn(for: post, size: size) }
+        let card = UIView(frame: CGRect(origin: .zero, size: size))
+        card.backgroundColor = PostGridTileCell.fillColor(for: post)
+        card.layer.cornerRadius = cornerRadius
+        card.layer.cornerCurve = .continuous
+        card.clipsToBounds = true
+        let picture = UIImageView(frame: card.bounds)
+        picture.contentMode = .scaleAspectFill
+        picture.clipsToBounds = true
+        picture.image = cover
+        picture.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        card.addSubview(picture)
+        let overlay = ForYouCardCaptionOverlay(post: post, placement: .onMedia)
+        overlay.frame = card.bounds
+        overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        card.addSubview(overlay)
+        return card
+    }
+
     /// A text card, drawn fresh at `size` — what a window opening from this
     /// card starts as and a close lands on.
     static func makeTextStandIn(for post: GalleryPost, size: CGSize) -> UIView {

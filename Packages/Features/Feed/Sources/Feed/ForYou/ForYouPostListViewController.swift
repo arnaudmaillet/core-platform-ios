@@ -212,8 +212,16 @@ final class ForYouPostListViewController: UIViewController {
         openPost(self, origin, stream.map(\.id))
     }
 
-    /// The window a TEXT row opens through, or nil for anything that is not
-    /// one — the plain push then being the honest floor.
+    /// The window a TEXT row opens through — and ANY row closes through once
+    /// the feed is on a text page — or nil for a row the list cannot find, the
+    /// plain push then being the honest floor.
+    ///
+    /// ⚠️ OFFERED FOR MEDIA ROWS TOO. `hasHero` decides the opening; this
+    /// decides whether a close that has nothing to fly has anywhere to go. A
+    /// photograph opened by a flight and paged onto a text post leaves both
+    /// zoom grabs refusing and the chevron's hero failing, unless the origin
+    /// carries a window for `RowCardCloseLanding` to arm — the profile's rule
+    /// ("Offered for EVERY post") and For You's rows' (`ForYouRowOrigins`).
     ///
     /// ⚠️ MARKER-SHAPED, and for the place page's reason
     /// (`PlaceProfileViewController.textRowReveal`): the feed is a PAGER, so
@@ -221,7 +229,7 @@ final class ForYouPostListViewController: UIViewController {
     /// window therefore does not align the page to the row's caption; it opens
     /// over a page that holds still, and closes onto the row it opened from.
     private func textRowReveal(for post: GalleryPost) -> TextRevealOrigin? {
-        guard post.kind == .text, page.rowFrame(for: post.id, in: page) != nil else { return nil }
+        guard page.rowFrame(for: post.id, in: page) != nil else { return nil }
         let anchor = post.id
         return TextRevealOrigin(
             rowFrame: { [weak page] space in

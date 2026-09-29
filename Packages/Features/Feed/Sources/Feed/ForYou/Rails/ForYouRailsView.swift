@@ -471,7 +471,7 @@ final class ForYouRailsView: UIView {
     /// nobody can see.
     func storyFrame(for id: ProfileID, in space: UICoordinateSpace) -> CGRect? {
         guard let cell = storyCell(for: id), isVisible(cell, in: storiesView) else { return nil }
-        return cell.discFrame(in: space)
+        return cell.discFrame(in: space, restingBelow: storiesView)
     }
 
     func storyFace(for id: ProfileID) -> UIImage? {
@@ -487,9 +487,43 @@ final class ForYouRailsView: UIView {
         storyCell(for: id)?.isDiscConcealed = concealed
     }
 
+    /// The card's rect in `space`, at rest — see `restingFrame`.
     func cardFrame(for id: PostID, in space: UICoordinateSpace) -> CGRect? {
         guard let cell = cardCell(for: id), isVisible(cell, in: cardsView) else { return nil }
-        return cell.convert(cell.bounds, to: space)
+        return Self.restingFrame(of: cell, below: cardsView, in: space)
+    }
+
+    /// `view`'s bounds in `space` as they are AT REST: every transform from
+    /// `view` up to (not including) `ancestor` left out, `ancestor` and
+    /// everything above it converted by UIKit as usual.
+    ///
+    /// ⚠️ WHERE A FLIGHT LANDS IS WHERE ITS SOURCE RESTS, not where it is
+    /// drawn this instant. An item that scales under a press — the disc of a
+    /// story, a card's content — reports its SCALED rect through
+    /// `convert(_:to:)`, so a close measured while (or because) the press was
+    /// still easing out flew to a rect a few points inside the item and off
+    /// its centre. Filmed on both rows as "the window doesn't come back to
+    /// the right coordinates". The rows' own scroll offsets are NOT
+    /// transforms — they are the bounds origins subtracted below — so the row
+    /// having scrolled is still honoured; only a transform is ignored.
+    ///
+    /// Assumes the default anchor point, which is `center`'s meaning.
+    static func restingFrame(
+        of view: UIView, below ancestor: UIView, in space: UICoordinateSpace
+    ) -> CGRect {
+        var rect = view.bounds
+        var current = view
+        while current !== ancestor, let parent = current.superview {
+            // From `current`'s bounds space into `parent`'s, as the frame an
+            // identity transform would give it: centred on `center`.
+            let size = current.bounds.size
+            rect = rect.offsetBy(
+                dx: current.center.x - size.width / 2 - current.bounds.minX,
+                dy: current.center.y - size.height / 2 - current.bounds.minY
+            )
+            current = parent
+        }
+        return current.convert(rect, to: space)
     }
 
     func cardCover(for id: PostID) -> UIImage? {
