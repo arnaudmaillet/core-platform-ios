@@ -203,14 +203,11 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         let forYou = ForYouViewController(
             viewModel: ForYouViewModel(
                 repository: ForYouRepository(feed: repository, counterClient: counterClient),
-                // Its OWN namespace. The profile gallery persists the same
-                // format axis under `profile.gallery.*`; sharing the keys would
-                // make each surface yank the other's landing tab.
-                preferences: GalleryPreferences(keyPrefix: "foryou.gallery"),
                 contextStore: ContentContextStore(),
-                // Following is the people the viewer follows: asked of the
-                // graph as pages land, and kept live by the app's follow
-                // channel. Discover (everyone) reads neither.
+                // The rows split the people the viewer follows into FRIENDS
+                // (mutual) and the rest: asked of the graph as pages land, and
+                // kept live by the app's follow channel. Discover (everyone)
+                // reads neither.
                 followRelations: followRelations,
                 followEvents: followEvents
             ),

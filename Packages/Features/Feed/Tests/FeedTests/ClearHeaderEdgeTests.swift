@@ -14,19 +14,20 @@ import UIKit
 struct ClearHeaderEdgeTests {
     private func pipeline() -> ImagePipeline { ImagePipeline(fetcher: PlaceholderImageFetcher()) }
 
-    @Test(arguments: [ForYouGridPage.Style.grid, .list])
+    @Test(arguments: [ForYouGridPage.Style.grid, .list, .discover])
     func aForYouPageHidesTheEffectUnderTheHeader(style: ForYouGridPage.Style) throws {
         let page = ForYouGridPage(imagePipeline: pipeline(), style: style)
         let list = try #require(page.subviews.compactMap { $0 as? UICollectionView }.first)
         #expect(list.topEdgeEffect.isHidden)
     }
 
-    /// ⚠️ THE PAGER TOO. Its scroll view spans the header and draws its own
-    /// effect: with only the pages hidden, the pager's band still cut the header
-    /// off (measured while the style was the thing being set).
-    @Test func theForYouPagerHidesItsEffectToo() throws {
-        let pager = ForYouPagerView(imagePipeline: pipeline())
-        let paging = try #require(pager.subviews.compactMap { $0 as? UIScrollView }.first)
-        #expect(paging.topEdgeEffect.isHidden)
+    /// ⚠️ AND THE ROWS' OWN SCROLLERS. For You's list is led by two
+    /// horizontal rows (`ForYouRailsView`); a row is a scroll view under the
+    /// same header, and its effect would draw a band across the header too.
+    @Test func theForYouRowsHideTheirEffectToo() throws {
+        let rails = ForYouRailsView(imagePipeline: pipeline(), videoPlayback: nil)
+        let rows = rails.subviews.compactMap { $0 as? UIScrollView }
+        #expect(rows.count == 2)
+        #expect(rows.allSatisfy { $0.topEdgeEffect.isHidden })
     }
 }

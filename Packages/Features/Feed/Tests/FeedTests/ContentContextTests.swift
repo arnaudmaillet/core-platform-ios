@@ -164,19 +164,22 @@ struct ForYouContextTests {
         return (model, { snapshots })
     }
 
-    @Test func theContextNarrowsBothTabsAtOnce() async {
+    @Test func theContextNarrowsEverySurfaceAtOnce() async {
         let (model, snapshots) = makeModel()
         model.viewDidLoad()
         for _ in 0..<12 { await Task.yield() }
 
         model.setContext(.work)
         let last = snapshots().last!
-        // Discover (media) keeps only the work-captioned photo; Following (the
-        // unfiltered page) keeps the work photo AND the work text post. Both
-        // moved — a context that narrowed one tab and not the other would read
+        // The mosaic (media) keeps only the work-captioned photo; Following
+        // (every kind) keeps the work photo AND the work text post. Both moved
+        // — a context that narrowed one surface and not the other would read
         // as a broken filter rather than as a scope anyone chose.
         #expect(last.media == .content([corpus[0]]))
-        #expect(last.activity == .content([corpus[0], corpus[2]]))
+        #expect(last.following == .content([corpus[0], corpus[2]]))
+        #expect(last.rails.following.map(\.id).sorted { $0.rawValue < $1.rawValue }
+            == [corpus[0], corpus[2]].map(\.id).sorted { $0.rawValue < $1.rawValue },
+            "the Following row reads the same lens")
     }
 
     @Test func widensAgainWhenTheContextIsCleared() async {
@@ -193,7 +196,7 @@ struct ForYouContextTests {
         // ordering decides (all these fixtures tie on reactions and time, so
         // `.trending` breaks the tie on id). Asserting the fixture's own order
         // would be testing the sort, which `DiscoverySourceTests` already owns.
-        guard case .content(let restored) = snapshots().last?.activity else {
+        guard case .content(let restored) = snapshots().last?.following else {
             Issue.record("expected content after clearing the context")
             return
         }
@@ -201,17 +204,17 @@ struct ForYouContextTests {
     }
 
     @Test func anEmptyContextSaysWhyItIsEmpty() {
-        let empty = ForYouViewModel.emptyState(format: .media, source: .trending, context: .work)
+        let empty = ForYouViewModel.emptyState(for: .following, context: .work)
         // The finding stays in the title; the REASON — the only part the viewer
         // can act on — gets its own line rather than trailing the sentence
         // where it read as punctuation.
-        #expect(empty.title == "No trending media yet.")
+        #expect(empty.title == "No posts from people you follow yet.")
         #expect(empty.subtitle?.contains("Work") == true)
     }
 
     @Test func theDefaultContextOffersNoReason() {
-        let empty = ForYouViewModel.emptyState(format: .media, source: .trending)
-        #expect(empty.title == "No trending media yet.")
+        let empty = ForYouViewModel.emptyState(for: .friend)
+        #expect(empty.title == "No posts from your friends yet.")
         #expect(empty.subtitle == nil)
     }
 

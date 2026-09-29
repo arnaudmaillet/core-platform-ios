@@ -24,7 +24,7 @@ public extension UIScrollView {
     /// A horizontal pager's own scroll view spans the header too, and draws its
     /// own edge effect over the pages. With only the pages hidden, the pager's
     /// band still shows (measured on For You and the inbox when the style was
-    /// the thing being set). `HorizontalPagerView`, `ForYouPagerView` and
+    /// the thing being set). `HorizontalPagerView` and
     /// `ProfileGalleryPagerView` each call this on their paging scroll view.
     ///
     /// ## Why one call per scroll view, not one app-wide default

@@ -122,7 +122,6 @@ struct ForYouCorpusResetTests {
                 page("w", caption: "office deadline"),
                 page("g", caption: "boss level speedrun")
             ]),
-            preferences: nil,
             unreadStore: ForYouUnreadStore(
                 defaults: UserDefaults(suiteName: "foryou.reset.tests.\(UUID().uuidString)")!,
                 keyPrefix: "test.reset",

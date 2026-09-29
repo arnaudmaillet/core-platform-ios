@@ -212,23 +212,23 @@ struct ForYouViewModelTests {
         ]
     }
 
-    @Test func eachFormatFiltersTheCorpusByKind() async {
+    /// The list and the pushed lists are every kind; the pushed MOSAIC is the
+    /// media alone.
+    @Test func theMosaicIsTheMediaAndTheListsAreEveryKind() async {
         let provider = StubForYouProvider(first: ForYouPage(posts: mixed, nextPageToken: nil))
         let (viewModel, snapshots) = makeViewModel(provider)
         viewModel.viewDidLoad()
         await settle()
 
         let last = try! #require(snapshots().last)
-        #expect(last.activity == .content(DiscoverySource.trending.ordering(mixed)))
+        #expect(last.discover == .content(DiscoverySource.trending.ordering(mixed)))
+        // No graph wired: everyone is Following, nobody a friend.
+        #expect(last.following == last.discover)
+        #expect(last.friends == .empty(ForYouViewModel.emptyState(for: .friend)))
         if case .content(let media) = last.media {
             #expect(media.map(\.id.rawValue) == ["m2", "m1"])
         } else {
             Issue.record("media page should have content, got \(last.media)")
-        }
-        if case .content(let short) = last.short {
-            #expect(short.map(\.id.rawValue) == ["t1"])
-        } else {
-            Issue.record("short page should have content, got \(last.short)")
         }
     }
 
@@ -245,7 +245,7 @@ struct ForYouViewModelTests {
 
         #expect(provider.firstPageLoads == 1)
         #expect(snapshots().count == landed + 1)
-        #expect(snapshots().last?.activity == .content(DiscoverySource.recent.ordering(mixed)))
+        #expect(snapshots().last?.discover == .content(DiscoverySource.recent.ordering(mixed)))
     }
 
     @Test func repeatingTheActiveSourceIsANoOp() async {
@@ -274,12 +274,12 @@ struct ForYouViewModelTests {
         let (viewModel, _) = makeViewModel(provider)
         viewModel.viewDidLoad()
         await settle()
-        let before = viewModel.posts(for: .activity).map(\.id.rawValue)
+        let before = viewModel.discoverPosts.map(\.id.rawValue)
 
         viewModel.loadNextPageIfNeeded()
         await settle()
 
-        let after = viewModel.posts(for: .activity).map(\.id.rawValue)
+        let after = viewModel.discoverPosts.map(\.id.rawValue)
         // m3 has the highest reaction count of anything loaded, and STILL goes
         // last: the first page's order is preserved exactly.
         #expect(Array(after.prefix(before.count)) == before)
@@ -311,12 +311,12 @@ struct ForYouViewModelTests {
         let (viewModel, _) = makeViewModel(provider)
         viewModel.viewDidLoad()
         await settle()
-        let before = viewModel.posts(for: .activity).map(\.id.rawValue)
+        let before = viewModel.discoverPosts.map(\.id.rawValue)
 
         viewModel.loadNextPageIfNeeded()
         await settle()
 
-        let after = viewModel.posts(for: .activity).map(\.id.rawValue)
+        let after = viewModel.discoverPosts.map(\.id.rawValue)
         #expect(after == before + ["m3"])
         #expect(Set(after).count == after.count)
     }
@@ -349,7 +349,7 @@ struct ForYouViewModelTests {
 
         #expect(reentered)
         #expect(provider.pagedLoads == 1)
-        let ids = viewModel.posts(for: .activity).map(\.id.rawValue)
+        let ids = viewModel.discoverPosts.map(\.id.rawValue)
         #expect(Set(ids).count == ids.count)
     }
 
@@ -373,7 +373,7 @@ struct ForYouViewModelTests {
         // Across BOTH pages, newest first. m3 was appended LAST under
         // `.trending`; it is the newest of the four, so switching to `.recent`
         // lifts it to the front — the reorder a source change is allowed to do.
-        #expect(viewModel.posts(for: .activity).map(\.id.rawValue) == ["m3", "m1", "m2", "t1"])
+        #expect(viewModel.discoverPosts.map(\.id.rawValue) == ["m3", "m1", "m2", "t1"])
     }
 
     @Test func pagingIsIgnoredBeforeTheFirstPageLands() async {
@@ -403,102 +403,25 @@ struct ForYouViewModelTests {
         await settle()
 
         let last = try! #require(snapshots().last)
-        #expect(last.activity == .failed(message: "Couldn't load. Pull to retry."))
-        #expect(last.media == last.activity)
-        #expect(last.short == last.activity)
+        #expect(last.discover == .failed(message: "Couldn't load. Pull to retry."))
+        #expect(last.media == last.discover)
+        #expect(last.following == last.discover)
+        #expect(last.friends == last.discover)
     }
 
-    /// An empty combination has to name itself, and the sentence has to read
-    /// correctly in every one of them.
-    @Test func emptyMessagesNameTheCombination() {
-        #expect(ForYouViewModel.emptyState(format: .media, source: .trending).title == "No trending media yet.")
-        #expect(ForYouViewModel.emptyState(format: .activity, source: .recent).title == "No recent activity yet.")
-        // Sweeps the whole grid rather than sampling it: the sentence is built
-        // from two enums, and a case added to either is a sentence nobody has
-        // read. Every one must name both halves and end in a full stop.
-        for format in GalleryFilter.Format.allCases {
-            for source in DiscoverySource.allCases {
-                let empty = ForYouViewModel.emptyState(format: format, source: source)
-                #expect(empty.title.hasPrefix("No "))
-                #expect(empty.title.hasSuffix(" yet."))
-                // Nothing is narrowing an unfiltered page, so there is no
-                // reason to offer — and inventing one would be noise.
-                #expect(empty.subtitle == nil)
-            }
+    /// An empty list has to name itself — and an unfiltered one offers no
+    /// reason, since inventing one would be noise.
+    @Test func emptyMessagesNameTheList() {
+        for source in DiscoverySource.allCases {
+            let empty = ForYouViewModel.discoverEmptyState(source: source)
+            #expect(empty.title.hasSuffix(" yet."))
+            #expect(empty.subtitle == nil)
         }
-    }
-
-    @Test func theFormatChoicePersistsAcrossViewModels() async {
-        let suiteName = "foryou-prefs-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        defer { defaults.removePersistentDomain(forName: suiteName) }
-        let preferences = GalleryPreferences(defaults: defaults, keyPrefix: "foryou.gallery")
-
-        let provider = StubForYouProvider(first: ForYouPage(posts: mixed, nextPageToken: nil))
-        let first = ForYouViewModel(repository: provider, preferences: preferences)
-        first.setFormat(.activity)
-
-        let second = ForYouViewModel(repository: provider, preferences: preferences)
-        #expect(second.format == .activity)
-        // The source is deliberately NOT persisted — one screen, session state.
-        #expect(second.source == .trending)
-    }
-
-    /// A fresh install opens on Discover — the case that `GalleryPreferences`'
-    /// own `.activity` default silently hid, because an unwritten preference
-    /// reads exactly like a viewer who chose Following.
-    @Test func anUntouchedPreferenceOpensOnDiscover() async {
-        let suiteName = "foryou-prefs-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        defer { defaults.removePersistentDomain(forName: suiteName) }
-        let preferences = GalleryPreferences(defaults: defaults, keyPrefix: "foryou.gallery")
-        #expect(preferences.hasStoredFormat == false)
-
-        let provider = StubForYouProvider(first: ForYouPage(posts: mixed, nextPageToken: nil))
-        let model = ForYouViewModel(repository: provider, preferences: preferences)
-        #expect(model.format == .media)
-    }
-
-    /// An install that last sat on a tab this screen no longer has must land on
-    /// Discover, not on a page the pager cannot show — which would leave the
-    /// capsule pointing at nothing.
-    @Test func aRetiredTabInTheStoreFallsBackToDiscover() async {
-        let suiteName = "foryou-prefs-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        defer { defaults.removePersistentDomain(forName: suiteName) }
-        let preferences = GalleryPreferences(defaults: defaults, keyPrefix: "foryou.gallery")
-        // Written by a build that still had a Short tab.
-        preferences.format = .short
-
-        let provider = StubForYouProvider(first: ForYouPage(posts: mixed, nextPageToken: nil))
-        let model = ForYouViewModel(repository: provider, preferences: preferences)
-        #expect(model.format == .media)
-    }
-
-    /// The profile gallery persists the same format axis. The two stores must
-    /// not see each other, or each surface yanks the other's landing tab.
-    @Test func theFormatStoreDoesNotCollideWithTheProfileGallery() async {
-        let suiteName = "foryou-prefs-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        defer { defaults.removePersistentDomain(forName: suiteName) }
-
-        // `.short` on purpose: a value For You has no tab for, so adopting it
-        // would be unmistakable. (`.media` would prove nothing now that it is
-        // also For You's own landing tab.)
-        let profile = GalleryPreferences(defaults: defaults)
-        profile.filter = GalleryFilter(format: .short, source: .reposts)
-
-        let discovery = GalleryPreferences(defaults: defaults, keyPrefix: "foryou.gallery")
-        // Reading does not cross over: For You's own key is untouched, so it
-        // lands on Discover rather than inheriting the profile's choice.
-        #expect(discovery.hasStoredFormat == false)
-        let viewModel = ForYouViewModel(
-            repository: StubForYouProvider(first: ForYouPage(posts: [], nextPageToken: nil)),
-            preferences: discovery
-        )
-        #expect(viewModel.format == .media)
-        // And writing does not cross over either.
-        viewModel.setFormat(.activity)
-        #expect(profile.filter == GalleryFilter(format: .short, source: .reposts))
+        for circle in [ForYouViewModel.Circle.friend, .following] {
+            let empty = ForYouViewModel.emptyState(for: circle)
+            #expect(empty.title.hasPrefix("No "))
+            #expect(empty.title.hasSuffix(" yet."))
+            #expect(empty.subtitle == nil)
+        }
     }
 }

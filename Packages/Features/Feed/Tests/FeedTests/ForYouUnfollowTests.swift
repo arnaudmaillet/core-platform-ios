@@ -29,7 +29,7 @@ struct ForYouUnfollowTests {
         var resets = 0
         model.onCorpusReset = { resets += 1 }
         model.viewDidLoad()
-        for _ in 0..<40 where model.posts(for: .activity).isEmpty {
+        for _ in 0..<40 where model.followingPosts.isEmpty {
             await Task.yield()
             try? await Task.sleep(for: .milliseconds(5))
         }
@@ -43,7 +43,7 @@ struct ForYouUnfollowTests {
 
         model.removeAuthor(ProfileID("sofia"))
 
-        #expect(model.posts(for: .activity).map(\.id.rawValue) == ["b1"])
+        #expect(model.followingPosts.map(\.id.rawValue) == ["b1"])
     }
 
     /// Following loses them; DISCOVER KEEPS THEM — it is everyone, followed
@@ -58,13 +58,13 @@ struct ForYouUnfollowTests {
 
         model.removeAuthor(ProfileID("sofia"))
 
-        // Following's pages: Short held only this author's text, so it empties.
-        #expect(model.posts(for: .activity).map(\.id.rawValue) == ["kept"])
-        #expect(model.posts(for: .short).isEmpty)
+        // Following's row and list: only the author still followed.
+        #expect(model.followingPosts.map(\.id.rawValue) == ["kept"])
         // Discover's: untouched.
         // (Sets: the trending order breaks these fixtures' ties on id.)
         #expect(Set(model.discoverPosts.map(\.id.rawValue)) == ["photo", "text", "kept"])
-        #expect(Set(model.posts(for: .media).map(\.id.rawValue)) == ["photo", "kept"])
+        #expect(Set(GalleryFilter.Format.media.filtering(model.discoverPosts).map(\.id.rawValue))
+            == ["photo", "kept"])
     }
 
     /// Unfollowing twice is one removal: the second changes nothing.
@@ -100,7 +100,7 @@ struct ForYouUnfollowTests {
         model.removeAuthor(ProfileID("nobody"))
 
         #expect(resets() == before)
-        #expect(model.posts(for: .activity).map(\.id.rawValue) == ["b1"])
+        #expect(model.followingPosts.map(\.id.rawValue) == ["b1"])
     }
 }
 
