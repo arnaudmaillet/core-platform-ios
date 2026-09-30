@@ -40,18 +40,20 @@ extension SoundSheetViewController {
                 self?.debugTileToOpen(text: wantsText, nextIsText: nextIsText) != nil
             }) { [weak self] in
                 guard let self,
-                      let (id, order) = debugTileToOpen(text: wantsText, nextIsText: nextIsText)
+                      let (id, kind, order) = debugTileToOpen(text: wantsText, nextIsText: nextIsText)
                 else { return }
                 print("[qa] \(label): opening \(id.rawValue)")
-                debugSelect(id, order: order)
+                debugSelect(id, in: kind, order: order)
                 Self.debugDriveFeed(label: label, pages: nextIsText == nil ? 0 : 1, closes: closes)
             }
         }
     }
 
-    /// The first tile the mode asks for, in the order a section feeds, and
-    /// that order.
-    private func debugTileToOpen(text: Bool, nextIsText: Bool?) -> (PostID, [PostID])? {
+    /// The first tile the mode asks for, the section it is in (a post can
+    /// be in both), and the order that section feeds.
+    private func debugTileToOpen(
+        text: Bool, nextIsText: Bool?
+    ) -> (PostID, SoundSheetSection.Kind, [PostID])? {
         guard let galleryPost else { return nil }
         for section in sections {
             let order = section.kind.isRow ? section.all : section.ids
@@ -59,7 +61,7 @@ extension SoundSheetViewController {
                 guard section.ids.contains(id),
                       let post = galleryPost(id), (post.kind == .text) == text,
                       tiles.first(where: { $0.postID == id })?.isLoaded == true,
-                      debugTileIsOnScreen(id)
+                      debugTileIsOnScreen(id, in: section.kind)
                 else { continue }
                 if let nextIsText {
                     guard order.indices.contains(index + 1),
@@ -67,7 +69,7 @@ extension SoundSheetViewController {
                           (next.kind == .text) == nextIsText
                     else { continue }
                 }
-                return (id, order)
+                return (id, section.kind, order)
             }
         }
         return nil
@@ -75,11 +77,11 @@ extension SoundSheetViewController {
 
     /// Asked of the origin a tap would build, so "on screen" means what the
     /// flight will measure.
-    private func debugTileIsOnScreen(_ id: PostID) -> Bool {
+    private func debugTileIsOnScreen(_ id: PostID, in kind: SoundSheetSection.Kind) -> Bool {
         guard let tile = tiles.first(where: { $0.postID == id }), let post = galleryPost?(id) else {
             return false
         }
-        return heroOrigin(for: tile, post: post, stream: [], source: .sheet).frame(view) != nil
+        return heroOrigin(for: tile, post: post, stream: [], source: .sheet(kind)).frame(view) != nil
     }
 
     /// Pages the opened feed `pages` times once it has landed, then closes it

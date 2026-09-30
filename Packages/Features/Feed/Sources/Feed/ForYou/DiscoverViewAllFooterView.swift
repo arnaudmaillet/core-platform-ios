@@ -4,16 +4,14 @@ import UIKit
 /// "View all ›" under each of Discover's mosaic chunks: pushes the whole
 /// mosaic (`DiscoverGalleryViewController`).
 ///
-/// The sound sheet's sections' "View all" control in every respect the eye
-/// reads (`SoundSheetSectionHeaderView`) — a plain secondary-label button in
-/// semibold subheadline, the chevron trailing and pointing RIGHT because it
-/// pushes a screen — so the app says "there is more of this" one way.
+/// A plain secondary-label button in semibold subheadline, the chevron
+/// trailing and pointing RIGHT because it pushes a screen.
 ///
 /// Under the chunk rather than over it: the chunk is content, not a section
 /// that needs a title to be understood, and the control belongs where the
-/// eye arrives having looked through it. (The sheet's sections carry theirs
-/// at their titled head: a row scrolls sideways, and there the head is
-/// where the eye starts.)
+/// eye arrives having looked through it. (The sound sheet's sections carry
+/// a bare chevron after their title instead, `SoundSheetSectionHeaderView`:
+/// a row scrolls sideways, and there the head is where the eye starts.)
 ///
 /// **Right-aligned, and close under the tiles** (2026-09-29): the chevron
 /// ends on the chunk's right edge, where a row header's "›" ends, and the

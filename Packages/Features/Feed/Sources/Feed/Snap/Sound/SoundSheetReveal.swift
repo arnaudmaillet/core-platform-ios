@@ -1,17 +1,23 @@
 import QuartzCore
 import UIKit
 
-/// What lies under the sound sheet's "New" title — its grid — fades in as the
-/// sheet grows from collapsed toward large, and out as it comes back down.
+/// What lies under the sound sheet's Popular row — the "Recent" title and
+/// its grid, as one — fades in as the sheet grows from collapsed toward its
+/// expanded detent, and out as it comes back down.
+///
+/// **FAINT AT COLLAPSED, NEVER GONE** (`restingOpacity`): the title and the
+/// top of the grid's first row stand over the toolbar at the collapsed
+/// detent, there but not yet read — what says the sheet has more below
+/// (asked for, 2026-09-30: "barely visible" at collapsed).
 ///
 /// **A MASK ON THE SHEET'S SCREEN, NOT AN ALPHA PER CELL.** Two opaque bands:
-/// everything above `line` (the sound, the Popular row, the "New" title
-/// peeking over the toolbar) always shows; the band below shows at
-/// `progress`. A collection view re-applies its layout
+/// everything above `line` (the sound, the Popular row) always shows; the
+/// band below shows at `opacity(progress:)`. A collection view re-applies its
+/// layout
 /// attributes' alpha to a cell on every layout pass, and cells come and go
 /// as rows scroll — so an alpha per cell would be fought over by the layout
 /// and rebuilt per cell. The mask is one layer, whatever is under it. At
-/// `progress` 1 it is taken off, so a sheet at large pays no offscreen pass.
+/// `progress` 1 it is taken off, so a sheet at its expanded detent pays no offscreen pass.
 /// Nothing here is native chrome: the toolbar lives in the navigation
 /// controller's view, not in the masked one.
 ///
@@ -29,19 +35,27 @@ import UIKit
 /// crashed #296 (a detent re-measured from a layout) has no path here.
 @MainActor
 final class SoundSheetReveal: NSObject {
-    /// How far toward large the sheet must travel for the lower sections to
-    /// be whole: at 60% of the way they are, so they read before the sheet
-    /// lands rather than as it lands.
+    /// How far toward its expanded detent the sheet must travel for the lower
+    /// sections to be whole: at 60% of the way they are, so they read before
+    /// the sheet lands rather than as it lands.
     static let reach: CGFloat = 0.6
     /// Still frames before the link sleeps (~0.25s at 120Hz).
     static let restFrames = 30
+    /// The fading band's opacity at progress 0 — the collapsed detent.
+    static let restingOpacity: CGFloat = 0.25
+
+    /// The fading band's opacity at `progress`: `restingOpacity` at 0, whole
+    /// at 1, linear between.
+    static func opacity(progress: CGFloat) -> CGFloat {
+        restingOpacity + (1 - restingOpacity) * min(1, max(0, progress))
+    }
 
     /// 0 at the collapsed detent (and below it, as the sheet leaves), 1 from
-    /// `reach` of the way to large up — linear in the sheet's height, so the
-    /// content follows the finger. A PURE function of the height: the same
-    /// height always reads the same.
-    static func progress(height: CGFloat, collapsed: CGFloat, large: CGFloat) -> CGFloat {
-        let span = (large - collapsed) * reach
+    /// `reach` of the way to the expanded detent up — linear in the sheet's
+    /// height, so the content follows the finger. A PURE function of the
+    /// height: the same height always reads the same.
+    static func progress(height: CGFloat, collapsed: CGFloat, expanded: CGFloat) -> CGFloat {
+        let span = (expanded - collapsed) * reach
         guard span > 1 else { return height > collapsed ? 1 : 0 }
         return min(1, max(0, (height - collapsed) / span))
     }
@@ -129,7 +143,7 @@ final class SoundSheetReveal: NSObject {
         guard let host else { return }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        fading.opacity = Float(progress)
+        fading.opacity = Float(Self.opacity(progress: progress))
         let masked = progress < 1
         if masked, host.layer.mask !== mask {
             host.layer.mask = mask

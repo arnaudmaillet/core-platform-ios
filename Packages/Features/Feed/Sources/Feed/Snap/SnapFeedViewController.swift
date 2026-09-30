@@ -4722,7 +4722,7 @@ final class SnapFeedViewController: UIViewController {
         // The sheet lists EVERY post set to this sound, not only this feed's,
         // in two sections (`SoundSheetSections`): popular — the sound's
         // original post first when it is a media post, then the page it was
-        // opened from — and every other post, newest first.
+        // opened from — and recent: every post, newest first.
         let rankings = soundProvider?.rankings(using: sound) ?? .empty
         // With nobody to ask, a clip's own sound (`sound(for:)`) is this
         // page's: it is its own original.
@@ -4800,7 +4800,7 @@ final class SnapFeedViewController: UIViewController {
             }
             return nil
         }
-        let everyPost = Set(rankings.popular + rankings.newest + [original].compactMap { $0 })
+        let everyPost = Set(rankings.popular + rankings.recent + [original].compactMap { $0 })
         let dropped = droppingUnknown ? Set(everyPost.filter { $0 != current && known($0) == nil }) : []
         let dealt = SoundSheetSections.make(
             rankings: rankings, current: current, original: original,
