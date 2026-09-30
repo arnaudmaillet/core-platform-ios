@@ -8,7 +8,7 @@ import UIKit
 /// The closing line's actions are PLAIN (2026-09-30): no capsule, two ranks of
 /// ink — comments and likes primary, repost and save secondary — new glyphs
 /// for comments and repost, and the ink rather than an invisible box on the
-/// caption's column. What stays of the capsule is its box: the press region,
+/// line's column (`actionLineInset`). What stays of the capsule is its box: the press region,
 /// the press wash, the hold's menu.
 @MainActor
 struct PlainCardActionsTests {
@@ -152,8 +152,10 @@ struct PlainCardActionsTests {
 
     // MARK: - The ink on the column
 
-    /// ⚠️ THE INK, NOT THE BOX, sits on the caption's column: the save glyph
-    /// starts where the caption starts, the like count ends where it ends.
+    /// ⚠️ THE INK, NOT THE BOX, sits on the line's column: the save glyph
+    /// starts `actionLineInset` in, the like count ends as far from the other
+    /// edge — one plain padding inside the caption's column on both sides
+    /// (the evening of 2026-09-30: more air around the actions).
     /// Measured on the drawn image and the drawn label, not on the hang the
     /// cell computed — a hang that agreed with itself would pass either way.
     @Test func theInkLinesUpWithTheCaption() throws {
@@ -162,11 +164,27 @@ struct PlainCardActionsTests {
             let line = actions(in: cell)
             let save = try #require(walk(line[0], UIButton.self).first?.imageView)
             let ink = save.convert(save.bounds, to: cell.contentView)
-            #expect(abs(ink.minX - PostGridListRowCell.captionInset) < 1, "\(kind): save ink at \(ink.minX)")
+            #expect(abs(ink.minX - PostGridListRowCell.actionLineInset) < 1, "\(kind): save ink at \(ink.minX)")
 
             let count = try #require(walk(line[3], UILabel.self).first { !$0.isHidden })
             let text = count.convert(count.bounds, to: cell.contentView)
-            #expect(abs(cell.contentView.bounds.maxX - text.maxX - PostGridListRowCell.captionInset) < 0.5)
+            #expect(abs(cell.contentView.bounds.maxX - text.maxX - PostGridListRowCell.actionLineInset) < 0.5)
+        }
+    }
+
+    /// The line is INSET from the caption, and by exactly one plain padding:
+    /// the outer actions' boxes — what a press lights — stand on the
+    /// caption's column, never past it towards the card's corner.
+    @Test func theLineIsInsetOnePaddingInsideTheCaption() {
+        #expect(PostGridListRowCell.actionLineInset
+                == PostGridListRowCell.captionInset + PostCardPillView.plainInsets.leading)
+        #expect(PostGridListRowCell.actionLineInset > PostGridListRowCell.captionInset)
+        let cell = row()
+        let line = actions(in: cell)
+        for pill in [line[0], line[3]] {
+            let box = pill.convert(pill.bounds, to: cell.contentView)
+            #expect(box.minX >= PostGridListRowCell.captionInset - 0.5, "a box spilled past the caption: \(box)")
+            #expect(cell.contentView.bounds.maxX - box.maxX >= PostGridListRowCell.captionInset - 0.5)
         }
     }
 

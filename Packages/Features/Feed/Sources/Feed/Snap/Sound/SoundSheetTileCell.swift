@@ -1,16 +1,43 @@
 import CoreModels
 import DesignSystem
 import MediaCore
+import PostGrid
 import UIKit
 
 /// One post made with the sound: its poster (or its words, for a text post),
-/// and the marks that say which one is which.
+/// the marks that say which one is which, and its likes.
 ///
-/// Two marks, both the same dark capsule in the top-leading corner — one
-/// family of labels on a thumbnail, stacked when a tile earns both:
+/// ## The foot carries the furniture, the head the words (2026-09-30)
+///
+/// ```
+///   ┌──────────────┐
+///   │ words words  │   a text post's caption, from the TOP — it reads
+///   │ words…       │   like the page it opens into, not a centred quote
+///   │              │
+///   │ ♪ Original   │   the marks, stacked, BOTTOM-leading
+///   │ Watching  ♥ 3│   the likes, BOTTOM-trailing
+///   └──────────────┘
+/// ```
+///
+/// Two marks, both the same dark capsule — one family of labels on a
+/// thumbnail, stacked when a tile earns both, the last one on the foot:
 /// - **♪ Original**: the post the sound was first published with. The
 ///   "Popular" row puts it first (`SoundSheetSections`).
 /// - **Watching**: the post the sheet was opened from — second in "Popular".
+///
+/// The LIKES close the foot on the other side, exactly as every gallery's
+/// brick does (`PostGridTileCell`'s `likes`: `heart.fill`, caption2
+/// semibold, white under a soft shadow, 8pt in and 7pt up). That is not a
+/// resemblance but a contract: this sheet's hero is a `.tile` flight card,
+/// and the card draws that very count at those very insets
+/// (`PostGridFlightCard`) — a tile without it landed a card whose heart
+/// vanished in the frame the card was taken away. No scrim: the marks carry
+/// their own dark ground and the count its shadow, as on every brick.
+///
+/// On WORDS the count is ink on the tile's own fill (`.secondaryLabel`, no
+/// shadow): a white heart on a light grey tile is not a read-out. Words only
+/// ever travel as the tile's own twin (`makeStandIn`), so no flight card has
+/// to know.
 ///
 /// The same cell in the rows, the grid and a pushed section's gallery.
 final class SoundSheetTileCell: UICollectionViewCell {
@@ -18,6 +45,21 @@ final class SoundSheetTileCell: UICollectionViewCell {
     private let originalBadge = TileBadge(text: "Original", symbol: "music.note")
     private let currentBadge = TileBadge(text: "Watching", symbol: nil)
     private let captionLabel = UILabel()
+    /// The count over a picture — the galleries' brick's, see the type's note.
+    private let pictureLikes = PostMetricLabel(
+        symbol: "heart.fill", font: PostGridFlightCard.metaFont, color: .white, shadowed: true
+    )
+    /// The count on words: the tile's ink, no shadow.
+    private let wordsLikes = PostMetricLabel(
+        symbol: "heart.fill", font: PostGridFlightCard.metaFont, color: .secondaryLabel
+    )
+    private let badges: UIStackView
+    /// The marks' foot — moved by `footLift` when they cannot share the line.
+    private var badgesBottom: NSLayoutConstraint!
+    /// Set on a twin once it is laid out at the tile's size: the foot's
+    /// arrangement is the TILE's, and a twin grown with a window must not
+    /// re-decide it at every width it passes through (see `footLift`).
+    private var footFrozen = false
     private var loading: Task<Void, Never>?
     private var postID: PostID?
 
@@ -29,6 +71,7 @@ final class SoundSheetTileCell: UICollectionViewCell {
     static let cornerRadius: CGFloat = Spacing.md
 
     override init(frame: CGRect) {
+        badges = Self.badgeStack([originalBadge, currentBadge])
         super.init(frame: frame)
         contentView.backgroundColor = .secondarySystemFill
         // ⚠️ A FIXED RADIUS, NEVER `.containerConcentric`. #304 made the tiles
@@ -47,21 +90,32 @@ final class SoundSheetTileCell: UICollectionViewCell {
         imageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         contentView.addSubview(imageView)
 
-        // A text post has no picture: its words are its tile.
+        // A text post has no picture: its words are its tile, read from the
+        // top like the page they open into.
         captionLabel.font = .preferredFont(forTextStyle: .caption1).withWeight(.semibold)
         captionLabel.textColor = .label
         captionLabel.numberOfLines = 5
         captionLabel.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(captionLabel)
+
+        contentView.addSubview(badges)
+        badgesBottom = Self.pinBadges(badges, in: contentView)
+        for likes in [pictureLikes, wordsLikes] {
+            likes.isHidden = true
+            contentView.addSubview(likes)
+            Self.pinLikes(likes, in: contentView)
+        }
+
         NSLayoutConstraint.activate([
+            captionLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: Spacing.sm),
             captionLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: Spacing.sm),
             captionLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -Spacing.sm),
-            captionLabel.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            // Never into the foot: at a large text size the words give up
+            // lines rather than run under the marks or the count. (A hidden
+            // mark column is empty, and so no taller than nothing.)
+            captionLabel.bottomAnchor.constraint(lessThanOrEqualTo: badges.topAnchor, constant: -Spacing.xs),
+            captionLabel.bottomAnchor.constraint(lessThanOrEqualTo: wordsLikes.topAnchor, constant: -Spacing.xs),
         ])
-
-        let badges = Self.badgeStack([originalBadge, currentBadge])
-        contentView.addSubview(badges)
-        Self.pinBadges(badges, in: contentView)
     }
 
     /// The marks' column — one arrangement for the tile and the overlay a
@@ -83,11 +137,77 @@ final class SoundSheetTileCell: UICollectionViewCell {
         return badgeStack([originalBadge, currentBadge])
     }
 
-    private static func pinBadges(_ badges: UIView, in parent: UIView) {
+    /// The marks on the foot, bottom-leading — the same few points off both
+    /// edges they used to keep in the top corner.
+    ///
+    /// ⚠️ PINNED TO THE FOOT, SO THEY RIDE IT. Every copy that grows with a
+    /// window — the twin (`makeStandIn`), the flight card's overlay
+    /// (`makeBadgeOverlay`) — is laid out INSIDE the pose that sizes it
+    /// (`RevealStage.apply`, `PostGridFlightCard.poseRestingChrome`), so the
+    /// marks follow the window's bottom edge on the flight's own curve. Pinned
+    /// to the top they could not have drifted even laid out late; pinned here,
+    /// a pass deferred to the end of the turn would snap them to where they
+    /// land while the window was still travelling.
+    @discardableResult
+    private static func pinBadges(_ badges: UIView, in parent: UIView, lift: CGFloat = 0) -> NSLayoutConstraint {
+        let bottom = badges.bottomAnchor.constraint(
+            equalTo: parent.bottomAnchor, constant: -(badgeInset + lift)
+        )
         NSLayoutConstraint.activate([
-            badges.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: Spacing.xs + 2),
-            badges.topAnchor.constraint(equalTo: parent.topAnchor, constant: Spacing.xs + 2),
+            badges.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: badgeInset),
+            bottom,
             badges.trailingAnchor.constraint(lessThanOrEqualTo: parent.trailingAnchor, constant: -Spacing.xs),
+        ])
+        return bottom
+    }
+
+    /// The marks' distance from the tile's leading and bottom edges.
+    private static let badgeInset: CGFloat = Spacing.xs + 2
+    /// The count's, from the trailing and bottom edges — the flight card's.
+    private static let likesTrailingInset: CGFloat = 8
+    private static let likesBottomInset: CGFloat = 7
+
+    /// How far the marks step up off the foot: nothing when the last mark and
+    /// the count share the line, else the count's line and a gap.
+    ///
+    /// ⚠️ THE ROW'S TILES ARE TOO NARROW FOR BOTH. "♪ Original" is ~66pt of
+    /// capsule and "♥ 1.2K" ~38pt of count; a Popular tile is ~108pt wide
+    /// (`rowTilesAcross`), and the two marked tiles are exactly the row's
+    /// first two. So the foot is shared when it fits (the grid's wider
+    /// tiles, a short count) and the marks stand on the count's line
+    /// otherwise — still bottom-leading, never under the count.
+    ///
+    /// Decided at the TILE's width, once, and carried unchanged by every copy
+    /// that grows with a window: a twin freezes it (`footFrozen`), the flight
+    /// card's overlay is built with it. Re-decided at the window's width, the
+    /// marks would drop onto the foot partway through a flight — a jump.
+    static func footLift(width: CGFloat, badges: UIView, likes: UIView) -> CGFloat {
+        guard !likes.isHidden, width > 0 else { return 0 }
+        let marks = badges.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
+        guard marks.height > 0 else { return 0 }
+        let count = likes.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
+        let room = width - badgeInset - likesTrailingInset - Spacing.xs
+        if marks.width + count.width <= room { return 0 }
+        return likesBottomInset + count.height + Spacing.xs - badgeInset
+    }
+
+    override func layoutSubviews() {
+        if !footFrozen {
+            let likes = pictureLikes.isHidden ? wordsLikes : pictureLikes
+            badgesBottom.constant = -(Self.badgeInset + Self.footLift(
+                width: bounds.width, badges: badges, likes: likes
+            ))
+        }
+        super.layoutSubviews()
+    }
+
+    /// The count, bottom-trailing, at the flight card's own insets
+    /// (`PostGridFlightCard`: 8 in, 7 up) — the card lands on this.
+    private static func pinLikes(_ likes: UIView, in parent: UIView) {
+        likes.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            likes.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -likesTrailingInset),
+            likes.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -likesBottomInset),
         ])
     }
 
@@ -119,7 +239,12 @@ final class SoundSheetTileCell: UICollectionViewCell {
     ///   flight;
     /// - WORDS stay at the tile's own size, centred, on the tile's ground —
     ///   `RevealDismissCardView`'s rule, since stretching them would re-wrap
-    ///   the caption on every frame. Around them is ground on ground.
+    ///   the caption on every frame. Around them is ground on ground. The
+    ///   whole tile travels as one piece, so its words (at its head) and its
+    ///   marks and count (at its foot) keep their places inside it.
+    ///
+    /// A picture's marks and count are pinned to the twin's FOOT and ride the
+    /// window's bottom edge as it grows — see `pinBadges`.
     ///
     /// ⚠️ ON AN OPAQUE GROUND. The tile's own fill is translucent — it rests
     /// on the sheet — and a window carries it over the PAGE, which would show
@@ -152,6 +277,7 @@ final class SoundSheetTileCell: UICollectionViewCell {
         // there grows the badges and words out of the window's top-left
         // corner (`ForYouFollowingCardCell.addAnchoredOverlay`).
         UIView.performWithoutAnimation { card.layoutIfNeeded() }
+        twin.footFrozen = true
         return card
     }
 
@@ -160,8 +286,11 @@ final class SoundSheetTileCell: UICollectionViewCell {
     /// does not land a bare picture and pop "Original" / "Watching" on in the
     /// frame the card is taken away. Nil for a tile that wears neither.
     ///
-    /// Laid out once at `size`, then only re-posed by the card: the badges are
-    /// pinned to the top-leading corner and never re-wrap.
+    /// Only the marks: the COUNT is the card's own (`PostGridFlightCard`
+    /// draws a `.tile` source's likes itself, at the tile's insets). Laid out
+    /// at `size`, then re-laid out only inside the card's pose
+    /// (`poseRestingChrome`): the marks are pinned to the foot, bottom-leading
+    /// as on the tile, and ride it — they never re-wrap.
     static func makeBadgeOverlay(
         for tile: SoundSheetViewController.Tile, size: CGSize
     ) -> UIView? {
@@ -169,8 +298,15 @@ final class SoundSheetTileCell: UICollectionViewCell {
         let overlay = UIView(frame: CGRect(origin: .zero, size: size))
         overlay.isUserInteractionEnabled = false
         let badges = makeBadgeStack(original: tile.isOriginal, current: tile.isCurrent)
+        // The count the card draws, measured only: the marks stand where the
+        // tile's do (`footLift`), decided at the tile's size.
+        let likes = PostMetricLabel(
+            symbol: "heart.fill", font: PostGridFlightCard.metaFont, color: .white, shadowed: true
+        )
+        likes.set(tile.likeCount)
+        let lift = footLift(width: size.width, badges: badges, likes: likes)
         overlay.addSubview(badges)
-        pinBadges(badges, in: overlay)
+        pinBadges(badges, in: overlay, lift: lift)
         UIView.performWithoutAnimation { overlay.layoutIfNeeded() }
         return overlay
     }
@@ -201,9 +337,28 @@ final class SoundSheetTileCell: UICollectionViewCell {
         postID = tile.postID
         originalBadge.isHidden = !tile.isOriginal
         currentBadge.isHidden = !tile.isCurrent
+        showLikes(of: tile)
         captionLabel.text = tile.thumbnailURL == nil ? tile.caption : nil
         imageView.image = cover
     }
+
+    /// The count on the ground it will be read on — see the type's note.
+    private func showLikes(of tile: SoundSheetViewController.Tile) {
+        let words = tile.thumbnailURL == nil
+        pictureLikes.set(words ? nil : tile.likeCount)
+        wordsLikes.set(words ? tile.likeCount : nil)
+        setNeedsLayout()
+    }
+
+    /// How far the marks stand off the foot now — what a test reads.
+    var debugFootLift: CGFloat { -badgesBottom.constant - Self.badgeInset }
+
+    #if DEBUG
+    /// The likes as drawn, nil when the tile shows none — what a test reads.
+    var debugLikes: String? {
+        [pictureLikes, wordsLikes].first { !$0.isHidden }?.debugText
+    }
+    #endif
 
     /// Whether the "Original" mark shows — what a test reads.
     var showsOriginalBadge: Bool { !originalBadge.isHidden }
@@ -218,9 +373,11 @@ final class SoundSheetTileCell: UICollectionViewCell {
         postID = tile.postID
         originalBadge.isHidden = !tile.isOriginal
         currentBadge.isHidden = !tile.isCurrent
+        showLikes(of: tile)
         accessibilityLabel = [
             tile.isOriginal ? "Original" : nil,
             tile.isCurrent ? "This post" : "Post",
+            tile.likeCount.map { "\(PostMetadata.count($0)) likes" },
         ].compactMap { $0 }.joined(separator: ", ")
         isAccessibilityElement = true
         accessibilityTraits = .button

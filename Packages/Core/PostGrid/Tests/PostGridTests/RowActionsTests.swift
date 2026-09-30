@@ -92,7 +92,7 @@ struct RowActionsTests {
     }
 
     /// The closing line reads `[save][repost] ······ [comments][likes]`: what
-    /// the viewer does leads, at the caption's inset, and what the post has
+    /// the viewer does leads, at the line's inset (`actionLineInset`), and what the post has
     /// closes the line at the same inset on the other side.
     @Test func theClosingLineReadsControlsThenCounts() throws {
         let cell = row()
@@ -115,9 +115,9 @@ struct RowActionsTests {
         let leading = first.convert(first.bounds, to: cell.contentView).minX
         let trailing = cell.contentView.bounds.maxX
             - last.convert(last.bounds, to: cell.contentView).maxX
-        #expect(abs(leading + first.inkLeading - PostGridListRowCell.captionInset) < 0.5,
+        #expect(abs(leading + first.inkLeading - PostGridListRowCell.actionLineInset) < 0.5,
                 "box at \(leading), ink inset \(first.inkLeading), hang \(cell.closingLineHang)")
-        #expect(abs(trailing + last.inkTrailing - PostGridListRowCell.captionInset) < 0.5)
+        #expect(abs(trailing + last.inkTrailing - PostGridListRowCell.actionLineInset) < 0.5)
         // And the two groups are apart: the slack is between them.
         let gap = ordered[2].convert(ordered[2].bounds, to: cell.contentView).minX
             - ordered[1].convert(ordered[1].bounds, to: cell.contentView).maxX
@@ -260,14 +260,14 @@ struct RowActionsTests {
         #expect(visible.isEmpty)
         #expect(buttons(in: bandView).map(\.accessibilityLabel) == ["More actions"])
 
-        // The date, on the closing line, at the caption's inset — before the
+        // The date, on the closing line, at the line's inset — before the
         // counters.
         let age = PostMetadata.compactAge(ofMillis: 0)
         let date = try #require(labels(cell.contentView).first {
             $0.text == age && !$0.isHidden && $0.superviewChainIsVisible
         })
         let dateFrame = date.convert(date.bounds, to: cell.contentView)
-        #expect(abs(dateFrame.minX - PostGridListRowCell.captionInset) < 0.5)
+        #expect(abs(dateFrame.minX - PostGridListRowCell.actionLineInset) < 0.5)
         let counters = pills(in: cell.contentView)
         #expect(counters.count == 2)
         for pill in counters {

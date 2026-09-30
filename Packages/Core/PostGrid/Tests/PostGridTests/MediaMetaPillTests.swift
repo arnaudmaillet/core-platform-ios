@@ -96,12 +96,12 @@ struct MediaMetaPillPlacementTests {
         }
     }
 
-    /// ⚠️ A text row wears the SAME line, at the caption's inset.
+    /// ⚠️ A text row wears the SAME line, at the line's inset.
     ///
     /// Measured at the TRAILING edge: the counters close the row on both of a
     /// card's shapes. The last one's box HANGS past the column by its own
     /// padding (the actions are plain since 2026-09-30), so its INK ends on
-    /// the caption's inset — see `PostGridListRowCell.closingLineHang`.
+    /// the line's inset (`actionLineInset`) — see `PostGridListRowCell.closingLineHang`.
     @Test func aTextCardWearsTheSameLineInItsOwnColumn() {
         let cell = row(kind: .text)
         let visible = visiblePills(in: cell)
@@ -112,12 +112,12 @@ struct MediaMetaPillPlacementTests {
         for pill in visible {
             let frame = pill.convert(pill.bounds, to: cell.contentView)
             #expect(cell.contentView.bounds.maxX - frame.maxX
-                        >= PostGridListRowCell.captionInset - hang - 0.5)
+                        >= PostGridListRowCell.actionLineInset - hang - 0.5)
         }
         let trailing = visible
             .map { cell.contentView.bounds.maxX - $0.convert($0.bounds, to: cell.contentView).maxX }
             .min() ?? 0
-        #expect(abs(trailing - (PostGridListRowCell.captionInset - hang)) < 0.5)
+        #expect(abs(trailing - (PostGridListRowCell.actionLineInset - hang)) < 0.5)
     }
 
     /// The two shapes agree about the line: same capsules, same order

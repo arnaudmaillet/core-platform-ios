@@ -4794,10 +4794,16 @@ final class SnapFeedViewController: UIViewController {
         current: PostID, original: PostID?, rankings: PostSoundRankings, droppingUnknown: Bool = false
     ) -> (sections: [SoundSheetSection], tiles: [SoundSheetViewController.Tile]) {
         let galleryPost = galleryPost
-        let known: (PostID) -> (thumbnailURL: URL?, caption: String?, isMedia: Bool)? = { [modelsByID] id in
-            if let model = modelsByID[id] { return (model.thumbnailURL, model.caption, model.mediaURL != nil) }
+        typealias Known = (thumbnailURL: URL?, caption: String?, isMedia: Bool, likes: Int64?)
+        let known: (PostID) -> Known? = { [modelsByID] id in
+            if let model = modelsByID[id] {
+                return (model.thumbnailURL, model.caption, model.mediaURL != nil, model.likeCount)
+            }
             if let post = galleryPost?(id) {
-                return (post.thumbnailURL, post.caption.isEmpty ? nil : post.caption, post.kind != .text)
+                return (
+                    post.thumbnailURL, post.caption.isEmpty ? nil : post.caption,
+                    post.kind != .text, post.reactionCount
+                )
             }
             return nil
         }
@@ -4813,7 +4819,8 @@ final class SnapFeedViewController: UIViewController {
             let post = known(id)
             return SoundSheetViewController.Tile(
                 postID: id, thumbnailURL: post?.thumbnailURL, caption: post?.caption,
-                isCurrent: id == current, isOriginal: id == dealt.original, isLoaded: post != nil
+                isCurrent: id == current, isOriginal: id == dealt.original, isLoaded: post != nil,
+                likeCount: post?.likes
             )
         }
         return (dealt.sections, tiles)
