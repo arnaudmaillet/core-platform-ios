@@ -55,6 +55,10 @@ final class PlaceProfileViewController: UIViewController {
     private let bannerBox = UIView()
     private let bannerView = UIImageView()
     private let bannerScrim = GradientScrimView()
+    /// The black scrim under the place's name, which stands on the picture in
+    /// white — the profile poster's rule, shared through `HeroInk`. Over the
+    /// picture, under the page-toned plate.
+    private let heroInkScrim = HeroInkScrimView()
     /// "#3 City Rank" — the first counter, when the place has a rank to show.
     private let rankMetric = PlaceMetricView(title: "Rank")
     /// The heart every tile of this page counts, summed. It used to sit beside
@@ -418,6 +422,21 @@ final class PlaceProfileViewController: UIViewController {
             guard let position = arguments.firstIndex(of: flag),
                   position + 1 < arguments.count else { return nil }
             return Double(arguments[position + 1])
+        }
+        // `-place-ink-audit`: the WCAG contrast of the name and the counters
+        // against the pixels rendered behind them, once the banner's picture
+        // is in (it lands after the posts, and dissolves over 0.25s).
+        if arguments.contains("-place-ink-audit") {
+            QAWait.until("place-ink-audit", { [weak self] in
+                self?.bannerView.image != nil
+            }) { [weak self] in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                    guard let self, let measured = debugHeroInkContrast() else { return }
+                    let style = traitCollection.userInterfaceStyle == .dark ? "dark" : "light"
+                    let rows = measured.map { "\($0.0)=[\($0.1)]" }.joined(separator: " ")
+                    print("PLACE-INK-AUDIT style=\(style) \(rows)")
+                }
+            }
         }
         if let position = arguments.firstIndex(of: "-maps-place-tab"),
            position + 1 < arguments.count,
@@ -853,24 +872,28 @@ final class PlaceProfileViewController: UIViewController {
         bannerView.translatesAutoresizingMaskIntoConstraints = false
         bannerBox.addSubview(bannerView)
 
+        heroInkScrim.pin(to: bannerBox)
+
         bannerScrim.translatesAutoresizingMaskIntoConstraints = false
         bannerBox.addSubview(bannerScrim)
 
-        // THE HERO TITLE: the place's name at the banner's foot, over the
-        // legibility plate — the identity leads the page, not the chrome.
+        // THE HERO TITLE: the place's name at the banner's foot, standing on
+        // the picture — the identity leads the page, not the chrome.
         //
-        // ⚠️ THE INK AND THE GROUND ARE OPPOSITES BY CONSTRUCTION, which is
-        // the whole reason this works on an arbitrary photograph. The plate is
-        // `.systemBackground` and the type is `.label`, so they can never
-        // disagree in either appearance — and the failure mode self-corrects:
-        // a white veil under black ink only fails on a DARK photograph, and
-        // the veil lightens dark photographs. Exactly inverted in dark mode.
+        // ⚠️ WHITE ON A BLACK SCRIM, THE PROFILE POSTER'S RULE (`HeroInk`).
+        // It was `.label` over a page-toned plate ("ink and ground opposites
+        // by construction"), but the plate was only ~0.2–0.4 under the name,
+        // so the picture was still mostly itself there: black type over a
+        // dark photograph (or white over a bright one, in dark mode) read
+        // faint. The plate now starts at the name's FOOT, and the name wears
+        // white over `heroInkScrim`.
         //
-        // A fixed white-on-black hero was considered and refused. Every
-        // over-media white ink in this app sits on a surface that FORCES an
-        // interface style; this page does not, and a black wash dissolving
-        // into `systemBackground` passes through mid-grey in light mode
-        // precisely where the selector now stands.
+        // The objection this once met — a black wash dissolving into the page
+        // passes through mid-grey where the selector stands — is met by where
+        // the scrim ends: on a light page it has given way by the counters'
+        // top (`HeroInk.Band.release`), well above the plate's flat tail, so
+        // nothing under the selector is grey. On a dark page it holds to the
+        // foot, under a plate of the same tone.
         heroNameLabel.text = Self.heroTitleComponents(of: placeName).name
         // ⚠️ 34 LITERAL, not read back from `preferredFont(forTextStyle:).pointSize`.
         //
@@ -889,7 +912,7 @@ final class PlaceProfileViewController: UIViewController {
         )
         heroNameLabel.adjustsFontForContentSizeCategory = true
         heroNameLabel.accessibilityTraits = .header
-        heroNameLabel.textColor = .label
+        heroNameLabel.textColor = HeroInk.primary
         heroNameLabel.adjustsFontSizeToFitWidth = true
         heroNameLabel.minimumScaleFactor = 0.6
         // ⚠️ LEADING, on the profile's column: the place's name stands where
@@ -1114,32 +1137,49 @@ final class PlaceProfileViewController: UIViewController {
     /// softly the two are blended just above it. Given a third of the banner
     /// the gradient has room to land on the page's own colour before it gets
     /// there, so there is no edge left to see.
-    /// ⚠️ AND IT IS A LADDER, not one ramp. Each row of type is placed at the
-    /// ground density its own size needs — the name high up where the picture
-    /// is still mostly itself, the captions low down where the plate is nearly
-    /// solid — and the last stop lands FLAT well above the selector's band,
-    /// because a glass capsule resolving its own luminance over a tonal
-    /// gradient is the per-luminance flip `PostMetaPillView` measured and
-    /// rejected. See `GradientScrimView.applyColors`.
+    /// ⚠️ AND IT IS A LADDER, not one ramp. It is clear under the name — which
+    /// is white on its own black scrim (`HeroInk`) — and each row of page-ink
+    /// type below is placed at the ground density its own size needs, the
+    /// captions low down where the plate is nearly solid; the last stop lands
+    /// FLAT well above the selector's band, because a glass capsule resolving
+    /// its own luminance over a tonal gradient is the per-luminance flip
+    /// `PostMetaPillView` measured and rejected. See `GradientScrimView.stops`.
     static func scrimHeight(forBanner height: CGFloat) -> CGFloat {
         max(160, height * 0.46)
     }
 
-    /// ⚠️ A COUNTER-TONE EDGE, not a glow — and re-resolved, because it is a
-    /// CGColor.
+    /// The name's edge: `HeroInk`'s soft black shadow under white type — it
+    /// holds a glyph where a busy picture puts a highlight right behind it.
     ///
-    /// `.systemBackground` under `.label` IS the opposite side in both
-    /// appearances, which is what the app's over-media ink law actually asks
-    /// for. What was wrong was the SHAPE — 0.8 at radius 6 is a haze that
-    /// fattens the glyphs rather than edging them — and the LIFETIME: a
-    /// CGColor does not track traits, so a light↔dark flip left light ink
-    /// wearing a light halo.
+    /// ⚠️ It was a `.systemBackground` halo under `.label` ink, re-resolved on
+    /// every style flip because a CGColor does not track traits. The name
+    /// wears the picture's ink now, the same in both appearances, and so does
+    /// its shadow; the counters, which stay page ink on the plate, keep the
+    /// counter-tone halo (`PlaceMetricView.applyBannerLegibility`).
     private func applyHeroLegibility() {
-        heroNameLabel.layer.shadowColor = UIColor.systemBackground
-            .resolvedColor(with: traitCollection).cgColor
-        heroNameLabel.layer.shadowOpacity = 0.9
-        heroNameLabel.layer.shadowRadius = 3
-        heroNameLabel.layer.shadowOffset = .zero
+        HeroInk.applyShadow(to: heroNameLabel, onPicture: 1)
+    }
+
+    /// Hands the two scrims where the type landed: the ink scrim the name's
+    /// band, released at the counters; the plate the name's foot and the
+    /// counters, which it climbs between. The box is settled first — the
+    /// controller's pass runs before the box's own subviews are placed.
+    private func placeHeroInk() {
+        guard let metricsBand else { return }
+        bannerBox.layoutIfNeeded()
+        let name = heroNameLabel.frame
+        let metrics = metricsBand.frame
+        guard name.height > 0, metrics.height > 0 else { return }
+        // Released at the counters' MIDLINE, not their top: the name sits
+        // only `nameToMetricsGap` above them, and a scrim leaving over that
+        // alone drew a hard edge under the name in light mode. Black values
+        // lose nothing to it — over a bright picture a residue of black still
+        // leaves them a light ground, and over a dark one it changes nothing.
+        heroInkScrim.band = HeroInk.Band(top: name.minY, bottom: name.maxY, release: metrics.midY)
+        bannerScrim.setLadder(
+            nameFoot: bannerScrim.convert(CGPoint(x: 0, y: name.maxY), from: bannerBox).y,
+            metrics: bannerScrim.convert(metrics, from: bannerBox)
+        )
     }
 
     /// Slides the image within its viewport so it lags the scroll.
@@ -1234,6 +1274,7 @@ final class PlaceProfileViewController: UIViewController {
         // the counters all change with the device and with Dynamic Type.
         bannerHeightConstraint?.constant = bannerHeight
         bannerScrimHeightConstraint?.constant = Self.scrimHeight(forBanner: bannerHeight)
+        placeHeroInk()
         let header = headerHeight
         for hosted in hostedPages {
             hosted.setHostedInsets(top: header, bottom: view.safeAreaInsets.bottom)
@@ -2212,6 +2253,32 @@ extension PlaceProfileViewController {
     var debugLandingOcclusion: UIEdgeInsets { landingOcclusion }
     var debugHeaderBottom: CGFloat { headerHost.frame.maxY }
     var debugBannerImageTop: CGFloat { bannerImageTop?.constant ?? 0 }
+    var debugHeroNameInk: UIColor { heroNameLabel.textColor }
+    var debugInkScrimLocations: [CGFloat] { heroInkScrim.debugLocations }
+    var debugInkScrimAlphas: [CGFloat] { heroInkScrim.debugAlphas }
+    var debugPlateLocations: [CGFloat] { bannerScrim.debugLocations }
+    var debugPlateAlphas: [CGFloat] { bannerScrim.debugAlphas }
+    /// The banner box's and the plate's frames, in the view's space — the ink
+    /// scrim is laid in the box's coordinates, the plate in its own.
+    var debugBannerBoxFrame: CGRect { bannerBox.convert(bannerBox.bounds, to: view) }
+    var debugPlateFrame: CGRect { bannerScrim.convert(bannerScrim.bounds, to: view) }
+    var debugHasBannerPicture: Bool { bannerView.image != nil }
+    /// Puts a picture on the banner directly, for a test that measures the
+    /// type over it — the load path is the pipeline's, tested elsewhere.
+    func debugSetBannerImage(_ image: UIImage) {
+        bannerView.image = image
+    }
+    /// WCAG contrast of the name, then each shown counter's value and
+    /// caption, against the pixels rendered behind them — see
+    /// `HeroInk.debugContrast`. Labelled by their text.
+    func debugHeroInkContrast() -> [(String, HeroInkContrast)]? {
+        view.layoutIfNeeded()
+        let metrics = [rankMetric, likesMetric].filter { !$0.isHidden }
+        let labels = [heroNameLabel] + metrics.flatMap(\.debugLabels)
+        guard let measured = HeroInk.debugContrast(of: labels, in: bannerBox, over: Surface.page)
+        else { return nil }
+        return zip(labels, measured).map { ($0.text ?? "?", $1) }
+    }
     /// Drives the header the way a scroll does, which the simulator cannot.
     func debugApplyHeaderOffset(_ travelled: CGFloat) { applyHeaderOffset(travelled) }
     /// Whether the name and the counters are drawn ON the banner.
@@ -2340,8 +2407,9 @@ private final class PlaceMetricView: UIView {
         accessibilityLabel = title
     }
 
-    /// The same soft shadow the hero title wears, for the same reason: these
-    /// now sit ON the picture, and the scrim under them is still mostly image.
+    /// A counter-tone halo — `.systemBackground` under `.label`, the opposite
+    /// side in both appearances — for page ink whose plate is not yet solid:
+    /// the values stand where it has only just passed half.
     func applyBannerLegibility() {
         for label in [valueLabel, titleLabel] {
             label.layer.shadowColor = UIColor.systemBackground
@@ -2370,6 +2438,8 @@ private final class PlaceMetricView: UIView {
     }
 
     #if DEBUG
+    /// The value and its caption, for the ink audit.
+    var debugLabels: [UILabel] { [valueLabel, titleLabel] }
     /// The raw total, before `CountFormatter` rounds it into something a
     /// column can hold. A test asserting "57" against "57" through the
     /// formatter would pass just as well against "57.4K".
@@ -2383,8 +2453,8 @@ private final class PlaceMetricView: UIView {
     #endif
 }
 
-/// The banner's legibility scrim: clear at the top, background-colored at the
-/// bottom, so the metrics band below never fights the cover for contrast.
+/// The banner's legibility plate: clear at the top, background-colored at the
+/// bottom, so the counters never fight the cover for contrast.
 private final class GradientScrimView: UIView {
     override class var layerClass: AnyClass { CAGradientLayer.self }
 
@@ -2402,43 +2472,93 @@ private final class GradientScrimView: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    /// Where the name ends and where the counters are, in this view's points
+    /// — nil until the controller's first layout, when a guessed ladder of
+    /// the same shape stands in.
+    private var ladder: (nameFoot: CGFloat, metrics: CGRect)?
+
+    func setLadder(nameFoot: CGFloat, metrics: CGRect) {
+        if let ladder, ladder.nameFoot == nameFoot, ladder.metrics == metrics { return }
+        ladder = (nameFoot, metrics)
+        setNeedsLayout()
+    }
+
+    /// Where the plate lands flat, as a fraction of its height.
+    ///
+    /// ⚠️ OPAQUE WELL BEFORE THE EDGE, not at it. Reaching full only in the
+    /// last few points left the photograph still legible where it was cut,
+    /// and an image ending in mid-detail against a flat colour is the line
+    /// this is here to remove — the fade has to be FINISHED with room to
+    /// spare, so what meets the page is the page's own colour.
+    ///
+    /// The flat tail is FIXED at 0.80 rather than computed from the bar:
+    /// 0.80 of a plate that is itself 0.46 of the banner outlasts the
+    /// selector's 44pt on every real device (612pt banner → 56pt of flat
+    /// tail, iPhone SE 3 → 43, the 220 floor → 32), so there is no runtime
+    /// mechanism to get wrong.
+    static let flatFrom: CGFloat = 0.80
+
+    /// The plate's stops, as (location, alpha) pairs.
+    ///
+    /// ⚠️ THE DENSITIES ARE THE DESIGN, not an accident of the curve. Each row
+    /// of PAGE-ink type stands on the ground its own size needs: the counter
+    /// values from 0.55, their 13pt captions from 0.93, because that is the
+    /// size that loses first; and the selector on a FLAT 1.00.
+    ///
+    /// ⚠️ AND IT IS CLEAR UNDER THE NAME. The name is white over the black ink
+    /// scrim (`HeroInk`); the page-toned veil that used to lie under it was,
+    /// in light mode, a white wash under white type. The plate starts
+    /// climbing at the name's foot — where, on a light page, the ink scrim
+    /// starts giving way to it.
+    static func stops(height: CGFloat, nameFoot: CGFloat, metrics: CGRect) -> [(CGFloat, CGFloat)] {
+        guard height > 0 else { return [] }
+        func fraction(_ y: CGFloat) -> CGFloat { max(0, min(y / height, flatFrom)) }
+        let foot = fraction(nameFoot)
+        let values = max(foot, fraction(metrics.minY))
+        // By the counters' MIDLINE — the captions' top — not their foot: at
+        // the foot, the 13pt secondary captions measured 2.8:1 on a light
+        // photograph, under the 3.3 they get on the bare page.
+        let captions = max(values, fraction(metrics.midY))
+        return [(0, 0), (foot, 0), (values, 0.55), (captions, 0.93), (flatFrom, 1), (1, 1)]
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        applyColors()
+    }
+
     private func applyColors() {
         guard let gradient = layer as? CAGradientLayer else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
         // ⚠️ ENDS FULLY OPAQUE, and one stop short of the edge.
         //
         // Stopping at 0.85 left the last pixels of the photograph showing where
         // the banner met the page, and a photograph meeting a flat colour is a
         // line however gently they were blended above it. Landing on the page's
         // own background before the edge means there is no boundary left to
-        // draw. The middle stop keeps the fade slow where the name sits and
-        // quick underneath it, so the type never floats on a grey slab.
-        // ⚠️ AND THE DENSITIES ARE THE DESIGN, not an accident of the curve.
-        //
-        // Each row of type is placed against the ground its own size needs:
-        // the 34pt name at ~0.34-0.53, where the photograph is still plainly
-        // itself; the counter values at ~0.66; their 13pt captions at ~0.93,
-        // because that is the size that loses first; and the selector on a
-        // FLAT 1.00. Four stops could not say that — the old middle pair
-        // handed the name and its captions almost the same ground, which is
-        // why the block read as pasted onto a slab.
+        // draw.
+        let stops: [(CGFloat, CGFloat)]
+        if let ladder, bounds.height > 0 {
+            stops = Self.stops(height: bounds.height, nameFoot: ladder.nameFoot, metrics: ladder.metrics)
+        } else {
+            stops = [(0, 0), (0.45, 0), (0.52, 0.55), (0.70, 0.93), (Self.flatFrom, 1), (1, 1)]
+        }
         // The PAGE's tone, so the run-out lands on what the list below
         // actually sits on — see `Surface`.
-        gradient.colors = [0, 0.14, 0.50, 0.86, 1.0, 1.0].map {
-            Surface.page.withAlphaComponent($0).cgColor
-        }
-        // ⚠️ OPAQUE WELL BEFORE THE EDGE, not at it. Reaching full only in the
-        // last few points left the photograph still legible where it was cut,
-        // and an image ending in mid-detail against a flat colour is the line
-        // this is here to remove — the fade has to be FINISHED with room to
-        // spare, so what meets the page is the page's own colour.
-        //
-        // The flat tail is FIXED at 0.80 rather than computed from the bar:
-        // 0.80 of a plate that is itself 0.46 of the banner outlasts the
-        // selector's 44pt on every real device (612pt banner → 56pt of flat
-        // tail, iPhone SE 3 → 43, the 220 floor → 32), so there is no runtime
-        // mechanism to get wrong.
-        gradient.locations = [0, 0.22, 0.50, 0.72, 0.80, 1.0]
+        gradient.colors = stops.map { Surface.page.withAlphaComponent($0.1).cgColor }
+        gradient.locations = stops.map { NSNumber(value: Double($0.0)) }
     }
+
+    #if DEBUG
+    var debugLocations: [CGFloat] {
+        ((layer as? CAGradientLayer)?.locations ?? []).map { CGFloat($0.doubleValue) }
+    }
+    var debugAlphas: [CGFloat] {
+        ((layer as? CAGradientLayer)?.colors as? [CGColor] ?? []).map { $0.alpha }
+    }
+    #endif
 }
 
 

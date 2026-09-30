@@ -24,11 +24,12 @@ import Foundation
 /// avatar's page-coloured ring cuts through.
 ///
 /// **Poster** is the streaming-app header: the picture runs down to the
-/// tray, and the identity lives ON it. Two rules keep that legible: the
+/// tray, and the identity lives ON it. Three rules keep that legible: the
 /// upper part of the picture is left alone — the subject is visible with
-/// nothing over it — and every line of text sits on a run-out to the page's
-/// tone that is opaque well before the counters, so the type is page ink on
-/// page colour, not ink on a photograph.
+/// nothing over it; the name and the handle, which stand on the picture, are
+/// white over an ink scrim that darkens its foot (the media-app treatment —
+/// no page ink survives an arbitrary photograph); and from the counters down
+/// every line sits on a run-out to the page's tone, page ink on page colour.
 ///
 /// ⚠️ THE PICTURE DECIDES, NOT A SETTING. A landscape picture is a band, a
 /// portrait one a poster: a setting would add a menu and, worse, a picture

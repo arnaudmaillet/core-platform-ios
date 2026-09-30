@@ -610,6 +610,35 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
                 }
             }
         }
+        // Dev convenience: `-profile-ink-audit` prints the WCAG contrast of
+        // the name and the handle against the pixels actually rendered behind
+        // them (see `ProfileHeaderView.debugIdentityContrast`) — once the
+        // profile AND its banner picture are in, since the picture decides
+        // both the shape and what the type stands on.
+        if ProcessInfo.processInfo.arguments.contains("-profile-ink-audit") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                QAWait.until("profile-ink-audit", { [weak self] in
+                    guard let self, self.viewModel.profile != nil else { return false }
+                    return self.headerView.bannerFormat == .none || self.headerView.debugBannerHasPicture
+                }) { [weak self] in
+                    guard let self else { return }
+                    // Past the banner's 0.25s dissolve.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                        guard let self else { return }
+                        self.view.layoutIfNeeded()
+                        let style = self.traitCollection.userInterfaceStyle == .dark ? "dark" : "light"
+                        guard let contrast = self.headerView.debugIdentityContrast() else {
+                            print("PROFILE-INK-AUDIT unavailable")
+                            return
+                        }
+                        print(
+                            "PROFILE-INK-AUDIT format=\(self.headerView.bannerFormat) style=\(style) "
+                                + "name=[\(contrast.name)] handle=[\(contrast.handle)]"
+                        )
+                    }
+                }
+            }
+        }
         // Dev convenience: `-profile-menu-audit` prints the "..." menu the
         // current state resolves to, and fires the copy action so the toast is
         // screenshottable. The menu is the one thing on this screen no launch

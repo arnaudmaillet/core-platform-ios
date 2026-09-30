@@ -52,6 +52,8 @@ let package = Package(
                 "Profile",
                 "CoreNavigation",
                 "CoreStorage",
+                // The identity-ink suite reads `HeroInk`'s constants directly.
+                "DesignSystem",
                 "CoreNetworking",
                 "PostGrid",
                 .product(name: "CoreNetworkingMocks", package: "CoreNetworking")
