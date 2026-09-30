@@ -52,6 +52,7 @@ let package = Package(
             name: "FeedTests",
             dependencies: [
                 "Feed",
+                "DesignSystem",
                 "EmoteKit",
                 "CoreNavigation",
                 "CoreNetworking",
