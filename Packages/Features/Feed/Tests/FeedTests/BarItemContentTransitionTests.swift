@@ -52,13 +52,10 @@ struct BarItemContentTransitionTests {
     /// Off screen there is nothing to see: the change lands in this turn.
     @Test func anOffscreenChangeLandsAtOnce() {
         let host = Host()
-        var applied = 0
-        host.transition.didApply = { applied += 1 }
 
         host.transition.perform(animated: true) { host.label.text = "New" }
 
         #expect(host.label.text == "New")
-        #expect(applied == 1)
         #expect(host.stills.isEmpty)
         #expect(host.content.alpha == 1)
         #expect(host.transition.isRunning == false)
@@ -93,16 +90,21 @@ struct BarItemContentTransitionTests {
         let host = Host()
         let window = Self.window(showing: host)
         defer { window.isHidden = true }
-        var applied = 0
-        host.transition.didApply = { applied += 1 }
+        // What the label said when the second change ran: "New" means the
+        // two landed in one swap, back to back.
+        var textAtSecondChange: String?
 
         host.transition.perform(animated: true) { host.label.text = "New" }
-        host.transition.perform(animated: true) { host.label.textAlignment = .right }
+        host.transition.perform(animated: true) {
+            textAtSecondChange = host.label.text
+            host.label.textAlignment = .right
+        }
+        #expect(textAtSecondChange == nil, "the second change landed before the fade")
         try await Self.settle(host)
 
         #expect(host.label.text == "New")
         #expect(host.label.textAlignment == .right)
-        #expect(applied == 1)
+        #expect(textAtSecondChange == "New")
     }
 
     /// A late arrival for the new content (a fetched face) waits for the swap
@@ -170,10 +172,12 @@ struct BarItemContentTransitionTests {
         let window = Self.window(showing: host)
         defer { window.isHidden = true }
         var applied = 0
-        host.transition.didApply = { applied += 1 }
 
         host.transition.setScrubBlur(1)
-        host.transition.perform(animated: true) { host.label.text = "New" }
+        host.transition.perform(animated: true) {
+            applied += 1
+            host.label.text = "New"
+        }
         host.transition.setScrubBlur(1)
 
         #expect(host.label.text == "New")

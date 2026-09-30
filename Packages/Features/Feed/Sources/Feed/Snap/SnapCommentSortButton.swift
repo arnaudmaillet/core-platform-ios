@@ -59,6 +59,12 @@ final class SnapCommentSortButton: UIButton {
     private var widthFloor: NSLayoutConstraint?
     private var titledWidthFloor: CGFloat = 0
 
+    /// The pill's two widths, whatever it shows now — the inputs the feed's
+    /// fixed author width is computed from (`SnapBarPillWidths`), measured
+    /// once off probes so asking never flips the live pill.
+    var titledWidth: CGFloat { titledWidthFloor }
+    private(set) var glyphWidth: CGFloat = 0
+
     init() {
         super.init(frame: .zero)
         var config = UIButton.Configuration.plain()
@@ -104,6 +110,10 @@ final class SnapCommentSortButton: UIButton {
             }
             .max() ?? 0
         titledWidthFloor = longest.rounded(.up)
+        var glyphOnly = configuration
+        glyphOnly?.attributedTitle = nil
+        glyphWidth = UIButton(configuration: glyphOnly ?? .plain())
+            .systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width.rounded(.up)
         let width = widthAnchor.constraint(greaterThanOrEqualToConstant: titledWidthFloor)
         width.priority = UILayoutPriority(999)
         width.isActive = true

@@ -572,7 +572,7 @@ final class TextPostComposerViewController: UIViewController {
 
     /// The author pill's share of the bar: the bar less its margins, the ✕,
     /// the sort when it is there and the balance — the text page's arithmetic
-    /// (see `SnapFeedViewController.applyEngagedTrailingRunFit`). Applied
+    /// (see `SnapBarPillWidths`, the feed's). Applied
     /// before the bar lays the run out, or the whole item collapses to `•••`.
     private func fitTrailingRun() {
         guard publishedModel != nil else { return }

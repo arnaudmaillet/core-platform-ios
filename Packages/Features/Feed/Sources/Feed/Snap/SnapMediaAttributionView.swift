@@ -8,39 +8,34 @@ import UIKit
 /// toolbar — the bottom-bar sibling of `SnapAuthorIdentityView`, and built on
 /// the same contracts:
 ///
-/// - Content-hugging custom view: the toolbar's system glass wraps it, and
-///   the `.flexibleSpace()` item next to it owns the spacer role natively —
-///   nothing here absorbs width.
+/// - FIXED width in the snap feed (`setFixedWidth`, read off the toolbar by
+///   `SnapBarPillWidths`): the capsule never changes size from one post to
+///   the next, and a long name or sound truncates inside it. Elsewhere (a
+///   published text post's footer) it hugs its content under a small cap.
+///   Either way the `.flexibleSpace()` item next to it owns the spacer role
+///   natively.
 /// - Rigidity flows one way: the cover is fixed (shared `barDiameter`
 ///   circle), the labels compress first (749, one under UIKit's default), so
-///   a long author name truncates under the width cap instead of pushing the
-///   trailing actions.
+///   a long author name truncates instead of pushing the trailing actions.
 /// - Page-fed, ONE VIEW IN ONE ITEM for the screen's life: a page that draws
 ///   something else blurs the old content out and the new in, inside the
 ///   item (`BarItemContentTransition`) — the identity pill's mechanism. The
-///   glass platter never morphs; only the width glides when it changes.
+///   glass platter never morphs.
 final class SnapMediaAttributionView: UIView {
     /// The bar-bubble invariant: every bubble on the feed's bars — back
     /// button, identity pill wrapper, and all three toolbar bubbles — renders
     /// 36pt tall (the bar item wrapper's own height on iOS 26), so the system
     /// glass capsules read as one family top and bottom.
     private static let height: CGFloat = 36
-    /// Long author names truncate here rather than crowding the share/more
-    /// bubbles across the flexible space.
-    ///
-    /// ⚠️ A BAR SHORT OF ROOM FOLDS ITS TRAILING ITEMS INTO UIKit's OWN
-    /// "•••", it does not truncate anything: with a long sound line the
-    /// [🔖 ⇄] capsule and ⋯ were replaced by a system overflow button that
-    /// looked exactly like ⋯ — the bookmark simply gone. So the cap is the
-    /// room the bar actually has, read off the bar's own frames on iOS 27
-    /// (iPhone 18 Pro, `-dump-bars`): 28pt margins each side, this capsule's
-    /// glass +10 around the pill and the mute's 48pt platter, the [🔖 ⇄]
-    /// capsule 86pt, ⋯ 48pt, two 8pt gaps — and 12pt of slack, because the
-    /// fold is silent and one point short is the whole capsule. A fixed 180
-    /// folded it on a 402pt screen; the host sets it (`setMaximumWidth`).
-    static let barReserve: CGFloat = 28 + 10 + 48 + 8 + 86 + 8 + 48 + 28 + 16
+    /// The hugging cap, for a host that does not fix the width. The feed's
+    /// fixed width is the toolbar's own room (`SnapBarPillWidths` —
+    /// ⚠️ a toolbar short of room folds its trailing items into UIKit's own
+    /// `•••`, it does not truncate anything).
     private static let defaultMaxWidth: CGFloat = 120
     private var maxWidthConstraint: NSLayoutConstraint?
+    private var fixedWidthConstraint: NSLayoutConstraint?
+    /// The pill's width in FIXED mode; nil while it hugs its content.
+    private(set) var fixedWidth: CGFloat?
 
     /// A tap on the pill — the feed opens the sound sheet. Nil keeps it a label.
     var onTap: (() -> Void)?
@@ -66,8 +61,9 @@ final class SnapMediaAttributionView: UIView {
     /// Blurs one attribution out and the next in, inside the one toolbar item.
     private lazy var contentTransition: BarItemContentTransition = {
         let transition = BarItemContentTransition(host: self, content: contentView)
+        // Only a hugging pill has a new width to take.
         transition.remeasure = { [weak self] duration in
-            guard let self else { return }
+            guard let self, self.fixedWidth == nil else { return }
             BarItemRemeasure.run(self, duration: duration)
         }
         transition.didSettle = { [weak self] in self?.onContentSettled?() }
@@ -171,11 +167,35 @@ final class SnapMediaAttributionView: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    /// The widest the pill may be — the bar's own room, see `barReserve`.
-    func setMaximumWidth(_ width: CGFloat) {
-        guard let maxWidthConstraint, abs(maxWidthConstraint.constant - width) > 0.5 else { return }
-        maxWidthConstraint.constant = width
-        BarItemRemeasure.run(self, duration: 0.22)
+    /// Pins the pill to `width`, or lets it hug its content again with nil —
+    /// the author pill's `setFixedWidth`, same rules: set before the item is
+    /// handed over (the frame is written while there is no bar), and changed
+    /// on an installed pill only with the toolbar's own geometry, which asks
+    /// the bar for a pass. Returns whether anything changed.
+    @discardableResult
+    func setFixedWidth(_ width: CGFloat?) -> Bool {
+        guard width != fixedWidth else { return false }
+        fixedWidth = width
+        if let width {
+            if let fixedWidthConstraint {
+                fixedWidthConstraint.constant = width
+            } else {
+                // 999, never required — the bar-bubble doctrine.
+                let constraint = widthAnchor.constraint(equalToConstant: width)
+                constraint.priority = UILayoutPriority(999)
+                fixedWidthConstraint = constraint
+            }
+            fixedWidthConstraint?.isActive = true
+        } else {
+            fixedWidthConstraint?.isActive = false
+        }
+        maxWidthConstraint?.isActive = width == nil
+        if superview == nil {
+            frame.size = systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
+        } else {
+            BarItemRemeasure.run(self, duration: nil)
+        }
+        return true
     }
 
     /// The SHADOW only — the identity pill's rule, for the same reason: the
