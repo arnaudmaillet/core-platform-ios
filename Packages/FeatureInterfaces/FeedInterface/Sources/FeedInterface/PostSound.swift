@@ -40,16 +40,25 @@ public struct PostSound: Sendable, Equatable, Identifiable {
     public var isOriginal: Bool { title == nil }
 }
 
-/// The posts set to a sound, ranked the two ways the sound page shows them:
-/// its "Popular" row and its "Recent" grid. Each list holds EVERY post
-/// ("Popular"'s "View all" shows the whole of it, "Recent" shows the whole of
-/// it — a popular post included); the page decides what each section shows
-/// of it.
+/// The posts set to a sound, as the sound page shows them: its "Popular"
+/// section — only when the sound has one — and its "Recent" grid.
+///
+/// **THE BACKEND DECIDES WHETHER THERE IS A POPULAR SECTION** (asked for,
+/// 2026-09-30): a sound used by a handful of posts has no "popular" to speak
+/// of, and the page then goes from the sound straight to "Recent". An EMPTY
+/// `popular` is that answer — the page never invents the section. The page
+/// only decides what each section SHOWS of what it is given: the row's first
+/// posts, and "Recent" without the posts that row already shows.
+///
+/// ⚠️ `timeline.v1.GetAudioFeed` can serve `recent` (a chronological page per
+/// audio id); nothing serves `popular` yet — see `dev/BACKEND_GAPS.md` #27.
 public struct PostSoundRankings: Sendable, Equatable {
-    /// Most engaged first.
+    /// Most engaged first — the whole ranking "Popular"'s chevron opens; the
+    /// row shows its head. EMPTY when the sound has no Popular section.
     public let popular: [PostID]
-    /// Most recently published first — the posts that used the sound
-    /// lately, popular ones too.
+    /// Most recently published first — EVERY post that used the sound, the
+    /// popular ones included (the page leaves out those its Popular row
+    /// already shows).
     public let recent: [PostID]
 
     public init(popular: [PostID], recent: [PostID]) {
@@ -58,6 +67,9 @@ public struct PostSoundRankings: Sendable, Equatable {
     }
 
     public static let empty = PostSoundRankings(popular: [], recent: [])
+
+    /// Whether the backend gave the sound a Popular section.
+    public var hasPopular: Bool { !popular.isEmpty }
 }
 
 /// Answers which sound a post is set to, and which posts use it.
@@ -69,7 +81,8 @@ public protocol PostSoundProviding: Sendable {
     func sound(forPost postID: PostID, clip: URL?) -> PostSound?
     /// The posts set to `sound`, most relevant first.
     func postIDs(using sound: PostSound) -> [PostID]
-    /// The posts set to `sound`, ranked for each of the sound page's sections.
+    /// The posts set to `sound`, ranked for each of the sound page's sections
+    /// — `popular` empty when the backend gives the sound no Popular section.
     func rankings(using sound: PostSound) -> PostSoundRankings
     /// The post `sound` was first published with — the clip it was cut from,
     /// or the first post of the author it is credited to. Nil for a track
@@ -82,10 +95,9 @@ public protocol PostSoundProviding: Sendable {
 public extension PostSoundProviding {
     func originalPostID(of sound: PostSound) -> PostID? { nil }
 
-    /// With no ranking of its own, a provider's one order stands for both:
-    /// the page then shows its posts once each, in that order.
+    /// With no ranking of its own, a provider has no Popular section to
+    /// give: its one order is the "Recent" grid.
     func rankings(using sound: PostSound) -> PostSoundRankings {
-        let posts = postIDs(using: sound)
-        return PostSoundRankings(popular: posts, recent: posts)
+        PostSoundRankings(popular: [], recent: postIDs(using: sound))
     }
 }

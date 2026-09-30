@@ -9,37 +9,55 @@ import PostGrid
 import UIKit
 
 /// The sound a post is set to, opened from the attribution at the foot of
-/// the feed: what it is, a listen, the posts set to it in two sections, a
-/// close button in the sheet's navigation bar and — in its native toolbar —
-/// "Use this sound", save and share.
+/// the feed: what it is, a listen, the posts set to it in one or two
+/// sections, a close button in the sheet's navigation bar and — in its native
+/// toolbar — "Use this sound", save and share.
 ///
 /// ```
 ///  ┌──────────────────────────────────────┐
-///  │╭────╮          ▔▔                    │  one gutter from the top, as from
-///  ││ ▶︎  │  Veridis Quo Veridis…     (✕)  │  the side; the round artwork =
-///  ││    │  Daft Punk                     │  play/pause; ✕ = the bar's close
-///  │╰────╯  0:30 · 23 posts               │  item
-///  │Popular ›                             │  title + chevron: pushes Popular
-///  │▢♪Original ▢Watching ▢ ▢┆→            │  a horizontal row
+///  │  ╭────╮          ▔▔                  │  `headerInset` from the top, as
+///  │  │ ▶︎  │  Veridis Quo Veridis…   (✕)  │  from the side; the round
+///  │  │    │  Daft Punk                   │  artwork = play/pause; ✕ = the
+///  │  ╰────╯  0:30 · 23 posts             │  bar's close item
+///  │                                      │  `headerInset` under it
+///  │Popular ›                             │  ONLY when the backend gives one:
+///  │▢♪Original ▢Watching ▢ ▢┆→            │  a row; its title + chevron push
 ///  │Recent                                │  ← faint at collapsed, with the
 ///  │▢ ▢ ▢                                 │  ← top of its first row, above…
 ///  │(   Use this sound         )(🔖)(↑)   │  ← …the toolbar: collapsed ends
 ///  ├──────────────────────────────────────┤
-///  │▢ ▢ ▢                                 │  EVERY post, newest first: a
-///  │▢ ▢ ▢                                 │  grid fading in as the sheet
-///  └──────────────────────────────────────┘  grows, to where its content ends
+///  │▢ ▢ ▢                                 │  every post the row does not
+///  │▢ ▢ ▢                                 │  show, newest first: a grid
+///  └──────────────────────────────────────┘  fading in as the sheet grows
 /// ```
+/// Without Popular, "Recent" stands right under the sound, whole at every
+/// height, and collapsed ends halfway down its first row (`foldBottom`).
 ///
-/// **TWO SECTIONS** (`SoundSheetSections`): the POPULAR posts (the original
-/// first, then the post watched) in a row, then EVERY post, most RECENT
-/// first, in a grid — a popular post is in both, so an item is a post IN a
-/// section (`Item`). Popular's title and chevron PUSH its whole ranking as a
-/// grid INSIDE the sheet (`SoundSheetGalleryViewController`), at whatever
-/// detent the sheet stands — the push never moves the sheet.
+/// **ONE OR TWO SECTIONS** (`SoundSheetSections`): the POPULAR posts (the
+/// original first, then the post watched) in a row — only when the backend
+/// gives the sound a Popular section, which it does from a number of posts —
+/// then every other post, most RECENT first, in a grid. A post shows once.
+/// Popular's title and chevron PUSH its whole ranking as a grid INSIDE the
+/// sheet (`SoundSheetGalleryViewController`), at whatever detent the sheet
+/// stands — the push never moves the sheet.
 ///
-/// **NO SPACING BETWEEN SECTIONS** but a title's own air (asked for,
-/// 2026-09-30): the sound, the row and the grid follow one another with
-/// nothing added, as a compositional layout lays sections out by default.
+/// **NO SPACING BETWEEN THE POSTS' SECTIONS** but a title's own air (asked
+/// for, 2026-09-30): the row and the grid follow one another with nothing
+/// added, as a compositional layout lays sections out by default. The SOUND
+/// has room of its own (`headerInset`, asked for the same day): above it, on
+/// its leading side and under it.
+///
+/// **THE POSTS SCROLL ONLY AT THE FULLEST DETENT** (asked for, 2026-09-30:
+/// a sound of one post scrolled inside its collapsed sheet, the sound sliding
+/// up under the ✕). Below it, a drag on the posts GROWS the sheet — UIKit's
+/// own `prefersScrollingExpandsWhenScrolledToEdge`, from posts resting at
+/// their top (`restAtTop`, on appearing) — and a content that fits its sheet
+/// does not bounce at all (`alwaysBounceVertical` off): the drag is the
+/// sheet's. The bounce was the bug: a sound of a few posts at its fitted
+/// detent — the fullest, so UIKit let the list have the drag — slid up under
+/// the ✕. Nothing holds the offset by hand: measured on iOS 27 with real
+/// drags (1, 7 and 24 posts), UIKit's own hand-over never scrolled the posts
+/// below the fullest detent (`-sound-sheet-trace` logs any `scrolled:`).
 ///
 /// **THE CONTENT STARTS BEHIND THE NAVIGATION BAR**, not under it: the bar
 /// holds only the close item at its trailing end, and the sound's header sits
@@ -51,8 +69,9 @@ import UIKit
 /// list under a header does (`prefersClearTopEdge`): no blur over the sound.
 ///
 /// **ONE GUTTER** (`gutter`) is the sheet's side margin, the gap between tiles
-/// and the gap between rows, and the header stands on it too: sound, titles
-/// and tiles share one left edge. Every tile wears the same FIXED corner,
+/// and the gap between rows: titles and tiles share one left edge. The sound
+/// stands further in (`headerInset`, twice the gutter), the one block with
+/// room around it. Every tile wears the same FIXED corner,
 /// never one concentric with the sheet's: the posts scroll past the screen's
 /// corners at large (`SoundSheetTileCell.cornerRadius`).
 ///
@@ -66,10 +85,11 @@ import UIKit
 ///
 /// **BOTH DETENTS ARE COMPUTED, NEVER MEASURED OFF THE LIVE SHEET.**
 /// - COLLAPSED (`collapsedDetentHeight`): the sound's header, the "Popular"
-///   title and its row, then the "Recent" title and the top of its first
-///   row — pure arithmetic on the sheet's WIDTH and the text size, plus the
-///   toolbar's band; nothing that depends on how tall the sheet is right now,
-///   nor on how many posts there are.
+///   title and its row when there is one, then the "Recent" title and the
+///   top of its first row — pure arithmetic on the sheet's WIDTH, the text
+///   size and whether Popular is there, plus the toolbar's band; nothing that
+///   depends on how tall the sheet is right now, nor on how many posts there
+///   are.
 /// - EXPANDED (`fittedDetentHeight`): the whole content — the same terms, the
 ///   "Recent" grid's rows counted from its posts — when that is shorter than
 ///   the screen, so a sound with a few posts rises only as far as its posts
@@ -77,7 +97,8 @@ import UIKit
 ///   (`expandedDetentIdentifier`).
 /// So each answer is the same at every visit, and the detents are asked
 /// again (`invalidateDetents`) only when an INPUT changes: the text size, the
-/// width, the band once known — and, for the expanded one, the post count.
+/// width, the band once known, Popular coming or going (posts that could not
+/// be loaded) — and, for the expanded one, the post count.
 ///
 /// ⚠️ **NEVER FROM A LAYOUT CALLBACK.** #296 re-measured the fold in
 /// `viewDidLayoutSubviews` and invalidated the detents inside `animateChanges`
@@ -94,7 +115,9 @@ import UIKit
 /// more below, but not yet read — and follow the sheet's DRAWN height — the
 /// finger, then the spring — to whole at 60% of the way to the expanded
 /// detent. The title fades WITH its grid (asked for, 2026-09-30): it is part
-/// of what the sheet grows into. What is faint cannot be tapped.
+/// of what the sheet grows into. What is faint cannot be tapped. Without a
+/// Popular row nothing fades: "Recent" is then what the collapsed sheet is
+/// for, and the reveal stands down (`SoundSheetReveal.isEnabled`).
 ///
 /// **THE FEED STAYS ALIVE UNDER THE SHEET, AT EVERY DETENT.** Neither detent
 /// pauses the clip behind: a detent is where the sheet sits, not a choice to
@@ -145,9 +168,11 @@ final class SoundSheetViewController: UIViewController {
     }
 
     /// ⚠️ A tile is identified by its POST IN ITS SECTION, not by its
-    /// content: a placeholder filled in is the same item reconfigured. A
-    /// popular post is in "Recent" too (`SoundSheetSections`), so the post
-    /// alone is not unique across the sections — the section makes it so.
+    /// content: a placeholder filled in is the same item reconfigured. A post
+    /// shows in one section (`SoundSheetSections`), but the section it is in
+    /// is what a tap and the hero look it up by; and a post the row lets go
+    /// (one that could not be loaded dealt the sections again) comes back in
+    /// "Recent" as a new item, not a moved one.
     enum Item: Hashable, Sendable {
         case sound
         case tile(PostID, SoundSheetSection.Kind)
@@ -185,18 +210,30 @@ final class SoundSheetViewController: UIViewController {
     /// Upload picker's rule (`Spacing.sm` both ways), so the posts read as
     /// tiles on the sheet rather than a wall with a frame around it.
     static let gutter: CGFloat = Spacing.sm
-    /// Above the sound: the sheet's side margin, so its header stands as far
-    /// from the sheet's top edge as from its leading one (asked for,
-    /// 2026-09-30). The grabber is centred, clear of the round artwork.
-    static let topInset: CGFloat = gutter
+    /// The room around the sound's header — above it, on its leading side
+    /// (and trailing, where the ✕ stands anyway) and under it: twice the
+    /// gutter (asked for, 2026-09-30: "more space at the top, left and bottom
+    /// of the audio info"). Top equals left, as it did at one gutter.
+    static let headerInset: CGFloat = 2 * gutter
+    /// Above the sound: its header's inset, so it stands as far from the
+    /// sheet's top edge as from its leading one. The grabber is centred,
+    /// clear of the round artwork.
+    static let topInset: CGFloat = headerInset
+    /// Under the sound, before the first section's title — which adds its
+    /// own air.
+    static let headerBottom: CGFloat = headerInset
     /// Under the "Recent" grid's last row — the gutter, as everywhere around
     /// a tile — before the toolbar's band.
     static let contentBottom: CGFloat = gutter
     /// How much of the "Recent" grid's first row the collapsed detent shows
-    /// above the toolbar, as a fraction of a tile's height: enough to read as
-    /// tiles, faint, under their faint title (asked for, 2026-09-30: "a bit
-    /// more of the sheet at collapsed").
+    /// above the toolbar, as a fraction of a tile's height, UNDER A POPULAR
+    /// ROW: enough to read as tiles, faint, under their faint title (asked
+    /// for, 2026-09-30: "a bit more of the sheet at collapsed").
     static let recentPeek: CGFloat = 0.25
+    /// The same when "Recent" is the only section, right under the sound and
+    /// whole: half its first row — the posts the collapsed sheet is for, cut
+    /// by the toolbar's glass, which is what says the sheet grows.
+    static let leadPeek: CGFloat = 0.5
     /// Tiles across a row's width: three whole and the fourth peeking — the
     /// peek is what says the row scrolls.
     static let rowTilesAcross: CGFloat = 3.4
@@ -348,7 +385,12 @@ final class SoundSheetViewController: UIViewController {
         // detent — a painted background makes it opaque at every height.
         view.backgroundColor = .clear
         collectionView.backgroundColor = .clear
-        collectionView.alwaysBounceVertical = true
+        // ⚠️ NO BOUNCE OF ITS OWN: a content that fits its sheet (a sound of
+        // a few posts at its fitted detent) has nowhere to scroll, and a drag
+        // on it is the sheet's — up, nothing; down, back to collapsed. With
+        // the bounce on, the list slid up under the ✕ instead (see the type's
+        // note on scrolling).
+        collectionView.alwaysBounceVertical = false
         collectionView.delegate = self
         // ⚠️ NO INSET FROM THE BARS: the sound starts BEHIND the navigation
         // bar, `topInset` under the grabber as it did when the bar was
@@ -420,6 +462,11 @@ final class SoundSheetViewController: UIViewController {
             }
         }
         refreshDetentMetrics(reason: "appearing")
+        // Below the fullest detent the posts rest at their TOP — the edge
+        // UIKit's scroll-to-expand starts from. Stated, not assumed: an
+        // offset left a few points in (the top inset set after the offset)
+        // would be a list already scrolled, which a drag scrolls on.
+        if !isAtFullestDetent { Self.restAtTop(collectionView) }
         // A pushed section left the sheet where the viewer took it.
         reveal.set(isExpanded ? 1 : 0)
         updateRevealLine()
@@ -644,13 +691,15 @@ final class SoundSheetViewController: UIViewController {
         }
     }
 
-    /// The sound's head, on the gutter.
+    /// The sound's head, `headerInset` in from the sides and with as much
+    /// room under it (`headerBottom`).
     private static func soundSection(height: CGFloat) -> NSCollectionLayoutSection {
         let size = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .absolute(height))
         let section = NSCollectionLayoutSection(
             group: .vertical(layoutSize: size, subitems: [NSCollectionLayoutItem(layoutSize: size)])
         )
-        section.contentInsets = .init(top: 0, leading: gutter, bottom: 0, trailing: gutter)
+        // Its top inset is the collection view's (`topInset`).
+        section.contentInsets = .init(top: 0, leading: headerInset, bottom: headerBottom, trailing: headerInset)
         return section
     }
 
@@ -763,9 +812,10 @@ final class SoundSheetViewController: UIViewController {
     /// be loaded gone, the sections re-dealt around it. Tiles whose content
     /// changed are reconfigured in place — on the sheet and in a pushed
     /// section — and the header's count follows. The collapsed detent does
-    /// not move: it counts no posts. The expanded one follows the "Recent"
-    /// grid's rows when it fits the content (`refreshFittedHeight`) — an
-    /// input changing, never a layout pass.
+    /// not move — it counts no posts — unless the Popular row came or went
+    /// (`SoundSheetSections`: a row left showing every post goes). The
+    /// expanded one follows the "Recent" grid's rows when it fits the content
+    /// (`refreshFittedHeight`) — an input changing, never a layout pass.
     func update(sections newSections: [SoundSheetSection], tiles newTiles: [Tile]) {
         let changed = Set(newTiles.filter { tileByID[$0.postID] != nil && tileByID[$0.postID] != $0 }.map(\.postID))
         sections = newSections
@@ -778,7 +828,7 @@ final class SoundSheetViewController: UIViewController {
             if case .tile(let id, _) = $0 { changed.contains(id) } else { false }
         })
         dataSource.apply(snapshot, animatingDifferences: view.window != nil)
-        refreshFittedHeight(reason: "posts")
+        refreshDetentMetrics(reason: "posts")
         // A section's chevron follows what it now holds — its head
         // reconfigured where it stands, not its section reloaded (which
         // would re-dequeue every tile under it, pictures blinking).
@@ -821,13 +871,16 @@ final class SoundSheetViewController: UIViewController {
 
     /// Everything the detents are made of. Each is an INPUT — the sheet's
     /// width, the header and a section title at the text size, the toolbar's
-    /// band — and none depends on how tall the sheet is. The collapsed detent
-    /// counts no posts; the fitted one adds the "Recent" grid's post count.
+    /// band, whether the backend gave a Popular row — and none depends on how
+    /// tall the sheet is. The collapsed detent counts no posts; the fitted
+    /// one adds the "Recent" grid's post count.
     struct DetentMetrics: Equatable {
         var width: CGFloat
         var headerHeight: CGFloat
         var sectionHeaderHeight: CGFloat
         var toolbarBand: CGFloat
+        /// Whether the Popular row stands between the sound and "Recent".
+        var hasPopular: Bool
     }
 
     /// The collapsed detent's value: the fold (`foldBottom`), then the
@@ -842,40 +895,54 @@ final class SoundSheetViewController: UIViewController {
     }
 
     /// Where the fold ends, from the sheet's top edge, with the posts at
-    /// rest: the inset under the grabber, the sound, the "Popular" title, its
-    /// row, then the "Recent" title WHOLE and the top of its first row
-    /// (`recentPeek`) — both faint at collapsed (`SoundSheetReveal`), the
-    /// rest going on behind the toolbar's glass: a glimpse of what lies below,
+    /// rest: the inset under the grabber, the sound and the room under it,
+    /// the "Popular" title and its row when there is one, then the "Recent"
+    /// title WHOLE and the top of its first row (`recentPeekHeight`) — faint
+    /// under a Popular row (`SoundSheetReveal`), whole without one — the rest
+    /// going on behind the toolbar's glass: a glimpse of what lies below,
     /// which is what says the sheet grows. The layout is built from the same
     /// numbers (`rowTileHeight`, `tileHeight`, the absolute heights).
     ///
     /// The fold counts no posts, so the collapsed height is the same for
-    /// every sound at a width and text size — "Recent" always has a first
-    /// row: it holds every post, the one watched included.
+    /// every sound of one shape at a width and text size — "Recent" always
+    /// has a first row (`SoundSheetSections`: it is never empty).
     static func foldBottom(_ metrics: DetentMetrics) -> CGFloat {
-        topInset + recentTitleTop(metrics) + metrics.sectionHeaderHeight + recentPeekHeight(width: metrics.width)
+        topInset + recentTitleTop(metrics) + metrics.sectionHeaderHeight
+            + recentPeekHeight(width: metrics.width, hasPopular: metrics.hasPopular)
     }
 
-    /// The part of the "Recent" grid's first row the collapsed detent shows.
-    static func recentPeekHeight(width: CGFloat) -> CGFloat {
-        (tileHeight(width: width) * recentPeek).rounded()
+    /// The part of the "Recent" grid's first row the collapsed detent shows:
+    /// a glimpse under a Popular row, half of it on its own.
+    static func recentPeekHeight(width: CGFloat, hasPopular: Bool) -> CGFloat {
+        (tileHeight(width: width) * (hasPopular ? recentPeek : leadPeek)).rounded()
     }
 
-    /// The Popular row's foot in CONTENT coordinates (the sound starts at 0).
+    /// The sound's foot in CONTENT coordinates (the sound starts at 0): its
+    /// header, then the room under it — where the first section's title
+    /// starts.
+    static func soundBottom(_ metrics: DetentMetrics) -> CGFloat {
+        metrics.headerHeight + headerBottom
+    }
+
+    /// The Popular row's foot in CONTENT coordinates — the sound's when there
+    /// is no row.
     static func popularRowBottom(_ metrics: DetentMetrics) -> CGFloat {
-        metrics.headerHeight + metrics.sectionHeaderHeight + rowTileHeight(width: metrics.width)
+        guard metrics.hasPopular else { return soundBottom(metrics) }
+        return soundBottom(metrics) + metrics.sectionHeaderHeight + rowTileHeight(width: metrics.width)
     }
 
     /// The "Recent" title's top in CONTENT coordinates: right on the row's
-    /// foot — no gap between sections but the title's own air.
+    /// foot — no gap between sections but the title's own air — or on the
+    /// sound's room when there is no row.
     static func recentTitleTop(_ metrics: DetentMetrics) -> CGFloat {
         popularRowBottom(metrics)
     }
 
     /// Where the reveal's always-shown part ends, in CONTENT coordinates: the
-    /// "Recent" title's TOP — the title fades with its grid, as one.
-    static func revealLine(_ metrics: DetentMetrics) -> CGFloat {
-        recentTitleTop(metrics)
+    /// "Recent" title's TOP — the title fades with its grid, as one. Nil
+    /// without a Popular row: nothing fades.
+    static func revealLine(_ metrics: DetentMetrics) -> CGFloat? {
+        metrics.hasPopular ? recentTitleTop(metrics) : nil
     }
 
     /// The "Recent" grid's height for `count` posts: its rows, a gutter
@@ -887,8 +954,9 @@ final class SoundSheetViewController: UIViewController {
     }
 
     /// The whole content's height in CONTENT coordinates, `recentCount` posts
-    /// in the "Recent" grid: the sound, the Popular title and row, the Recent
-    /// title and grid, the gutter under its last row.
+    /// in the "Recent" grid: the sound and its room, the Popular title and
+    /// row when there is one, the Recent title and grid, the gutter under its
+    /// last row.
     static func contentHeight(_ metrics: DetentMetrics, recentCount: Int) -> CGFloat {
         guard recentCount > 0 else { return popularRowBottom(metrics) + contentBottom }
         return recentTitleTop(metrics) + metrics.sectionHeaderHeight
@@ -923,8 +991,9 @@ final class SoundSheetViewController: UIViewController {
 
     /// Recomputes the detents' inputs and re-asks the sheet ONLY when an
     /// answer moved. Called when an input changes — loading, appearing (the
-    /// real width and band), the text size, the width — and from nowhere
-    /// else. ⚠️ Never from a layout callback: see the type's note.
+    /// real width and band), the text size, the width, the posts re-dealt —
+    /// and from nowhere else. ⚠️ Never from a layout callback: see the type's
+    /// note.
     private func refreshDetentMetrics(reason: String) {
         guard let width = sheetWidth, width > 0 else { return }
         let traits = view.window != nil
@@ -934,7 +1003,8 @@ final class SoundSheetViewController: UIViewController {
             width: width,
             headerHeight: headerHeight(width: width, traits: traits),
             sectionHeaderHeight: SoundSheetSectionHeaderView.height(traits: traits),
-            toolbarBand: Self.measuredToolbarBand ?? estimatedToolbarBand(width: width)
+            toolbarBand: Self.measuredToolbarBand ?? estimatedToolbarBand(width: width),
+            hasPopular: hasPopular
         )
         if metrics != detentMetrics {
             let heightsMoved = metrics.headerHeight != detentMetrics?.headerHeight
@@ -945,10 +1015,12 @@ final class SoundSheetViewController: UIViewController {
             collapsedHeight = height
             trace("""
                 \(reason): width \(metrics.width) header \(metrics.headerHeight) title \(metrics.sectionHeaderHeight) \
-                band \(metrics.toolbarBand) → \(height) (was \(previous.map { "\($0)" } ?? "nil"))
+                band \(metrics.toolbarBand) popular \(metrics.hasPopular) → \(height) \
+                (was \(previous.map { "\($0)" } ?? "nil"))
                 """)
             if heightsMoved, isViewLoaded { collectionView.collectionViewLayout.invalidateLayout() }
             if let previous, abs(previous - height) >= 0.5 { invalidateDetents() }
+            if isViewLoaded { updateRevealLine() }
         }
         refreshFittedHeight(reason: reason)
     }
@@ -956,6 +1028,12 @@ final class SoundSheetViewController: UIViewController {
     /// The posts the "Recent" grid lays out.
     private var recentCount: Int {
         sections.first { $0.kind == .recent }?.ids.filter { tileByID[$0] != nil }.count ?? 0
+    }
+
+    /// Whether the Popular row is laid out — the snapshot's rule
+    /// (`makeSnapshot`): a section with a post to show.
+    private var hasPopular: Bool {
+        sections.first { $0.kind == .popular }?.ids.contains { tileByID[$0] != nil } ?? false
     }
 
     /// Recomputes the fitted height and whether it is the expanded detent —
@@ -1042,7 +1120,7 @@ final class SoundSheetViewController: UIViewController {
     /// the sound's own lines, fitted off screen — the sheet's height plays no
     /// part. Cached per width and text size.
     private func headerHeight(width: CGFloat, traits: UITraitCollection) -> CGFloat {
-        let headerWidth = width - 2 * Self.gutter
+        let headerWidth = width - 2 * Self.headerInset
         let key = "\(headerWidth)|\(traits.preferredContentSizeCategory.rawValue)"
         if let headerHeightCache, headerHeightCache.key == key { return headerHeightCache.height }
         var height: CGFloat = 0
@@ -1082,17 +1160,24 @@ final class SoundSheetViewController: UIViewController {
     }
 
     /// Places the reveal's line on the "Recent" title's top, where the
-    /// content is scrolled to now. A layer's frame: it lays nothing out.
+    /// content is scrolled to now — or stands the reveal down when there is
+    /// no Popular row above that title. A layer's frame and a mask taken off:
+    /// it lays nothing out.
     private func updateRevealLine() {
         guard let metrics = detentMetrics, isViewLoaded else { return }
-        let line = Self.revealLine(metrics) - collectionView.contentOffset.y
-        reveal.setLine(line, width: view.bounds.width)
+        guard let line = Self.revealLine(metrics) else {
+            reveal.isEnabled = false
+            return
+        }
+        reveal.isEnabled = true
+        reveal.setLine(line - collectionView.contentOffset.y, width: view.bounds.width)
     }
 
-    /// Whether a section can be touched: the Popular row always, the others
-    /// once they are more than half there — what is faint cannot be tapped.
-    private func isRevealed(_ kind: SoundSheetSection.Kind) -> Bool {
-        kind == .popular || reveal.progress >= 0.5
+    /// Whether a section can be touched: the Popular row always, "Recent"
+    /// once it is more than half there — what is faint cannot be tapped —
+    /// or at once when nothing fades. Internal for the suite.
+    func isRevealed(_ kind: SoundSheetSection.Kind) -> Bool {
+        kind == .popular || !reveal.isEnabled || reveal.progress >= 0.5
     }
 
     private func traceReveal(_ progress: CGFloat) {
@@ -1126,6 +1211,16 @@ final class SoundSheetViewController: UIViewController {
             let inWindow: CGRect = view.convert(view.bounds, to: nil)
             let use: CGRect = useButton.map { $0.convert($0.bounds, to: nil) } ?? .zero
             trace("geometry: view \(view.bounds) on screen \(inWindow) use \(use)")
+            // The list at rest: at its top (−topInset) below the fullest
+            // detent, and whether it has anywhere to scroll.
+            let list = collectionView
+            let room = list.contentSize.height + list.adjustedContentInset.top + list.adjustedContentInset.bottom
+                - list.bounds.height
+            trace("""
+                list: offset \(list.contentOffset.y) top \(-list.adjustedContentInset.top) \
+                content \(list.contentSize.height) scrollable \(room) fullest \(isAtFullestDetent) \
+                sections \(sections.map { "\($0.kind.rawValue) \($0.ids.count)" })
+                """)
         }
         #endif
     }
@@ -1557,9 +1652,42 @@ extension SoundSheetViewController: UICollectionViewDelegate {
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        // The line follows the Popular row as the posts scroll. Only this
-        // collection's own scroll: a row's sideways scroll moves no line.
-        guard scrollView === collectionView, reveal.progress < 1 else { return }
+        // Only this collection's own scroll: a row's sideways scroll moves no
+        // line.
+        guard scrollView === collectionView else { return }
+        #if DEBUG
+        // `-sound-sheet-trace`: a finger that SCROLLED the posts. Below the
+        // fullest detent there must be none — the drag is the sheet's.
+        if scrollView.isDragging, ProcessInfo.processInfo.arguments.contains("-sound-sheet-trace") {
+            trace("scrolled: offset \(scrollView.contentOffset.y) fullest \(isAtFullestDetent)")
+        }
+        #endif
+        // The line follows the Popular row as the posts scroll.
+        guard reveal.progress < 1 else { return }
         updateRevealLine()
+    }
+}
+
+// MARK: - Scrolling
+
+extension SoundSheetViewController {
+    /// Whether the sheet stands at its fullest detent — the fitted one or
+    /// large — the one height at which the posts may scroll. The SHEET's own
+    /// answer, not `isExpanded`: that one follows a programmatic change only
+    /// through `detentChanged`. Off a presented sheet (a test), true.
+    var isAtFullestDetent: Bool {
+        guard let navigation = navigationController, navigation.presentingViewController != nil,
+              let sheet = navigation.sheetPresentationController
+        else { return true }
+        return Self.isExpanded(sheet.selectedDetentIdentifier)
+    }
+
+    /// Puts the posts at their top — the edge UIKit's scroll-to-expand starts
+    /// from — when they rest any further in. A pull past the top is left
+    /// alone. Called when the sheet appears, never while a finger moves.
+    static func restAtTop(_ scrollView: UIScrollView) {
+        let top = -scrollView.adjustedContentInset.top
+        guard scrollView.contentOffset.y > top else { return }
+        scrollView.contentOffset.y = top
     }
 }
