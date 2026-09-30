@@ -251,7 +251,7 @@ struct ForYouRowsCloseTests {
 
     /// ⚠️ BY THE SYMBOL'S NAME, `system: play…`. A bare "play" also matches
     /// every symbol's trait dump ("DisplayScale"), which failed this for the
-    /// count's `eye.fill` — and a probe that fires on any symbol proves nothing.
+    /// count's glyph — and a probe that fires on any symbol proves nothing.
     private static func drawsPlayGlyph(_ view: UIView) -> Bool {
         if let image = (view as? UIImageView)?.image, !view.isHidden,
            image.isSymbolImage, String(describing: image).contains("system: play") {
@@ -263,7 +263,7 @@ struct ForYouRowsCloseTests {
     /// The probe itself can see a play glyph — or its silence means nothing.
     @Test func thePlayGlyphProbeSeesAPlayGlyph() {
         let host = UIView()
-        host.addSubview(UIImageView(image: UIImage(systemName: "eye.fill")))
+        host.addSubview(UIImageView(image: UIImage(systemName: "heart.fill")))
         #expect(!Self.drawsPlayGlyph(host), "the probe fires on any symbol")
         host.addSubview(UIImageView(image: UIImage(systemName: "play.fill")))
         #expect(Self.drawsPlayGlyph(host), "the probe cannot see the glyph it is for")

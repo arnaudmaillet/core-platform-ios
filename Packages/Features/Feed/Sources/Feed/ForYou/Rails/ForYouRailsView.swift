@@ -174,7 +174,10 @@ final class ForYouRailsView: UIView {
     private let listHeader = SectionLinkHeaderView(title: "For you", isLink: false)
     private let storiesView: UICollectionView
     private let cardsView: UICollectionView
-    private let imagePipeline: ImagePipeline
+    /// Also what a card's COPIES read the author's face from — the flight's
+    /// resting overlay, a window's stand-in — so they draw the picture the
+    /// card in the row already has (`ForYouCardCaptionOverlay`).
+    let imagePipeline: ImagePipeline
     /// The Following row's own playback: EVERY card on screen plays, muted —
     /// "all the visible video cards", the product call of 2026-09-29 (it used
     /// to be the lead card alone). A card must be half on screen to count

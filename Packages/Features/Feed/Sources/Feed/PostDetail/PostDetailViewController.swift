@@ -346,6 +346,10 @@ final class PostDetailViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = mode == .commentsOnly ? "Comments" : "Post"
+        // `.never`, stated rather than inherited: a route can push this over
+        // For You's large-titled lists (`PushedScreenHeader`), and `.automatic`
+        // would inherit their large title.
+        navigationItem.largeTitleDisplayMode = .never
         view.backgroundColor = .systemBackground
         configureViews()
         if viewModel.isDraft { configureDraft() }

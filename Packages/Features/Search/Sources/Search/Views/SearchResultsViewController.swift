@@ -176,6 +176,10 @@ final class SearchResultsViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        // `.never`, stated rather than inherited: pushed over a large-titled
+        // screen (For You's Following / Friends lists), `.automatic` would put
+        // an empty large-title band under this header.
+        navigationItem.largeTitleDisplayMode = .never
         view.backgroundColor = .systemBackground
         configureHeader()
         configurePages()

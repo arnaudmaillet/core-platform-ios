@@ -1,17 +1,24 @@
 import UIKit
 
-/// A section's title that is also the way INTO the section: `Title … [3] ›`.
+/// A section's title that is also the way INTO the section: `Title (3) ›`.
 ///
 /// ```
-///   Friends                                   (3) ›
+///   Friends (3) ›
 ///   ───────────────────────────────────────────────
 ///   ◯ ◯ ◯ ◯ ◯ …            (the section's own row)
 /// ```
 ///
-/// The title leads; the trailing edge carries the count of what is new in the
+/// The title leads, and right after it comes the count of what is new in the
 /// section — a `NotificationCountBadge`, the count the tab badges have always
-/// worn and the pushed list's "New" header repeats — and a chevron, the platform's sign that a screen will be PUSHED. The
-/// whole bar is the control, not just the chevron: a row of content under a
+/// worn and the pushed list's "New" header repeats — then a chevron, the
+/// platform's sign that a screen will be PUSHED.
+///
+/// ⚠️ BESIDE THE TITLE, NOT AT THE EDGE (product call, 2026-09-30). #312 put
+/// the badge and chevron at the trailing edge, where they read as a control of
+/// their own a screen-width away from the word they qualify; after the title
+/// they read as one phrase, "Friends, 3 new, more". The row stops where the
+/// chevron does and the rest of the bar is empty — but still the bar's: the
+/// whole width is the control, not just the chevron: a row of content under a
 /// heading reads "tap the heading to see all of it", and a 20pt glyph is a
 /// target nobody should have to aim for.
 ///
@@ -89,18 +96,20 @@ public final class SectionLinkHeaderView: UIView {
         chevron.contentMode = .center
         chevron.setContentHuggingPriority(.required, for: .horizontal)
 
-        let trailing = UIStackView(arrangedSubviews: [countBadge, chevron])
-        trailing.axis = .horizontal
-        trailing.alignment = .center
-        trailing.spacing = Spacing.sm
-        // ⚠️ THE TITLE TAKES THE SLACK, the trailing run hugs its content:
-        // left to the defaults the stack stretched the PILL across the bar.
-        titleLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        for view in [trailing, countBadge] as [UIView] {
-            view.setContentHuggingPriority(.required, for: .horizontal)
-            view.setContentCompressionResistancePriority(.required, for: .horizontal)
-        }
-        let row = UIStackView(arrangedSubviews: [titleLabel, trailing])
+        // ⚠️ EVERYTHING HUGS, and the row is held at the leading edge with its
+        // trailing end FREE (`≤`): the slack is the bar's, after the chevron.
+        // Left to the defaults a stack stretches something across the width —
+        // the pill, once, or the title, which put the badge back at the edge.
+        // The title is the first to give when a long one meets a narrow bar.
+        titleLabel.setContentHuggingPriority(.required, for: .horizontal)
+        countBadge.setContentHuggingPriority(.required, for: .horizontal)
+        countBadge.setContentCompressionResistancePriority(.required, for: .horizontal)
+        // ONE FLAT ROW, `[title][pill][›]`: a hidden pill leaves the row with
+        // its spacing, so the chevron closes up on the title when the count
+        // goes to zero (`SectionLinkHeaderTests.aCountGoingToZeroClosesTheGap`).
+        // At the trailing edge a kept gap was invisible; after the title it is
+        // not.
+        let row = UIStackView(arrangedSubviews: [titleLabel, countBadge, chevron])
         row.axis = .horizontal
         row.alignment = .center
         row.spacing = Spacing.sm
@@ -108,7 +117,7 @@ public final class SectionLinkHeaderView: UIView {
         row.isUserInteractionEnabled = false
         row.constrain(in: self) { parent in
             row.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
-            row.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
+            row.trailingAnchor.constraint(lessThanOrEqualTo: parent.trailingAnchor)
             row.topAnchor.constraint(equalTo: parent.topAnchor)
             row.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
         }
@@ -142,6 +151,8 @@ public final class SectionLinkHeaderView: UIView {
     /// The pill's number — "99+" past 99 (`NotificationCountBadge`).
     public func setCount(_ count: Int) {
         countBadge.setCount(count)
+        // The run after the title changes length with the pill.
+        setNeedsLayout()
         updateAccessibility()
     }
 
@@ -155,6 +166,14 @@ public final class SectionLinkHeaderView: UIView {
     public var debugCountText: String? { countBadge.text }
     /// Whether the chevron is drawn.
     public var debugShowsChevron: Bool { !chevron.isHidden }
+    /// Where the title, the pill and the chevron are, in the bar's space —
+    /// the arrangement a test pins (a hidden pill reads `.null`).
+    public var debugFrames: (title: CGRect, badge: CGRect, chevron: CGRect) {
+        func frame(_ view: UIView) -> CGRect {
+            view.isHidden ? .null : view.convert(view.bounds, to: self)
+        }
+        return (frame(titleLabel), frame(countBadge), frame(chevron))
+    }
     /// Fires the bar's own recogniser action — the path a finger takes, which
     /// is the one #312's tests skipped by calling the host's closure.
     public func debugTap() {

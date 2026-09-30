@@ -127,13 +127,17 @@ struct ForYouRowsTests {
         return list
     }
 
-    /// `[‹] ———— [points][search]`, no tab bar — the header every screen For
-    /// You pushes wears. With nothing new the posts are one untitled run, in
-    /// the order they came.
+    /// `[‹] ———— [points][search]` over the page's name as a large title, no
+    /// tab bar — the header every screen For You pushes wears. With nothing new
+    /// the posts are ONE section, "Recent", titled (2026-09-30: Friends is
+    /// usually all seen, and an untitled run made it a different screen from
+    /// Following), in the order they came.
     @Test func aPushedListWearsTheSharedHeaderAndNoTabBar() {
         let list = makeList()
         #expect(list.hidesBottomBarWhenPushed)
-        #expect(list.title == nil)
+        #expect(list.navigationItem.title == "Friends")
+        #expect(list.navigationItem.largeTitleDisplayMode == .always)
+        #expect(makeList(.following).navigationItem.title == "Following")
         #expect(list.navigationItem.rightBarButtonItems?.map(\.identifier) == [
             PushedScreenHeader.searchItemIdentifier
         ])
@@ -148,7 +152,9 @@ struct ForYouRowsTests {
         list.view.layoutIfNeeded()
         #expect(list.posts.map(\.id.rawValue) == ["a", "b"], "one after another, nothing regrouped")
         #expect(list.debugNewSectionCount == 0)
-        #expect(list.debugSectionHeaders().isEmpty, "a lone section goes untitled")
+        let headers = list.debugSectionHeaders()
+        #expect(headers.map { $0.title } == ["Recent"], "a lone Recent keeps its title")
+        #expect(headers.map { $0.count } == [0])
     }
 
     /// "New" over the unseen, "Recent" over the rest (2026-09-29): the new
@@ -177,9 +183,9 @@ struct ForYouRowsTests {
         #expect(headers.map { $0.count } == [2, 0], "only New is counted")
     }
 
-    /// A list that is ALL new is one section, and a lone header is a label
-    /// rather than a division — the inbox's rule.
-    @Test func aListThatIsAllNewGoesUntitled() {
+    /// A list that is ALL new is one section — "New", titled and counted, not
+    /// the untitled run the inbox's rule would make it.
+    @Test func aListThatIsAllNewIsOneCountedNewSection() {
         let list = makeList(.following)
         let posts = [post("n1", by: "bo", at: 2), post("n2", by: "bo", at: 1)]
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 4000))
@@ -188,8 +194,28 @@ struct ForYouRowsTests {
         defer { window.isHidden = true }
         list.render(.content(posts), newPosts: [PostID("n1"), PostID("n2")])
         list.view.layoutIfNeeded()
-        #expect(list.debugNewSectionCount == 0)
-        #expect(list.debugSectionHeaders().isEmpty)
+        #expect(list.debugNewSectionCount == 2)
+        let headers = list.debugSectionHeaders()
+        #expect(headers.map { $0.title } == ["New"])
+        #expect(headers.map { $0.count } == [2])
+    }
+
+    /// An all-new list gaining its first older page grows a "Recent" section
+    /// under "New" — a change of shape, so a reload rather than an insert (an
+    /// insert into a section count that moved is UIKit's inconsistency crash).
+    @Test func anAllNewListGainingAnOlderPageSplits() {
+        let list = makeList(.friends)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 4000))
+        window.rootViewController = list
+        window.isHidden = false
+        defer { window.isHidden = true }
+        let first = [post("n1", by: "bo", at: 9), post("n2", by: "bo", at: 8)]
+        list.render(.content(first), newPosts: [PostID("n1"), PostID("n2")])
+        list.view.layoutIfNeeded()
+        list.render(.content(first + [post("old", by: "cy", at: 1)]), newPosts: [PostID("n1"), PostID("n2")])
+        list.view.layoutIfNeeded()
+        #expect(list.posts.map(\.id.rawValue) == ["n1", "n2", "old"])
+        #expect(list.debugSectionHeaders().map { $0.title } == ["New", "Recent"])
     }
 
     /// A post that stops being new (a friend's story watched while the list

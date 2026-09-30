@@ -2394,15 +2394,20 @@ public final class PostGridTileCell: UICollectionViewCell {
     private static let metaFont = UIFont.postGridSystemFont(
         matching: .preferredFont(forTextStyle: .caption2), weight: .semibold
     )
-    /// ⚠️ ONE NUMBER, and it is REACH rather than approval.
+    /// ⚠️ ONE NUMBER, and it is the LIKES (product call, 2026-09-30).
     ///
-    /// A brick is small and read at a glance, in a mosaic of a dozen others.
-    /// Two numbers on it are two things to compare across every tile at once,
-    /// and the second one earns its place least here: the heart is what the
-    /// POST is for and the card carries it, but a tile is a way in — how many
-    /// got here is the number that says whether it is worth being one of them.
-    private let views = PostMetricLabel(
-        symbol: "eye.fill", font: metaFont, color: .white, shadowed: true
+    /// A brick is small and read at a glance, in a mosaic of a dozen others;
+    /// two numbers on it are two things to compare across every tile at once.
+    /// It used to be reach — views, an `eye.fill` — on the reading that a
+    /// tile is a way in and "how many got here" says whether to be one more.
+    /// The app no longer shows views anywhere a post is drawn, so the tile
+    /// carries the number every card and the feed carry: the heart, filled —
+    /// the glyph a count over a picture wears (the cards' outline heart is a
+    /// control; this is a read-out). The flight card mirrors it
+    /// (`PostGridFlightCard`), in every gallery: For You's chunks and mosaic,
+    /// a profile's Media, a place's grid.
+    private let likes = PostMetricLabel(
+        symbol: "heart.fill", font: metaFont, color: .white, shadowed: true
     )
     private var loadTask: Task<Void, Never>?
 
@@ -2427,10 +2432,10 @@ public final class PostGridTileCell: UICollectionViewCell {
         // numbers gather at the trailing edge on every surface, and a mosaic of
         // bricks whose counters sat on the other side would be the one place
         // the eye had to look somewhere else for them.
-        views.constrain(in: contentView) { parent in
-            views.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -8)
-            views.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -7)
-            views.leadingAnchor.constraint(
+        likes.constrain(in: contentView) { parent in
+            likes.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -8)
+            likes.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -7)
+            likes.leadingAnchor.constraint(
                 greaterThanOrEqualTo: parent.leadingAnchor, constant: 8
             )
         }
@@ -2516,12 +2521,17 @@ public final class PostGridTileCell: UICollectionViewCell {
         loadedVideoRenderView?.hideCrossFading()
     }
 
+    #if DEBUG
+    /// The count the tile shows, as drawn — nil while it is hidden.
+    public var debugCounterText: String? { likes.isHidden ? nil : likes.debugText }
+    #endif
+
     public func configure(with post: GalleryPost, imagePipeline: ImagePipeline) {
         // Video tiles keep a dark floor: their poster may be unrenderable
         // (or plain black in the simulator), and the glyph needs a stage.
         contentView.backgroundColor = Self.fillColor(for: post)
 
-        views.set(post.viewCount)
+        likes.set(post.reactionCount)
 
         imageView.image = nil
         guard let url = post.thumbnailURL else { return }

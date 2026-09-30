@@ -78,6 +78,53 @@ struct ForYouRowsHeroPolishTests {
         #expect(abs(overlay.debugCaptionWrapWidth - resting.width) < 0.5)
     }
 
+    /// The author's face (2026-09-30): a disc as tall as the name's line, just
+    /// before the name, on both placements — and posed with the name, so at
+    /// the page's size it is still on the name's line at the window's foot.
+    @Test func theAuthorsDiscLeadsTheNameAtTheNamesHeight() {
+        for (kind, placement) in [(GalleryPost.Kind.photo, ForYouCardCaptionOverlay.Placement.onMedia),
+                                  (.text, .onCard)] {
+            let overlay = ForYouCardCaptionOverlay(
+                post: Self.post("a", kind: kind), placement: placement, referenceSize: Self.card
+            )
+            overlay.layoutIfNeeded()
+            let disc = overlay.debugAvatarFrame
+            let author = overlay.debugAuthorFrame
+            #expect(abs(disc.height - author.height) < 0.5, "the disc is the name's line tall")
+            #expect(abs(disc.width - disc.height) < 0.5, "a disc, not an oval")
+            #expect(abs(disc.midY - author.midY) < 0.5, "on the name's line")
+            #expect(disc.maxX <= author.minX && author.minX - disc.maxX < 8, "just before the name")
+            #expect(abs(disc.minX - 10) < 0.5, "at the card's leading inset, where the name used to start")
+
+            overlay.frame = CGRect(origin: .zero, size: Self.page)
+            overlay.layoutIfNeeded()
+            let scale = Self.page.width / Self.card.width
+            #expect(abs(overlay.debugAvatarFrame.height - disc.height * scale) < 0.5, "scaled with the window")
+            #expect(abs(overlay.debugAvatarFrame.midY - overlay.debugAuthorFrame.midY) < 0.5,
+                    "the disc left the name's line in the window")
+        }
+    }
+
+    /// A COPY draws the face the card already has: the picture straight from
+    /// the pipeline's memory, so the flight's resting overlay takes off with
+    /// the card's face, not its initials.
+    @Test func aCopyDrawsTheFaceFromMemory() async {
+        let pipeline = ImagePipeline(fetcher: SilentFetcher())
+        let face = URL(string: "https://example.com/bo.jpg")!
+        let picture = UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8)).image { context in
+            UIColor.red.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
+        }
+        await pipeline.store(picture, for: face)
+        var post = Self.post("f", kind: .photo)
+        post.authorAvatarURL = face
+        let copy = ForYouFollowingCardCell.makeOverlay(for: post, restingSize: Self.card, imagePipeline: pipeline)
+        #expect(copy.debugShowsAvatarPicture)
+        let bare = ForYouFollowingCardCell.makeOverlay(for: Self.post("g", kind: .photo), restingSize: Self.card)
+        #expect(!bare.debugShowsAvatarPicture, "no picture named: the initials alone")
+        #expect(!bare.debugAvatarFrame.isNull)
+    }
+
     /// ⚠️ THE UNFOLD ITSELF. A caption whose first layout pass runs inside
     /// someone else's animation block grows out of a zero rect — the "text
     /// from the top-left" of the report. The first pose never animates,

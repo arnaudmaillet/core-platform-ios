@@ -498,6 +498,11 @@ final class SnapFeedViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "Timeline"
+        // ⚠️ `.never`, STATED: an item left `.automatic` inherits the one under
+        // it, and For You's pushed lists wear large titles on a bar that allows
+        // them (`PushedScreenHeader`). A feed opened from one would arrive
+        // under a tall bar with "Timeline" in it.
+        navigationItem.largeTitleDisplayMode = .never
         // The stored value, not a literal: `setEmptyGround` may legitimately
         // arrive BEFORE this runs — the map route loads this view while it
         // builds the dismissal, ahead of the reveal geometry.

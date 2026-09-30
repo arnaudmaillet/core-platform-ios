@@ -245,16 +245,16 @@ struct MediaMetaPillPlacementTests {
 /// What a mosaic BRICK carries, which is deliberately less than a card does.
 @MainActor
 struct TileMetaTests {
-    /// ⚠️ ONE NUMBER ON A TILE, and it is reach rather than approval.
+    /// ⚠️ ONE NUMBER ON A TILE, and it is the LIKES (2026-09-30).
     ///
     /// A brick is small and read at a glance in a mosaic of a dozen others; two
-    /// numbers on it are two things to compare across every tile at once. The
-    /// heart is what the POST is for and the card carries it — a tile is a way
-    /// IN, so how many got here is the number that earns the space.
+    /// numbers on it are two things to compare across every tile at once. It
+    /// was the view count until the app stopped showing views: now the tile
+    /// says what every card says, the heart.
     ///
     /// Counted by walking for metric labels rather than by naming a field: a
     /// second counter added back under another name is the regression.
-    @Test func aTileCarriesTheViewCountAlone() {
+    @Test func aTileCarriesTheLikeCountAlone() {
         func metrics(_ view: UIView) -> [PostMetricLabel] {
             if let label = view as? PostMetricLabel { return [label] }
             return view.subviews.flatMap(metrics)
@@ -272,6 +272,11 @@ struct TileMetaTests {
 
         let visible = metrics(cell.contentView).filter { isVisible($0, within: cell.contentView) }
         #expect(visible.count == 1)
+        #expect(cell.debugCounterText == "160", "the likes, not the 4.2K views")
+        // By the symbol's NAME in the image's description: two symbol images
+        // are not `==` for being the same glyph.
+        let glyph = visible.first?.debugSymbol.map { String(describing: $0) } ?? ""
+        #expect(glyph.contains("system: heart.fill"))
         // And it closes the row, like the counters on a card.
         let frame = visible[0].convert(visible[0].bounds, to: cell.contentView)
         #expect(cell.contentView.bounds.maxX - frame.maxX < frame.minX)
