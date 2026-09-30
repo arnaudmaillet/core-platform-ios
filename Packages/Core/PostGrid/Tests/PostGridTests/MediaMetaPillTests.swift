@@ -99,23 +99,25 @@ struct MediaMetaPillPlacementTests {
     /// ⚠️ A text row wears the SAME line, at the caption's inset.
     ///
     /// Measured at the TRAILING edge: the counters close the row on both of a
-    /// card's shapes, and there is no date leading it any more — the date is
-    /// on the band's handle line.
+    /// card's shapes. The last one's box HANGS past the column by its own
+    /// padding (the actions are plain since 2026-09-30), so its INK ends on
+    /// the caption's inset — see `PostGridListRowCell.closingLineHang`.
     @Test func aTextCardWearsTheSameLineInItsOwnColumn() {
         let cell = row(kind: .text)
         let visible = visiblePills(in: cell)
+        let hang = PostCardPillView.plainInsets.trailing
 
         #expect(cell.mediaHeroRect == nil)
         #expect(visible.count == 2)
         for pill in visible {
             let frame = pill.convert(pill.bounds, to: cell.contentView)
             #expect(cell.contentView.bounds.maxX - frame.maxX
-                        >= PostGridListRowCell.captionInset - 0.5)
+                        >= PostGridListRowCell.captionInset - hang - 0.5)
         }
         let trailing = visible
             .map { cell.contentView.bounds.maxX - $0.convert($0.bounds, to: cell.contentView).maxX }
             .min() ?? 0
-        #expect(abs(trailing - PostGridListRowCell.captionInset) < 0.5)
+        #expect(abs(trailing - (PostGridListRowCell.captionInset - hang)) < 0.5)
     }
 
     /// The two shapes agree about the line: same capsules, same order
@@ -179,12 +181,13 @@ struct MediaMetaPillPlacementTests {
             publishedAtMS: ninetyMinutesAgo
         )
         // Narrow enough that five dots no longer fit beside two six-figure
-        // counts, wide enough that two still do. (286, not 262: the
-        // counters' glyphs grew to the controls' size on 2026-09-26, which
-        // takes ~16pt more of the line — still far narrower than any phone,
-        // an iPhone SE's card is ~343.)
+        // counts, wide enough that two still do. (262: the counters' glyphs
+        // grew to the controls' size on 2026-09-26, ~16pt more of the line,
+        // and 286 held; the plain actions of 2026-09-30 gave ~24pt back —
+        // 8pt less padding per counter and an 8pt hang at the end. Still far
+        // narrower than any phone, an iPhone SE's card is ~343.)
         let narrow = row(
-            kind: .photo, reactions: 1_600_000, comments: 128_000, pages: 12, width: 286,
+            kind: .photo, reactions: 1_600_000, comments: 128_000, pages: 12, width: 262,
             publishedAtMS: ninetyMinutesAgo
         )
         func indicator(_ cell: PostGridListRowCell) -> MediaPageIndicatorView? {
@@ -204,9 +207,10 @@ struct MediaMetaPillPlacementTests {
         }
     }
 
-    /// The indicator wears the card's own fill, like the capsules beside it,
-    /// and draws its dots in the card's ink — white dots on a light capsule
-    /// would be no dots at all.
+    /// The indicator keeps its capsule — a painted card fill — while the
+    /// actions beside it went plain (2026-09-30): it is a scrubber, and the
+    /// capsule is its track. It draws its dots in the card's ink — white dots
+    /// on a light capsule would be no dots at all.
     @Test func theIndicatorWearsTheCardsFillAndInk() throws {
         let cell = row(kind: .photo, pages: 3)
         func indicators(_ view: UIView) -> [MediaPageIndicatorView] {
@@ -215,7 +219,7 @@ struct MediaMetaPillPlacementTests {
         }
         let chip = try #require(indicators(cell.contentView).first)
         let counter = try #require(visiblePills(in: cell).first { !($0 is MediaPageIndicatorView) })
-        #expect(chip.contentView.backgroundColor == counter.contentView.backgroundColor)
+        #expect(counter.contentView.backgroundColor == nil)
         #expect(chip.contentView.backgroundColor == .tertiarySystemFill)
         func dots(_ view: UIView) -> [UIView] {
             let own = view.subviews.filter { $0.layer.cornerRadius == MediaPageIndicatorView.dotDiameter / 2 && $0.bounds.width > 0 }

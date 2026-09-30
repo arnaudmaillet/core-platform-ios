@@ -94,7 +94,7 @@ struct RowActionsTests {
     /// The closing line reads `[save][repost] ······ [comments][likes]`: what
     /// the viewer does leads, at the caption's inset, and what the post has
     /// closes the line at the same inset on the other side.
-    @Test func theClosingLineReadsControlsThenCounts() {
+    @Test func theClosingLineReadsControlsThenCounts() throws {
         let cell = row()
         let ordered = pills(in: cell.contentView).sorted {
             $0.convert($0.bounds, to: cell.contentView).minX < $1.convert($1.bounds, to: cell.contentView).minX
@@ -107,11 +107,16 @@ struct RowActionsTests {
         let controls = buttons(in: cell.contentView).filter { $0.accessibilityLabel != "More actions" }
             .sorted { $0.convert($0.bounds, to: cell.contentView).minX < $1.convert($1.bounds, to: cell.contentView).minX }
         #expect(controls.map(\.accessibilityLabel) == ["Save", "Repost"])
-        let leading = ordered.first!.convert(ordered.first!.bounds, to: cell.contentView).minX
+        // The boxes HANG past the column by the air they leave before their
+        // ink (plain actions, 2026-09-30), so the ink is what sits on it —
+        // measured on the ink in `PlainCardActionsTests`.
+        let first = try #require(ordered.first as? PostCardPillView)
+        let last = try #require(ordered.last as? PostCardPillView)
+        let leading = first.convert(first.bounds, to: cell.contentView).minX
         let trailing = cell.contentView.bounds.maxX
-            - ordered.last!.convert(ordered.last!.bounds, to: cell.contentView).maxX
-        #expect(abs(leading - PostGridListRowCell.captionInset) < 0.5)
-        #expect(abs(trailing - PostGridListRowCell.captionInset) < 0.5)
+            - last.convert(last.bounds, to: cell.contentView).maxX
+        #expect(abs(leading + first.inkLeading - PostGridListRowCell.captionInset) < 0.5)
+        #expect(abs(trailing + last.inkTrailing - PostGridListRowCell.captionInset) < 0.5)
         // And the two groups are apart: the slack is between them.
         let gap = ordered[2].convert(ordered[2].bounds, to: cell.contentView).minX
             - ordered[1].convert(ordered[1].bounds, to: cell.contentView).maxX

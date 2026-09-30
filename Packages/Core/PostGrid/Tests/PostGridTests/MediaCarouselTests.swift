@@ -784,11 +784,11 @@ struct CarouselChipsAreFixedTests {
     @Test func theCountersAreNeverSqueezedAndTheIndicatorYields() throws {
         let roomy = spaciousRow()
         // Narrow enough that five dots no longer fit beside two six-figure
-        // counts and the date, wide enough that two still do. (286, not 262: the
-        // counters' glyphs grew to the controls' size on 2026-09-26, which
-        // takes ~16pt more of the line — still far narrower than any phone,
+        // counts and the date, wide enough that two still do. (262: the
+        // counters' glyphs grew on 2026-09-26 and 286 held; the plain actions
+        // of 2026-09-30 gave ~24pt back — still far narrower than any phone,
         // an iPhone SE's card is ~343.)
-        let tight = spaciousRow(width: 286)
+        let tight = spaciousRow(width: 262)
         for cell in [roomy, tight] {
             let line = counterPills(in: cell)
             #expect(line.count == 2)
@@ -814,13 +814,15 @@ struct CarouselChipsAreFixedTests {
     }
 
     /// The closing line packs the counters at one gap each, trailing:
-    /// comments, then likes, at the caption's inset.
+    /// comments, then likes, the likes' box hung past the caption's inset by
+    /// its own padding so its INK ends on the column.
     @Test func theLinePacksItsCountersTrailing() {
         let cell = spaciousRow()
         let frames = counterPills(in: cell).map { $0.convert($0.bounds, to: cell.contentView) }
         #expect(frames.count == 2)
         #expect(abs((frames[1].minX - frames[0].maxX) - PostGridListRowCell.chipGap) < 0.5)
-        #expect(abs(cell.contentView.bounds.maxX - frames[1].maxX - PostGridListRowCell.captionInset) < 0.5)
+        #expect(abs(cell.contentView.bounds.maxX - frames[1].maxX
+            - (PostGridListRowCell.captionInset - PostCardPillView.plainInsets.trailing)) < 0.5)
     }
 }
 
