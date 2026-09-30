@@ -673,6 +673,9 @@ final class PlaceProfileViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        // `-status-bar-blur` (DEBUG): the progressive blur behind the status
+        // bar, on every full-screen screen — see `StatusBarBlurView`.
+        StatusBarBlurView.install(in: view)
         // The page the cards lie on, a step below them — see `Surface`.
         view.backgroundColor = Surface.page
         configureHeader()
