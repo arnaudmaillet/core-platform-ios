@@ -76,31 +76,20 @@ final class SnapAuthorIdentityView: UIView {
     private static let barItemWrapperHeight: CGFloat = 36
     /// Long display names truncate here rather than crowding the back item.
     private static let maxWidth: CGFloat = 220
-    /// The COMPACT cap, used while the sort pill shares the trailing run.
-    ///
-    /// This is a width BUDGET, not a taste call. The bar is 402pt on the
-    /// reference device: 16pt margins each side, a 44pt leading platter, and
-    /// a 96pt sort platter leave ~222pt, and the system overflows the whole
-    /// item into a `•••` menu the moment the run does not fit — which is
-    /// exactly what it did with the full pill (measured: the author's view
-    /// chain dead-ended at its item wrapper, never reaching the window).
-    /// Compact keeps the author VISIBLE, which is the point of having it
-    /// there.
-    private static let compactMaxWidth: CGFloat = 150
     /// The unhydrated (cold-tap) floor: the pill opens at a plausible
     /// footprint instead of a nub, so hydration is a small glide, not a pop.
     private static let minWidth: CGFloat = 150
 
     /// Narrows the pill without changing what it IS.
     ///
-    /// The budget above is real — the system overflows the whole item into a
-    /// `•••` menu the moment the trailing run does not fit, and losing the
-    /// author entirely is worse than any amount of truncation. `setCompact`
-    /// paid for it by dropping the handle line and the follow button, which
-    /// made the pill a visibly different component in the two states. This
-    /// pays for it in WIDTH instead: same two lines, same follow button,
-    /// same platter — the name simply truncates earlier, exactly as a long
-    /// name already does at rest.
+    /// The budget is real — the system overflows the whole item into a `•••`
+    /// menu the moment the trailing run does not fit (measured: the author's
+    /// view chain dead-ended at its item wrapper, never reaching the window),
+    /// and losing the author entirely is worse than any amount of truncation.
+    /// A COMPACT form once paid for it by dropping the handle line and the
+    /// follow button, which made the pill a visibly different component in
+    /// the two states. This pays for it in WIDTH instead: same two lines, same
+    /// follow button, same platter — the name simply truncates earlier.
     ///
     /// The floor comes off below `minWidth`: it exists to hold the pill open
     /// while a name hydrates, and it would otherwise out-argue the budget.
@@ -213,9 +202,8 @@ final class SnapAuthorIdentityView: UIView {
     /// from "same page, better data".
     private var renderedModel: FeedItemDisplayModel?
     private var avatarTask: Task<Void, Never>?
-    /// Whether the pill is sharing the trailing run with the sort selector.
-    private var isCompact = false
-    /// The width bounds, held so `setCompact` can retune them.
+    /// The hugging width bounds, held so `setWidthBudget` and `setFixedWidth`
+    /// can retune them.
     private var maxWidthConstraint: NSLayoutConstraint?
     private var minWidthConstraint: NSLayoutConstraint?
 
@@ -531,7 +519,7 @@ final class SnapAuthorIdentityView: UIView {
         followButton.accessibilityLabel = followBadge.accessibilityLabel
         followButton.isUserInteractionEnabled = followBadge == .follow
         followButton.accessibilityTraits = followBadge == .follow ? .button : .staticText
-        followButton.isHidden = followBadge == .none || isCompact
+        followButton.isHidden = followBadge == .none
     }
 
     @objc private func authorTapped() {
@@ -553,35 +541,6 @@ final class SnapAuthorIdentityView: UIView {
         }
     }
 
-    /// COMPACT: avatar + display name only, under a tighter width cap — the
-    /// form the pill takes while the sort selector shares the trailing run.
-    ///
-    /// It sheds the meta line (@handle · age) and the follow badge, both of
-    /// which belong to the resting page's chrome: with the comments open the
-    /// author is context for what you are reading, not the thing you are
-    /// acting on, and the affordances for acting on them are a tap away in
-    /// the pill itself. Shedding them is what buys the ~70pt that keeps the
-    /// whole item out of the system's overflow menu.
-    func setCompact(_ compact: Bool, animated: Bool) {
-        guard compact != isCompact else { return }
-        isCompact = compact
-        let apply = {
-            self.applyLabelVisibility()
-            self.followButton.isHidden = compact || self.followBadge == .none
-            self.maxWidthConstraint?.constant = compact ? Self.compactMaxWidth : Self.maxWidth
-            // The cold-start floor is a RESTING metric (it holds the pill
-            // open while the name hydrates). Compact is only ever entered
-            // from a hydrated page, and 150 is the compact cap itself — it
-            // would pin the pill to exactly the cap and undo the shrink.
-            self.minWidthConstraint?.isActive = !compact
-        }
-        guard animated else { return apply() }
-        UIView.animate(withDuration: 0.22, delay: 0, options: [.curveEaseInOut, .allowUserInteraction]) {
-            apply()
-            self.superview?.superview?.layoutIfNeeded()
-        }
-    }
-
     /// Swaps the label area between redacted stand-ins and the real labels.
     /// The stand-in bars need a gap of their own; label line-heights carry it
     /// once hydrated.
@@ -592,16 +551,13 @@ final class SnapAuthorIdentityView: UIView {
 
     private var isRedacted = true
 
-    /// The label area's visibility, resolved from BOTH axes at once —
-    /// redaction (hydrated yet?) and compactness (is the meta line shown at
-    /// all?). One resolver, because two independent setters racing over
-    /// four `isHidden` flags is how a compact pill ends up wearing a
-    /// placeholder bar it never shows text in.
+    /// The label area's visibility: the real labels once hydrated, the
+    /// redaction bars before.
     private func applyLabelVisibility() {
         nameLabel.isHidden = isRedacted
         namePlaceholder.isHidden = !isRedacted
-        metaLabel.isHidden = isRedacted || isCompact
-        metaPlaceholder.isHidden = !isRedacted || isCompact
+        metaLabel.isHidden = isRedacted
+        metaPlaceholder.isHidden = !isRedacted
         labelsStack.spacing = isRedacted ? 5 : 0
     }
 
