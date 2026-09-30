@@ -1,18 +1,20 @@
 import QuartzCore
 import UIKit
 
-/// What lies under the sound sheet's Popular row — the "Recent" title and
-/// its grid, as one — fades in as the sheet grows from collapsed toward its
-/// expanded detent, and out as it comes back down.
+/// What lies under what the collapsed sound sheet is for fades in as the
+/// sheet grows from collapsed toward its expanded detent, and out as it comes
+/// back down: under a Popular row, the "Recent" title and its grid, as one;
+/// with "Recent" alone, its rows after the first
+/// (`SoundSheetViewController.revealLine`).
 ///
-/// **FAINT AT COLLAPSED, NEVER GONE** (`restingOpacity`): the title and the
-/// top of the grid's first row stand over the toolbar at the collapsed
-/// detent, there but not yet read — what says the sheet has more below
-/// (asked for, 2026-09-30: "barely visible" at collapsed).
+/// **FAINT AT COLLAPSED, NEVER GONE** (`restingOpacity`): what lies under the
+/// line stands over and behind the toolbar at the collapsed detent, there but
+/// not yet read — what says the sheet has more below (asked for, 2026-09-30:
+/// "barely visible" at collapsed).
 ///
 /// **A MASK ON THE SHEET'S SCREEN, NOT AN ALPHA PER CELL.** Two opaque bands:
-/// everything above `line` (the sound, the Popular row) always shows; the
-/// band below shows at `opacity(progress:)`. A collection view re-applies its
+/// everything above `line` (the sound, the Popular row or the first row of
+/// "Recent") always shows; the band below shows at `opacity(progress:)`. A collection view re-applies its
 /// layout
 /// attributes' alpha to a cell on every layout pass, and cells come and go
 /// as rows scroll — so an alpha per cell would be fought over by the layout
@@ -61,12 +63,6 @@ final class SoundSheetReveal: NSObject {
     }
 
     private(set) var progress: CGFloat = 0
-    /// Whether anything fades at all. Off when the sheet has no Popular row:
-    /// "Recent" is then right under the sound and is what the collapsed sheet
-    /// shows — the mask comes off, whatever the progress.
-    var isEnabled = true {
-        didSet { if isEnabled != oldValue { apply() } }
-    }
     /// The progress the sheet's drawn height says now; nil when it cannot be
     /// read (no window).
     var measure: (() -> CGFloat?)?
@@ -150,7 +146,7 @@ final class SoundSheetReveal: NSObject {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         fading.opacity = Float(Self.opacity(progress: progress))
-        let masked = isEnabled && progress < 1
+        let masked = progress < 1
         if masked, host.layer.mask !== mask {
             host.layer.mask = mask
         } else if !masked, host.layer.mask === mask {

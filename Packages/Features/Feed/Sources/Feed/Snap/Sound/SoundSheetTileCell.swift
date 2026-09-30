@@ -294,11 +294,23 @@ final class SoundSheetSectionHeaderView: UICollectionReusableView {
 
     private let button = UIButton(configuration: .plain())
 
-    /// The header's height at `traits`' text size: the title's line with a
-    /// little air, never under the 44pt a control needs.
+    /// The header's height at `traits`' text size: the title's line with
+    /// `Spacing.sectionTitle` above and under it — the distance every section
+    /// title in the app keeps over its content — never under the 44pt a
+    /// control needs.
     static func height(traits: UITraitCollection) -> CGFloat {
-        let title = UIFont.preferredFont(forTextStyle: .title3, compatibleWith: traits)
-        return max(44, (title.lineHeight + 2 * Spacing.sm).rounded(.up))
+        Spacing.sectionTitleBarHeight(lineHeight: titleLineHeight(traits: traits))
+    }
+
+    /// The space the layout leaves ABOVE the header: `Spacing.section` from
+    /// what is above to the title's line, the header's own air (it centres
+    /// the title) counted in.
+    static func gapAbove(traits: UITraitCollection) -> CGFloat {
+        Spacing.sectionGap(aboveTitleBar: height(traits: traits), lineHeight: titleLineHeight(traits: traits))
+    }
+
+    private static func titleLineHeight(traits: UITraitCollection) -> CGFloat {
+        UIFont.preferredFont(forTextStyle: .title3, compatibleWith: traits).withWeight(.bold).lineHeight
     }
 
     override init(frame: CGRect) {

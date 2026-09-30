@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import Foundation
 import MediaCore
 import PostGrid
@@ -184,6 +185,43 @@ struct ForYouRowsTests {
         #expect(headers.map { $0.count } == [2, 0], "only New is counted")
     }
 
+    /// The app's ONE section spacing (2026-09-30): "Recent"'s title LINE
+    /// stands `Spacing.section` under New's last card and `Spacing.sectionTitle`
+    /// over its own first card — the distances the sound sheet and For You's
+    /// rows keep.
+    @Test func thePushedListKeepsTheAppsSectionSpacing() throws {
+        let list = makeList(.following)
+        let posts = [
+            post("old-1", by: "bo", at: 5), post("new-1", by: "bo", at: 9),
+            post("old-2", by: "cy", at: 4), post("new-2", by: "cy", at: 8)
+        ]
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 4000))
+        window.rootViewController = list
+        window.isHidden = false
+        defer { window.isHidden = true }
+        list.render(.content(posts), newPosts: [PostID("new-1"), PostID("new-2")])
+        list.view.layoutIfNeeded()
+        func collectionView(in view: UIView) -> UICollectionView? {
+            if let found = view as? UICollectionView { return found }
+            return view.subviews.lazy.compactMap(collectionView(in:)).first
+        }
+        let collection = try #require(collectionView(in: list.view))
+        collection.layoutIfNeeded()
+        let layout = collection.collectionViewLayout
+        let header = try #require(layout.layoutAttributesForSupplementaryView(
+            ofKind: PostGridListLayout.headerElementKind, at: IndexPath(item: 0, section: 1)
+        ))
+        let lastNew = try #require(layout.layoutAttributesForItem(at: IndexPath(item: 1, section: 0)))
+        let firstRecent = try #require(layout.layoutAttributesForItem(at: IndexPath(item: 0, section: 1)))
+        let traits = collection.traitCollection
+        let lineTop = header.frame.minY + SectionHeaderPillButton.inlineTitleTop(traits: traits)
+        let line = UIFont.preferredFont(forTextStyle: .title3, compatibleWith: traits).lineHeight
+        #expect(abs(lineTop - lastNew.frame.maxY - Spacing.section) <= 0.6,
+                "Recent's line is \(lineTop - lastNew.frame.maxY) under New's last card")
+        #expect(abs(firstRecent.frame.minY - (lineTop + line) - Spacing.sectionTitle) <= 0.6,
+                "Recent's line is \(firstRecent.frame.minY - lineTop - line) over its first card")
+    }
+
     /// A list that is ALL new is one section — "New", titled and counted, not
     /// the untitled run the inbox's rule would make it.
     @Test func aListThatIsAllNewIsOneCountedNewSection() {
@@ -256,6 +294,22 @@ struct ForYouRowsTests {
         let friendsOnly = ForYouRailsView.height(forWidth: 393, friends: 3, following: 0)
         #expect(friendsOnly > 0)
         #expect(both > friendsOnly)
+    }
+
+    /// The app's ONE section gap between the rows and before "For you"
+    /// (2026-09-30): each title's line `Spacing.section` under the row above,
+    /// the bar's own air counted in.
+    @Test func theRowsKeepTheAppsSectionGap() {
+        let width: CGFloat = 393
+        let bar = SectionLinkHeaderView.height
+        let story = ForYouRailsView.Metrics.storySize(forWidth: width).height
+        let card = ForYouRailsView.Metrics.cardSize(forWidth: width).height
+        let gap = ForYouRailsView.Metrics.rowGap
+        #expect(gap == SectionLinkHeaderView.gapAbove)
+        let air = (bar - UIFont.systemFont(ofSize: 20, weight: .bold).lineHeight) / 2
+        #expect(abs(gap + air - Spacing.section) <= 0.5)
+        #expect(ForYouRailsView.height(forWidth: width, friends: 3, following: 3)
+                == bar + story + gap + bar + card + gap + bar + ForYouRailsView.Metrics.listGap)
     }
 
     /// Two whole cards and a third peeking — the product's "the row goes on".

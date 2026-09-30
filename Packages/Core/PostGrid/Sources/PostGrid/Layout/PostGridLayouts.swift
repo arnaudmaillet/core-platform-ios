@@ -205,6 +205,17 @@ public enum PostGridListLayout {
     public static let rowSpacing: CGFloat = 10
     public static let sideMargin: CGFloat = 16
 
+    /// The bottom inset of a HEADED section: `Spacing.section` from its last
+    /// row to the next header's title LINE, less the room that header holds
+    /// above its line (`SectionHeaderPillButton.inlineTitleTop`). Its rows
+    /// start `Spacing.sectionTitle` under the line — the header's half of the
+    /// rule, which the host asks of it (`SectionHeaderCapsuleView.setTitle`'s
+    /// `titleToContent`).
+    @MainActor
+    public static func sectionGap(traits: UITraitCollection) -> CGFloat {
+        max(0, (Spacing.section - SectionHeaderPillButton.inlineTitleTop(traits: traits)).rounded())
+    }
+
     /// Headers FLOAT over the rows rather than pushing them down: the header is
     /// a capsule, not a band, and a pinned capsule reads as an object sitting on
     /// the list — the same treatment the inbox's plain tables give theirs.
@@ -217,7 +228,7 @@ public enum PostGridListLayout {
     public static func layout(
         hasHeader: (@MainActor (Int) -> Bool)? = nil
     ) -> UICollectionViewCompositionalLayout {
-        UICollectionViewCompositionalLayout { index, _ in
+        UICollectionViewCompositionalLayout { index, environment in
             let isHeaded = hasHeader?(index) == true
             let item = NSCollectionLayoutItem(layoutSize: .init(
                 widthDimension: .fractionalWidth(1),
@@ -257,16 +268,16 @@ public enum PostGridListLayout {
             // page's Activity list, the pushed Following list with nothing
             // new): asked per section, it gets no stray band at its foot.
             //
-            // The SAME constant the pill applies as its own top margin in the
-            // inbox's tables — one number for one rule, expressed through
-            // whichever lever the host actually has. A table has no per-section
-            // content inset, so there the header grows; here a pinned boundary
-            // item resolves its own position and would ignore a top inset, so
-            // the margin goes on the section above.
+            // HOW MUCH: the app's one section gap (`Spacing.section`,
+            // 2026-09-30) — from this section's last row to the next title's
+            // LINE — less what the next header holds above that line
+            // (`sectionGap`). The sound sheet and For You's rows keep the same
+            // distance through their own bars. The inbox's tables still keep
+            // `SectionHeaderPillButton.Metrics.sectionGap` inside their headers.
             section.contentInsets = NSDirectionalEdgeInsets(
                 top: 0,
                 leading: sideMargin,
-                bottom: isHeaded ? SectionHeaderPillButton.Metrics.sectionGap : 0,
+                bottom: isHeaded ? sectionGap(traits: environment.traitCollection) : 0,
                 trailing: sideMargin
             )
             if isHeaded {

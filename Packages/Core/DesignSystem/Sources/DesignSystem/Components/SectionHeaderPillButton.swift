@@ -77,6 +77,11 @@ public final class SectionHeaderPillButton: UIButton {
     private var topConstraint: NSLayoutConstraint?
     /// Carries the section gap now — see `pinAsHeader`.
     private var bottomConstraint: NSLayoutConstraint?
+    /// What `setLeadsList` last said — the bottom margin is restated from it.
+    private var leadsList = true
+    /// The distance a host asked for between the inline title's line and the
+    /// section's first row (`setTitleToContent`); nil keeps `Metrics.float`.
+    private var titleToContent: CGFloat?
     /// ⚠️ **The header's height must not depend on which shape it is wearing.**
     /// The two states have different type sizes, so a self-sizing header would
     /// re-measure mid-scroll and shove every row below it — the morph would
@@ -174,10 +179,44 @@ public final class SectionHeaderPillButton: UIButton {
     /// sections, so a view that carried the gap for "Recent" would carry it
     /// into "New" the moment it was reused.
     public func setLeadsList(_ leadsList: Bool) {
+        self.leadsList = leadsList
+        applyBottomMargin()
+    }
+
+    /// Puts the inline title's LINE `gap` points over the section's first row
+    /// — For You's lists pass `Spacing.sectionTitle`, the distance every
+    /// section title in the app keeps over its content (2026-09-30); nil (the
+    /// inbox's tables) keeps `Metrics.float` under the pill. Only the header's
+    /// bottom margin moves: the pill hangs from the header's TOP, so the
+    /// pinned capsule stands where it always did.
+    ///
+    /// Set on every configure, like the rest: header views are recycled.
+    public func setTitleToContent(_ gap: CGFloat?) {
+        titleToContent = gap
+        applyBottomMargin()
+    }
+
+    /// Where the inline title's line stands from the header's top: the float
+    /// over the pill, then the air the pill's reserved height leaves above a
+    /// title it centres. What a list counts its section gap from
+    /// (`Spacing.section`: the previous section's foot to this line).
+    public static func inlineTitleTop(traits: UITraitCollection) -> CGFloat {
+        Metrics.float + inlineTitleAir(traits: traits)
+    }
+
+    /// The air above (and below) the inline title inside the pill's reserved
+    /// height.
+    private static func inlineTitleAir(traits: UITraitCollection) -> CGFloat {
+        max(0, (reservedHeight(for: traits) - font(for: .inline, traits: traits).lineHeight) / 2)
+    }
+
+    private func applyBottomMargin() {
         // The gap separates this section from the rows above it, and it is spent
         // BELOW the pill so the pill's own offset from the top of the header never
         // changes. Same total header height either way; same pinned position.
-        let constant = Metrics.float + (leadsList ? 0 : Metrics.sectionGap)
+        let float = titleToContent.map { max(0, ($0 - Self.inlineTitleAir(traits: traitCollection)).rounded()) }
+            ?? Metrics.float
+        let constant = float + (leadsList ? 0 : Metrics.sectionGap)
         guard bottomConstraint?.constant != constant else { return }
         bottomConstraint?.constant = constant
         // The host has to re-measure: this changes the header's HEIGHT, not
@@ -354,6 +393,7 @@ public final class SectionHeaderPillButton: UIButton {
         guard traitCollection.preferredContentSizeCategory != previous?.preferredContentSizeCategory
         else { return }
         heightConstraint?.constant = Self.reservedHeight(for: traitCollection)
+        applyBottomMargin()
         applyConfiguration(for: presentation)
     }
 

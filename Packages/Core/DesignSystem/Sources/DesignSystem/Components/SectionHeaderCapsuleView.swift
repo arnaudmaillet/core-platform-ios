@@ -31,11 +31,16 @@ public final class SectionHeaderCapsuleView: UICollectionReusableView {
 
     /// `count` is the badge after the title, zero for none — see
     /// `SectionHeaderPillButton.setCount`. `leadsList` decides the header's top
-    /// margin — see `SectionHeaderPillButton.setLeadsList`.
-    public func setTitle(_ title: String?, count: Int = 0, leadsList: Bool = true) {
+    /// margin — see `SectionHeaderPillButton.setLeadsList`. `titleToContent`
+    /// stands the title's line that far over the section's first row — see
+    /// `SectionHeaderPillButton.setTitleToContent`.
+    public func setTitle(
+        _ title: String?, count: Int = 0, leadsList: Bool = true, titleToContent: CGFloat? = nil
+    ) {
         pill.setPillTitle(title)
         pill.setCount(count)
         pill.setLeadsList(leadsList)
+        pill.setTitleToContent(titleToContent)
     }
 
     #if DEBUG

@@ -1,6 +1,7 @@
 import CoreModels
 import CoreNavigation
 import CoreStorage
+import DesignSystem
 import FeedInterface
 import MediaCore
 import PostGrid
@@ -10,18 +11,19 @@ import UIKit
 
 /// The sound sheet's rules: how it opens (the close item in its bar, the
 /// content behind the bar, the sound `headerInset` under its top edge and
-/// from its side, with as much room under it), that no detent — large
+/// from its side, the app's section gap under it), that no detent — large
 /// included — pauses the clip behind, the sections (the Popular row with
 /// "Original" first ONLY when the provider gives one, then the Recent grid of
 /// every post the row does not show, newest first — never empty), the
-/// toolbar ([Use this sound —][🔖][↑]), the one gutter and no gap between
-/// the posts' sections, that the collapsed detent ends a little into the
-/// Recent grid's first row, over the toolbar — at the SAME height at every
-/// visit and for any number of posts of one shape, with no layout pass ever
-/// re-asking the detents — that the expanded detent fits a short content,
-/// the reveal of the Recent title and grid as one (faint at collapsed, and
-/// only under a Popular row), that the posts do not scroll below the fullest
-/// detent, and Popular's title + chevron.
+/// toolbar ([Use this sound —][🔖][↑]), the one gutter and the app's section
+/// gap before each title, that the collapsed detent ends a little into the
+/// Recent grid's first row under a Popular row — after its whole first row
+/// without one — over the toolbar, at the SAME height at every visit and for
+/// any number of posts of one shape, with no layout pass ever re-asking the
+/// detents — that the expanded detent fits a short content, the reveal (the
+/// Recent title and grid as one under a Popular row, the rows after the
+/// first without one; faint at collapsed), that the posts do not scroll below
+/// the fullest detent, and Popular's title + chevron.
 @MainActor
 struct SoundSheetTests {
     private typealias Sheet = SoundSheetViewController
@@ -160,7 +162,9 @@ struct SoundSheetTests {
         #expect(collection.contentInsetAdjustmentBehavior == .never, "the bar would push the sound down")
         #expect(collection.contentInset.top == Sheet.topInset)
         #expect(Sheet.topInset == Sheet.headerInset, "the header's top margin is not its side margin")
-        #expect(Sheet.headerBottom == Sheet.headerInset, "the room under the sound is not the room above it")
+        let metrics = try #require(controller.detentMetrics)
+        #expect(Sheet.soundBottom(metrics) - metrics.headerHeight >= Sheet.headerInset,
+                "less room under the sound than above it")
         #expect(Sheet.headerInset == 2 * Sheet.gutter, "the sound has no more room than a tile")
         #expect(collection.topEdgeEffect.isHidden, "a blur over the sound at rest")
         #expect(controller.contentScrollView(for: .top) === collection)
@@ -585,12 +589,13 @@ struct SoundSheetTests {
     // MARK: - Collapsed detent
 
     /// The arithmetic: the fold is the inset under the grabber, the header
-    /// and the room under it, the Popular title and its row when there is
-    /// one, then — no gap — the Recent title and the top of its first row
-    /// (more of it without a row); the toolbar's band is the bottom safe area
-    /// ABOVE the window's, which the sheet adds by itself. The reveal's line
-    /// is the Recent title's top — none without a row. The fitted height is
-    /// the whole content.
+    /// and the section gap under it, the Popular title and its row when there
+    /// is one, the section gap, then the Recent title and the top of its
+    /// first row — its whole first row and the gutter under it without a
+    /// Popular row; the toolbar's band is the bottom safe area ABOVE the
+    /// window's, which the sheet adds by itself. The reveal's line is the
+    /// Recent title's top under a row, the first row's foot without one. The
+    /// fitted height is the whole content.
     @Test func theDetentsAreComputed() {
         #expect(Sheet.toolbarBand(bottomSafeArea: 34 + 52, windowBottomSafeArea: 34) == 52)
         #expect(Sheet.toolbarBand(bottomSafeArea: 20, windowBottomSafeArea: 34) == 0)
@@ -599,15 +604,17 @@ struct SoundSheetTests {
         // A row: (402 - 4 × 8) / 3.4 = 108.8 → 108 → 3:4 → 144.
         #expect(Sheet.rowTileWidth(width: 402) == 108)
         #expect(Sheet.rowTileHeight(width: 402) == 144)
-        #expect(Sheet.recentPeekHeight(width: 402, hasPopular: true) == 41)
-        #expect(Sheet.recentPeekHeight(width: 402, hasPopular: false) == 82)
-        let room = Sheet.headerBottom
+        #expect(Sheet.recentPeekHeight(width: 402) == 41)
+        let gap: CGFloat = 18
         let metrics = Sheet.DetentMetrics(
-            width: 402, headerHeight: 96, sectionHeaderHeight: 44, toolbarBand: 52.2, hasPopular: true
+            width: 402, headerHeight: 96, sectionHeaderHeight: 44, sectionGap: gap, toolbarBand: 52.2,
+            hasPopular: true
         )
-        #expect(Sheet.soundBottom(metrics) == 96 + room)
-        #expect(Sheet.recentTitleTop(metrics) == 96 + room + 44 + 144, "a gap between the row and the Recent title")
-        #expect(Sheet.foldBottom(metrics) == Sheet.topInset + 96 + room + 44 + 144 + 44 + 41)
+        #expect(Sheet.soundBottom(metrics) == 96 + gap)
+        #expect(Sheet.popularRowBottom(metrics) == 96 + gap + 44 + 144)
+        #expect(Sheet.recentTitleTop(metrics) == 96 + gap + 44 + 144 + gap,
+                "no section gap between the row and the Recent title")
+        #expect(Sheet.foldBottom(metrics) == Sheet.topInset + 96 + gap + 44 + 144 + gap + 44 + 41)
         #expect(Sheet.collapsedDetentHeight(metrics) == (Sheet.foldBottom(metrics) + 52.2).rounded(.up))
         #expect(Sheet.revealLine(metrics) == Sheet.recentTitleTop(metrics), "the Recent title does not fade")
 
@@ -616,21 +623,25 @@ struct SoundSheetTests {
         #expect(Sheet.gridHeight(width: 402, count: 3) == 164)
         #expect(Sheet.gridHeight(width: 402, count: 4) == 2 * 164 + Sheet.gutter)
         #expect(Sheet.contentHeight(metrics, recentCount: 5)
-                == 96 + room + 44 + 144 + 44 + 2 * 164 + Sheet.gutter + Sheet.contentBottom)
+                == 96 + gap + 44 + 144 + gap + 44 + 2 * 164 + Sheet.gutter + Sheet.contentBottom)
         #expect(Sheet.fittedDetentHeight(metrics, recentCount: 5)
                 == (Sheet.topInset + Sheet.contentHeight(metrics, recentCount: 5) + 52.2).rounded(.up))
         // One post: still taller than collapsed — the sheet always grows.
         #expect(Sheet.fittedDetentHeight(metrics, recentCount: 1) > Sheet.collapsedDetentHeight(metrics))
 
-        // Without Popular: Recent right on the sound's room, half its first
-        // row at collapsed, nothing fading.
+        // Without Popular: Recent on the sound's gap, its WHOLE first row and
+        // the gutter under it at collapsed — the fold is where the second row
+        // starts — and the rows after the first fading.
         var alone = metrics
         alone.hasPopular = false
-        #expect(Sheet.recentTitleTop(alone) == 96 + room)
-        #expect(Sheet.foldBottom(alone) == Sheet.topInset + 96 + room + 44 + 82)
-        #expect(Sheet.revealLine(alone) == nil, "something fades without a Popular row")
-        #expect(Sheet.contentHeight(alone, recentCount: 1) == 96 + room + 44 + 164 + Sheet.contentBottom)
-        #expect(Sheet.fittedDetentHeight(alone, recentCount: 1) > Sheet.collapsedDetentHeight(alone))
+        #expect(Sheet.recentTitleTop(alone) == 96 + gap)
+        #expect(Sheet.revealLine(alone) == 96 + gap + 44 + 164, "the line is not the first row's foot")
+        #expect(Sheet.foldBottom(alone) == Sheet.topInset + 96 + gap + 44 + 164 + Sheet.gutter)
+        #expect(Sheet.contentHeight(alone, recentCount: 1) == 96 + gap + 44 + 164 + Sheet.contentBottom)
+        // One row: the collapsed sheet shows it all; the sheet still grows.
+        #expect(Sheet.fittedDetentHeight(alone, recentCount: 1) == Sheet.collapsedDetentHeight(alone) + 1)
+        #expect(Sheet.fittedDetentHeight(alone, recentCount: 4)
+                == Sheet.collapsedDetentHeight(alone) + 164 + Sheet.gutter)
         #expect(Sheet.collapsedDetentHeight(alone) < Sheet.collapsedDetentHeight(metrics))
 
         // Expanded is the fitted detent or large, never collapsed.
@@ -671,30 +682,32 @@ struct SoundSheetTests {
         let sound = try frame(of: .sound, in: controller)
         #expect(sound.minY == 0 && sound.height == metrics.headerHeight)
         let title = try headerFrame(of: .popular, in: controller)
-        #expect(abs(title.minY - sound.maxY - Sheet.headerBottom) < 0.5, "the Popular title is off the sound's room")
+        #expect(abs(title.minY - sound.maxY - metrics.sectionGap) < 0.5, "the Popular title is off the sound's gap")
         #expect(title.height == metrics.sectionHeaderHeight)
         let popular = try tileIDs(in: .popular, of: controller)
         let row = try popular.prefix(4).map { try frame(of: .tile(PostID($0), .popular), in: controller) }
         #expect(row.allSatisfy { abs($0.minY - title.maxY) < 0.5 }, "the row is not one line under its title")
         let recent = try headerFrame(of: .recent, in: controller)
-        #expect(abs(recent.minY - row[0].maxY) < 0.5, "a gap between the row and the Recent title")
+        #expect(abs(recent.minY - row[0].maxY - metrics.sectionGap) < 0.5,
+                "no section gap between the row and the Recent title")
         #expect(abs(recent.minY - Sheet.recentTitleTop(metrics)) < 0.5)
-        let line = try #require(Sheet.revealLine(metrics))
+        let line = Sheet.revealLine(metrics)
         #expect(abs(line - recent.minY) < 0.5, "the reveal's line is off the Recent title's top")
 
         let firstID = try #require(try tileIDs(in: .recent, of: controller).first)
         let first = try frame(of: .tile(PostID(firstID), .recent), in: controller)
         #expect(abs(first.minY - recent.maxY) < 0.5, "the Recent grid is not one line under its title")
         // Content coordinates start under the inset below the grabber.
-        let foldFromLayout = Sheet.topInset + first.minY + Sheet.recentPeekHeight(width: metrics.width, hasPopular: true)
+        let foldFromLayout = Sheet.topInset + first.minY + Sheet.recentPeekHeight(width: metrics.width)
         #expect(abs(foldFromLayout - Sheet.foldBottom(metrics)) <= 0.5,
                 "laid out \(foldFromLayout), computed \(Sheet.foldBottom(metrics))")
         #expect(Sheet.foldBottom(metrics) < Sheet.topInset + first.maxY, "the fold shows the whole first row")
         #expect(abs(collapsed - (Sheet.foldBottom(metrics) + metrics.toolbarBand)) <= 1)
     }
 
-    /// Without Popular, the Recent title stands on the sound's room and the
-    /// fold is halfway down its first row — as laid out.
+    /// Without Popular, the Recent title stands on the sound's gap, the
+    /// collapsed fold shows its WHOLE first row and ends where the second
+    /// starts, and the reveal's line is the first row's foot — as laid out.
     @Test func withoutPopularTheFoldIsTheLaidOutFoldToo() throws {
         let controller = sheet(tiles: 7, popular: false)
         try laidOut(controller)
@@ -702,14 +715,32 @@ struct SoundSheetTests {
         #expect(!metrics.hasPopular)
         let sound = try frame(of: .sound, in: controller)
         let recent = try headerFrame(of: .recent, in: controller)
-        #expect(abs(recent.minY - sound.maxY - Sheet.headerBottom) < 0.5, "the Recent title is off the sound's room")
+        #expect(abs(recent.minY - sound.maxY - metrics.sectionGap) < 0.5, "the Recent title is off the sound's gap")
         #expect(abs(recent.minY - Sheet.recentTitleTop(metrics)) < 0.5)
-        let firstID = try #require(try tileIDs(in: .recent, of: controller).first)
-        let first = try frame(of: .tile(PostID(firstID), .recent), in: controller)
-        let foldFromLayout = Sheet.topInset + first.minY + Sheet.recentPeekHeight(width: metrics.width, hasPopular: false)
-        #expect(abs(foldFromLayout - Sheet.foldBottom(metrics)) <= 0.5,
-                "laid out \(foldFromLayout), computed \(Sheet.foldBottom(metrics))")
+        let ids = try tileIDs(in: .recent, of: controller)
+        #expect(ids.count == 7)
+        let first = try frame(of: .tile(PostID(ids[0]), .recent), in: controller)
+        let second = try frame(of: .tile(PostID(ids[Sheet.columns]), .recent), in: controller)
+        #expect(abs(first.minY - recent.maxY) < 0.5, "the Recent grid is not one line under its title")
+        #expect(abs(Sheet.revealLine(metrics) - first.maxY) < 0.5, "the reveal's line is off the first row's foot")
+        #expect(abs(Sheet.topInset + second.minY - Sheet.foldBottom(metrics)) <= 0.5,
+                "laid out \(Sheet.topInset + second.minY), computed \(Sheet.foldBottom(metrics))")
+        #expect(Sheet.topInset + first.maxY < Sheet.foldBottom(metrics), "the first row is not whole at collapsed")
         #expect(controller.collapsedHeight == Sheet.collapsedDetentHeight(metrics))
+    }
+
+    /// ONE section gap: every title's LINE stands `Spacing.section` under
+    /// what is above it and `Spacing.sectionTitle` over its posts — the
+    /// distances For You's rows and its pushed lists keep too.
+    @Test func theTitlesKeepTheAppsSectionGap() throws {
+        let controller = sheet(tiles: 23)
+        try laidOut(controller)
+        let metrics = try #require(controller.detentMetrics)
+        let line = UIFont.preferredFont(forTextStyle: .title3).lineHeight
+        let air = (metrics.sectionHeaderHeight - line) / 2
+        #expect(abs(air - Spacing.sectionTitle) <= 0.5, "the title's line is \(air) over its posts")
+        #expect(abs(metrics.sectionGap + air - Spacing.section) <= 0.5,
+                "the title's line is \(metrics.sectionGap + air) under what is above it")
     }
 
     /// The fitted height is the content the LAYOUT lays out — its whole
@@ -833,7 +864,9 @@ struct SoundSheetTests {
         #expect(controller.collapsedHeight == Sheet.collapsedDetentHeight(metrics))
         #expect(controller.collapsedHeight != before)
         #expect(controller.detentInvalidations > invalidations, "the new shape did not re-ask the detents")
-        #expect(!controller.reveal.isEnabled, "the reveal fades Recent without a row above it")
+        #expect(Sheet.revealLine(metrics)
+                == Sheet.recentTitleTop(metrics) + metrics.sectionHeaderHeight + Sheet.tileHeight(width: metrics.width),
+                "the reveal's line did not move to the first row's foot")
     }
 
     // MARK: - Reveal
@@ -880,22 +913,27 @@ struct SoundSheetTests {
         #expect(reveal.isMasking)
     }
 
-    /// Without a Popular row nothing fades: "Recent" is what the collapsed
-    /// sheet shows — no mask at collapsed, and its tiles answer a tap there.
-    @Test func withoutPopularNothingFades() throws {
+    /// Without a Popular row, the rows after "Recent"'s first fade — the
+    /// mask on at collapsed — and only the first row answers a tap there;
+    /// under a row, the whole of "Recent" is faint and answers none.
+    @Test func withoutPopularTheRowsAfterTheFirstFade() throws {
         let controller = sheet(tiles: 7, popular: false)
         try laidOut(controller)
         controller.reveal.set(0)
-        #expect(!controller.reveal.isEnabled)
-        #expect(!controller.reveal.isMasking, "Recent is faint with nothing above it")
-        #expect(controller.isRevealed(.recent), "the only section's tiles do not answer at collapsed")
+        #expect(controller.reveal.isMasking, "the rows after the first are not faint at collapsed")
+        #expect(controller.isRevealed(.recent, item: 0) && controller.isRevealed(.recent, item: Sheet.columns - 1),
+                "the first row does not answer at collapsed")
+        #expect(!controller.isRevealed(.recent, item: Sheet.columns), "a faint tile answers a tap")
+        controller.reveal.set(1)
+        #expect(!controller.reveal.isMasking)
+        #expect(controller.isRevealed(.recent, item: 6))
 
         let withRow = sheet(tiles: 23)
         try laidOut(withRow)
         withRow.reveal.set(0)
-        #expect(withRow.reveal.isEnabled && withRow.reveal.isMasking)
-        #expect(!withRow.isRevealed(.recent), "a faint tile answers a tap")
-        #expect(withRow.isRevealed(.popular))
+        #expect(withRow.reveal.isMasking)
+        #expect(!withRow.isRevealed(.recent, item: 0), "a faint tile answers a tap")
+        #expect(withRow.isRevealed(.popular, item: 5))
     }
 
     // MARK: - Scrolling

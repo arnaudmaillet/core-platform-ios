@@ -58,7 +58,26 @@ import UIKit
 public final class SectionLinkHeaderView: UIView {
     /// The bar's height: a title3 line with room to breathe, and a tap target
     /// past the 44pt minimum.
-    public static let height: CGFloat = 44
+    nonisolated public static let height: CGFloat = 44
+
+    /// The title's line at the default text size — what the section gaps
+    /// around the bar are counted from (`Spacing.sectionGap`).
+    nonisolated static var titleLineHeight: CGFloat { UIFont.systemFont(ofSize: 20, weight: .bold).lineHeight }
+
+    /// The space a host leaves ABOVE the bar when it follows another section:
+    /// `Spacing.section` from that section's foot to the title's line, the
+    /// bar's own air (it centres the title) counted in.
+    nonisolated public static var gapAbove: CGFloat {
+        Spacing.sectionGap(aboveTitleBar: height, lineHeight: titleLineHeight)
+    }
+
+    /// The space a host leaves UNDER the bar before the section's content:
+    /// what `Spacing.sectionTitle` asks for beyond the air the bar already
+    /// holds under its line — none at the default size, where a 44pt bar
+    /// holds exactly that.
+    nonisolated public static var gapBelow: CGFloat {
+        max(0, (Spacing.sectionTitle - (height - titleLineHeight) / 2).rounded())
+    }
 
     /// The row's gaps. Their SUM with a pill is the old even `sm + sm`: the
     /// pill moved toward the chevron and the chevron stayed where it was.
