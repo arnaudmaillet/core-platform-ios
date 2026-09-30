@@ -254,7 +254,7 @@ public actor PostComposer: PostComposing {
         // (The clip itself plays from the local file URL carried on the
         // optimistic attachment.)
         for seed in imageSeeds {
-            await imagePipeline.store(seed.image, for: seed.url)
+            imagePipeline.store(seed.image, for: seed.url)
         }
         await composedChannel.publish(entry)
         return entry

@@ -2137,8 +2137,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             $0.posts.prefix(Self.storyPicturePrefetch.postsPerStory).compactMap(\.thumbnailURL)
         }
         guard !urls.isEmpty else { return }
-        let pipeline = imagePipeline
-        Task { await pipeline.prefetch(urls) }
+        imagePipeline.prefetch(urls)
     }
 
     private static let storyPicturePrefetch = (stories: 12, postsPerStory: 4)

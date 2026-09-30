@@ -5091,8 +5091,7 @@ final class SnapFeedViewController: UIViewController {
         let urls = ids.compactMap { modelsByID[$0] }
             .flatMap { [$0.avatarURL, $0.mediaURL, $0.thumbnailURL] }
             .compactMap(\.self)
-        let pipeline = imagePipeline
-        Task { await pipeline.prefetch(urls) }
+        imagePipeline.prefetch(urls)
         // Loaded before the page scrolls in, so its band enters the viewport
         // already streaming (subtitles still wait for settle — their gate is
         // activation, not content).
@@ -6689,8 +6688,7 @@ extension SnapFeedViewController: UICollectionViewDataSourcePrefetching {
 
     func collectionView(_ collectionView: UICollectionView, cancelPrefetchingForItemsAt indexPaths: [IndexPath]) {
         let urls = prefetchURLs(for: indexPaths)
-        let pipeline = imagePipeline
-        Task { await pipeline.cancelPrefetch(urls) }
+        imagePipeline.cancelPrefetch(urls)
     }
 }
 
