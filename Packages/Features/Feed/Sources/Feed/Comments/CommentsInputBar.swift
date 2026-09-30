@@ -11,6 +11,19 @@ import UIKit
 /// a replica of the chat's own input bar, which is gone: this is the one
 /// composer now.) It owns no keyboard logic — the host pins its bottom to
 /// `view.keyboardLayoutGuide.topAnchor`.
+///
+/// TWO ROWS, one view:
+///
+///     ——————————————————————[stake]
+///     [avatar][field      ][mic/send]
+///
+/// The stake (boost) bubble stands on its own row above the mic/send slot,
+/// trailing-aligned, at UIKit's default glass-button size — the post's
+/// headline action, which in the input row squeezed the field and sat one
+/// thumb-slip from send. The row is INSIDE the bar's bounds, so the bar's
+/// height (and `restingHeight(for:)`) include it and every host's clearance
+/// follows; the row's empty leading run is NOT part of the bar for touches
+/// (`point(inside:with:)`), so the stream behind it keeps its taps and drags.
 final class CommentsInputBar: UIView {
     /// Fired with trimmed, non-empty text; the field clears itself first.
     var onSend: ((String) -> Void)?
@@ -43,9 +56,9 @@ final class CommentsInputBar: UIView {
     /// and the host drives `contentOffset` directly. `translation`/
     /// `velocity` are the pan's vertical components; up (negative) pages to
     /// the next post. Wiring this ENABLES the drive AND marks a feed
-    /// engagement (so a text post — which has no ✕ — still shows the
-    /// keyboard-dismiss face); hosts that leave it nil (the pushed comments
-    /// screen) have no page-swipe and keep a permanent send.
+    /// engagement (so the idle slot wears the microphone); hosts that leave
+    /// it nil (the pushed comments screen) have no page-swipe and keep a
+    /// permanent send.
     var onPageSwipe: ((PageSwipePhase, _ translation: CGFloat, _ velocity: CGFloat) -> Void)? {
         didSet { updateTrailingButtons(animated: false) }
     }
@@ -58,9 +71,9 @@ final class CommentsInputBar: UIView {
         }
     }
 
-    /// The bar's height at rest in `category`: one empty line, and never less
-    /// than the field's floor. For a host that places something against the
-    /// resting bar before it is laid out.
+    /// The bar's height at rest in `category`: the stake row, then one empty
+    /// line never less than the field's floor. For a host that places
+    /// something against the resting bar before it is laid out.
     ///
     /// ⚠️ NOT A CONSTANT. The field grows with the text size — 38pt up to the
     /// large sizes, about 80pt at the largest accessibility size — so this
@@ -75,12 +88,17 @@ final class CommentsInputBar: UIView {
         )
         probe.textContainerInset = UIEdgeInsets(top: Spacing.sm, left: Spacing.sm, bottom: Spacing.sm, right: Spacing.sm)
         let fitting = probe.sizeThatFits(CGSize(width: 320, height: CGFloat.greatestFiniteMagnitude)).height
-        let height = max(ceil(fitting), Metrics.controlSize)
+        let height = max(ceil(fitting), Metrics.controlSize) + stakeRowHeight
         restingHeights[category] = height
         return height
     }
 
     private static var restingHeights: [UIContentSizeCategory: CGFloat] = [:]
+
+    /// What the stake row adds above the input row: the bubble and the gap
+    /// under it. A constant — the bubble does not scale with the text size,
+    /// like every other round control on the bar.
+    static let stakeRowHeight: CGFloat = Metrics.stakeButtonSize + Metrics.stakeRowGap
 
     private enum Metrics {
         static let maxLines: CGFloat = 4
@@ -92,6 +110,12 @@ final class CommentsInputBar: UIView {
         /// the glass read as a rim around it; that ring of glass read as a
         /// margin instead, and the face is the thing worth the room.
         static let avatarDiameter: CGFloat = controlSize
+        /// The stake bubble: UIKit's default glass-button size, a notch above
+        /// the input row's 38pt controls — the bar's one action on the post,
+        /// sized as a system button rather than as a peer of the field.
+        static let stakeButtonSize: CGFloat = 44
+        /// Between the stake bubble and the input row below it.
+        static let stakeRowGap: CGFloat = Spacing.sm
     }
 
     /// The viewer's face, leading the bar — the composer's answer to the
@@ -102,7 +126,7 @@ final class CommentsInputBar: UIView {
     private let avatarView = MonogramAvatarView(diameter: Metrics.avatarDiameter)
     private let avatarImageView = AvatarImageView()
     /// The glass bubble the avatar sits in, and the button that owns its
-    /// touches. The bubble matches the mic and boost button beside it — the composer
+    /// touches. The bubble matches the mic/send button at the row's other end — the composer
     /// reads as one row of glass controls with a face at its head — and the
     /// button carries the profile switcher menu.
     ///
@@ -130,22 +154,21 @@ final class CommentsInputBar: UIView {
     /// See `visibilityMenu`.
     private let visibilityButton = UIButton(configuration: .glass())
     private let sendButton = UIButton(configuration: .prominentGlass())
-    /// The trailing slot's UTILITY face (send's overlay partner): a
-    /// keyboard-state morphing control. Keyboard closed → the MICROPHONE
-    /// (voice note); keyboard open with an empty field → the
-    /// dismiss-keyboard chevron (retires the keyboard, engagement
-    /// untouched). Send takes the slot only while there is text to send
-    /// (or a submission in flight).
+    /// The trailing slot's idle face (send's overlay partner): the
+    /// MICROPHONE (voice note), keyboard up or down. Send takes the slot
+    /// while there is text to send (or a submission in flight).
+    ///
+    /// It used to morph into a dismiss-keyboard chevron while the keyboard
+    /// was up over an empty field. A tap on the stream retires the keyboard
+    /// (the hosts' stream tap), so the chevron only duplicated it — at the
+    /// cost of the slot changing meaning under the thumb.
     private let utilityButton = UIButton(configuration: .glass())
-    /// Whether the keyboard is up — the third axis of the trailing
-    /// toggle, driven by the keyboardWillShow/Hide notifications (the
-    /// engaged bar is the screen's only text input, so the global signal
-    /// is unambiguous). Internal setter for tests: the state machine is
-    /// unit-tested without driving a real keyboard.
+    /// Whether the keyboard is up, driven by the keyboardWillShow/Hide
+    /// notifications (the engaged bar is the screen's only text input, so
+    /// the global signal is unambiguous). It gates the page-swipe drive and
+    /// the idle-dismiss seam — no longer the trailing face. Internal setter
+    /// for tests: both are unit-tested without driving a real keyboard.
     private(set) var isKeyboardOpen = false
-    /// Which glyph the utility button currently wears (avoids re-running
-    /// the crossfade transition on every unrelated update).
-    private var utilityShowsKeyboardDismiss = false
     /// Removes the keyboard observers on release — a nonisolated deinit
     /// cannot touch main-actor state, so the tokens live in a bag whose
     /// own deinit does the unregistering (the VC-side pattern).
@@ -165,7 +188,9 @@ final class CommentsInputBar: UIView {
         // short of it, and the toggle holds the last line's station as the
         // field grows (bottom-anchored, like the round controls around it).
         let emoteToggle = emotes.toggleButton
-        emotes.suggestionAnchor = field
+        // The `:query` strip floats above the WHOLE bar, not the field: over
+        // the field it would lie across the stake bubble.
+        emotes.suggestionAnchor = self
         emoteToggle.tintColor = .secondaryLabel
         textView.translatesAutoresizingMaskIntoConstraints = false
         emoteToggle.translatesAutoresizingMaskIntoConstraints = false
@@ -203,9 +228,10 @@ final class CommentsInputBar: UIView {
         field.clipsToBounds = true
         field.cornerConfiguration = .capsule(maximumRadius: Metrics.controlSize / 2)
 
-        // The boost control, in the slot the media "+" held: tap spends the
-        // default denomination, long-press opens the amount menu (the rail
-        // anchor's exact contract — one post, two surfaces, one behavior).
+        // The boost (stake) control, on its own row above mic/send: tap
+        // spends the default denomination, long-press opens the amount menu
+        // (the rail anchor's exact contract — one post, two surfaces, one
+        // behavior).
         boostButton.configuration?.image = PointsSymbol.glyphImage(
             UIImage.SymbolConfiguration(weight: .semibold)
         )
@@ -253,8 +279,7 @@ final class CommentsInputBar: UIView {
         utilityButton.accessibilityLabel = "Record voice comment"
         utilityButton.addAction(UIAction { [weak self] _ in self?.utilityTapped() }, for: .primaryActionTriggered)
 
-        // The keyboard axis of the trailing toggle: the utility face
-        // morphs mic ↔ dismiss-keyboard as the keyboard comes and goes.
+        // The keyboard axis: the page-swipe gate and the idle-dismiss seam.
         keyboardObservers.tokens = [
             NotificationCenter.default.addObserver(
                 forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main
@@ -308,15 +333,16 @@ final class CommentsInputBar: UIView {
         sendButton.translatesAutoresizingMaskIntoConstraints = false
         utilityButton.translatesAutoresizingMaskIntoConstraints = false
         fieldHeight = field.heightAnchor.constraint(equalToConstant: Metrics.controlSize)
-        // Four slots, leading to trailing: the viewer's AVATAR, the field,
-        // the mic/send toggle, and the boost button. Bottom-baseline anchoring — the
+        // Two rows. The INPUT row, leading to trailing: the viewer's AVATAR,
+        // the field, the mic/send toggle. Bottom-baseline anchoring — the
         // field grows upward while the round controls hold their stations,
-        // and the field owns all the flexible width.
+        // and the field owns all the flexible width. The STAKE row above it
+        // holds the boost alone, its trailing edge on the bar's (over
+        // mic/send), riding the field's top as the field grows — the bar
+        // grows with it, so the hosts' clearance follows for free.
         //
-        // This slot moved from the leading edge to the trailing one so the
-        // avatar could open the bar (a composer says who is speaking before
-        // it offers what to attach), which also puts both action controls in
-        // one thumb-reachable cluster. Mic and send OVERLAY a single slot
+        // The avatar opens the input row (a composer says who is speaking
+        // before it offers anything else). Mic and send OVERLAY a single slot
         // and crossfade; the avatar is silent and never moves.
         NSLayoutConstraint.activate([
             fieldHeight,
@@ -325,9 +351,9 @@ final class CommentsInputBar: UIView {
             avatarBubble.widthAnchor.constraint(equalToConstant: Metrics.controlSize),
             avatarBubble.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
             field.leadingAnchor.constraint(equalTo: avatarBubble.trailingAnchor, constant: Spacing.sm),
-            field.topAnchor.constraint(equalTo: topAnchor),
             field.bottomAnchor.constraint(equalTo: bottomAnchor),
             sendButton.leadingAnchor.constraint(equalTo: field.trailingAnchor, constant: Spacing.sm),
+            sendButton.trailingAnchor.constraint(equalTo: trailingAnchor),
             sendButton.bottomAnchor.constraint(equalTo: bottomAnchor),
             sendButton.widthAnchor.constraint(equalToConstant: Metrics.controlSize),
             sendButton.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
@@ -335,16 +361,16 @@ final class CommentsInputBar: UIView {
             utilityButton.centerYAnchor.constraint(equalTo: sendButton.centerYAnchor),
             utilityButton.widthAnchor.constraint(equalToConstant: Metrics.controlSize),
             utilityButton.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
-            boostButton.leadingAnchor.constraint(equalTo: sendButton.trailingAnchor, constant: Spacing.sm),
+            boostButton.topAnchor.constraint(equalTo: topAnchor),
+            boostButton.bottomAnchor.constraint(equalTo: field.topAnchor, constant: -Metrics.stakeRowGap),
             boostButton.trailingAnchor.constraint(equalTo: trailingAnchor),
-            boostButton.bottomAnchor.constraint(equalTo: bottomAnchor),
-            boostButton.widthAnchor.constraint(equalToConstant: Metrics.controlSize),
-            boostButton.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
+            boostButton.widthAnchor.constraint(equalToConstant: Metrics.stakeButtonSize),
+            boostButton.heightAnchor.constraint(equalToConstant: Metrics.stakeButtonSize),
             // The boost's own station: the two never show at once.
             visibilityButton.centerXAnchor.constraint(equalTo: boostButton.centerXAnchor),
             visibilityButton.centerYAnchor.constraint(equalTo: boostButton.centerYAnchor),
-            visibilityButton.widthAnchor.constraint(equalToConstant: Metrics.controlSize),
-            visibilityButton.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
+            visibilityButton.widthAnchor.constraint(equalToConstant: Metrics.stakeButtonSize),
+            visibilityButton.heightAnchor.constraint(equalToConstant: Metrics.stakeButtonSize),
         ])
 
         // The disc is NEVER empty. Before an identity resolves the bar shows
@@ -373,6 +399,27 @@ final class CommentsInputBar: UIView {
         let velocity = pan.velocity(in: self)
         return abs(velocity.y) > abs(velocity.x)
     }
+
+    /// The bar owns its input row and its stake bubble — not the empty run to
+    /// the bubble's left. That run is inside the bar's bounds only because the
+    /// row is; the stream glides behind it, and a tap or a drag there belongs
+    /// to the rows it shows.
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        guard super.point(inside: point, with: event) else { return false }
+        if point.y >= field.frame.minY { return true }
+        let station = visibilityMenu == nil ? boostButton : visibilityButton
+        return station.frame.contains(point)
+    }
+
+    /// The input row's top — the field's top edge, which rises as it grows.
+    /// For a host whose chrome belongs to the input row rather than to the
+    /// whole bar (the footer band, whose ramp the stake bubble floats in).
+    var inputRowTopAnchor: NSLayoutYAxisAnchor { field.topAnchor }
+
+    /// Whether the field holds the keyboard. A row tap on the stream then
+    /// retires it instead of doing the row's own work — see the hosts'
+    /// reply taps.
+    var isEditingDraft: Bool { textView.isFirstResponder }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -467,11 +514,10 @@ final class CommentsInputBar: UIView {
         }
     }
 
-    /// The idle faces — mic with the keyboard down, the dismiss chevron with it
-    /// up and nothing typed — outside a feed engagement too. The conversation
-    /// screen is the text page's bar without a pager
-    /// behind it; everywhere else this stays false and the rule is exactly
-    /// the page-swipe marker it always was.
+    /// The idle face — the mic over an empty field — outside a feed
+    /// engagement too. The conversation screen is the text page's bar without
+    /// a pager behind it; everywhere else this stays false and the rule is
+    /// exactly the page-swipe marker it always was.
     var showsIdleUtilityFaces = false {
         didSet { updateTrailingButtons(animated: false) }
     }
@@ -488,10 +534,10 @@ final class CommentsInputBar: UIView {
         didSet { sendButton.accessibilityLabel = sendAccessibilityLabel ?? "Send comment" }
     }
 
-    /// The trailing slot's other face. A boost needs a post to land on; a post
-    /// that does not exist yet has a different question for that slot — who
-    /// will see it. Non-nil swaps the star for a globe that opens this menu;
-    /// nil puts the star back.
+    /// The stake row's other face. A boost needs a post to land on; a post
+    /// that does not exist yet has a different question for that station —
+    /// who will see it. Non-nil swaps the heart for a globe that opens this
+    /// menu; nil puts the heart back.
     var visibilityMenu: UIMenu? {
         didSet {
             visibilityButton.menu = visibilityMenu
@@ -524,24 +570,17 @@ final class CommentsInputBar: UIView {
         textViewDidChange(textView)
     }
 
-    /// The utility face's tap: with the keyboard up it retires the keyboard
-    /// (the engagement stays); with it down it opens the voice-note seam.
-    /// One slot, one thumb position, state-appropriate intent.
+    /// The mic's tap: the voice-note seam, keyboard up or down.
     private func utilityTapped() {
-        if isKeyboardOpen {
-            textView.resignFirstResponder()
-        } else {
-            onVoiceNote?()
-        }
+        onVoiceNote?()
     }
 
     /// The keyboard seam behind the notification observers. Internal (not
-    /// private) so the three-state trailing machine is unit-testable
-    /// without driving a real keyboard.
+    /// private) so what hangs on it is unit-testable without driving a real
+    /// keyboard.
     func setKeyboardOpen(_ open: Bool) {
         guard open != isKeyboardOpen else { return }
         isKeyboardOpen = open
-        updateTrailingButtons(animated: true)
         // An idle dismissal (keyboard retired over an empty field) resets
         // any armed reply state — the host clears its target so a later
         // composition starts top-level, not silently bound to a thread.
@@ -847,62 +886,32 @@ final class CommentsInputBar: UIView {
         boostButton.layer.add(shake, forKey: "boost.denied")
     }
 
-    /// The trailing slot's three-state toggle:
-    ///   keyboard OPEN, field empty → dismiss-keyboard chevron
-    ///   keyboard OPEN, has text    → send (also while a send is in flight)
-    ///   keyboard CLOSED, empty     → 🎙 microphone (voice note)
-    /// Both idle faces belong to a FEED ENGAGEMENT, or to a bar that asks for
-    /// them (`showsIdleUtilityFaces` — the conversation, which never parks a
-    /// draft behind the mic); the pushed comments screen does neither and
-    /// keeps a permanent send. Swapped as
-    /// short crossfades — the slot swap animates alpha, the utility glyph
-    /// its own cross-dissolve — never a pop.
+    /// The trailing slot's two faces:
+    ///   has text (or a send in flight) → send
+    ///   empty                          → 🎙 microphone (voice note)
+    /// The keyboard plays no part. The mic stays up while nothing is typed,
+    /// and a draft is sendable with the keyboard down: a shared link or an
+    /// emote lands in the field precisely to be sent, and a mic over a draft
+    /// turned the one action there into a "not available" notice.
+    /// The mic belongs to a FEED ENGAGEMENT, or to a bar that asks for it
+    /// (`showsIdleUtilityFaces` — the conversation, the draft post); the
+    /// pushed comments screen does neither and keeps a permanent send.
+    /// Swapped as a short alpha crossfade, never a pop.
     private func updateTrailingButtons(animated: Bool) {
         let hasText = !textView.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         sendButton.isEnabled = hasText && !isSending
         // The page-swipe drive is the engagement's marker — BOTH media and
-        // text posts wire it (the ✕ that used to distinguish them is gone
-        // from this bar entirely). The conversation asks for the faces
-        // explicitly; the pushed comments SCREEN does neither and keeps its
-        // permanent send.
+        // text posts wire it. The conversation asks for the face explicitly;
+        // the pushed comments SCREEN does neither and keeps its permanent
+        // send.
         let isFeedEngagement = onPageSwipe != nil || showsIdleUtilityFaces
-        let showsKeyboardDismiss = isFeedEngagement && isKeyboardOpen && !hasText
-        // The mic owns the slot whenever an engaged bar is idle — keyboard
-        // down, draft parked or not (send needs the keyboard up) — on the
-        // POST. A conversation never parks a draft behind it: a shared link
-        // or an emote lands in the field precisely to be sent, and a mic in
-        // that slot turned the route's one action into a "not available"
-        // notice.
-        let showsMic = isFeedEngagement && !isKeyboardOpen && !(showsIdleUtilityFaces && hasText)
-        let showsSend = isSending || !(showsKeyboardDismiss || showsMic)
+        let showsSend = isSending || !isFeedEngagement || hasText
         let apply = {
             self.sendButton.alpha = showsSend ? 1 : 0
             self.utilityButton.alpha = showsSend ? 0 : 1
         }
         sendButton.isUserInteractionEnabled = showsSend
         utilityButton.isUserInteractionEnabled = !showsSend
-
-        let wantsKeyboardDismiss = showsKeyboardDismiss
-        if wantsKeyboardDismiss != utilityShowsKeyboardDismiss {
-            utilityShowsKeyboardDismiss = wantsKeyboardDismiss
-            let swapGlyph = {
-                self.utilityButton.configuration?.image = UIImage(
-                    systemName: wantsKeyboardDismiss ? "keyboard.chevron.compact.down" : "mic",
-                    withConfiguration: UIImage.SymbolConfiguration(weight: .semibold)
-                )
-                self.utilityButton.accessibilityLabel =
-                    wantsKeyboardDismiss ? "Dismiss keyboard" : "Record voice comment"
-            }
-            if animated {
-                UIView.transition(
-                    with: utilityButton, duration: 0.15,
-                    options: [.transitionCrossDissolve, .allowUserInteraction],
-                    animations: swapGlyph
-                )
-            } else {
-                swapGlyph()
-            }
-        }
 
         if animated {
             UIView.animate(withDuration: 0.15, animations: apply)

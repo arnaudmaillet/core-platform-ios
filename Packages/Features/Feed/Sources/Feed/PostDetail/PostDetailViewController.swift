@@ -434,6 +434,26 @@ final class PostDetailViewController: UIViewController {
         view.endEditing(true)
     }
 
+    /// A tap on a row's BODY while the keyboard is up retires the keyboard —
+    /// the stream tap's rule — and does not arm a reply.
+    ///
+    /// The stream tap alone could not deliver that: the row's own reply tap
+    /// is nearer the touch, recognizes first and PREVENTS the stream's
+    /// (`cancelsTouchesInView = false` governs touch delivery to views, not
+    /// recognition between recognizers), so a tap on any comment
+    /// re-armed a reply and kept the keyboard up — most of the stream was
+    /// "outside the keyboard" and did nothing of the kind. Arbitrating here,
+    /// in the row's own action, keeps every other recognizer's answer as it
+    /// was: the ♥ and the avatar are controls and still act, the fold seams
+    /// still expand, a drag still scrolls (and dismisses interactively).
+    private func retireKeyboardOr(_ work: () -> Void) {
+        if composeBar.isEditingDraft {
+            view.endEditing(true)
+        } else {
+            work()
+        }
+    }
+
     // MARK: - Setup
 
     private func configureViews() {
@@ -459,7 +479,9 @@ final class PostDetailViewController: UIViewController {
         // A bare tap on the stream retires the keyboard (the drag path
         // above already does; taps should match). Non-cancelling, so row
         // interactions and the cell-side arbitration see every touch
-        // unchanged — and a no-op when nothing is editing.
+        // unchanged — and a no-op when nothing is editing. A row's body
+        // wins its own taps, so it applies the same rule itself
+        // (`retireKeyboardOr`).
         let keyboardDismissTap = UITapGestureRecognizer(target: self, action: #selector(handleStreamTap))
         keyboardDismissTap.cancelsTouchesInView = false
         collectionView.addGestureRecognizer(keyboardDismissTap)
@@ -801,9 +823,11 @@ final class PostDetailViewController: UIViewController {
             // The band starts ABOVE the composer by the lead, so its ramp
             // is finished — full material — by the time it reaches the
             // capsule's top edge. Anchored to the composer, so it rides the
-            // keyboard with it.
+            // keyboard with it — to its INPUT ROW, not the bar's top: the
+            // stake bubble above the row floats in the ramp, and the band
+            // keeps the height it had before the bubble moved up there.
             composerBackdrop.topAnchor.constraint(
-                equalTo: composeBar.topAnchor, constant: -SnapCommentsLayout.footerFrostLead
+                equalTo: composeBar.inputRowTopAnchor, constant: -SnapCommentsLayout.footerFrostLead
             ),
         ])
     }
@@ -937,8 +961,10 @@ final class PostDetailViewController: UIViewController {
         composerBackdrop.effect = UIBlurEffect(style: SnapCommentsLayout.frostStyle)
     }
 
-    /// Extra bottom room so resting content clears the composer band.
-    private static let engagedFooterClearance: CGFloat = 62
+    /// Extra bottom room so resting content clears the composer band: the
+    /// input row's band (62), plus the stake row standing on it — the stake
+    /// bubble sits at the trailing edge, where a resting row's ♥ would be.
+    private static let engagedFooterClearance: CGFloat = 62 + CommentsInputBar.stakeRowHeight
 
     /// Freezes the comment stream for the length of a gesture that owns the
     /// screen — a dismissal swipe.
@@ -2105,7 +2131,10 @@ final class PostDetailViewController: UIViewController {
         row.onAvatarTap = { [weak self] in
             self?.viewModel.didTapCommentAuthor(commentID: model.id)
         }
-        row.onReplyTap = { [weak self] in self?.enterReplyState(for: model) }
+        row.onReplyTap = { [weak self] in
+            guard let self else { return }
+            self.retireKeyboardOr { self.enterReplyState(for: model) }
+        }
         row.onShare = { [weak self] in self?.presentCommentShare(model) }
         // Moderation seams: the menu is the honest affordance; the
         // block/report mutations wait on a moderation backend (the
