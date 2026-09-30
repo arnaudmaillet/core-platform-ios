@@ -492,14 +492,27 @@ final class SnapAuthorIdentityView: UIView {
 
     /// The widest of the badge glyphs at their own point sizes — the one slot
     /// every badge is drawn in.
+    ///
+    /// Measured off BUTTONS wearing each glyph, not off the symbol images: a
+    /// button draws a symbol wider than the image's own `size` says (the
+    /// friends mark measured 26.7 in its button against a 22pt "slot" read
+    /// off the images, and grew past it).
     static let followBadgeSlotWidth: CGFloat = {
-        [FollowBadge.follow, .following, .friends].compactMap { badge -> CGFloat? in
-            guard let name = badge.symbolName else { return nil }
-            return UIImage(systemName: name)?
-                .withConfiguration(UIImage.SymbolConfiguration(pointSize: badge.pointSize, weight: .semibold))
-                .size.width
-        }.max().map { ceil($0) } ?? 20
+        [FollowBadge.follow, .following, .friends].map { badge in
+            UIButton(configuration: badgeConfiguration(badge))
+                .systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
+        }.max().map { ceil($0) } ?? 24
     }()
+
+    /// The glyph `badge` draws, as its button's configuration.
+    private static func badgeConfiguration(_ badge: FollowBadge) -> UIButton.Configuration {
+        var config = UIButton.Configuration.plain()
+        config.image = badge.symbolName.flatMap { UIImage(systemName: $0) }?
+            .withConfiguration(UIImage.SymbolConfiguration(pointSize: badge.pointSize, weight: .semibold))
+        config.baseForegroundColor = .label
+        config.contentInsets = .zero
+        return config
+    }
 
     /// The pill's own default is the "+", as it always was: a host that offers
     /// no follow says so (`setFollowBadge(.none)`).
@@ -510,12 +523,7 @@ final class SnapAuthorIdentityView: UIView {
     /// tap (the author's profile), which is the natural reading of tapping
     /// someone's "friends" mark and keeps unfollowing where it already lives.
     private func applyFollowBadge() {
-        var config = UIButton.Configuration.plain()
-        config.image = followBadge.symbolName.flatMap { UIImage(systemName: $0) }?
-            .withConfiguration(UIImage.SymbolConfiguration(pointSize: followBadge.pointSize, weight: .semibold))
-        config.baseForegroundColor = .label
-        config.contentInsets = .zero
-        followButton.configuration = config
+        followButton.configuration = Self.badgeConfiguration(followBadge)
         followButton.accessibilityLabel = followBadge.accessibilityLabel
         followButton.isUserInteractionEnabled = followBadge == .follow
         followButton.accessibilityTraits = followBadge == .follow ? .button : .staticText

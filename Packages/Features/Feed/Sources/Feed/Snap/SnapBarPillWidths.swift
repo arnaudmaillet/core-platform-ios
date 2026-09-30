@@ -19,10 +19,11 @@ import DesignSystem
 /// the bar (a text page past `CommentSortPolicy`'s threshold). So its width
 /// changes when the bar gains or loses a control — in the same turn, under the
 /// bar's own item animation — and never when a name does. Reserving the sort
-/// on every page was weighed and rejected: with the wallet, it cost the pill
-/// ~57pt on EVERY media page (402pt bar: ~183 → ~126, the name gone after a
-/// few letters) to spare the few text pages whose thread is long enough to
-/// sort. The sort shows its word only when the word leaves the pill
+/// on every page was weighed and rejected: measured on the iPhone 18 Pro
+/// (402pt, a "250" balance), it would cost the pill 66pt on EVERY media page
+/// — 193 → 127, the name gone after a few letters — to spare the few text
+/// pages whose thread is long enough to sort. (Passing the sort on every page
+/// below is the one-line switch, should that trade be wanted.) The sort shows its word only when the word leaves the pill
 /// `comfortableAuthor` wide (`sortShowsTitle`) — the bar's geometry again,
 /// not the author's handle, which is what used to decide it.
 ///

@@ -16,9 +16,9 @@ import UIKit
 /// wide is folded whole into UIKit's `•••`.
 @MainActor
 struct SnapBarPillWidthsTests {
-    /// The widths the feed actually hands in, rounded up from the simulator
-    /// (iPhone 18 Pro, default text size): a four-digit balance badge and
-    /// the comments sort with and without its word.
+    /// Widths on the generous side of what the feed hands in (iPhone 18 Pro,
+    /// default text size: a "250" balance badge measured 71pt): a wider
+    /// balance, and the comments sort with and without its word.
     static let wallet: CGFloat = 90
     static let sort = SnapBarPillWidths.Sort(glyph: 32, titled: 96)
     /// iPhone SE, the 6.1" and 6.3" phones, the Pro Max.
