@@ -26,7 +26,7 @@ struct StandInAvatarTests {
 
     @Test func aRedatedStandInKeepsTheAuthorsPicture() async {
         let pipeline = ImagePipeline(fetcher: PlaceholderImageFetcher())
-        await pipeline.store(UIImage(systemName: "person.fill")!, for: Self.avatar)
+        pipeline.store(UIImage(systemName: "person.fill")!, for: Self.avatar)
         let card = PostGridListRowCell(frame: CGRect(x: 0, y: 0, width: 343, height: 200))
         card.configure(with: Self.post(), imagePipeline: pipeline)
         #expect(card.authorBandShowsPicture, "guard: a cached picture draws at configure")

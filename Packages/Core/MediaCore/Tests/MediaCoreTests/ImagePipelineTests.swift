@@ -42,7 +42,7 @@ struct ImagePipelineTests {
         _ = try await pipeline.image(for: url)
 
         #expect(fetcher.fetchCount == 1)
-        #expect(await pipeline.cachedImage(for: url) != nil)
+        #expect(pipeline.cachedImage(for: url) != nil)
     }
 
     @Test func decodeDownsamplesToMaxPixelSize() async throws {

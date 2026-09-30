@@ -631,11 +631,12 @@ enum SnapNavControls {
 
 /// The faces the author pill has drawn lately, readable SYNCHRONOUSLY.
 ///
-/// The image pipeline is an actor, so its cache answers only across an await —
-/// too late for a swap made on this turn: the new author would blur in with
-/// their initials and pop to the picture once the blur had landed. A handful
-/// of decoded faces on the main actor is what lets the swap draw the new
-/// author already wearing the right one.
+/// A swap made on this turn must draw the new author already wearing the
+/// right face — otherwise they blur in with their initials and pop to the
+/// picture once the blur has landed. The pipeline's cache answers
+/// synchronously too, but with the full-size picture; this one holds the
+/// pill's own small, already-decoded bitmap (`prepared(_:)`), which is what
+/// keeps the swap's still from paying a decode on a frame of the scroll.
 @MainActor
 enum SnapAuthorFaceCache {
     /// A few pages either way is all paging ever asks for.

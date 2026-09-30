@@ -176,7 +176,7 @@ struct PostComposerTests {
         // witness below — so this count can fail.
         #expect(harness.ticketCount == 2, "expected a clip + a poster, got \(harness.ticketCount)")
         // Seeded under the exact URL the feed will ask for, already decoded.
-        #expect(await harness.pipeline.cachedImage(for: thumbnail) != nil,
+        #expect(harness.pipeline.cachedImage(for: thumbnail) != nil,
                 "the author's own post must draw its poster without a round trip")
     }
 

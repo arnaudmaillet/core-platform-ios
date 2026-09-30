@@ -58,11 +58,7 @@ import UIKit
 /// "For you", names the list under the rows and pushes nothing; it is drawn
 /// only under rows, since alone at the top of the screen it would title the
 /// only thing there.
-///
-/// ⚠️ NOT `@MainActor` in so many words, and not for want of it: a `UIView`
-/// subclass is main-actor by inference already, and the explicit attribute
-/// turns the synchronous `ImagePipeline.cachedImage` read — which every grid
-/// in this app makes on its cover gate — from a warning into an error.
+@MainActor
 final class ForYouRailsView: UIView {
     enum Metrics {
         static var sideMargin: CGFloat { PostGridListLayout.sideMargin }

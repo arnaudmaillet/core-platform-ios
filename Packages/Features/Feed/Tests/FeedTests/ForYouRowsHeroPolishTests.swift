@@ -115,7 +115,7 @@ struct ForYouRowsHeroPolishTests {
             UIColor.red.setFill()
             context.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
         }
-        await pipeline.store(picture, for: face)
+        pipeline.store(picture, for: face)
         var post = Self.post("f", kind: .photo)
         post.authorAvatarURL = face
         let copy = ForYouFollowingCardCell.makeOverlay(for: post, restingSize: Self.card, imagePipeline: pipeline)

@@ -34,10 +34,7 @@ import UIKit
 ///
 /// The caption is the card's own overlay (`ForYouCardCaptionOverlay`), so its
 /// emotes animate here too (`EmoteLabel`).
-///
-/// ⚠️ Not `@MainActor` in so many words, for `ForYouRailsView`'s reason: the
-/// explicit attribute turns the synchronous `ImagePipeline.cachedImage` read
-/// into an error.
+@MainActor
 final class ForYouPostPreviewViewController: UIViewController {
     let post: GalleryPost
     private let imagePipeline: ImagePipeline
