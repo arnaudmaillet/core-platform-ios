@@ -158,10 +158,13 @@ final class SoundSheetViewController: UIViewController {
         /// are filled in by `update(sections:tiles:)` once the repository has
         /// them.
         let isLoaded: Bool
+        /// The post's likes, drawn at the tile's foot — nil draws none (a
+        /// placeholder, or a post that carries no count).
+        let likeCount: Int64?
 
         init(
             postID: PostID, thumbnailURL: URL?, caption: String?, isCurrent: Bool,
-            isOriginal: Bool = false, isLoaded: Bool = true
+            isOriginal: Bool = false, isLoaded: Bool = true, likeCount: Int64? = nil
         ) {
             self.postID = postID
             self.thumbnailURL = thumbnailURL
@@ -169,6 +172,7 @@ final class SoundSheetViewController: UIViewController {
             self.isCurrent = isCurrent
             self.isOriginal = isOriginal
             self.isLoaded = isLoaded
+            self.likeCount = likeCount
         }
     }
 
@@ -1496,8 +1500,16 @@ final class SoundSheetViewController: UIViewController {
                 for: tile, cover: cell()?.cover ?? cover, size: size, traits: traits
             )
         }
+        // ⚠️ THE CARD WEARS THE TILE'S COUNT. A `.tile` flight card draws the
+        // post's likes at the tile's foot (`PostGridFlightCard`), and the
+        // tile draws the count the feed knew when the sheet was dealt — the
+        // repository's copy can be a like behind or ahead. The number the
+        // card lands on is the one on the tile, or it changes in the frame
+        // the card is taken away.
+        var flown = post
+        if let likes = tile.likeCount { flown.reactionCount = likes }
         return SnapFeedHeroOrigin(
-            post: post,
+            post: flown,
             stream: stream,
             // A text post has no picture to fly: it opens through its window.
             hasHero: post.kind != .text && cover != nil,

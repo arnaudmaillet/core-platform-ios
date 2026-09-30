@@ -302,6 +302,112 @@ struct SoundSheetTests {
         #expect(cell.contentView.clipsToBounds)
     }
 
+    // MARK: - The tile's foot
+
+    private static func views<T: UIView>(_ type: T.Type, in root: UIView) -> [T] {
+        root.subviews.flatMap { child -> [T] in
+            if let match = child as? T { return [match] }
+            return views(type, in: child)
+        }
+    }
+
+    private static func isShown(_ view: UIView) -> Bool {
+        var current: UIView? = view
+        while let each = current {
+            if each.isHidden || each.alpha == 0 { return false }
+            current = each.superview
+        }
+        return true
+    }
+
+    /// A mark's capsule, found by its words.
+    private static func mark(_ text: String, in root: UIView) -> CGRect? {
+        views(UILabel.self, in: root)
+            .first { ($0.attributedText?.string ?? $0.text ?? "").contains(text) && isShown($0) }
+            .flatMap { label in label.superview.map { $0.convert($0.bounds, to: root) } }
+    }
+
+    private static func likes(in root: UIView) -> CGRect? {
+        views(PostMetricLabel.self, in: root).first(where: isShown).map { $0.convert($0.bounds, to: root) }
+    }
+
+    /// The tile at rest, drawn the way a twin draws it — synchronously.
+    private static func restingTile(
+        _ tile: Sheet.Tile, size: CGSize = CGSize(width: 123, height: 164)
+    ) throws -> SoundSheetTileCell {
+        let card = SoundSheetTileCell.makeStandIn(
+            for: tile, cover: tile.thumbnailURL == nil ? nil : UIImage(), size: size,
+            traits: UITraitCollection(userInterfaceStyle: .light)
+        )
+        return try #require(card.subviews.first as? SoundSheetTileCell)
+    }
+
+    /// "Original" and "Watching" stand BOTTOM-leading, the last one on the
+    /// foot, and the likes close the foot BOTTOM-trailing at the flight
+    /// card's own insets — asked for 2026-09-30 (evening).
+    @Test func theMarksAndTheLikesStandOnTheFoot() throws {
+        let tile = Sheet.Tile(
+            postID: PostID("m"), thumbnailURL: URL(string: "https://example.com/m.jpg"), caption: nil,
+            isCurrent: true, isOriginal: true, likeCount: 3
+        )
+        let cell = try Self.restingTile(tile)
+        let size = cell.bounds.size
+        let original = try #require(Self.mark("Original", in: cell.contentView))
+        let watching = try #require(Self.mark("Watching", in: cell.contentView))
+        let likes = try #require(Self.likes(in: cell.contentView))
+        #expect(cell.debugLikes == "3")
+        #expect(cell.debugFootLift == 0, "a short count shares the foot with the marks")
+        #expect(abs(watching.maxY - (size.height - 6)) < 0.5, "Watching at \(watching)")
+        #expect(original.maxY < watching.minY, "the marks stack upwards from the foot")
+        #expect(abs(original.minX - 6) < 0.5 && abs(watching.minX - 6) < 0.5)
+        #expect(abs(likes.maxX - (size.width - 8)) < 0.5 && abs(likes.maxY - (size.height - 7)) < 0.5)
+        #expect(!likes.intersects(watching))
+    }
+
+    /// A text post's words read from the TOP, not the middle; its count is
+    /// on the foot too.
+    @Test func aTextTilesWordsStartAtItsHead() throws {
+        let tile = Sheet.Tile(
+            postID: PostID("t"), thumbnailURL: nil, caption: "A few words about the sound",
+            isCurrent: false, likeCount: 12
+        )
+        let cell = try Self.restingTile(tile)
+        let caption = try #require(Self.views(UILabel.self, in: cell.contentView).first { $0.text == tile.caption })
+        let frame = caption.convert(caption.bounds, to: cell.contentView)
+        #expect(abs(frame.minY - Spacing.sm) < 0.5, "the words at \(frame)")
+        let likes = try #require(Self.likes(in: cell.contentView))
+        #expect(likes.minY > frame.maxY)
+        #expect(cell.debugLikes == "12")
+    }
+
+    /// ⚠️ A row's tile is too narrow for a mark AND a long count on one line:
+    /// the marks step up onto the count's line rather than run under it —
+    /// and the flight card's overlay, which draws only the marks, stands them
+    /// exactly there, at every size the card grows through.
+    @Test func aNarrowTileLiftsItsMarksAndTheFlightCardAgrees() throws {
+        let size = CGSize(width: 104, height: 139)
+        let tile = Sheet.Tile(
+            postID: PostID("r"), thumbnailURL: URL(string: "https://example.com/r.jpg"), caption: nil,
+            isCurrent: false, isOriginal: true, likeCount: 12_345
+        )
+        let cell = try Self.restingTile(tile, size: size)
+        let original = try #require(Self.mark("Original", in: cell.contentView))
+        let likes = try #require(Self.likes(in: cell.contentView))
+        #expect(cell.debugFootLift > 0)
+        #expect(!original.intersects(likes), "the mark ran under the count: \(original) / \(likes)")
+        #expect(original.maxY <= likes.minY)
+
+        let overlay = try #require(SoundSheetTileCell.makeBadgeOverlay(for: tile, size: size))
+        let flown = try #require(Self.mark("Original", in: overlay))
+        #expect(abs(flown.minX - original.minX) < 0.5 && abs(flown.maxY - original.maxY) < 0.5)
+        // Grown with the card, the marks ride its foot at the SAME lift — a
+        // re-decided lift would drop them onto the foot mid-flight.
+        overlay.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        overlay.layoutIfNeeded()
+        let grown = try #require(Self.mark("Original", in: overlay))
+        #expect(abs((874 - grown.maxY) - (size.height - original.maxY)) < 0.5)
+    }
+
     // MARK: - Hero
 
     private static func galleryPost(_ id: String, kind: GalleryPost.Kind) -> GalleryPost {

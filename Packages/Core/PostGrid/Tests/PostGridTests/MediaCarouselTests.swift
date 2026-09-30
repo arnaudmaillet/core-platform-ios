@@ -814,7 +814,7 @@ struct CarouselChipsAreFixedTests {
     }
 
     /// The closing line packs the counters at one gap each, trailing:
-    /// comments, then likes, the likes' box hung past the caption's inset by
+    /// comments, then likes, the likes' box hung past the line's inset by
     /// its own padding so its INK ends on the column.
     @Test func theLinePacksItsCountersTrailing() {
         let cell = spaciousRow()
@@ -822,7 +822,7 @@ struct CarouselChipsAreFixedTests {
         #expect(frames.count == 2)
         #expect(abs((frames[1].minX - frames[0].maxX) - PostGridListRowCell.chipGap) < 0.5)
         #expect(abs(cell.contentView.bounds.maxX - frames[1].maxX
-            - (PostGridListRowCell.captionInset - PostCardPillView.plainInsets.trailing)) < 0.5)
+            - (PostGridListRowCell.actionLineInset - PostCardPillView.plainInsets.trailing)) < 0.5)
     }
 }
 
