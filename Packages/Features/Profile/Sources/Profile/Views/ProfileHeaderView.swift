@@ -6,27 +6,25 @@ import UIKit
 
 /// The profile identity block, layered over an immersive media banner:
 /// `ProfileBannerView` runs from the very top of the screen (under the status
-/// bar and transparent navigation bar) down to the bottom of the action tray,
-/// and the identity content sits directly on top of it. The banner's bottom
-/// fade dissolves into the page's tone under the counters, the bio and the
-/// tray, so they keep standard dynamic label colors; on a poster the name and
-/// the handle stand on the picture itself, in white over an ink scrim (see
-/// `HeroInk`).
+/// bar and transparent navigation bar) down to the avatar's MIDLINE on a
+/// band, to the tray's foot on a poster, and the identity content sits
+/// directly on top of it.
 ///
 /// Identity anatomy:
-/// - a tall banner-viewing window under the chrome (`Metrics.bannerClearance`
-///   of raw media) — the relationship button lives in the navigation bar
-///   (owned by `ProfileViewController`), NOT in this view;
-/// - then the two-column identity block — circular avatar left, sized to span
-///   the three lines beside it: display name + verified badge, @handle, and
-///   the flat action tray (a leading Message-or-Edit-Profile capsule,
-///   then QR-code and see-more bubbles trailing-aligned);
-/// - below, full width: the 3-metric counter row (Followers / Following /
-///   Likes — likes, not views: no surface shows views since 2026-09-30)
-///   directly under the identity block, then bio and website link closing
-///   the header right above the content threshold. The
-///   banner ends at the TRAY's bottom (the identity block's baseline); the
-///   counters and bio sit on plain background.
+/// - a banner-viewing window under the chrome (`Metrics.bannerClearance` of
+///   raw media: a poster's stage, or just air on a band);
+/// - then the identity row: the circular avatar left, and beside it two
+///   halves of the avatar's height — the display name (+ verified badge)
+///   over the @handle in the TOP half, standing on the picture in its ink
+///   (`HeroInk`), and the 3-metric counter row (Followers / Following /
+///   Likes) in the BOTTOM half. The picture grows progressively blurred
+///   from above the name (`HeroBannerFade`, shared with a place's banner)
+///   and dissolves into the page over a few points: at the midline on a
+///   band, so its counters are on the page in page ink; behind the tray on a
+///   poster, whose counters, bio and link stand on the picture too;
+/// - below, full width: bio, website link and the flat action tray (Follow /
+///   Message or Edit Profile capsules, map pin, QR code and see-more
+///   bubbles), closing the header right above the content threshold.
 /// Pure presentation — it is handed a finished `ProfileDisplayModel` and an
 /// `ImagePipeline`; it owns no data.
 final class ProfileHeaderView: UIView {
@@ -36,19 +34,18 @@ final class ProfileHeaderView: UIView {
         /// Gap between groups. Small enough to read as one flowing change
         /// rather than three separate ones.
         static let stagger: TimeInterval = 0.05
-        /// The avatar's side — what the disc resolved to while it spanned a
-        /// three-line identity column, kept now that the column is two.
+        /// The avatar's side — and so the identity row's height: half of it
+        /// for the name and the handle, half for the counters.
         static let avatarSize: CGFloat = 96
         /// Dynamic-Type ceiling for the avatar.
         static let avatarMaxSize: CGFloat = 110
         static let avatarRingWidth: CGFloat = 3
         static let badgeSize: CGFloat = 18
         /// Raw-media window between the navigation chrome and the identity
-        /// block, per banner shape. A poster's is the picture's whole stage —
-        /// nothing sits on it — so it gets more. A band's is exactly half
-        /// the avatar: the disc's top sits ON the chrome's bottom edge, with
-        /// no strip of picture between the two, and the band ends on the
-        /// disc's midline.
+        /// block, per banner shape. A poster's is the picture's whole stage,
+        /// so it gets more. A band's is only air: the disc's top sits just
+        /// under the chrome's bottom edge, and the strip is the picture
+        /// behind the chrome plus the top half of the identity row.
         static func bannerClearance(for format: ProfileBannerFormat) -> CGFloat {
             switch format {
             case .band, .none: bandGap
@@ -58,21 +55,13 @@ final class ProfileHeaderView: UIView {
         /// The air between the chrome's bottom edge and the avatar, on a band
         /// and on a header with no picture.
         static let bandGap: CGFloat = Spacing.md
-        /// How far down the avatar a band reaches: its first quarter, so the
-        /// strip's edge cuts the disc high and the name below sits clear of
-        /// it, with air above.
-        static let bandOverlap: CGFloat = avatarSize / 4
-        /// On a band, how far under the strip's edge the name begins: the
-        /// name hangs just below the picture rather than sinking to the foot
-        /// of the disc.
-        static let bandNameGap: CGFloat = Spacing.sm
+        /// How far above the name a band's blur starts climbing. Shorter than
+        /// a poster's (`HeroBannerFade.blurLead`): a band's picture is mostly
+        /// behind the chrome, and a full lead would blur all of it.
+        static let bandBlurLead: CGFloat = 64
         /// The air above the tray, carried by the tray itself so it holds
         /// whether or not a website row sits above it.
         static let trayGap: CGFloat = Spacing.md
-        /// How far above the counters the poster's run-out begins. The avatar
-        /// and the name sit on the picture itself; the tone arrives for the
-        /// numbers and is strong by the bio.
-        static let posterFadeLead: CGFloat = 40
         /// Side length of the circular bubbles in the action tray (and
         /// thus the height of the whole tray).
         static let bubbleSize: CGFloat = 44
@@ -133,7 +122,11 @@ final class ProfileHeaderView: UIView {
     /// a full banner-clearance below this inset; the banner ignores it and
     /// bleeds to y = 0.
     var chromeTopInset: CGFloat = 0 {
-        didSet { columnTopConstraint?.constant = columnTopConstant }
+        didSet {
+            columnTopConstraint?.constant = columnTopConstant
+            // The status bar's scrim covers the chrome, and stops there.
+            bannerView.topScrimHeight = chromeTopInset > 0 ? chromeTopInset : 160
+        }
     }
 
     /// The banner's shape — see `ProfileBannerFormat`. Read off the picture
@@ -148,28 +141,18 @@ final class ProfileHeaderView: UIView {
         chromeTopInset + Metrics.bannerClearance(for: bannerFormat)
     }
 
-    /// Adopts a banner shape: the column's start, where the banner ends, how
-    /// the name sits against the avatar, and whether the picture runs out.
+    /// Adopts a banner shape: the column's start, whether there is a banner,
+    /// where it ends — a band on the avatar's midline (the name on the
+    /// picture, the counters on the page), a poster at the tray's foot (the
+    /// whole block on the picture) — and whether it fades out on the way up.
     func setBannerFormat(_ format: ProfileBannerFormat) {
         guard format != bannerFormat || !hasAppliedBannerFormat else { return }
         hasAppliedBannerFormat = true
         bannerFormat = format
         columnTopConstraint?.constant = columnTopConstant
-        // A band ends a quarter of the way down the avatar, its edge cut by
-        // the disc; a poster runs to the foot of the tray; no picture, no
-        // banner.
         bannerView.isHidden = format == .none
         bannerEndsAtTray?.isActive = format == .poster
         bannerEndsInAvatar?.isActive = format != .poster
-        // Beside a straddling disc the name sits on the page just BELOW the
-        // strip's edge: top-aligned with the disc and pushed down by the
-        // strip's reach into it plus a small gap. Bottom-aligning it instead
-        // sank the name to the foot of the disc, a long way under the
-        // picture. On a poster, and with no picture, the two are centred on
-        // each other.
-        topRow.alignment = format == .band ? .top : .center
-        identityColumn.directionalLayoutMargins.top =
-            format == .band ? Metrics.bandOverlap + Metrics.bandNameGap : 0
         bannerView.setFormat(format)
         applyIdentityInk()
         setNeedsLayout()
@@ -186,29 +169,108 @@ final class ProfileHeaderView: UIView {
 
     // MARK: - Identity ink
 
-    /// The page's ink, for a band, no picture, and a poster scrolled away. On
-    /// a poster at rest the name and the handle wear `HeroInk.primary` and
-    /// `.secondary` instead — they stand on the picture; see `HeroInk`.
+    /// The page's ink, for no picture and a poster scrolled away. On a
+    /// banner the name and the handle wear the picture's ink instead — white
+    /// or black by what the picture is behind them; see `HeroInk`.
     static let pageNameInk = UIColor.label
     static let pageHandleInk = UIColor.secondaryLabel
 
-    /// How much of the name's and the handle's ink is the picture's: 1 on a
-    /// poster at rest, 0 on a band or no picture. The poster fades out as it
-    /// scrolls up (`setTravelled`), taking its scrim with it — white type
-    /// kept over a light page would vanish — so the ink follows the banner's
-    /// own alpha back to the page's.
-    private var identityInkOnPicture: CGFloat = 0
+    /// Which ink each block standing on the picture wears — read off the
+    /// blurred picture behind it (`updateInkTones`): the name and the handle,
+    /// and on a poster the counters and the bio with its link.
+    private struct InkTones: Equatable {
+        var name = HeroInk.defaultTone
+        var counters = HeroInk.defaultTone
+        var body = HeroInk.defaultTone
+    }
+    private var inkTones = InkTones()
+    /// The blocks' frames the tones were last read for, and the bake — a
+    /// re-read only when one of them moves or the picture is re-baked.
+    private var inkTonesReadFor: [CGRect] = []
 
-    private func applyIdentityInk() {
-        let onPicture = bannerFormat == .poster ? bannerView.alpha : 0
-        guard onPicture != identityInkOnPicture else { return }
-        identityInkOnPicture = onPicture
-        nameLabel.textColor = HeroInk.blend(page: Self.pageNameInk, picture: HeroInk.primary, onPicture: onPicture)
-        handleLabel.textColor = HeroInk.blend(
-            page: Self.pageHandleInk, picture: HeroInk.secondary, onPicture: onPicture
+    /// How much of the name's and the handle's ink is the picture's: 1 on a
+    /// banner at rest, 0 with no picture. A poster fades out as it scrolls up
+    /// (`setTravelled`) — picture ink kept over the page could vanish — so
+    /// the ink follows the banner's own alpha back to the page's. A band
+    /// never fades: it scrolls away under the type it carries.
+    private var identityInkOnPicture: CGFloat = 0
+    /// The same for what stands BELOW the name — the counters, the bio and
+    /// the link: on the picture only on a poster, which runs down to the
+    /// tray; on a band they are on the page.
+    private var bodyInkOnPicture: CGFloat = 0
+
+    private func applyIdentityInk(force: Bool = false) {
+        let onPicture = bannerFormat == .none ? 0 : bannerView.alpha
+        if force || onPicture != identityInkOnPicture {
+            identityInkOnPicture = onPicture
+            let tone = inkTones.name
+            nameLabel.textColor = HeroInk.blend(
+                page: Self.pageNameInk, picture: tone.primary, onPicture: onPicture
+            )
+            handleLabel.textColor = HeroInk.blend(
+                page: Self.pageHandleInk, picture: tone.secondary, onPicture: onPicture
+            )
+            for label in [nameLabel, handleLabel] {
+                HeroInk.applyShadow(to: label, tone: tone, onPicture: onPicture)
+            }
+        }
+        let bodyOnPicture = bannerFormat == .poster ? bannerView.alpha : 0
+        guard force || bodyOnPicture != bodyInkOnPicture else { return }
+        bodyInkOnPicture = bodyOnPicture
+        for stat in [followersStat, followingStat, likesStat] {
+            stat.setInk(tone: inkTones.counters, onPicture: bodyOnPicture)
+        }
+        let body = inkTones.body
+        bioLabel.textColor = HeroInk.blend(page: .label, picture: body.primary, onPicture: bodyOnPicture)
+        HeroInk.applyShadow(to: bioLabel, tone: body, onPicture: bodyOnPicture)
+        // The link keeps its blue on the page; on a picture blue is the one
+        // ink sure to sink into it, so it wears the picture's ink.
+        websiteButton.configuration?.baseForegroundColor = HeroInk.blend(
+            page: .systemBlue, picture: body.primary, onPicture: bodyOnPicture
         )
-        for label in [nameLabel, handleLabel] {
-            HeroInk.applyShadow(to: label, onPicture: onPicture)
+    }
+
+    /// Reads the blurred picture behind each block of type and picks its
+    /// ink (`HeroInk.tone`, which keeps a legible ink rather than flip on a
+    /// mid picture). Runs when the levels are baked and when a block moves;
+    /// a change of ink on screen cross-dissolves.
+    private func updateInkTones(force: Bool = false) {
+        guard bannerFormat != .none else { return }
+        func frame(of views: [UIView]) -> CGRect {
+            views.filter { !$0.isHidden }
+                .map { $0.convert($0.bounds, to: bannerView) }
+                .reduce(CGRect.null) { $0.union($1) }
+        }
+        let blocks = [
+            frame(of: [nameLabel, handleLabel]),
+            frame(of: [statsRow]),
+            frame(of: [bioLabel, websiteButton])
+        ]
+        let moved = blocks.count != inkTonesReadFor.count
+            || zip(blocks, inkTonesReadFor).contains { abs($0.minY - $1.minY) > 2 || abs($0.height - $1.height) > 2 }
+        guard force || moved else { return }
+        guard let nameGround = bannerView.groundPixels(behind: blocks[0]) else { return }
+        inkTonesReadFor = blocks
+        var tones = inkTones
+        tones.name = HeroInk.tone(forGround: nameGround, current: inkTones.name)
+        #if DEBUG
+        HeroInk.debugTraceGround(nameGround, name: "profile-name", picked: tones.name)
+        #endif
+        if bannerFormat == .poster {
+            if let ground = bannerView.groundPixels(behind: blocks[1]) {
+                tones.counters = HeroInk.tone(forGround: ground, current: inkTones.counters)
+            }
+            if let ground = bannerView.groundPixels(behind: blocks[2]) {
+                tones.body = HeroInk.tone(forGround: ground, current: inkTones.body)
+            }
+        }
+        guard tones != inkTones else { return }
+        inkTones = tones
+        guard window != nil else { return applyIdentityInk(force: true) }
+        UIView.transition(
+            with: self, duration: 0.2, options: [.transitionCrossDissolve, .allowUserInteraction]
+        ) {
+            self.applyIdentityInk(force: true)
         }
     }
 
@@ -220,10 +282,15 @@ final class ProfileHeaderView: UIView {
     }
 
     private var hasAppliedBannerFormat = false
-    private var bannerEndsAtTray: NSLayoutConstraint?
     private var bannerEndsInAvatar: NSLayoutConstraint?
+    private var bannerEndsAtTray: NSLayoutConstraint?
+    /// The tray's row, whose buttons a poster's page ramp stands behind.
+    private weak var trayRow: UIView?
     private let topRow = UIStackView()
     private let statsRow = UIStackView()
+    /// The name and the handle, in the identity row's top half.
+    private let nameBlock = UIStackView()
+    /// Beside the avatar: `nameBlock`'s half over the counters' half.
     private let identityColumn = UIStackView()
 
     #if DEBUG
@@ -231,22 +298,39 @@ final class ProfileHeaderView: UIView {
     var debugAvatarFrame: CGRect { avatarView.convert(avatarView.bounds, to: self) }
     var debugTrayFrame: CGRect { actionRowForDebug?.convert(actionRowForDebug!.bounds, to: self) ?? .zero }
     var debugStatsFrame: CGRect { statsRow.convert(statsRow.bounds, to: self) }
+    /// The two halves beside the avatar: name + handle, then the counters.
+    var debugNameHalfFrame: CGRect {
+        identityColumn.arrangedSubviews[0].convert(identityColumn.arrangedSubviews[0].bounds, to: self)
+    }
+    var debugStatsHalfFrame: CGRect {
+        identityColumn.arrangedSubviews[1].convert(identityColumn.arrangedSubviews[1].bounds, to: self)
+    }
     var debugBannerIsHidden: Bool { bannerView.isHidden }
     var debugTrayButtons: [UIButton] {
         [followButton, messageButton, editButton, mapPinButton, qrCodeButton, moreButton]
     }
-    var debugBannerShowsFade: Bool { bannerView.debugShowsFade }
-    var debugBannerFadeLocations: [CGFloat] { bannerView.debugFadeLocations }
-    var debugBannerFadeAlphas: [CGFloat] { bannerView.debugFadeAlphas }
+    /// The banner's fade, in the HEADER's coordinates.
+    var debugBannerFade: HeroBannerFade.Geometry? {
+        bannerView.debugFade?.offset(by: bannerView.frame.minY)
+    }
+    /// The blur levels showing, in the header's coordinates.
+    var debugBannerBlurLevels: [(start: CGFloat, full: CGFloat)] {
+        bannerView.debugBlurLevels.map { ($0.start + bannerView.frame.minY, $0.full + bannerView.frame.minY) }
+    }
+    var debugBannerRampLocations: [CGFloat] { bannerView.debugRampLocations }
+    var debugBannerRampAlphas: [CGFloat] { bannerView.debugRampAlphas }
     var debugBannerAlpha: CGFloat { bannerView.alpha }
     var debugBannerPictureShift: CGFloat { bannerView.debugPictureShift }
     var debugBannerHasPicture: Bool { bannerView.debugHasPicture }
-    var debugShowsInkScrim: Bool { bannerView.debugShowsInkScrim }
-    var debugInkScrimLocations: [CGFloat] { bannerView.debugInkScrimLocations }
-    var debugInkScrimAlphas: [CGFloat] { bannerView.debugInkScrimAlphas }
+    var debugBlurBakeMilliseconds: Double { bannerView.debugLastBlurBakeMilliseconds }
+    var debugBlurBakeBytes: Int { bannerView.debugLastBlurBakeBytes }
     var debugNameInk: UIColor { nameLabel.textColor }
     var debugHandleInk: UIColor { handleLabel.textColor }
     var debugNameShadowOpacity: Float { nameLabel.layer.shadowOpacity }
+    /// The ink each block on the picture wears: name + handle, counters, bio.
+    var debugInkTones: (name: HeroInk.Tone, counters: HeroInk.Tone, body: HeroInk.Tone) {
+        (inkTones.name, inkTones.counters, inkTones.body)
+    }
     var debugNameFrame: CGRect { nameLabel.convert(nameLabel.bounds, to: self) }
     var debugHandleFrame: CGRect { handleLabel.convert(handleLabel.bounds, to: self) }
     private weak var actionRowForDebug: UIView?
@@ -259,6 +343,15 @@ final class ProfileHeaderView: UIView {
             of: [nameLabel, handleLabel], in: self, over: Surface.page
         ), measured.count == 2 else { return nil }
         return (measured[0], measured[1])
+    }
+
+    /// The same for what stands below the name — the first counter's value
+    /// and caption, and the bio — labelled, for the audit: on a poster they
+    /// stand on the picture too.
+    func debugBodyContrast() -> [(String, HeroInkContrast)]? {
+        let labels = followersStat.debugLabels + (bioLabel.isHidden ? [] : [bioLabel])
+        guard let measured = HeroInk.debugContrast(of: labels, in: self, over: Surface.page) else { return nil }
+        return zip(["followers", "caption", "bio"], measured).map { ($0, $1) }
     }
     #endif
 
@@ -300,6 +393,14 @@ final class ProfileHeaderView: UIView {
         // The picture decides the shape, whenever it lands.
         bannerView.onImageResolved = { [weak self] image in
             self?.setBannerFormat(.resolved(forImageSize: image.size))
+        }
+        // The blurred picture decides the type's ink — read it again the
+        // moment it changes. Off the bake's own dissolve (it lands inside
+        // one) when on screen, so the ink's change is its own.
+        bannerView.onLevelsChanged = { [weak self] in
+            guard let self else { return }
+            guard window != nil else { return updateInkTones(force: true) }
+            DispatchQueue.main.async { [weak self] in self?.updateInkTones(force: true) }
         }
         setBannerFormat(.unresolved)
     }
@@ -790,14 +891,18 @@ final class ProfileHeaderView: UIView {
             )
         }
 
-        // The 3-metric counter row, last element of the header: equal cells
-        // across the full content width, right above the content threshold.
+        // The 3-metric counter row, in the identity row's bottom half: under
+        // the name, leading-aligned with it, each column as wide as its
+        // caption — equal cells across the half centred the first number
+        // away from the name's edge. The trailing spacer takes the rest.
         for stat in [followersStat, followingStat, likesStat] {
             statsRow.addArrangedSubview(stat)
         }
+        statsRow.addArrangedSubview(UIView())
         statsRow.axis = .horizontal
         statsRow.alignment = .center
-        statsRow.distribution = .fillEqually
+        statsRow.distribution = .fill
+        statsRow.spacing = Spacing.xl
 
         // Type hierarchy of the identity block, three clear steps: title3
         // semibold display name (the block's anchor; SF applies its tighter
@@ -805,7 +910,7 @@ final class ProfileHeaderView: UIView {
         // subheadline bio below — name > handle = body copy, one weight jump.
         nameLabel.font = UIFont.preferredFont(forTextStyle: .title3).withWeight(.semibold)
         nameLabel.adjustsFontForContentSizeCategory = true
-        // Page ink until a poster says otherwise — see `applyIdentityInk`.
+        // Page ink until a banner says otherwise — see `applyIdentityInk`.
         nameLabel.textColor = Self.pageNameInk
         nameLabel.numberOfLines = 1
 
@@ -813,6 +918,12 @@ final class ProfileHeaderView: UIView {
         handleLabel.adjustsFontForContentSizeCategory = true
         handleLabel.textColor = Self.pageHandleInk
         handleLabel.numberOfLines = 1
+        // The two lines decide how tall the identity row's halves must be at
+        // a large Dynamic Type size; the avatar's side must not squash them
+        // (it is only `.defaultHigh`, the labels' default resistance).
+        for label in [nameLabel, handleLabel] {
+            label.setContentCompressionResistancePriority(.required, for: .vertical)
+        }
 
         verifiedBadge.tintColor = .systemBlue
         verifiedBadge.contentMode = .scaleAspectFit
@@ -903,8 +1014,8 @@ final class ProfileHeaderView: UIView {
         // Message + three bubbles need ~300pt and the column has ~240. So the
         // whole tray moved down to the header's last line, the width of the
         // page — the arrangement a profile screen has settled on everywhere
-        // else — and the identity column beside the avatar is the name and
-        // the handle alone.
+        // else — and the column beside the avatar is the name, the handle
+        // and the counters alone.
         //
         // The two capsules share the width left by the bubbles equally: the
         // pair reads as one control with two halves, and Follow is the one
@@ -952,22 +1063,50 @@ final class ProfileHeaderView: UIView {
             ])
         }
 
-        // Right column of the top block: name over @handle, centred against
-        // the avatar.
-        identityColumn.addArrangedSubview(nameRow)
-        identityColumn.addArrangedSubview(handleLabel)
+        // Beside the avatar, two halves of its height: name over @handle in
+        // the top one, on the picture; the counters in the bottom one, on
+        // the page. `fillEqually` keeps the halves equal when a large
+        // Dynamic Type size grows one of them.
+        //
+        // ⚠️ PUSHED APART, not centred: the name to the top of its half (level
+        // with the disc's top), the counters to the foot of theirs (level with
+        // its foot). The page's ramp is centred on the seam between them, and
+        // centred content left it ~4pt between the handle's foot and the
+        // counters' top — the ramp then whitened the handle's last rows and
+        // left the counters' values on a mostly-picture ground. Pushed apart,
+        // the seam has ~8pt of air for the ramp to cross.
+        nameBlock.addArrangedSubview(nameRow)
+        nameBlock.addArrangedSubview(handleLabel)
+        nameBlock.axis = .vertical
+        nameBlock.alignment = .fill
+        nameBlock.spacing = 2
+        let nameHalf = UIView()
+        let statsHalf = UIView()
+        nameBlock.constrain(in: nameHalf) { half in
+            nameBlock.leadingAnchor.constraint(equalTo: half.leadingAnchor)
+            nameBlock.trailingAnchor.constraint(equalTo: half.trailingAnchor)
+            nameBlock.topAnchor.constraint(equalTo: half.topAnchor)
+            nameBlock.bottomAnchor.constraint(lessThanOrEqualTo: half.bottomAnchor)
+        }
+        statsRow.constrain(in: statsHalf) { half in
+            statsRow.leadingAnchor.constraint(equalTo: half.leadingAnchor)
+            statsRow.trailingAnchor.constraint(equalTo: half.trailingAnchor)
+            statsRow.topAnchor.constraint(greaterThanOrEqualTo: half.topAnchor)
+            statsRow.bottomAnchor.constraint(equalTo: half.bottomAnchor)
+        }
+        identityColumn.addArrangedSubview(nameHalf)
+        identityColumn.addArrangedSubview(statsHalf)
         identityColumn.axis = .vertical
         identityColumn.alignment = .fill
-        identityColumn.spacing = Spacing.xs
-        // The band pushes the name down inside the column — see
-        // `setBannerFormat`.
-        identityColumn.isLayoutMarginsRelativeArrangement = true
-        identityColumn.directionalLayoutMargins = .zero
+        identityColumn.distribution = .fillEqually
 
         topRow.addArrangedSubview(avatarView)
         topRow.addArrangedSubview(identityColumn)
         topRow.axis = .horizontal
-        topRow.alignment = .center
+        // Top: the column is the avatar's height (see the tie below), and
+        // when a large Dynamic Type size outgrows the avatar's cap, the two
+        // still share their top edge.
+        topRow.alignment = .top
         topRow.spacing = Spacing.md
         #if DEBUG
         actionRowForDebug = actionRow
@@ -995,22 +1134,20 @@ final class ProfileHeaderView: UIView {
             for: .primaryActionTriggered
         )
 
-        // Page column: the two-column identity block (avatar | name/@handle/
-        // tray), then full width — the counter row directly under the identity
-        // block, then bio and website closing the header right above the
-        // content threshold. Wider vertical rhythm than the standard xs-step
-        // stacks: the header sits against a full-bleed banner and needs air
-        // between its major containers to read premium.
-        let column = UIStackView(arrangedSubviews: [topRow, statsRow, bioLabel, websiteButton, actionRow])
+        // Page column: the identity row (avatar | name/@handle over the
+        // counters), then full width — bio, website and the tray closing the
+        // header right above the content threshold. Wider vertical rhythm
+        // than the standard xs-step stacks: the header sits against a
+        // full-bleed banner and needs air between its major containers to
+        // read premium.
+        let column = UIStackView(arrangedSubviews: [topRow, bioLabel, websiteButton, actionRow])
         column.axis = .vertical
         column.alignment = .fill
         // Air between the block's rows: a step more than the standard stack
         // at every seam, because this block sits alone under a picture and
-        // read as packed at the standard pitch — counters on the name, tray
-        // on the bio.
+        // read as packed at the standard pitch — tray on the bio.
         column.spacing = Spacing.sm
-        column.setCustomSpacing(Spacing.xl, after: topRow)
-        column.setCustomSpacing(Spacing.lg, after: statsRow)
+        column.setCustomSpacing(Spacing.lg, after: topRow)
         column.setCustomSpacing(Spacing.md, after: bioLabel)
         column.setCustomSpacing(Spacing.md, after: websiteButton)
         // The tray carries its own air above, so the gap holds whether the
@@ -1022,8 +1159,7 @@ final class ProfileHeaderView: UIView {
         // Layering: banner first (back), identity column on top of it. The
         // banner bleeds to the header's very top — the column starts below the
         // navigation chrome via `chromeTopInset` — and its bottom edge is tied
-        // to the action tray's, so it always ends exactly at the tray's bottom
-        // threshold no matter which identity rows are visible.
+        // to the avatar's midline (see below).
         //
         // The top attachment is deliberately soft (high, not required): the
         // owning controller adds a required ≤-viewport-top constraint via
@@ -1049,51 +1185,79 @@ final class ProfileHeaderView: UIView {
             column.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -Spacing.xl)
         }
 
-        // The avatar is a fixed disc now that the tray no longer sits beside
-        // it: the identity column is two lines, which is no height to tie a
-        // disc to. `avatarSize` is what the three-line column used to resolve
-        // to, so the block keeps the proportions it had.
+        // The avatar is a fixed disc, and the column beside it its height —
+        // half for the name, half for the counters.
         //
-        // High, not required, so a Dynamic-Type name that needs more than the
-        // disc's height is not clipped — the column then grows and the disc
-        // re-centres against it.
+        // The side is high, not required, and the column's tie to it 999: a
+        // Dynamic-Type name that needs more than half the disc grows the
+        // column, the disc follows it up to its cap, and past the cap the
+        // column simply outgrows it rather than clipping a label.
         let avatarSide = avatarView.heightAnchor.constraint(equalToConstant: Metrics.avatarSize)
         avatarSide.priority = .defaultHigh
+        let columnSpansAvatar = identityColumn.heightAnchor.constraint(equalTo: avatarView.heightAnchor)
+        columnSpansAvatar.priority = UILayoutPriority(999)
         // Where the banner ENDS is the shape's — see `setBannerFormat`, which
         // activates exactly one of these.
-        bannerEndsAtTray = bannerView.bottomAnchor.constraint(equalTo: actionRow.bottomAnchor)
+        //
+        // ⚠️ A BAND ENDS ON THE AVATAR'S MIDLINE — the line between the
+        // name's half and the counters' half, so the name stands on the strip
+        // and the counters on the page. The ramp into the page is centred on
+        // it: the banner's own edge sits half a ramp lower, where the page's
+        // tone is already whole. (It used to end a quarter of the way down the
+        // avatar, the name below it on the page.)
+        //
+        // ⚠️ A POSTER RUNS TO THE TRAY'S FOOT, the whole identity block on the
+        // picture — cut at the midline, it read as a band with a tall stage
+        // (user, 30 September 2026). Its long page-toned run-out over the
+        // counters, a white wash climbing the photograph, is gone:
+        // `HeroBannerFade`'s blur carries the block and the page arrives only
+        // behind the tray.
         bannerEndsInAvatar = bannerView.bottomAnchor.constraint(
-            equalTo: avatarView.topAnchor, constant: Metrics.bandOverlap
+            equalTo: avatarView.centerYAnchor, constant: HeroBannerFade.rampLength / 2
         )
+        bannerEndsAtTray = bannerView.bottomAnchor.constraint(equalTo: actionRow.bottomAnchor)
+        trayRow = actionRow
         NSLayoutConstraint.activate([
             avatarView.widthAnchor.constraint(equalTo: avatarView.heightAnchor),
             avatarSide,
-            avatarView.heightAnchor.constraint(lessThanOrEqualToConstant: Metrics.avatarMaxSize)
+            avatarView.heightAnchor.constraint(lessThanOrEqualToConstant: Metrics.avatarMaxSize),
+            columnSpansAvatar,
+            identityColumn.heightAnchor.constraint(greaterThanOrEqualTo: avatarView.heightAnchor)
         ])
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        guard bannerFormat == .poster else { return }
+        guard bannerFormat != .none else { return }
         // The nested stacks settle AFTER this pass — the note on
         // `CircleAvatarView` — so they are settled here by hand before the
-        // frames are read: the run-out is placed against where the avatar
-        // and the counters actually are, not where they were a pass ago.
+        // frames are read: the fade is placed against where the name and the
+        // avatar actually are, not where they were a pass ago.
         topRow.superview?.layoutIfNeeded()
-        let stats = statsRow.convert(statsRow.bounds, to: bannerView)
-        guard stats.height > 0 else { return }
-        // Clear until just above the counters, strong by the bio: the
-        // counters climb through the steep part of the curve, and the avatar
-        // and the name above them stand on the picture itself.
-        bannerView.setFade(
-            start: stats.minY - Metrics.posterFadeLead,
-            opaque: stats.maxY + Spacing.md
-        )
-        // The type the ink scrim stands under: the name's row to the
-        // handle's foot, released at the counters.
         let name = nameLabel.convert(nameLabel.bounds, to: bannerView)
-        let handle = handleLabel.convert(handleLabel.bounds, to: bannerView)
-        bannerView.setInk(HeroInk.Band(top: name.minY, bottom: handle.maxY, release: stats.minY))
+        let avatar = avatarView.convert(avatarView.bounds, to: bannerView)
+        guard name.height > 0, avatar.height > 0 else { return }
+        switch bannerFormat {
+        case .band:
+            // The blur climbing from above the name to the strip's foot, the
+            // page arriving at the midline.
+            bannerView.setFade(HeroBannerFade.geometry(
+                typeTop: name.minY, edge: avatar.midY, lead: Metrics.bandBlurLead
+            ))
+        case .poster:
+            // The blur climbing from above the name all the way down, under
+            // the counters and the bio too, whole at the banner's foot; the
+            // page arrives only behind the tray's buttons.
+            guard let trayRow else { return }
+            let tray = trayRow.convert(trayRow.bounds, to: bannerView)
+            bannerView.setFade(HeroBannerFade.Geometry(
+                blurStart: name.minY - HeroBannerFade.blurLead, blurFull: tray.maxY,
+                rampStart: tray.minY + Metrics.trayGap, rampEnd: tray.maxY
+            ))
+        case .none:
+            break
+        }
+        updateInkTones()
     }
 }
 

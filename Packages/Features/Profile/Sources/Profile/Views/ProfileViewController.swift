@@ -633,7 +633,12 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
                         }
                         print(
                             "PROFILE-INK-AUDIT format=\(self.headerView.bannerFormat) style=\(style) "
-                                + "name=[\(contrast.name)] handle=[\(contrast.handle)]"
+                                + "tones=\(self.headerView.debugInkTones) "
+                                + "name=[\(contrast.name)] handle=[\(contrast.handle)] "
+                                + String(format: "blur-bake=%.1fms %dKB", self.headerView.debugBlurBakeMilliseconds,
+                                         self.headerView.debugBlurBakeBytes / 1024)
+                                + " " + (self.headerView.debugBodyContrast() ?? [])
+                                    .map { "\($0.0)=[\($0.1)]" }.joined(separator: " ")
                         )
                     }
                 }
@@ -834,6 +839,14 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
                     print("[qa] profile-scroll settled requested=\(points) "
                         + "offset=\(galleryPager.verticalOffset)")
                 }
+            }
+        }
+        // `-profile-scroll-sweep`: scrolls the page from the top to 240pt and
+        // back, frame by frame, 3s each way (after 2.5s) — the header's fade
+        // and parallax filmed without touch injection.
+        if arguments.contains("-profile-scroll-sweep") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+                self?.debugSweepStep(began: CACurrentMediaTime())
             }
         }
         // `-profile-bar-tree`: the navigation bar's real subview tree. The own
@@ -1083,6 +1096,17 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     }
 
     #if DEBUG
+    /// One frame of `-profile-scroll-sweep`: 0 → 240pt → 0, eased, 3s a leg.
+    private func debugSweepStep(began: CFTimeInterval) {
+        let t = CACurrentMediaTime() - began
+        guard t < 6 else { return }
+        let leg = t < 3 ? t / 3 : (6 - t) / 3
+        _ = galleryPager.debugSetVerticalOffset(CGFloat(240 * leg * leg * (3 - 2 * leg)))
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 60) { [weak self] in
+            self?.debugSweepStep(began: began)
+        }
+    }
+
     /// Waits for the map-pin bubble to be OFFERED, then taps it — through the
     /// same callback a finger fires, so what QA exercises is the real path.
     ///

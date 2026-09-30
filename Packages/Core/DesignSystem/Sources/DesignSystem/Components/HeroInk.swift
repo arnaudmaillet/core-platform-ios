@@ -1,97 +1,119 @@
 import UIKit
 
 /// The ink of type that stands ON a picture-led header's photograph — a
-/// profile's poster name and handle, a place's name — and the scrim that
-/// makes it legible there.
+/// profile's name and handle on its band or poster (and, on a poster, its
+/// counters, bio and link), a place's name and counters.
 ///
 /// ⚠️ **TYPE ON A PHOTOGRAPH WEARS THE PICTURE'S INK, NOT THE PAGE'S.** Both
-/// headers used to keep `.label` over the raw picture, dressed with a
-/// page-coloured halo or a page-coloured plate: black type over the dark
-/// clothes, hair and shadow nearly every portrait carries at the height of a
-/// name read faint in light mode, and white type over a bright table or sky
-/// in dark mode. No page colour survives an arbitrary photograph. What every
-/// media app does does: white type over a black scrim that darkens the foot
-/// of the picture, the same in both appearances.
+/// headers used to keep `.label` over the raw picture: black type over the
+/// dark clothes, hair and shadow nearly every portrait carries at the height
+/// of a name read faint in light mode, and white type over a bright table or
+/// sky in dark mode. No page colour survives an arbitrary photograph.
 ///
-/// The scrim (`HeroInkScrimView`) eases in from clear well above the type —
-/// so the subject is left alone and there is no edge to see — reaches
-/// `scrimPeak` just above it, and holds under it. What it does below depends
-/// on the PAGE it runs into:
-/// - a dark page (dark mode): it holds to the foot. The page's run-out is the
-///   same tone, so the two join without a seam;
-/// - a light page: it gives way by `Band.release` — the next row of page-ink
-///   type — as the page's tone arrives. Held to the foot there, it greys the
-///   counters and whatever follows; given way, the picture brightens
-///   monotonically from the type into the page, with no dark band left at
-///   the header's foot, where a glass control could resolve over mid-grey.
+/// ⚠️ **THE PICTURE PICKS THE INK — white on a dark picture, black on a
+/// light one — the same in both appearances.** There is no scrim under the
+/// type: #327's black gradient read as a veil and went (30 September 2026),
+/// and white type alone over a light picture measured 2.34:1 (a place's
+/// banner). What stands under the type is `HeroBannerFade`'s progressive
+/// blur, which evens the ground out — which is what makes ONE ink per
+/// block right: `tone(forGround:current:)` reads the blurred picture behind
+/// each block and keeps whichever ink's worst pixel clears more. Over an
+/// even ground the better of black and white never falls below 4.58:1 (the
+/// crossover, a ground of luminance 0.18).
 ///
-/// `scrimPeak` is set by the worst picture there is — pure white — against
-/// `secondary`, the fainter of the two inks: 0.62 black over white leaves
-/// `secondary` 5.0:1 and `primary` 6.2:1, over the 4.5:1 WCAG asks of body
-/// text. Measured on rendered pixels, not assumed: see `debugContrast`.
+/// ⚠️ OVER AN UNEVEN GROUND NO INK HOLDS. Where the blur leaves both light
+/// and dark behind one block — a place's name over a light face and dark
+/// hair, measured luminance 0.03 to 0.46 — the better ink's worst pixel is
+/// ~2.3:1. That is the one thing a picked ink cannot fix without a layer
+/// that changes the picture's tone, which the design refused (30 September
+/// 2026); the audits print it rather than hide it.
 public enum HeroInk {
-    /// The ink of the headline on a picture: a name.
-    public static let primary = UIColor.white
-    /// The ink of a second line on a picture — a handle. Its step below the
-    /// headline is a touch of transparency and no more: 0.85 is what still
-    /// clears 4.5:1 over a pure white picture.
-    public static let secondary = UIColor.white.withAlphaComponent(0.85)
+    /// Which ink a block of type on a picture wears.
+    public enum Tone: Equatable, Sendable {
+        /// White ink, for a dark picture.
+        case light
+        /// Black ink, for a light picture.
+        case dark
 
-    public static let scrimPeak: CGFloat = 0.62
-    /// How far above the type the scrim starts climbing — too gentle a climb
-    /// to read as an edge.
-    public static let scrimLead: CGFloat = 96
-    /// The scrim is at its peak this far outside the type on either side.
-    public static let scrimPad: CGFloat = 8
-    /// How many segments the climb is sampled in — see `scrimStops`.
-    public static let scrimClimbSamples = 6
-
-    /// Where the type stands, in the scrim's own points from its top: the
-    /// first line's top, the last line's foot, and where the page's run-out
-    /// takes over (the top of the next row, which wears page ink).
-    public struct Band: Equatable, Sendable {
-        public var top: CGFloat
-        public var bottom: CGFloat
-        public var release: CGFloat
-
-        public init(top: CGFloat, bottom: CGFloat, release: CGFloat) {
-            self.top = top
-            self.bottom = bottom
-            self.release = release
-        }
+        /// The headline's ink: a name, a counter's value.
+        public var primary: UIColor { self == .light ? .white : .black }
+        /// A second line's — a handle, a caption: the SAME opaque ink; its
+        /// step below the headline is the type's (size, weight), not the
+        /// colour's.
+        ///
+        /// ⚠️ It was the ink at 0.85. Over an even ground, the better of
+        /// black and white at 0.85 bottoms out at 3.96:1 (a ground around
+        /// sRGB 0.45); only opaque inks keep every ground at or above 4.58:1.
+        public var secondary: UIColor { primary }
     }
 
-    /// The scrim's stops, as (location, alpha) pairs, for a scrim of
-    /// `height`. The climb is a smoothstep, so it leaves clear and arrives at
-    /// the peak without a crease at either end.
-    public static func scrimStops(height: CGFloat, band: Band, holdsToFoot: Bool) -> [(CGFloat, CGFloat)] {
-        guard height > 0 else { return [] }
-        func fraction(_ y: CGFloat) -> CGFloat { max(0, min(y / height, 1)) }
-        let peakStart = fraction(band.top - scrimPad)
-        let climbStart = fraction(band.top - scrimPad - scrimLead)
-        let peakEnd = max(peakStart, fraction(band.bottom + scrimPad))
-        var stops: [(CGFloat, CGFloat)] = []
-        for sample in 0...scrimClimbSamples {
-            let t = CGFloat(sample) / CGFloat(scrimClimbSamples)
-            let eased = t * t * (3 - 2 * t)
-            stops.append((climbStart + (peakStart - climbStart) * t, scrimPeak * eased))
+    /// The ink until the picture has been read: most banners are
+    /// photographs darker at the foot than a white page.
+    public static let defaultTone = Tone.light
+
+    /// The contrast WCAG asks of body text.
+    public static let legible: CGFloat = 4.5
+    /// How much better the other ink must do before a block that is not
+    /// legible in its own switches — so a mid picture, whose two inks score
+    /// alike, does not flip each time the banner is re-read.
+    public static let switchMargin: CGFloat = 0.25
+
+    /// The ink for a block standing on `ground` — the blurred picture's
+    /// pixels behind it, sRGB 0…1 — given the ink it wears now.
+    ///
+    /// Scored by the WORST pixel of each tone's weaker ink (`secondary`). A
+    /// block that is legible in its current ink keeps it; one that is not
+    /// takes the other only when that does clearly better.
+    public static func tone(forGround ground: [SIMD3<Float>], current: Tone?) -> Tone {
+        guard !ground.isEmpty else { return current ?? defaultTone }
+        func worst(_ tone: Tone) -> CGFloat {
+            var ink = (r: CGFloat(0), g: CGFloat(0), b: CGFloat(0), a: CGFloat(0))
+            tone.secondary.getRed(&ink.r, green: &ink.g, blue: &ink.b, alpha: &ink.a)
+            var lowest = CGFloat.greatestFiniteMagnitude
+            for pixel in ground {
+                let back = [CGFloat(pixel.x), CGFloat(pixel.y), CGFloat(pixel.z)]
+                let front = zip([ink.r, ink.g, ink.b], back).map { $0 * ink.a + $1 * (1 - ink.a) }
+                lowest = min(lowest, contrast(luminance(front), luminance(back)))
+            }
+            return lowest
         }
-        stops.append((peakEnd, scrimPeak))
-        if holdsToFoot {
-            stops.append((1, scrimPeak))
-        } else {
-            stops.append((max(peakEnd, fraction(band.release)), 0))
-            stops.append((1, 0))
-        }
-        return stops
+        let light = worst(.light)
+        let dark = worst(.dark)
+        let better: Tone = light >= dark ? .light : .dark
+        guard let current else { return better }
+        let mine = current == .light ? light : dark
+        let theirs = current == .light ? dark : light
+        if mine >= legible { return current }
+        return theirs > mine + switchMargin ? (current == .light ? .dark : .light) : current
     }
 
-    /// Whether the page under `traits` is dark — which decides where the
-    /// scrim ends.
-    public static func pageIsDark(_ traits: UITraitCollection) -> Bool {
-        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0
-        Surface.page.resolvedColor(with: traits).getRed(&red, green: &green, blue: &blue, alpha: nil)
-        return 0.2126 * red + 0.7152 * green + 0.0722 * blue < 0.5
+    #if DEBUG
+    /// `-hero-blur-trace`: the ground's luminance spread and each ink's worst
+    /// contrast over it, for a block called `name`.
+    public static func debugTraceGround(_ ground: [SIMD3<Float>], name: String, picked: Tone) {
+        guard ProcessInfo.processInfo.arguments.contains("-hero-blur-trace"), !ground.isEmpty else { return }
+        let lums = ground.map { luminance([CGFloat($0.x), CGFloat($0.y), CGFloat($0.z)]) }.sorted()
+        func at(_ p: Double) -> CGFloat { lums[min(lums.count - 1, Int(Double(lums.count - 1) * p))] }
+        let white = contrast(1, lums.last!), black = contrast(0, lums.first!)
+        print(String(
+            format: "HERO-INK %@ ground L p0 %.3f p10 %.3f p50 %.3f p90 %.3f p100 %.3f | white worst %.2f black worst %.2f -> %@",
+            name, at(0), at(0.1), at(0.5), at(0.9), at(1), white, black, picked == .light ? "white" : "black"
+        ))
+    }
+    #endif
+
+    /// WCAG relative luminance of an sRGB colour.
+    public static func luminance(_ rgb: [CGFloat]) -> CGFloat {
+        let linear = rgb.map { channel -> CGFloat in
+            let c = max(0, min(channel, 1))
+            return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+    }
+
+    /// WCAG contrast ratio of two relative luminances.
+    public static func contrast(_ a: CGFloat, _ b: CGFloat) -> CGFloat {
+        (max(a, b) + 0.05) / (min(a, b) + 0.05)
     }
 
     /// `page` at 0, `picture` at 1, blended in between — for type whose
@@ -115,65 +137,20 @@ public enum HeroInk {
         }
     }
 
-    /// A soft black shadow under white type: over the scrim it adds little to
-    /// the numbers, but it holds a glyph's edge where a busy picture puts a
-    /// highlight right behind it. Scaled by how much of the ink is the
-    /// picture's; none at all on the page. Not trait-dependent, so it never
-    /// needs re-resolving.
-    @MainActor public static func applyShadow(to label: UILabel, onPicture t: CGFloat) {
-        label.layer.shadowColor = UIColor.black.cgColor
-        label.layer.shadowOffset = CGSize(width: 0, height: 1)
+    /// A soft shadow of the OPPOSITE tone under the type: black under white,
+    /// a lighter touch of white under black (a dark halo reads as a glow, a
+    /// light one as an engraving, so it is kept fainter). It holds a glyph's
+    /// edge where the picture puts its own tone right behind it. Scaled by
+    /// how much of the ink is the picture's; none at all on the page. (The
+    /// contrast instrument hides the labels, shadows and all, so it never
+    /// counts in the numbers.)
+    @MainActor public static func applyShadow(to label: UILabel, tone: Tone, onPicture t: CGFloat) {
+        label.layer.shadowColor = (tone == .light ? UIColor.black : UIColor.white).cgColor
+        label.layer.shadowOffset = CGSize(width: 0, height: tone == .light ? 1 : 0.5)
         label.layer.shadowRadius = 3
-        label.layer.shadowOpacity = Float(0.3 * max(0, min(t, 1)))
+        let strength: CGFloat = tone == .light ? 0.3 : 0.2
+        label.layer.shadowOpacity = Float(strength * max(0, min(t, 1)))
     }
-}
-
-/// The scrim under type that stands on a picture — see `HeroInk`. Pin it
-/// over the picture and under any page-toned run-out, and hand it the
-/// type's `band` in its own coordinates whenever layout moves the type.
-public final class HeroInkScrimView: UIView {
-    override public class var layerClass: AnyClass { CAGradientLayer.self }
-
-    /// Nil draws nothing.
-    public var band: HeroInk.Band? {
-        didSet { if band != oldValue { setNeedsLayout() } }
-    }
-
-    override public init(frame: CGRect) {
-        super.init(frame: frame)
-        isUserInteractionEnabled = false
-        // Where the scrim ends depends on the page's tone.
-        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: HeroInkScrimView, _) in
-            self.setNeedsLayout()
-        }
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    private var gradient: CAGradientLayer? { layer as? CAGradientLayer }
-
-    override public func layoutSubviews() {
-        super.layoutSubviews()
-        guard let gradient else { return }
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        defer { CATransaction.commit() }
-        guard let band, band.bottom > band.top, bounds.height > 0 else {
-            gradient.colors = []
-            return
-        }
-        let stops = HeroInk.scrimStops(
-            height: bounds.height, band: band, holdsToFoot: HeroInk.pageIsDark(traitCollection)
-        )
-        gradient.locations = stops.map { NSNumber(value: Double($0.0)) }
-        gradient.colors = stops.map { UIColor.black.withAlphaComponent($0.1).cgColor }
-    }
-
-    #if DEBUG
-    public var debugLocations: [CGFloat] { (gradient?.locations ?? []).map { CGFloat($0.doubleValue) } }
-    public var debugAlphas: [CGFloat] { (gradient?.colors as? [CGColor] ?? []).map { $0.alpha } }
-    #endif
 }
 
 #if DEBUG

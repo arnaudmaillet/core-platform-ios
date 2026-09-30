@@ -5,14 +5,15 @@ import Testing
 import UIKit
 @testable import Profile
 
-/// The name and the handle over a poster's picture: white over an ink scrim,
-/// legible over ANY picture — measured on the rendered pixels behind the type,
-/// not on the scrim's numbers.
+/// The type over a banner's picture — the name and the handle, and on a
+/// poster the counters and the bio — in the picture's ink (white on a dark
+/// picture, black on a light one, read off the blurred picture behind each
+/// block), over the picture's progressively blurred foot (`HeroBannerFade`):
+/// measured on the rendered pixels behind the type, not on the numbers.
 ///
-/// ⚠️ The pictures are the extremes on purpose. White type's worst case is a
-/// pure white picture and a white stripe right behind a glyph; a pure black
-/// one pins that the scrim never drags the dark page's type down with it. A
-/// real photograph sits between them.
+/// ⚠️ The pictures are the extremes on purpose — white, black, hard 2px
+/// stripes and a mid grey (luminance 0.21, near where the two inks cross) —
+/// and every line clears AA over each, in both appearances, with no scrim.
 @MainActor
 @Suite("Profile identity ink")
 struct ProfileIdentityInkTests {
@@ -81,22 +82,64 @@ struct ProfileIdentityInkTests {
         ).height
         header.setNeedsLayout()
         header.layoutIfNeeded()
-        // The banner places its scrim from the frames the header hands it in
-        // this pass; one more lays the layers out against them.
+        // The banner places its fade from the frames the header hands it in
+        // this pass; one more lays the blur and the ramp out against them.
         header.layoutIfNeeded()
         return header
     }
 
-    /// WCAG AA for the handle's 15pt text — the stricter of the two lines —
-    /// over every extreme a picture can be, in both appearances.
+    /// WCAG AA for every line on the picture — the handle's 15pt the
+    /// stricter — over any picture, on a poster and on a band, in both
+    /// appearances.
     @Test(arguments: Picture.allCases, [UIUserInterfaceStyle.light, .dark])
-    func theTypeClearsAAOverAnyPoster(picture: Picture, style: UIUserInterfaceStyle) throws {
-        let header = header(picture: picture.image(), style: style)
-        #expect(header.bannerFormat == .poster)
-        #expect(header.debugBannerHasPicture)
+    func theTypeClearsAAOverAnyPicture(picture: Picture, style: UIUserInterfaceStyle) throws {
+        for band in [false, true] {
+            let size = band ? CGSize(width: 160, height: 90) : CGSize(width: 90, height: 160)
+            let header = header(picture: picture.image(size: size), style: style)
+            #expect(header.bannerFormat == (band ? .band : .poster))
+            #expect(header.debugBannerHasPicture)
+            let contrast = try #require(header.debugIdentityContrast())
+            let shape = band ? "band" : "poster"
+            #expect(contrast.handle.min >= 4.5, "\(shape) handle \(contrast.handle) \(header.debugInkTones)")
+            #expect(contrast.name.min >= 4.5, "\(shape) name \(contrast.name)")
+            // On a poster the counters and the bio stand on the picture too.
+            // (On a band they are page ink on the page, whose secondary
+            // caption is the system's own 3.3:1 in light mode — not this
+            // suite's.)
+            if !band {
+                let body = try #require(header.debugBodyContrast())
+                for (label, measured) in body {
+                    #expect(measured.min >= 4.5, "poster \(label) \(measured) \(header.debugInkTones)")
+                }
+            }
+        }
+    }
+
+    /// The picture picks the ink: black over a light picture, white over a
+    /// dark one — per block, the same in both appearances.
+    @Test(arguments: [UIUserInterfaceStyle.light, .dark])
+    func thePicturePicksTheInk(style: UIUserInterfaceStyle) {
+        let light = header(picture: Picture.white.image(), style: style)
+        #expect(light.debugInkTones.name == .dark)
+        #expect(light.debugInkTones.counters == .dark)
+        #expect(light.debugInkTones.body == .dark)
+        #expect(light.debugNameInk == HeroInk.Tone.dark.primary)
+        let dark = header(picture: Picture.black.image(), style: style)
+        #expect(dark.debugInkTones.name == .light)
+        #expect(dark.debugNameInk == HeroInk.Tone.light.primary)
+    }
+
+    /// The blur's job: under the type, a busy picture is ONE tone. Over hard
+    /// 2px stripes the worst pixel behind the name sits right by the typical
+    /// one — the stripes that made the worst pixel a white stripe are gone.
+    @Test func theBlurCalmsABusyPictureUnderTheType() throws {
+        let header = header(picture: Picture.stripes.image(), style: .light)
         let contrast = try #require(header.debugIdentityContrast())
-        #expect(contrast.handle.min >= 4.5, "handle \(contrast.handle)")
         #expect(contrast.name.min >= 4.5, "name \(contrast.name)")
+        // Not one flat tone any more: the blur keeps climbing under the name
+        // (to the banner's foot), so the name's top rows keep a trace.
+        #expect(contrast.name.median - contrast.name.min < 0.5, "name \(contrast.name)")
+        #expect(contrast.handle.median - contrast.handle.min < 0.3, "handle \(contrast.handle)")
     }
 
     /// The instrument can see a failure: halfway through the poster's fade on
@@ -104,98 +147,104 @@ struct ProfileIdentityInkTests {
     /// picture — a transient mid-grey on mid-grey, gone within a flick. If
     /// this ever reads AA, the measurement has stopped measuring.
     @Test func theInstrumentSeesAFailure() throws {
-        let header = header(picture: Picture.white.image(), style: .light)
+        // White ink over a black picture, fading towards the light page's
+        // black label over the light page: grey on grey half-way.
+        let header = header(picture: Picture.black.image(), style: .light)
         header.setTravelled(header.posterFadeOutTravel / 2)
         let contrast = try #require(header.debugIdentityContrast())
         #expect(contrast.handle.min < 4.5, "handle \(contrast.handle)")
     }
 
-    /// Only a poster puts type on the picture. A band's name sits on the page
-    /// under the strip, and a header with no picture is all page: both keep
-    /// exactly the dynamic colours they always had, and no scrim is drawn.
-    @Test func aBandAndNoPictureKeepThePagesInk() {
+    /// The name stands on the picture on a band too now (it used to sit on
+    /// the page below the strip), so both shapes wear the picture's ink; only
+    /// a header with no picture keeps the page's.
+    @Test func everyBannerWearsThePicturesInkAndNoPictureThePages() {
         let band = header(picture: Picture.white.image(size: CGSize(width: 160, height: 90)))
         #expect(band.bannerFormat == .band)
+        let poster = header(picture: Picture.white.image())
+        #expect(poster.bannerFormat == .poster)
+        for header in [band, poster] {
+            #expect(header.debugNameInk == HeroInk.Tone.dark.primary)
+            #expect(header.debugHandleInk == HeroInk.Tone.dark.secondary)
+            #expect(header.debugNameShadowOpacity > 0)
+        }
         let bare = header(picture: nil)
         #expect(bare.bannerFormat == .none)
-        for header in [band, bare] {
-            #expect(header.debugNameInk == ProfileHeaderView.pageNameInk)
-            #expect(header.debugHandleInk == ProfileHeaderView.pageHandleInk)
-            #expect(header.debugNameShadowOpacity == 0)
-            #expect(!header.debugShowsInkScrim)
-        }
-        let poster = header(picture: Picture.white.image())
-        #expect(poster.debugNameInk == HeroInk.primary)
-        #expect(poster.debugHandleInk == HeroInk.secondary)
-        #expect(poster.debugNameShadowOpacity > 0)
-        #expect(poster.debugShowsInkScrim)
+        #expect(bare.debugNameInk == ProfileHeaderView.pageNameInk)
+        #expect(bare.debugHandleInk == ProfileHeaderView.pageHandleInk)
+        #expect(bare.debugNameShadowOpacity == 0)
     }
 
-    /// The poster fades as it scrolls up, scrim and all; white type left over
-    /// a light page would vanish, so the ink follows the banner back to the
-    /// page's.
+    /// The poster fades as it scrolls up; white type left over a light page
+    /// would vanish, so the ink follows the banner back to the page's.
     @Test func theInkFollowsThePosterAway() throws {
-        let header = header(picture: Picture.white.image(), style: .light)
+        // A dark picture's white ink, going back to the light page's black.
+        let header = header(picture: Picture.black.image(), style: .light)
         header.setTravelled(header.posterFadeOutTravel / 2)
         var red: CGFloat = 0
         header.debugNameInk.resolvedColor(with: header.traitCollection)
             .getRed(&red, green: nil, blue: nil, alpha: nil)
         // Halfway between white and the light page's black label.
-        #expect(abs(red - 0.5) < 0.02)
+        #expect(abs(red - 0.5) < 0.02, "red \(red)")
         header.setTravelled(header.posterFadeOutTravel)
         #expect(header.debugNameInk == ProfileHeaderView.pageNameInk)
         #expect(header.debugNameShadowOpacity == 0)
         header.setTravelled(0)
-        #expect(header.debugNameInk == HeroInk.primary)
+        #expect(header.debugNameInk == HeroInk.Tone.light.primary)
     }
 
-    /// The scrim is at its peak under the whole of the type. Below it, under a
-    /// dark page it holds to the foot — the run-out is the same tone — and
-    /// under a light one it has given way by the counters, so they, the bio
-    /// and the tray are not greyed.
-    @Test(arguments: [UIUserInterfaceStyle.light, .dark])
-    func theScrimPeaksUnderTheTypeAndEndsByThePage(style: UIUserInterfaceStyle) throws {
-        let header = header(picture: Picture.grey.image(), style: style)
-        // ⚠️ IN A WINDOW, for this one: where the scrim ends is read off the
-        // SCRIM's own traits, and a view tree with no window never hands an
-        // override down to a subview that deep — the dark case read a light
-        // page. Local, never stored on the suite (a suite-held window dies at
-        // release). Hidden: nothing here needs to be on screen.
-        let window = UIWindow(frame: header.frame)
-        window.overrideUserInterfaceStyle = style
-        window.addSubview(header)
-        defer { header.removeFromSuperview() }
-        header.setNeedsLayout()
-        header.layoutIfNeeded()
-        header.layoutIfNeeded()
+    /// The blur's levels are all showing once the picture is in, each fading
+    /// in below the one before, the strongest whole by the name's top; the
+    /// page's ramp is clear under the name and whole at the banner's foot.
+    @Test(arguments: [false, true])
+    func theBlurClimbsToTheNameAndThePageArrivesBelowIt(band: Bool) throws {
+        let size = band ? CGSize(width: 160, height: 90) : CGSize(width: 90, height: 160)
+        let header = header(picture: Picture.grey.image(size: size))
+        let levels = header.debugBannerBlurLevels
+        try #require(levels.count == HeroBannerFade.blurSigmas.count)
+        let name = header.debugNameFrame
+        let fade = try #require(header.debugBannerFade)
+        #expect(abs(levels[0].start - fade.blurStart) < 1)
+        for (lower, upper) in zip(levels, levels.dropFirst()) {
+            #expect(upper.start >= lower.start)
+            #expect(upper.full > lower.full)
+            // Neighbours hand over: the next starts where this one is whole.
+            #expect(abs(upper.start - lower.full) < 1)
+        }
+        // Whole only at the banner's foot: the blur keeps climbing under
+        // the type.
+        #expect(abs(levels[levels.count - 1].full - header.debugBannerFrame.maxY) < 1)
+        #expect(levels[levels.count - 1].start > name.minY)
+
         let banner = header.debugBannerFrame
-        let locations = header.debugInkScrimLocations
-        let alphas = header.debugInkScrimAlphas
+        let locations = header.debugBannerRampLocations
+        let alphas = header.debugBannerRampAlphas
         try #require(locations.count == alphas.count && !locations.isEmpty)
         func alpha(at y: CGFloat) -> CGFloat {
-            let f = y / banner.height
+            let f = (y - banner.minY) / banner.height
             guard let upper = locations.firstIndex(where: { $0 >= f }) else { return alphas.last! }
             guard upper > 0 else { return alphas[0] }
-            let lower = upper - 1
-            let span = locations[upper] - locations[lower]
+            let span = locations[upper] - locations[upper - 1]
             guard span > 0 else { return alphas[upper] }
-            let t = (f - locations[lower]) / span
-            return alphas[lower] + (alphas[upper] - alphas[lower]) * t
+            let t = (f - locations[upper - 1]) / span
+            return alphas[upper - 1] + (alphas[upper] - alphas[upper - 1]) * t
         }
-        let peak = HeroInk.scrimPeak
-        #expect(alphas.first == 0)
-        #expect(abs(alpha(at: header.debugNameFrame.minY) - peak) < 0.001)
-        #expect(abs(alpha(at: header.debugHandleFrame.maxY) - peak) < 0.001)
-        // The upper half of the picture's stage is untouched: the climb
-        // begins a lead above the name, low in the stage.
-        #expect(alpha(at: header.chromeTopInset + HeroBannerMetrics.posterStage / 2) == 0)
-        #expect(alpha(at: header.debugNameFrame.minY - HeroInk.scrimPad - HeroInk.scrimLead) < 0.001)
-        let counters = header.debugStatsFrame
-        if style == .dark {
-            #expect(alphas.last == peak)
-        } else {
-            #expect(alpha(at: counters.minY) < 0.001)
-            #expect(alphas.last == 0)
-        }
+        #expect(alpha(at: name.maxY) == 0)
+        #expect(alpha(at: header.debugHandleFrame.midY) < 0.001)
+        #expect(alpha(at: banner.maxY) > 0.99)
+    }
+
+    /// The bake is a few milliseconds, once per picture — not per frame.
+    @Test func theBlurIsBakedOnce() throws {
+        let header = header(picture: Picture.grey.image())
+        let first = header.debugBlurBakeMilliseconds
+        #expect(first > 0)
+        #expect(header.debugBlurBakeBytes > 0)
+        print("HERO-BLUR test bake \(first)ms, \(header.debugBlurBakeBytes / 1024) KB")
+        // A scroll moves the picture, the masks stay put, nothing re-bakes.
+        header.setTravelled(40)
+        header.setNeedsLayout()
+        header.layoutIfNeeded()
+        #expect(header.debugBlurBakeMilliseconds == first)
     }
 }
