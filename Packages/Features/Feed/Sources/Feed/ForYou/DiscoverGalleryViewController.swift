@@ -39,10 +39,18 @@ import UIKit
 ///
 /// # Its chrome
 ///
-/// No tab bar (`hidesBottomBarWhenPushed`, UIKit's own choreography) and no
-/// title: the header is `[‹] ———— [points][search]`, the one every screen For
-/// You pushes wears (`PushedScreenHeader`, product call 2026-09-29). The back
-/// chevron is how the viewer leaves; the mosaic has the whole screen.
+/// No tab bar (`hidesBottomBarWhenPushed`, UIKit's own choreography); the
+/// header is `[‹] ———— [points][search]` over "For you" as a large title, the
+/// one every screen For You pushes wears (`PushedScreenHeader`, product calls
+/// 2026-09-29 and 2026-09-30). The name is For You's own section's — "For you"
+/// is the heading the chunks sit under — not "Discover".
+///
+/// # Holding still under a post
+///
+/// The mosaic's inset is pinned from a tap until the screen is back
+/// (`ForYouGridPage.openHoldingStill`), for the reason
+/// `ForYouPostListViewController` gives: a gallery that tracked the safe area
+/// while covered came back shifted by about a bar's height.
 @MainActor
 final class DiscoverGalleryViewController: UIViewController {
     private let page: ForYouGridPage
@@ -63,6 +71,9 @@ final class DiscoverGalleryViewController: UIViewController {
     /// number, because this is For You's mosaic.
     private static let seedWindow = 40
 
+    /// The large title: For You's own section, whose mosaic this is.
+    static let title = "For you"
+
     init(
         imagePipeline: ImagePipeline,
         videoPlayback: VideoPlaybackController?,
@@ -78,7 +89,7 @@ final class DiscoverGalleryViewController: UIViewController {
         // finds no dock to give back (`showsAppTabBar(for:)` reads this flag),
         // which is right: this screen never shows one.
         hidesBottomBarWhenPushed = true
-        header.install(on: self)
+        header.install(on: self, title: Self.title)
     }
 
     @available(*, unavailable)
@@ -88,6 +99,9 @@ final class DiscoverGalleryViewController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = Surface.page
         page.pin(to: view)
+        // The large title folds with the mosaic — named, since UIKit's search
+        // does not find a scroller nested in the page.
+        setContentScrollView(page.minimizeScrollView, for: .top)
         page.onItemTapped = { [weak self] index in self?.openTile(at: index) }
         page.onNearEnd = { [weak self] in self?.onNearEnd?() }
         page.onRefresh = { [weak self] in self?.onRefresh?() }
@@ -119,8 +133,20 @@ final class DiscoverGalleryViewController: UIViewController {
     // give back — the flight's backstop asks `showsAppTabBar(for:)` and gets
     // the same answer.
 
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        #if DEBUG
+        PushedListJumpTrace.begin("gallery will-appear", page: page, host: view)
+        #endif
+    }
+
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        // Back: the inset tracks the safe area again, offset carried across.
+        page.endHeroFreeze()
+        #if DEBUG
+        PushedListJumpTrace.mark("gallery did-appear", page: page, host: view)
+        #endif
         // Nothing floats over this grid's foot — the tab bar is down for the
         // screen's whole life — so the safe area is the whole cover. See
         // `ForYouGridPage.footChromeCover`.
@@ -166,6 +192,9 @@ final class DiscoverGalleryViewController: UIViewController {
         // The tapped tile's player is the flight's from here: the grid's own
         // reconcile must neither restart nor stop it while it is in the air.
         page.beginPlaybackHandoff(of: tapped.id)
+        #if DEBUG
+        PushedListJumpTrace.mark("gallery open", page: page, host: view)
+        #endif
         let origin = SnapFeedHeroOrigin(
             post: tapped,
             stream: stream,
@@ -193,13 +222,18 @@ final class DiscoverGalleryViewController: UIViewController {
                     page?.beginHeroFreeze()
                     page?.revealPost(tapped.id)
                 },
+                // No thaw here: `viewDidAppear` hands the inset back, once the
+                // pop has settled the chrome — a window's close ends before
+                // it, and a thaw then re-bases the mosaic on a mid-flight
+                // inset (`ForYouPostListViewController.textRowReveal`).
                 dismissalDidEnd: { [weak page] committed in
-                    page?.endHeroFreeze()
                     if !committed { page?.clearRevealConcealment() }
                 }
-            )
+            ),
+            // Pinned since the tap; the close measures a mosaic holding still.
+            willStageDismissal: { [weak page] in page?.pinForPushedClose() }
         )
-        openPost(self, origin, stream.map(\.id))
+        page.openHoldingStill(from: self) { openPost(self, origin, stream.map(\.id)) }
     }
 
     #if DEBUG
@@ -207,6 +241,11 @@ final class DiscoverGalleryViewController: UIViewController {
     /// finger reaches. False while that tile is not loaded yet.
     func debugOpenTile(at index: Int) -> Bool {
         page.debugSelectItem(at: index)
+    }
+
+    /// Scrolls `offset` points into the content — `-foryou-pushed-scroll`.
+    func debugScroll(to offset: CGFloat) {
+        page.setVerticalOffset(offset)
     }
 
     /// Whether tile `index` has a cover to fly — what a scripted open waits

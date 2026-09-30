@@ -1116,6 +1116,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // skeleton waiting for the next publish.
         if let lastSnapshot { gallery.render(lastSnapshot.media) }
         discoverGallery = gallery
+        PushedScreenHeader.allowLargeTitles(on: navigationController)
         navigationController.pushViewController(gallery, animated: true)
     }
 
@@ -2245,6 +2246,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
                 + " posts=\(list.posts.count)")
         }
         #endif
+        PushedScreenHeader.allowLargeTitles(on: navigationController)
         navigationController.pushViewController(list, animated: true)
     }
 
@@ -2733,8 +2735,27 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         }) { [weak self] in
             guard let list = kind == .friends ? self?.friendsList : self?.followingList else { return }
             print("[qa] \(label): opening \(list.posts[index].id.rawValue) of \(list.posts.count)")
-            _ = list.debugOpenRow(at: index)
+            self?.preScrollIfRequested({ list.debugScroll(to: $0) }) { [weak self, weak list] in
+                self?.scheduleDemoCloseIfRequested()
+                _ = list?.debugOpenRow(at: index)
+            }
         }
+    }
+
+    /// `-foryou-pushed-scroll Y`: scrolls a pushed list or the mosaic Y points
+    /// into its content before `-foryou-list-open` / `-foryou-gallery-open`
+    /// taps, so a return can be filmed away from the top as well as at it —
+    /// the two rest under a different bar with a large title. Opens at once
+    /// without the flag.
+    private func preScrollIfRequested(_ scroll: (CGFloat) -> Void, then open: @escaping () -> Void) {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let position = arguments.firstIndex(of: "-foryou-pushed-scroll"),
+              position + 1 < arguments.count,
+              let offset = Double(arguments[position + 1])
+        else { return open() }
+        print("[qa] -foryou-pushed-scroll \(offset)")
+        scroll(CGFloat(offset))
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: open)
     }
 
     /// `-foryou-gallery-open N`, once `-foryou-view-all` has pushed the mosaic:
@@ -2755,7 +2776,10 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         }) { [weak self] in
             guard let gallery = self?.discoverGallery else { return }
             print("[qa] \(label): opening \(gallery.posts[index].id.rawValue) of \(gallery.posts.count)")
-            _ = gallery.debugOpenTile(at: index)
+            self?.preScrollIfRequested({ gallery.debugScroll(to: $0) }) { [weak self, weak gallery] in
+                self?.scheduleDemoCloseIfRequested()
+                _ = gallery?.debugOpenTile(at: index)
+            }
         }
     }
     #endif

@@ -14,7 +14,7 @@ import UIKit
 /// counter overlay's glyphs, font and inset.
 ///
 /// Layer order (bottom → top): cover image, DEPARTURE cover image, live video
-/// surface, resting chrome (the brick's view count, or a row card's caption).
+/// surface, resting chrome (the brick's like count, or a row card's caption).
 /// The flight fades the resting chrome out as the card leaves the grid and back
 /// in as it returns, so a landed brick never pops its furniture on.
 ///
@@ -31,7 +31,7 @@ final class PostGridFlightCard: UIView {
     /// differently, and a hero that flew from both with one set of constants
     /// would be a twin of neither.
     enum Style {
-        /// A grid brick: the layout's tile corners, its view count overlaid on
+        /// A grid brick: the layout's tile corners, its like count overlaid on
         /// the media.
         case tile
         /// The preview inside a timeline row: 12pt corners, and NO counters —
@@ -119,7 +119,7 @@ final class PostGridFlightCard: UIView {
         #endif
         return view
     }()
-    /// The source's furniture — a brick's view count, a row card's caption —
+    /// The source's furniture — a brick's like count, a row card's caption —
     /// in one view so the flight can fade it as a unit.
     ///
     /// ⚠️ NO PLAY GLYPH, ON ANY CARD, AT EITHER END. The card used to carry a
@@ -134,8 +134,8 @@ final class PostGridFlightCard: UIView {
     private static let metaFont = UIFont.systemFont(
         ofSize: UIFont.preferredFont(forTextStyle: .caption2).pointSize, weight: .semibold
     )
-    private let views = PostMetricLabel(
-        symbol: "eye.fill", font: metaFont, color: .white, shadowed: true
+    private let likes = PostMetricLabel(
+        symbol: "heart.fill", font: metaFont, color: .white, shadowed: true
     )
 
     /// Whether the card's own picture IS the post — every tile and row. False
@@ -268,17 +268,17 @@ final class PostGridFlightCard: UIView {
 
         // ⚠️ THE CARD WEARS WHAT THE SOURCE WORE, and nothing else. A timeline
         // row shows no furniture on its media at all (the note on
-        // `showsCounters`); a brick shows ONE count, reach, closing the row at
-        // its trailing foot — `PostGridTileCell`'s `views`, same glyph, font,
-        // insets. The card used to wear the heart-and-eye pair the tile once
+        // `showsCounters`); a brick shows ONE count, its likes, closing the row
+        // at its trailing foot — `PostGridTileCell`'s `likes`, same glyph,
+        // font, insets. The card used to wear the heart-and-eye pair the tile once
         // had, on the other side, so every landing swapped one set of
         // furniture for another in the frame the card was removed.
         guard style.showsCounters else { return }
-        views.set(post.viewCount)
-        views.constrain(in: restingChromeView) { parent in
-            views.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -8)
-            views.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -7)
-            views.leadingAnchor.constraint(greaterThanOrEqualTo: parent.leadingAnchor, constant: 8)
+        likes.set(post.reactionCount)
+        likes.constrain(in: restingChromeView) { parent in
+            likes.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -8)
+            likes.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -7)
+            likes.leadingAnchor.constraint(greaterThanOrEqualTo: parent.leadingAnchor, constant: 8)
         }
     }
 

@@ -123,26 +123,71 @@ final class ForYouGridPage: UIView {
     /// every other page, which is therefore one plain run.
     private var newPostIDs: Set<PostID> = []
 
-    /// Where the "New" section ends, or 0 for a list that is one plain run.
+    /// Whether every section of a list wears its title, a lone one included —
+    /// the pushed Following and Friends lists (2026-09-30).
+    ///
+    /// ⚠️ THE INBOX'S "A LONE HEADER IS A LABEL" RULE IS OFF HERE, by product
+    /// call. #316 left a list that was all one section untitled, so Friends —
+    /// whose posts are usually all seen — showed no header at all while
+    /// Following showed two, and the same screen read as two different ones.
+    /// With this on, a list with nothing new is "Recent" alone and titled, and
+    /// one with nothing but new is "New" alone, counted. Off (every other list
+    /// page — a place's Activity) the page is one untitled run unless it has
+    /// both halves, as before.
+    var titlesEverySection = false {
+        didSet {
+            guard titlesEverySection != oldValue, style == .list, !showsSkeleton else { return }
+            collectionView.reloadData()
+        }
+    }
+
+    /// How many rows lead the list as NEW — the run of arrivals `posts` is
+    /// partitioned to start with. Zero on a grid, a skeleton, and a page that
+    /// was told of no arrivals.
+    private var newRunLength: Int {
+        guard style == .list, !showsSkeleton, !newPostIDs.isEmpty else { return 0 }
+        return posts.prefix { newPostIDs.contains($0.id) }.count
+    }
+
+    /// Where the "New" section ends when the list has BOTH sections, 0 when it
+    /// is one section (titled or not) — the number the index mapping needs.
     ///
     /// Read off `posts` rather than stored, because `posts` is kept partitioned
-    /// — the arrivals lead it. Three conditions, and each removes a header that
-    /// would say nothing: a grid page is a ranked mosaic with no "since" to
-    /// divide on; a skeleton has no posts to have arrived; and a corpus that is
-    /// ENTIRELY new would put "New" over everything and "Recent" over nothing,
-    /// which is a label rather than a division. The inbox lists follow the same
-    /// rule for the same reason.
+    /// — the arrivals lead it.
     private var split: Int {
-        guard style == .list, !showsSkeleton, !newPostIDs.isEmpty else { return 0 }
-        let leading = posts.prefix { newPostIDs.contains($0.id) }.count
-        return leading < posts.count ? leading : 0
+        sections.count == 2 ? newRunLength : 0
+    }
+
+    /// The sections a list of `total` rows whose first `lead` are new is cut
+    /// into. Both halves when both have rows; otherwise the one that does —
+    /// "Recent" for an empty list, so there is always one section to draw.
+    ///
+    /// Untitled lists keep the inbox's rule: a list that would be all one
+    /// section is one plain run (`.earlier`, and `hasHeader` says no), since a
+    /// lone header there is a label rather than a division.
+    private static func sections(lead: Int, total: Int, titled: Bool) -> [Section] {
+        if lead > 0, lead < total { return [.new, .earlier] }
+        if titled, lead > 0, lead == total { return [.new] }
+        return [.earlier]
+    }
+
+    /// Everything that decides how many sections there are and how many rows
+    /// each holds — what an update compares before promising UIKit that the
+    /// shape did not change.
+    private struct SectionShape: Equatable {
+        let sections: [Section]
+        let split: Int
+    }
+
+    private var sectionShape: SectionShape {
+        SectionShape(sections: sections, split: split)
     }
 
     #if DEBUG
-    /// How many rows the "New" header currently covers — the number UIKit
-    /// checks an update against, so a test can assert the shape rather than
-    /// the contents.
-    var debugArrivalsRunLength: Int { split }
+    /// How many rows the "New" header currently covers — zero when there is
+    /// no "New" section — so a test can assert the shape rather than the
+    /// contents.
+    var debugArrivalsRunLength: Int { sections.first == .new ? newRunLength : 0 }
 
     /// The section headers laid out right now, top to bottom: the title each
     /// wears and the count its badge shows.
@@ -179,7 +224,8 @@ final class ForYouGridPage: UIView {
 
     /// The sections this page currently has, in order.
     private var sections: [Section] {
-        split > 0 ? [.new, .earlier] : [.earlier]
+        guard style == .list, !showsSkeleton else { return [.earlier] }
+        return Self.sections(lead: newRunLength, total: posts.count, titled: titlesEverySection)
     }
 
     /// The two halves of a sectioned list, and the words they wear.
@@ -304,12 +350,14 @@ final class ForYouGridPage: UIView {
     /// not an append: a list that was entirely new gaining its first non-new
     /// row, and a newcomer that is itself NEW — it belongs in the first half,
     /// and an insert would put it at the foot of the second.
-    private func splitWouldHold(afterAppending added: [GalleryPost], to current: Int) -> Bool {
+    private func shapeWouldHold(afterAppending added: [GalleryPost], from before: SectionShape) -> Bool {
         guard style == .list else { return true }
         guard !added.contains(where: { newPostIDs.contains($0.id) }) else { return false }
-        let leading = posts.prefix { newPostIDs.contains($0.id) }.count
-        let after = leading < posts.count + added.count ? leading : 0
-        return after == current
+        // Older rows join the foot, so the leading run of arrivals is the same
+        // run; only the total — and with it which sections exist — can move.
+        let lead = newRunLength
+        let after = Self.sections(lead: lead, total: posts.count + added.count, titled: titlesEverySection)
+        return SectionShape(sections: after, split: after.count == 2 ? lead : 0) == before
     }
 
     /// Adopts a new set of arrivals. Re-groups the rows and reloads, because
@@ -1386,6 +1434,17 @@ final class ForYouGridPage: UIView {
 
     var debugViewportHeight: CGFloat { collectionView.bounds.height }
 
+    /// The topmost realized item, and where its top edge is in `space` — what
+    /// `-list-jump-trace` follows across a post's open and close.
+    func debugFirstVisibleItem(in space: UICoordinateSpace) -> (id: String, minY: CGFloat)? {
+        let top = collectionView.indexPathsForVisibleItems.min {
+            ($0.section, $0.item) < ($1.section, $1.item)
+        }
+        guard let top, let cell = collectionView.cellForItem(at: top),
+              posts.indices.contains(flatIndex(for: top)) else { return nil }
+        return (posts[flatIndex(for: top)].id.rawValue, cell.convert(cell.bounds, to: space).minY)
+    }
+
     /// The three numbers that decide where a cell is on screen, for tracing a
     /// landing that missed. A rect alone cannot say WHY it moved; these can.
     var debugInsetState: String {
@@ -2214,6 +2273,40 @@ final class ForYouGridPage: UIView {
         collectionView.contentOffset = offset
     }
 
+    /// Opens a post from a PUSHED screen with this page's inset pinned — from
+    /// the tap until the host is back on screen and thaws it (its
+    /// `viewDidAppear`).
+    ///
+    /// ⚠️ PINNED FOR THE WHOLE VISIT, not only for the close. A pushed list
+    /// adds the safe area to its inset, and while a post covers it that safe
+    /// area is not the list's: the view leaves the window, and under a large
+    /// title the bar changes height with the push. Each change drags
+    /// `contentOffset` along (see `beginHeroFreeze`), so a list that tracked
+    /// them came back from a post shifted by about a bar's height. For You's
+    /// own page is pinned by its flight source for the same reason.
+    ///
+    /// A push that did not happen — the stack refused it — hands the inset
+    /// straight back.
+    func openHoldingStill(from host: UIViewController, _ open: () -> Void) {
+        pinForPushedClose()
+        open()
+        if host.navigationController?.topViewController === host,
+           host.navigationController?.transitionCoordinator == nil {
+            endHeroFreeze()
+        }
+    }
+
+    /// The pin a pushed screen asks for at the tap and again as a close
+    /// stages — `beginHeroFreeze`, unless `-list-jump-unpinned` asks for the
+    /// old behaviour (DEBUG: the control run that shows the jump this pin
+    /// removes, read with `-list-jump-trace`).
+    func pinForPushedClose() {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-list-jump-unpinned") { return }
+        #endif
+        beginHeroFreeze()
+    }
+
     /// Symmetrical with the freeze, and for the same reason: the two
     /// assignments below each re-clamp `contentOffset` against an inset that
     /// is momentarily wrong, so the offset is carried across by hand rather
@@ -2221,6 +2314,7 @@ final class ForYouGridPage: UIView {
     func endHeroFreeze() {
         guard let frozenContentInset else { return }
         let offset = collectionView.contentOffset
+        let pinnedTop = collectionView.adjustedContentInset.top
         self.frozenContentInset = nil
         // A hosted page manages its insets manually for its whole life — the
         // pre-freeze behaviour to restore is `.never` there, not the default.
@@ -2231,6 +2325,31 @@ final class ForYouGridPage: UIView {
         // The footer may have opened or closed while the inset was pinned, and
         // those writes were dropped. Re-apply now that it is ours again.
         applyBottomInset()
+        // ⚠️ A THAW ONTO A DIFFERENT INSET IS SETTLED HERE, OR THE NEXT UPDATE
+        // MOVES THE ROWS. The collection view re-bases its offset on the inset
+        // it recorded at its last UPDATE (`_restoreOrAdjustContentOffset
+        // IfNecessaryWithInsets:`, from a later `layoutSubviews` →
+        // `_updateVisibleCellsNow:`) and keeps `offset + top inset` constant
+        // across the difference. Under a large title the pinned and resting
+        // insets differ whenever the title folded while the list was covered —
+        // pinned t168 (expanded, at the tap), resting t116 (the departure
+        // reveal had scrolled the list to 204) — so about a second after a
+        // grab's return the rows slid 52pt up (204 → 256), after the viewer
+        // had them back. Measured with `-list-jump-trace` and a KVO stack,
+        // 2026-09-30. An empty update now records the resting inset, and the
+        // offset the viewer sees is restated over whatever it re-based to.
+        if abs(collectionView.adjustedContentInset.top - pinnedTop) > 0.5 {
+            UIView.performWithoutAnimation {
+                collectionView.performBatchUpdates(nil)
+                collectionView.layoutIfNeeded()
+            }
+            collectionView.contentOffset = offset
+        }
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-list-jump-trace") {
+            print("[list-jump] thaw from offset=\(offset.y) pinnedTop=\(pinnedTop) → \(debugInsetState)")
+        }
+        #endif
     }
 
     /// Puts the post the viewer ended on into the slot they LEFT from, swapping
@@ -2306,7 +2425,8 @@ final class ForYouGridPage: UIView {
         //
         // `split` is not a stored number: it is the length of the leading RUN
         // of arrivals. Move an old post into that run and the run stops there,
-        // so both sections' counts change — while `reloadItems` promises UIKit
+        // so both sections' counts change — or a section appears or goes, which
+        // is why the comparison is the whole `sectionShape` — while `reloadItems` promises UIKit
         // they did not. It crashes: "the number of items in section 0 after the
         // update (1) must be equal to the number before (6)". Invisible while
         // the adoption was gated to the mosaic, which has one section.
@@ -2316,7 +2436,7 @@ final class ForYouGridPage: UIView {
         // immediately, and declining there means the viewer lands on the card
         // they left — the exact thing the adoption exists to prevent. So the
         // swap stands and the UPDATE changes shape below.
-        let splitBefore = split
+        let shapeBefore = sectionShape
         // The pixels each cell is showing RIGHT NOW, carried across the reload.
         //
         // `configure` clears the image and re-asks the cache, so a cell whose
@@ -2334,7 +2454,7 @@ final class ForYouGridPage: UIView {
         // without `prepareForReuse`, so a tile would keep the previous post's
         // video surface and play one post's motion under another's cover.
         UIView.performWithoutAnimation {
-            if split == splitBefore {
+            if sectionShape == shapeBefore {
                 collectionView.reloadItems(at: [
                     indexPath(for: slot),
                     indexPath(for: current)
@@ -2804,9 +2924,9 @@ final class ForYouGridPage: UIView {
         // into a collection view whose section count changed in the same pass
         // is the classic inconsistency exception, so that case takes the
         // reload path below instead.
-        let splitBefore = split
+        let shapeBefore = sectionShape
         if let added, !added.isEmpty, !showsSkeleton, !skeleton, !dissolving, !mustReload,
-           splitWouldHold(afterAppending: added, to: splitBefore) {
+           shapeWouldHold(afterAppending: added, from: shapeBefore) {
             // Arrange only the newcomers, against the absolute slots they will
             // occupy. Placement depends solely on the absolute index, so the
             // items already on screen cannot move — which is what keeps this an
@@ -2893,10 +3013,14 @@ final class ForYouGridPage: UIView {
 // MARK: - Data source / delegate
 
 extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
-    /// Whether a section carries a pill. False for a single unlabelled run —
-    /// see `split`. Asked by the LAYOUT, which is why it is not private.
+    /// Whether a section carries a pill: both halves of a divided list, and a
+    /// lone section only on a list that titles every section
+    /// (`titlesEverySection`). Asked by the LAYOUT, which is why it is not
+    /// private.
     func hasHeader(inSection index: Int) -> Bool {
-        split > 0 && sections.indices.contains(index)
+        guard style == .list, !showsSkeleton, !posts.isEmpty,
+              sections.indices.contains(index) else { return false }
+        return sections.count == 2 || titlesEverySection
     }
 
     /// What one post is drawn as. The page's `Style` answers it for the grid
@@ -2959,7 +3083,7 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         // they came from carries, in the same red badge, on the section it
         // describes. Every header leads (`leadsList: true`): the separation
         // between sections is the layout's bottom inset on the one above.
-        header.setTitle(section.title, count: section == .new ? split : 0, leadsList: true)
+        header.setTitle(section.title, count: section == .new ? newRunLength : 0, leadsList: true)
         // Tapping a header means "show me this part" — the same gesture the
         // inbox's pills answer.
         header.onTap = { [weak self] in self?.scrollToSection(indexPath.section) }

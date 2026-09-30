@@ -33,10 +33,11 @@ import UIKit
 /// sections came back on 2026-09-29 by product call, on BOTH lists because
 /// they are one screen whose header badges answer the same question.
 ///
-/// The inbox's rules come with the headers: a section with nothing in it is
-/// not drawn, and a list that would be all one section — nothing new, or
-/// nothing but new — goes untitled, since a lone header is a label rather
-/// than a division.
+/// A section with nothing in it is not drawn, and — unlike the inbox — a lone
+/// section keeps its title (2026-09-30): nothing new is "Recent" alone, titled;
+/// nothing but new is "New" alone, counted. Friends is usually the first case,
+/// and #316's untitled run made it read as a different screen from Following
+/// (`ForYouGridPage.titlesEverySection`).
 ///
 /// # How it opens posts
 ///
@@ -50,15 +51,38 @@ import UIKit
 ///
 /// # Its chrome
 ///
-/// No tab bar (`hidesBottomBarWhenPushed`) and no title: `[‹] ——
-/// [points][search]`, the header every screen For You pushes wears
-/// (`PushedScreenHeader`).
+/// No tab bar (`hidesBottomBarWhenPushed`); `[‹] —— [points][search]` over
+/// "Following" or "Friends" as a large title, the header every screen For You
+/// pushes wears (`PushedScreenHeader`). The section capsules pin under
+/// whichever height the bar has — expanded or folded — because they pin to
+/// the collection view's adjusted inset, which is that bar.
+///
+/// # Holding still under a post
+///
+/// ⚠️ The list's inset is PINNED from the tap until the list is back on
+/// screen (`ForYouGridPage.beginHeroFreeze` / `viewDidAppear`). This list
+/// adds the safe area to its inset, and that safe area is not the list's
+/// while a post covers it — the view leaves the window, and the bar changes
+/// height under a large title. Every change of it drags `contentOffset` with
+/// it, so a list left to track it came back from a post shifted by about a
+/// bar's height, a jump the viewer saw the moment the card landed (filmed on
+/// Following, Friends and the mosaic, 2026-09-30). For You never showed it:
+/// its own flight pins the same inset (`ForYouGridZoomSource`).
 @MainActor
 final class ForYouPostListViewController: UIViewController {
     /// Which row this list is the whole of.
     enum Kind: String {
         case following
         case friends
+
+        /// The large title — the page's name, the word the For You header it
+        /// was pushed from wears.
+        var title: String {
+            switch self {
+            case .following: "Following"
+            case .friends: "Friends"
+            }
+        }
     }
 
     let kind: Kind
@@ -103,11 +127,14 @@ final class ForYouPostListViewController: UIViewController {
         // The like chips stake from the same wallet For You's list does — one
         // surface, one undo window (`PostCardStaking`).
         page.staking = staking
+        // Both lists title every section, a lone "Recent" included — see the
+        // type's note.
+        page.titlesEverySection = true
         // UIKit takes the bar down with the push and brings it back with the
         // pop; a post opened from here finds no dock to give back
         // (`showsAppTabBar(for:)` reads this flag).
         hidesBottomBarWhenPushed = true
-        header.install(on: self)
+        header.install(on: self, title: kind.title)
     }
 
     @available(*, unavailable)
@@ -117,6 +144,10 @@ final class ForYouPostListViewController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = Surface.page
         page.pin(to: view)
+        // ⚠️ NAMED, not left to UIKit's search, which does not find a scroller
+        // nested in the page (`ForYouViewController`'s note): the large title
+        // folds with THIS scroll view, and the bar's edge follows it.
+        setContentScrollView(page.minimizeScrollView, for: .top)
         page.onItemTapped = { [weak self] index in self?.openRow(at: index) }
         page.onItemCommentsTapped = { [weak self] index in self?.openRow(at: index, showingComments: true) }
         page.onNearEnd = { [weak self] in self?.onNearEnd?() }
@@ -166,8 +197,21 @@ final class ForYouPostListViewController: UIViewController {
     // NO DOCK REVEAL on the way back from a post: there is no bar on this
     // screen to give back (`hidesBottomBarWhenPushed`).
 
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        #if DEBUG
+        PushedListJumpTrace.begin("\(kind.rawValue) will-appear", page: page, host: view)
+        #endif
+    }
+
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        // Back: the inset tracks the safe area again, offset carried across,
+        // so nothing moves — see the type's note.
+        page.endHeroFreeze()
+        #if DEBUG
+        PushedListJumpTrace.mark("\(kind.rawValue) did-appear", page: page, host: view)
+        #endif
         // Nothing floats over this list's foot but the home indicator's band.
         page.footChromeCover = view.safeAreaInsets.bottom
         // Nothing on this screen may be invisible once it is back, whoever
@@ -216,6 +260,9 @@ final class ForYouPostListViewController: UIViewController {
         let appearance = page.heroAppearance(for: tapped.id)
         // The tapped row's player is the flight's from here.
         page.beginPlaybackHandoff(of: tapped.id)
+        #if DEBUG
+        PushedListJumpTrace.mark("\(kind.rawValue) open", page: page, host: view)
+        #endif
         let origin = SnapFeedHeroOrigin(
             post: tapped,
             stream: stream,
@@ -232,9 +279,12 @@ final class ForYouPostListViewController: UIViewController {
             // A TEXT post's page IS its thread — see `opensComments`.
             opensComments: showingComments && tapped.kind != .text,
             depthView: { [weak page] in page },
-            textReveal: textRowReveal(for: tapped)
+            textReveal: textRowReveal(for: tapped),
+            // Already pinned since the tap; pinned again in case a cancelled
+            // window close handed it back meanwhile.
+            willStageDismissal: { [weak page] in page?.pinForPushedClose() }
         )
-        openPost(self, origin, stream.map(\.id))
+        page.openHoldingStill(from: self) { openPost(self, origin, stream.map(\.id)) }
     }
 
     /// The window a TEXT row opens through — and ANY row closes through once
@@ -278,8 +328,15 @@ final class ForYouPostListViewController: UIViewController {
                 page.revealPost(anchor, clearing: landingOcclusion)
                 view.layoutIfNeeded()
             },
+            // ⚠️ NO THAW HERE — `viewDidAppear` hands the inset back. The
+            // window's close ends BEFORE the pop has settled the chrome: the
+            // safe area read then was mid-flight (t146 / b68 against a resting
+            // t168 / b34), the list re-adjusted to it, and UIKit dragged the
+            // offset by the 22pt it still had to travel — the list sat 22pt
+            // low at `viewDidAppear` and slid back a moment later. Measured
+            // with `-list-jump-trace` on a Following text row, 2026-09-30. A
+            // cancelled close leaves the list covered, and pinned, as well.
             dismissalDidEnd: { [weak page] committed in
-                page?.endHeroFreeze()
                 if !committed { page?.clearRevealConcealment() }
             }
         )
@@ -289,6 +346,11 @@ final class ForYouPostListViewController: UIViewController {
     /// Taps row `index` through the page's own selection path.
     func debugOpenRow(at index: Int) -> Bool {
         page.debugSelectItem(at: index)
+    }
+
+    /// Scrolls `offset` points into the content — `-foryou-pushed-scroll`.
+    func debugScroll(to offset: CGFloat) {
+        page.setVerticalOffset(offset)
     }
 
     /// Whether row `index` is loaded and has what it would fly.

@@ -652,6 +652,10 @@ final class PlaceProfileViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        // `.never`, stated rather than inherited — see `PushedScreenHeader`:
+        // the one bar that allows large titles is For You's, and a place pushed
+        // over a large-titled screen there would inherit one.
+        navigationItem.largeTitleDisplayMode = .never
         // The page the cards lie on, a step below them — see `Surface`.
         view.backgroundColor = Surface.page
         configureHeader()

@@ -37,6 +37,17 @@ import UIKit
 ///
 /// The cell's own overlay passes no reference: it IS the card, and lays out
 /// at whatever size the card is, like any view.
+///
+/// ## The author's face
+///
+/// A small disc leads the author's name (2026-09-30), as tall as the name's
+/// line — the band's avatar (`PostAuthorBandView`) at the size a caption can
+/// afford. It follows the app's avatar contract: the initials are drawn at
+/// once and the picture, when the post names one, is laid over them as it
+/// arrives. A COPY — the flight's resting furniture, a window's stand-in —
+/// reads the picture straight from the pipeline's memory when the card in the
+/// row already drew it, so the face the card takes off with is the face it
+/// had.
 final class ForYouCardCaptionOverlay: UIView {
     enum Placement {
         /// Over media: white text on a dark scrim rising from the foot.
@@ -57,6 +68,14 @@ final class ForYouCardCaptionOverlay: UIView {
     /// rect while the window it belongs to was still travelling.
     private let scrim = ScrimView()
     private let authorLabel = UILabel()
+    /// The author's disc, before the name — initials, and the picture over
+    /// them once it is here. Posed like the labels (bounds, centre,
+    /// transform), so it rides a flight's window by its corner too.
+    private let avatar = MonogramAvatarView(diameter: 16)
+    private let avatarPicture = AvatarImageView()
+    /// The picture's load. Holds the overlay weakly: a card recycled before it
+    /// lands drops its overlay, and the picture goes nowhere.
+    private var avatarTask: Task<Void, Never>?
     /// An `EmoteLabel`: the caption's emoji and `:code:` emotes animate on the
     /// card as they do on the list's cards (`PostGridListRowCell`), and only
     /// while the card is actually on screen (`EmoteVisibility`).
@@ -74,7 +93,12 @@ final class ForYouCardCaptionOverlay: UIView {
     /// end.
     private var hasPosed = false
 
-    init(post: GalleryPost, placement: Placement, referenceSize: CGSize? = nil) {
+    /// - Parameter imagePipeline: where the author's picture comes from. Nil
+    ///   draws the initials alone.
+    init(
+        post: GalleryPost, placement: Placement, referenceSize: CGSize? = nil,
+        imagePipeline: ImagePipeline? = nil
+    ) {
         self.placement = placement
         let reference = referenceSize.flatMap { $0.width > 0 && $0.height > 0 ? $0 : nil }
         self.referenceSize = reference
@@ -88,6 +112,19 @@ final class ForYouCardCaptionOverlay: UIView {
         )
         authorLabel.textColor = onMedia ? .white : .secondaryLabel
         authorLabel.text = post.authorName ?? post.authorHandle.map { "@\($0)" }
+        let diameter = Self.avatarDiameter(for: authorLabel.font)
+        avatar.setDiameter(diameter)
+        avatar.setMonogram(MonogramAvatarView.monogram(
+            name: post.authorName ?? "", handle: post.authorHandle ?? ""
+        ))
+        avatar.isHidden = authorLabel.text == nil
+        avatar.isUserInteractionEnabled = false
+        // Over a picture the initials sit on the scrim, like the white name
+        // beside them: drawn in the dark style, or a light-mode plate and ink
+        // all but vanish into the photograph (seen on the simulator).
+        if onMedia { avatar.overrideUserInterfaceStyle = .dark }
+        avatarPicture.isHidden = true
+        avatarPicture.pin(to: avatar)
         captionLabel.font = onMedia
             ? .systemFont(ofSize: UIFont.preferredFont(forTextStyle: .footnote).pointSize, weight: .medium)
             : .systemFont(ofSize: UIFont.preferredFont(forTextStyle: .headline).pointSize, weight: .semibold)
@@ -102,11 +139,46 @@ final class ForYouCardCaptionOverlay: UIView {
             label.layer.shadowOffset = .zero
         }
         addSubview(captionLabel)
+        addSubview(avatar)
         addSubview(authorLabel)
+        loadAvatar(post.authorAvatarURL, from: imagePipeline)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// The disc is exactly as tall as the name's line: the face and the name
+    /// read as one line of type, not as an avatar with a caption.
+    static func avatarDiameter(for font: UIFont) -> CGFloat {
+        font.lineHeight.rounded(.up)
+    }
+
+    /// The gap between the disc and the name.
+    private static let avatarGap: CGFloat = 5
+
+    /// The picture over the initials: from memory at once when the pipeline
+    /// has it — every copy of a card the row has drawn — else when it lands.
+    /// The initials stay under it, the rendered state (the app's avatar
+    /// contract), so a face that never arrives costs nothing.
+    private func loadAvatar(_ url: URL?, from imagePipeline: ImagePipeline?) {
+        guard let url, let imagePipeline, !avatar.isHidden else { return }
+        if let cached = imagePipeline.cachedImage(for: url) {
+            showAvatar(cached)
+            return
+        }
+        avatarTask = Task { [weak self] in
+            guard let image = try? await imagePipeline.image(for: url), !Task.isCancelled,
+                  let self else { return }
+            showAvatar(image)
+        }
+    }
+
+    private func showAvatar(_ image: UIImage) {
+        avatarPicture.image = image
+        avatarPicture.isHidden = false
+        // A covered disc draws the picture alone, no plate rim around it.
+        avatar.isCovered = true
+    }
 
     private static let inset: CGFloat = 10
 
@@ -115,6 +187,8 @@ final class ForYouCardCaptionOverlay: UIView {
         let size: CGSize
         let caption: CGRect
         let author: CGRect
+        /// The author's disc, on the name's line, before it.
+        let avatar: CGRect
         /// The scrim's top edge; it always runs to the card's foot.
         let scrimTop: CGFloat
     }
@@ -123,6 +197,14 @@ final class ForYouCardCaptionOverlay: UIView {
         let inset = Self.inset
         let width = max(0, size.width - inset * 2)
         let authorHeight = authorLabel.font.lineHeight.rounded(.up)
+        // The name's line starts after the disc; the caption keeps the card's
+        // whole width.
+        let face = avatar.isHidden ? 0 : Self.avatarDiameter(for: authorLabel.font) + Self.avatarGap
+        let authorWidth = max(0, width - face)
+        func disc(on line: CGRect) -> CGRect {
+            let side = Self.avatarDiameter(for: authorLabel.font)
+            return CGRect(x: inset, y: line.midY - side / 2, width: side, height: side)
+        }
         let fitted = captionLabel.sizeThatFits(
             CGSize(width: width, height: .greatestFiniteMagnitude)
         ).height.rounded(.up)
@@ -133,23 +215,27 @@ final class ForYouCardCaptionOverlay: UIView {
                 x: inset, y: size.height - inset - fitted, width: width, height: fitted
             )
             let author = CGRect(
-                x: inset, y: caption.minY - 2 - authorHeight, width: width, height: authorHeight
+                x: inset + face, y: caption.minY - 2 - authorHeight, width: authorWidth, height: authorHeight
             )
             // The scrim reaches a little above the author, so the text never
             // sits on the picture's own brightness.
             return RestingLayout(
-                size: size, caption: caption, author: author, scrimTop: max(0, author.minY - 36)
+                size: size, caption: caption, author: author, avatar: disc(on: author),
+                scrimTop: max(0, author.minY - 36)
             )
         case .onCard:
             // The words from the top, the author at the foot.
             let author = CGRect(
-                x: inset, y: size.height - inset - authorHeight, width: width, height: authorHeight
+                x: inset + face, y: size.height - inset - authorHeight, width: authorWidth, height: authorHeight
             )
             let available = author.minY - inset * 2
             let caption = CGRect(
                 x: inset, y: inset + 2, width: width, height: min(fitted, max(0, available))
             )
-            return RestingLayout(size: size, caption: caption, author: author, scrimTop: size.height)
+            return RestingLayout(
+                size: size, caption: caption, author: author, avatar: disc(on: author),
+                scrimTop: size.height
+            )
         }
     }
 
@@ -165,7 +251,13 @@ final class ForYouCardCaptionOverlay: UIView {
             pose(resting)
         } else {
             hasPosed = true
-            UIView.performWithoutAnimation { pose(resting) }
+            // The disc's own insides (initials, picture) too: laid out by
+            // constraints in a pass that would otherwise run AFTER this one,
+            // inside whatever block is open, and grow out of a zero rect.
+            UIView.performWithoutAnimation {
+                pose(resting)
+                avatar.layoutIfNeeded()
+            }
         }
     }
 
@@ -191,11 +283,13 @@ final class ForYouCardCaptionOverlay: UIView {
         case .onMedia:
             place(captionLabel, resting.caption, atFoot: true)
             place(authorLabel, resting.author, atFoot: true)
+            place(avatar, resting.avatar, atFoot: true)
             let top = fromFoot(resting.scrimTop)
             scrim.frame = CGRect(x: 0, y: top, width: bounds.width, height: bounds.height - top)
         case .onCard:
             place(captionLabel, resting.caption, atFoot: false)
             place(authorLabel, resting.author, atFoot: true)
+            place(avatar, resting.avatar, atFoot: true)
         }
     }
 
@@ -224,6 +318,9 @@ final class ForYouCardCaptionOverlay: UIView {
     /// suite pins.
     var debugCaptionFrame: CGRect { captionLabel.frame }
     var debugAuthorFrame: CGRect { authorLabel.frame }
+    /// The author's disc, and whether a picture covers its initials.
+    var debugAvatarFrame: CGRect { avatar.isHidden ? .null : avatar.frame }
+    var debugShowsAvatarPicture: Bool { !avatarPicture.isHidden && avatarPicture.image != nil }
     /// The width the caption is wrapped at — the card's, never the window's.
     var debugCaptionWrapWidth: CGFloat { captionLabel.bounds.width }
     #endif
@@ -297,7 +394,9 @@ final class ForYouFollowingCardCell: UICollectionViewCell {
         contentView.backgroundColor = isText
             ? PostGridListRowCell.cardFillColor
             : PostGridTileCell.fillColor(for: post)
-        let overlay = ForYouCardCaptionOverlay(post: post, placement: isText ? .onCard : .onMedia)
+        let overlay = ForYouCardCaptionOverlay(
+            post: post, placement: isText ? .onCard : .onMedia, imagePipeline: imagePipeline
+        )
         contentView.addSubview(overlay)
         overlay.frame = contentView.bounds
         self.overlay = overlay
@@ -329,9 +428,12 @@ final class ForYouFollowingCardCell: UICollectionViewCell {
     /// first layout pass inside the flight's block grew out of the window's
     /// top-left corner. `restingSize` nil (the card is not in its row) keeps
     /// the overlay laying out at whatever size it is given, as before.
-    static func makeOverlay(for post: GalleryPost, restingSize: CGSize?) -> ForYouCardCaptionOverlay {
+    static func makeOverlay(
+        for post: GalleryPost, restingSize: CGSize?, imagePipeline: ImagePipeline? = nil
+    ) -> ForYouCardCaptionOverlay {
         let overlay = ForYouCardCaptionOverlay(
-            post: post, placement: post.kind == .text ? .onCard : .onMedia, referenceSize: restingSize
+            post: post, placement: post.kind == .text ? .onCard : .onMedia, referenceSize: restingSize,
+            imagePipeline: imagePipeline
         )
         UIView.performWithoutAnimation { overlay.layoutIfNeeded() }
         return overlay
@@ -346,8 +448,12 @@ final class ForYouFollowingCardCell: UICollectionViewCell {
     /// (`RowCardCloseLanding`) — and what that window lands as has to be this
     /// card, picture and caption, not a text card that never sat in the row.
     /// `cover` is the picture the card was showing; nil draws its floor.
-    static func makeStandIn(for post: GalleryPost, cover: UIImage?, size: CGSize) -> UIView {
-        guard post.kind != .text else { return makeTextStandIn(for: post, size: size) }
+    static func makeStandIn(
+        for post: GalleryPost, cover: UIImage?, size: CGSize, imagePipeline: ImagePipeline? = nil
+    ) -> UIView {
+        guard post.kind != .text else {
+            return makeTextStandIn(for: post, size: size, imagePipeline: imagePipeline)
+        }
         let card = UIView(frame: CGRect(origin: .zero, size: size))
         card.backgroundColor = PostGridTileCell.fillColor(for: post)
         card.layer.cornerRadius = cornerRadius
@@ -359,19 +465,21 @@ final class ForYouFollowingCardCell: UICollectionViewCell {
         picture.image = cover
         picture.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         card.addSubview(picture)
-        addAnchoredOverlay(for: post, placement: .onMedia, to: card)
+        addAnchoredOverlay(for: post, placement: .onMedia, to: card, imagePipeline: imagePipeline)
         return card
     }
 
     /// A text card, drawn fresh at `size` — what a window opening from this
     /// card starts as and a close lands on.
-    static func makeTextStandIn(for post: GalleryPost, size: CGSize) -> UIView {
+    static func makeTextStandIn(
+        for post: GalleryPost, size: CGSize, imagePipeline: ImagePipeline? = nil
+    ) -> UIView {
         let card = UIView(frame: CGRect(origin: .zero, size: size))
         card.backgroundColor = PostGridListRowCell.cardFillColor
         card.layer.cornerRadius = cornerRadius
         card.layer.cornerCurve = .continuous
         card.clipsToBounds = true
-        addAnchoredOverlay(for: post, placement: .onCard, to: card)
+        addAnchoredOverlay(for: post, placement: .onCard, to: card, imagePipeline: imagePipeline)
         return card
     }
 
@@ -385,10 +493,12 @@ final class ForYouFollowingCardCell: UICollectionViewCell {
     /// text cards' half of the defect the flight's overlay had. From here on
     /// every pass only re-poses what this one wrapped.
     private static func addAnchoredOverlay(
-        for post: GalleryPost, placement: ForYouCardCaptionOverlay.Placement, to card: UIView
+        for post: GalleryPost, placement: ForYouCardCaptionOverlay.Placement, to card: UIView,
+        imagePipeline: ImagePipeline?
     ) {
         let overlay = ForYouCardCaptionOverlay(
-            post: post, placement: placement, referenceSize: card.bounds.size
+            post: post, placement: placement, referenceSize: card.bounds.size,
+            imagePipeline: imagePipeline
         )
         overlay.frame = card.bounds
         overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]

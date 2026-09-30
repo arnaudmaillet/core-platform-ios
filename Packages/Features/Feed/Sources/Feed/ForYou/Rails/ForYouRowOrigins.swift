@@ -214,7 +214,9 @@ enum ForYouRowOrigins {
             // `ForYouCardCaptionOverlay`.
             restingOverlay: { [weak rails] in
                 let size = rails.flatMap { $0.cardFrame(for: id, in: $0)?.size } ?? tappedSize
-                return ForYouFollowingCardCell.makeOverlay(for: tapped, restingSize: size)
+                return ForYouFollowingCardCell.makeOverlay(
+                    for: tapped, restingSize: size, imagePipeline: rails?.imagePipeline
+                )
             },
             willStageDismissal: { [weak rails, weak page] in
                 stageClose(page: page, then: closeStaged) { rails?.bringCardIntoView(id) }
@@ -242,7 +244,9 @@ enum ForYouRowOrigins {
             // The picture the card is showing NOW, or the one it showed at the
             // tap for a cell that has not drawn it again yet.
             let picture = rails.cardCover(for: id) ?? cover
-            return ForYouFollowingCardCell.makeStandIn(for: post, cover: picture, size: size)
+            return ForYouFollowingCardCell.makeStandIn(
+                for: post, cover: picture, size: size, imagePipeline: rails.imagePipeline
+            )
         }
         return TextRevealOrigin(
             rowFrame: { [weak rails] space in

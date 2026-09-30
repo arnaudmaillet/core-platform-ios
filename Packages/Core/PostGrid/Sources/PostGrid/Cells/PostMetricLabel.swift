@@ -113,6 +113,13 @@ public final class PostMetricLabel: UIView {
         label.isHidden = value == nil
     }
 
+    #if DEBUG
+    /// The number as drawn, nil when there is none.
+    public var debugText: String? { label.isHidden ? nil : label.text }
+    /// The glyph's symbol image, to tell one counter from another.
+    public var debugSymbol: UIImage? { icon.image }
+    #endif
+
     /// Re-inks the glyph — the like chip's heart fills in the points' red once
     /// the viewer has a stake on the post.
     func setGlyph(systemName: String, color: UIColor) {

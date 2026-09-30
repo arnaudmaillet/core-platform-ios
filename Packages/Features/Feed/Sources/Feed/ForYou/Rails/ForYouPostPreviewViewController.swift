@@ -85,7 +85,9 @@ final class ForYouPostPreviewViewController: UIViewController {
         imageView.contentMode = .scaleAspectFill
         imageView.clipsToBounds = true
         imageView.pin(to: view)
-        let overlay = ForYouCardCaptionOverlay(post: post, placement: isText ? .onCard : .onMedia)
+        let overlay = ForYouCardCaptionOverlay(
+            post: post, placement: isText ? .onCard : .onMedia, imagePipeline: imagePipeline
+        )
         overlay.pin(to: view)
 
         guard !isText, let url = post.thumbnailURL else { return }

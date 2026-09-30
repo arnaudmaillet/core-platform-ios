@@ -322,13 +322,14 @@ struct DiscoverGalleryTests {
         )
     }
 
-    /// `[‹] ———— [points][search]`: no title, no tab bar, and the root's two
-    /// trailing items in the root's order — search at the edge.
+    /// `[‹] ———— [points][search]` over "For you" as a large title (the
+    /// section the mosaic's chunks sit under, 2026-09-30), no tab bar, and the
+    /// root's two trailing items in the root's order — search at the edge.
     @Test func theHeaderIsBackThenPointsAndSearch() {
         let gallery = Self.gallery(wallet: Self.wallet())
         gallery.loadViewIfNeeded()
-        #expect(gallery.title == nil)
-        #expect(gallery.navigationItem.title == nil)
+        #expect(gallery.navigationItem.title == "For you")
+        #expect(gallery.navigationItem.largeTitleDisplayMode == .always)
         #expect(gallery.hidesBottomBarWhenPushed, "the tab bar leaves with the push, UIKit's way")
         #expect(gallery.navigationItem.rightBarButtonItems?.map(\.identifier) == [
             PushedScreenHeader.searchItemIdentifier, PushedScreenHeader.walletItemIdentifier
@@ -358,7 +359,6 @@ struct DiscoverGalleryTests {
         gallery.view.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
         gallery.render(.content(posts))
         gallery.view.layoutIfNeeded()
-        #expect(gallery.title == nil, "the pushed mosaic wears no title")
         #expect(gallery.debugOpenTile(at: 2))
         let shown = gallery.posts
         #expect(opened?.ids.first == shown[2].id, "the feed starts on the tapped tile")
