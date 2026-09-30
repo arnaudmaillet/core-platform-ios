@@ -49,7 +49,7 @@ import UIKit
 /// first title, and from the Popular row to "Recent", each title's LINE
 /// stands `Spacing.section` under what is above it and `Spacing.sectionTitle`
 /// over its posts — as For You's rows and its pushed lists do. The title bars
-/// centre their line (`SoundSheetSectionHeaderView.height`), so the gap the
+/// centre their line (`SectionTitleView.barHeight`), so the gap the
 /// layout adds above a bar is the section gap less the bar's own air
 /// (`DetentMetrics.sectionGap`). The SOUND also has room of its own
 /// (`headerInset`): above it and on its leading side.
@@ -778,14 +778,14 @@ final class SoundSheetViewController: UIViewController {
             [weak self] cell, _, _ in
             self?.configure(cell.header)
         }
-        let headerRegistration = UICollectionView.SupplementaryRegistration<SoundSheetSectionHeaderView>(
+        let headerRegistration = UICollectionView.SupplementaryRegistration<SectionTitleSupplementaryView>(
             elementKind: UICollectionView.elementKindSectionHeader
         ) { [weak self] header, _, path in
             guard let self, case .posts(let kind) = dataSource.sectionIdentifier(for: path.section),
                   let section = sections.first(where: { $0.kind == kind })
             else { return }
-            header.configure(title: section.title, hasMore: section.hasMore)
-            header.onViewAll = { [weak self] in self?.showSection(kind) }
+            Self.configure(header, for: section)
+            header.onTap = { [weak self] in self?.showSection(kind) }
         }
         dataSource = UICollectionViewDiffableDataSource(collectionView: collectionView) { view, path, item in
             switch item {
@@ -845,11 +845,11 @@ final class SoundSheetViewController: UIViewController {
         ) {
             guard let head = collectionView.supplementaryView(
                 forElementKind: UICollectionView.elementKindSectionHeader, at: path
-            ) as? SoundSheetSectionHeaderView,
+            ) as? SectionTitleSupplementaryView,
                 case .posts(let kind) = dataSource.sectionIdentifier(for: path.section),
                 let section = newSections.first(where: { $0.kind == kind })
             else { continue }
-            head.configure(title: section.title, hasMore: section.hasMore)
+            Self.configure(head, for: section)
         }
         if !isPreviewing { header?.setMeta(Self.meta(duration: sound.duration, posts: tiles.count)) }
         if let gallery = pushedGallery {
@@ -888,7 +888,7 @@ final class SoundSheetViewController: UIViewController {
         var sectionHeaderHeight: CGFloat
         /// The space above a section's title bar — under the sound, under the
         /// Popular row: `Spacing.section` to the title's line, less the bar's
-        /// own air (`SoundSheetSectionHeaderView.gapAbove`).
+        /// own air (`SectionTitleView.gapAbove`).
         var sectionGap: CGFloat
         var toolbarBand: CGFloat
         /// Whether the Popular row stands between the sound and "Recent".
@@ -1024,8 +1024,8 @@ final class SoundSheetViewController: UIViewController {
         let metrics = DetentMetrics(
             width: width,
             headerHeight: headerHeight(width: width, traits: traits),
-            sectionHeaderHeight: SoundSheetSectionHeaderView.height(traits: traits),
-            sectionGap: SoundSheetSectionHeaderView.gapAbove(traits: traits),
+            sectionHeaderHeight: SectionTitleView.barHeight(traits: traits),
+            sectionGap: SectionTitleView.gapAbove(traits: traits),
             toolbarBand: Self.measuredToolbarBand ?? estimatedToolbarBand(width: width),
             hasPopular: hasPopular
         )
@@ -1313,6 +1313,20 @@ final class SoundSheetViewController: UIViewController {
     }
 
     // MARK: - Sections
+
+    /// A section's head: the app's one section title (`SectionTitleView`) —
+    /// with a chevron right after it when the section holds more than the
+    /// sheet shows (`SoundSheetSection.hasMore`), the whole bar then one
+    /// control that pushes the ranking; a plain title when it shows
+    /// everything. No "View all" label (dropped 2026-09-30).
+    ///
+    /// ⚠️ Its height is `SectionTitleView.barHeight`, given ABSOLUTELY by the
+    /// layout: it is part of the collapsed detent, which is never measured
+    /// off a live layout.
+    static func configure(_ header: SectionTitleSupplementaryView, for section: SoundSheetSection) {
+        header.configure(.init(title: section.title, isLink: section.hasMore))
+        header.titleView.accessibilityHint = section.hasMore ? "Shows every post in \(section.title)" : nil
+    }
 
     /// A section's title and chevron — Popular's, the one section that has
     /// one: its whole ranking as a grid, pushed inside the sheet AT THE

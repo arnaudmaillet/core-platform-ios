@@ -12,10 +12,10 @@ import UIKit
 ///  │ 🔍 Search countries                  │
 ///  │ Your map        3 of 237 countries   │  ← scrolls with the list
 ///  │ ▓▓▓░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  │
-///  │ UNLOCKED · 3                         │
+///  │ Unlocked 3                           │
 ///  │ 🇫🇷 France                     Home   │
 ///  │ 🇺🇸 United States          ✓ Unlocked │
-///  │ LOCKED · 234                         │
+///  │ Locked 234                           │
 ///  │ 🇪🇸 Spain                             │
 ///  │    #4 · ♥ 12.4K · 86 posts    [◆ 50] │
 ///  └──────────────────────────────────────┘
@@ -25,7 +25,7 @@ import UIKit
 /// The progress block leads the collection — it is an ITEM, so it scrolls
 /// away with the rows rather than standing over them. Then **Unlocked** (the
 /// home country first, then by rank) and **Locked** (by rank), each header
-/// carrying its count. Search filters both sections at once; a section left
+/// the app's one section title carrying its count (`SectionTitleView`). Search filters both sections at once; a section left
 /// empty by it is dropped, and nothing left at all is the system's search
 /// empty state. An unlock moves its row from Locked to Unlocked, animated.
 ///
@@ -153,7 +153,7 @@ public final class CountryShopViewController: UIViewController {
                 view.dequeueConfiguredReusableCell(using: countryRegistration, for: path, item: code)
             }
         }
-        let headerRegistration = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
+        let headerRegistration = UICollectionView.SupplementaryRegistration<SectionTitleSupplementaryView>(
             elementKind: UICollectionView.elementKindSectionHeader
         ) { [weak self] header, _, path in
             self?.configure(header, section: path.section)
@@ -230,7 +230,7 @@ public final class CountryShopViewController: UIViewController {
         let kind = UICollectionView.elementKindSectionHeader
         for path in collectionView.indexPathsForVisibleSupplementaryElements(ofKind: kind) {
             guard let header = collectionView.supplementaryView(forElementKind: kind, at: path)
-                as? UICollectionViewListCell else { continue }
+                as? SectionTitleSupplementaryView else { continue }
             configure(header, section: path.section)
         }
     }
@@ -245,24 +245,28 @@ public final class CountryShopViewController: UIViewController {
         return (standings.filter { access.isUnlocked($0.code) }.count, standings.count)
     }
 
-    /// "Unlocked · 3" / "Locked · 234": the rows the section SHOWS, so a
-    /// search's count is its results'.
-    func headerTitle(for section: Section) -> String? {
+    /// "Unlocked 3" / "Locked 234" — the count in the secondary colour: the
+    /// rows the section SHOWS, so a search's count is its results'.
+    func headerContent(for section: Section) -> SectionTitleView.Content? {
         let snapshot = dataSource.snapshot()
         guard snapshot.sectionIdentifiers.contains(section) else { return nil }
         let count = snapshot.numberOfItems(inSection: section)
+        let title: String
         switch section {
         case .progress: return nil
-        case .unlocked: return "Unlocked · \(count)"
-        case .locked: return "Locked · \(count)"
+        case .unlocked: title = "Unlocked"
+        case .locked: title = "Locked"
         }
+        return SectionTitleView.Content(
+            title: title, count: count.formatted(),
+            countAccessibilityValue: count == 1 ? "1 country" : "\(count.formatted()) countries"
+        )
     }
 
-    private func configure(_ header: UICollectionViewListCell, section index: Int) {
-        guard let section = dataSource.sectionIdentifier(for: index) else { return }
-        var content = header.defaultContentConfiguration()
-        content.text = headerTitle(for: section)
-        header.contentConfiguration = content
+    private func configure(_ header: SectionTitleSupplementaryView, section index: Int) {
+        guard let section = dataSource.sectionIdentifier(for: index),
+              let content = headerContent(for: section) else { return }
+        header.configure(content)
     }
 
     private func configure(_ cell: CountryShopRowCell, code: String) {

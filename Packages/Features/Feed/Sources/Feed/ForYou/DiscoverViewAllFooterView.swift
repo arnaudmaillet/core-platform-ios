@@ -10,7 +10,7 @@ import UIKit
 /// Under the chunk rather than over it: the chunk is content, not a section
 /// that needs a title to be understood, and the control belongs where the
 /// eye arrives having looked through it. (The sound sheet's sections carry
-/// a bare chevron after their title instead, `SoundSheetSectionHeaderView`:
+/// a bare chevron after their title instead, `SectionTitleView`:
 /// a row scrolls sideways, and there the head is where the eye starts.)
 ///
 /// **Right-aligned, and close under the tiles** (2026-09-29): the chevron

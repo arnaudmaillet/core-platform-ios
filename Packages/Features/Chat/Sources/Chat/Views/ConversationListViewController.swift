@@ -370,12 +370,9 @@ extension ConversationListViewController: UITableViewDelegate {
         let header = tableView.dequeueReusableHeaderFooterView(
             withIdentifier: InboxSectionHeaderView.reuseIdentifier
         ) as? InboxSectionHeaderView
-        header?.setTitle(section.title, // ⚠️ TRUE for every section, not just the first. `leadsList: false` spends
-            // the section gap under the pill, which put a band of space between a
-            // header and its OWN first row from section two down. The separation
-            // between sections is the footer's job — see `heightForFooterInSection`
-            // — so the header has nothing left to pad.
-            leadsList: true)
+        // The separation between sections is the footer's job — see
+        // `heightForFooterInSection` — so the header has nothing to pad.
+        header?.setTitle(section.title)
         // The section's own first row, so tapping "Recent" puts Recent under
         // the header rather than wherever the list happened to be.
         header?.onTap = { [weak self] in
@@ -401,7 +398,7 @@ extension ConversationListViewController: UITableViewDelegate {
     /// previous section separates the two lists without moving anything that pins.
     func tableView(_ tableView: UITableView, heightForFooterInSection index: Int) -> CGFloat {
         index < tableView.numberOfSections - 1
-            ? SectionHeaderPillButton.Metrics.sectionGap
+            ? SectionHeaderPillButton.sectionGap(traits: tableView.traitCollection)
             : .leastNormalMagnitude
     }
 

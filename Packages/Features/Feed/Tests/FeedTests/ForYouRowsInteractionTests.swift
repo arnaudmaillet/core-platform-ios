@@ -76,9 +76,39 @@ struct ForYouRowsInteractionTests {
         rails.render(railsState(friends: [story("ana", unseen: false)]))
         rails.layoutIfNeeded()
         #expect(rails.debugShowsListHeader)
-        let rowsOnly = SectionLinkHeaderView.height + ForYouRailsView.Metrics.storySize(forWidth: 393).height
+        let rowsOnly = SectionTitleView.Metrics.height + ForYouRailsView.Metrics.storySize(forWidth: 393).height
         #expect(ForYouRailsView.height(forWidth: 393, friends: 1, following: 0)
-                >= rowsOnly + SectionLinkHeaderView.height, "room for the title")
+                >= rowsOnly + SectionTitleView.Metrics.height, "room for the title")
+    }
+
+    /// The three titles are the app's ONE section title (2026-09-30):
+    /// `Friends 2 ›` with the count as secondary text, "For you" a plain
+    /// heading — every one standing `SectionTitleView.Metrics.surfaceInset`
+    /// from the list's edge, the same line the pushed lists' and the sound
+    /// sheet's titles stand on.
+    @Test func theRowTitlesAreTheAppsSectionTitle() {
+        let list = UIScrollView(frame: CGRect(x: 0, y: 0, width: 393, height: 800))
+        let rails = makeRails()
+        list.addSubview(rails)
+        var state = railsState(
+            friends: [story("ana", unseen: true)], following: [post("p1", by: "bo"), post("p2", by: "cy")]
+        )
+        state.friendsBadge = 2
+        rails.render(state)
+        rails.layoutIfNeeded()
+        let headers = rails.debugHeaders
+        for header in headers { header.layoutIfNeeded() }
+        #expect(headers.map(\.debugTitleText) == ["Friends", "Following", "For you"])
+        #expect(headers.map(\.debugCountText) == ["2", nil, nil])
+        #expect(headers.map(\.debugShowsChevron) == [true, true, false])
+        for header in headers {
+            let x = header.convert(header.debugFrames.title, to: list).minX
+            #expect(abs(x - SectionTitleView.Metrics.surfaceInset) < 0.5, "\(header.debugTitleText ?? "") at \(x)")
+        }
+        let friends = headers[0].debugFrames
+        #expect(abs(friends.count.minX - friends.title.maxX - SectionTitleView.Metrics.titleToCount) < 0.5)
+        #expect(abs(friends.chevron.minX - friends.count.maxX - SectionTitleView.Metrics.countToChevron) < 0.5)
+        #expect(headers[0].accessibilityValue == "2 new")
     }
 
     // MARK: - Long press

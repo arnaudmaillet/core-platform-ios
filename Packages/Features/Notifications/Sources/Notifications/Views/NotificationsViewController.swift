@@ -86,12 +86,17 @@ final class NotificationsViewController: UIViewController {
     // MARK: - Setup
 
     private func makeLayout() -> UICollectionViewLayout {
-        var configuration = UICollectionLayoutListConfiguration(appearance: .plain)
-        configuration.showsSeparators = false
-        configuration.backgroundColor = .clear
-        configuration.headerMode = .supplementary
-        configuration.headerTopPadding = Spacing.sm
-        return UICollectionViewCompositionalLayout { _, environment in
+        UICollectionViewCompositionalLayout { index, environment in
+            var configuration = UICollectionLayoutListConfiguration(appearance: .plain)
+            configuration.showsSeparators = false
+            configuration.backgroundColor = .clear
+            configuration.headerMode = .supplementary
+            // The first title a small step under the large title; "Earlier"
+            // the app's one section gap under the rows above it
+            // (`Spacing.section` to its line, the bar's own air counted in).
+            configuration.headerTopPadding = index == 0
+                ? Spacing.sm
+                : SectionTitleView.gapAbove(traits: environment.traitCollection)
             let section = NSCollectionLayoutSection.list(using: configuration, layoutEnvironment: environment)
             // A plain list pins its headers; these scroll with their rows.
             // "New" and "Earlier" are landmarks in one list, not sticky
@@ -134,21 +139,13 @@ final class NotificationsViewController: UIViewController {
             cell, _, hiddenCount in
             cell.configure(hiddenCount: hiddenCount)
         }
-        let headerRegistration = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
+        // The app's one section title (`SectionTitleView`): a heading, no
+        // count, nothing to tap.
+        let headerRegistration = UICollectionView.SupplementaryRegistration<SectionTitleSupplementaryView>(
             elementKind: UICollectionView.elementKindSectionHeader
         ) { [weak self] header, _, indexPath in
             guard let self, sections.indices.contains(indexPath.section) else { return }
-            var content = UIListContentConfiguration.header()
-            content.text = sections[indexPath.section].title
-            content.textProperties.font = Self.headerFont
-            content.textProperties.color = .label
-            content.textProperties.transform = .none
-            content.directionalLayoutMargins = NSDirectionalEdgeInsets(
-                top: Spacing.md, leading: Spacing.lg, bottom: Spacing.xs, trailing: Spacing.lg
-            )
-            header.contentConfiguration = content
-            header.backgroundConfiguration = .clear()
-            header.accessibilityTraits = .header
+            header.configure(.init(title: sections[indexPath.section].title))
         }
 
         dataSource = UICollectionViewDiffableDataSource(collectionView: collectionView) {
@@ -164,18 +161,6 @@ final class NotificationsViewController: UIViewController {
         dataSource.supplementaryViewProvider = { collectionView, _, indexPath in
             collectionView.dequeueConfiguredReusableSupplementary(using: headerRegistration, for: indexPath)
         }
-    }
-
-    /// Section titles: the headline weight a step up in size — a list's
-    /// landmarks, not its content.
-    private static var headerFont: UIFont {
-        let title3 = UIFont.preferredFont(forTextStyle: .title3)
-        return UIFont(
-            descriptor: title3.fontDescriptor.addingAttributes([
-                .traits: [UIFontDescriptor.TraitKey.weight: UIFont.Weight.bold]
-            ]),
-            size: 0
-        )
     }
 
     private func configureStatusViews() {

@@ -305,20 +305,15 @@ final class MapSubFilterSheetViewController: UIViewController {
                 ? { [weak self] in self?.deactivate(subFilter) }
                 : nil
         }
-        let headerRegistration = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
+        // The app's one section title (`SectionTitleView`), its count the
+        // secondary text after it.
+        let headerRegistration = UICollectionView.SupplementaryRegistration<SectionTitleSupplementaryView>(
             elementKind: UICollectionView.elementKindSectionHeader
         ) { [weak self] header, _, indexPath in
             // Same trap as the cells: resolve the identity through the data
             // source, because a hidden section shifts every index below it.
-            let section = self?.dataSource.sectionIdentifier(for: indexPath.section)
-            var content = UIListContentConfiguration.groupedHeader()
-            content.text = section?.title
-            if section == .active, let self {
-                // The cap is a rule the viewer is allowed to see coming.
-                content.secondaryText = "\(sections.active.count) of \(sections.maxActive)"
-                content.prefersSideBySideTextAndSecondaryText = true
-            }
-            header.contentConfiguration = content
+            guard let self else { return }
+            header.configure(headerContent(for: dataSource.sectionIdentifier(for: indexPath.section)))
         }
 
         dataSource = UICollectionViewDiffableDataSource<Section, MapSubFilter>(collectionView: collectionView) {
@@ -445,6 +440,13 @@ final class MapSubFilterSheetViewController: UIViewController {
     /// is no restore path to get wrong.
     func cancelAndDismiss() {
         dismiss(animated: true)
+    }
+
+    /// A section's title; Active's carries how full the row is, `3 of 5` —
+    /// the cap is a rule the viewer is allowed to see coming.
+    private func headerContent(for section: Section?) -> SectionTitleView.Content {
+        guard section == .active else { return .init(title: section?.title) }
+        return .init(title: Section.active.title, count: "\(sections.active.count) of \(sections.maxActive)")
     }
 
     private func reloadHeaders() {

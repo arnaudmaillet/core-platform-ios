@@ -1,8 +1,8 @@
 import UIKit
 
-/// Every sectioned list's header, in the two shapes a section header has:
-/// a large bold title while it sits in the flow, and a floating glass capsule
-/// once it pins to the top.
+/// Every pinning list's section header, in the two shapes a section header
+/// has: a large bold title while it sits in the flow, and a floating glass
+/// capsule once it pins to the top.
 ///
 /// **Why two shapes.** In the flow a header is *typography* — it introduces the
 /// rows under it and wants the weight and size that says so. Pinned, it is
@@ -12,21 +12,33 @@ import UIKit
 /// and a list whose headers stayed one size looked, next to them, like a screen
 /// that had forgotten to.
 ///
+/// **The same title in both shapes (2026-09-30).** What the header SAYS is a
+/// `SectionTitleView` — the app's one section title, `New 8` with the count
+/// as secondary text — drawn `.standard` in the flow and `.compact` in the
+/// capsule. In the flow it is therefore indistinguishable from every other
+/// section title in the app: same type, same colours, same gaps, and the same
+/// `SectionTitleView.Metrics.surfaceInset` from the surface's edge. The
+/// capsule forms AROUND that line — its leading edge stays on it and the
+/// title steps in by the capsule's padding, which is most of what makes the
+/// morph read as one.
+///
 /// **A real `UIButton` on `UIButton.Configuration.glass()`** in the pinned
 /// state, not a `UIVisualEffectView` with a tap recognizer bolted on. That is
 /// what buys the native Liquid Glass press behaviour — the deform-and-settle
 /// spring, the highlight, the accessibility treatment of a control — none of
-/// which a recognizer over an effect view would produce.
+/// which a recognizer over an effect view would produce. The configuration
+/// draws the capsule and nothing else: the title is a SUBVIEW over it.
 ///
-/// It lives here rather than in any one feature because six lists across two
-/// features need the same header: the inbox's two tables, the compose picker's
-/// and the search screen's collection views, and For You's pushed Following and
-/// Friends lists. All of them host it; none of them owns how it looks.
+/// ⚠️ Not the configuration's title: on glass a configuration's content is
+/// rendered VIBRANT, and a two-colour title (a label title, a secondary
+/// count) is what vibrancy flattens — the hearts and gems that came out black
+/// were exactly that (`platter-flattens-label-alpha`). The count badge this
+/// header used to carry lived as a subview for the same reason.
 ///
-/// **An optional count** (`setCount`) rides after the title in both shapes —
-/// `New (23)` — as a `NotificationCountBadge`, the count the section's way in
-/// (`SectionLinkHeaderView`) wore on the screen before. Zero draws nothing, so
-/// a header nobody gives a count is exactly the header it always was.
+/// It lives here rather than in any one feature because the inbox's two
+/// tables, the inbox search's and the search screen's collection views, and
+/// For You's pushed Following and Friends lists all need the same header. All
+/// of them host it; none of them owns how it looks.
 public final class SectionHeaderPillButton: UIButton {
     /// Which shape the header is currently wearing.
     public enum Presentation: Equatable, Sendable {
@@ -42,18 +54,16 @@ public final class SectionHeaderPillButton: UIButton {
         public static let textInsets = NSDirectionalEdgeInsets(
             top: Spacing.sm, leading: Spacing.lg, bottom: Spacing.sm, trailing: Spacing.lg
         )
-        /// Around the pill, symmetric: it floats in the band rather than
-        /// hanging from either edge of it.
-        public static let float = Spacing.sm
-        /// Extra space above a header that FOLLOWS another section.
+        /// Above the pill: it floats clear of the top of the band it pins in.
         ///
-        /// ⚠️ The first header never gets it, and the asymmetry is the point.
-        /// It sits directly under the navigation bar's tab capsule, where a gap
-        /// reads as the screen failing to fill — there is nothing above it to be
-        /// separated from. Every later header IS separating two runs of content,
-        /// and without this its pill crowds the last row of the section before
-        /// it, reading as part of that section rather than the start of the next.
-        public static let sectionGap = Spacing.lg
+        /// ⚠️ The SAME for every header, first or not. A plain table PINS its
+        /// headers and a pinned header carries its top margin with it — a gap
+        /// spent above the pill hung a second section's capsule lower than the
+        /// first's for as long as both were stuck to the top (measured on the
+        /// inbox: `pillTop=8` for section 0, `24` for section 1). The
+        /// separation between sections is the host's, spent at the END of the
+        /// section above (`sectionGap(traits:)`).
+        public static let float = Spacing.sm
         /// How close to the pin line the header forms its capsule.
         ///
         /// Slightly BEFORE it locks, not at the instant it does: a morph that
@@ -63,8 +73,6 @@ public final class SectionHeaderPillButton: UIButton {
         /// The crossfade. Short enough to feel like a consequence of the scroll
         /// rather than an animation playing over it.
         public static let morphDuration: TimeInterval = 0.22
-        /// Title to count badge.
-        public static let badgeGap: CGFloat = 6
     }
 
     /// Fires when the capsule is tapped. Re-assigned on every configure, since
@@ -73,33 +81,21 @@ public final class SectionHeaderPillButton: UIButton {
 
     public private(set) var presentation: Presentation = .inline
 
-    /// Held so the section gap can be applied per header — see `setLeadsList`.
-    private var topConstraint: NSLayoutConstraint?
-    /// Carries the section gap now — see `pinAsHeader`.
+    /// The pill's distance from its host's leading edge — restated from the
+    /// surface on every host layout (`alignToSurface`).
+    private var leadingConstraint: NSLayoutConstraint?
+    /// Stands the inline title's line `Spacing.sectionTitle` over the first
+    /// row — see `bottomMargin`.
     private var bottomConstraint: NSLayoutConstraint?
-    /// What `setLeadsList` last said — the bottom margin is restated from it.
-    private var leadsList = true
-    /// The distance a host asked for between the inline title's line and the
-    /// section's first row (`setTitleToContent`); nil keeps `Metrics.float`.
-    private var titleToContent: CGFloat?
     /// ⚠️ **The header's height must not depend on which shape it is wearing.**
     /// The two states have different type sizes, so a self-sizing header would
     /// re-measure mid-scroll and shove every row below it — the morph would
     /// jitter the whole list. One constant height, sized for the taller of the
     /// two, keeps the box still while its contents change.
     private var heightConstraint: NSLayoutConstraint?
-    private var title: String?
-    /// The count after the title — a SUBVIEW, not part of the configuration.
-    ///
-    /// ⚠️ Not an image in the configuration nor a text attachment: on glass
-    /// both are rendered as vibrant content, and a red-and-white image comes
-    /// out as a flat monochrome shape (`platter-flattens-label-alpha`, the
-    /// hearts and gems that turned black). The configuration only RESERVES the
-    /// badge's width, through its trailing inset.
-    private let countBadge = NotificationCountBadge()
-    /// The badge's distance from the button's trailing edge — which differs
-    /// per shape, see `badgeTrailingInset`.
-    private var badgeTrailing: NSLayoutConstraint?
+    /// What the header says, drawn by `titleView` in both shapes.
+    private var content = SectionTitleView.Content(title: nil)
+    private let titleView = SectionTitleView(embeddedStyle: .standard)
     /// Watches the enclosing scroll view so the header decides its own shape.
     /// See `beginObservingScroll`.
     private var scrollObservation: NSKeyValueObservation?
@@ -108,20 +104,10 @@ public final class SectionHeaderPillButton: UIButton {
         super.init(frame: .zero)
         applyConfiguration(for: presentation)
         addAction(UIAction { [weak self] _ in self?.onTap?() }, for: .primaryActionTriggered)
-        countBadge.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(countBadge)
-        let badgeTrailing = trailingAnchor.constraint(
-            equalTo: countBadge.trailingAnchor,
-            constant: Self.badgeTrailingInset(for: presentation, traits: traitCollection)
-        )
-        self.badgeTrailing = badgeTrailing
-        NSLayoutConstraint.activate([
-            countBadge.centerYAnchor.constraint(equalTo: centerYAnchor),
-            badgeTrailing
-        ])
+        addSubview(titleView)
         // Hugging horizontally so the header wraps its title rather than
-        // stretching: it is sized by its label, and the space either side of it
-        // is the list showing through.
+        // stretching: it is sized by its title (`intrinsicContentSize`), and
+        // the space either side of it is the list showing through.
         setContentHuggingPriority(.required, for: .horizontal)
     }
 
@@ -129,79 +115,91 @@ public final class SectionHeaderPillButton: UIButton {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     public func setPillTitle(_ title: String?) {
-        self.title = title
-        applyConfiguration(for: presentation)
+        content.title = title
+        applyContent()
         accessibilityHint = title.map { "Scrolls to the \($0) section" }
     }
 
-    /// The count after the title. Zero (the default) draws none. Set on every
-    /// configure, like the title: header views are recycled across sections.
+    /// The count after the title — `New 8`, in the secondary colour. Zero (the
+    /// default) draws none. Set on every configure, like the title: header
+    /// views are recycled across sections.
     public func setCount(_ count: Int) {
-        guard count != countBadge.count else { return }
-        countBadge.setCount(count)
-        accessibilityValue = countBadge.count > 0 ? "\(countBadge.count) new" : nil
-        applyConfiguration(for: presentation)
+        let count = max(0, count)
+        guard count != self.count else { return }
+        self.count = count
+        content = SectionTitleView.Content(title: content.title, newCount: count)
+        applyContent()
     }
 
-    /// The count on the badge, zero while none shows.
-    public var count: Int { countBadge.count }
+    /// The count after the title, zero while none shows.
+    public private(set) var count = 0
 
-    /// Pins the header into a host: leading-aligned on the host's margins,
-    /// floating clear of its top and bottom, and free to be narrower than the
-    /// host is wide.
+    /// The title shown.
+    public var title: String? { content.title }
+
+    private func applyContent() {
+        titleView.content = content
+        // The button is the accessibility element (its subviews are not
+        // traversed): "New, 8 new, button".
+        accessibilityLabel = content.title
+        accessibilityValue = content.countAccessibilityValue
+        invalidateIntrinsicContentSize()
+        setNeedsLayout()
+        superview?.setNeedsLayout()
+    }
+
+    /// Pins the header into a host: its leading edge on the surface's title
+    /// line, floating clear of the host's top, and free to be narrower than
+    /// the host is wide.
     public func pinAsHeader(in host: UIView) {
         translatesAutoresizingMaskIntoConstraints = false
         host.addSubview(self)
-        // ⚠️ The top margin is the SAME for every header, and the section gap
-        // lives at the bottom. It used to be the other way round, and a pinned
-        // header carries its top margin with it — so a second section's pill hung
-        // lower than the first's for as long as it was stuck to the top of the
-        // list, which is the one place they are compared side by side.
+        let leading = leadingAnchor.constraint(
+            equalTo: host.leadingAnchor, constant: SectionTitleView.Metrics.surfaceInset
+        )
         let top = topAnchor.constraint(equalTo: host.topAnchor, constant: Metrics.float)
-        let bottom = host.bottomAnchor.constraint(equalTo: bottomAnchor, constant: Metrics.float)
+        let bottom = host.bottomAnchor.constraint(equalTo: bottomAnchor, constant: bottomMargin)
         let height = heightAnchor.constraint(equalToConstant: Self.reservedHeight(for: traitCollection))
-        topConstraint = top
+        leadingConstraint = leading
         bottomConstraint = bottom
         heightConstraint = height
         NSLayoutConstraint.activate([
-            leadingAnchor.constraint(equalTo: host.layoutMarginsGuide.leadingAnchor),
+            leading,
             top,
             height,
             bottom,
-            trailingAnchor.constraint(lessThanOrEqualTo: host.layoutMarginsGuide.trailingAnchor)
+            trailingAnchor.constraint(
+                lessThanOrEqualTo: host.trailingAnchor, constant: -SectionTitleView.Metrics.surfaceInset
+            )
         ])
     }
 
-    /// Whether this header opens the list or follows another section — which is
-    /// the only thing that decides its top margin. See `Metrics.sectionGap`.
-    ///
-    /// Set on every configure, not once: header views are recycled across
-    /// sections, so a view that carried the gap for "Recent" would carry it
-    /// into "New" the moment it was reused.
-    public func setLeadsList(_ leadsList: Bool) {
-        self.leadsList = leadsList
-        applyBottomMargin()
-    }
-
-    /// Puts the inline title's LINE `gap` points over the section's first row
-    /// — For You's lists pass `Spacing.sectionTitle`, the distance every
-    /// section title in the app keeps over its content (2026-09-30); nil (the
-    /// inbox's tables) keeps `Metrics.float` under the pill. Only the header's
-    /// bottom margin moves: the pill hangs from the header's TOP, so the
-    /// pinned capsule stands where it always did.
-    ///
-    /// Set on every configure, like the rest: header views are recycled.
-    public func setTitleToContent(_ gap: CGFloat?) {
-        titleToContent = gap
-        applyBottomMargin()
+    /// Restates the pill's leading edge from where its host sits on its
+    /// surface, so the title stands `SectionTitleView.Metrics.surfaceInset`
+    /// from the surface's edge whether the host is laid edge to edge (a
+    /// table's header) or inside a section's content insets (For You's
+    /// lists). Every host calls it from its `layoutSubviews`, before `super`.
+    public func alignToSurface() {
+        guard let host = superview else { return }
+        let inset = SectionTitleView.surfaceInsets(of: host).leading
+        if leadingConstraint?.constant != inset { leadingConstraint?.constant = inset }
     }
 
     /// Where the inline title's line stands from the header's top: the float
     /// over the pill, then the air the pill's reserved height leaves above a
-    /// title it centres. What a list counts its section gap from
-    /// (`Spacing.section`: the previous section's foot to this line).
+    /// title it centres. What a list counts its section gap from.
     public static func inlineTitleTop(traits: UITraitCollection) -> CGFloat {
         Metrics.float + inlineTitleAir(traits: traits)
+    }
+
+    /// What a host leaves between a section's last row and the NEXT header —
+    /// a table's footer, a section's bottom inset, a list's header top
+    /// padding: `Spacing.section` from that row to the next title's LINE,
+    /// less what the header holds above its line (`inlineTitleTop`). The app's
+    /// one section gap (2026-09-30), the same distance every other section
+    /// title keeps under the section above it.
+    public static func sectionGap(traits: UITraitCollection) -> CGFloat {
+        max(0, (Spacing.section - inlineTitleTop(traits: traits)).rounded())
     }
 
     /// The air above (and below) the inline title inside the pill's reserved
@@ -210,13 +208,17 @@ public final class SectionHeaderPillButton: UIButton {
         max(0, (reservedHeight(for: traits) - font(for: .inline, traits: traits).lineHeight) / 2)
     }
 
+    /// Under the pill: what stands the inline title's LINE `Spacing.sectionTitle`
+    /// over the section's first row — the distance every section title in the
+    /// app keeps over its content. Only the header's bottom margin carries
+    /// it: the pill hangs from the header's TOP, so the pinned capsule stands
+    /// where it always did.
+    private var bottomMargin: CGFloat {
+        max(0, (Spacing.sectionTitle - Self.inlineTitleAir(traits: traitCollection)).rounded())
+    }
+
     private func applyBottomMargin() {
-        // The gap separates this section from the rows above it, and it is spent
-        // BELOW the pill so the pill's own offset from the top of the header never
-        // changes. Same total header height either way; same pinned position.
-        let float = titleToContent.map { max(0, ($0 - Self.inlineTitleAir(traits: traitCollection)).rounded()) }
-            ?? Metrics.float
-        let constant = float + (leadsList ? 0 : Metrics.sectionGap)
+        let constant = bottomMargin
         guard bottomConstraint?.constant != constant else { return }
         bottomConstraint?.constant = constant
         // The host has to re-measure: this changes the header's HEIGHT, not
@@ -239,20 +241,22 @@ public final class SectionHeaderPillButton: UIButton {
         guard presentation != self.presentation else { return }
         self.presentation = presentation
         guard animated, window != nil else {
-            return UIView.performWithoutAnimation { applyConfiguration(for: presentation) }
+            return UIView.performWithoutAnimation {
+                applyConfiguration(for: presentation)
+                superview?.layoutIfNeeded()
+            }
         }
         // ⚠️ The fade is added FIRST and everything under it is then changed
         // with animation off. Both halves matter, and the second is the one that
         // was missing: a crossfade whose contents are ALSO animating is a
         // crossfade with a slide underneath it.
         //
-        // Two things slide if left alone. The header hugs its title and is
-        // anchored on its leading edge, so a type-size change moves the
-        // trailing edge — the capsule appears to grow out of the left margin
-        // rather than fade in. And `UIButton.Configuration` animates its own
-        // title change, which reveals the new text left-to-right on top of
-        // that. Neither is geometry the viewer asked to watch: the header is in
-        // the same place before and after, only dressed differently.
+        // The header hugs its title and is anchored on its leading edge, so a
+        // type-size change moves the trailing edge — left to animate, the
+        // capsule appears to grow out of the left margin rather than fade in,
+        // and the title's frames slide inside it. Neither is geometry the
+        // viewer asked to watch: the header is in the same place before and
+        // after, only dressed differently.
         //
         // `CATransition` rather than `UIView.transition` because it dissolves
         // the layer's RENDERED RESULT and takes no view-level animation with
@@ -378,14 +382,33 @@ public final class SectionHeaderPillButton: UIButton {
             scrollObservation = nil
         } else {
             beginObservingScroll()
+            // The surface is known now.
+            superview?.setNeedsLayout()
         }
+    }
+
+    // MARK: - Sizing
+
+    /// The title's run plus the shape's padding, at the reserved height — what
+    /// the capsule wraps and what the inline title occupies.
+    public override var intrinsicContentSize: CGSize {
+        let insets = Self.contentInsets(for: presentation)
+        return CGSize(
+            width: ceil(titleView.intrinsicContentSize.width + insets.leading + insets.trailing),
+            height: Self.reservedHeight(for: traitCollection)
+        )
     }
 
     public override func layoutSubviews() {
         super.layoutSubviews()
+        let insets = Self.contentInsets(for: presentation)
+        titleView.frame = CGRect(
+            x: insets.leading, y: 0,
+            width: max(0, bounds.width - insets.leading - insets.trailing), height: bounds.height
+        )
         // Over whatever the configuration draws — the glass is a background
         // UIKit may re-insert.
-        bringSubviewToFront(countBadge)
+        bringSubviewToFront(titleView)
     }
 
     public override func traitCollectionDidChange(_ previous: UITraitCollection?) {
@@ -405,52 +428,29 @@ public final class SectionHeaderPillButton: UIButton {
         case .pinned:
             configuration = .glass()
             configuration.cornerStyle = .capsule
-            configuration.contentInsets = Metrics.textInsets
-            configuration.baseForegroundColor = .secondaryLabel
         case .inline:
             configuration = .plain()
-            // No horizontal inset: a large title belongs on the list's own
-            // margin, beside the content it introduces. The capsule's padding
-            // is what indents the pinned shape, and watching the title step in
-            // as it forms is most of what makes the morph read as one.
-            configuration.contentInsets = .zero
-            configuration.baseForegroundColor = .label
         }
-        // Room for the badge after the title, reserved in the configuration so
-        // the button's own sizing — and the capsule — include it.
-        if countBadge.count > 0 {
-            let trailing = Self.badgeTrailingInset(for: presentation, traits: traitCollection)
-            configuration.contentInsets.trailing = trailing
-                + countBadge.intrinsicContentSize.width + Metrics.badgeGap
-            badgeTrailing?.constant = trailing
-        }
-        configuration.attributedTitle = title.flatMap { title in
-            guard !title.isEmpty else { return nil }
-            var attributes = AttributeContainer()
-            attributes.font = Self.font(for: presentation, traits: traitCollection)
-            return AttributedString(title, attributes: attributes)
-        }
+        // The capsule and nothing in it: the title is `titleView`.
+        configuration.contentInsets = .zero
         self.configuration = configuration
+        titleView.style = presentation == .pinned ? .compact : .standard
+        invalidateIntrinsicContentSize()
+        setNeedsLayout()
     }
 
-    /// How far the badge sits from the trailing edge: flush with the title's
-    /// margin inline, and CONCENTRIC in the capsule — the same distance from
-    /// the capsule's end as from its top and bottom, so the badge nests in the
-    /// curve rather than floating a text inset away from it.
-    private static func badgeTrailingInset(
-        for presentation: Presentation, traits: UITraitCollection
-    ) -> CGFloat {
+    /// The title's distance from the button's edges: none inline — the title
+    /// IS the section title, on the surface's title line — and the capsule's
+    /// padding pinned, which is what steps the title in as the capsule forms.
+    private static func contentInsets(for presentation: Presentation) -> NSDirectionalEdgeInsets {
         switch presentation {
-        case .inline: 0
-        case .pinned: max(Spacing.xs, (reservedHeight(for: traits) - NotificationCountBadge.height) / 2)
+        case .inline: .zero
+        case .pinned: Metrics.textInsets
         }
     }
 
     private static func font(for presentation: Presentation, traits: UITraitCollection) -> UIFont {
-        switch presentation {
-        case .inline: .preferredFont(forTextStyle: .title3, compatibleWith: traits).withWeight(.bold)
-        case .pinned: .preferredFont(forTextStyle: .subheadline, compatibleWith: traits).withWeight(.semibold)
-        }
+        SectionTitleView.titleFont(presentation == .pinned ? .compact : .standard, traits: traits)
     }
 
     /// The height the header holds in BOTH shapes — the taller of the two, so
@@ -461,15 +461,9 @@ public final class SectionHeaderPillButton: UIButton {
             + Metrics.textInsets.top + Metrics.textInsets.bottom
         return ceil(max(inline, pinned))
     }
-}
 
-private extension UIFont {
-    /// A weight at this font's own size, keeping whatever Dynamic Type has
-    /// already scaled it to — a descriptor edit, so the size is never restated.
-    func withWeight(_ weight: UIFont.Weight) -> UIFont {
-        let descriptor = fontDescriptor.addingAttributes([
-            .traits: [UIFontDescriptor.TraitKey.weight: weight]
-        ])
-        return UIFont(descriptor: descriptor, size: pointSize)
-    }
+    #if DEBUG
+    /// The title this header draws — the app's one section title.
+    public var debugTitleView: SectionTitleView { titleView }
+    #endif
 }

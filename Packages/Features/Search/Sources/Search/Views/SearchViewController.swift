@@ -745,8 +745,7 @@ final class SearchViewController: UIViewController {
             let section = self?.visibleSections[safe: indexPath.section]
             header.configure(
                 title: section?.title,
-                actionTitle: section?.actionTitle,
-                leadsList: indexPath.section == 0
+                actionTitle: section?.actionTitle
             )
             header.onAction = { [weak self] in
                 guard section == .recent else { return }

@@ -25,13 +25,14 @@ import UIKit
 /// "New" over what the viewer has not seen, "Recent" over the rest — the
 /// Messages inbox's split, with its headers: a large title in the flow that
 /// pins under the bar as a Liquid Glass capsule (`SectionHeaderPillButton`,
-/// tap to scroll to the section). "New" carries its count in the red badge
-/// (`NotificationCountBadge`) the For You header this list was pushed from
-/// wears, and it is the same number by construction: both are the size of the
-/// set the view model hands over (`Snapshot.followingNew` for Following,
-/// `.friendsUnseen` for Friends). #313 had made this list one plain run; the
-/// sections came back on 2026-09-29 by product call, on BOTH lists because
-/// they are one screen whose header badges answer the same question.
+/// tap to scroll to the section). "New" carries its count — secondary text
+/// after the title, `New 8` (`SectionTitleView`) — the number the For You
+/// header this list was pushed from carries, and the same one by
+/// construction: both are the size of the set the view model hands over
+/// (`Snapshot.followingNew` for Following, `.friendsUnseen` for Friends).
+/// #313 had made this list one plain run; the sections came back on
+/// 2026-09-29 by product call, on BOTH lists because they are one screen
+/// whose header counts answer the same question.
 ///
 /// A section with nothing in it is not drawn, and — unlike the inbox — a lone
 /// section keeps its title (2026-09-30): nothing new is "Recent" alone, titled;

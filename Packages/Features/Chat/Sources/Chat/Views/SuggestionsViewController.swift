@@ -168,7 +168,7 @@ extension SuggestionsViewController: UITableViewDelegate {
     /// previous section separates the two lists without moving anything that pins.
     func tableView(_ tableView: UITableView, heightForFooterInSection index: Int) -> CGFloat {
         index < tableView.numberOfSections - 1
-            ? SectionHeaderPillButton.Metrics.sectionGap
+            ? SectionHeaderPillButton.sectionGap(traits: tableView.traitCollection)
             : .leastNormalMagnitude
     }
 

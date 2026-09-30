@@ -79,13 +79,17 @@ final class InboxSearchResultsViewController: UIViewController {
         // Built per section rather than from one list configuration: every
         // section here carries a header, but the FIRST one must lose its top
         // padding — that padding separates a section from the rows above it, and
-        // at the top of the list there is nothing above to separate from.
+        // at the top of the list there is nothing above to separate from. The
+        // others leave the app's one section gap (`Spacing.section` to the
+        // next title's line — `SectionHeaderPillButton.sectionGap`).
         let layout = UICollectionViewCompositionalLayout { index, environment in
             var configuration = UICollectionLayoutListConfiguration(appearance: .plain)
             // No hairlines — see the compose picker and the search screen.
             configuration.showsSeparators = false
             configuration.headerMode = .supplementary
-            if index == 0 { configuration.headerTopPadding = 0 }
+            configuration.headerTopPadding = index == 0
+                ? 0
+                : SectionHeaderPillButton.sectionGap(traits: environment.traitCollection)
             return NSCollectionLayoutSection.list(using: configuration, layoutEnvironment: environment)
         }
 
@@ -124,10 +128,7 @@ final class InboxSearchResultsViewController: UIViewController {
             // section it names survives the snapshots that reshuffle rows
             // beneath it.
             let section = self?.visibleSections[safe: indexPath.section]
-            header.setTitle(
-                section.flatMap { self?.sectionTitles[$0] },
-                leadsList: indexPath.section == 0
-            )
+            header.setTitle(section.flatMap { self?.sectionTitles[$0] })
             header.onTap = { [weak self] in
                 guard let self, let section else { return }
                 self.scrollToTop(of: section)
