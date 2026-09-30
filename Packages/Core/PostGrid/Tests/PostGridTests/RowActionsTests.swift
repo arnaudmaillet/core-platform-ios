@@ -115,7 +115,8 @@ struct RowActionsTests {
         let leading = first.convert(first.bounds, to: cell.contentView).minX
         let trailing = cell.contentView.bounds.maxX
             - last.convert(last.bounds, to: cell.contentView).maxX
-        #expect(abs(leading + first.inkLeading - PostGridListRowCell.captionInset) < 0.5)
+        #expect(abs(leading + first.inkLeading - PostGridListRowCell.captionInset) < 0.5,
+                "box at \(leading), ink inset \(first.inkLeading), hang \(cell.closingLineHang)")
         #expect(abs(trailing + last.inkTrailing - PostGridListRowCell.captionInset) < 0.5)
         // And the two groups are apart: the slack is between them.
         let gap = ordered[2].convert(ordered[2].bounds, to: cell.contentView).minX

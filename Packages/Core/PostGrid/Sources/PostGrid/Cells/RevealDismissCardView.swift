@@ -49,11 +49,21 @@ public final class RevealDismissCardView: UIView, RevealStandInShaping {
         public var repost: Bool
         public var bookmark: Bool
         public var saved: Bool
+        /// What the VIEWER has staked on the post when the row's like stakes,
+        /// nil when the row's like is a plain counter.
+        ///
+        /// ⚠️ Without it every staked post flew home with the heart at rest
+        /// and turned red in the landing frame — filmed on 2026-09-30, once
+        /// the plain row put the resting heart in `.label` beside a red one.
+        /// The row reads the wallet (`PostCardStaking`); the stand-in has to
+        /// be told.
+        public var stake: Int?
 
-        public init(repost: Bool, bookmark: Bool, saved: Bool) {
+        public init(repost: Bool, bookmark: Bool, saved: Bool, stake: Int? = nil) {
             self.repost = repost
             self.bookmark = bookmark
             self.saved = saved
+            self.stake = stake
         }
 
         /// A row whose host wired neither control — a profile gallery's, until
@@ -131,6 +141,9 @@ public final class RevealDismissCardView: UIView, RevealStandInShaping {
         card.showRowActionsAsScenery(
             repost: actions.repost, bookmark: actions.bookmark, saved: actions.saved
         )
+        if let stake = actions.stake {
+            card.showStakeAsScenery(viewerStake: stake)
+        }
         // ⚠️ THE ROW'S DATE, not this instant's. See
         // `PostGridListRowCell.renderedAgeText`: a compact age is a function of
         // the clock, and the row worked its own out when it was configured.

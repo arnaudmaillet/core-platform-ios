@@ -67,6 +67,12 @@ public final class PostCardStaking {
         cell.setViewerStake(wallet.boostTotal(forTarget: key))
     }
 
+    /// What the viewer has staked on `postID` — the answer a bound row draws,
+    /// for a stand-in that has no binding (`RevealDismissCardView.RowActions`).
+    public func viewerStake(on postID: PostID) -> Int {
+        wallet.boostTotal(forTarget: postID.rawValue)
+    }
+
     /// Closes the undo window — the surface left the screen.
     public func endSession() {
         session.removeAll()

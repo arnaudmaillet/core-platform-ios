@@ -1588,6 +1588,18 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         syncClosingLine()
     }
 
+    /// Draws the like as a STAKING row draws it, without wiring it: the heart
+    /// kept when the post has no count yet, and red when the viewer has
+    /// staked. For a stand-in, on the same terms as `showRowActionsAsScenery`
+    /// — the landing frame swaps the stand-in for the row, and a heart
+    /// changing colour in it is the pop.
+    public func showStakeAsScenery(viewerStake: Int) {
+        reactions.keepsGlyphWhenEmpty = true
+        setViewerStake(viewerStake)
+        applyReactionCount()
+        syncClosingLine()
+    }
+
     /// What the row's date is CURRENTLY reading, so a stand-in can show the
     /// same string rather than working one out for itself.
     ///

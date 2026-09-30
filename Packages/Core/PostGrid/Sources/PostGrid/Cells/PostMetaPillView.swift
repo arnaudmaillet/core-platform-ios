@@ -534,6 +534,7 @@ public final class PostActionPillView: PostCardPillView {
         button.setContentHuggingPriority(.required, for: .horizontal)
         button.translatesAutoresizingMaskIntoConstraints = false
         button.widthAnchor.constraint(equalToConstant: width).isActive = true
+        button.fixedWidth = width
         return button
     }
 
@@ -542,15 +543,12 @@ public final class PostActionPillView: PostCardPillView {
     /// leaves of that width. Read off the image the button is drawing, so a
     /// wider glyph (the repost arrows) hangs less than a narrow one (save).
     override var inkLeading: CGFloat {
-        guard let button = glyphControl as? UIButton,
+        guard let button = glyphControl as? PostGlyphButton,
               let configuration = button.configuration,
               let image = configuration.image else { return 0 }
         let drawn = configuration.preferredSymbolConfigurationForImage
             .flatMap { image.applyingSymbolConfiguration($0) } ?? image
-        let width = button.constraints.first {
-            $0.firstAttribute == .width && $0.secondItem == nil && $0.isActive
-        }?.constant ?? button.bounds.width
-        return max((width - drawn.size.width) / 2, 0)
+        return max((button.fixedWidth - drawn.size.width) / 2, 0)
     }
 
     override var inkTrailing: CGFloat { inkLeading }
@@ -583,6 +581,14 @@ public final class PostActionPillView: PostCardPillView {
 /// the hit region grows around it, the way `PostMetaPillView` sizes its own
 /// chips.
 final class PostGlyphButton: UIButton {
+    /// The width it was built at (`makeGlyphControl`), kept as a value.
+    ///
+    /// ⚠️ Not re-read off `constraints`: once laid out a button adds its own
+    /// content-size width constraint there, whose constant is the IMAGE's
+    /// width — read first, it made the glyph's air zero and the closing line
+    /// hung 5pt off its column after the first layout pass.
+    var fixedWidth: CGFloat = 0
+
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
         let slopY = max((PostMetaPillView.minimumTouchTarget - bounds.height) / 2, 0)
         return bounds.insetBy(dx: 0, dy: -slopY).contains(point)

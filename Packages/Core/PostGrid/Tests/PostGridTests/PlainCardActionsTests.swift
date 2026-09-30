@@ -240,4 +240,35 @@ struct PlainCardActionsTests {
             #expect(glyph(of: a) == glyph(of: b))
         }
     }
+
+    /// ⚠️ A STAKED heart flies home red — filmed without this: the stand-in's
+    /// heart at rest, the row's red, the colour changing in the landing frame.
+    @Test func aStakedHeartFliesHomeRed() throws {
+        func heart(_ view: UIView) throws -> UIImageView {
+            let likes = try #require(walk(view, PostCardPillView.self)
+                .filter { !$0.isHidden && $0.superviewChainIsVisible && !($0 is PostActionPillView) }
+                .max { $0.frame.minX < $1.frame.minX })
+            return try #require(walk(likes, PostMetricLabel.self).first).icon
+        }
+        let wired = row()
+        wired.setViewerStake(10)
+        let view = RevealDismissCardView(
+            post: Self.post(), width: 370,
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            actions: .init(repost: true, bookmark: true, saved: false, stake: 10)
+        )
+        let card = try #require(view.subviews.first as? PostGridListRowCell)
+        #expect(try heart(card).tintColor == PointsSymbol.tint)
+        #expect(try heart(card).tintColor == heart(wired.contentView).tintColor)
+
+        // And a staking row with no count yet keeps its heart on both.
+        let countless = RevealDismissCardView(
+            post: Self.post(reactions: nil), width: 370,
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            actions: .init(repost: false, bookmark: false, saved: false, stake: 0)
+        )
+        let bare = try #require(countless.subviews.first as? PostGridListRowCell)
+        // The line's last VISIBLE action is the heart, not the comments.
+        #expect(try String(describing: heart(bare).image as Any).contains("system: heart"))
+    }
 }
