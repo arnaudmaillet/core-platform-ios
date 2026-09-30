@@ -1,6 +1,8 @@
 import CoreModels
+import CoreNavigation
 import CoreStorage
 import DesignSystem
+import FeedInterface
 import MediaCore
 import MediaPlayback
 import PostGrid
@@ -1897,9 +1899,20 @@ final class ForYouGridPage: UIView {
     /// Where the page stops matching the row, in the row's own space — the
     /// reveal's cut line. `nil` when the row is not realized.
     /// The card a dismissal carries home, drawn at the ROW's own width so its
-    /// caption wraps and truncates exactly as the row's does.
+    /// caption wraps and truncates exactly as the row's does — or, for a post
+    /// this page draws as a TILE, the tile.
+    ///
+    /// ⚠️ A TILE IS NOT A ROW, and this used to draw one for it. On Discover a
+    /// chunk's tile opens with a flight; page onto a text post and the close
+    /// is the card-shaped window (`installTextReveal`, `presenting: false`),
+    /// whose stand-in came from here — a whole post card, author band, caption
+    /// and actions, squeezed into the tile's rect. Filmed as "the whole post
+    /// interface squashed" in a window that should have held the tile's
+    /// picture. The tile's own twin (`PostGridTileStandInView`) is what the
+    /// window lands as now, the rows' #314 arrangement for a brick.
     func makeDismissStandIn(for postID: PostID) -> UIView? {
         guard let post = posts.first(where: { $0.id == postID }) else { return nil }
+        if drawsAsTile(postID) { return makeTileStandIn(for: post) }
         // The realized row's width when there is one, the list's own otherwise:
         // a row scrolled out still has to produce a card, and the width is a
         // property of the LIST rather than of any particular cell.
@@ -1949,7 +1962,17 @@ final class ForYouGridPage: UIView {
     /// Nil when nothing is realized at the slot: there is no rect to size to,
     /// and a stand-in built at a guessed size lands at the wrong one.
     func makeTileStandIn(for post: GalleryPost, slotOf occupantID: PostID) -> UIView? {
-        guard let size = cell(for: occupantID)?.bounds.size,
+        makeTileStandIn(for: post, slotOf: occupantID, sizingUnrealizedFromLayout: false)
+    }
+
+    /// `sizingUnrealizedFromLayout` is for a tile landing in its OWN slot, where
+    /// the layout's rect is the one the close measures too; a swap into
+    /// another post's slot keeps the rule above and refuses a guessed size.
+    private func makeTileStandIn(
+        for post: GalleryPost, slotOf occupantID: PostID, sizingUnrealizedFromLayout: Bool
+    ) -> UIView? {
+        let laidOut = sizingUnrealizedFromLayout ? slotSize(of: occupantID) : nil
+        guard let size = cell(for: occupantID)?.bounds.size ?? laidOut,
               size.width > 0, size.height > 0
         else { return nil }
         return PostGridTileStandInView(
@@ -1959,6 +1982,61 @@ final class ForYouGridPage: UIView {
             // curve are one decision — see `tileCornerRadius`.
             cornerRadius: tileCornerRadius,
             imagePipeline: imagePipeline
+        )
+    }
+
+    /// A tile's OWN twin — `post` in its own slot. See `makeDismissStandIn`.
+    func makeTileStandIn(for post: GalleryPost) -> UIView? {
+        makeTileStandIn(for: post, slotOf: post.id, sizingUnrealizedFromLayout: true)
+    }
+
+    /// The size the layout gives `postID`'s slot, for a slot with no realized
+    /// cell to measure — a close whose tile scrolled out under the open post
+    /// still lands as that tile rather than as nothing (and nothing, for a
+    /// window, is the live page squeezed into the tile's rect).
+    private func slotSize(of postID: PostID) -> CGSize? {
+        guard let index = posts.firstIndex(where: { $0.id == postID }) else { return nil }
+        return collectionView.layoutAttributesForItem(at: indexPath(for: index))?.size
+    }
+
+    /// The window a TILE's post opens (a text tile) and closes (any tile, once
+    /// the feed has paged onto words) through — for a host that opens its
+    /// tiles through `presentSnapFeedHero` (`RowCardCloseLanding`).
+    ///
+    /// ⚠️ OFFERED FOR MEDIA TILES TOO, the rows' rule (`ForYouRowOrigins`):
+    /// `hasHero` decides the opening, and this decides whether a close that
+    /// has nothing left to fly has anywhere to go. Without it a tile opened by
+    /// a flight and paged onto a text post had neither grab — both refuse a
+    /// `.card` page — and a chevron that cut.
+    ///
+    /// Marker-shaped, for the place page's reason: the feed is a pager, so the
+    /// tile and the page are the same post only until the first swipe. The
+    /// tile's own twin is the stand-in at both ends, in the tile's own shape
+    /// and ground; nothing is aligned (a tile has no caption to align to).
+    /// `willStageDismissal` is the host's: bring the tile back and pin the
+    /// inset before the landing is measured.
+    func tileWindow(
+        for post: GalleryPost,
+        willStageDismissal: @escaping () -> Void,
+        dismissalDidEnd: @escaping (Bool) -> Void
+    ) -> TextRevealOrigin? {
+        guard drawsAsTile(post.id), rowFrame(for: post.id, in: self) != nil else { return nil }
+        let anchor = post.id
+        return TextRevealOrigin(
+            rowFrame: { [weak self] space in self?.rowFrame(for: anchor, in: space) },
+            captionEnd: nil,
+            depthView: { [weak self] in self },
+            makeDismissStandIn: { [weak self] _ in self?.makeTileStandIn(for: post) },
+            makePresentStandIn: { [weak self] in self?.makeTileStandIn(for: post) },
+            alignsPageToSource: false,
+            pageFit: .covering,
+            cornerRadius: tileCornerRadius,
+            fill: PostGridTileCell.fillColor(for: post),
+            setConcealed: { [weak self] concealed in
+                self?.setRevealConcealed(concealed, for: anchor)
+            },
+            willStageDismissal: { _ in willStageDismissal() },
+            dismissalDidEnd: dismissalDidEnd
         )
     }
 

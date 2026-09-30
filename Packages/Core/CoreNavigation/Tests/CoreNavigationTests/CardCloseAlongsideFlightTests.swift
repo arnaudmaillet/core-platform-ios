@@ -215,4 +215,34 @@ struct CardCloseAlongsideFlightTests {
         #expect(stages == 1)
         withExtendedLifetime(feed) {}
     }
+
+    /// ⚠️ THE FLIGHT'S PUSH SURVIVES THE CLOSE BEING INSTALLED FIRST. The
+    /// close is installed right after the push, and a stack presented a moment
+    /// earlier (the sound sheet's over-sheet host) asks for the push's
+    /// animator only on its next turn — by then the slot is the close's. It
+    /// answered nil and the tile opened with UIKit's slide. The push of OUR
+    /// feed goes to the delegate it displaced; anything else stays native.
+    @Test func theFeedsPushGoesToTheDisplacedFlight() {
+        final class Flight: NSObject, UINavigationControllerDelegate, UIViewControllerAnimatedTransitioning {
+            func transitionDuration(using context: (any UIViewControllerContextTransitioning)?) -> TimeInterval { 0 }
+            func animateTransition(using context: any UIViewControllerContextTransitioning) {}
+            func navigationController(
+                _ navigationController: UINavigationController,
+                animationControllerFor operation: UINavigationController.Operation,
+                from fromVC: UIViewController, to toVC: UIViewController
+            ) -> (any UIViewControllerAnimatedTransitioning)? { self }
+        }
+        let (driver, feed, _) = armed(kind: .hero)
+        let host = UIViewController()
+        let nav = UINavigationController(rootViewController: host)
+        let flight = Flight()
+        nav.delegate = flight
+        driver.install(on: nav)
+        #expect(nav.delegate === driver, "precondition: the close holds the slot")
+        let pushed = driver.navigationController(nav, animationControllerFor: .push, from: host, to: feed)
+        #expect(pushed === flight, "the feed's push fell to UIKit's slide")
+        let other = driver.navigationController(nav, animationControllerFor: .push, from: host, to: UIViewController())
+        #expect(other == nil, "a push of another screen was taken from UIKit")
+        withExtendedLifetime(flight) {}
+    }
 }

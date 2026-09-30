@@ -310,6 +310,15 @@ public struct SnapFeedHeroOrigin {
     /// half its side, so the card leaves as a circle and lands as one. `nil`
     /// keeps the style's.
     public let cornerRadius: CGFloat?
+    /// The curve of that rounding, for a source whose own radius is NOT a
+    /// disc's — the sound sheet's tiles are a fixed 12pt squircle. `nil`
+    /// keeps the card's rule: the style's squircle, or a circle whenever
+    /// `cornerRadius` is set (a disc).
+    ///
+    /// ⚠️ The two have to agree with the source at the landing, or the frame
+    /// the card is taken away in swaps one corner for another — filmed on the
+    /// sound sheet as a flash of the tile's corners at the end of a close.
+    public let cornerCurve: CALayerCornerCurve?
     /// The picture the PAGE opens on, for a source that is not drawing the
     /// post at all — a friend's FACE opening onto their post.
     ///
@@ -385,6 +394,7 @@ public struct SnapFeedHeroOrigin {
         depthView: @escaping () -> UIView? = { nil },
         textReveal: TextRevealOrigin? = nil,
         cornerRadius: CGFloat? = nil,
+        cornerCurve: CALayerCornerCurve? = nil,
         pagePicture: UIImage? = nil,
         pagePictureOf: ((PostID, @escaping (UIImage) -> Void) -> UIImage?)? = nil,
         adoptLandingLiveMedia: ((UIView) -> Void)? = nil,
@@ -405,6 +415,7 @@ public struct SnapFeedHeroOrigin {
         self.depthView = depthView
         self.textReveal = textReveal
         self.cornerRadius = cornerRadius
+        self.cornerCurve = cornerCurve
         self.pagePicture = pagePicture
         self.pagePictureOf = pagePictureOf
         self.adoptLandingLiveMedia = adoptLandingLiveMedia

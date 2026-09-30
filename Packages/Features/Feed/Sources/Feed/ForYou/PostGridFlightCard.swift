@@ -152,7 +152,17 @@ final class PostGridFlightCard: UIView {
     /// operand on its own, and the face rises over it.
     private let drawsPost: Bool
 
-    init(post: GalleryPost, cover: UIImage?, style: Style, cornerRadius: CGFloat? = nil, drawsPost: Bool = true) {
+    /// - Parameter cornerCurve: the source's own curve, for a source that
+    ///   supplies its own `cornerRadius` and is NOT a disc — nil keeps the
+    ///   rule below (the style's squircle, or a circle for a disc).
+    init(
+        post: GalleryPost,
+        cover: UIImage?,
+        style: Style,
+        cornerRadius: CGFloat? = nil,
+        cornerCurve: CALayerCornerCurve? = nil,
+        drawsPost: Bool = true
+    ) {
         self.style = style
         self.drawsPost = drawsPost
         restingCornerRadius = cornerRadius
@@ -170,7 +180,13 @@ final class PostGridFlightCard: UIView {
         layer.cornerRadius = cornerRadius ?? style.cornerRadius
         // A disc is a circle, not a squircle: its curve must match the
         // avatar it leaves from or the corners pinch at takeoff.
-        layer.cornerCurve = cornerRadius == nil ? .continuous : .circular
+        //
+        // ⚠️ AND A SOURCE WITH ITS OWN RADIUS IS NOT ALWAYS A DISC. The sound
+        // sheet's tiles round at a fixed 12pt SQUIRCLE; read as a disc, the
+        // card landed on them with circular corners — a few points of corner
+        // swapped for the tile's in the frame the card went. Such a source
+        // names its curve (`SnapFeedHeroOrigin.cornerCurve`).
+        layer.cornerCurve = cornerCurve ?? (cornerRadius == nil ? .continuous : .circular)
 
         imageView.contentMode = .scaleAspectFill
         imageView.clipsToBounds = true
@@ -767,14 +783,58 @@ extension PostGridFlightCard: ZoomFlightCard {
     func adoptZoomLiveMedia(_ mirror: (UIView) -> Bool) {
         guard mirror(videoRenderView) else { return }
         hasAdoptedLiveMedia = true
-        videoRenderView.setPoster(imageView.image)
+        // The poster is the SURFACE's picture until its first frame: the
+        // card's own cover for a card that draws its post, but for a FACE
+        // the surface is the PAGE's player — the other end of the blend — so
+        // it is the page's still, never the face (`drawsPost`).
+        videoRenderView.setPoster(drawsPost ? imageView.image : departureCoverView.image)
         videoRenderView.isHidden = false
+        // A face mirroring the page's player has its far end now, still or
+        // no still — the same re-derivation the donated path makes.
+        refreshLandingPane()
+        applyBlend()
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
             print(String(format: "[zoom-live] %.3f card attached readyNow=%@",
                          CACurrentMediaTime(), videoRenderView.isReadyForDisplay ? "true" : "false"))
         }
         #endif
+    }
+
+    /// The ARRIVING page's picture, mirrored mid-flight, comes up over what the
+    /// card is already drawing — `PinCardView`'s arrangement, for the one
+    /// source of this card that flies no player of its own: a friend's FACE
+    /// (`ExternalHeroZoomSource.zoomFlightCarriesLivePlayer`).
+    ///
+    /// ⚠️ WITHOUT THIS A STORY FLEW ITS POSTER. Nothing on For You draws a
+    /// friend's post, so there is no surface to donate at the tap and none to
+    /// be granted one a few frames later: the card dissolved from the face to
+    /// the post's still, and the clip only started once the page had landed.
+    /// The page now decodes from take-off, the flight mirrors its player here
+    /// the moment it has one (`ZoomLiveMediaRetry`'s mirroring arm), and this
+    /// is how that picture arrives.
+    ///
+    /// The poster goes first, as on the marker's card: it is a COPY of the
+    /// still under the surface, so fading it would change nothing on screen
+    /// and the video would still cut in when it retires. What fades is the
+    /// video, and only once it has a frame (`fadeInOnFirstFrame` — the flight
+    /// reads a HIDDEN surface as no media, so the surface stays visible and
+    /// transparent meanwhile). Its alpha is the reveal's alone; the blend
+    /// never writes it — it moves the pane above.
+    func fadeInAdoptedLiveMedia(over duration: TimeInterval) {
+        guard hasAdoptedLiveMedia else { return }
+        videoRenderView.setPoster(nil)
+        videoRenderView.fadeInOnFirstFrame(over: duration)
+    }
+
+    /// A surface mirrored mid-flight stays out of sight until the card lands —
+    /// see `ZoomFlightCard.holdAdoptedLiveMediaUntilLanding` for why a late
+    /// surface cannot be posed exactly while the card is still travelling.
+    /// Hidden rather than faded, for the alpha's single owner above; the
+    /// arrival (`fadeInAdoptedLiveMedia`) un-hides it on its own terms.
+    func holdAdoptedLiveMediaUntilLanding() {
+        guard hasAdoptedLiveMedia else { return }
+        videoRenderView.isHidden = true
     }
 
     func setZoomCornerRadius(_ radius: CGFloat) {
