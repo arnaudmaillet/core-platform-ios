@@ -45,8 +45,7 @@ struct ProfileSelectorHandoverTests {
             isVerified: true,
             followerCount: .exact(12),
             followingCount: .exact(34),
-            reactionCount: .exact(56),
-            viewCount: .exact(78)
+            reactionCount: .exact(56)
         )
     }
 

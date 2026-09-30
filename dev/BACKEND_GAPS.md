@@ -33,6 +33,7 @@ full functionality.
 | 23 | Video publishes as an IMAGE asset: no `MEDIA_KIND_POST_VIDEO`, no `asset_id` on `MediaAttachmentInput`, and `ResolveDelivery` polled synchronously | Publishing a video against a real fleet (works in mock mode only) | **High** |
 | 24 | No country entitlements, standings or gem purchases; `RadarPin` has no country | Map country unlocks + Countries shop (mock only; fleet shows every country) | Medium |
 | 25 | `notification.v1`: no FOLLOW kind, no per-row read, no comment text | Notifications drawer — no "started following you / Follow back" rows; opening marks ALL read | Medium |
+| 26 | `counter.v1` has no PLACE entity; profile-scoped LIKE unverified on the fleet | Place page "Likes" total is a client-side sum; profile header "Likes" column hidden wherever the projection is absent | Low |
 
 ---
 
@@ -949,6 +950,28 @@ Sender pictures and post thumbnails are hydrated client-side (`profile.v1`
 `GetProfileById` per distinct sender, `post.v1` `GetPost` per distinct post) —
 N+1, cached per session. → **Needs:** the FOLLOW kind; `MarkRead` by id;
 optionally denormalised `preview_text` / `thumbnail_url` on the view.
+
+---
+
+## 26. `counter.v1` has no PLACE entity; profile-scoped LIKE unverified on the fleet
+
+**Status: client built 2026-09-30.** The place page and the profile header
+show a **Likes** total (they showed Reactions + Views until then; views are
+shown nowhere in the app any more, and the client no longer requests the
+`VIEW` metric).
+
+- **Place.** `Counter_V1_CounterEntityType` has no `PLACE` (nor any geo)
+  entity, so the place page sums `LIKE` over the posts it hydrates for the
+  cluster (`PlaceProfileViewController.aggregatedLikes`). The total is only as
+  complete as the member list the map hands over (§18: `QueryTile` is Top-K
+  capped), so a busy place under-counts. → **Needs:** a place entity (or the
+  §18 `GeoCluster` carrying a `like_count`) projected by the counter-worker.
+- **Profile.** The client reads `LIKE` on `COUNTER_ENTITY_TYPE_PROFILE` (the
+  sum of likes received across the profile's posts). The mock projects it;
+  the fleet's projection has not been verified and, like §7's
+  follower/following, may be empty — the column is then not drawn. There is
+  no client-side fallback on purpose: the profile's gallery holds only the
+  pages it has fetched, and a partial sum would read as the total.
 
 ---
 

@@ -21,7 +21,7 @@ struct ProfileHeaderStaggerTests {
             id: ProfileID(name), handle: name, displayName: name.capitalized, bio: bio,
             avatarURL: nil, websiteURL: nil, isVerified: false,
             followerCount: .exact(followers), followingCount: .exact(1),
-            reactionCount: .exact(1), viewCount: .exact(1)
+            reactionCount: .exact(1)
         ))
     }
 

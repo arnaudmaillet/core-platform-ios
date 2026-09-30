@@ -1,7 +1,11 @@
 import CoreContracts
 import Foundation
 
-/// The three numbers `counter.v1` keeps about a post.
+/// The two numbers the app reads from `counter.v1` about a post.
+///
+/// Views are not read any more (2026-09-30): no surface shows them — tiles,
+/// cards and the profile / place headers all count likes — so the metric is
+/// not asked for.
 ///
 /// Each is OPTIONAL because absent and zero are different claims: a surface
 /// hides a counter it has no value for and renders a `0` it does have, and
@@ -10,12 +14,10 @@ import Foundation
 public struct PostCounters: Sendable, Equatable {
     public let likes: Int64?
     public let comments: Int64?
-    public let views: Int64?
 
-    public init(likes: Int64?, comments: Int64?, views: Int64?) {
+    public init(likes: Int64?, comments: Int64?) {
         self.likes = likes
         self.comments = comments
-        self.views = views
     }
 }
 
@@ -48,7 +50,7 @@ public enum PostCounterReader {
             entity.id = id
             return entity
         }
-        request.metrics = [.like, .comment, .view]
+        request.metrics = [.like, .comment]
         let response = await client.batchGetCounters(request: request, headers: [:])
         guard let snapshots = response.message?.snapshots else { return [:] }
         return Dictionary(
@@ -57,8 +59,7 @@ public enum PostCounterReader {
                     snapshot.entity.id,
                     PostCounters(
                         likes: snapshot.values.first { $0.metric == .like }?.value,
-                        comments: snapshot.values.first { $0.metric == .comment }?.value,
-                        views: snapshot.values.first { $0.metric == .view }?.value
+                        comments: snapshot.values.first { $0.metric == .comment }?.value
                     )
                 )
             },

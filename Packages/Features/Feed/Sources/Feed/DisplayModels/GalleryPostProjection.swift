@@ -87,10 +87,9 @@ enum GalleryPostProjection {
             likeCount: post.reactionCount ?? 0,
             timestampText: PostMetadata.compactAge(ofMillis: post.publishedAtMS, now: now),
             // Passed through as OPTIONALS, not collapsed to zero: this is the
-            // one place that knows all three, and a text page's caption row
-            // spells them exactly as the row it was opened from does.
+            // one place that knows both, and a text page's caption row spells
+            // them exactly as the row it was opened from does.
             cardMetrics: PostCardMetrics(
-                views: post.viewCount,
                 reactions: post.reactionCount,
                 comments: post.commentCount
             ),

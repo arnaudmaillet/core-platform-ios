@@ -6,8 +6,8 @@ import UIKit
 ///
 /// A `UIControl`, not a plain view: Followers and Following open the
 /// relationship lists, and a control gives that a press state, the button
-/// accessibility trait, and `addAction` wiring for free. Reactions and Views
-/// have no destination — they stay inert, which `isTappable` makes explicit
+/// accessibility trait, and `addAction` wiring for free. Likes has no
+/// destination — it stays inert, which `isTappable` makes explicit
 /// rather than leaving to whether a caller happened to attach an action.
 final class ProfileStatView: UIControl {
     private let valueLabel = UILabel()
@@ -42,9 +42,9 @@ final class ProfileStatView: UIControl {
         valueLabel.textAlignment = .center
 
         captionLabel.text = caption
-        // caption1, not footnote: four of these share the identity column
-        // beside the avatar (~64pt per cell on a 393pt screen), and
-        // "Followers" must fit that cell without truncating.
+        // caption1, not footnote: several of these share one row, and
+        // "Followers" must fit its cell without truncating. (Four did until
+        // Views went on 2026-09-30; the type was kept, not re-tuned.)
         captionLabel.font = .preferredFont(forTextStyle: .caption1)
         captionLabel.adjustsFontForContentSizeCategory = true
         captionLabel.textColor = .secondaryLabel

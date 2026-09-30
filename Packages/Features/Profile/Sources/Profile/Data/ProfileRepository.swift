@@ -140,12 +140,11 @@ public struct UserProfile: Equatable, Sendable {
     public let visibility: ProfileVisibility
     public let followerCount: CountEstimate
     public let followingCount: CountEstimate
-    /// Total reactions received across the profile's posts (counter.v1 LIKE,
-    /// profile-scoped). No social-graph fallback exists for this metric.
+    /// Total likes received across the profile's posts (counter.v1 LIKE,
+    /// profile-scoped) — the header's "Likes". No social-graph fallback exists
+    /// for this metric. (Views were read beside it until 2026-09-30; nothing
+    /// shows them any more.)
     public let reactionCount: CountEstimate
-    /// Total content views across the profile's posts (counter.v1 VIEW,
-    /// profile-scoped). No fallback source exists for this metric.
-    public let viewCount: CountEstimate
 
     public init(
         id: ProfileID,
@@ -161,8 +160,7 @@ public struct UserProfile: Equatable, Sendable {
         visibility: ProfileVisibility = .unspecified,
         followerCount: CountEstimate,
         followingCount: CountEstimate,
-        reactionCount: CountEstimate,
-        viewCount: CountEstimate
+        reactionCount: CountEstimate
     ) {
         self.id = id
         self.handle = handle
@@ -176,7 +174,6 @@ public struct UserProfile: Equatable, Sendable {
         self.followerCount = followerCount
         self.followingCount = followingCount
         self.reactionCount = reactionCount
-        self.viewCount = viewCount
     }
 }
 
@@ -599,20 +596,19 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileViewe
 
     // MARK: - Social counters
 
-    /// The four header metrics, resolved together.
+    /// The three header metrics, resolved together.
     struct SocialCounts {
         let followers: CountEstimate
         let following: CountEstimate
         let reactions: CountEstimate
-        let views: CountEstimate
     }
 
     /// Best-effort: an outage in *both* sources degrades to `.unavailable`
     /// (rendered "—") rather than failing the whole profile load. The counter
     /// read is one round-trip; the social-graph fallbacks fire only for metrics
-    /// the counter didn't already answer, and run concurrently. Reactions and
-    /// views live *only* in counter.v1 — there is no edge set to sample — so an
-    /// empty read degrades straight to `.unavailable`.
+    /// the counter didn't already answer, and run concurrently. Likes live
+    /// *only* in counter.v1 — there is no edge set to sample — so an empty
+    /// read degrades straight to `.unavailable`.
     private func fetchSocialCounts(for id: ProfileID) async -> SocialCounts {
         let counter = await counterEstimates(for: id)
         async let followers = resolve(counter.followers, fallback: { await self.followerFallback(for: id) })
@@ -620,8 +616,7 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileViewe
         return await SocialCounts(
             followers: followers,
             following: following,
-            reactions: counter.reactions ?? .unavailable,
-            views: counter.views ?? .unavailable
+            reactions: counter.reactions ?? .unavailable
         )
     }
 
@@ -635,23 +630,23 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileViewe
     /// value for it (the signal to fall back), not `.unavailable`.
     private func counterEstimates(
         for id: ProfileID
-    ) async -> (followers: CountEstimate?, following: CountEstimate?, reactions: CountEstimate?, views: CountEstimate?) {
+    ) async -> (followers: CountEstimate?, following: CountEstimate?, reactions: CountEstimate?) {
         var entity = Counter_V1_EntityRef()
         entity.entityType = .profile
         entity.id = id.rawValue
 
         var request = Counter_V1_BatchGetCountersRequest()
         request.entities = [entity]
-        request.metrics = [.follower, .following, .like, .view]
+        request.metrics = [.follower, .following, .like]
 
         let response = await counterClient.batchGetCounters(request: request, headers: [:])
         guard let snapshot = response.message?.snapshots.first else {
-            return (nil, nil, nil, nil)
+            return (nil, nil, nil)
         }
         func estimate(_ metric: Counter_V1_CounterMetric) -> CountEstimate? {
             snapshot.values.first { $0.metric == metric }.map { CountEstimate.exact($0.value) }
         }
-        return (estimate(.follower), estimate(.following), estimate(.like), estimate(.view))
+        return (estimate(.follower), estimate(.following), estimate(.like))
     }
 
     private func followerFallback(for id: ProfileID) async -> CountEstimate {
@@ -694,8 +689,7 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileViewe
             visibility: ProfileVisibility(view.visibility),
             followerCount: counts.followers,
             followingCount: counts.following,
-            reactionCount: counts.reactions,
-            viewCount: counts.views
+            reactionCount: counts.reactions
         )
     }
 }

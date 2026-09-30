@@ -24,8 +24,7 @@ struct CommentChipTests {
                 caption: "Golden hour over the harbour.",
                 publishedAtMS: 0,
                 reactionCount: 160,
-                commentCount: comments,
-                viewCount: 4_200
+                commentCount: comments
             ),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
         )

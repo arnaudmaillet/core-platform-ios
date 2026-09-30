@@ -9,7 +9,7 @@ import UIKit
 @testable import Feed
 
 /// The PLACE PROFILE: a hero banner wearing the top post, aggregated
-/// Reactions/Views, two tabs (a Discover grid and an Activity list, both by
+/// Likes, two tabs (a Discover grid and an Activity list, both by
 /// popularity), and the follow toggle in its header.
 @MainActor
 struct PlaceProfileTests {
@@ -17,7 +17,6 @@ struct PlaceProfileTests {
         _ id: String,
         kind: GalleryPost.Kind = .photo,
         reactions: Int64? = nil,
-        views: Int64? = nil,
         publishedAtMS: Int64 = 0,
         author: String? = nil,
         thumbnail: String? = nil
@@ -27,7 +26,7 @@ struct PlaceProfileTests {
             thumbnailURL: thumbnail.flatMap { URL(string: $0) },
             caption: "", publishedAtMS: publishedAtMS,
             authorName: author,
-            reactionCount: reactions, viewCount: views
+            reactionCount: reactions
         )
     }
 
@@ -267,16 +266,17 @@ struct PlaceProfileTests {
             in: PlaceProfileViewController.gallery(shouted))?.id == PostID("post-2"))
     }
 
-    /// The metric band's two numbers are straight sums; a counter the
-    /// read-model never projected counts as zero, never poisons the total.
-    @Test func metricsAggregateReactionsAndViews() {
-        let totals = PlaceProfileViewController.aggregatedMetrics(of: [
-            post("post-1", reactions: 100, views: 1_000),
-            post("post-2", reactions: 40, views: nil),
-            post("post-3", reactions: nil, views: 500),
+    /// The band's Likes is a straight sum — client-side, since counter.v1 has
+    /// no place entity; a counter the read-model never projected counts as
+    /// zero, never poisons the total. (It stood beside a Views total until
+    /// 2026-09-30.)
+    @Test func likesAggregateOverEveryMember() {
+        let likes = PlaceProfileViewController.aggregatedLikes(of: [
+            post("post-1", reactions: 100),
+            post("post-2", reactions: 40),
+            post("post-3", reactions: nil),
         ])
-        #expect(totals.reactions == 140)
-        #expect(totals.views == 1_500)
+        #expect(likes == 140)
     }
 
     // MARK: - Activity
@@ -436,14 +436,13 @@ struct PlaceProfileTests {
     /// a grid cannot draw it would make the place look quieter than it is.
     @Test func theMetricsCountTheWholePlaceNotJustItsGallery() async {
         let profile = makeProfile(posts: [
-            post("post-1", kind: .photo, reactions: 50, views: 100, publishedAtMS: 1_000),
-            post("post-2", kind: .text, reactions: 7, views: 20, publishedAtMS: 2_000),
+            post("post-1", kind: .photo, reactions: 50, publishedAtMS: 1_000),
+            post("post-2", kind: .text, reactions: 7, publishedAtMS: 2_000),
         ])
         profile.beginLoading()
         for _ in 0..<50 where profile.renderedPosts.isEmpty { await Task.yield() }
         #expect(profile.renderedPosts.count == 1, "precondition: the text post left the grid")
-        #expect(profile.debugMetrics.reactions == 57)
-        #expect(profile.debugMetrics.views == 120)
+        #expect(profile.debugLikes == 57)
     }
 
     // MARK: - The follow toggle

@@ -149,9 +149,10 @@ public final class MockCounterService: @unchecked Sendable {
                     ? store.totalLikes(forAuthor: entity.id)
                     : store.likeCount(for: entity.id))
             }
-            // Views and comments are projected for POSTS only: profile-scoped
-            // views intentionally stay unanswered so the header's "—" state
-            // keeps exercising the unavailable path.
+            // Views and comments are projected for POSTS only, as the fleet's
+            // read-model does. No client surface reads views any more (the
+            // mock's sound ranking reads the store directly); they stay
+            // answered so a `.view` request still gets the contract's shape.
             if entity.entityType == .post {
                 if wantsView { append(.view, store.viewCount(for: entity.id)) }
                 if wantsComment { append(.comment, store.commentCount(for: entity.id)) }

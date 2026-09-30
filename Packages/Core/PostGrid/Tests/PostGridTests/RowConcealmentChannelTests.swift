@@ -31,8 +31,7 @@ struct RowConcealmentChannelTests {
             caption: "Golden hour over the harbour.",
             publishedAtMS: 0,
             reactionCount: 160,
-            commentCount: 12,
-            viewCount: 4_200
+            commentCount: 12
         )
     }
 

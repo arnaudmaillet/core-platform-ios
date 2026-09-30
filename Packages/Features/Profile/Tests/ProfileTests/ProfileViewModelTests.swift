@@ -103,8 +103,7 @@ private func sampleProfile(followers: CountEstimate = .exact(1_234)) -> UserProf
         isVerified: true,
         followerCount: followers,
         followingCount: .exact(56),
-        reactionCount: .exact(9_800),
-        viewCount: .atLeast(120_000)
+        reactionCount: .exact(9_800)
     )
 }
 

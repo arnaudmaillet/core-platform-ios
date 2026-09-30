@@ -1116,7 +1116,6 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // skeleton waiting for the next publish.
         if let lastSnapshot { gallery.render(lastSnapshot.media) }
         discoverGallery = gallery
-        PushedScreenHeader.allowLargeTitles(on: navigationController)
         navigationController.pushViewController(gallery, animated: true)
     }
 
@@ -2245,7 +2244,6 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
                 + " posts=\(list.posts.count)")
         }
         #endif
-        PushedScreenHeader.allowLargeTitles(on: navigationController)
         navigationController.pushViewController(list, animated: true)
     }
 
@@ -2743,9 +2741,8 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
 
     /// `-foryou-pushed-scroll Y`: scrolls a pushed list or the mosaic Y points
     /// into its content before `-foryou-list-open` / `-foryou-gallery-open`
-    /// taps, so a return can be filmed away from the top as well as at it —
-    /// the two rest under a different bar with a large title. Opens at once
-    /// without the flag.
+    /// taps, so a return can be filmed away from the top as well as at it.
+    /// Opens at once without the flag.
     private func preScrollIfRequested(_ scroll: (CGFloat) -> Void, then open: @escaping () -> Void) {
         let arguments = ProcessInfo.processInfo.arguments
         guard let position = arguments.firstIndex(of: "-foryou-pushed-scroll"),

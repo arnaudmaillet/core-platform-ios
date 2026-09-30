@@ -129,7 +129,6 @@ public actor ForYouRepository: ForYouProviding {
                 var decorated = post
                 decorated.reactionCount = counts.likes ?? post.reactionCount
                 decorated.commentCount = counts.comments
-                decorated.viewCount = counts.views
                 return decorated
             },
             nextPageToken: page.nextPageToken
@@ -138,7 +137,7 @@ public actor ForYouRepository: ForYouProviding {
 
     /// Projects hydrated timeline entries onto grid tiles.
     ///
-    /// `commentCount`/`viewCount` are left absent HERE and filled by
+    /// `commentCount` is left absent HERE and filled by
     /// `withCounters` afterwards: a `FeedEntry` carries a like count and nothing
     /// else, so the numbers come from `counter.v1` in one batched read per page.
     ///

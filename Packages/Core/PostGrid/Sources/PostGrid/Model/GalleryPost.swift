@@ -120,7 +120,6 @@ public struct GalleryPost: Equatable, Sendable {
     public var authorAvatarURL: URL?
     public var reactionCount: Int64?
     public var commentCount: Int64?
-    public var viewCount: Int64?
 
     public init(
         id: PostID,
@@ -136,8 +135,7 @@ public struct GalleryPost: Equatable, Sendable {
         authorHandle: String? = nil,
         authorAvatarURL: URL? = nil,
         reactionCount: Int64? = nil,
-        commentCount: Int64? = nil,
-        viewCount: Int64? = nil
+        commentCount: Int64? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -163,7 +161,6 @@ public struct GalleryPost: Equatable, Sendable {
         self.authorAvatarURL = authorAvatarURL
         self.reactionCount = reactionCount
         self.commentCount = commentCount
-        self.viewCount = viewCount
     }
 
     /// The collection initializer. The single-media one above stays because
@@ -181,8 +178,7 @@ public struct GalleryPost: Equatable, Sendable {
         authorHandle: String? = nil,
         authorAvatarURL: URL? = nil,
         reactionCount: Int64? = nil,
-        commentCount: Int64? = nil,
-        viewCount: Int64? = nil
+        commentCount: Int64? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -196,7 +192,6 @@ public struct GalleryPost: Equatable, Sendable {
         self.authorAvatarURL = authorAvatarURL
         self.reactionCount = reactionCount
         self.commentCount = commentCount
-        self.viewCount = viewCount
     }
 
     /// Portrait, square, or landscape, from the media's own pixels.

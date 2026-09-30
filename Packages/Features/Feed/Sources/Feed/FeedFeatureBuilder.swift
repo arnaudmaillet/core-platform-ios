@@ -461,7 +461,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             hydrate: { ids in
                 // The place profile's hydration, verbatim in shape: a fixed-set
                 // provider through the For You repository so every member is a
-                // cache hit, then ONE batched counter read for all three counts.
+                // cache hit, then ONE batched counter read for both counts.
                 // Three surfaces asking three different ways is how they come to
                 // disagree — see `makeClusterGallery`'s note.
                 let provider = FixedPostsFeedProvider(base: base, ids: ids)
@@ -477,7 +477,6 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                     var decorated = post
                     decorated.reactionCount = counts.likes ?? post.reactionCount
                     decorated.commentCount = counts.comments
-                    decorated.viewCount = counts.views ?? post.viewCount
                     return decorated
                 }
             }
@@ -503,7 +502,6 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         markerClose: ((UIViewController) -> RevealGeometry?)?
     ) -> UIViewController {
         let base = repository
-        let engagement = engagementProvider
         let gallery = PlaceProfileViewController(
             postIDs: postIDs,
             placeName: title,
@@ -533,12 +531,13 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 // pill, and the shortcut to a media post's thread did not exist
                 // on this screen at all. Filmed.
                 //
-                // One batched read of all three instead, through the same
-                // `PostCounterReader` For You and the profile gallery use — the
-                // counter is the number the rest of the app reads, so three
-                // surfaces asking three different ways is how they come to
-                // disagree. Fail-open: a missing read leaves every count as the
-                // timeline gave it.
+                // One batched read of likes and comments instead (the views
+                // aggregate itself went on 2026-09-30: the header counts
+                // likes), through the same `PostCounterReader` For You and the
+                // profile gallery use — the counter is the number the rest of
+                // the app reads, so three surfaces asking three different ways
+                // is how they come to disagree. Fail-open: a missing read
+                // leaves every count as the timeline gave it.
                 if let counterClient {
                     let byPostID = await PostCounterReader.counters(
                         forPostIDs: members.map(\.id.rawValue), using: counterClient
@@ -549,18 +548,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                             var decorated = post
                             decorated.reactionCount = counts.likes ?? post.reactionCount
                             decorated.commentCount = counts.comments
-                            decorated.viewCount = counts.views ?? post.viewCount
                             return decorated
                         }
-                    }
-                } else if let engagement,
-                          let views = try? await engagement.viewCounts(for: members.map(\.id)) {
-                    // No counter service wired: keep the view projection this
-                    // page's aggregate depends on rather than losing it too.
-                    members = members.map { post in
-                        var decorated = post
-                        decorated.viewCount = views[post.id] ?? post.viewCount
-                        return decorated
                     }
                 }
                 return members

@@ -23,8 +23,7 @@ private let subject = UserProfile(
     isVerified: false,
     followerCount: .exact(12),
     followingCount: .exact(9),
-    reactionCount: .exact(3),
-    viewCount: .exact(40)
+    reactionCount: .exact(3)
 )
 
 /// Answers the identity and the relationship, and accepts a follow toggle —

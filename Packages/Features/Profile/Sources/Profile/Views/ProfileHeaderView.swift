@@ -19,9 +19,10 @@ import UIKit
 ///   the three lines beside it: display name + verified badge, @handle, and
 ///   the flat action tray (a leading Message-or-Edit-Profile capsule,
 ///   then QR-code and see-more bubbles trailing-aligned);
-/// - below, full width: the 4-metric counter row (Followers / Following /
-///   Reactions / Views) directly under the identity block, then bio and
-///   website link closing the header right above the content threshold. The
+/// - below, full width: the 3-metric counter row (Followers / Following /
+///   Likes — likes, not views: no surface shows views since 2026-09-30)
+///   directly under the identity block, then bio and website link closing
+///   the header right above the content threshold. The
 ///   banner ends at the TRAY's bottom (the identity block's baseline); the
 ///   counters and bio sit on plain background.
 /// Pure presentation — it is handed a finished `ProfileDisplayModel` and an
@@ -97,8 +98,10 @@ final class ProfileHeaderView: UIView {
     private var configureGeneration = 0
     private let followersStat = ProfileStatView(caption: "Followers")
     private let followingStat = ProfileStatView(caption: "Following")
-    private let reactionsStat = ProfileStatView(caption: "Reactions")
-    private let viewsStat = ProfileStatView(caption: "Views")
+    /// The likes the profile's posts have received, summed — the heart every
+    /// tile of the gallery below counts. Was "Reactions" beside a "Views"
+    /// total until 2026-09-30.
+    private let likesStat = ProfileStatView(caption: "Likes")
     private let messageButton = UIButton(configuration: .gray())
     private let editButton = UIButton(configuration: .gray())
     /// Keep-this-profile-on-the-map's-people-rails, immediately right of
@@ -229,8 +232,8 @@ final class ProfileHeaderView: UIView {
     /// Invoked with the profile's website URL when the link row is tapped.
     var onWebsiteTapped: ((URL) -> Void)?
     /// Invoked when the Followers or Following counter is tapped — the two
-    /// columns that lead somewhere. Reactions and Views are read-only totals
-    /// with no list behind them, and stay inert.
+    /// columns that lead somewhere. Likes is a read-only total with no list
+    /// behind it, and stays inert.
     var onRelationshipsTapped: ((RelationshipDirection) -> Void)?
 
     private let imagePipeline: ImagePipeline
@@ -276,8 +279,7 @@ final class ProfileHeaderView: UIView {
 
         followersStat.setValue(model.followerText)
         followingStat.setValue(model.followingText)
-        reactionsStat.setValue(model.reactionsText)
-        viewsStat.setValue(model.viewsText)
+        likesStat.setValue(model.likesText)
 
         applyBannerPresence(model.bannerImageURL)
         bannerView.setImageURL(model.bannerImageURL)
@@ -329,11 +331,10 @@ final class ProfileHeaderView: UIView {
             self.bannerView.setImageURL(model.bannerImageURL)
             self.loadAvatar(model.avatarURL)
         }
-        dissolve([followersStat, followingStat, reactionsStat, viewsStat], after: Metrics.stagger, generation: generation) {
+        dissolve([followersStat, followingStat, likesStat], after: Metrics.stagger, generation: generation) {
             self.followersStat.setValue(model.followerText)
             self.followingStat.setValue(model.followingText)
-            self.reactionsStat.setValue(model.reactionsText)
-            self.viewsStat.setValue(model.viewsText)
+            self.likesStat.setValue(model.likesText)
         }
         dissolve([bioLabel, websiteButton], after: Metrics.stagger * 2, generation: generation) {
             self.bioLabel.text = model.bio
@@ -528,7 +529,7 @@ final class ProfileHeaderView: UIView {
                 view.alpha = 0
             }
             for bone in redactionBones { bone.isHidden = false; bone.alpha = 1 }
-            for stat in [followersStat, followingStat, reactionsStat, viewsStat] {
+            for stat in [followersStat, followingStat, likesStat] {
                 stat.setRedacted(true)
             }
             bannerView.setRedacted(true)
@@ -547,7 +548,7 @@ final class ProfileHeaderView: UIView {
                 view.alpha = 1
             }
             for bone in self.redactionBones { bone.alpha = 0 }
-            for stat in [self.followersStat, self.followingStat, self.reactionsStat, self.viewsStat] {
+            for stat in [self.followersStat, self.followingStat, self.likesStat] {
                 stat.setRedacted(false)
             }
             self.bannerView.setRedacted(false)
@@ -725,8 +726,8 @@ final class ProfileHeaderView: UIView {
             }
         }
 
-        // Followers and Following open the relationship lists; the other two
-        // columns are totals with nothing behind them.
+        // Followers and Following open the relationship lists; Likes is a
+        // total with nothing behind it.
         for (stat, direction) in [
             (followersStat, RelationshipDirection.followers),
             (followingStat, RelationshipDirection.following)
@@ -738,9 +739,9 @@ final class ProfileHeaderView: UIView {
             )
         }
 
-        // The 4-metric counter row, last element of the header: equal cells
+        // The 3-metric counter row, last element of the header: equal cells
         // across the full content width, right above the content threshold.
-        for stat in [followersStat, followingStat, reactionsStat, viewsStat] {
+        for stat in [followersStat, followingStat, likesStat] {
             statsRow.addArrangedSubview(stat)
         }
         statsRow.axis = .horizontal

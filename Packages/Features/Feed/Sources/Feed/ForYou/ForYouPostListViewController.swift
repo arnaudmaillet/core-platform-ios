@@ -51,38 +51,31 @@ import UIKit
 ///
 /// # Its chrome
 ///
-/// No tab bar (`hidesBottomBarWhenPushed`); `[‹] —— [points][search]` over
-/// "Following" or "Friends" as a large title, the header every screen For You
-/// pushes wears (`PushedScreenHeader`). The section capsules pin under
-/// whichever height the bar has — expanded or folded — because they pin to
-/// the collection view's adjusted inset, which is that bar.
+/// No tab bar (`hidesBottomBarWhenPushed`) and no title: `[‹] ——
+/// [points][search]`, the header every screen For You pushes wears
+/// (`PushedScreenHeader`; #323's large titles were taken back on 2026-09-30).
+/// The section capsules pin right under that bar, because they pin to the
+/// collection view's adjusted inset, which is that bar.
 ///
 /// # Holding still under a post
 ///
 /// ⚠️ The list's inset is PINNED from the tap until the list is back on
 /// screen (`ForYouGridPage.beginHeroFreeze` / `viewDidAppear`). This list
 /// adds the safe area to its inset, and that safe area is not the list's
-/// while a post covers it — the view leaves the window, and the bar changes
-/// height under a large title. Every change of it drags `contentOffset` with
-/// it, so a list left to track it came back from a post shifted by about a
-/// bar's height, a jump the viewer saw the moment the card landed (filmed on
-/// Following, Friends and the mosaic, 2026-09-30). For You never showed it:
-/// its own flight pins the same inset (`ForYouGridZoomSource`).
+/// while a post covers it — the view leaves the window, and the pop settles
+/// the chrome only after a close has ended. Every change of it drags
+/// `contentOffset` with it, so a list left to track it came back from a post
+/// shifted, a jump the viewer saw the moment the card landed (filmed on
+/// Following, Friends and the mosaic, 2026-09-30 — under #323's large titles,
+/// which made it a bar's height, but the covered safe area moves without
+/// them too). For You never showed it: its own flight pins the same inset
+/// (`ForYouGridZoomSource`).
 @MainActor
 final class ForYouPostListViewController: UIViewController {
     /// Which row this list is the whole of.
     enum Kind: String {
         case following
         case friends
-
-        /// The large title — the page's name, the word the For You header it
-        /// was pushed from wears.
-        var title: String {
-            switch self {
-            case .following: "Following"
-            case .friends: "Friends"
-            }
-        }
     }
 
     let kind: Kind
@@ -134,7 +127,7 @@ final class ForYouPostListViewController: UIViewController {
         // pop; a post opened from here finds no dock to give back
         // (`showsAppTabBar(for:)` reads this flag).
         hidesBottomBarWhenPushed = true
-        header.install(on: self, title: kind.title)
+        header.install(on: self)
     }
 
     @available(*, unavailable)
@@ -144,10 +137,6 @@ final class ForYouPostListViewController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = Surface.page
         page.pin(to: view)
-        // ⚠️ NAMED, not left to UIKit's search, which does not find a scroller
-        // nested in the page (`ForYouViewController`'s note): the large title
-        // folds with THIS scroll view, and the bar's edge follows it.
-        setContentScrollView(page.minimizeScrollView, for: .top)
         page.onItemTapped = { [weak self] index in self?.openRow(at: index) }
         page.onItemCommentsTapped = { [weak self] index in self?.openRow(at: index, showingComments: true) }
         page.onNearEnd = { [weak self] in self?.onNearEnd?() }

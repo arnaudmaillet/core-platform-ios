@@ -36,8 +36,7 @@ struct PostGridFlightCardBlendTests {
             thumbnailURL: nil,
             caption: "a caption",
             publishedAtMS: 0,
-            reactionCount: 12,
-            viewCount: 340
+            reactionCount: 12
         )
     }
 

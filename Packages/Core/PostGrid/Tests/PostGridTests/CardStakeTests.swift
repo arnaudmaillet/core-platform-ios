@@ -22,7 +22,7 @@ struct CardStakeTests {
             with: GalleryPost(
                 id: PostID("post-1"), kind: .text, isRepost: false, thumbnailURL: nil,
                 caption: "Third coffee.", publishedAtMS: 0,
-                reactionCount: reactions, commentCount: 3, viewCount: nil
+                reactionCount: reactions, commentCount: 3
             ),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
         )

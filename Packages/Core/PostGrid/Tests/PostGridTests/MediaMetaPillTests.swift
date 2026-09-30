@@ -20,7 +20,6 @@ private func row(
     kind: GalleryPost.Kind,
     reactions: Int64? = 160,
     comments: Int64? = 12,
-    views: Int64? = 4_200,
     pages: Int = 1,
     width: CGFloat = 390,
     publishedAtMS: Int64 = 0
@@ -36,8 +35,7 @@ private func row(
             caption: "A caption short enough to leave the card its own shape.",
             publishedAtMS: publishedAtMS,
             reactionCount: reactions,
-            commentCount: comments,
-            viewCount: views
+            commentCount: comments
         ),
         imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
     )
@@ -249,8 +247,9 @@ struct TileMetaTests {
     ///
     /// A brick is small and read at a glance in a mosaic of a dozen others; two
     /// numbers on it are two things to compare across every tile at once. It
-    /// was the view count until the app stopped showing views: now the tile
-    /// says what every card says, the heart.
+    /// was the view count until the app stopped showing views (the model no
+    /// longer carries them): now the tile says what every card says, the
+    /// heart.
     ///
     /// Counted by walking for metric labels rather than by naming a field: a
     /// second counter added back under another name is the regression.
@@ -264,7 +263,7 @@ struct TileMetaTests {
             with: GalleryPost(
                 id: PostID("post-1"), kind: .photo, isRepost: false,
                 thumbnailURL: URL(string: "mock://photo/1"), caption: "A caption.",
-                publishedAtMS: 0, reactionCount: 160, commentCount: 12, viewCount: 4_200
+                publishedAtMS: 0, reactionCount: 160, commentCount: 12
             ),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
         )
@@ -272,7 +271,7 @@ struct TileMetaTests {
 
         let visible = metrics(cell.contentView).filter { isVisible($0, within: cell.contentView) }
         #expect(visible.count == 1)
-        #expect(cell.debugCounterText == "160", "the likes, not the 4.2K views")
+        #expect(cell.debugCounterText == "160", "the likes, not the 12 comments")
         // By the symbol's NAME in the image's description: two symbol images
         // are not `==` for being the same glyph.
         let glyph = visible.first?.debugSymbol.map { String(describing: $0) } ?? ""
@@ -291,7 +290,7 @@ struct MediaMetaPillContentTests {
     /// not an asserted zero — and the leftover would be a filled capsule with
     /// nothing in it.
     @Test func aPostWithNoCountersDrawsNoEmptyCapsule() {
-        let cell = row(kind: .photo, reactions: nil, comments: nil, views: nil)
+        let cell = row(kind: .photo, reactions: nil, comments: nil)
         #expect(visiblePills(in: cell).isEmpty)
     }
 
@@ -299,12 +298,10 @@ struct MediaMetaPillContentTests {
     ///
     /// One capsule per verb — how many liked it, how many said something — so a
     /// post with likes and no comments draws one counter chip, not one chip with
-    /// half its contents missing. Views are carried by the model and rendered on
-    /// no card at all.
+    /// half its contents missing.
     @Test func eachCounterEarnsItsOwnCapsule() {
-        #expect(visiblePills(in: row(kind: .photo, reactions: nil, comments: nil, views: 4_200)).count == 0)
-        #expect(visiblePills(in: row(kind: .photo, reactions: 160, comments: nil, views: nil)).count == 1)
-        #expect(visiblePills(in: row(kind: .photo, reactions: 160, comments: 12, views: nil)).count == 2)
+        #expect(visiblePills(in: row(kind: .photo, reactions: 160, comments: nil)).count == 1)
+        #expect(visiblePills(in: row(kind: .photo, reactions: 160, comments: 12)).count == 2)
     }
 
     /// The controls join the line only when the host wired them — a capsule

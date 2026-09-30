@@ -2279,10 +2279,10 @@ final class ForYouGridPage: UIView {
     ///
     /// ⚠️ PINNED FOR THE WHOLE VISIT, not only for the close. A pushed list
     /// adds the safe area to its inset, and while a post covers it that safe
-    /// area is not the list's: the view leaves the window, and under a large
-    /// title the bar changes height with the push. Each change drags
+    /// area is not the list's: the view leaves the window, and the pop settles
+    /// the chrome only after a close has ended. Each change drags
     /// `contentOffset` along (see `beginHeroFreeze`), so a list that tracked
-    /// them came back from a post shifted by about a bar's height. For You's
+    /// them came back from a post shifted. For You's
     /// own page is pinned by its flight source for the same reason.
     ///
     /// A push that did not happen — the stack refused it — hands the inset
@@ -2330,14 +2330,16 @@ final class ForYouGridPage: UIView {
         // it recorded at its last UPDATE (`_restoreOrAdjustContentOffset
         // IfNecessaryWithInsets:`, from a later `layoutSubviews` →
         // `_updateVisibleCellsNow:`) and keeps `offset + top inset` constant
-        // across the difference. Under a large title the pinned and resting
-        // insets differ whenever the title folded while the list was covered —
-        // pinned t168 (expanded, at the tap), resting t116 (the departure
-        // reveal had scrolled the list to 204) — so about a second after a
-        // grab's return the rows slid 52pt up (204 → 256), after the viewer
-        // had them back. Measured with `-list-jump-trace` and a KVO stack,
-        // 2026-09-30. An empty update now records the resting inset, and the
-        // offset the viewer sees is restated over whatever it re-based to.
+        // across the difference. The pinned and resting insets differ whenever
+        // the chrome moved while the list was covered — under #323's large
+        // titles (since removed) it was pinned t168 (expanded, at the tap),
+        // resting t116 (the departure reveal had scrolled the list to 204), so
+        // about a second after a grab's return the rows slid 52pt up (204 →
+        // 256), after the viewer had them back. Measured with
+        // `-list-jump-trace` and a KVO stack, 2026-09-30. Without a large title
+        // the two usually agree and this is a no-op; when they do not, an
+        // empty update records the resting inset, and the offset the viewer
+        // sees is restated over whatever it re-based to.
         if abs(collectionView.adjustedContentInset.top - pinnedTop) > 0.5 {
             UIView.performWithoutAnimation {
                 collectionView.performBatchUpdates(nil)

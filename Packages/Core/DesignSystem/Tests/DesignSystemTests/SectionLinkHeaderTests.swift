@@ -61,6 +61,13 @@ struct SectionLinkHeaderTests {
         #expect(frames.badge.minX > frames.title.maxX)
         #expect(frames.badge.minX - frames.title.maxX <= 12, "right after the title, not at the edge")
         #expect(frames.chevron.minX > frames.badge.maxX)
+        // `Friends ——— (3)›` (2026-09-30): the pill sits closer to the chevron
+        // than to the title, so the two read as one element.
+        let titleGap = frames.badge.minX - frames.title.maxX
+        let chevronGap = frames.chevron.minX - frames.badge.maxX
+        #expect(chevronGap < titleGap, "pill→chevron \(chevronGap) must be tighter than title→pill \(titleGap)")
+        #expect(abs(titleGap - SectionLinkHeaderView.Metrics.titleToCount) < 0.5)
+        #expect(abs(chevronGap - SectionLinkHeaderView.Metrics.countToChevron) < 0.5)
         #expect(frames.chevron.maxX < 180, "the run stops well short of the trailing edge")
         #expect(header.hitTest(CGPoint(x: 340, y: 22), with: nil) === header, "the empty end still opens")
 
@@ -89,6 +96,16 @@ struct SectionLinkHeaderTests {
         let bare = header.debugFrames
         #expect(bare.badge.isNull)
         #expect(bare.chevron.minX - bare.title.maxX <= 12, "title \(bare.title) chevron \(bare.chevron)")
+        #expect(
+            abs(bare.chevron.minX - bare.title.maxX - SectionLinkHeaderView.Metrics.titleToChevron) < 0.5,
+            "the bare chevron keeps the plain gap, not the pill's wider one"
+        )
+
+        // …and a count coming back restores the uneven pair.
+        header.setCount(2)
+        header.layoutIfNeeded()
+        let counted = header.debugFrames
+        #expect(counted.chevron.minX - counted.badge.maxX < counted.badge.minX - counted.title.maxX)
     }
 
     /// "For you" over the list: a heading, not a way in — no chevron, nothing

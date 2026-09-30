@@ -117,10 +117,6 @@ final class ConversationThreadViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        // `.never`, stated rather than inherited: a route can push this over
-        // For You's large-titled lists (`PushedScreenHeader`), and `.automatic`
-        // would inherit their large title.
-        navigationItem.largeTitleDisplayMode = .never
         view.backgroundColor = .systemBackground
         configureCollectionView()
         configureHeaderFrost()

@@ -964,8 +964,7 @@ public final class ProfileViewModel {
             visibility: profile.visibility,
             followerCount: profile.followerCount.adjusted(by: following ? 1 : -1),
             followingCount: profile.followingCount,
-            reactionCount: profile.reactionCount,
-            viewCount: profile.viewCount
+            reactionCount: profile.reactionCount
         )
         self.profile = updated
         phase = .content(ProfileDisplayModel(profile: updated))
