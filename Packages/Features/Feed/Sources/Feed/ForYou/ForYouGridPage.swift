@@ -1962,7 +1962,17 @@ final class ForYouGridPage: UIView {
     /// Nil when nothing is realized at the slot: there is no rect to size to,
     /// and a stand-in built at a guessed size lands at the wrong one.
     func makeTileStandIn(for post: GalleryPost, slotOf occupantID: PostID) -> UIView? {
-        guard let size = cell(for: occupantID)?.bounds.size ?? slotSize(of: occupantID),
+        makeTileStandIn(for: post, slotOf: occupantID, sizingUnrealizedFromLayout: false)
+    }
+
+    /// `sizingUnrealizedFromLayout` is for a tile landing in its OWN slot, where
+    /// the layout's rect is the one the close measures too; a swap into
+    /// another post's slot keeps the rule above and refuses a guessed size.
+    private func makeTileStandIn(
+        for post: GalleryPost, slotOf occupantID: PostID, sizingUnrealizedFromLayout: Bool
+    ) -> UIView? {
+        let laidOut = sizingUnrealizedFromLayout ? slotSize(of: occupantID) : nil
+        guard let size = cell(for: occupantID)?.bounds.size ?? laidOut,
               size.width > 0, size.height > 0
         else { return nil }
         return PostGridTileStandInView(
@@ -1977,7 +1987,7 @@ final class ForYouGridPage: UIView {
 
     /// A tile's OWN twin — `post` in its own slot. See `makeDismissStandIn`.
     func makeTileStandIn(for post: GalleryPost) -> UIView? {
-        makeTileStandIn(for: post, slotOf: post.id)
+        makeTileStandIn(for: post, slotOf: post.id, sizingUnrealizedFromLayout: true)
     }
 
     /// The size the layout gives `postID`'s slot, for a slot with no realized
