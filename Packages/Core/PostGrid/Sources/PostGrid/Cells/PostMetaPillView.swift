@@ -92,6 +92,11 @@ public class PostMetaPillView: UIVisualEffectView {
     /// It also protects the hierarchy the alternative would have broken —
     /// promoting the cluster to `.label` would have put three near-black marks
     /// beside a `.label` author name.
+    ///
+    /// ⚠️ NOT the closing line's rule any more (30 September 2026): there the
+    /// ACTIONS are ranked instead of glyph against number — comments and likes
+    /// in `.label`, glyph and count alike, repost and save in
+    /// `.secondaryLabel`. See `PostCardPillView.Emphasis`.
     public static let glyphForeground: UIColor = .secondaryLabel
 
     /// The pill's inner padding.
@@ -338,127 +343,119 @@ extension UIView {
     }
 }
 
-/// A pill that stands on the CARD's own fill rather than on media.
+/// A card ACTION — comments, likes, repost, save — standing on the card's own
+/// fill with NO GROUND OF ITS OWN.
 ///
-/// ⚠️ Same shape, same height, DIFFERENT GROUND — and the difference is not a
-/// preference.
+/// ⚠️ PLAIN SINCE 30 SEPTEMBER 2026, and the name is the history. These wore a
+/// `.tertiarySystemFill` capsule, four of them along the foot of every card,
+/// and the card read as a row of grey slabs under its own content. Asked for
+/// without containers: the actions are ink on the card, like the band's "..."
+/// above them always was.
 ///
-/// `PostMetaPillView`'s material resolves against what is behind it, which is
-/// what makes it a floor over a photograph and what makes it nothing over a
-/// flat colour: laid on the card it resolves to the card and the capsule is
-/// drawn, correctly, invisible. A system FILL is a translucent overlay instead,
-/// so it stands off the card by the same amount in either appearance.
+/// What stays of the capsule is its BOX, and every part of it still works:
+/// - the declared height (`PostMetaPillView.height`), so the line keeps one
+///   rhythm with the page indicator's capsule beside it;
+/// - the press region, grown to 44pt by `point(inside:)`;
+/// - the SHAPE the press draws. `ActionAffordance`'s wash is a capsule inside
+///   this box, so a pressed action shows a capsule that was not there a moment
+///   before and a held one a deeper one — the container appears only while a
+///   finger is on it, the way the system's plain buttons answer a press.
 ///
-/// ⚠️ `.tertiarySystemFill`, and the step was walked in both directions.
+/// ⚠️ **TWO RANKS OF INK** (`Emphasis`). Comments and likes are what a card is
+/// for and draw in `.label`; repost and save are secondary and draw in
+/// `.secondaryLabel`. The rank is the ACTION's, so a count follows its glyph —
+/// the card-wide rule "the number is the datum, the glyph names it"
+/// (`PostMetaPillView.glyphForeground`) still governs the band and the media
+/// chips, where no action outranks another.
 ///
-/// Measured on a real card, whose fill reads 242 in light mode:
-///
-/// | fill        | capsule | delta |
-/// |-------------|---------|-------|
-/// | secondary   |   222   |  20   |
-/// | tertiary    |   227   |  15   |
-/// | quaternary  |   232   |  10   |
-///
-/// Secondary was chosen first and was right at the time: the card carried ONE
-/// filled capsule — the band's control cluster — and a lone container has to
-/// assert itself. The closing line then gained two more, and three capsules of
-/// the same fill weigh more than one of them did, so the same delta that read
-/// as "a container" started reading as three grey slabs on a quiet card.
-///
-/// Quaternary is a step too far in the other direction: at a delta of 10 the
-/// capsule stops being a shape and becomes a smudge behind a number.
-///
-/// The number that matters is the DELTA, not the token — which is why it is
-/// recorded here. Change the card's fill and this choice needs re-measuring,
-/// not re-reading.
-///
-/// ❌ Painting an opaque white behind the material so it has something to blur
-/// was tried and rejected. It works, but a material over an opaque layer you
-/// control is just a colour — it reduces to `.systemBackground`, which is white
-/// on the card in light mode and BLACK on it in dark, so the contrast flips
-/// direction between appearances.
+/// ⚠️ The padding shrank with the ground (`plainInsets`, 8 rather than 12): 12
+/// was what a WORD needs to sit off a capsule's ends, and with no capsule to
+/// sit off it only pushed the ink away from the caption column. The closing
+/// line hangs its first and last box outward by their `inkLeading` /
+/// `inkTrailing`, so the INK — not an invisible box — lines up with the
+/// caption above it.
 public class PostCardPillView: PostMetaPillView {
-    override public init(
-        contents: [UIView], spacing: CGFloat = 8,
-        insets: NSDirectionalEdgeInsets = PostMetaPillView.insets
-    ) {
-        super.init(contents: contents, spacing: spacing, insets: insets)
-        contentView.backgroundColor = .tertiarySystemFill
+    /// How loudly an action speaks on the card.
+    public enum Emphasis: Sendable {
+        /// Comments and likes: glyph and count in `.label`.
+        case primary
+        /// Repost and save: `.secondaryLabel`.
+        case secondary
+
+        public var ink: UIColor {
+            switch self {
+            case .primary: .label
+            case .secondary: .secondaryLabel
+            }
+        }
     }
 
-    @available(*, unavailable)
-    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    /// Nothing to resolve: the ground above is painted, not sampled.
-    override public func makeGround() -> UIVisualEffect? { nil }
-}
-
-/// A chip's BOX without a chip's ground.
-///
-/// The preview's date sits in the same slot as the capsules beside it — same
-/// height, same inner padding, so the row keeps one rhythm and every constraint
-/// that measured against the date still measures the same thing — but draws no
-/// capsule of its own. A capsule is a claim that what is inside it can be
-/// pressed, and of the four things on that row the date is the one that never
-/// will be.
-///
-/// Its floor comes from `ProgressiveMaterialView` behind it instead: the same
-/// material, with no edge.
-public final class PostChipSlotView: UIView {
-    public init(contents: [UIView], spacing: CGFloat = 8) {
-        super.init(frame: .zero)
-        isUserInteractionEnabled = false
-        let row = UIStackView(arrangedSubviews: contents)
-        row.axis = .horizontal
-        row.alignment = .center
-        row.spacing = spacing
-        row.pin(to: self, insets: PostMetaPillView.insets)
-        let uniform = heightAnchor.constraint(equalToConstant: PostMetaPillView.height)
-        uniform.priority = .init(999)
-        uniform.isActive = true
-    }
-
-    @available(*, unavailable)
-    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-}
-
-/// A pill of CONTROLS, wearing the card's own capsule.
-///
-/// Interaction is ON, which is the one thing every other `PostMetaPillView` on
-/// a card turns off — the counters are furniture and must not swallow the tap
-/// that opens the post. This one exists to be pressed: it holds the row's
-/// repost and save glyphs, and any other lone control a card wants in a
-/// capsule.
-public final class PostActionPillView: PostCardPillView {
-    /// The width of one glyph control inside it.
-    ///
-    /// 36 rather than a disc's 40: a glyph button carries its own margin
-    /// inside its width, and the capsule's ends add the rest. Every point a
-    /// control takes is a point off whatever shares its row.
-    public static let controlWidth: CGFloat = 36
-    /// The capsule's padding around glyph controls. Narrower than the text
-    /// pills' 12: a glyph button already carries its own margin, so the text
-    /// value would push two apart and swell the capsule.
-    public static let glyphInsets = NSDirectionalEdgeInsets(
-        top: 0, leading: 6, bottom: 0, trailing: 6
+    /// A plain action's padding: enough for the press wash to read as a
+    /// capsule around the ink, and no more — see the type's note.
+    public static let plainInsets = NSDirectionalEdgeInsets(
+        top: PostMetaPillView.insets.top, leading: 8,
+        bottom: PostMetaPillView.insets.bottom, trailing: 8
     )
 
+    private let padding: NSDirectionalEdgeInsets
+
     override public init(
         contents: [UIView], spacing: CGFloat = 8,
-        insets: NSDirectionalEdgeInsets = PostMetaPillView.insets
+        insets: NSDirectionalEdgeInsets = PostCardPillView.plainInsets
+    ) {
+        padding = insets
+        super.init(contents: contents, spacing: spacing, insets: insets)
+    }
+
+    @available(*, unavailable)
+    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// Nothing to resolve and nothing to paint: a plain action has no ground.
+    override public func makeGround() -> UIVisualEffect? { nil }
+
+    /// How far in from the box's leading edge the ink starts — what a line
+    /// hangs this box out by to put the ink on its column.
+    var inkLeading: CGFloat { padding.leading }
+
+    /// The same, from the trailing edge.
+    var inkTrailing: CGFloat { padding.trailing }
+}
+
+/// A plain action that is ONE GLYPH — the closing line's repost and save.
+///
+/// Interaction is ON, which is the one thing every other `PostMetaPillView` on
+/// a card turns off by default — the counters become controls only when the
+/// host gives them something to do. This one exists to be pressed.
+public final class PostActionPillView: PostCardPillView {
+    /// The width of the band's "..." — a glyph button carrying its own margin
+    /// inside its width, hung from the card's top-right corner.
+    public static let controlWidth: CGFloat = 36
+
+    /// The width of a glyph action on the closing line: the glyph and a few
+    /// points either side, which is what the press wash needs to read as a
+    /// disc around it. 36 was sized to sit inside a capsule's ends; with no
+    /// capsule it left ~12pt of air before the ink, and the save glyph sat
+    /// visibly right of the caption it closes. `point(inside:)` grows the
+    /// press region back to 44 either way.
+    public static let plainControlWidth: CGFloat = 28
+
+    override public init(
+        contents: [UIView], spacing: CGFloat = 8,
+        insets: NSDirectionalEdgeInsets = PostCardPillView.plainInsets
     ) {
         super.init(contents: contents, spacing: spacing, insets: insets)
         isUserInteractionEnabled = true
     }
 
-    /// A capsule around exactly one glyph control.
+    /// A plain action around exactly one glyph control, which fills it.
     public convenience init(control: UIView) {
-        self.init(contents: [control], spacing: 0, insets: Self.glyphInsets)
-        // ⚠️ THE PILL IS THE CONTROL NOW, the glyph inside is its face.
+        self.init(contents: [control], spacing: 0, insets: .zero)
+        glyphControl = control
+        // ⚠️ THE PILL IS THE CONTROL, the glyph inside is its face.
         //
         // The button used to answer its own events with the pill giving
         // around it, while the counter chips beside it ran a different
-        // recogniser and a different press. Every chip on the card goes
+        // recogniser and a different press. Every action on the card goes
         // through `ActionAffordance` instead (see `setTapHandler`), so this
         // one forwards its tap to the button's own actions — the host's
         // target-action wiring is untouched — and the button stops taking
@@ -476,17 +473,18 @@ public final class PostActionPillView: PostCardPillView {
     @available(*, unavailable)
     public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    /// ⚠️ A LONE GLYPH IS SIZED TO ITS CONTAINER, NOT TO THE CARD'S TYPE.
+    private weak var glyphControl: UIView?
+
+    /// ⚠️ A LONE GLYPH IS SIZED TO ITS BOX, NOT TO THE CARD'S TYPE.
     ///
     /// Two wrong answers were tried first, in opposite directions. A `UIButton`
-    /// sizes a symbol from its own font — body, 17pt — which crowds a capsule
-    /// the height of a footnote. Matching the counters' font instead, so every
+    /// sizes a symbol from its own font — body, 17pt — which crowds a box the
+    /// height of a footnote. Matching the counters' font instead, so every
     /// glyph on the card would be drawn at one size, produced glyphs that LOOK
     /// smaller than the counters' — measured, the heart beside "160" is 9pt of
     /// ink, a lone bookmark at that size 13pt: bigger, and reading as smaller,
-    /// because a glyph alone in a capsule is read against the empty capsule
-    /// around it. UIKit's own bar buttons settle this at a little over half
-    /// their container.
+    /// because a glyph alone is read against the space around it. UIKit's own
+    /// bar buttons settle this at a little over half their container.
     public static var glyphPointSize: CGFloat {
         (PostMetaPillView.height * 0.58).rounded()
     }
@@ -496,46 +494,83 @@ public final class PostActionPillView: PostCardPillView {
     /// Zero content insets, rather than padding a glyph out to size: the width
     /// is set by a constraint, so insets would only fight it. `.medium`
     /// weight, one step up from regular and deliberately not two: regular
-    /// reads thin on a filled ground, semibold empties the repost arrows into a
-    /// blob. `.secondaryLabel`, so a control never outranks the name or the
-    /// count beside it.
-    public static func glyphConfiguration(systemName: String) -> UIButton.Configuration {
+    /// reads thin, semibold empties the repost arrows into a blob.
+    ///
+    /// - Parameter emphasis: `.secondary` by default — the band's "..." and
+    ///   the closing line's repost and save never outrank the name or the
+    ///   primary actions beside them.
+    public static func glyphConfiguration(
+        systemName: String, emphasis: Emphasis = .secondary
+    ) -> UIButton.Configuration {
         var configuration = UIButton.Configuration.plain()
         configuration.image = UIImage(systemName: systemName)
-        configuration.baseForegroundColor = .secondaryLabel
+        configuration.baseForegroundColor = emphasis.ink
         configuration.contentInsets = .zero
-        configuration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(
-            pointSize: glyphPointSize, weight: .medium, scale: .medium
-        )
+        configuration.preferredSymbolConfigurationForImage = glyphSymbolConfiguration
         return configuration
     }
 
+    /// The symbol configuration every glyph control on a card is drawn at —
+    /// the same size and weight the counters' glyphs take through
+    /// `PostMetricLabel`'s `glyphPointSize`.
+    static var glyphSymbolConfiguration: UIImage.SymbolConfiguration {
+        UIImage.SymbolConfiguration(pointSize: glyphPointSize, weight: .medium, scale: .medium)
+    }
+
     /// Builds one glyph control: a fixed width, the glyph floating in the
-    /// middle, the height left to whatever pill or row holds it, and a touch
-    /// region grown back to a finger's size around the drawn chrome.
-    public static func makeGlyphControl(systemName: String, label: String) -> UIButton {
+    /// middle, the height left to whatever holds it, and a touch region grown
+    /// back to a finger's size around the drawn glyph.
+    ///
+    /// - Parameter width: `controlWidth` for the band's "...";
+    ///   `plainControlWidth` for an action on the closing line.
+    public static func makeGlyphControl(
+        systemName: String, label: String,
+        width: CGFloat = controlWidth, emphasis: Emphasis = .secondary
+    ) -> UIButton {
         let button = PostGlyphButton(type: .system)
-        button.configuration = glyphConfiguration(systemName: systemName)
+        button.configuration = glyphConfiguration(systemName: systemName, emphasis: emphasis)
         button.accessibilityLabel = label
         button.setContentCompressionResistancePriority(.required, for: .horizontal)
         button.setContentHuggingPriority(.required, for: .horizontal)
         button.translatesAutoresizingMaskIntoConstraints = false
-        button.widthAnchor.constraint(equalToConstant: controlWidth).isActive = true
+        button.widthAnchor.constraint(equalToConstant: width).isActive = true
+        button.fixedWidth = width
         return button
     }
 
-    /// Folds the pill's vertical hit-slop onto the row inside it.
+    /// The air between the box's edge and the glyph's ink: the glyph is
+    /// centred in a control of fixed width, so it is half of what the glyph
+    /// leaves of that width. Read off the image the button is drawing, so a
+    /// wider glyph (the repost arrows) hangs less than a narrow one (save).
+    override var inkLeading: CGFloat {
+        guard let button = glyphControl as? PostGlyphButton,
+              let configuration = button.configuration,
+              let image = configuration.image else { return 0 }
+        let drawn = configuration.preferredSymbolConfigurationForImage
+            .flatMap { image.applyingSymbolConfiguration($0) } ?? image
+        return max((button.fixedWidth - drawn.size.width) / 2, 0)
+    }
+
+    override var inkTrailing: CGFloat { inkLeading }
+
+    /// Folds the box's hit-slop onto the control inside it.
     ///
-    /// ⚠️ `point(inside:)` alone does NOT give the buttons a 44pt target. It
+    /// ⚠️ `point(inside:)` alone does NOT give the button a 44pt target. It
     /// lets the touch reach the PILL, and hit-testing then walks its subviews —
-    /// which are bounded normally, so a touch 6pt below the capsule finds the
-    /// content view outside itself, and the pill answers for a press that was
-    /// aimed at a control. Clamping the point back into the pill hands it to
-    /// whichever button it was under.
+    /// which are bounded normally, so a touch beside or below the glyph finds
+    /// the content view outside itself, and the pill answers for a press that
+    /// was aimed at a control. Clamping the point back into the box — on BOTH
+    /// axes now that the box is narrower than a finger too — hands it to the
+    /// control it was beside.
     override public func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         if let hit = super.hitTest(point, with: event), hit !== self { return hit }
-        guard self.point(inside: point, with: event), bounds.height > 2 else { return nil }
-        let clamped = CGPoint(x: point.x, y: min(max(point.y, 1), bounds.height - 1))
+        guard self.point(inside: point, with: event), bounds.height > 2, bounds.width > 2 else {
+            return nil
+        }
+        let clamped = CGPoint(
+            x: min(max(point.x, 1), bounds.width - 1),
+            y: min(max(point.y, 1), bounds.height - 1)
+        )
         let retargeted = super.hitTest(clamped, with: event)
         return retargeted === self ? nil : retargeted
     }
@@ -546,6 +581,14 @@ public final class PostActionPillView: PostCardPillView {
 /// the hit region grows around it, the way `PostMetaPillView` sizes its own
 /// chips.
 final class PostGlyphButton: UIButton {
+    /// The width it was built at (`makeGlyphControl`), kept as a value.
+    ///
+    /// ⚠️ Not re-read off `constraints`: once laid out a button adds its own
+    /// content-size width constraint there, whose constant is the IMAGE's
+    /// width — read first, it made the glyph's air zero and the closing line
+    /// hung 5pt off its column after the first layout pass.
+    var fixedWidth: CGFloat = 0
+
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
         let slopY = max((PostMetaPillView.minimumTouchTarget - bounds.height) / 2, 0)
         return bounds.insetBy(dx: 0, dy: -slopY).contains(point)

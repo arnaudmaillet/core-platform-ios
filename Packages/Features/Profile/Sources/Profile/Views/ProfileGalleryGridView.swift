@@ -752,7 +752,9 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
             // same controls rather than ending with one vanishing.
             actions: .init(
                 repost: true, bookmark: bookmarks != nil,
-                saved: bookmarks?.isSaved(postID.rawValue) ?? false
+                saved: bookmarks?.isSaved(postID.rawValue) ?? false,
+                // And the like as the row draws it — see For You's twin.
+                stake: staking?.viewerStake(on: postID)
             ),
             // The row's own date when there is a row — a compact age is a
             // function of the clock, and the row worked its own out when it was

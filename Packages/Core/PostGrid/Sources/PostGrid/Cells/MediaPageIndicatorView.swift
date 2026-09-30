@@ -101,8 +101,11 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
                 bottom: PostMetaPillView.insets.bottom, trailing: 0
             )
         )
-        // The card pill's own fill — the same the counters and the controls
-        // beside it wear (`PostCardPillView`), painted rather than sampled.
+        // A painted system fill, not a sampled material: it stands on the
+        // card's flat fill. ⚠️ The actions beside it wore the same capsule
+        // until 2026-09-30 and are plain now (`PostCardPillView`); the
+        // indicator keeps its capsule — it is a scrubber, not an action, and
+        // the capsule is the track a finger drags along.
         contentView.backgroundColor = .tertiarySystemFill
         // The one chip that IS a control. `PostMetaPillView` turns interaction
         // off because a counter that swallowed touches would put a dead corner

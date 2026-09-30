@@ -113,7 +113,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
             menu: UIMenu(options: .singleSelection, children: [
                 makeSourceAction(.all, title: "All", symbol: "rectangle.stack"),
                 makeSourceAction(.posts, title: "Posts", symbol: "square.and.pencil"),
-                makeSourceAction(.reposts, title: "Reposts", symbol: "arrow.2.squarepath"),
+                makeSourceAction(.reposts, title: "Reposts", symbol: PostActionSymbol.repost),
                 makeSourceAction(.tagged, title: "Tagged", symbol: "at")
             ])
         )

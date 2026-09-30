@@ -1993,7 +1993,11 @@ final class ForYouGridPage: UIView {
             // unconditionally. The saved state is read from the same store the
             // row reads, so a post saved a moment ago flies home filled in.
             actions: .init(
-                repost: true, bookmark: true, saved: bookmarks.isSaved(postID.rawValue)
+                repost: true, bookmark: true, saved: bookmarks.isSaved(postID.rawValue),
+                // The like stakes on every row `staking` binds, and its heart
+                // is red once the viewer has — the stand-in reads the same
+                // wallet, or the heart changes colour in the landing frame.
+                stake: staking?.viewerStake(on: postID)
             ),
             // The row's own date when there is a row — see
             // `PostGridListRowCell.renderedAgeText`.

@@ -1709,7 +1709,10 @@ final class PostDetailViewController: UIViewController {
     }
 
     static let commentsEmptyPageCopy = EmptyPageCopy(
-        symbol: "bubble.left.and.bubble.right",
+        // The comments glyph, app-wide — a DM thread's empty page keeps the
+        // two bubbles (`ConversationThreadViewController`): a conversation is
+        // not a post's comments.
+        symbol: PostActionSymbol.comments,
         title: SnapCommentEmptyStateView.promptText,
         subtitle: "Be the first to comment."
     )

@@ -39,7 +39,7 @@ enum SnapFooterToolbar {
     /// ⚠️ Drawn without an action — see the feed's note on why repost has no
     /// client path to publish one yet.
     static func makeRepostButton() -> UIButton {
-        let button = SnapNavControls.makeToolbarActionButton(systemName: "arrow.2.squarepath")
+        let button = SnapNavControls.makeToolbarActionButton(systemName: PostActionSymbol.repost)
         button.accessibilityLabel = "Repost"
         return button
     }

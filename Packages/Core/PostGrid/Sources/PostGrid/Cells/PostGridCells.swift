@@ -1220,6 +1220,21 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// together more closely than the row belongs to the frame.
     public static let chipGap: CGFloat = 6
 
+    /// The closing line's glyphs, named once so a test can ask the runtime
+    /// whether each one exists.
+    ///
+    /// ⚠️ A NAME THAT DOES NOT RESOLVE IS AN EMPTY BUTTON, NOT AN ERROR — see
+    /// `IconActionBarTests.everyGlyphThisBarIsGivenResolves`. Comments and
+    /// repost are the app-wide `PostActionSymbol`s, so the card and the post
+    /// screen's toolbar cannot drift apart.
+    public enum ActionSymbol {
+        public static let comments = PostActionSymbol.comments
+        public static let like = "heart"
+        public static let repost = PostActionSymbol.repost
+        public static let save = "bookmark"
+        public static let saved = "bookmark.fill"
+    }
+
     /// How far the preview's own furniture — the metadata pills, the play badge
     /// — is held off its edges. `contentInset` again, and that is the point.
     ///
@@ -1521,6 +1536,9 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         } : nil)
         closingLikesPill.accessibilityLabel = stakes ? "Like, stakes \(stakeTapAmount) points" : nil
         applyReactionCount()
+        // A count-less post's heart may have just appeared at the line's end,
+        // and the end hangs by what is there.
+        syncClosingLine()
     }
 
     /// The post's own count, and the heart inked by whether the viewer has a
@@ -1528,8 +1546,8 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     private func applyReactionCount() {
         reactions.set(baseReactionCount)
         reactions.setGlyph(
-            systemName: viewerStake > 0 ? PointsSymbol.glyph : "heart",
-            color: viewerStake > 0 ? PointsSymbol.tint : PostMetaPillView.glyphForeground
+            systemName: viewerStake > 0 ? PointsSymbol.glyph : ActionSymbol.like,
+            color: viewerStake > 0 ? PointsSymbol.tint : PostCardPillView.Emphasis.primary.ink
         )
         closingLikesPill.accessibilityValue = baseReactionCount.map(PostMetadata.count)
         closingLikesPill.syncVisibilityToContents()
@@ -1543,7 +1561,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
 
     private func applyBookmarkGlyph() {
         bookmarkButton.configuration?.image =
-            UIImage(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
+            UIImage(systemName: isBookmarked ? ActionSymbol.saved : ActionSymbol.save)
         bookmarkButton.accessibilityLabel = isBookmarked ? "Saved" : "Save"
     }
 
@@ -1567,6 +1585,18 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         repostPill.isHidden = !repost
         bookmarkPill.isHidden = !bookmark
         isBookmarked = saved
+        syncClosingLine()
+    }
+
+    /// Draws the like as a STAKING row draws it, without wiring it: the heart
+    /// kept when the post has no count yet, and red when the viewer has
+    /// staked. For a stand-in, on the same terms as `showRowActionsAsScenery`
+    /// — the landing frame swaps the stand-in for the row, and a heart
+    /// changing colour in it is the pop.
+    public func showStakeAsScenery(viewerStake: Int) {
+        reactions.keepsGlyphWhenEmpty = true
+        setViewerStake(viewerStake)
+        applyReactionCount()
         syncClosingLine()
     }
 
@@ -1641,17 +1671,16 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     private var showMoreRange: NSRange?
     private let mediaView = UIImageView()
     private static let metaFont = UIFont.preferredFont(forTextStyle: .footnote)
-    /// The closing line's counters — same type, colour and glyph as the two a
-    /// media card wears, because they are the same two numbers and will be the
-    /// same two buttons.
+    /// The closing line's counters — the card's PRIMARY actions, glyph and
+    /// count in one ink (`PostCardPillView.Emphasis.primary`).
     private let reactions = PostMetricLabel(
-        symbol: "heart", font: PostMetaPillView.font,
-        color: PostMetaPillView.foreground, iconColor: PostMetaPillView.glyphForeground,
+        symbol: ActionSymbol.like, font: PostMetaPillView.font,
+        color: PostCardPillView.Emphasis.primary.ink,
         glyphPointSize: PostActionPillView.glyphPointSize
     )
     private let comments = PostMetricLabel(
-        symbol: "bubble.right", font: PostMetaPillView.font,
-        color: PostMetaPillView.foreground, iconColor: PostMetaPillView.glyphForeground,
+        symbol: ActionSymbol.comments, font: PostMetaPillView.font,
+        color: PostCardPillView.Emphasis.primary.ink,
         glyphPointSize: PostActionPillView.glyphPointSize
     )
     private var closingLikesPill: PostCardPillView!
@@ -1660,15 +1689,16 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// profile's own cards still say when. On a card with an identity the
     /// date is on the handle's line instead.
     private let closingAgeLabel = UILabel()
-    /// The closing row's two controls, each in its own capsule, leading the
-    /// line: `[save][repost][pages] ······ [comments][likes]`. One capsule per
-    /// verb, so a hidden control closes its own slot and the row never carries
-    /// an empty capsule.
+    /// The closing row's two SECONDARY actions, each its own plain control,
+    /// leading the line: `[save][repost][pages] ······ [comments][likes]`. One
+    /// control per verb, so a hidden one closes its own slot.
     private let repostButton = PostActionPillView.makeGlyphControl(
-        systemName: "arrow.2.squarepath", label: "Repost"
+        systemName: ActionSymbol.repost, label: "Repost",
+        width: PostActionPillView.plainControlWidth, emphasis: .secondary
     )
     private let bookmarkButton = PostActionPillView.makeGlyphControl(
-        systemName: "bookmark", label: "Save"
+        systemName: ActionSymbol.save, label: "Save",
+        width: PostActionPillView.plainControlWidth, emphasis: .secondary
     )
     private var repostPill: PostActionPillView!
     private var bookmarkPill: PostActionPillView!
@@ -1713,6 +1743,9 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// Active for text rows only: the line is the card's last thing. A media
     /// row ends at the preview instead — see `mediaClosesCard`.
     private var metaClosesCard: NSLayoutConstraint!
+    /// The line's two ends, hung by `syncClosingLine` — see `closingLineHang`.
+    private var metaLeading: NSLayoutConstraint!
+    private var metaTrailing: NSLayoutConstraint!
     private var mediaConstraints: [NSLayoutConstraint] = []
 
     override public init(frame: CGRect) {
@@ -1833,8 +1866,9 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // more" — and a count never truncates: a clipped count is a wrong
         // count.
         //
-        // Card pills, not media ones: what is behind them is the card's flat
-        // fill, which a material would resolve to and vanish into.
+        // Card actions, not media pills: PLAIN, ink on the card's own fill
+        // (no capsule since 2026-09-30 — see `PostCardPillView`). Comments
+        // and likes are the primary pair, repost and save the secondary one.
         closingLikesPill = PostCardPillView(contents: [reactions])
         closingCommentsPill = PostCardPillView(contents: [comments])
         repostPill = PostActionPillView(control: repostButton)
@@ -1874,11 +1908,22 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // everything else — and the gap either side of it is the spacer's
         // own, so a line with nothing leading it still ends at the counters.
         metaRow.spacing = Self.chipGap
-        metaRow.constrain(in: card) { parent in
-            metaRow.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: Self.captionInset)
-            metaRow.trailingAnchor.constraint(
-                equalTo: parent.trailingAnchor, constant: -Self.captionInset
-            )
+        // The ends HANG: `syncClosingLine` moves them out by the ink inset
+        // of whatever box opens and closes the line, so the ink sits on the
+        // caption's column. Written at the caption's inset here, which is
+        // right for a line whose ends have no air of their own (the date,
+        // the indicator's capsule).
+        let metaLeading = metaRow.leadingAnchor.constraint(
+            equalTo: card.leadingAnchor, constant: Self.captionInset
+        )
+        let metaTrailing = metaRow.trailingAnchor.constraint(
+            equalTo: card.trailingAnchor, constant: -Self.captionInset
+        )
+        self.metaLeading = metaLeading
+        self.metaTrailing = metaTrailing
+        metaRow.constrain(in: card) { _ in
+            metaLeading
+            metaTrailing
             // A pill tall whatever is on it: a line holding only the date is
             // the same line as one holding capsules, and the card under it
             // the same height.
@@ -1928,6 +1973,30 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         metaClosesCard.isActive = !isEmpty
         captionClosesCard.isActive = isEmpty && !hasMedia
         mediaClosesCard.isActive = isEmpty && hasMedia
+        let hang = closingLineHang
+        metaLeading.constant = Self.captionInset - hang.leading
+        metaTrailing.constant = -(Self.captionInset - hang.trailing)
+    }
+
+    /// How far the closing line's two ends reach past the caption's column.
+    ///
+    /// ⚠️ THE INK IS ON THE COLUMN, NOT THE BOX. A plain action still has a
+    /// box — the press region, and the capsule the press wash draws — but
+    /// nothing marks its edge, so a box standing on the caption's inset put
+    /// the save glyph ~8pt right of the caption it closes and the like count
+    /// 8pt short of the caption's end. Each end hangs out by the air its own
+    /// box leaves before the ink; the date and the indicator's capsule have
+    /// none, and hang nothing.
+    ///
+    /// Stays inside the card: the widest hang (the save glyph's ~8pt) leaves
+    /// the box ~4pt off the card's edge, clear of its corner arc at the
+    /// line's height.
+    var closingLineHang: (leading: CGFloat, trailing: CGFloat) {
+        let shown = metaRow.arrangedSubviews.filter { !$0.isHidden && $0 !== lineSpacer }
+        return (
+            (shown.first as? PostCardPillView)?.inkLeading ?? 0,
+            (shown.last as? PostCardPillView)?.inkTrailing ?? 0
+        )
     }
 
     @objc private func repostPressed() { onRepostTapped?() }
