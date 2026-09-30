@@ -8,9 +8,9 @@ import UIKit
 ///
 /// Laid out inside its section's insets (`SoundSheetHeaderCell`) —
 /// `SoundSheetViewController.headerInset` from the sheet's leading edge, as
-/// far from its top (`topInset`) and with as much room under it
-/// (`headerBottom`): twice the tiles' gutter, the one block of the sheet
-/// with air around it (asked for, 2026-09-30) — at the ABSOLUTE height
+/// far from its top (`topInset`): twice the tiles' gutter, the one block of
+/// the sheet with air around it (asked for, 2026-09-30) — and the app's
+/// section gap under it (`DetentMetrics.sectionGap`), at the ABSOLUTE height
 /// `fittingHeight` computes.
 ///
 /// ```
@@ -120,8 +120,8 @@ final class SoundSheetHeaderView: UICollectionReusableView {
         addSubview(identity)
 
         // NO GAP OF ITS OWN under the record: the room under the sound is its
-        // SECTION's (`SoundSheetViewController.headerBottom`), counted by the
-        // detents from the same constant.
+        // SECTION's (`SoundSheetViewController.DetentMetrics.sectionGap`),
+        // counted by the detents from the same value.
         let bottom = identity.bottomAnchor.constraint(equalTo: bottomAnchor)
         bottom.priority = .init(999)
         NSLayoutConstraint.activate([

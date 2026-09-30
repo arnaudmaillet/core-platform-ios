@@ -3085,7 +3085,12 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         // they came from carries, in the same red badge, on the section it
         // describes. Every header leads (`leadsList: true`): the separation
         // between sections is the layout's bottom inset on the one above.
-        header.setTitle(section.title, count: section == .new ? newRunLength : 0, leadsList: true)
+        // Its line stands `Spacing.sectionTitle` over the first row, as every
+        // section title does (the gap above it is the layout's).
+        header.setTitle(
+            section.title, count: section == .new ? newRunLength : 0, leadsList: true,
+            titleToContent: Spacing.sectionTitle
+        )
         // Tapping a header means "show me this part" — the same gesture the
         // inbox's pills answer.
         header.onTap = { [weak self] in self?.scrollToSection(indexPath.section) }

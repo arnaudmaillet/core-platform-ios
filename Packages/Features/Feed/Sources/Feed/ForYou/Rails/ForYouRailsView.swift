@@ -79,10 +79,17 @@ final class ForYouRailsView: UIView {
         /// Height over width: portrait, tall enough that two lines of caption
         /// sit over the picture without burying it.
         static let cardAspect: CGFloat = 4.0 / 3.0
-        /// Between the two rows, and between the last row and "For you".
-        static let rowGap: CGFloat = 10
-        /// Below "For you", before the list's first card.
-        static let listGap: CGFloat = 4
+        /// Between the two rows, and between the last row and "For you": the
+        /// app's ONE section gap (`Spacing.section`, 2026-09-30), from a row's
+        /// foot to the next title's line — the bar's own air counted in
+        /// (`SectionLinkHeaderView.gapAbove`). The sound sheet and the pushed
+        /// Following / Friends lists keep the same distance.
+        static var rowGap: CGFloat { SectionLinkHeaderView.gapAbove }
+        /// Below "For you", before the list's first card: what
+        /// `Spacing.sectionTitle` asks beyond the bar's own air — none at the
+        /// default size — so "For you" stands over the list as far as
+        /// "Friends" and "Following" over their rows.
+        static var listGap: CGFloat { SectionLinkHeaderView.gapBelow }
 
         /// The width of one item when `perWidth` of them — gaps included —
         /// fill `width` from the left margin: `perWidth.rounded(.down)` whole
