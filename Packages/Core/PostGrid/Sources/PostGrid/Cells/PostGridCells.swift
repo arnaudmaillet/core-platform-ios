@@ -1292,6 +1292,38 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// question about reading a row of numbers rather than about where the card
     /// ends. It does not follow `contentInset`.
     public static let metaSpacing: CGFloat = 14
+    /// The closing line's column: where its first ink starts and its last
+    /// ink ends, from the card's edges — one plain action's padding INSIDE
+    /// the caption's (`captionInset` + `PostCardPillView.plainInsets`, 20).
+    ///
+    /// ⚠️ NOT THE CAPTION'S COLUMN, on purpose (2026-09-30, evening). #329
+    /// hung the ends so the ink sat exactly on the caption's inset, 12pt
+    /// from the card's edge — typographically tidy, and the row read as
+    /// pressed against the card's sides ("add a bit of horizontal space on
+    /// the container of the action buttons"). Two ways to buy the air were
+    /// weighed:
+    ///
+    /// * **wider gaps between the groups** — there is no gap to widen: the
+    ///   spacer already takes all the slack between save/repost and
+    ///   comments/likes, so it is the ENDS that are tight;
+    /// * **an inset line** — here. Inset by exactly one action's padding,
+    ///   the outer actions' BOXES (the press wash's capsule) now stand on the
+    ///   caption's column rather than 8pt past it, 4pt from the card's edge:
+    ///   at rest the ink breathes, and a press lights a capsule that stays
+    ///   inside the text's margin instead of spilling towards the corner.
+    ///
+    /// **20**, chosen off three builds side by side (16 / 18 / 20). 16 still
+    /// read as the ends pressed out to the card; at 20 the line is plainly
+    /// its own inset row, and its last count ends where the band's "..."
+    /// glyph ends above it — the card's trailing ink on one column, top and
+    /// bottom.
+    ///
+    /// The whole line moves as one container — the date and the page
+    /// indicator lead it on this column too — so the line reads as a unit
+    /// under the caption, not as a row whose ends disagree.
+    public static var actionLineInset: CGFloat {
+        captionInset + PostCardPillView.plainInsets.leading
+    }
     // MARK: - The card's shape system
     //
     // Every radius on a card, in one place, because four radii chosen
@@ -1910,14 +1942,14 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         metaRow.spacing = Self.chipGap
         // The ends HANG: `syncClosingLine` moves them out by the ink inset
         // of whatever box opens and closes the line, so the ink sits on the
-        // caption's column. Written at the caption's inset here, which is
-        // right for a line whose ends have no air of their own (the date,
-        // the indicator's capsule).
+        // line's own column (`actionLineInset`). Written at that inset here,
+        // which is right for a line whose ends have no air of their own (the
+        // date, the indicator's capsule).
         let metaLeading = metaRow.leadingAnchor.constraint(
-            equalTo: card.leadingAnchor, constant: Self.captionInset
+            equalTo: card.leadingAnchor, constant: Self.actionLineInset
         )
         let metaTrailing = metaRow.trailingAnchor.constraint(
-            equalTo: card.trailingAnchor, constant: -Self.captionInset
+            equalTo: card.trailingAnchor, constant: -Self.actionLineInset
         )
         self.metaLeading = metaLeading
         self.metaTrailing = metaTrailing
@@ -1974,23 +2006,24 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         captionClosesCard.isActive = isEmpty && !hasMedia
         mediaClosesCard.isActive = isEmpty && hasMedia
         let hang = closingLineHang
-        metaLeading.constant = Self.captionInset - hang.leading
-        metaTrailing.constant = -(Self.captionInset - hang.trailing)
+        metaLeading.constant = Self.actionLineInset - hang.leading
+        metaTrailing.constant = -(Self.actionLineInset - hang.trailing)
     }
 
-    /// How far the closing line's two ends reach past the caption's column.
+    /// How far the closing line's two ends reach past the line's column
+    /// (`actionLineInset`).
     ///
     /// ⚠️ THE INK IS ON THE COLUMN, NOT THE BOX. A plain action still has a
     /// box — the press region, and the capsule the press wash draws — but
-    /// nothing marks its edge, so a box standing on the caption's inset put
-    /// the save glyph ~8pt right of the caption it closes and the like count
-    /// 8pt short of the caption's end. Each end hangs out by the air its own
-    /// box leaves before the ink; the date and the indicator's capsule have
-    /// none, and hang nothing.
+    /// nothing marks its edge, so a box standing on the column put the save
+    /// glyph a few points further in than the like count's end — the two
+    /// ends of one line at two different insets. Each end hangs out by the
+    /// air its own box leaves before the ink; the date and the indicator's
+    /// capsule have none, and hang nothing.
     ///
-    /// Stays inside the card: the widest hang (the save glyph's ~8pt) leaves
-    /// the box ~4pt off the card's edge, clear of its corner arc at the
-    /// line's height.
+    /// The column being one plain padding inside the caption's, the widest
+    /// hang (the save glyph's ~8pt) puts that box back on the caption's
+    /// column — never past it.
     var closingLineHang: (leading: CGFloat, trailing: CGFloat) {
         let shown = metaRow.arrangedSubviews.filter { !$0.isHidden && $0 !== lineSpacer }
         return (

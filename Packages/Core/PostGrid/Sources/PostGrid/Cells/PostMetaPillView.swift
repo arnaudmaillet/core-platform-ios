@@ -372,8 +372,9 @@ extension UIView {
 /// was what a WORD needs to sit off a capsule's ends, and with no capsule to
 /// sit off it only pushed the ink away from the caption column. The closing
 /// line hangs its first and last box outward by their `inkLeading` /
-/// `inkTrailing`, so the INK — not an invisible box — lines up with the
-/// caption above it.
+/// `inkTrailing`, so the INK — not an invisible box — lines up on the line's
+/// column (`PostGridListRowCell.actionLineInset`, one of these paddings
+/// inside the caption's).
 public class PostCardPillView: PostMetaPillView {
     /// How loudly an action speaks on the card.
     public enum Emphasis: Sendable {
