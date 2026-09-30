@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import UIKit
 
 /// The Search screen's sections, and the order they appear in.
@@ -111,8 +112,12 @@ enum ExploreLayout {
             // Only the FIRST section loses its top padding. That padding is
             // what separates a header from the rows above it; at the top of
             // the list there is nothing above to separate from, and the gap
-            // just pushes the content down under the navigation bar.
-            if index == 0 { configuration.headerTopPadding = 0 }
+            // just pushes the content down under the navigation bar. The
+            // others leave the app's one section gap: `Spacing.section` from
+            // the rows above to the next title's line.
+            configuration.headerTopPadding = index == 0
+                ? 0
+                : SectionHeaderPillButton.sectionGap(traits: environment.traitCollection)
             return NSCollectionLayoutSection.list(using: configuration, layoutEnvironment: environment)
         }
     }

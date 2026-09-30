@@ -220,6 +220,18 @@ struct ForYouRowsTests {
                 "Recent's line is \(lineTop - lastNew.frame.maxY) under New's last card")
         #expect(abs(firstRecent.frame.minY - (lineTop + line) - Spacing.sectionTitle) <= 0.6,
                 "Recent's line is \(firstRecent.frame.minY - lineTop - line) over its first card")
+
+        // And its title is the app's one section title, on the one line: the
+        // header lies inside the cards' 16pt insets, the title stands 20 from
+        // the list's edge like every other title (2026-09-30).
+        let view = try #require(collection.supplementaryView(
+            forElementKind: PostGridListLayout.headerElementKind, at: IndexPath(item: 0, section: 1)
+        ) as? SectionHeaderCapsuleView)
+        view.layoutIfNeeded()
+        let title = view.debugPill.debugTitleView
+        title.layoutIfNeeded()
+        let titleX = title.convert(title.debugFrames.title, to: collection).minX
+        #expect(abs(titleX - SectionTitleView.Metrics.surfaceInset) < 0.5, "Recent's title stands at \(titleX)")
     }
 
     /// A list that is ALL new is one section — "New", titled and counted, not
@@ -301,11 +313,11 @@ struct ForYouRowsTests {
     /// the bar's own air counted in.
     @Test func theRowsKeepTheAppsSectionGap() {
         let width: CGFloat = 393
-        let bar = SectionLinkHeaderView.height
+        let bar = SectionTitleView.Metrics.height
         let story = ForYouRailsView.Metrics.storySize(forWidth: width).height
         let card = ForYouRailsView.Metrics.cardSize(forWidth: width).height
         let gap = ForYouRailsView.Metrics.rowGap
-        #expect(gap == SectionLinkHeaderView.gapAbove)
+        #expect(gap == SectionTitleView.gapAbove())
         let air = (bar - UIFont.systemFont(ofSize: 20, weight: .bold).lineHeight) / 2
         #expect(abs(gap + air - Spacing.section) <= 0.5)
         #expect(ForYouRailsView.height(forWidth: width, friends: 3, following: 3)

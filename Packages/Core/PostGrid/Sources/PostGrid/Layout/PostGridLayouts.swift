@@ -209,11 +209,11 @@ public enum PostGridListLayout {
     /// row to the next header's title LINE, less the room that header holds
     /// above its line (`SectionHeaderPillButton.inlineTitleTop`). Its rows
     /// start `Spacing.sectionTitle` under the line — the header's half of the
-    /// rule, which the host asks of it (`SectionHeaderCapsuleView.setTitle`'s
-    /// `titleToContent`).
+    /// rule, which it keeps on its own. `SectionHeaderPillButton.sectionGap`,
+    /// the one the inbox's and the search screen's lists leave too.
     @MainActor
     public static func sectionGap(traits: UITraitCollection) -> CGFloat {
-        max(0, (Spacing.section - SectionHeaderPillButton.inlineTitleTop(traits: traits)).rounded())
+        SectionHeaderPillButton.sectionGap(traits: traits)
     }
 
     /// Headers FLOAT over the rows rather than pushing them down: the header is
@@ -272,8 +272,8 @@ public enum PostGridListLayout {
             // 2026-09-30) — from this section's last row to the next title's
             // LINE — less what the next header holds above that line
             // (`sectionGap`). The sound sheet and For You's rows keep the same
-            // distance through their own bars. The inbox's tables still keep
-            // `SectionHeaderPillButton.Metrics.sectionGap` inside their headers.
+            // distance through their own bars, the inbox's tables through
+            // their footers.
             section.contentInsets = NSDirectionalEdgeInsets(
                 top: 0,
                 leading: sideMargin,

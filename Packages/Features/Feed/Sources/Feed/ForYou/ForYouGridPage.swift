@@ -190,14 +190,13 @@ final class ForYouGridPage: UIView {
     var debugArrivalsRunLength: Int { sections.first == .new ? newRunLength : 0 }
 
     /// The section headers laid out right now, top to bottom: the title each
-    /// wears and the count its badge shows.
+    /// wears and the count after it.
     func debugSectionHeaders() -> [(title: String?, count: Int)] {
         collectionView.visibleSupplementaryViews(ofKind: PostGridListLayout.headerElementKind)
             .compactMap { $0 as? SectionHeaderCapsuleView }
             .sorted { $0.frame.minY < $1.frame.minY }
             .map { header in
-                let title = header.debugPill.configuration?.attributedTitle.map { String($0.characters) }
-                return (title, header.debugPill.count)
+                (header.debugPill.title, header.debugPill.count)
             }
     }
     #endif
@@ -3084,17 +3083,13 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
             for: indexPath
         ) as! SectionHeaderCapsuleView
         let section = sections.indices.contains(indexPath.section) ? sections[indexPath.section] : .earlier
-        // "New (8)": the header says how much is new, so the viewer knows the
+        // "New 8": the header says how much is new, so the viewer knows the
         // size of the run before scrolling it — the number the For You header
-        // they came from carries, in the same red badge, on the section it
-        // describes. Every header leads (`leadsList: true`): the separation
-        // between sections is the layout's bottom inset on the one above.
-        // Its line stands `Spacing.sectionTitle` over the first row, as every
-        // section title does (the gap above it is the layout's).
-        header.setTitle(
-            section.title, count: section == .new ? newRunLength : 0, leadsList: true,
-            titleToContent: Spacing.sectionTitle
-        )
+        // they came from carries, written the same way, on the section it
+        // describes. The separation between sections is the layout's bottom
+        // inset on the one above; the header stands its line
+        // `Spacing.sectionTitle` over the first row, as every title does.
+        header.setTitle(section.title, count: section == .new ? newRunLength : 0)
         // Tapping a header means "show me this part" — the same gesture the
         // inbox's pills answer.
         header.onTap = { [weak self] in self?.scrollToSection(indexPath.section) }

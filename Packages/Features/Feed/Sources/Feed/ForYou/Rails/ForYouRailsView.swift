@@ -8,15 +8,15 @@ import UIKit
 /// The two rows that lead For You's list (2026-09-29):
 ///
 /// ```
-///   Friends                                   (3) ›
+///     Friends 3 ›
 ///   ◉ ◉ ◉ ○ ○ ○ ○          stories: unseen first, with a ring
-///   Following                                 (5) ›
+///     Following 5 ›
 ///   ┌──────┐ ┌──────┐ ┌───       cards, the third peeking;
 ///   │ ▶    │ │ ▶    │ │ ▶         every card on screen plays,
 ///   │ Ana  │ │ Bo   │ │           and each wears its first two
 ///   │ two… │ │ two… │ │           lines over its foot
 ///   └──────┘ └──────┘ └───
-///   For you                       ← a heading, not a way in
+///     For you                     ← a heading, not a way in
 ///   ─── Discover's list ─────────────────────────────
 /// ```
 ///
@@ -53,8 +53,9 @@ import UIKit
 /// the inbox's rule for its sections — and with both empty the header is zero
 /// tall and the list starts at the top.
 ///
-/// Each row's header is a way in (`SectionLinkHeaderView`): the whole bar
-/// pushes its screen, and its pill counts what is new in the row. The third,
+/// Each row's header is a way in — the app's one section title
+/// (`SectionTitleView`) as a link: the whole bar pushes its screen, and the
+/// secondary number after the title counts what is new in the row. The third,
 /// "For you", names the list under the rows and pushes nothing; it is drawn
 /// only under rows, since alone at the top of the screen it would title the
 /// only thing there.
@@ -82,14 +83,14 @@ final class ForYouRailsView: UIView {
         /// Between the two rows, and between the last row and "For you": the
         /// app's ONE section gap (`Spacing.section`, 2026-09-30), from a row's
         /// foot to the next title's line — the bar's own air counted in
-        /// (`SectionLinkHeaderView.gapAbove`). The sound sheet and the pushed
+        /// (`SectionTitleView.gapAbove`). The sound sheet and the pushed
         /// Following / Friends lists keep the same distance.
-        static var rowGap: CGFloat { SectionLinkHeaderView.gapAbove }
+        static var rowGap: CGFloat { SectionTitleView.gapAbove() }
         /// Below "For you", before the list's first card: what
         /// `Spacing.sectionTitle` asks beyond the bar's own air — none at the
         /// default size — so "For you" stands over the list as far as
         /// "Friends" and "Following" over their rows.
-        static var listGap: CGFloat { SectionLinkHeaderView.gapBelow }
+        static var listGap: CGFloat { SectionTitleView.gapBelow() }
 
         /// The width of one item when `perWidth` of them — gaps included —
         /// fill `width` from the left margin: `perWidth.rounded(.down)` whole
@@ -120,15 +121,15 @@ final class ForYouRailsView: UIView {
     static func height(forWidth width: CGFloat, friends: Int, following: Int) -> CGFloat {
         var height: CGFloat = 0
         if friends > 0 {
-            height += SectionLinkHeaderView.height + Metrics.storySize(forWidth: width).height
+            height += SectionTitleView.Metrics.height + Metrics.storySize(forWidth: width).height
         }
         if following > 0 {
             if friends > 0 { height += Metrics.rowGap }
-            height += SectionLinkHeaderView.height + Metrics.cardSize(forWidth: width).height
+            height += SectionTitleView.Metrics.height + Metrics.cardSize(forWidth: width).height
         }
         // "For you" under whatever rows there are; nothing at all without them.
         guard height > 0 else { return 0 }
-        return height + Metrics.rowGap + SectionLinkHeaderView.height + Metrics.listGap
+        return height + Metrics.rowGap + SectionTitleView.Metrics.height + Metrics.listGap
     }
 
     var preferredHeight: CGFloat {
@@ -171,10 +172,10 @@ final class ForYouRailsView: UIView {
     /// nil until the row is first drawn in a window, and again once released.
     private var heldStoryOrder: [ProfileID]?
 
-    private let friendsHeader = SectionLinkHeaderView(title: "Friends")
-    private let followingHeader = SectionLinkHeaderView(title: "Following")
+    private let friendsHeader = SectionTitleView(content: .init(title: "Friends", isLink: true))
+    private let followingHeader = SectionTitleView(content: .init(title: "Following", isLink: true))
     /// The list's own title, under the rows: a heading, not a way in.
-    private let listHeader = SectionLinkHeaderView(title: "For you", isLink: false)
+    private let listHeader = SectionTitleView(content: .init(title: "For you"))
     private let storiesView: UICollectionView
     private let cardsView: UICollectionView
     /// Also what a card's COPIES read the author's face from — the flight's
@@ -301,8 +302,8 @@ final class ForYouRailsView: UIView {
         let cardsChanged = rails.following != cards
         stories = ordered
         cards = rails.following
-        friendsHeader.setCount(rails.friendsBadge)
-        followingHeader.setCount(rails.followingBadge)
+        friendsHeader.content = .init(title: "Friends", newCount: rails.friendsBadge, isLink: true)
+        followingHeader.content = .init(title: "Following", newCount: rails.followingBadge, isLink: true)
         if storiesChanged { applyStories(animated: window != nil) }
         if cardsChanged { applyCards() }
         holdStoryOrderIfShown()
@@ -386,7 +387,8 @@ final class ForYouRailsView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         let width = bounds.width
-        let margin = Metrics.sideMargin
+        // The titles span the row edge to edge: the title stands its own
+        // inset from the surface (`SectionTitleView.Metrics.surfaceInset`).
         var y: CGFloat = 0
         let hasStories = !stories.isEmpty
         let hasCards = !cards.isEmpty
@@ -396,9 +398,9 @@ final class ForYouRailsView: UIView {
         cardsView.isHidden = !hasCards
         if hasStories {
             friendsHeader.frame = CGRect(
-                x: margin, y: y, width: width - margin * 2, height: SectionLinkHeaderView.height
+                x: 0, y: y, width: width, height: SectionTitleView.Metrics.height
             )
-            y += SectionLinkHeaderView.height
+            y += SectionTitleView.Metrics.height
             let size = Metrics.storySize(forWidth: width)
             if let layout = storiesView.collectionViewLayout as? UICollectionViewFlowLayout,
                layout.itemSize != size {
@@ -410,9 +412,9 @@ final class ForYouRailsView: UIView {
         if hasCards {
             if hasStories { y += Metrics.rowGap }
             followingHeader.frame = CGRect(
-                x: margin, y: y, width: width - margin * 2, height: SectionLinkHeaderView.height
+                x: 0, y: y, width: width, height: SectionTitleView.Metrics.height
             )
-            y += SectionLinkHeaderView.height
+            y += SectionTitleView.Metrics.height
             let size = Metrics.cardSize(forWidth: width)
             if let layout = cardsView.collectionViewLayout as? UICollectionViewFlowLayout,
                layout.itemSize != size {
@@ -425,7 +427,7 @@ final class ForYouRailsView: UIView {
         if !listHeader.isHidden {
             y += Metrics.rowGap
             listHeader.frame = CGRect(
-                x: margin, y: y, width: width - margin * 2, height: SectionLinkHeaderView.height
+                x: 0, y: y, width: width, height: SectionTitleView.Metrics.height
             )
         }
     }
@@ -834,6 +836,8 @@ final class ForYouRailsView: UIView {
     /// The friends' order as drawn.
     var debugStoryOrder: [ProfileID] { stories.map(\.authorID) }
     var debugShowsListHeader: Bool { !listHeader.isHidden }
+    /// Friends, Following and "For you" — the app's one section title each.
+    var debugHeaders: [SectionTitleView] { [friendsHeader, followingHeader, listHeader] }
 
     /// Taps story `index` through the row's own selection path.
     func debugTapStory(at index: Int) -> Bool {
@@ -857,7 +861,7 @@ final class ForYouRailsView: UIView {
         return cardCell(for: post.id)?.renderedCover != nil
     }
 
-    /// The headers' OWN tap path (`SectionLinkHeaderView.debugTap`), not the
+    /// The headers' OWN tap path (`SectionTitleView.debugTap`), not the
     /// host's closure: calling the closure is how #312's dead chevron passed.
     func debugTapFriendsHeader() { friendsHeader.debugTap() }
     func debugTapFollowingHeader() { followingHeader.debugTap() }

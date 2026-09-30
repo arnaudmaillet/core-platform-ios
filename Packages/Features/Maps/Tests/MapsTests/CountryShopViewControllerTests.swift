@@ -65,9 +65,16 @@ struct CountryShopViewControllerTests {
         let shop = makeShop()
         #expect(codes(shop, in: .unlocked) == ["FR", "US", "ES"])
         #expect(codes(shop, in: .locked) == ["CN", "IN", "DE", "IT"])
-        #expect(shop.headerTitle(for: .unlocked) == "Unlocked · 3")
-        #expect(shop.headerTitle(for: .locked) == "Locked · 4")
-        #expect(shop.headerTitle(for: .progress) == nil)
+        #expect(header(shop, .unlocked) == "Unlocked 3")
+        #expect(header(shop, .locked) == "Locked 4")
+        #expect(shop.headerContent(for: .progress) == nil)
+        // The count is the section title's secondary number, spoken whole.
+        #expect(shop.headerContent(for: .locked)?.countAccessibilityValue == "4 countries")
+    }
+
+    /// A header as the eye reads it: the title, then its secondary count.
+    private func header(_ shop: CountryShopViewController, _ section: CountryShopViewController.Section) -> String? {
+        shop.headerContent(for: section).map { [$0.title, $0.count].compactMap { $0 }.joined(separator: " ") }
     }
 
     /// "an" is in France (unlocked) and Germany (locked): one search, both
@@ -78,8 +85,8 @@ struct CountryShopViewControllerTests {
         search(shop, "an")
         #expect(codes(shop, in: .unlocked) == ["FR"])
         #expect(codes(shop, in: .locked) == ["DE"])
-        #expect(shop.headerTitle(for: .unlocked) == "Unlocked · 1")
-        #expect(shop.headerTitle(for: .locked) == "Locked · 1")
+        #expect(header(shop, .unlocked) == "Unlocked 1")
+        #expect(header(shop, .locked) == "Locked 1")
         #expect(shop.dataSource.snapshot().itemIdentifiers.first == .progress)
         #expect(shop.contentUnavailableConfiguration == nil)
 
@@ -104,7 +111,7 @@ struct CountryShopViewControllerTests {
         _ = access.unlock("CN")
         #expect(codes(shop, in: .unlocked) == ["FR", "US", "CN", "ES"])
         #expect(codes(shop, in: .locked) == ["IN", "DE", "IT"])
-        #expect(shop.headerTitle(for: .locked) == "Locked · 3")
+        #expect(header(shop, .locked) == "Locked 3")
     }
 
     @Test func theBarIsGemsLeftTitleShopCloseRight() throws {

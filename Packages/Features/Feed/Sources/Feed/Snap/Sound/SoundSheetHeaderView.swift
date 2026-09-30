@@ -4,7 +4,7 @@ import UIKit
 /// The sound sheet's head: the artwork that plays and pauses the sound, and
 /// what the sound is — nothing else. "Use this sound" and share are bar items
 /// of the sheet's native TOOLBAR, and a section of posts that holds more than
-/// it shows opens from its title's chevron (`SoundSheetSectionHeaderView`).
+/// it shows opens from its title's chevron (`SectionTitleView`).
 ///
 /// Laid out inside its section's insets (`SoundSheetHeaderCell`) —
 /// `SoundSheetViewController.headerInset` from the sheet's leading edge, as

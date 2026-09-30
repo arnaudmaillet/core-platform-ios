@@ -969,34 +969,41 @@ struct SoundSheetTests {
 
     // MARK: - Chevron
 
-    /// The chevron stands RIGHT AFTER the title, not at the header's far end,
-    /// and the title and chevron are one control that pushes; a section that
-    /// shows everything is a plain title.
+    /// The sheet's titles are the app's ONE section title (`SectionTitleView`,
+    /// 2026-09-30): the chevron RIGHT AFTER the title, not at the header's far
+    /// end, and the whole bar one control that pushes; a section that shows
+    /// everything is a plain title. And the title stands the app's one inset
+    /// from the SHEET's edge, though its header lies in the tiles' 8pt gutter.
     @Test func theChevronFollowsTheTitle() throws {
-        let width: CGFloat = 386
-        let header = SoundSheetSectionHeaderView(frame: CGRect(x: 0, y: 0, width: width, height: 44))
-        var pushed = 0
-        header.onViewAll = { pushed += 1 }
-        header.configure(title: "Popular", hasMore: true)
-        header.layoutIfNeeded()
-        header.control.layoutIfNeeded()
-        #expect(header.title == "Popular")
-        #expect(header.offersViewAll)
-        let title = try #require(header.control.titleLabel)
-        let chevron = try #require(header.control.imageView)
-        let titleFrame = title.convert(title.bounds, to: header)
-        let chevronFrame = chevron.convert(chevron.bounds, to: header)
-        #expect(abs(titleFrame.minX) < 0.5, "the title is off the tiles' edge")
-        #expect(chevronFrame.minX >= titleFrame.maxX - 0.5, "the chevron is not after the title")
-        #expect(chevronFrame.minX - titleFrame.maxX < 12, "the chevron stands off the title")
-        #expect(chevronFrame.maxX < width / 2, "the chevron sits at the header's far end")
-        #expect(!allSubviews(of: header).compactMap { $0 as? UILabel }.contains { $0.text == "View all" })
-        header.sendViewAll()
-        #expect(pushed == 1)
+        let controller = sheet(tiles: 23, original: 0)
+        try laidOut(controller)
+        let collection = try grid(of: controller)
+        func head(_ kind: SoundSheetSection.Kind) throws -> SectionTitleSupplementaryView {
+            let section = try #require(dataSource(of: controller).snapshot().indexOfSection(.posts(kind)))
+            let view = try #require(collection.supplementaryView(
+                forElementKind: UICollectionView.elementKindSectionHeader, at: IndexPath(item: 0, section: section)
+            ) as? SectionTitleSupplementaryView)
+            view.layoutIfNeeded()
+            return view
+        }
+        let popular = try head(.popular).titleView
+        #expect(popular.debugTitleText == "Popular")
+        #expect(popular.debugShowsChevron)
+        #expect(popular.accessibilityTraits.contains(.button))
+        let frames = popular.debugFrames
+        let titleInSheet = popular.convert(frames.title, to: collection).minX - collection.bounds.minX
+        #expect(abs(titleInSheet - SectionTitleView.Metrics.surfaceInset) < 0.5,
+                "the title stands \(titleInSheet) from the sheet's edge")
+        #expect(abs(frames.chevron.minX - frames.title.maxX - SectionTitleView.Metrics.titleToChevron) < 0.5,
+                "the chevron is not right after the title")
+        #expect(frames.chevron.maxX < collection.bounds.width / 2, "the chevron sits at the header's far end")
+        #expect(!allSubviews(of: popular).compactMap { $0 as? UILabel }.contains { $0.text == "View all" })
 
-        header.configure(title: "Recent", hasMore: false)
-        #expect(!header.offersViewAll, "a section that shows everything offers a chevron")
-        #expect(header.title == "Recent")
+        let recent = try head(.recent).titleView
+        #expect(recent.debugTitleText == "Recent")
+        #expect(!recent.debugShowsChevron, "a section that shows everything offers a chevron")
+        #expect(recent.accessibilityTraits.contains(.header))
+        #expect(!recent.accessibilityTraits.contains(.button))
     }
 
     /// Popular's title and chevron push its WHOLE ranking inside the sheet — a

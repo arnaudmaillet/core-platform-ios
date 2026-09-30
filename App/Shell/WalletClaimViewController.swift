@@ -256,8 +256,13 @@ final class WalletClaimViewController: UIViewController {
     // MARK: - Layout
 
     private func buildCollection() {
-        let layout = UICollectionViewCompositionalLayout { [weak self] index, _ in
+        let layout = UICollectionViewCompositionalLayout { [weak self] index, environment in
             let section = self?.dataSource?.sectionIdentifier(for: index) ?? .summary
+            let traits = environment.traitCollection
+            // Every section is followed by a titled one but the last: it
+            // leaves the app's one section gap under it (`Spacing.section` to
+            // the next title's line, the title bar's own air counted in).
+            let isLast = index == (self?.dataSource?.snapshot().numberOfSections ?? 1) - 1
             let item = NSCollectionLayoutItem(layoutSize: NSCollectionLayoutSize(
                 widthDimension: .fractionalWidth(1), heightDimension: .estimated(72)
             ))
@@ -269,11 +274,17 @@ final class WalletClaimViewController: UIViewController {
             layoutSection.interGroupSpacing = Spacing.sm
             let margin = WalletSheetMetrics.sideMargin
             layoutSection.contentInsets = NSDirectionalEdgeInsets(
-                top: section == .summary ? 0 : Spacing.xs, leading: margin, bottom: 0, trailing: margin
+                top: section == .summary ? 0 : SectionTitleView.gapBelow(traits: traits),
+                leading: margin,
+                bottom: isLast ? 0 : SectionTitleView.gapAbove(traits: traits),
+                trailing: margin
             )
             if section != .summary {
                 let header = NSCollectionLayoutBoundarySupplementaryItem(
-                    layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .estimated(44)),
+                    layoutSize: NSCollectionLayoutSize(
+                        widthDimension: .fractionalWidth(1),
+                        heightDimension: .absolute(SectionTitleView.barHeight(traits: traits))
+                    ),
                     elementKind: WalletSectionHeader.kind, alignment: .top
                 )
                 layoutSection.boundarySupplementaryItems = [header]

@@ -1,11 +1,12 @@
 import UIKit
 
-/// A collection view's section header: `SectionHeaderPillButton` in the shape
-/// a collection view can use.
+/// A collection view's pinning section header: `SectionHeaderPillButton` in
+/// the shape a collection view can use.
 ///
 /// The pill itself — its glass, its metrics, its tap behaviour — lives in that
 /// type, because the inbox's tables need the identical object inside a
-/// `UITableViewHeaderFooterView` instead. This is a host, not a design.
+/// `UITableViewHeaderFooterView` instead. And what the pill SAYS is the app's
+/// one section title (`SectionTitleView`). This is a host, not a design.
 public final class SectionHeaderCapsuleView: UICollectionReusableView {
     /// Fires when the capsule is tapped. Re-assigned on every configure, since
     /// the view is reused across sections.
@@ -29,18 +30,18 @@ public final class SectionHeaderCapsuleView: UICollectionReusableView {
         onTap = nil
     }
 
-    /// `count` is the badge after the title, zero for none — see
-    /// `SectionHeaderPillButton.setCount`. `leadsList` decides the header's top
-    /// margin — see `SectionHeaderPillButton.setLeadsList`. `titleToContent`
-    /// stands the title's line that far over the section's first row — see
-    /// `SectionHeaderPillButton.setTitleToContent`.
-    public func setTitle(
-        _ title: String?, count: Int = 0, leadsList: Bool = true, titleToContent: CGFloat? = nil
-    ) {
+    public override func layoutSubviews() {
+        // Laid inside a section's content insets or edge to edge, the title
+        // stands on the surface's title line.
+        pill.alignToSurface()
+        super.layoutSubviews()
+    }
+
+    /// `count` is the secondary number after the title, zero for none — see
+    /// `SectionHeaderPillButton.setCount`.
+    public func setTitle(_ title: String?, count: Int = 0) {
         pill.setPillTitle(title)
         pill.setCount(count)
-        pill.setLeadsList(leadsList)
-        pill.setTitleToContent(titleToContent)
     }
 
     #if DEBUG

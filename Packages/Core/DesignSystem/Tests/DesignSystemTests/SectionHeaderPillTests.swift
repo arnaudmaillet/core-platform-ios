@@ -2,81 +2,63 @@ import Testing
 import UIKit
 @testable import DesignSystem
 
-/// The one rule every sectioned list in the app shares: the first header is
-/// flush, later ones carry a margin.
-///
-/// Tested on the pill rather than on each host, because the pill is where the
-/// rule lives — four hosts across two features (the inbox's two tables, the
-/// compose picker's and the search screen's collection views, and For You's
-/// Following list) all render it by asking this one object. A per-screen
-/// screenshot proves one of them; this proves the thing they have in common.
+/// Where the pill stands in the header that hosts it — the same for every
+/// header of every list (the inbox's two tables, the inbox search's and the
+/// search screen's collection views, For You's pushed lists).
 @MainActor
 struct SectionHeaderPillTests {
     /// Lays the pill into a host the way a header view does, and reports both
     /// the pill's own offset and the height the header ends up with.
-    private func layout(leadsList: Bool) -> (pillTop: CGFloat, headerHeight: CGFloat) {
+    private func layout(title: String = "Recent") -> (pill: SectionHeaderPillButton, headerHeight: CGFloat) {
         let host = UIView(frame: CGRect(x: 0, y: 0, width: 320, height: 200))
         let pill = SectionHeaderPillButton()
-        pill.setPillTitle("Recent")
+        pill.setPillTitle(title)
         pill.pinAsHeader(in: host)
-        pill.setLeadsList(leadsList)
         host.setNeedsLayout()
         host.layoutIfNeeded()
         let fitted = host.systemLayoutSizeFitting(
             CGSize(width: 320, height: UIView.layoutFittingCompressedSize.height)
         )
-        return (pill.frame.minY, fitted.height)
+        return (pill, fitted.height)
     }
 
-    /// ⚠️ **EVERY header's pill sits at the same offset, first or not.**
-    ///
-    /// A plain table PINS its section headers, and a pinned header carries its
-    /// top margin with it — so a gap spent above the pill hung the second
-    /// section's capsule lower than the first's for exactly as long as both were
-    /// stuck to the top of the list, which is the one place they are compared.
-    /// Measured on the inbox before this changed: `pillTop=8` for section 0 and
-    /// `pillTop=24` for section 1.
+    /// ⚠️ **EVERY header's pill sits at the same offset.** A plain table PINS
+    /// its section headers, and a pinned header carries its top margin with it
+    /// — so a gap spent above the pill hung the second section's capsule lower
+    /// than the first's for exactly as long as both were stuck to the top
+    /// (measured on the inbox: `pillTop=8` for section 0, `24` for section 1).
+    /// The section gap is the host's, at the foot of the section above.
     @Test func everyHeaderPinsItsPillAtTheSameOffset() {
-        #expect(layout(leadsList: true).pillTop == SectionHeaderPillButton.Metrics.float)
-        #expect(layout(leadsList: false).pillTop == SectionHeaderPillButton.Metrics.float)
+        #expect(layout(title: "New").pill.frame.minY == SectionHeaderPillButton.Metrics.float)
+        #expect(layout(title: "Recent").pill.frame.minY == SectionHeaderPillButton.Metrics.float)
+        #expect(layout(title: "New").headerHeight == layout(title: "Recent").headerHeight)
     }
 
-    /// The separation is still THERE — it just sits below the pill, so a
-    /// following section is still parted from the rows above it.
-    @Test func aLaterHeaderStillCarriesTheSectionGap() {
-        #expect(
-            layout(leadsList: false).headerHeight - layout(leadsList: true).headerHeight
-                == SectionHeaderPillButton.Metrics.sectionGap
-        )
+    /// The pill stands on the surface's title line — `SectionTitleView`'s one
+    /// inset — whatever the host's own geometry: edge to edge in a table, 16pt
+    /// in inside a compositional section's content insets.
+    @Test func thePillStandsOnTheSurfacesTitleLine() {
+        let surface = UIScrollView(frame: CGRect(x: 0, y: 0, width: 393, height: 600))
+        for hostX: CGFloat in [0, 16] {
+            let host = UIView(frame: CGRect(x: hostX, y: 100, width: 393 - 2 * hostX, height: 60))
+            surface.addSubview(host)
+            let pill = SectionHeaderPillButton()
+            pill.setPillTitle("Recent")
+            pill.pinAsHeader(in: host)
+            pill.alignToSurface()
+            host.layoutIfNeeded()
+            let x = pill.convert(pill.bounds, to: surface).minX
+            #expect(abs(x - SectionTitleView.Metrics.surfaceInset) < 0.5, "host at \(hostX): pill at \(x)")
+        }
     }
 
-    /// ⚠️ Header views are RECYCLED across sections, so the state has to be
-    /// re-stated on every configure rather than set once. A pill that kept the
-    /// gap from the "Recent" it last rendered would carry it into "New".
-    @Test func theGapIsReversibleOnReuse() {
-        let host = UIView(frame: CGRect(x: 0, y: 0, width: 320, height: 200))
-        let pill = SectionHeaderPillButton()
-        pill.pinAsHeader(in: host)
-
-        pill.setLeadsList(false)
-        host.layoutIfNeeded()
-        let followedHeight = host.systemLayoutSizeFitting(
-            CGSize(width: 320, height: UIView.layoutFittingCompressedSize.height)
-        ).height
-
-        pill.setLeadsList(true)
-        host.layoutIfNeeded()
-        let leadingHeight = host.systemLayoutSizeFitting(
-            CGSize(width: 320, height: UIView.layoutFittingCompressedSize.height)
-        ).height
-        #expect(leadingHeight < followedHeight)
-        // And the pill has not moved, either way.
-        #expect(pill.frame.minY == SectionHeaderPillButton.Metrics.float)
-    }
-
-    /// The gap is in the range the design calls for — a margin, not a band.
-    @Test func theGapIsAMarginNotABand() {
-        #expect((12...16).contains(SectionHeaderPillButton.Metrics.sectionGap))
+    /// The gap a host leaves before the NEXT header puts that header's title
+    /// line `Spacing.section` under the rows above — the app's one gap.
+    @Test func theSectionGapCountsTheHeadersOwnRoom() {
+        let traits = UITraitCollection(preferredContentSizeCategory: .large)
+        let gap = SectionHeaderPillButton.sectionGap(traits: traits)
+        let lineTop = SectionHeaderPillButton.inlineTitleTop(traits: traits)
+        #expect(abs(gap + lineTop - Spacing.section) <= 0.5)
     }
 }
 
@@ -202,9 +184,9 @@ struct SectionHeaderPresentationTests {
     }
 }
 
-/// The count a header can carry after its title — `New (23)` on For You's
-/// pushed lists (2026-09-29) — and the badge it shares with the section link
-/// that pushed them.
+/// The count a header can carry after its title — `New 8` on For You's
+/// pushed lists — as the app's one section title draws it: secondary text,
+/// no badge (2026-09-30).
 @MainActor
 struct SectionHeaderCountTests {
     /// The width the pill asks for, in one shape, at one count.
@@ -213,17 +195,19 @@ struct SectionHeaderCountTests {
         pill.setPillTitle("New")
         pill.setCount(count)
         pill.setPresentation(presentation, animated: false)
-        return pill.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
+        // What the pill's hugging constraints size it to in a host — a bare
+        // button's `systemLayoutSizeFitting` answers from its configuration.
+        return pill.intrinsicContentSize.width
     }
 
-    /// The badge's room is RESERVED by the button's own sizing, in both
-    /// shapes — so the glass capsule wraps "New" and its count together, and
-    /// the inline title never runs under the badge.
+    /// The count's room is the button's own size, in both shapes — so the
+    /// glass capsule wraps "New" and its count together, and the inline
+    /// title never runs under it.
     @Test func aCountWidensThePillInBothShapes() {
         for shape in [SectionHeaderPillButton.Presentation.inline, .pinned] {
             let bare = width(count: 0, presentation: shape)
             let counted = width(count: 23, presentation: shape)
-            #expect(counted >= bare + NotificationCountBadge.height, "\(shape)")
+            #expect(counted >= bare + SectionTitleView.Metrics.titleToCount + 8, "\(shape)")
         }
     }
 
@@ -236,34 +220,37 @@ struct SectionHeaderCountTests {
         zeroed.setPillTitle("New")
         zeroed.setCount(5)
         zeroed.setCount(0)
-        let fitting = UIView.layoutFittingCompressedSize
-        #expect(untouched.systemLayoutSizeFitting(fitting) == zeroed.systemLayoutSizeFitting(fitting))
+        #expect(untouched.intrinsicContentSize == zeroed.intrinsicContentSize)
         #expect(zeroed.accessibilityValue == nil)
     }
 
-    /// VoiceOver hears the count with the header, not as a stray number.
+    /// VoiceOver hears the count with the header, not as a stray number:
+    /// "New, 23 new, button".
     @Test func theCountIsSpokenWithTheHeader() {
         let pill = SectionHeaderPillButton()
         pill.setPillTitle("New")
         pill.setCount(23)
         #expect(pill.count == 23)
+        #expect(pill.accessibilityLabel == "New")
         #expect(pill.accessibilityValue == "23 new")
     }
 
-    /// One digit is a circle, more digits a longer pill, past 99 "99+", and
-    /// zero is no badge at all.
-    @Test func theBadgeReadsLikeANotificationBadge() {
-        let badge = NotificationCountBadge()
-        #expect(badge.text == nil, "hidden until it has something to count")
-        badge.setCount(3)
-        #expect(badge.text == "3")
-        #expect(badge.intrinsicContentSize == CGSize(width: NotificationCountBadge.height,
-                                                     height: NotificationCountBadge.height))
-        badge.setCount(23)
-        #expect(badge.intrinsicContentSize.width > NotificationCountBadge.height)
-        badge.setCount(1200)
-        #expect(badge.text == "99+")
-        badge.setCount(0)
-        #expect(badge.isHidden)
+    /// The pill draws the app's ONE section title in both shapes: the count
+    /// is plain secondary text, the title `.label` — only the size changes
+    /// when it pins.
+    @Test func bothShapesDrawTheSameTitle() {
+        let pill = SectionHeaderPillButton()
+        pill.setPillTitle("New")
+        pill.setCount(3)
+        let title = pill.debugTitleView
+        #expect(title.debugTitleText == "New")
+        #expect(title.debugCountText == "3")
+        #expect(title.debugColors.title == .label)
+        #expect(title.debugColors.count == .secondaryLabel)
+        #expect(!title.debugShowsChevron, "a pill scrolls to its section; it pushes nothing")
+        #expect(title.style == .standard)
+        pill.setPresentation(.pinned, animated: false)
+        #expect(title.style == .compact)
+        #expect(title.debugCountText == "3")
     }
 }

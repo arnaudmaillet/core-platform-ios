@@ -13,9 +13,9 @@ import UIKit
 ///
 /// ```
 ///   [bell][lens]                        [coins][search]
-///   Friends                                     (3) ›   ← stories: a tap flies
+///     Friends 3 ›                                ← stories: a tap flies
 ///   ◉ ◉ ◉ ○ ○ ○                                            that friend's posts
-///   Following                                   (5) ›   ← cards: a tap flies
+///     Following 5 ›                              ← cards: a tap flies
 ///   ┌────┐ ┌────┐ ┌──                                      the row's posts
 ///   └────┘ └────┘ └──
 ///   ── Discover: cards, with mosaic chunks and "View all" ──

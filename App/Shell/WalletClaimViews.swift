@@ -558,36 +558,36 @@ final class WalletEmptyStakesCell: UICollectionViewCell {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 }
 
-/// A section's title and, on the right, what it adds up to.
+/// A section's title — the app's one (`SectionTitleView`) — and, at the
+/// trailing end, what the section adds up to (its accessory).
 final class WalletSectionHeader: UICollectionReusableView {
     static let kind = "wallet.sectionHeader"
-    private let titleLabel = UILabel()
+    let titleView = SectionTitleView()
     private let detailLabel = UILabel()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        titleLabel.font = .systemFont(ofSize: 17, weight: .semibold)
         detailLabel.font = .monospacedDigitSystemFont(ofSize: 13, weight: .medium)
         detailLabel.textColor = .secondaryLabel
-        let row = UIStackView(arrangedSubviews: [titleLabel, UIView(), detailLabel])
-        row.alignment = .firstBaseline
-        row.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(row)
+        titleView.trailingAccessory = detailLabel
+        titleView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(titleView)
         NSLayoutConstraint.activate([
-            row.topAnchor.constraint(equalTo: topAnchor, constant: Spacing.md),
-            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Spacing.xs),
-            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Spacing.xs),
-            row.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Spacing.xs),
+            titleView.topAnchor.constraint(equalTo: topAnchor),
+            titleView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            titleView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            titleView.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
-        accessibilityTraits = .header
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     func configure(title: String, detail: NSAttributedString?) {
-        titleLabel.text = title
+        titleView.content = .init(title: title)
         detailLabel.attributedText = detail
+        detailLabel.isHidden = (detail?.length ?? 0) == 0
+        titleView.setNeedsLayout()
     }
 }
 
