@@ -30,7 +30,7 @@ struct MockPostSoundProvider: PostSoundProviding {
     /// a clip (a borrower earlier in the dataset does not count — the sound
     /// was cut from the clip), or the first post set to a song.
     private let originals: [String: PostID]
-    /// When each post was published — the "New" row's order.
+    /// When each post was published — the "Recent" grid's order.
     private let publishedAt: [PostID: Int64]
     /// The corpus's views and likes — the "Popular" row's order. Read when a
     /// sheet opens, so a like given in the session counts.
@@ -98,12 +98,13 @@ struct MockPostSoundProvider: PostSoundProviding {
     /// The two orders of the sound page, over the same posts:
     /// - **popular**: views plus ten per like (a like is worth ten looks) —
     ///   the counters the feed itself shows;
-    /// - **newest**: by publication date, newest first.
+    /// - **recent**: by publication date, newest first — every post, the
+    ///   popular ones included.
     ///
     /// Ties fall back to the dataset's order.
     func rankings(using sound: PostSound) -> PostSoundRankings {
         let posts = postsBySound[sound.id] ?? []
-        guard posts.count > 1 else { return PostSoundRankings(popular: posts, newest: posts) }
+        guard posts.count > 1 else { return PostSoundRankings(popular: posts, recent: posts) }
         let position = Dictionary(posts.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
         let engagement: [PostID: Int64] = Dictionary(posts.map { id in
             let views = counters?.viewCount(for: id.rawValue) ?? 0
@@ -113,7 +114,7 @@ struct MockPostSoundProvider: PostSoundProviding {
         func ranked(_ key: (PostID) -> Int64) -> [PostID] {
             posts.sorted { key($0) != key($1) ? key($0) > key($1) : position[$0, default: 0] < position[$1, default: 0] }
         }
-        return PostSoundRankings(popular: ranked { engagement[$0] ?? 0 }, newest: ranked { publishedAt[$0] ?? 0 })
+        return PostSoundRankings(popular: ranked { engagement[$0] ?? 0 }, recent: ranked { publishedAt[$0] ?? 0 })
     }
 
     /// A clip's sound is its clip's; a song is its first poster's only when

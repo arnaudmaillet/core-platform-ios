@@ -3,12 +3,14 @@ import UIKit
 
 /// The sound sheet's head: the artwork that plays and pauses the sound, and
 /// what the sound is — nothing else. "Use this sound" and share are bar items
-/// of the sheet's native TOOLBAR, and each section of posts has its own
-/// "View all" (`SoundSheetSectionHeaderView`).
+/// of the sheet's native TOOLBAR, and a section of posts that holds more than
+/// it shows opens from its title's chevron (`SoundSheetSectionHeaderView`).
 ///
 /// Laid out inside its section's side insets (`SoundSheetHeaderCell`) — one
-/// gutter from the sheet's edge, on the tiles' left edge — at the ABSOLUTE
-/// height `fittingHeight` computes.
+/// gutter from the sheet's edge, on the tiles' left edge, and ONE GUTTER FROM
+/// ITS TOP too (`SoundSheetViewController.topInset`): the same margin both
+/// ways (asked for, 2026-09-30) — at the ABSOLUTE height `fittingHeight`
+/// computes.
 ///
 /// ```
 ///  ╭────╮  Veridis Quo Veridis Qu…   (✕)   the sheet's close button, a bar
@@ -116,9 +118,11 @@ final class SoundSheetHeaderView: UICollectionReusableView {
         identity.translatesAutoresizingMaskIntoConstraints = false
         addSubview(identity)
 
-        // The gap to the grid below is the header's own, so the first row
-        // starts where the header says it ends.
-        let bottom = identity.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Spacing.lg)
+        // NO GAP OF ITS OWN under the record: what separates it from the
+        // "Popular" title is that title's own air, as between every section
+        // of the sheet (asked for, 2026-09-30: no spacing added between
+        // sections).
+        let bottom = identity.bottomAnchor.constraint(equalTo: bottomAnchor)
         bottom.priority = .init(999)
         NSLayoutConstraint.activate([
             identity.topAnchor.constraint(equalTo: topAnchor),

@@ -41,21 +41,23 @@ public struct PostSound: Sendable, Equatable, Identifiable {
 }
 
 /// The posts set to a sound, ranked the two ways the sound page shows them:
-/// its "Popular" row and its "New" grid. Each list holds every post
-/// ("Popular"'s "View all" shows the whole of it); the page decides what each
-/// section shows of it.
+/// its "Popular" row and its "Recent" grid. Each list holds EVERY post
+/// ("Popular"'s "View all" shows the whole of it, "Recent" shows the whole of
+/// it — a popular post included); the page decides what each section shows
+/// of it.
 public struct PostSoundRankings: Sendable, Equatable {
     /// Most engaged first.
     public let popular: [PostID]
-    /// Most recently published first.
-    public let newest: [PostID]
+    /// Most recently published first — the posts that used the sound
+    /// lately, popular ones too.
+    public let recent: [PostID]
 
-    public init(popular: [PostID], newest: [PostID]) {
+    public init(popular: [PostID], recent: [PostID]) {
         self.popular = popular
-        self.newest = newest
+        self.recent = recent
     }
 
-    public static let empty = PostSoundRankings(popular: [], newest: [])
+    public static let empty = PostSoundRankings(popular: [], recent: [])
 }
 
 /// Answers which sound a post is set to, and which posts use it.
@@ -84,6 +86,6 @@ public extension PostSoundProviding {
     /// the page then shows its posts once each, in that order.
     func rankings(using sound: PostSound) -> PostSoundRankings {
         let posts = postIDs(using: sound)
-        return PostSoundRankings(popular: posts, newest: posts)
+        return PostSoundRankings(popular: posts, recent: posts)
     }
 }

@@ -271,25 +271,27 @@ private final class TileBadge: UIView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 }
 
-/// A section's head: its title on the left, "View all ›" on the right when
-/// the section holds more than the sheet shows (`SoundSheetSection.hasMore`).
+/// A section's head: its title, and — when the section holds more than the
+/// sheet shows (`SoundSheetSection.hasMore`) — a chevron RIGHT AFTER the
+/// title's last letter, the two one control that pushes the whole ranking.
 ///
-/// "View all ›" is Discover's control in every respect the eye reads
-/// (`DiscoverViewAllFooterView`) — a plain secondary-label button in semibold
-/// subheadline, the chevron trailing and pointing RIGHT because it pushes a
-/// screen — so the app says "there is more of this" one way. It sits at the
-/// section's head rather than under it: a row scrolls sideways, and a door
-/// under it would be under the toolbar at the collapsed detent.
+/// ```
+///  Popular ›                 ← title and chevron: one tap target
+///  Recent                    ← shows everything it holds: no chevron
+/// ```
+///
+/// No "View all" label (dropped 2026-09-30): a chevron after a title says
+/// "this title opens its section", the way For You's section headers say it.
+/// The control keeps the header's full height as its hit target; the chevron
+/// is in the secondary label's colour, a notch smaller than the title, so the
+/// title stays the word the eye reads.
 ///
 /// ⚠️ ITS HEIGHT IS COMPUTED (`height(traits:)`), and the layout gives it that
 /// height absolutely: it is part of the collapsed detent, which is never
 /// measured off a live layout.
 final class SoundSheetSectionHeaderView: UICollectionReusableView {
-    static let viewAllTitle = "View all"
-
     var onViewAll: (() -> Void)?
 
-    private let titleLabel = UILabel()
     private let button = UIButton(configuration: .plain())
 
     /// The header's height at `traits`' text size: the title's line with a
@@ -301,36 +303,30 @@ final class SoundSheetSectionHeaderView: UICollectionReusableView {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        titleLabel.font = .preferredFont(forTextStyle: .title3).withWeight(.bold)
-        titleLabel.adjustsFontForContentSizeCategory = true
-        titleLabel.accessibilityTraits = .header
-        titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-
         var configuration = UIButton.Configuration.plain()
-        configuration.image = UIImage(systemName: "chevron.right")
-        configuration.preferredSymbolConfigurationForImage = .init(pointSize: 12, weight: .bold)
         configuration.imagePlacement = .trailing
-        configuration.imagePadding = Spacing.xs + 2
-        configuration.baseForegroundColor = .secondaryLabel
-        // Flush with the tiles' right edge: the plain style's own side padding
-        // would stand the chevron off the gutter.
-        configuration.contentInsets = .init(top: 0, leading: Spacing.sm, bottom: 0, trailing: 0)
-        var text = AttributedString(Self.viewAllTitle)
-        text.font = UIFont.preferredFont(forTextStyle: .subheadline).withWeight(.semibold)
-        configuration.attributedTitle = text
+        configuration.imagePadding = Spacing.xs
+        configuration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(textStyle: .body)
+            .applying(UIImage.SymbolConfiguration(weight: .bold))
+        configuration.imageColorTransformer = UIConfigurationColorTransformer { _ in .secondaryLabel }
+        configuration.baseForegroundColor = .label
+        configuration.titleLineBreakMode = .byTruncatingTail
+        // Flush with the tiles' left edge: the plain style's own padding would
+        // stand the title off the gutter.
+        configuration.contentInsets = .zero
+        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
+            var attributes = attributes
+            attributes.font = UIFont.preferredFont(forTextStyle: .title3).withWeight(.bold)
+            return attributes
+        }
         button.configuration = configuration
+        button.contentHorizontalAlignment = .leading
         button.addAction(UIAction { [weak self] _ in self?.onViewAll?() }, for: .primaryActionTriggered)
         button.translatesAutoresizingMaskIntoConstraints = false
-        button.setContentCompressionResistancePriority(.required, for: .horizontal)
-
-        addSubview(titleLabel)
         addSubview(button)
         NSLayoutConstraint.activate([
-            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor),
-            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: button.leadingAnchor, constant: -Spacing.sm),
-            button.trailingAnchor.constraint(equalTo: trailingAnchor),
+            button.leadingAnchor.constraint(equalTo: leadingAnchor),
+            button.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
             button.topAnchor.constraint(equalTo: topAnchor),
             button.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
@@ -345,17 +341,23 @@ final class SoundSheetSectionHeaderView: UICollectionReusableView {
     }
 
     func configure(title: String, hasMore: Bool) {
-        titleLabel.text = title
-        button.isHidden = !hasMore
-        button.accessibilityLabel = "View all: \(title)"
+        button.configuration?.title = title
+        button.configuration?.image = hasMore ? UIImage(systemName: "chevron.right") : nil
+        // A section that shows everything is a plain title: nothing to press.
+        button.isUserInteractionEnabled = hasMore
+        button.accessibilityLabel = title
+        button.accessibilityTraits = hasMore ? [.header, .button] : .header
+        button.accessibilityHint = hasMore ? "Shows every post in \(title)" : nil
     }
 
     /// The title as shown — what a test reads.
-    var title: String? { titleLabel.text }
-    /// Whether "View all" is offered — what a test reads.
-    var offersViewAll: Bool { !button.isHidden }
+    var title: String? { button.configuration?.title }
+    /// Whether the chevron is offered — what a test reads.
+    var offersViewAll: Bool { button.configuration?.image != nil && button.isUserInteractionEnabled }
+    /// The title and its chevron — what a test lays out.
+    var control: UIButton { button }
 
-    /// Presses "View all", as a tap would.
+    /// Presses the title and its chevron, as a tap would.
     func sendViewAll() { onViewAll?() }
 }
 

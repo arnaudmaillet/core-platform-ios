@@ -3,7 +3,7 @@ import DesignSystem
 import MediaCore
 import UIKit
 
-/// What "Popular"'s "View all" pushes INSIDE the sound sheet: its whole
+/// What "Popular"'s title and chevron push INSIDE the sound sheet: its whole
 /// ranking as the sheet's three-column grid, under a navigation bar with
 /// UIKit's back button and the section's title — at whatever detent the sheet
 /// stands: the push never moves it.
