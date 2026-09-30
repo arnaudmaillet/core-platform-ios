@@ -50,6 +50,13 @@ final class ProfileStatView: UIControl {
         captionLabel.textColor = .secondaryLabel
         captionLabel.textAlignment = .center
 
+        // The two lines size the identity row's lower half at a large
+        // Dynamic Type size; the avatar's `.defaultHigh` side must not
+        // squash them.
+        for label in [valueLabel, captionLabel] {
+            label.setContentCompressionResistancePriority(.required, for: .vertical)
+        }
+
         let stack = UIStackView(arrangedSubviews: [valueLabel, captionLabel])
         stack.axis = .vertical
         stack.alignment = .center
@@ -76,6 +83,24 @@ final class ProfileStatView: UIControl {
         // column is for; the caption names it.
         accessibilityValue = text
     }
+
+    /// How much of the column's ink is the picture's: page ink at 0, the
+    /// picture's (`HeroInk`, white or black by `tone`) at 1 — on a poster,
+    /// whose picture runs down under the counters.
+    func setInk(tone: HeroInk.Tone, onPicture: CGFloat) {
+        valueLabel.textColor = HeroInk.blend(page: .label, picture: tone.primary, onPicture: onPicture)
+        captionLabel.textColor = HeroInk.blend(
+            page: .secondaryLabel, picture: tone.secondary, onPicture: onPicture
+        )
+        for label in [valueLabel, captionLabel] {
+            HeroInk.applyShadow(to: label, tone: tone, onPicture: onPicture)
+        }
+    }
+
+    #if DEBUG
+    /// The value and its caption, for the ink audit.
+    var debugLabels: [UILabel] { [valueLabel, captionLabel] }
+    #endif
 
     // MARK: - Redaction
 

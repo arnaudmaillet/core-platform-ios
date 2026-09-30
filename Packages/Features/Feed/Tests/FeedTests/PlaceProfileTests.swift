@@ -175,20 +175,17 @@ struct PlaceProfileTests {
         #expect(profile.debugIdentityRidesTheBanner)
     }
 
-    /// ⚠️ THE FADE HAS TO OUTLAST THE PICTURE. A short scrim leaves the image
-    /// meeting the page at a definite boundary, which reads as a rule however
-    /// gently the two are blended above it.
-    @Test func theScrimIsDeepEnoughToSwallowTheBannersEdge() {
-        #expect(PlaceProfileViewController.scrimHeight(forBanner: 612) > 200)
-        // And never vanishes on a short banner, where the floor applies.
-        #expect(PlaceProfileViewController.scrimHeight(forBanner: 220) >= 120)
-        // ⚠️ AND IT MUST LAND FLAT BEFORE THE SELECTOR, which now stands on the
-        // banner's last 44pt. The gradient's final stop is at 0.80 of the
-        // plate, so the flat tail is 20% of it — a glass capsule resolving its
-        // own luminance over a still-changing gradient is the per-luminance
-        // flip this app has measured and rejected once already.
-        let tail = PlaceProfileViewController.scrimHeight(forBanner: 612) * 0.20
-        #expect(tail > PagedTabBar.Style.navigationTitle.height)
+    /// The picture runs under the whole identity — the name and the counters
+    /// — and the page arrives only over the banner's last few points, whole
+    /// by its edge, so the list below starts on the page with no seam.
+    @Test func thePictureRunsUnderTheIdentityToTheFoot() throws {
+        let profile = makeProfile()
+        laidOut(profile)
+        let fade = try #require(profile.debugBannerFade)
+        let box = profile.debugBannerBoxFrame
+        #expect(fade.rampStart > profile.debugMetricsFrame.maxY)
+        #expect(abs(fade.rampEnd - box.maxY) < 0.5)
+        #expect(profile.debugRampAlphas.last == 1)
     }
 
     /// The image lags the scroll and is cut taller than its viewport, so the

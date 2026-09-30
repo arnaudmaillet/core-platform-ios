@@ -7,29 +7,35 @@ import Foundation
 ///   band                                  poster
 ///   ┌──────────────────────────┐          ┌──────────────────────────┐
 ///   │ ‹  ▢          [Following]│          │ ‹  ▢          [Following]│
-///   │   ~~~ picture ~~~        │          │                          │
-///   │        (◯)               │ ← edge   │      ~~~ picture ~~~     │
-///   │  ◯  Name                 │          │                          │
-///   │     @handle              │          │  (◯)  Name      ░░░░░░░░ │ ← fade
-///   │  35    12    3.5K        │          │       @handle   ░░░░░░░░ │
-///   │  Bio …                   │          │  35    12    3.5K ▓▓▓▓▓▓ │ ← opaque
-///   │  [Edit Profile] [QR] [•] │          │  Bio …                   │
-///   └──────────────────────────┘          │  [Edit Profile] [QR] [•] │
+///   │   ~~~ picture ~~~        │          │      ~~~ picture ~~~     │
+///   │  ◯  Name   ≈≈ blur ≈≈    │          │                          │
+///   │ (◯) @handle              │ ← edge   │      ≈≈≈ blur ≈≈≈        │
+///   │  ◯  35   12   3.5K       │          │  ◯  Name                 │
+///   │  Bio …                   │          │ (◯) @handle   ≈≈ blur ≈≈ │
+///   │  [Edit Profile] [QR] [•] │          │  ◯  35   12   3.5K       │
+///   └──────────────────────────┘          │  Bio …                   │
+///                                         │  [Edit Profile] [QR] [•] │ ← edge
 ///                                         └──────────────────────────┘
 /// ```
 ///
-/// **Band** is the social-network header: a short strip across the top, the
-/// avatar straddling its bottom edge, the name on the PAGE beneath it. The
-/// picture carries no text, so it needs no fade — a clean edge, which the
-/// avatar's page-coloured ring cuts through.
+/// In both, the name and the handle beside the disc's top half stand ON the
+/// picture, in its ink (`HeroInk`: white or black by the picture), over its
+/// progressively blurred foot, and the page's tone arrives over a short ramp
+/// at the edge (`HeroBannerFade`). What differs is the stage and where the
+/// edge is:
 ///
-/// **Poster** is the streaming-app header: the picture runs down to the
-/// tray, and the identity lives ON it. Three rules keep that legible: the
-/// upper part of the picture is left alone — the subject is visible with
-/// nothing over it; the name and the handle, which stand on the picture, are
-/// white over an ink scrim that darkens its foot (the media-app treatment —
-/// no page ink survives an arbitrary photograph); and from the counters down
-/// every line sits on a run-out to the page's tone, page ink on page colour.
+/// **Band** is the social-network header: a short strip across the top — the
+/// picture behind the chrome and the identity row's top half, no more. Its
+/// edge is the avatar's midline; the counters beside the disc's bottom half
+/// and everything below sit on the page, in page ink.
+///
+/// **Poster** is the streaming-app header: a tall stage of picture under the
+/// chrome before the identity (`HeroBannerMetrics.posterStage`), the subject
+/// left alone at its top, and the picture running on under the whole block
+/// to the tray's foot — the counters, the bio and the link in its ink on it
+/// too, the page arriving behind the tray. It fades out as the page scrolls
+/// up, gone by the point where a band would hold the avatar, and the ink
+/// goes back to the page's with it.
 ///
 /// ⚠️ THE PICTURE DECIDES, NOT A SETTING. A landscape picture is a band, a
 /// portrait one a poster: a setting would add a menu and, worse, a picture

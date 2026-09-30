@@ -1,11 +1,14 @@
 import CoreModels
+import DesignSystem
 import MediaCore
 import Testing
 import UIKit
 @testable import Profile
 
-/// The banner's two shapes — a strip across the top, or a poster the identity
-/// sits on — and the rule that picks one: the picture, never a setting.
+/// The banner's two shapes — a strip across the top, or a tall poster — the
+/// rule that picks one (the picture, never a setting), and the identity row
+/// both share: the name and the handle on the picture, the counters on the
+/// page, the banner ending on the avatar's midline between them.
 @MainActor
 struct ProfileBannerFormatTests {
     private struct SilentFetcher: ImageFetching {
@@ -53,71 +56,105 @@ struct ProfileBannerFormatTests {
         #expect(ProfileBannerFormat.resolved(forImageSize: .zero) == .poster)
     }
 
-    /// A band ends a quarter of the way down the avatar: the disc straddles
-    /// the strip's edge high, its ring cutting the picture, and the name
-    /// below sits clear of it with air above.
-    @Test func aBandEndsInTheAvatarsFirstQuarter() {
+    /// Beside the avatar, two halves of its height: the name and the handle
+    /// in the top one, the counters in the bottom one — under the name,
+    /// leading-aligned with it.
+    @Test(arguments: [ProfileBannerFormat.band, .poster, .none])
+    func theIdentityRowSplitsTheAvatarsHeightInTwo(format: ProfileBannerFormat) {
+        let header = header(format: format, picture: format != .none)
+        let avatar = header.debugAvatarFrame
+        let names = header.debugNameHalfFrame
+        let stats = header.debugStatsHalfFrame
+        #expect(abs(avatar.height - 96) < 0.5)
+        #expect(abs(names.minY - avatar.minY) < 0.5)
+        #expect(abs(names.height - avatar.height / 2) < 0.5)
+        #expect(abs(stats.minY - avatar.midY) < 0.5)
+        #expect(abs(stats.maxY - avatar.maxY) < 0.5)
+        #expect(names.minX > avatar.maxX)
+        #expect(abs(stats.minX - names.minX) < 0.5)
+        // The name and the handle sit INSIDE their half, the counters inside
+        // theirs.
+        #expect(header.debugNameFrame.minY >= names.minY - 0.5)
+        #expect(header.debugHandleFrame.maxY <= names.maxY + 0.5)
+        #expect(header.debugStatsFrame.minY >= stats.minY - 0.5)
+        #expect(header.debugStatsFrame.maxY <= stats.maxY + 0.5)
+        // Leading-aligned under the name: the first counter starts where the
+        // name does.
+        #expect(abs(header.debugStatsFrame.minX - header.debugNameFrame.minX) < 0.5)
+        // And the bio follows the whole row, under the disc.
+        #expect(header.debugTrayFrame.minY > avatar.maxY)
+    }
+
+    /// A band ENDS on the avatar's midline: the page's short ramp is centred
+    /// there, the banner's own edge half a ramp lower, where the page's tone
+    /// is already whole.
+    @Test func aBandEndsOnTheAvatarsMidline() throws {
         let header = header(format: .band)
         let banner = header.debugBannerFrame
         let avatar = header.debugAvatarFrame
-        #expect(abs(banner.maxY - (avatar.minY + avatar.height / 4)) < 0.5)
         #expect(banner.minY == 0)
-        // The disc's top sits a small gap under the chrome's bottom edge: air,
-        // not a strip of picture.
-        #expect(abs(avatar.minY - (header.chromeTopInset + 12)) < 0.5)
-        #expect(abs(banner.height - (header.chromeTopInset + 12 + avatar.height / 4)) < 0.5)
-        // The edge is softened, lightly and only near the edge — not run out.
-        let stops = header.debugBannerFadeLocations
-        let alphas = header.debugBannerFadeAlphas
-        #expect(stops.count == 2)
-        #expect(stops[0] * banner.height >= banner.height - ProfileBannerView.bandFadeDepth - 0.5)
-        #expect(alphas.last == ProfileBannerView.bandFadeAlpha)
+        #expect(abs(banner.maxY - (avatar.midY + HeroBannerFade.rampLength / 2)) < 0.5)
+        let fade = try #require(header.debugBannerFade)
+        #expect(abs((fade.rampStart + fade.rampEnd) / 2 - avatar.midY) < 0.5)
+        #expect(abs(fade.rampEnd - banner.maxY) < 0.5)
+        // Short: a seam, not a run-out.
+        #expect(fade.rampEnd - fade.rampStart <= 16)
+        // The ramp itself: clear, then the page, opaque at the edge.
+        let alphas = header.debugBannerRampAlphas
+        #expect(alphas.first == 0)
+        #expect(alphas.last == 1)
     }
 
-    /// A poster runs to the foot of the tray, and the identity sits on it.
-    @Test func aPosterRunsToTheTray() {
+    /// The blur's container runs from a lead above the name — the poster's
+    /// full lead, the band's shorter one (its picture is mostly behind the
+    /// chrome) — to the banner's FOOT, where it is whole.
+    @Test(arguments: [ProfileBannerFormat.band, .poster])
+    func theBlurClimbsFromAboveTheNameToTheFoot(format: ProfileBannerFormat) throws {
+        let header = header(format: format)
+        let fade = try #require(header.debugBannerFade)
+        let name = header.debugNameFrame
+        #expect(abs(fade.blurFull - header.debugBannerFrame.maxY) < 0.5)
+        let lead: CGFloat = format == .band ? 64 : HeroBannerFade.blurLead
+        #expect(abs(name.minY - fade.blurStart - lead) < 0.5)
+        // The blur starts above the page's ramp — the long transition is the
+        // blur's, the short one the page's.
+        #expect(fade.blurStart < fade.rampStart - 40)
+        // On a poster the container starts inside the stage, under the
+        // chrome — the subject at the stage's top is left sharp, and the
+        // ease-in keeps the next stretch nearly so.
+        if format == .poster {
+            #expect(fade.blurStart > header.chromeTopInset + 40)
+        }
+    }
+
+    /// A poster runs to the tray's FOOT — not cut at the midline (user, 30
+    /// September 2026): the whole identity block stands on the picture, and
+    /// the page arrives only behind the tray's buttons.
+    @Test func aPosterRunsToTheTraysFoot() throws {
         let header = header(format: .poster)
         let banner = header.debugBannerFrame
         let tray = header.debugTrayFrame
         #expect(abs(banner.maxY - tray.maxY) < 0.5)
-        // The picture shows through under the whole block — and the very
-        // foot is opaque, so the banner meets the page without a seam.
-        let alphas = header.debugBannerFadeAlphas
-        let stops = header.debugBannerFadeLocations
-        let climb = ProfileBannerView.posterClimbSamples
-        #expect(alphas.count == climb + 3)
-        #expect(alphas[climb + 1] < 1)
-        #expect(alphas[climb + 1] > alphas[climb])
-        #expect(alphas[climb + 2] == 1)
-        #expect(stops[climb + 2] == 1)
-        #expect((1 - stops[climb + 1]) * banner.height <= ProfileBannerView.posterFootDepth + 0.5)
+        let fade = try #require(header.debugBannerFade)
+        #expect(abs(fade.rampEnd - banner.maxY) < 0.5)
+        // Behind the buttons (the row carries 12pt of air above them).
+        #expect(abs(fade.rampStart - (tray.minY + 12)) < 0.5)
+        // The counters and the bio are above it, on the blurred picture.
+        #expect(header.debugStatsFrame.maxY < fade.rampStart)
+        let alphas = header.debugBannerRampAlphas
+        #expect(alphas.first == 0)
+        #expect(alphas.last == 1)
     }
 
-    /// The climb to the counters is eased in: gentle at the top, steeper at
-    /// the bottom, and between a line and a square — halfway along it, the
-    /// tone is about a third of what it will be at the counters.
-    @Test func aPostersClimbIsGentleFirstAndSteepLast() {
-        let header = header(format: .poster)
-        let alphas = header.debugBannerFadeAlphas
-        let stops = header.debugBannerFadeLocations
-        let climb = ProfileBannerView.posterClimbSamples
-        #expect(alphas[0] == 0)
-        #expect(abs(alphas[climb] - ProfileBannerView.posterFadeAtCounters) < 0.001)
-        // Each step of the climb is steeper than the one before it.
-        var previousRise: CGFloat = 0
-        for sample in 1...climb {
-            let rise = alphas[sample] - alphas[sample - 1]
-            #expect(rise > previousRise)
-            previousRise = rise
-        }
-        // The stops are evenly spaced along the climb — the curve is in the
-        // opacities, not in where they land.
-        let spans = (1...climb).map { stops[$0] - stops[$0 - 1] }
-        for span in spans { #expect(abs(span - spans[0]) < 0.001) }
-        let halfway = ProfileBannerView.posterFadeAtCounters * pow(0.5, ProfileBannerView.posterClimbExponent)
-        #expect(abs(alphas[climb / 2] - halfway) < 0.001)
-        #expect(halfway > ProfileBannerView.posterFadeAtCounters / 4)
-        #expect(halfway < ProfileBannerView.posterFadeAtCounters / 2)
+    /// On a band the name and the handle stand on the picture — above the
+    /// ramp's middle — and the counters on the page, below it.
+    @Test func onABandTheNameStandsOnThePictureAndTheCountersOnThePage() throws {
+        let header = header(format: .band)
+        let fade = try #require(header.debugBannerFade)
+        let edge = (fade.rampStart + fade.rampEnd) / 2
+        #expect(header.debugHandleFrame.maxY <= edge + 0.5)
+        #expect(header.debugStatsFrame.minY >= edge - 0.5)
+        #expect(header.debugNameFrame.minY >= header.debugBannerFrame.minY)
     }
 
     /// On the way up the picture lags the content, and a poster is gone by
@@ -157,27 +194,6 @@ struct ProfileBannerFormatTests {
         #expect(abs(header.debugBannerPictureShift - 100 * ProfileBannerView.parallaxShare) < 0.5)
     }
 
-    /// The poster's picture is left alone down past the avatar and the name:
-    /// the run-out begins just above the counters and is strong by the bio.
-    @Test func aPostersFadeStartsAboveTheCountersAndIsStrongByTheBio() {
-        let header = header(format: .poster)
-        let banner = header.debugBannerFrame
-        let avatar = header.debugAvatarFrame
-        let stats = header.debugStatsFrame
-        let stops = header.debugBannerFadeLocations
-        #expect(stops.count == ProfileBannerView.posterClimbSamples + 3)
-        let start = stops[0] * banner.height
-        let strong = stops[ProfileBannerView.posterClimbSamples] * banner.height
-        #expect(abs(start - (stats.minY - 40)) < 1)
-        // The lead reaches into the avatar's lower edge, where the curve is
-        // still at nothing; the disc's upper half and the name are clear.
-        #expect(start > avatar.midY)
-        #expect(abs(strong - (stats.maxY + 12)) < 1)
-        #expect(strong < header.debugTrayFrame.minY)
-        // Most of the picture is clear: the run-out begins past half.
-        #expect(stops[0] > 0.5)
-    }
-
     /// A band is the shorter header, by exactly the poster's clearance: the
     /// band's column starts on the chrome, the poster's a clearance below it.
     @Test func aBandIsShorterThanAPoster() {
@@ -215,20 +231,5 @@ struct ProfileBannerFormatTests {
         // Follow is the one prominent capsule: it does not wear the quiet
         // grey the others do.
         #expect(follow.configuration?.background.backgroundColor != message.configuration?.background.backgroundColor)
-    }
-
-    /// On a band the name sits BELOW the strip's edge, on the page — not on
-    /// the picture.
-    @Test func onABandTheNameSitsOnThePage() throws {
-        let header = header(format: .band)
-        func labels(_ view: UIView) -> [UILabel] {
-            if let label = view as? UILabel { return [label] }
-            return view.subviews.flatMap(labels)
-        }
-        let name = try #require(labels(header).first { $0.text == "Kenji Tanaka" })
-        let frame = name.convert(name.bounds, to: header)
-        #expect(frame.minY >= header.debugBannerFrame.maxY - 0.5)
-        // Just below it — a small gap, not the foot of the disc.
-        #expect(abs(frame.minY - header.debugBannerFrame.maxY - 8) < 1)
     }
 }

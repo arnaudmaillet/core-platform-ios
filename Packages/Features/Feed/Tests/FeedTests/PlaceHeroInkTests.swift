@@ -6,18 +6,20 @@ import Testing
 import UIKit
 @testable import Feed
 
-/// The place's name on its banner: white over a black ink scrim — the
-/// profile poster's rule, shared through `HeroInk` — measured on the rendered
-/// pixels behind the type.
+/// The place's name and counters on its banner's picture, in the picture's
+/// ink — white on a dark picture, black on a light one, read off the blurred
+/// picture behind each — over the picture's progressively blurred foot (the
+/// profile banner's run-out, shared through `HeroBannerFade`), measured on
+/// the rendered pixels behind the type.
 ///
-/// ⚠️ It was `.label` with a page-toned halo over a plate that was still
-/// mostly picture where the name stood: faint black over a dark photograph in
-/// light mode, faint white over a bright one in dark mode.
+/// ⚠️ With no scrim (#327's went as a black veil, 30 September 2026), white
+/// alone measured 2.34:1 over this page's light mock picture; the ink
+/// choosing the picture's side is what restores AA over any picture.
 @MainActor
 @Suite("Place hero ink")
 struct PlaceHeroInkTests {
-    /// The extremes a picture can be under white type: pure white is its
-    /// worst case, hard 2px white/black stripes a busy one.
+    /// The extremes a picture can be under the type: pure white and black,
+    /// hard 2px white/black stripes, and a mid grey near where the inks cross.
     enum Picture: String, CaseIterable, CustomTestStringConvertible {
         case white, black, stripes, grey
 
@@ -64,69 +66,60 @@ struct PlaceHeroInkTests {
         return profile
     }
 
-    /// AA for the name over every extreme, in both appearances — and for the
-    /// first counter's value, page ink on the plate, which now starts at the
-    /// name's foot rather than under the name.
+    /// AA for the name and for every counter's value and caption over any
+    /// picture, in both appearances.
     @Test(arguments: Picture.allCases, [UIUserInterfaceStyle.light, .dark])
-    func theNameClearsAAOverAnyBanner(picture: Picture, style: UIUserInterfaceStyle) throws {
+    func theTypeClearsAAOverAnyBanner(picture: Picture, style: UIUserInterfaceStyle) throws {
         let profile = place(picture, style: style)
         #expect(profile.debugHasBannerPicture)
-        #expect(profile.debugHeroNameInk == HeroInk.primary)
         let measured = try #require(profile.debugHeroInkContrast())
-        let name = try #require(measured.first { $0.0 == "Paris" })
-        #expect(name.1.min >= 4.5, "name \(name.1)")
-        let rank = try #require(measured.first { $0.0 == "#3" })
-        #expect(rank.1.min >= 4.5, "rank value \(rank.1)")
+        #expect(measured.count == 5)
+        for (label, contrast) in measured {
+            #expect(contrast.min >= 4.5, "\(label) \(contrast) \(profile.debugHeroInkTones)")
+        }
     }
 
-    /// The plate is clear under the name and climbs from its foot; the ink
-    /// scrim peaks under the name and, on a light page, has given way by the
-    /// counters — so nothing is grey where the plate lands flat, under the
-    /// selector. On a dark page it holds to the foot, under a plate of the
-    /// same tone.
+    /// The picture picks the ink, the same in both appearances.
     @Test(arguments: [UIUserInterfaceStyle.light, .dark])
-    func theScrimsShareTheBannerAtTheType(style: UIUserInterfaceStyle) throws {
-        let profile = place(.grey, style: style)
-        // ⚠️ IN A WINDOW, for this one: where the ink scrim ends is read off
-        // the scrim's own traits, and a view tree with no window never hands
-        // the override down that deep. Local, never stored on the suite.
-        let window = UIWindow(frame: profile.view.frame)
-        window.overrideUserInterfaceStyle = style
-        window.addSubview(profile.view)
-        defer { profile.view.removeFromSuperview() }
-        profile.view.layoutIfNeeded()
-        profile.viewDidLayoutSubviews()
-        profile.view.layoutIfNeeded()
-        let box = profile.debugBannerBoxFrame
-        let plate = profile.debugPlateFrame
+    func thePicturePicksTheInk(style: UIUserInterfaceStyle) {
+        let light = place(.white, style: style)
+        #expect(light.debugHeroInkTones.name == .dark)
+        #expect(light.debugHeroInkTones.rank == .dark)
+        #expect(light.debugHeroInkTones.likes == .dark)
+        #expect(light.debugHeroNameInk == HeroInk.Tone.dark.primary)
+        let dark = place(.black, style: style)
+        #expect(dark.debugHeroInkTones.name == .light)
+        #expect(dark.debugHeroInkTones.rank == .light)
+        #expect(dark.debugHeroInkTones.likes == .light)
+        #expect(dark.debugHeroNameInk == HeroInk.Tone.light.primary)
+    }
+
+    /// The blur's job: under the name, a busy picture is one tone — no stripe
+    /// is left for a glyph to stand on.
+    @Test func theBlurCalmsABusyPictureUnderTheName() throws {
+        let profile = place(.stripes, style: .light)
+        let measured = try #require(profile.debugHeroInkContrast())
+        let name = try #require(measured.first { $0.0 == "Paris" })
+        #expect(name.1.median - name.1.min < 0.3, "name \(name.1)")
+    }
+
+    /// The blur climbing from a lead above the name all the way down to the
+    /// banner's foot, under the counters too — the whole identity on the
+    /// picture, as on a profile's poster — and the page arriving over the
+    /// banner's last few points.
+    @Test func theFadeRunsTheIdentityOnThePicture() throws {
+        let profile = place(.grey, style: .light)
+        let fade = try #require(profile.debugBannerFade)
         let name = profile.debugNameFrame
         let metrics = profile.debugMetricsFrame
-        func alpha(at y: CGFloat, locations: [CGFloat], alphas: [CGFloat]) -> CGFloat {
-            guard let upper = locations.firstIndex(where: { $0 >= y }) else { return alphas.last ?? 0 }
-            guard upper > 0 else { return alphas[0] }
-            let span = locations[upper] - locations[upper - 1]
-            guard span > 0 else { return alphas[upper] }
-            let t = (y - locations[upper - 1]) / span
-            return alphas[upper - 1] + (alphas[upper] - alphas[upper - 1]) * t
-        }
-        func plateAlpha(_ y: CGFloat) -> CGFloat {
-            alpha(at: (y - plate.minY) / plate.height,
-                  locations: profile.debugPlateLocations, alphas: profile.debugPlateAlphas)
-        }
-        func inkAlpha(_ y: CGFloat) -> CGFloat {
-            alpha(at: (y - box.minY) / box.height,
-                  locations: profile.debugInkScrimLocations, alphas: profile.debugInkScrimAlphas)
-        }
-        try #require(!profile.debugInkScrimLocations.isEmpty)
-        #expect(plateAlpha(name.midY) < 0.001)
-        #expect(plateAlpha(name.maxY) < 0.001)
-        #expect(abs(inkAlpha(name.minY) - HeroInk.scrimPeak) < 0.001)
-        #expect(abs(inkAlpha(name.maxY) - HeroInk.scrimPeak) < 0.001)
-        #expect(plateAlpha(metrics.minY) >= 0.5)
-        if style == .light {
-            #expect(inkAlpha(metrics.midY) < 0.001)
-        } else {
-            #expect(abs(inkAlpha(box.maxY - 1) - HeroInk.scrimPeak) < 0.001)
-        }
+        let box = profile.debugBannerBoxFrame
+        #expect(abs(fade.blurFull - box.maxY) < 0.5)
+        #expect(abs(name.minY - fade.blurStart - HeroBannerFade.blurLead) < 0.5)
+        #expect(abs(fade.rampEnd - box.maxY) < 0.5)
+        #expect(abs(fade.rampEnd - fade.rampStart - HeroBannerFade.rampLength) < 0.5)
+        #expect(metrics.maxY < fade.rampStart)
+        let levels = profile.debugBannerBlurLevels
+        try #require(levels.count == HeroBannerFade.blurSigmas.count)
+        #expect(abs(levels[levels.count - 1].full - box.maxY) < 1)
     }
 }
