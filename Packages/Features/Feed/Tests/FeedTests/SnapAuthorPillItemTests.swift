@@ -83,22 +83,61 @@ struct SnapAuthorPillItemTests {
     }
 
     /// Across authors the pill keeps what the host configured: its taps still
-    /// route, and its width cap is the one the run arithmetic set.
-    @Test func thePillKeepsTheHostsWiringAcrossAuthors() throws {
-        let (_, feed) = Self.feed()
-        feed.showAuthor(Self.model(id: "p1", author: "Ada Lovelace", authorID: "prof-1", meta: "@ada · 2h"))
-        let first = try #require(Self.authorItem(feed)?.customView as? SnapAuthorIdentityView)
-        first.setWidthBudget(120)
+    /// route, and its width is the one the BAR's arithmetic set — the same for
+    /// a two-letter name and a sentence (asked 2026-09-30: the glass must not
+    /// change size between posts).
+    @Test func thePillKeepsItsWiringAndItsWidthAcrossAuthors() throws {
+        let (nav, feed) = Self.feed()
+        // A real width to share out, as the screen's first layout pass has.
+        nav.view.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        nav.view.layoutIfNeeded()
+        let pill = try #require(Self.authorItem(feed)?.customView as? SnapAuthorIdentityView)
+        let fixed = try #require(pill.fixedWidth, "the feed installed a pill that hugs its text")
+        func fitted() -> CGFloat {
+            pill.setNeedsLayout()
+            pill.layoutIfNeeded()
+            return pill.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
+        }
 
-        feed.showAuthor(Self.model(id: "p2", author: "Grace Hopper With A Very Long Name",
-                                   authorID: "prof-2", meta: "@grace · 1d"))
-        let fresh = try #require(Self.authorItem(feed)?.customView as? SnapAuthorIdentityView)
+        for (id, name, meta) in [
+            ("prof-1", "Al", "@al · 2h"),
+            ("prof-2", "Grace Hopper With A Very Long Name Indeed", "@grace.hopper.the.admiral · 1d"),
+            ("prof-3", "Ada Lovelace", "@ada · 3w"),
+        ] {
+            feed.showAuthor(Self.model(id: "p-\(id)", author: name, authorID: id, meta: meta))
+            #expect(Self.authorItem(feed)?.customView === pill)
+            #expect(abs(fitted() - fixed) < 0.5, "\(name): the pill took its text's width")
+            #expect(pill.fixedWidth == fixed)
+        }
+        #expect(pill.onAuthorTapped != nil)
+        #expect(pill.onFollowTapped != nil)
+    }
 
-        #expect(fresh.onAuthorTapped != nil)
-        #expect(fresh.onFollowTapped != nil)
-        fresh.setNeedsLayout()
-        fresh.layoutIfNeeded()
-        #expect(fresh.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width <= 120.5)
+    /// The follow glyphs share ONE slot, so a relation that changes (the "+"
+    /// tapped into the followed mark) moves nothing in the pill.
+    @Test func everyFollowBadgeIsDrawnInOneSlot() throws {
+        let pill = SnapAuthorIdentityView()
+        pill.setFixedWidth(200)
+        pill.setAuthor(Self.model(id: "p1", author: "Ada Lovelace", authorID: "prof-1", meta: "@ada · 2h"),
+                       pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), animated: false)
+        var widths: [CGFloat] = []
+        for badge in [SnapAuthorIdentityView.FollowBadge.follow, .following, .friends] {
+            pill.setFollowBadge(badge)
+            pill.setNeedsLayout()
+            pill.layoutIfNeeded()
+            widths.append(try #require(Self.firstButton(in: pill)).bounds.width)
+        }
+        #expect(
+            widths.allSatisfy { abs($0 - SnapAuthorIdentityView.followBadgeSlotWidth) < 0.5 },
+            "\(widths) vs slot \(SnapAuthorIdentityView.followBadgeSlotWidth)"
+        )
+    }
+
+    private static func firstButton(in view: UIView) -> UIButton? {
+        for sub in view.subviews {
+            if let found = sub as? UIButton ?? firstButton(in: sub) { return found }
+        }
+        return nil
     }
 
     /// With a media post's thread open the ✕ holds the slot; an author change

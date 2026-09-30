@@ -1395,10 +1395,8 @@ struct SnapCommentsPresentationTests {
         #expect(abs(settledWidth() - resting) < 0.5)
     }
 
-    /// The order the trailing run gives way in, rung by rung. The handle
-    /// outranks the name, so a budget that only bites into the name leaves
-    /// the handle whole — and `widthKeepingHandleWhole` is the threshold
-    /// that says when the sort pill should surrender its word instead.
+    /// The order the pill gives way in: the handle outranks the name, so a
+    /// width that only bites into the name leaves the handle whole.
     @Test func theAuthorPillYieldsItsNameBeforeItsHandle() throws {
         let view = SnapAuthorIdentityView()
         view.setAuthor(
@@ -1412,15 +1410,6 @@ struct SnapCommentsPresentationTests {
         )
         view.setNeedsLayout()
         view.layoutIfNeeded()
-
-        // The threshold is everything that is NOT the name: the chrome plus
-        // the handle's own width. Above it the name absorbs the squeeze.
-        let threshold = view.widthKeepingHandleWhole
-        // `<=`, not `<`: this author's handle is WIDER than their name, so
-        // the name contributes nothing to the natural width and the two
-        // coincide. That is the threshold doing its job, not a miss.
-        #expect(threshold > 0)
-        #expect(threshold <= ceil(view.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width))
 
         // The name label is the designated absorber; the handle resists.
         func labels(in root: UIView) -> [UILabel] {

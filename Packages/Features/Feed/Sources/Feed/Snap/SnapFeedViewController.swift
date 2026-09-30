@@ -24,7 +24,8 @@ final class SnapFeedViewController: UIViewController {
     private var dataSource: UICollectionViewDiffableDataSource<Section, PostID>!
     private let statusLabel = UILabel()
     /// The author identity, hosted as the trailing bar item's custom view —
-    /// content-hugging, so the system glass pill wraps it flush.
+    /// at a FIXED width read off the bar (`applyBarPillWidths`), so its glass
+    /// is the same size on every page and a long name truncates inside it.
     ///
     /// ONE VIEW FOR THE SCREEN'S LIFE, in one item under one stable
     /// `identifier` (`authorItemIdentifier`): an author change blurs the pill's
@@ -38,9 +39,6 @@ final class SnapFeedViewController: UIViewController {
     /// native bottom toolbar's leading item — one view in one item for the
     /// screen's life, the author pill's contract (`showAttribution`).
     private let mediaAttributionView = SnapMediaAttributionView()
-    /// The toolbar item wearing `mediaAttributionView`, under
-    /// `attributionItemIdentifier`.
-    private var attributionItem = UIBarButtonItem()
     /// Mutes and unmutes the feed for the session (`FeedSound`), shown on
     /// clips only. It sits in the ATTRIBUTION'S capsule, on purpose: adjacent
     /// items share one platter on iOS 26, so the sound reads as one thing —
@@ -70,10 +68,9 @@ final class SnapFeedViewController: UIViewController {
     /// card; the audio attribution stays anchored on the left).
     private let commentSortButton = SnapCommentSortButton()
     /// The one living toolbar's items (keep-and-stack): built once. The
-    /// attribution's content changes inside its item (`showAttribution`), and
-    /// the item is re-minted only to heal a drifted wrapper
-    /// (`checkBarItemWidth`). The engagement no longer touches the footer — see
-    /// `configureToolbarItems` for why the trailing ✕ left it.
+    /// attribution's content changes inside its item (`showAttribution`), at a
+    /// fixed width (`applyBarPillWidths`). The engagement no longer touches the
+    /// footer — see `configureToolbarItems` for why the trailing ✕ left it.
     private var defaultToolbarItems: [UIBarButtonItem] = []
     /// The nav bar's two trailing items, held so comment mode can add the
     /// sort selector beside the author pill and take it away again.
@@ -552,13 +549,13 @@ final class SnapFeedViewController: UIViewController {
     private var didStartLoading = false
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        // The attribution takes what the toolbar can spare, never more — see
-        // `SnapMediaAttributionView.barReserve`.
-        if view.bounds.width > 0 {
-            mediaAttributionView.setMaximumWidth(
-                max(100, view.bounds.width - SnapMediaAttributionView.barReserve)
-            )
-        }
+        // The pills' widths are shares of the BARS' widths, and the bars are
+        // not guaranteed to have one when the items are first built (nor when
+        // a text page's resting engagement mounts from `willDisplay`) — a
+        // width computed against zero is no width at all. Re-applied here,
+        // where the width is real, and wherever it moves (rotation). Idempotent:
+        // an unchanged width writes nothing, so a settled page pays nothing.
+        applyBarPillWidths()
         // A material arrives through `effect` and cannot be built without a
         // window. This pass runs inside the present animator's own
         // `layoutIfNeeded`, which is the first moment there is one — and still
@@ -569,28 +566,6 @@ final class SnapFeedViewController: UIViewController {
         if !didStartLoading, view.bounds.width > 0 {
             didStartLoading = true
             viewModel.viewDidLoad()
-        }
-        // The author pill's budget is a share of the NAVIGATION BAR's width,
-        // and the bar is not guaranteed to have one when the engagement
-        // mounts — a text page's resting engagement can be applied from
-        // `willDisplay`, before the bar has laid out, and a budget computed
-        // against a zero width is no budget at all. The pill then keeps its
-        // full cap, the trailing run does not fit, and the whole item
-        // disappears into a `•••` menu — which is precisely the failure this
-        // budget exists to prevent, arriving through the back door.
-        //
-        // Re-applied here, where the width is real. Idempotent (the setter
-        // no-ops on an unchanged cap), so a settled page pays nothing.
-        //
-        // The RESTING run has the same hole since the wallet badge joined
-        // it: its budget is bar-width arithmetic too (the badge is the
-        // PRIORITY item — the author is what truncates), and a budget
-        // computed at zero width is nil, an uncapped pill, and the same
-        // `•••` failure on narrow bars.
-        if commentsEngagedID != nil {
-            applyEngagedTrailingRunFit()
-        } else {
-            authorIdentityView.setWidthBudget(restingAuthorBudget())
         }
     }
 
@@ -1514,23 +1489,13 @@ final class SnapFeedViewController: UIViewController {
         // supposed to persist across.
         //
         // The run's width budget is REAL, though, and it is paid in width
-        // rather than in layout: the pill keeps every part of itself and
-        // truncates a long name earlier while the sort pill is beside it —
-        // which is what a long name already does at rest. Measured on the
+        // rather than in layout: the pill keeps every part of itself and is
+        // narrower while the sort shares the bar (`applyBarPillWidths`) — in
+        // this same turn, under the bar's own item animation. Measured on the
         // narrowest device: a full-width pill DID overflow the whole item
         // into a `•••` menu, and losing the author entirely is worse than
         // any truncation.
-        authorIdentityView.setCompact(false, animated: animated)
-        if engaged {
-            applyEngagedTrailingRunFit()
-        } else {
-            // Nil (no cap) without a wallet badge, as before; with one the
-            // author gives up the badge's footprint the same way it gives
-            // up the sort pill's — overflow hides the WHOLE item behind a
-            // `•••`, so the cap must be arithmetic, not hope.
-            authorIdentityView.setWidthBudget(restingAuthorBudget())
-            commentSortButton.setTitleHidden(false)
-        }
+        applyBarPillWidths()
 
         // ⚠️ READ RIGHT TO LEFT: `rightBarButtonItems[0]` is the one nearest the
         // screen edge, so this array is the bar reversed — left to right the
@@ -1574,79 +1539,72 @@ final class SnapFeedViewController: UIViewController {
         // state, because the menu it holds is not about the layout.
     }
 
-    /// Fits the trailing run to the bar, giving way in a fixed order.
+    /// Gives both pills their FIXED widths for the bars as they stand — see
+    /// `SnapBarPillWidths` for the arithmetic and why nothing a post says is
+    /// in it.
     ///
-    /// The system does not negotiate here: the instant the run does not fit
-    /// it hides the whole item behind a `•••` menu, and the author vanishes
-    /// rather than shrinking. So the fitting is arithmetic done up front,
-    /// and what gives way gives way in the order that costs the reader
-    /// least:
+    /// The system does not negotiate here: the instant a run does not fit it
+    /// hides the whole item behind a `•••` menu, and the author vanishes
+    /// rather than shrinking. So the fitting is arithmetic done up front, off
+    /// the bars and the items beside the pills, and what gives way gives way
+    /// in the order that costs the reader least:
     ///
-    ///   1. the display NAME truncates (`SnapAuthorIdentityView`'s
-    ///      compression priorities — the handle outranks the name)
-    ///   2. the SORT PILL drops its word and keeps its glyph
-    ///   3. the HANDLE truncates, once the pill is narrower still
+    ///   1. inside the pill, the display NAME truncates first
+    ///      (`SnapAuthorIdentityView`'s compression priorities — the handle
+    ///      outranks the name), then the handle
+    ///   2. the SORT PILL drops its word and keeps its glyph when the word
+    ///      would leave the author narrower than `comfortableAuthor`
     ///
-    /// Rungs 1 and 3 are the same mechanism at two depths: cap the pill and
-    /// Auto Layout spends the name first, the handle only when the name is
-    /// exhausted. Rung 2 is the one explicit switch, taken when the cap
-    /// would otherwise fall below what a pill can usefully show.
-    ///
-    /// `itemPlatterPadding` is the glass wrapper UIKit puts around every
-    /// custom bar item. It is not published, so it is MEASURED: on a 390pt
-    /// bar an author view of 170 fits beside an 88pt sort pill and 195 does
-    /// not, which puts the per-item padding at ~18 and is what these
-    /// numbers are calibrated against.
-    private static let itemPlatterPadding: CGFloat = 18
-    private static let barSideMargin: CGFloat = 16
-    private static let leadingItemWidth: CGFloat = 36
-    private func applyEngagedTrailingRunFit() {
-        let bar = navigationController?.navigationBar.bounds.width ?? view.bounds.width
+    /// Idempotent, and cheap enough for every layout pass: an unchanged width
+    /// writes nothing. Called wherever the bars' geometry can move — a layout
+    /// pass of this screen (rotation, the first real width), the sort joining
+    /// or leaving (`setEngagedChrome`, `setCommentSortAvailable`), the wallet
+    /// badge growing a digit — and never from a page change.
+    private func applyBarPillWidths() {
+        // The first width that is real: the bar's, else its navigation
+        // controller's (already on screen when this screen's view loads for a
+        // push), else this screen's own.
+        let bar = [
+            navigationController?.navigationBar.bounds.width,
+            navigationController?.view.bounds.width,
+            view.bounds.width,
+        ].compactMap { $0 }.first { $0 > 0 } ?? 0
         guard bar > 0 else { return }
-
-        // ⚠️ THE SORT IS STILL IN THIS ARITHMETIC, and it has to be: it moved to
-        // the LEADING group, which takes its width from the same bar. What the
-        // author can have is what the bar has left after everything else on it,
-        // whichever end that everything sits at.
-        // A withdrawn sort (`CommentSortPolicy`) takes nothing: no pill, no
-        // padding, no spacer beside the arrow.
-        let sortShown = isCommentSortAvailable
-        func authorBudget(sortWidth: CGFloat) -> CGFloat {
-            let pad = Self.itemPlatterPadding
-            return bar
-                - Self.barSideMargin * 2
-                - (Self.leadingItemWidth + pad)
-                - (sortShown ? sortWidth + pad + Spacing.sm : 0)
-                - pad
-                - walletItemFootprint()
-        }
-        func sortWidth() -> CGFloat {
-            commentSortButton.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
-        }
-
-        // Rung 1: the name truncates inside whatever the run can spare.
-        commentSortButton.setTitleHidden(false)
-        var budget = authorBudget(sortWidth: sortWidth())
-        // Rung 2: the name alone cannot absorb it — the HANDLE would start
-        // truncating next, so the sort pill gives up its word first and the
-        // width it frees goes to the author.
-        if sortShown, budget < authorIdentityView.widthKeepingHandleWhole {
-            commentSortButton.setTitleHidden(true)
-            budget = authorBudget(sortWidth: sortWidth())
-        }
-        // Rung 3 needs no branch: if it is STILL below that threshold the
-        // handle truncates on its own, because the name has nothing left.
-        authorIdentityView.setWidthBudget(budget)
+        // ⚠️ Not `toolbar.bounds`: the iOS 26 toolbar answers the screen, laid
+        // out or not. The feed is full-screen, so its own width is the bar's.
+        let toolbar = view.bounds.width > 0 ? view.bounds.width : bar
+        // The sort is on the bar only while a thread that offers it holds the
+        // engaged chrome — a withdrawn sort (`CommentSortPolicy`) takes
+        // nothing: no pill, no padding, no spacer beside the arrow.
+        let sortOnBar = engagedChromeOnBar && isCommentSortAvailable
+        let widths = SnapBarPillWidths.resolve(
+            navBarWidth: bar,
+            toolbarWidth: toolbar,
+            walletWidth: walletBadgeItem == nil
+                ? nil : walletBadge.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width,
+            sort: sortOnBar
+                ? SnapBarPillWidths.Sort(glyph: commentSortButton.glyphWidth, titled: commentSortButton.titledWidth)
+                : nil
+        )
+        barPillWidths = widths
+        commentSortButton.setTitleHidden(sortOnBar && !widths.sortShowsTitle)
+        authorIdentityView.setFixedWidth(widths.author)
+        mediaAttributionView.setFixedWidth(widths.attribution(soundShown: !soundItem.isHidden))
     }
 
-    /// What the wallet badge takes from the trailing run: its fitted width,
-    /// its glass platter, and the spacer that keeps it its own pill. Zero
-    /// when no wallet is wired — the run is then exactly its historical
-    /// shape and the historical (nil) budgets stay right.
-    private func walletItemFootprint() -> CGFloat {
-        guard walletBadgeItem != nil else { return 0 }
-        let width = walletBadge.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
-        return width + Self.itemPlatterPadding + Spacing.sm
+    /// The widths `applyBarPillWidths` last gave the pills.
+    private var barPillWidths: SnapBarPillWidths?
+
+    /// Shows or hides the mute button — and gives its slot to the attribution
+    /// that shares its capsule, so the capsule keeps its width
+    /// (`SnapBarPillWidths.attribution(soundShown:)`). In the same turn, so
+    /// the toolbar lays the two out together.
+    private func setSoundShown(_ shown: Bool) {
+        guard soundItem.isHidden == shown else { return }
+        soundItem.isHidden = !shown
+        if let barPillWidths {
+            mediaAttributionView.setFixedWidth(barPillWidths.attribution(soundShown: shown))
+        }
     }
 
     /// The resting run's items: the author pill alone (no wallet), or the
@@ -1656,22 +1614,6 @@ final class SnapFeedViewController: UIViewController {
         guard let walletBadgeItem else { return [authorItem] }
         return [authorItem, .fixedSpace(Spacing.sm), walletBadgeItem]
     }
-
-    /// The resting author cap: nil (uncapped, the historical contract)
-    /// without a wallet badge; with one, the bar minus everything that
-    /// isn't the author — the engaged fit's arithmetic minus the sort pill.
-    private func restingAuthorBudget() -> CGFloat? {
-        guard walletBadgeItem != nil else { return nil }
-        let bar = navigationController?.navigationBar.bounds.width ?? view.bounds.width
-        guard bar > 0 else { return nil }
-        let pad = Self.itemPlatterPadding
-        return bar
-            - Self.barSideMargin * 2
-            - (Self.leadingItemWidth + pad)
-            - pad
-            - walletItemFootprint()
-    }
-
     /// The leading slot's two faces:
     ///
     ///   media comments open → ✕ (collapse to the media layout)
@@ -1738,8 +1680,9 @@ final class SnapFeedViewController: UIViewController {
         guard available != isCommentSortAvailable else { return }
         isCommentSortAvailable = available
         guard engagedChromeOnBar else { return }
+        // The widths first: the sort's word is decided before it is handed over.
+        applyBarPillWidths()
         applyLeadingNavItem(engaged: true, hasMedia: engagedChromeHasMedia, animated: animated)
-        applyEngagedTrailingRunFit()
     }
 
     /// Reads the answer off the panel about to own the engagement — BEFORE the
@@ -1802,8 +1745,8 @@ final class SnapFeedViewController: UIViewController {
     /// for the run to be rebuilt.
     ///
     /// A fresh item is a fresh custom-view wrapper, measured at hand-over — the
-    /// cure for a wrapper whose width drifted from the pill's (memory
-    /// `bar-item-wrapper-drift`), and the landing install's second guard.
+    /// landing install's second guard, and the cure for a wrapper whose width
+    /// drifted from the pill's (memory `bar-item-wrapper-drift`), should one.
     private func reinstallAuthorItem() {
         let previousItem = authorItem
         authorItem = makeAuthorItem()
@@ -1973,18 +1916,12 @@ final class SnapFeedViewController: UIViewController {
         // No badge until the graph has answered for an author.
         authorIdentityView.setFollowBadge(.none)
         authorItem = makeAuthorItem()
-        // The engaged fit reads the pill's own handle width, which is the new
-        // author's only once the blur has swapped it in.
-        authorIdentityView.onContentApplied = { [weak self] in
-            guard let self, self.commentsEngagedID != nil else { return }
-            self.applyEngagedTrailingRunFit()
-        }
+        #if DEBUG
         authorIdentityView.onContentSettled = { [weak self] in
             guard let self else { return }
-            self.checkBarItemWidth(self.authorIdentityView, slot: "author") { [weak self] in
-                self?.reinstallAuthorItem()
-            }
+            self.debugProbeBarItemWidth(self.authorIdentityView, slot: "author")
         }
+        #endif
         sortItem = UIBarButtonItem(customView: commentSortButton)
         if wallet != nil {
             // Tappable exactly when a sheet is wired: the badge opens the
@@ -2010,15 +1947,12 @@ final class SnapFeedViewController: UIViewController {
                 let fresh = UIBarButtonItem(customView: self.walletBadge)
                 self.walletBadgeItem = fresh
                 items[index] = fresh
-                self.navigationItem.rightBarButtonItems = items
                 // The badge is the run's PRIORITY member: when it grows,
-                // the author's budget shrinks by the same points — re-fit
-                // now, or the run overflows into a `•••` on narrow bars.
-                if self.commentsEngagedID != nil {
-                    self.applyEngagedTrailingRunFit()
-                } else {
-                    self.authorIdentityView.setWidthBudget(self.restingAuthorBudget())
-                }
+                // the author's width shrinks by the same points — before the
+                // run is handed over, or it overflows into a `•••` on narrow
+                // bars. One of the few things that moves the pill's width.
+                self.applyBarPillWidths()
+                self.navigationItem.rightBarButtonItems = items
             }
             refreshWalletBadge()
             // The badge (and every visible boost control) re-renders on
@@ -2035,6 +1969,9 @@ final class SnapFeedViewController: UIViewController {
                 }
             })
         }
+        // Both pills' widths BEFORE their items are handed over: the bar reads
+        // a custom view's size at hand-over (memory `bar-item-wrapper-drift`).
+        applyBarPillWidths()
         navigationItem.rightBarButtonItems = restingTrailingItems()
 
         // The comments exit, built once and held: it takes the TRAILING nav
@@ -2156,17 +2093,16 @@ final class SnapFeedViewController: UIViewController {
         // beside the author pill (`setEngagedChrome`).
         soundButton.addAction(UIAction { [weak self] _ in self?.toggleSound() }, for: .primaryActionTriggered)
         mediaAttributionView.onTap = { [weak self] in self?.presentSoundSheet() }
+        #if DEBUG
         mediaAttributionView.onContentSettled = { [weak self] in
             guard let self else { return }
-            self.checkBarItemWidth(self.mediaAttributionView, slot: "attribution") { [weak self] in
-                self?.reinstallAttributionItem()
-            }
+            self.debugProbeBarItemWidth(self.mediaAttributionView, slot: "attribution")
         }
+        #endif
         refreshSoundButton()
-        attributionItem = makeAttributionItem()
-        // Every item carries a stable identifier, so a re-handed set (a healed
-        // attribution, `reinstallAttributionItem`) is matched item for item and
-        // nothing transitions.
+        let attributionItem = makeAttributionItem()
+        // Every item carries a stable identifier, so a re-handed set is matched
+        // item for item and nothing transitions.
         soundItem.identifier = "feed.snap.sound"
         let leading: [UIBarButtonItem] = [
             attributionItem,
@@ -4355,7 +4291,8 @@ final class SnapFeedViewController: UIViewController {
         refreshBookmarkGlyph(for: model.id)
         // The sound bubble is for posts that HAVE a sound: a clip, or a
         // collection with one. A photograph or a text page has nothing to mute.
-        soundItem.isHidden = postSound == nil
+        // Usually already decided by the scroll's swap (`updateBarPillScrub`).
+        setSoundShown(postSound != nil)
     }
 
     /// What the attribution draws for `model`: the sound's line, and a cover
@@ -4398,20 +4335,6 @@ final class SnapFeedViewController: UIViewController {
             model, sound: sound, cover: cover, pipeline: imagePipeline, animated: canAnimateBarItems
         )
         refreshCoverSpin()
-    }
-
-    /// The author item's `reinstallAuthorItem`, for the toolbar: the same
-    /// attribution in a fresh item under the same identifier, handed over
-    /// unanimated — one unseen frame — in the live set and the held one.
-    private func reinstallAttributionItem() {
-        let previousItem = attributionItem
-        attributionItem = makeAttributionItem()
-        if let index = defaultToolbarItems.firstIndex(of: previousItem) {
-            defaultToolbarItems[index] = attributionItem
-        }
-        guard var items = toolbarItems, let index = items.firstIndex(of: previousItem) else { return }
-        items[index] = attributionItem
-        setToolbarItems(items, animated: false)
     }
 
     // MARK: - Bar pills under the scroll
@@ -4472,6 +4395,10 @@ final class SnapFeedViewController: UIViewController {
               orderedIDs.indices.contains(index), let model = modelsByID[orderedIDs[index]] else { return }
         showAuthor(model)
         let attribution = attributionContent(for: model)
+        // The mute button changes hands with the attribution, under its blur —
+        // and gives or takes the attribution's slot, so their capsule keeps
+        // its width (`setSoundShown`).
+        setSoundShown(sound(for: model) != nil)
         showAttribution(model, sound: attribution.sound, cover: attribution.cover)
         authorIdentityView.setScrubBlur(authorBlur)
         mediaAttributionView.setScrubBlur(attributionBlur)
@@ -4524,42 +4451,33 @@ final class SnapFeedViewController: UIViewController {
         mediaAttributionView.setScrubBlur(0)
     }
 
-    /// ⚠️ THE WRAPPER'S WIDTH, checked after every content swap. A kept bar
-    /// item hosts its view in a UIKit wrapper whose width has been measured
-    /// DRIFTING from the view's (memory `bar-item-wrapper-drift`: +9pt per
-    /// round trip, cumulative, until the bar folded a group into `•••`). The
-    /// pills keep their item now, so each swap is checked: the width the bar
-    /// gave the view against the width it fits, and on any disagreement the
-    /// item is re-minted, which is a fresh wrapper measured at hand-over.
+    #if DEBUG
+    /// `-pill-probe`: the WRAPPER'S width against the pill's fixed one, a
+    /// moment after each content swap has landed (the bar's own pass has run
+    /// by then).
     ///
-    /// Read a moment after the swap has landed, so the bar's own pass (an
-    /// unanimated change only ASKS for one) has run.
-    ///
-    /// Measured on iOS 27 (iPhone 18 Pro, 32 pages): the NAV bar follows an
-    /// in-place width change on its own — view, fitted and wrapper agree on
-    /// every page. The one disagreement is the author set while a flight
-    /// owns the bar (unanimated): the bar kept the previous author's width
-    /// (158.7 for a 193.3 pill) until this re-mint.
-    private func checkBarItemWidth(_ pill: UIView, slot: String, reinstall: @escaping () -> Void) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self, weak pill] in
-            guard let self, let pill, pill.window != nil, self.view.window != nil else { return }
-            let fitted = pill.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
+    /// ⚠️ This used to be a guard, not a probe: a kept bar item hosts its view
+    /// in a UIKit wrapper whose width was measured DRIFTING from the view's
+    /// (memory `bar-item-wrapper-drift`: +9pt per round trip, cumulative, until
+    /// the bar folded a group into `•••`), and while the pills hugged their
+    /// text every swap was a new width to drift from, so a >1pt disagreement
+    /// re-minted the item. The pills' widths no longer move with a post
+    /// (`applyBarPillWidths`), which leaves the wrapper nothing to drift from;
+    /// the probe stays so a `DRIFT` line would say so if it ever came back.
+    private func debugProbeBarItemWidth(_ pill: UIView, slot: String) {
+        guard ProcessInfo.processInfo.arguments.contains("-pill-probe") else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak pill] in
+            guard let pill, pill.window != nil else { return }
+            let fixed = (pill as? SnapAuthorIdentityView)?.fixedWidth
+                ?? (pill as? SnapMediaAttributionView)?.fixedWidth ?? -1
             let drawn = pill.bounds.width
-            // A point, not half of one: an engaged width budget lands the
-            // pill a fraction of a point off its fitted width (134.7 vs 135.3,
-            // measured on a text page), and that is pixel rounding, not the
-            // drift — which moved in whole +9pt steps.
-            let drifted = abs(drawn - fitted) > 1
-            #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-pill-probe") {
-                print(String(format: "[pill-probe] width %@ view=%.1f fitted=%.1f wrapper=%.1f%@",
-                             slot, drawn, fitted, pill.superview?.bounds.width ?? -1,
-                             drifted ? " DRIFT -> reinstall" : ""))
-            }
-            #endif
-            if drifted { reinstall() }
+            let wrapper = pill.superview?.bounds.width ?? -1
+            let drifted = abs(drawn - fixed) > 1 || abs(wrapper - drawn) > 1
+            print(String(format: "[pill-probe] width %@ fixed=%.1f view=%.1f wrapper=%.1f%@",
+                         slot, fixed, drawn, wrapper, drifted ? " DRIFT" : ""))
         }
     }
+    #endif
 
     // MARK: - Sound
 

@@ -33,8 +33,11 @@ import UIKit
 /// `content` container and each still sits in a plain container of its own,
 /// and a container's group opacity survives the platter. Filmed at 60fps on
 /// iOS 27 (iPhone 18 Pro, light and dark, both bars, the follow badge): the
-/// old content visibly blurs out over ~7 frames, the glass holds its shape and
-/// only glides its width, and the new content sharpens over ~8.
+/// old content visibly blurs out over ~7 frames, the glass holds its shape,
+/// and the new content sharpens over ~8. In the snap feed the glass does not
+/// even change width — both pills are FIXED there (`SnapBarPillWidths`) — so
+/// the width path below (`remeasure`) serves only the hosts whose pill still
+/// hugs its content.
 ///
 /// TWO DRIVERS, ONE MECHANISM.
 /// - The CLOCK (`perform`): the timeline above, 0.12s out and 0.2s in — a
@@ -68,12 +71,9 @@ final class BarItemContentTransition {
 
     /// Resizes the bar item for content that has just been swapped in: with a
     /// duration it glides (the new content is invisible for the whole glide),
-    /// with nil it lands at once. Called in the same turn as the swap.
+    /// with nil it lands at once. Called in the same turn as the swap. A host
+    /// with a fixed width leaves it doing nothing.
     var remeasure: ((_ duration: TimeInterval?) -> Void)?
-    /// After the swap has been applied — immediately for an unanimated change,
-    /// at the midpoint of an animated one. For host decisions that read the
-    /// content (a width budget computed off the labels).
-    var didApply: (() -> Void)?
     /// Once a transition has fully landed (live content sharp and opaque).
     var didSettle: (() -> Void)?
 
@@ -123,7 +123,6 @@ final class BarItemContentTransition {
         guard let host, let content else { return change() }
         guard animated, host.window != nil, content.bounds.width > 0 else {
             change()
-            didApply?()
             remeasure?(nil)
             didSettle?()
             return
@@ -172,7 +171,6 @@ final class BarItemContentTransition {
             let changes = pending
             pending = []
             changes.forEach { $0() }
-            didApply?()
             remeasure?(nil)
         }
         isFadingOut = false
@@ -204,11 +202,6 @@ final class BarItemContentTransition {
     /// between two blurred pictures is a short fade, because a hard cut
     /// between two stills of different lengths reads as a flash.
     static let scrubSwapCrossfade: TimeInterval = 0.1
-    /// The width glide at a scroll-driven swap. Short: past the plateau the
-    /// scroll is already sharpening the new content, and a glide still
-    /// running then clips its labels against a platter that has not finished
-    /// growing (the timed swap's lesson, below).
-    static let scrubWidthGlide: TimeInterval = 0.1
 
     /// Renders the still a scroll-driven blur will show, ahead of the first
     /// frame that needs it — at the start of a drag, so the render is paid
@@ -233,8 +226,8 @@ final class BarItemContentTransition {
     ///
     /// A content change asked for while `amount > 0` (`perform`) is applied at
     /// the next call (or at the end of this turn, when no call follows), under
-    /// the blur: the live content swaps, the item takes its new width, and a
-    /// still of the NEW content cross-fades over the old one. Back at 0 the
+    /// the blur: the live content swaps and a still of the NEW content
+    /// cross-fades over the old one. Back at 0 the
     /// stills go and the live content is alone again.
     ///
     /// A timed transition still running when the scroll starts blurring jumps
@@ -273,12 +266,11 @@ final class BarItemContentTransition {
             let changes = pending
             pending = []
             changes.forEach { $0() }
-            didApply?()
             scrubSwapped = true
+            // The scroll drives only fixed-width pills (the snap feed's), so
+            // this does nothing there; a hugging host lands its width at once.
+            remeasure?(nil)
             if amount > 0 {
-                // As in the timed swap: the new width first, so the new still
-                // is rendered at the size it lands at.
-                remeasure?(Self.scrubWidthGlide)
                 host.layoutIfNeeded()
                 let previous = scrubStill
                 let next = still(of: content)
@@ -293,8 +285,6 @@ final class BarItemContentTransition {
                     previous?.removeFromSuperview()
                     self?.stills.removeAll { $0 === previous }
                 }
-            } else {
-                remeasure?(nil)
             }
         }
         scrubBlur = amount
@@ -319,13 +309,12 @@ final class BarItemContentTransition {
         let changes = pending
         pending = []
         changes.forEach { $0() }
-        didApply?()
-        // The item takes its new width FIRST, so the new content is laid out
-        // — and its still rendered — at the size it will land at. The glide
-        // runs while only stills are showing: over the first HALF of the
-        // fade-in, because a glide as long as the fade-in was filmed clipping
-        // the sharpening labels of a wider author against a platter still
-        // growing to fit them.
+        // A hugging host's item takes its new width FIRST, so the new content
+        // is laid out — and its still rendered — at the size it will land at.
+        // The glide runs while only stills are showing: over the first HALF of
+        // the fade-in, because a glide as long as the fade-in was filmed
+        // clipping the sharpening labels of a wider author against a platter
+        // still growing to fit them.
         remeasure?(Self.fadeInDuration / 2)
         guard let host, let content else { return }
         host.layoutIfNeeded()
@@ -353,8 +342,8 @@ final class BarItemContentTransition {
     /// A blurred still of `view` as it draws now, added to the host at alpha 0
     /// — or nil under Reduce Motion, or for a view with nothing to draw.
     ///
-    /// Pinned to the LEADING edge at its own size, never stretched: the item's
-    /// width glides under it while it shows, and everything in these pills is
+    /// Pinned to the LEADING edge at its own size, never stretched: a hugging
+    /// item's width glides under it while it shows, and everything in these pills is
     /// leading-aligned, so the still stays over what it pictures.
     private func still(of view: UIView) -> UIView? {
         guard let host, !UIAccessibility.isReduceMotionEnabled else { return nil }
@@ -465,8 +454,8 @@ final class BarItemContentTransition {
     }
 }
 
-/// Re-measures a bar item's custom view after its content changed — the one
-/// width path both pills share.
+/// Re-measures a bar item's custom view after its size changed: a hugging
+/// pill's new content, or a fixed pill's new width (its bar's geometry moved).
 ///
 /// ⚠️ THE ITEM IS NEVER RE-HANDED FOR IT. Re-handing a kept item leaves UIKit's
 /// custom-view wrapper at a width that drifts from the view's (memory

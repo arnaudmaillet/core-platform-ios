@@ -8,13 +8,16 @@ import UIKit
 /// actions). The bar never hides or transforms it during a hero flight — the
 /// card flies beneath the real, static bar.
 ///
-/// Content-hugging by design: the view sizes itself to its content (zero
-/// horizontal padding), so the system glass pill the bar draws around it
-/// wraps the avatar and text exactly. A hard width cap keeps long display
-/// names truncating instead of crowding the bar; the trade-off, accepted for
-/// the flush-pill look, is that an author change re-negotiates the item's
-/// size — at the paging's midpoint, under the full blur of the scroll-driven
-/// swap (`setScrubBlur`), where only blurred stills are showing.
+/// TWO WIDTH MODES.
+/// - FIXED (`setFixedWidth`, the snap feed): one width, read off the bar's
+///   geometry (`SnapBarPillWidths`), whoever the author — the name and the
+///   handle truncate inside it, the follow glyph keeps the pill's trailing
+///   end. Asked 2026-09-30: a pill that hugged its text grew and shrank on
+///   every page.
+/// - HUGGING (every other host — a conversation's header, a published text
+///   post): the view sizes itself to its content under a width cap
+///   (`setWidthBudget`), and a content change re-negotiates the item's size
+///   through the blur (`BarItemRemeasure`).
 final class SnapAuthorIdentityView: UIView {
     /// What the pill's trailing glyph says about the viewer and the author.
     ///
@@ -101,34 +104,57 @@ final class SnapAuthorIdentityView: UIView {
     ///
     /// The floor comes off below `minWidth`: it exists to hold the pill open
     /// while a name hydrates, and it would otherwise out-argue the budget.
-    /// The narrowest this pill can be while the HANDLE still reads whole —
-    /// everything that is not the label column, plus the handle's own
-    /// natural width. Below it the handle starts truncating, which is the
-    /// last rung of the run's degradation and the signal to buy width from
-    /// the sort pill first.
-    ///
-    /// Measured off the live labels rather than assumed, because the answer
-    /// moves with the handle, the Dynamic Type size and the avatar's
-    /// diameter — the name is deliberately absent from the sum, since it is
-    /// allowed to be squeezed to nothing before the handle gives anything.
-    var widthKeepingHandleWhole: CGFloat {
-        let avatarBreathing = (Self.barItemWrapperHeight - AvatarImageView.barDiameter) / 2
-        // A hidden badge takes no width and no spacing: the stack skips both.
-        let follow = followButton.isHidden
-            ? 0
-            : Spacing.sm + followButton.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
-        let chrome = AvatarImageView.barDiameter
-            + Spacing.sm                // avatar → labels
-            + follow                    // labels → badge, and the glyph itself
-            + avatarBreathing + Spacing.sm   // the row's own leading/trailing insets
-        return chrome + ceil(metaLabel.intrinsicContentSize.width)
-    }
-
+    /// HUGGING mode only: a fixed width ignores it.
     func setWidthBudget(_ budget: CGFloat?) {
         let target = min(Self.maxWidth, budget ?? Self.maxWidth)
         guard target > 0, maxWidthConstraint?.constant != target else { return }
         maxWidthConstraint?.constant = target
-        minWidthConstraint?.isActive = target >= Self.minWidth
+        minWidthConstraint?.isActive = fixedWidth == nil && target >= Self.minWidth
+    }
+
+    /// The pill's width in FIXED mode; nil while it hugs its content.
+    private(set) var fixedWidth: CGFloat?
+    private var fixedWidthConstraint: NSLayoutConstraint?
+
+    /// Pins the pill to `width` — or, with nil, lets it hug its content again.
+    /// Returns whether anything changed.
+    ///
+    /// The bar reads a custom view's size when the item is handed over, so a
+    /// host sets this BEFORE installing the item; the frame is written too
+    /// while the pill has no bar (a custom view keeps
+    /// `translatesAutoresizingMaskIntoConstraints`, and the size UIKit reads
+    /// at hand-over is its frame). A change on an installed pill asks the bar
+    /// for a pass — the host changes it only with the bar's own geometry.
+    ///
+    /// 999, never required: the bar pins its item wrapper with autoresizing
+    /// constraints, and anything required loses to them with a console break.
+    /// 999 still outranks everything inside — the labels truncate (the name
+    /// first, `nameLabel`'s resistance), the redaction bars give way.
+    @discardableResult
+    func setFixedWidth(_ width: CGFloat?) -> Bool {
+        guard width != fixedWidth else { return false }
+        fixedWidth = width
+        if let width {
+            if let fixedWidthConstraint {
+                fixedWidthConstraint.constant = width
+            } else {
+                let constraint = widthAnchor.constraint(equalToConstant: width)
+                constraint.priority = UILayoutPriority(999)
+                fixedWidthConstraint = constraint
+            }
+            fixedWidthConstraint?.isActive = true
+        } else {
+            fixedWidthConstraint?.isActive = false
+        }
+        // A fixed width answers for itself: no cap, no floor.
+        maxWidthConstraint?.isActive = width == nil
+        minWidthConstraint?.isActive = width == nil && (maxWidthConstraint?.constant ?? 0) >= Self.minWidth
+        if superview == nil {
+            frame.size = systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
+        } else {
+            BarItemRemeasure.run(self, duration: nil)
+        }
+        return true
     }
 
     /// Called when the identity is tapped, with the shown author.
@@ -160,17 +186,15 @@ final class SnapAuthorIdentityView: UIView {
     /// (`BarItemContentTransition`).
     private lazy var contentTransition: BarItemContentTransition = {
         let transition = BarItemContentTransition(host: self, content: contentView)
+        // A FIXED pill never re-measures: its width is the bar's, not the
+        // author's. Only a hugging one has a new width to take.
         transition.remeasure = { [weak self] duration in
-            guard let self else { return }
+            guard let self, self.fixedWidth == nil else { return }
             BarItemRemeasure.run(self, duration: duration)
         }
-        transition.didApply = { [weak self] in self?.onContentApplied?() }
         transition.didSettle = { [weak self] in self?.onContentSettled?() }
         return transition
     }()
-    /// After a content change has been APPLIED — at once, or at the midpoint
-    /// of the blur — for host arithmetic that reads the pill's labels.
-    var onContentApplied: (() -> Void)?
     /// Once a content change has fully landed.
     var onContentSettled: (() -> Void)?
 
@@ -229,6 +253,12 @@ final class SnapAuthorIdentityView: UIView {
         }
 
         applyFollowBadge()
+        // ONE SLOT for the three glyphs: "+", the followed mark and the friends
+        // mark differ in width, and a pill whose width is fixed would
+        // otherwise re-truncate its labels whenever the relation changed.
+        let badgeSlot = followButton.widthAnchor.constraint(equalToConstant: Self.followBadgeSlotWidth)
+        badgeSlot.priority = UILayoutPriority(999)
+        badgeSlot.isActive = true
         followButton.addAction(UIAction { [weak self] _ in
             guard let self, self.followBadge == .follow, let id = self.authorID else { return }
             self.onFollowTapped?(id)
@@ -253,7 +283,10 @@ final class SnapAuthorIdentityView: UIView {
         // passes and the hydration glide. Make the button rigid, and make the
         // labels area the designated absorber — its content is leading-aligned,
         // so a stretched frame just gains invisible trailing space.
-        followButton.setContentHuggingPriority(.required, for: .horizontal)
+        // Rigid at its SLOT (the 999 width above), so its hugging sits just
+        // under it: a required hugging would pin a narrow glyph to its own
+        // width and break the slot.
+        followButton.setContentHuggingPriority(UILayoutPriority(998), for: .horizontal)
         followButton.setContentCompressionResistancePriority(.required, for: .horizontal)
         labelsStack.setContentHuggingPriority(.defaultLow, for: .horizontal)
         labelsStack.setContentCompressionResistancePriority(UILayoutPriority(749), for: .horizontal)
@@ -302,9 +335,8 @@ final class SnapAuthorIdentityView: UIView {
     /// Shows `model`'s author, IN PLACE: the pill is one view in one bar item
     /// for the screen's life, and a change of what it draws blurs the old
     /// content out and the new in (`BarItemContentTransition`) while the
-    /// item's glass stays where it is. The view is content-sized, so a new
-    /// author re-negotiates the item's width — glided under the blur, at a
-    /// settle-time event by construction.
+    /// item's glass stays where it is — at its fixed width in the feed, so
+    /// the glass does not so much as change size.
     ///
     /// Paging between posts by the same author moves only the per-post meta
     /// line (the post's age) — through the same blur, and without refetching
@@ -470,6 +502,17 @@ final class SnapAuthorIdentityView: UIView {
     /// Whether the "+" is on offer.
     var offersFollow: Bool { followBadge == .follow }
 
+    /// The widest of the badge glyphs at their own point sizes — the one slot
+    /// every badge is drawn in.
+    static let followBadgeSlotWidth: CGFloat = {
+        [FollowBadge.follow, .following, .friends].compactMap { badge -> CGFloat? in
+            guard let name = badge.symbolName else { return nil }
+            return UIImage(systemName: name)?
+                .withConfiguration(UIImage.SymbolConfiguration(pointSize: badge.pointSize, weight: .semibold))
+                .size.width
+        }.max().map { ceil($0) } ?? 20
+    }()
+
     /// The pill's own default is the "+", as it always was: a host that offers
     /// no follow says so (`setFollowBadge(.none)`).
     private(set) var followBadge: FollowBadge = .follow
@@ -567,7 +610,12 @@ final class SnapAuthorIdentityView: UIView {
         bar.backgroundColor = UIColor.white.withAlphaComponent(0.3)
         bar.layer.cornerRadius = height / 2
         bar.layer.cornerCurve = .continuous
-        bar.widthAnchor.constraint(equalToConstant: width).isActive = true
+        // Below a fixed pill's 999: a narrow pill shortens the bar rather than
+        // being widened by it. Still above a fitting pass's own level, so a
+        // hugging pill keeps the bar's length.
+        let length = bar.widthAnchor.constraint(equalToConstant: width)
+        length.priority = .defaultHigh
+        length.isActive = true
         bar.heightAnchor.constraint(equalToConstant: height).isActive = true
         return bar
     }
