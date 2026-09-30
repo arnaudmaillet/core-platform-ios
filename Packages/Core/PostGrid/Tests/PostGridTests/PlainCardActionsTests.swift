@@ -131,7 +131,10 @@ struct PlainCardActionsTests {
         let names = [
             PostGridListRowCell.ActionSymbol.comments, PostGridListRowCell.ActionSymbol.like,
             PostGridListRowCell.ActionSymbol.repost, PostGridListRowCell.ActionSymbol.save,
-            PostGridListRowCell.ActionSymbol.saved
+            PostGridListRowCell.ActionSymbol.saved,
+            // The app-wide set the card's two new glyphs come from — the
+            // notifications' comment disc draws the filled one.
+            PostActionSymbol.comments, PostActionSymbol.commentsFilled, PostActionSymbol.repost
         ]
         for name in names {
             #expect(UIImage(systemName: name) != nil, "\(name) is not a symbol on this runtime")

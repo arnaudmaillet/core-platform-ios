@@ -237,8 +237,8 @@ final class SnapCommentEmptyStateView: UIView {
 
     /// One tier below the caption, the cue pill's exact type recipe
     /// (footnote/medium, white on the translucent pill) — and, in the slot
-    /// beside it, the comment-bubble mark that says this row speaks for the
-    /// comment system rather than for a commenter.
+    /// beside it, the comments mark (`PostActionSymbol.comments`) that says
+    /// this row speaks for the comment system rather than for a commenter.
     private func renderPrompt() {
         accessibilityLabel = Self.promptText
         let font = UIFont.preferredFont(forTextStyle: .footnote).withWeight(.medium)
@@ -246,7 +246,7 @@ final class SnapCommentEmptyStateView: UIView {
         label.textColor = .white
         label.text = Self.promptText
         glyphView.image = UIImage(
-            systemName: "bubble.left",
+            systemName: PostActionSymbol.comments,
             withConfiguration: UIImage.SymbolConfiguration(font: font, scale: .small)
         )
     }

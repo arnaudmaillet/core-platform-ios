@@ -1224,15 +1224,13 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// whether each one exists.
     ///
     /// ⚠️ A NAME THAT DOES NOT RESOLVE IS AN EMPTY BUTTON, NOT AN ERROR — see
-    /// `IconActionBarTests.everyGlyphThisBarIsGivenResolves`. Both of
-    /// 2026-09-30's are older than the app's iOS 26 floor
-    /// (`arrow.trianglehead.2.clockwise.rotate.90` since iOS 18,
-    /// `ellipsis.message` since iOS 16, per the system's
-    /// `name_availability.plist`), so neither carries a fallback.
+    /// `IconActionBarTests.everyGlyphThisBarIsGivenResolves`. Comments and
+    /// repost are the app-wide `PostActionSymbol`s, so the card and the post
+    /// screen's toolbar cannot drift apart.
     public enum ActionSymbol {
-        public static let comments = "ellipsis.message"
+        public static let comments = PostActionSymbol.comments
         public static let like = "heart"
-        public static let repost = "arrow.trianglehead.2.clockwise.rotate.90"
+        public static let repost = PostActionSymbol.repost
         public static let save = "bookmark"
         public static let saved = "bookmark.fill"
     }

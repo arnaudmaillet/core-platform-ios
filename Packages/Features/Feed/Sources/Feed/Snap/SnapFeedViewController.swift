@@ -2094,7 +2094,7 @@ final class SnapFeedViewController: UIViewController {
         // Posts/Reposts split), but `PostComposer` takes no parent, so there is
         // no client path that publishes one. What it needs is a mutation, not a
         // handler. Pressing it does nothing today, here as there.
-        let repost = SnapNavControls.makeToolbarActionButton(systemName: "arrow.2.squarepath")
+        let repost = SnapNavControls.makeToolbarActionButton(systemName: PostActionSymbol.repost)
         repost.accessibilityLabel = "Repost"
 
         // SHARE LEFT THE BAR. It is in the ⋯ menu now, beside the other things

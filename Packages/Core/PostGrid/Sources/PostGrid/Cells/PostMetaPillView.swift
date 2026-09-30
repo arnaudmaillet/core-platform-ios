@@ -421,35 +421,6 @@ public class PostCardPillView: PostMetaPillView {
     var inkTrailing: CGFloat { padding.trailing }
 }
 
-/// A chip's BOX without a chip's ground.
-///
-/// The preview's date sits in the same slot as the capsules beside it — same
-/// height, same inner padding, so the row keeps one rhythm and every constraint
-/// that measured against the date still measures the same thing — but draws no
-/// capsule of its own. A capsule is a claim that what is inside it can be
-/// pressed, and of the four things on that row the date is the one that never
-/// will be.
-///
-/// Its floor comes from `ProgressiveMaterialView` behind it instead: the same
-/// material, with no edge.
-public final class PostChipSlotView: UIView {
-    public init(contents: [UIView], spacing: CGFloat = 8) {
-        super.init(frame: .zero)
-        isUserInteractionEnabled = false
-        let row = UIStackView(arrangedSubviews: contents)
-        row.axis = .horizontal
-        row.alignment = .center
-        row.spacing = spacing
-        row.pin(to: self, insets: PostMetaPillView.insets)
-        let uniform = heightAnchor.constraint(equalToConstant: PostMetaPillView.height)
-        uniform.priority = .init(999)
-        uniform.isActive = true
-    }
-
-    @available(*, unavailable)
-    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-}
-
 /// A plain action that is ONE GLYPH — the closing line's repost and save.
 ///
 /// Interaction is ON, which is the one thing every other `PostMetaPillView` on
