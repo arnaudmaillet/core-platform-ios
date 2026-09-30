@@ -6,11 +6,12 @@ import UIKit
 /// of the sheet's native TOOLBAR, and a section of posts that holds more than
 /// it shows opens from its title's chevron (`SoundSheetSectionHeaderView`).
 ///
-/// Laid out inside its section's side insets (`SoundSheetHeaderCell`) — one
-/// gutter from the sheet's edge, on the tiles' left edge, and ONE GUTTER FROM
-/// ITS TOP too (`SoundSheetViewController.topInset`): the same margin both
-/// ways (asked for, 2026-09-30) — at the ABSOLUTE height `fittingHeight`
-/// computes.
+/// Laid out inside its section's insets (`SoundSheetHeaderCell`) —
+/// `SoundSheetViewController.headerInset` from the sheet's leading edge, as
+/// far from its top (`topInset`) and with as much room under it
+/// (`headerBottom`): twice the tiles' gutter, the one block of the sheet
+/// with air around it (asked for, 2026-09-30) — at the ABSOLUTE height
+/// `fittingHeight` computes.
 ///
 /// ```
 ///  ╭────╮  Veridis Quo Veridis Qu…   (✕)   the sheet's close button, a bar
@@ -26,11 +27,11 @@ final class SoundSheetHeaderView: UICollectionReusableView {
     static let artworkSide: CGFloat = 96
     /// What the lines leave free at the header's trailing edge for the
     /// sheet's close button: the bar's glass circle (44) and its margin (16),
-    /// less the gutter the header is already inset by (8), plus a gutter of
-    /// air before the circle. Measured on iOS 27 (iPhone 18 Pro, sheet at
-    /// large, 402 wide): the circle is drawn from x 341 to 386, the lines end
-    /// at 334.
-    static let closeClearance: CGFloat = 44 + 16 - 8 + 8
+    /// less what the header is already inset by (`headerInset`, 16), plus a
+    /// gutter of air before the circle. Measured on iOS 27 (iPhone 18 Pro,
+    /// sheet at large, 402 wide): the circle is drawn from x 341 to 386, the
+    /// lines end at 334.
+    static let closeClearance: CGFloat = 44 + 16 - SoundSheetViewController.headerInset + SoundSheetViewController.gutter
 
     var onTogglePreview: (() -> Void)?
 
@@ -118,10 +119,9 @@ final class SoundSheetHeaderView: UICollectionReusableView {
         identity.translatesAutoresizingMaskIntoConstraints = false
         addSubview(identity)
 
-        // NO GAP OF ITS OWN under the record: what separates it from the
-        // "Popular" title is that title's own air, as between every section
-        // of the sheet (asked for, 2026-09-30: no spacing added between
-        // sections).
+        // NO GAP OF ITS OWN under the record: the room under the sound is its
+        // SECTION's (`SoundSheetViewController.headerBottom`), counted by the
+        // detents from the same constant.
         let bottom = identity.bottomAnchor.constraint(equalTo: bottomAnchor)
         bottom.priority = .init(999)
         NSLayoutConstraint.activate([

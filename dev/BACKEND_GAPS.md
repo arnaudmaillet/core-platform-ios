@@ -34,6 +34,7 @@ full functionality.
 | 24 | No country entitlements, standings or gem purchases; `RadarPin` has no country | Map country unlocks + Countries shop (mock only; fleet shows every country) | Medium |
 | 25 | `notification.v1`: no FOLLOW kind, no per-row read, no comment text | Notifications drawer — no "started following you / Follow back" rows; opening marks ALL read | Medium |
 | 26 | `counter.v1` has no PLACE entity; profile-scoped LIKE unverified on the fleet | Place page "Likes" total is a client-side sum; profile header "Likes" column hidden wherever the projection is absent | Low |
+| 27 | No "popular posts for a sound" ranking, and no rule for when a sound has one | Sound sheet's Popular row (mock only: a sound of 10+ posts, ranked by views + 10 × likes) | Medium |
 
 ---
 
@@ -972,6 +973,37 @@ shown nowhere in the app any more, and the client no longer requests the
   follower/following, may be empty — the column is then not drawn. There is
   no client-side fallback on purpose: the profile's gallery holds only the
   pages it has fetched, and a partial sum would read as the total.
+
+---
+
+## 27. No "popular posts for a sound" ranking — and no rule for when a sound has one
+
+**Status: client built 2026-09-30 (sound sheet).** The sound sheet (the
+attribution under a feed video → the sound's page) shows the sound, then a
+horizontal **Popular** row, then a **Recent** grid. Product rule: the Popular
+section exists ONLY when the sound has enough posts for "popular" to mean
+something, and **the backend decides** — the client never invents it. A post
+the Popular row shows is left out of Recent.
+
+**What the contracts offer.** `timeline.v1.GetAudioFeed(audio_id, limit,
+page_token)` is chronological (Redis ZSET / `timeline.posts_by_audio`) — it can
+serve Recent. Nothing ranks a sound's posts by engagement, and nothing says
+whether a sound has a Popular section at all.
+
+**What ships meanwhile.** `PostSoundProviding.rankings(using:)` returns
+`PostSoundRankings(popular:recent:)`; an EMPTY `popular` means "no Popular
+section" (FeedInterface `PostSound.swift`). The mock (`MockPostSoundProvider`)
+gives a sound a Popular ranking from **10 posts** (`popularThreshold`), ordered
+by views + 10 × likes over the mock counters; the sheet's row shows its first
+8 (the sound's original post and the post being watched lead), and its
+chevron pushes the whole ranking.
+
+**What we need.** Either a `GetAudioPopular(audio_id, limit, page_token)`
+returning posts ranked by engagement (empty when the sound is under the
+server's threshold), or a `sort` on `GetAudioFeed` (`RECENT` / `POPULAR`) plus
+a `has_popular` (or the threshold) on the first page — so the rule lives in
+one place, server-side. A total post count for the sound on the first page
+would also replace the client's count of what it has loaded ("23 posts").
 
 ---
 

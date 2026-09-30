@@ -61,6 +61,12 @@ final class SoundSheetReveal: NSObject {
     }
 
     private(set) var progress: CGFloat = 0
+    /// Whether anything fades at all. Off when the sheet has no Popular row:
+    /// "Recent" is then right under the sound and is what the collapsed sheet
+    /// shows — the mask comes off, whatever the progress.
+    var isEnabled = true {
+        didSet { if isEnabled != oldValue { apply() } }
+    }
     /// The progress the sheet's drawn height says now; nil when it cannot be
     /// read (no window).
     var measure: (() -> CGFloat?)?
@@ -144,7 +150,7 @@ final class SoundSheetReveal: NSObject {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         fading.opacity = Float(Self.opacity(progress: progress))
-        let masked = progress < 1
+        let masked = isEnabled && progress < 1
         if masked, host.layer.mask !== mask {
             host.layer.mask = mask
         } else if !masked, host.layer.mask === mask {

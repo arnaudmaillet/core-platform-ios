@@ -90,31 +90,51 @@ struct MockPostSoundProvider: PostSoundProviding {
         return clips.clip(id: id).map { sound(clip: $0) }
     }
 
-    /// Most engaged first — the popular order.
+    /// How many posts a sound needs before the mock backend gives it a
+    /// "Popular" section. Under it, "popular" among a handful of posts means
+    /// nothing, and the sound page goes from the sound straight to "Recent".
+    /// Ten: on the corpus the biggest hits pass (an original sound of 24
+    /// posts — `-open-feed -snap-start-index 6 -snap-sound-sheet`) and the
+    /// long tail does not (a sound of 7 at index 0, of 1 at index 1) — the
+    /// sheet is seen in both shapes. The row shows the first eight
+    /// (`SoundSheetSections.rowLimit`), the rest go to "Recent".
+    static let popularThreshold = 10
+
+    /// Most engaged first — every post, whether or not the sound has a
+    /// Popular section.
     func postIDs(using sound: PostSound) -> [PostID] {
-        rankings(using: sound).popular
+        ranked(postsBySound[sound.id] ?? []).byEngagement
     }
 
-    /// The two orders of the sound page, over the same posts:
+    /// The sound page's two lists, as the backend would send them:
     /// - **popular**: views plus ten per like (a like is worth ten looks) —
-    ///   the counters the feed itself shows;
+    ///   the counters the feed itself shows — ONLY for a sound used by
+    ///   `popularThreshold` posts or more; empty otherwise: no section;
     /// - **recent**: by publication date, newest first — every post, the
-    ///   popular ones included.
-    ///
-    /// Ties fall back to the dataset's order.
+    ///   popular ones included (the page leaves out what its row shows).
     func rankings(using sound: PostSound) -> PostSoundRankings {
         let posts = postsBySound[sound.id] ?? []
-        guard posts.count > 1 else { return PostSoundRankings(popular: posts, recent: posts) }
+        let orders = ranked(posts)
+        return PostSoundRankings(
+            popular: posts.count >= Self.popularThreshold ? orders.byEngagement : [],
+            recent: orders.byDate
+        )
+    }
+
+    /// `posts` by engagement and by date. Ties fall back to the dataset's
+    /// order.
+    private func ranked(_ posts: [PostID]) -> (byEngagement: [PostID], byDate: [PostID]) {
+        guard posts.count > 1 else { return (posts, posts) }
         let position = Dictionary(posts.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
         let engagement: [PostID: Int64] = Dictionary(posts.map { id in
             let views = counters?.viewCount(for: id.rawValue) ?? 0
             let likes = counters?.likeCount(for: id.rawValue) ?? 0
             return (id, views + 10 * likes)
         }, uniquingKeysWith: { first, _ in first })
-        func ranked(_ key: (PostID) -> Int64) -> [PostID] {
+        func sorted(_ key: (PostID) -> Int64) -> [PostID] {
             posts.sorted { key($0) != key($1) ? key($0) > key($1) : position[$0, default: 0] < position[$1, default: 0] }
         }
-        return PostSoundRankings(popular: ranked { engagement[$0] ?? 0 }, recent: ranked { publishedAt[$0] ?? 0 })
+        return (sorted { engagement[$0] ?? 0 }, sorted { publishedAt[$0] ?? 0 })
     }
 
     /// A clip's sound is its clip's; a song is its first poster's only when

@@ -4719,10 +4719,11 @@ final class SnapFeedViewController: UIViewController {
     private func presentSoundSheet() {
         guard presentedViewController == nil, let model = activeModel,
               let sound = sound(for: model) else { return }
-        // The sheet lists EVERY post set to this sound, not only this feed's,
-        // in two sections (`SoundSheetSections`): popular — the sound's
-        // original post first when it is a media post, then the page it was
-        // opened from — and recent: every post, newest first.
+        // The sheet lists EVERY post set to this sound, not only this feed's
+        // (`SoundSheetSections`): popular — only when the provider gives the
+        // sound one; the sound's original post first when it is a media
+        // post, then the page it was opened from — then recent: every post
+        // the popular row does not show, newest first.
         let rankings = soundProvider?.rankings(using: sound) ?? .empty
         // With nobody to ask, a clip's own sound (`sound(for:)`) is this
         // page's: it is its own original.

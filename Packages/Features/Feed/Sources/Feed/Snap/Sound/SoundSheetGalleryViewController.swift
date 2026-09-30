@@ -55,7 +55,11 @@ final class SoundSheetGalleryViewController: UIViewController {
         // Clear, like the sheet's own screen: the sheet is the surface.
         view.backgroundColor = .clear
         collectionView.backgroundColor = .clear
-        collectionView.alwaysBounceVertical = true
+        // The sheet's rule (`SoundSheetViewController`, "the posts scroll
+        // only at the fullest detent"): no bounce of its own — a content that
+        // fits leaves the drag to the sheet, and UIKit's scroll-to-expand does
+        // the rest below the fullest detent.
+        collectionView.alwaysBounceVertical = false
         collectionView.delegate = self
         collectionView.contentInset.top = SoundSheetViewController.gutter
         collectionView.translatesAutoresizingMaskIntoConstraints = false

@@ -6,10 +6,11 @@ import FeedInterface
 struct SoundSheetSection: Hashable, Sendable {
     enum Kind: String, Hashable, Sendable, CaseIterable {
         /// A horizontal row — the one the collapsed detent shows whole — whose
-        /// title and chevron push its whole ranking.
+        /// title and chevron push its whole ranking. Only when the backend
+        /// gives the sound one.
         case popular
-        /// The vertical grid under the row: EVERY post that used the sound,
-        /// most recent first — the popular ones too. It shows everything it
+        /// The vertical grid: every post that used the sound, most recent
+        /// first, but those the Popular row shows. It shows everything it
         /// holds, so it has nothing to push.
         case recent
 
@@ -39,25 +40,32 @@ struct SoundSheetSection: Hashable, Sendable {
     var hasMore: Bool { all.count > ids.count }
 }
 
-/// The sound sheet's sections, built from the provider's two rankings.
+/// The sound sheet's sections, built from the provider's two lists.
 ///
-/// **TWO VIEWS OF THE SAME POSTS, NOT A PARTITION.** The "Popular" row shows
-/// the first posts of its ranking; the "Recent" grid is EVERY post that used
-/// the sound, most recent first — a popular post is in both (asked for,
-/// 2026-09-30: "Recent" says who used the sound lately, whoever they are).
-/// So a post can show twice on the sheet, once per section — the sheet's
-/// items are a post IN a section (`SoundSheetViewController.Item`).
+/// **"POPULAR" ONLY WHEN THE BACKEND SAYS SO** (asked for, 2026-09-30): an
+/// empty `rankings.popular` is a sound with too few posts for one, and the
+/// sheet goes from the sound straight to "Recent". The sheet never invents
+/// the section; it only decides what each one shows.
 ///
-/// **NEITHER IS EVER EMPTY.** The sheet opens from a post set to the sound,
-/// and that post is in both: "Popular" leads with it (after the original),
-/// and "Recent" holds every post — one the date order leaves out (the post
-/// the sheet was opened from, a ranking that lags) joins its end.
+/// **A POST SHOWS ONCE** (asked for, 2026-09-30, reversing #322's "in both"):
+/// "Recent" is every post, most recent first, LESS the posts the Popular row
+/// shows. The rest of the Popular ranking — behind its chevron, not on the
+/// sheet — stays in "Recent".
+///
+/// **"RECENT" IS NEVER EMPTY, AND ALWAYS THERE.** The sheet opens from a post
+/// set to the sound, and every post is in it: one the date order leaves out
+/// (the post the sheet was opened from, a ranking that lags) joins its end.
+/// Should the row show every post — a backend that ranks a sound of three —
+/// the row goes, not "Recent": a Popular row holding everything says nothing
+/// the grid would not, and the sheet keeps one of its two shapes (which the
+/// collapsed detent counts, `SoundSheetViewController.foldBottom`).
 ///
 /// **"POPULAR" LEADS WITH THE ORIGINAL, THEN THE POST WATCHED.** The row the
 /// collapsed detent shows keeps the rule the grid had (`gridPostIDs`): the
 /// post the sound was first published with — marked "Original" once it is
 /// known to be a media post — then the post the sheet was opened from, then
-/// the most engaged.
+/// the most engaged. Without a Popular section they stand in "Recent" at
+/// their date, the original still marked.
 @MainActor
 enum SoundSheetSections {
     /// How many posts the row shows before its chevron: three and a peek on
@@ -79,15 +87,21 @@ enum SoundSheetSections {
         let head = SoundSheetViewController.gridPostIDs(
             current: current, original: original, using: kept(rankings.popular), isMedia: isMedia
         )
+        // Every post, by date; what the date order misses at the end — the
+        // post watched and the original among them.
+        let everyPost = kept(rankings.recent + head.ids)
+        let recentAlone = [SoundSheetSection(kind: .recent, ids: everyPost, all: everyPost)]
+        guard rankings.hasPopular else { return (recentAlone, head.original) }
+
         let popularAll = kept(head.ids)
         let popularRow = Array(popularAll.prefix(rowLimit))
-        // Every post, by date; what the date order misses at the end.
-        let recent = kept(rankings.recent + popularAll)
-
-        let sections = [
+        let shown = Set(popularRow)
+        let recent = everyPost.filter { !shown.contains($0) }
+        // The row would show every post: the grid alone says as much.
+        guard !recent.isEmpty else { return (recentAlone, head.original) }
+        return ([
             SoundSheetSection(kind: .popular, ids: popularRow, all: popularAll),
             SoundSheetSection(kind: .recent, ids: recent, all: recent),
-        ].filter { !$0.ids.isEmpty }
-        return (sections, head.original)
+        ], head.original)
     }
 }
