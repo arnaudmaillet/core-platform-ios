@@ -7,10 +7,12 @@ import UIKit
 /// transparent navigation bar) down to the bottom of the action-button tray;
 /// the header lays its content on top of it.
 ///
-/// Two gradient layers make the overlay legible over arbitrary media:
-/// - a bottom fade from clear into `systemBackground`, so the identity block's
-///   standard `.label` text sits on (effectively) the page background in both
-///   light and dark mode — in dark mode this *is* the fade-to-dark treatment;
+/// Three gradient layers make the overlay legible over arbitrary media:
+/// - a bottom fade from clear into the page's tone, so the counters, the bio
+///   and the tray keep standard dynamic `.label` text on (effectively) the
+///   page in both light and dark mode;
+/// - on a poster, an ink scrim — clear into black — under the name and the
+///   handle, which stand on the picture itself in white (see `HeroInk`);
 /// - a subtle top scrim, so the status bar and navigation title survive a
 ///   bright sky.
 ///
@@ -21,6 +23,10 @@ final class ProfileBannerView: UIView {
     private let mediaContainer = UIView()
     private let imageView = FillImageView()
     private let bottomFade = CAGradientLayer()
+    /// Inside `mediaContainer`, over the picture (and a loading bone) and so
+    /// under the page's run-out, which covers it wherever the page's tone
+    /// has arrived.
+    private let inkScrim = HeroInkScrimView()
     private let topScrim = CAGradientLayer()
 
     private let imagePipeline: ImagePipeline
@@ -61,6 +67,13 @@ final class ProfileBannerView: UIView {
             imageView.topAnchor.constraint(equalTo: mediaContainer.topAnchor, constant: -Self.parallaxReserve),
             imageView.bottomAnchor.constraint(equalTo: mediaContainer.bottomAnchor)
         ])
+
+        inkScrim.pin(to: mediaContainer)
+        // ⚠️ From the INITIAL shape, not `true`: the banner starts as
+        // `.unresolved`, which IS `.poster`, so the header's first
+        // `setFormat(.poster)` is a no-op — a hidden-until-set scrim stayed
+        // hidden on every poster (measured: the handle at 3.99:1 on prof-2).
+        inkScrim.isHidden = format != .poster
 
         topScrim.locations = [0, 1]
         layer.addSublayer(bottomFade)
@@ -115,6 +128,7 @@ final class ProfileBannerView: UIView {
     func setFormat(_ format: ProfileBannerFormat) {
         guard format != self.format else { return }
         self.format = format
+        inkScrim.isHidden = format != .poster
         refreshGradientColors()
         setNeedsLayout()
     }
@@ -210,7 +224,21 @@ final class ProfileBannerView: UIView {
         setNeedsLayout()
     }
 
+    // MARK: - Ink scrim
+
+    /// Where the poster's name and handle stand, and where the counters
+    /// begin, in this view's own points from its top — the ink scrim's band.
+    /// The name and the handle wear `HeroInk`'s white over it; see `HeroInk`
+    /// for why, and for the contrast it buys over any picture.
+    func setInk(_ band: HeroInk.Band) {
+        inkScrim.band = band
+    }
+
     #if DEBUG
+    var debugInkScrimLocations: [CGFloat] { inkScrim.debugLocations }
+    var debugInkScrimAlphas: [CGFloat] { inkScrim.debugAlphas }
+    var debugShowsInkScrim: Bool { !inkScrim.isHidden }
+    var debugHasPicture: Bool { imageView.image != nil }
     /// The run-out's stops as fractions of the banner's height, for a test
     /// that asks where the picture is left alone.
     var debugFadeLocations: [CGFloat] { (bottomFade.locations ?? []).map { CGFloat($0.doubleValue) } }
@@ -235,6 +263,8 @@ final class ProfileBannerView: UIView {
         if redacted, bone == nil {
             let bone = SkeletonBoneView(rounding: .fixed(0))
             bone.pin(to: mediaContainer)
+            // Under the ink scrim, as the picture it stands in for is.
+            mediaContainer.bringSubviewToFront(inkScrim)
             self.bone = bone
         }
         bone?.isHidden = false

@@ -8,8 +8,10 @@ import UIKit
 /// `ProfileBannerView` runs from the very top of the screen (under the status
 /// bar and transparent navigation bar) down to the bottom of the action tray,
 /// and the identity content sits directly on top of it. The banner's bottom
-/// fade dissolves into `systemBackground` under the identity rows, so they
-/// keep standard dynamic label colors.
+/// fade dissolves into the page's tone under the counters, the bio and the
+/// tray, so they keep standard dynamic label colors; on a poster the name and
+/// the handle stand on the picture itself, in white over an ink scrim (see
+/// `HeroInk`).
 ///
 /// Identity anatomy:
 /// - a tall banner-viewing window under the chrome (`Metrics.bannerClearance`
@@ -169,6 +171,7 @@ final class ProfileHeaderView: UIView {
         identityColumn.directionalLayoutMargins.top =
             format == .band ? Metrics.bandOverlap + Metrics.bandNameGap : 0
         bannerView.setFormat(format)
+        applyIdentityInk()
         setNeedsLayout()
     }
 
@@ -178,6 +181,35 @@ final class ProfileHeaderView: UIView {
     /// below it — so the two shapes meet at the same picture: none.
     func setTravelled(_ travelled: CGFloat) {
         bannerView.setTravelled(travelled, fadeOutTravel: posterFadeOutTravel)
+        applyIdentityInk()
+    }
+
+    // MARK: - Identity ink
+
+    /// The page's ink, for a band, no picture, and a poster scrolled away. On
+    /// a poster at rest the name and the handle wear `HeroInk.primary` and
+    /// `.secondary` instead — they stand on the picture; see `HeroInk`.
+    static let pageNameInk = UIColor.label
+    static let pageHandleInk = UIColor.secondaryLabel
+
+    /// How much of the name's and the handle's ink is the picture's: 1 on a
+    /// poster at rest, 0 on a band or no picture. The poster fades out as it
+    /// scrolls up (`setTravelled`), taking its scrim with it — white type
+    /// kept over a light page would vanish — so the ink follows the banner's
+    /// own alpha back to the page's.
+    private var identityInkOnPicture: CGFloat = 0
+
+    private func applyIdentityInk() {
+        let onPicture = bannerFormat == .poster ? bannerView.alpha : 0
+        guard onPicture != identityInkOnPicture else { return }
+        identityInkOnPicture = onPicture
+        nameLabel.textColor = HeroInk.blend(page: Self.pageNameInk, picture: HeroInk.primary, onPicture: onPicture)
+        handleLabel.textColor = HeroInk.blend(
+            page: Self.pageHandleInk, picture: HeroInk.secondary, onPicture: onPicture
+        )
+        for label in [nameLabel, handleLabel] {
+            HeroInk.applyShadow(to: label, onPicture: onPicture)
+        }
     }
 
     /// The travel that brings a poster's avatar to where a band holds its
@@ -208,7 +240,26 @@ final class ProfileHeaderView: UIView {
     var debugBannerFadeAlphas: [CGFloat] { bannerView.debugFadeAlphas }
     var debugBannerAlpha: CGFloat { bannerView.alpha }
     var debugBannerPictureShift: CGFloat { bannerView.debugPictureShift }
+    var debugBannerHasPicture: Bool { bannerView.debugHasPicture }
+    var debugShowsInkScrim: Bool { bannerView.debugShowsInkScrim }
+    var debugInkScrimLocations: [CGFloat] { bannerView.debugInkScrimLocations }
+    var debugInkScrimAlphas: [CGFloat] { bannerView.debugInkScrimAlphas }
+    var debugNameInk: UIColor { nameLabel.textColor }
+    var debugHandleInk: UIColor { handleLabel.textColor }
+    var debugNameShadowOpacity: Float { nameLabel.layer.shadowOpacity }
+    var debugNameFrame: CGRect { nameLabel.convert(nameLabel.bounds, to: self) }
+    var debugHandleFrame: CGRect { handleLabel.convert(handleLabel.bounds, to: self) }
     private weak var actionRowForDebug: UIView?
+
+    /// WCAG contrast of the name and the handle against the pixels rendered
+    /// behind them, over the page — see `HeroInk.debugContrast`. Used by
+    /// `ProfileIdentityInkTests` and the `-profile-ink-audit` launch argument.
+    func debugIdentityContrast() -> (name: HeroInkContrast, handle: HeroInkContrast)? {
+        guard let measured = HeroInk.debugContrast(
+            of: [nameLabel, handleLabel], in: self, over: Surface.page
+        ), measured.count == 2 else { return nil }
+        return (measured[0], measured[1])
+    }
     #endif
 
     /// Builds the mutual's rail menu, resolved at PRESENTATION so the rows
@@ -754,12 +805,13 @@ final class ProfileHeaderView: UIView {
         // subheadline bio below — name > handle = body copy, one weight jump.
         nameLabel.font = UIFont.preferredFont(forTextStyle: .title3).withWeight(.semibold)
         nameLabel.adjustsFontForContentSizeCategory = true
-        nameLabel.textColor = .label
+        // Page ink until a poster says otherwise — see `applyIdentityInk`.
+        nameLabel.textColor = Self.pageNameInk
         nameLabel.numberOfLines = 1
 
         handleLabel.font = .preferredFont(forTextStyle: .subheadline)
         handleLabel.adjustsFontForContentSizeCategory = true
-        handleLabel.textColor = .secondaryLabel
+        handleLabel.textColor = Self.pageHandleInk
         handleLabel.numberOfLines = 1
 
         verifiedBadge.tintColor = .systemBlue
@@ -1037,6 +1089,11 @@ final class ProfileHeaderView: UIView {
             start: stats.minY - Metrics.posterFadeLead,
             opaque: stats.maxY + Spacing.md
         )
+        // The type the ink scrim stands under: the name's row to the
+        // handle's foot, released at the counters.
+        let name = nameLabel.convert(nameLabel.bounds, to: bannerView)
+        let handle = handleLabel.convert(handleLabel.bounds, to: bannerView)
+        bannerView.setInk(HeroInk.Band(top: name.minY, bottom: handle.maxY, release: stats.minY))
     }
 }
 
