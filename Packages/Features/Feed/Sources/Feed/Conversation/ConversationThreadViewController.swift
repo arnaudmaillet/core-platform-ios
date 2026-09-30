@@ -201,7 +201,9 @@ final class ConversationThreadViewController: UIViewController {
         } else {
             refreshControl.addAction(UIAction { [weak self] _ in self?.driver.refresh() }, for: .valueChanged)
             collectionView.refreshControl = refreshControl
-            // A bare tap on the stream retires the keyboard, as on the post.
+            // A bare tap on the stream retires the keyboard, as on the post
+            // — and so does a tap on a message's body (`retireKeyboardOr`),
+            // whose own reply tap otherwise wins the touch.
             let tap = UITapGestureRecognizer(target: self, action: #selector(handleStreamTap))
             tap.cancelsTouchesInView = false
             collectionView.addGestureRecognizer(tap)
@@ -352,8 +354,10 @@ final class ConversationThreadViewController: UIViewController {
             composerBackdrop.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             composerBackdrop.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             composerBackdrop.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            // From the INPUT ROW, as on the post: the stake bubble floats in
+            // the band's ramp.
             composerBackdrop.topAnchor.constraint(
-                equalTo: composeBar.topAnchor, constant: -SnapCommentsLayout.footerFrostLead
+                equalTo: composeBar.inputRowTopAnchor, constant: -SnapCommentsLayout.footerFrostLead
             ),
         ])
     }
@@ -537,7 +541,12 @@ final class ConversationThreadViewController: UIViewController {
         cell.row.setLikeControlHidden(true)
         cell.row.onAvatarTap = message.isMine ? nil : { [weak self] in self?.driver.didTapIdentity() }
         // A row tap answers it — the post's grammar. Nothing to answer in a peek.
-        cell.row.onReplyTap = mode == .full ? { [weak self] in self?.driver.beginReply(to: messageID) } : nil
+        // While the keyboard is up, the tap retires it instead (see
+        // `retireKeyboardOr`).
+        cell.row.onReplyTap = mode == .full ? { [weak self] in
+            guard let self else { return }
+            self.retireKeyboardOr { self.driver.beginReply(to: messageID) }
+        } : nil
         if let quote = message.quote {
             cell.setQuote((quote.author, quote.snippet))
             cell.onQuoteTap = { [weak self] in self?.scrollToMessage(quote.messageID) }
@@ -813,6 +822,19 @@ final class ConversationThreadViewController: UIViewController {
 
     @objc private func handleStreamTap() {
         view.endEditing(true)
+    }
+
+    /// A tap on a message's BODY while the keyboard is up retires the
+    /// keyboard instead of arming a reply — the post's rule (see
+    /// `PostDetailViewController.retireKeyboardOr`): the row's reply tap is
+    /// nearer the touch and prevents the stream's, so the row must say it.
+    /// The quote strip and the avatar keep their own taps.
+    private func retireKeyboardOr(_ work: () -> Void) {
+        if composeBar.isEditingDraft {
+            view.endEditing(true)
+        } else {
+            work()
+        }
     }
 }
 

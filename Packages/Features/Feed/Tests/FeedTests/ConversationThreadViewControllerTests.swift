@@ -21,6 +21,7 @@ struct ConversationThreadViewControllerTests {
         var initial: ConversationThreadPhase
         private(set) var sent: [String] = []
         private(set) var didLoad = false
+        private(set) var replies: [String] = []
 
         init(initial: ConversationThreadPhase) { self.initial = initial }
 
@@ -31,7 +32,7 @@ struct ConversationThreadViewControllerTests {
         }
         func refresh() {}
         func send(_ text: String) { sent.append(text) }
-        func beginReply(to messageID: String) {}
+        func beginReply(to messageID: String) { replies.append(messageID) }
         func cancelReply() {}
         func forward(_ messageID: String) {}
         func delete(_ messageID: String) {}
@@ -150,9 +151,25 @@ struct ConversationThreadViewControllerTests {
         #expect(driver.sent == ["On my way"])
     }
 
-    /// The conversation's trailing slot: the post's faces, except that a draft
-    /// is NEVER parked behind the mic — a shared link or an emote lands in
-    /// the field to be sent, and the mic there answered with a notice.
+    /// A tap on a message answers it while the keyboard is down. (With the
+    /// keyboard up the same tap only retires it — `retireKeyboardOr`. That half
+    /// needs a real first responder, which the package test host, having no
+    /// window scene, cannot give; it is verified on the simulator.)
+    @Test func aRowTapWithTheKeyboardDownAnswersTheMessage() throws {
+        let (screen, driver, _, _) = makeScreen()
+        let stream = try #require(Self.firstView(UICollectionView.self, in: screen.view))
+        let cell = try #require(stream.cellForItem(at: IndexPath(item: 0, section: 0)) as? ThreadRowCell)
+        let bar = try #require(Self.firstView(CommentsInputBar.self, in: screen.view))
+        #expect(!bar.isEditingDraft)
+
+        cell.row.onReplyTap?()
+        #expect(driver.replies == ["m1"])
+    }
+
+    /// The conversation's trailing slot: the post's faces — a draft is
+    /// sendable with the keyboard down (a shared link or an emote lands in
+    /// the field to be sent), and an empty field wears the mic, keyboard up
+    /// or down.
     @Test func aDraftIsSendableWithTheKeyboardDown() throws {
         let bar = CommentsInputBar()
         bar.showsIdleUtilityFaces = true
@@ -165,7 +182,7 @@ struct ConversationThreadViewControllerTests {
         #expect(button("Record voice comment") != nil)
         #expect(send.alpha == 0)
 
-        // A draft with the keyboard down: SEND, where the post keeps the mic.
+        // A draft with the keyboard down: SEND.
         bar.draftText = "https://example.test/p/1"
         #expect(send.alpha == 1)
         #expect(send.isEnabled)
@@ -175,9 +192,10 @@ struct ConversationThreadViewControllerTests {
         bar.setKeyboardOpen(true)
         #expect(send.alpha == 1)
 
-        // Emptied with the keyboard up: the dismiss-keyboard face.
+        // Emptied with the keyboard up: the mic — no dismiss-keyboard face.
         bar.draftText = ""
-        #expect(button("Dismiss keyboard") != nil)
+        #expect(button("Record voice comment")?.alpha == 1)
+        #expect(button("Dismiss keyboard") == nil)
         #expect(send.alpha == 0)
     }
 

@@ -1018,12 +1018,13 @@ struct SnapCommentsPresentationTests {
         #expect(changes == [.trending])
     }
 
-    /// The trailing slot's three faces, and the one that changed: the ✕ is
-    /// GONE from this bar (the exit moved to the toolbar) and a MICROPHONE
-    /// holds the idle slot instead — the affordance a message composer
-    /// actually wants there. The page-swipe drive marks a feed engagement;
-    /// the pushed comments screen wires none and keeps a permanent send.
-    @Test func composerTrailingSlotFollowsKeyboardAndText() throws {
+    /// The trailing slot's two faces: the MICROPHONE over an empty field and
+    /// SEND over a draft — the keyboard plays no part. There is no ✕ (the
+    /// exit moved to the toolbar) and no dismiss-keyboard chevron (a tap on
+    /// the stream retires the keyboard). The page-swipe drive marks a feed
+    /// engagement; the pushed comments screen wires none and keeps a
+    /// permanent send.
+    @Test func composerTrailingSlotFollowsTheText() throws {
         let bar = CommentsInputBar()
         bar.onPageSwipe = { _, _, _ in }
         func button(_ label: String) -> UIButton? {
@@ -1037,27 +1038,26 @@ struct SnapCommentsPresentationTests {
         #expect(button("Close comments") == nil)
         #expect(send.alpha == 0)
 
-        // Keyboard closed, text drafted: STILL the mic (send needs the
-        // keyboard; a parked draft does not claim the slot).
+        // Keyboard closed, text drafted: send — a draft is sendable with the
+        // keyboard down.
         bar.draftText = "draft"
-        #expect(button("Record voice comment") != nil)
-        #expect(send.alpha == 0)
-
-        // Keyboard opens over the draft: send takes the slot.
-        bar.setKeyboardOpen(true)
         #expect(send.alpha == 1)
         #expect(send.isEnabled)
 
-        // Text cleared with the keyboard up: the dismiss-keyboard face —
-        // tapping must retire the keyboard, never the engagement.
+        // Keyboard up over the draft: still send.
+        bar.setKeyboardOpen(true)
+        #expect(send.alpha == 1)
+
+        // Text cleared with the keyboard up: the MIC, never a
+        // dismiss-keyboard chevron.
         bar.draftText = ""
-        #expect(button("Dismiss keyboard") != nil)
-        #expect(button("Record voice comment") == nil)
+        #expect(button("Record voice comment")?.alpha == 1)
+        #expect(button("Dismiss keyboard") == nil)
         #expect(send.alpha == 0)
 
-        // Keyboard retires: back to the mic.
+        // Keyboard retires: still the mic.
         bar.setKeyboardOpen(false)
-        #expect(button("Record voice comment") != nil)
+        #expect(button("Record voice comment")?.alpha == 1)
 
         // Pushed screen (no engagement): permanent send, no utility face.
         let pushed = CommentsInputBar()
@@ -1465,17 +1465,15 @@ struct SnapCommentsPresentationTests {
         #expect(button.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width >= titled - 0.5)
     }
 
-    /// The bar's four slots, in order: the viewer's AVATAR opens it, the
-    /// field takes the flexible width, then the mic/send toggle, then "+"
-    /// at the trailing edge.
-    ///
-    /// The "+" used to lead the bar. It moved so the avatar could — a
-    /// composer says who is speaking before it offers what to attach — which
-    /// also gathers both action controls into one thumb cluster.
-    @Test func composerSlotsRunAvatarFieldToggleThenAttach() throws {
+    /// The bar's two rows. The INPUT row: the viewer's AVATAR opens it, the
+    /// field takes the flexible width, then the mic/send toggle at the
+    /// trailing edge. The STAKE row above it: the boost alone, 44pt (UIKit's
+    /// default glass button), its trailing edge over mic/send's.
+    @Test func composerRowsRunAvatarFieldToggleUnderTheStake() throws {
         let bar = CommentsInputBar()
         bar.onPageSwipe = { _, _, _ in }
-        bar.frame = CGRect(x: 0, y: 0, width: 340, height: 38)
+        let height = CommentsInputBar.restingHeight(for: .large)
+        bar.frame = CGRect(x: 0, y: 0, width: 340, height: height)
         bar.layoutIfNeeded()
 
         // TWO effect views in the bar now (the avatar's bubble and the
@@ -1491,31 +1489,45 @@ struct SnapCommentsPresentationTests {
         let buttons = bar.subviews.compactMap { $0 as? UIButton }
         let send = try #require(buttons.first { $0.accessibilityLabel == "Send comment" })
         let mic = try #require(buttons.first { $0.accessibilityLabel == "Record voice comment" })
-        let attach = try #require(buttons.first { $0.configuration?.image != nil && $0 !== send && $0 !== mic })
+        let stake = try #require(buttons.first { $0.accessibilityLabel == "Boost post" })
 
-        // Leading to trailing, no overlaps — except the toggle pair, which
-        // SHARE one slot by design.
+        // The input row, leading to trailing, no overlaps — except the toggle
+        // pair, which SHARE one slot by design. The field has the width the
+        // stake used to take.
         #expect(avatar.frame.minX == 0)
         #expect(field.frame.minX >= avatar.frame.maxX)
         #expect(send.frame.minX >= field.frame.maxX)
-        #expect(attach.frame.minX >= send.frame.maxX)
-        #expect(attach.frame.maxX == bar.bounds.width)
+        #expect(send.frame.maxX == bar.bounds.width)
         #expect(mic.frame == send.frame)
 
-        // Every control keeps a full tap target, and they share the bottom
-        // baseline the field grows away from.
-        for control in [avatar, send, attach] {
+        // Every input-row control keeps a full tap target, and they share the
+        // bottom baseline the field grows away from.
+        for control in [avatar, send] {
             #expect(control.frame.height == 38)
             #expect(control.frame.maxY == bar.bounds.height)
         }
+
+        // The stake row: on top, trailing-aligned over mic/send, clear of the
+        // field, at the system button size.
+        #expect(stake.frame.size == CGSize(width: 44, height: 44))
+        #expect(stake.frame.minY == 0)
+        #expect(stake.frame.maxX == send.frame.maxX)
+        #expect(stake.frame.maxY < field.frame.minY)
+        #expect(bar.bounds.height == field.frame.height + CommentsInputBar.stakeRowHeight)
+
+        // The row's empty leading run is not the bar's: the stream behind it
+        // keeps those touches. The stake and the input row are.
+        #expect(!bar.point(inside: CGPoint(x: 40, y: 20), with: nil))
+        #expect(bar.point(inside: CGPoint(x: stake.frame.midX, y: stake.frame.midY), with: nil))
+        #expect(bar.point(inside: CGPoint(x: 40, y: field.frame.midY), with: nil))
     }
 
-    /// The avatar is a GLASS BUBBLE, matching the mic and "+" beside it, that
+    /// The avatar is a GLASS BUBBLE, matching the mic/send at the row's end, that
     /// the face FILLS edge to edge — no ring of glass around it — and the
     /// whole 38pt bubble is the tap target.
     @Test func composerAvatarSitsInAnInteractiveGlassBubble() throws {
         let bar = CommentsInputBar()
-        bar.frame = CGRect(x: 0, y: 0, width: 340, height: 38)
+        bar.frame = CGRect(x: 0, y: 0, width: 340, height: CommentsInputBar.restingHeight(for: .large))
         bar.layoutIfNeeded()
 
         let bubble = try #require(
@@ -1671,10 +1683,10 @@ struct SnapCommentsPresentationTests {
 
     /// TEXT-POST parity: a text engagement wires the page-swipe drive and
     /// nothing else, and its bar must behave exactly like a media post's —
-    /// the mic when idle, the dismiss chevron with the keyboard up over an
-    /// empty field, send the moment text is entered. (Before the ✕ left the
-    /// bar this was an edge case, because text posts had no close handler
-    /// to key off; the mic made both formats one path.)
+    /// the mic over an empty field (keyboard up or down), send the moment
+    /// text is entered. (Before the ✕ left the bar this was an edge case,
+    /// because text posts had no close handler to key off; the mic made both
+    /// formats one path.)
     @Test func textPostBarMatchesTheMediaBar() throws {
         let bar = CommentsInputBar()
         bar.onPageSwipe = { _, _, _ in } // feed engagement, text post
@@ -1686,9 +1698,9 @@ struct SnapCommentsPresentationTests {
         #expect(utility.alpha == 1)
         #expect(send.alpha == 0)
 
-        // Keyboard up over an empty field: the dismiss-keyboard face.
+        // Keyboard up over an empty field: still the mic.
         bar.setKeyboardOpen(true)
-        #expect(utility.accessibilityLabel == "Dismiss keyboard")
+        #expect(utility.accessibilityLabel == "Record voice comment")
         #expect(utility.alpha == 1)
         #expect(send.alpha == 0)
 
@@ -1697,13 +1709,13 @@ struct SnapCommentsPresentationTests {
         #expect(send.alpha == 1)
         #expect(send.isEnabled)
         #expect(utility.alpha == 0)
-        // Cleared with the keyboard still up: back to the dismiss face.
+        // Cleared with the keyboard still up: back to the mic.
         bar.draftText = ""
-        #expect(utility.accessibilityLabel == "Dismiss keyboard")
+        #expect(utility.accessibilityLabel == "Record voice comment")
         #expect(utility.alpha == 1)
         #expect(send.alpha == 0)
 
-        // …and back to the mic once the keyboard retires.
+        // …and it stays once the keyboard retires.
         bar.setKeyboardOpen(false)
         #expect(utility.accessibilityLabel == "Record voice comment")
         #expect(utility.alpha == 1)
