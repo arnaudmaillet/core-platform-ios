@@ -5,22 +5,24 @@ import UIKit
 /// The banner run-out both picture-led headers share — see `HeroBannerFade`.
 @MainActor
 struct HeroBannerFadeTests {
-    private let geometry = HeroBannerFade.geometry(typeTop: 300, edge: 360)
+    private let geometry = HeroBannerFade.geometry(identityTop: 300, foot: 540)
 
-    /// The blur's container from the lead above the type to the banner's
-    /// foot (the ramp's end); the page's short ramp centred on the edge.
-    @Test func theGeometryHangsOffTheTypeAndTheEdge() {
-        #expect(geometry.blurFull == 360 + HeroBannerFade.rampLength / 2)
+    /// One container, from just above the identity to the banner's foot,
+    /// for the blur and the page's tone alike.
+    @Test func theGeometryHangsOffTheIdentityAndTheFoot() {
         #expect(geometry.blurStart == 300 - HeroBannerFade.blurLead)
-        #expect(geometry.rampStart == 360 - HeroBannerFade.rampLength / 2)
-        #expect(geometry.rampEnd == 360 + HeroBannerFade.rampLength / 2)
+        #expect(HeroBannerFade.blurLead <= 12)
+        #expect(geometry.blurFull == 540)
+        #expect(geometry.rampStart == geometry.blurStart)
+        #expect(geometry.rampEnd == 540)
         #expect(geometry.offset(by: -100).blurStart == geometry.blurStart - 100)
     }
 
     /// The levels hand over without a gap or an overlap — at any height at
     /// most two neighbours blend — from the blur's start to its full, and
-    /// the climb is gentle first: the faintest level takes a sixth of the
-    /// lead, the strongest under a third.
+    /// the climb is next to nothing first: the faintest level alone (sigma
+    /// 1.5, blended in) takes over a quarter of the container, the
+    /// strongest under a quarter.
     @Test func theLevelsTileTheClimb() throws {
         let spans = HeroBannerFade.levelSpans(geometry)
         try #require(spans.count == HeroBannerFade.blurSigmas.count)
@@ -31,15 +33,21 @@ struct HeroBannerFadeTests {
             #expect(upper.full > upper.start)
         }
         let lead = geometry.blurFull - geometry.blurStart
-        #expect(spans[0].full - spans[0].start > lead * 0.15)
-        #expect(spans[spans.count - 1].full - spans[spans.count - 1].start < lead * 0.3)
+        #expect(spans[0].full - spans[0].start > lead * 0.25)
+        #expect(spans[spans.count - 1].full - spans[spans.count - 1].start < lead * 0.25)
+        // Half way down, the blur is still under an eighth of its strongest:
+        // the third level (sigma 7) is not whole before the middle.
+        #expect(spans[2].full >= geometry.blurStart + lead * 0.5 - 0.001)
     }
 
-    /// Clear above the ramp, eased across it, whole below.
-    @Test func theRampIsShortAndWholeBelowTheEdge() throws {
-        let height: CGFloat = 400
+    /// The page's tone over the whole container — the picture's fade into
+    /// the page, under the blur — clear at its top, whole at the foot, and
+    /// eased in: a few percent a third of the way down, where the type
+    /// stands, most of it in the last third.
+    @Test func theRampFadesThePictureOverTheWholeContainer() throws {
+        let height: CGFloat = 600
         let stops = HeroBannerFade.rampStops(height: height, geometry: geometry)
-        try #require(stops.count >= 3)
+        try #require(stops.count >= 8)
         #expect(stops.first?.1 == 0)
         #expect(stops.last?.1 == 1)
         for (a, b) in zip(stops, stops.dropFirst()) {
@@ -50,6 +58,75 @@ struct HeroBannerFadeTests {
         let wholeFrom = stops.first { $0.1 == 1 }?.0 ?? 1
         #expect(abs(clearUntil * height - geometry.rampStart) < 0.001)
         #expect(abs(wholeFrom * height - geometry.rampEnd) < 0.001)
+        let length = geometry.rampEnd - geometry.rampStart
+        func alpha(atFraction t: CGFloat) -> CGFloat {
+            HeroBannerFade.rampAlpha(at: geometry.rampStart + length * t, geometry: geometry)
+        }
+        #expect(alpha(atFraction: 1.0 / 3) < 0.05)
+        #expect(alpha(atFraction: 2.0 / 3) < 0.35)
+        #expect(alpha(atFraction: 0.9) > 0.6)
+        #expect(HeroBannerFade.rampAlpha(at: geometry.rampStart - 50, geometry: geometry) == 0)
+        #expect(HeroBannerFade.rampAlpha(at: geometry.rampEnd + 50, geometry: geometry) == 1)
+        // The stops draw the same curve the ground is read with.
+        for stop in stops.dropFirst().dropLast() {
+            #expect(abs(HeroBannerFade.rampAlpha(at: stop.0 * height, geometry: geometry) - stop.1) < 0.001)
+        }
+    }
+
+    /// A shouldered ramp — type on the picture from the container's top: the
+    /// blur exactly as the plain one, the page's tone eased in over the rise
+    /// above the container and already `shoulderAlpha` at its top, then on
+    /// to whole at the foot, without a step anywhere.
+    @Test func aShoulderedRampPutsHalfThePageUnderTheTypeAndLeavesTheBlur() throws {
+        let plain = HeroBannerFade.geometry(identityTop: 300, foot: 540)
+        let shouldered = HeroBannerFade.shoulderedGeometry(identityTop: 300, foot: 540)
+        #expect(shouldered.blurStart == plain.blurStart)
+        #expect(shouldered.blurFull == plain.blurFull)
+        #expect(HeroBannerFade.levelSpans(shouldered).map(\.full) == HeroBannerFade.levelSpans(plain).map(\.full))
+        let shoulder = try #require(shouldered.rampShoulder)
+        #expect(shoulder == plain.blurStart)
+        #expect(shouldered.rampStart == shoulder - HeroBannerFade.shoulderRise)
+        func alpha(_ y: CGFloat) -> CGFloat { HeroBannerFade.rampAlpha(at: y, geometry: shouldered) }
+        #expect(alpha(shouldered.rampStart - 1) == 0)
+        #expect(abs(alpha(shoulder) - HeroBannerFade.shoulderAlpha) < 0.001)
+        #expect(alpha(shouldered.rampEnd) == 1)
+        // Monotonic, and no jump bigger than the curve allows in a point.
+        var previous: CGFloat = 0
+        for y in stride(from: shouldered.rampStart - 4, through: shouldered.rampEnd + 4, by: 1) {
+            let value = alpha(y)
+            #expect(value >= previous - 0.0001)
+            #expect(value - previous < 0.03)
+            previous = value
+        }
+        // The stops draw the same curve.
+        let height: CGFloat = 600
+        for stop in HeroBannerFade.rampStops(height: height, geometry: shouldered).dropFirst().dropLast() {
+            #expect(abs(alpha(stop.0 * height) - stop.1) < 0.001)
+        }
+    }
+
+    /// The ground the type's ink is picked over is what is drawn there: the
+    /// blurred picture with the page's tone over it at each row's height —
+    /// nothing of the page above the container, nearly all of it at the foot.
+    @Test func theGroundIncludesThePagesTone() throws {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let black = UIGraphicsImageRenderer(size: CGSize(width: 40, height: 60), format: format).image { context in
+            UIColor.black.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 40, height: 60))
+        }
+        let view = HeroBannerPictureView(frame: CGRect(x: 0, y: 0, width: 400, height: 600))
+        view.pageTone = .white
+        view.image = black
+        view.fade = HeroBannerFade.geometry(identityTop: 300, foot: 600)
+        view.layoutIfNeeded()
+        func mean(_ rect: CGRect) throws -> Float {
+            let pixels = try #require(view.groundPixels(behind: rect))
+            try #require(!pixels.isEmpty)
+            return pixels.map { ($0.x + $0.y + $0.z) / 3 }.reduce(0, +) / Float(pixels.count)
+        }
+        #expect(try mean(CGRect(x: 100, y: 200, width: 50, height: 10)) < 0.02)
+        #expect(try mean(CGRect(x: 100, y: 590, width: 50, height: 10)) > 0.85)
     }
 
     /// A bake yields one level per sigma, each blurrier than the last: over
@@ -115,6 +192,17 @@ struct HeroBannerFadeTests {
     @Test func aMidGroundKeepsTheInkItWears() {
         #expect(HeroInk.tone(forGround: ground(0.46), current: .light) == .light)
         #expect(HeroInk.tone(forGround: ground(0.46), current: .dark) == .dark)
+    }
+
+    /// Over a sharp, mixed ground — mostly a white shirt, some black hair —
+    /// neither ink is legible everywhere, and the one that reads over most
+    /// of it wins, whatever was worn (a poster's counters kept white over
+    /// white at 1.51:1 before).
+    @Test func aMixedGroundTakesTheInkThatReadsOverMostOfIt() {
+        let mostlyLight = ground(0.95, count: 70) + ground(0.02, count: 30)
+        #expect(HeroInk.tone(forGround: mostlyLight, current: .light) == .dark)
+        let mostlyDark = ground(0.02, count: 70) + ground(0.95, count: 30)
+        #expect(HeroInk.tone(forGround: mostlyDark, current: .dark) == .light)
     }
 
     /// Over ANY even ground, the ink picked clears AA — the promise that let

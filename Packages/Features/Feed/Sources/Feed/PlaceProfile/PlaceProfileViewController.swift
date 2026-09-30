@@ -868,7 +868,7 @@ final class PlaceProfileViewController: UIViewController {
         // moment it changes, off the bake's own dissolve when on screen.
         bannerView.onLevelsChanged = { [weak self] in
             guard let self else { return }
-            guard view.window != nil else { return updateHeroInk(force: true) }
+            guard view.isInVisibleWindow else { return updateHeroInk(force: true) }
             DispatchQueue.main.async { [weak self] in self?.updateHeroInk(force: true) }
         }
 
@@ -1142,7 +1142,7 @@ final class PlaceProfileViewController: UIViewController {
         nameTone = name
         rankTone = rank
         likesTone = likes
-        guard view.window != nil else { return applyHeroLegibility() }
+        guard view.isInVisibleWindow else { return applyHeroLegibility() }
         UIView.transition(
             with: bannerBox, duration: 0.2, options: [.transitionCrossDissolve, .allowUserInteraction]
         ) {
@@ -1150,13 +1150,12 @@ final class PlaceProfileViewController: UIViewController {
         }
     }
 
-    /// Hands the fade where the type landed: the blur climbing from above the
-    /// name all the way down to the banner's foot, under the counters too
-    /// (`HeroBannerFade`'s ease-in) — the whole identity stands
-    /// on the picture, as on a profile's poster — and the page arriving over
-    /// the banner's last few points, where the list begins. The box is
-    /// settled first — the controller's pass runs before the box's own
-    /// subviews are placed.
+    /// Hands the fade where the type landed: from just above the name — the
+    /// identity's top, as a profile's avatar is its — down to the banner's
+    /// foot, the blur barely there under the name and the page's tone
+    /// already half there (shouldered), both whole where the list begins. The whole identity stands on the picture, as on a
+    /// profile's poster. The box is settled first — the controller's pass
+    /// runs before the box's own subviews are placed.
     ///
     /// ⚠️ It used to be a page-toned PLATE a third of the banner tall — a
     /// ladder climbing from the name's foot, with the counters' values on
@@ -1169,11 +1168,11 @@ final class PlaceProfileViewController: UIViewController {
         bannerBox.layoutIfNeeded()
         let name = heroNameLabel.frame
         let foot = bannerBox.bounds.height
-        guard name.height > 0, metricsBand.frame.height > 0, foot > 0 else { return }
-        let fade = HeroBannerFade.Geometry(
-            blurStart: name.minY - HeroBannerFade.blurLead, blurFull: foot,
-            rampStart: foot - HeroBannerFade.rampLength, rampEnd: foot
-        )
+        guard name.height > 0, metricsBand.frame.height > 0, foot > name.minY else { return }
+        // Shouldered, as a profile's poster: the name stands on the picture
+        // where the blur is still nil, so the page's tone is already half
+        // there under it.
+        let fade = HeroBannerFade.shoulderedGeometry(identityTop: name.minY, foot: foot)
         bannerView.fade = fade
         bannerRamp.fade = fade
         updateHeroInk()

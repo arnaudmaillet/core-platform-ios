@@ -8,10 +8,12 @@ import UIKit
 /// tray's foot on a poster; the header lays its content on top of it.
 ///
 /// Over the picture, bottom to top:
-/// - `HeroBannerFade`: the picture grows progressively blurred from above the
-///   name, which stands on it in the picture's ink (`HeroInk`), and only the last few
-///   points dissolve into the page's tone. The same run-out as a place's
-///   banner;
+/// - `HeroBannerFade`: from just above the avatar, the page's tone climbs
+///   the picture (the ramp) and the picture grows progressively blurred,
+///   whole at the foot. The blur is barely there under the name — which
+///   stands on it in the picture's ink (`HeroInk`) — and so is the page's
+///   tone on a band; on a poster it is already half there (shouldered). The
+///   same run-out as a place's banner;
 /// - a subtle top scrim, so the status bar and navigation title survive a
 ///   bright sky.
 ///

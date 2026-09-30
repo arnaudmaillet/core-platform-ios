@@ -2,41 +2,54 @@ import Accelerate
 import UIKit
 
 /// How a picture-led header's banner runs out into the page — a profile's
-/// band or poster, a place's banner: the picture grows PROGRESSIVELY BLURRED
-/// towards its foot, and only its last few points dissolve into the page's
-/// tone.
+/// band or poster, a place's banner: over one container, from just above the
+/// identity to the banner's foot, the picture FADES into the page's tone and
+/// grows PROGRESSIVELY BLURRED, both on steep ease-ins — next to nothing at
+/// the container's top, all of it at the foot.
 ///
 /// ```
 ///   ┌──────────────────────────┐
-///   │      ~~~ picture ~~~     │  sharp
-///   │                          │ ── blurStart: 0%
-///   │      ~≈~ picture ~≈~     │  blur climbs, slowly first (ease-in),
-///   │ (◯)  Name                │  through the type…
-///   │      @handle  ≈≈≈≈≈≈≈≈≈≈ │
-///   │▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒│ ── rampStart … rampEnd: the page arrives
-///   └──────────────────────────┘ ── blurFull: 100%, the banner's foot
+///   │      ~~~ picture ~~~     │  sharp, opaque
+///   │                          │ ── container top: blur 0, fade 0
+///   │ (◯)  Name                │  both barely begin under the type…
+///   │      @handle  ~≈~≈~≈~≈~  │  …and climb steeper and steeper
+///   │▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒│  (ease-in), the page arriving
+///   └──────────────────────────┘ ── foot: blur 100%, the page's tone whole
 ///        35   12   3.5K           page ink on the page
 /// ```
 ///
-/// ⚠️ **A LONG OPACITY RAMP OVER A PHOTOGRAPH IS A HALO.** Both headers used
-/// to run the picture out over a hundred-odd points of page tone: on a light
-/// page that is a white wash climbing up the picture — the photograph looks
-/// fogged, lit from below — and the user asked for it gone (30 September
-/// 2026). The blur does the long transition instead: it takes the detail out
-/// of the picture's foot without changing its colour, so the type standing
-/// there has a calm ground, and the page's tone only has to cover a SHORT
-/// seam, too short to read as a glow.
+/// ⚠️ **THE FADE IS UNDER THE BLUR, AND BOTH ARE NEEDED.** #331 replaced the
+/// long opacity ramp with the blur and kept only a 12pt seam of page tone:
+/// the blur took the detail out of the picture's foot but not its colour,
+/// so the line where the picture met the page stayed visible THROUGH the
+/// blur (user, 30 September 2026: "the opacity effect below and the blur on
+/// top"). The page's tone climbs the picture again over the whole container
+/// — it is what dissolves the edge — and the blur sits over it. Drawn as a
+/// page-toned ramp OVER the baked levels (`HeroBannerRampView`), which is the
+/// same picture: a blur is linear, so blurring the picture after fading it
+/// into a flat tone is the faded blur, as long as the fade changes slowly
+/// against the blur's radius — which a ramp the container's height does.
+///
+/// ⚠️ **EASED IN, NOT THE HALO.** The long ramp #331 removed climbed the
+/// photograph early — a white wash over its lower half on a light page, the
+/// picture fogged, lit from below. This one is `rampCurveExponent` steep:
+/// under the name the page is a few percent, and it is the container's last
+/// third that turns into the page — where the blur has already taken the
+/// picture's detail, so what dissolves is a wash of its colours, not a
+/// photograph. Where the type stands on the picture from the container's
+/// very top — a poster's name, a place's — the page's tone is SHOULDERED
+/// instead (`shoulderedGeometry`): half of it already under the type,
+/// eased in just above, the blur untouched.
 ///
 /// ⚠️ **THE BLUR IS BAKED FROM THE PICTURE, NOT A MATERIAL.** A
 /// `UIVisualEffectView` under a gradient mask was the obvious public route,
-/// and it is exactly the halo again: every `UIBlurEffect` style carries a
-/// tint, white-ish on a light page, which is a frost over the picture's
-/// foot. These levels are the picture itself, blurred once (vImage, 7–40ms on a
-/// background queue) when it lands or when its displayed size changes — so they
-/// keep the picture's own colours, cost nothing per frame beyond compositing
-/// six masked layers, and render in `layer.render(in:)`, where the contrast
-/// instrument (`HeroInk.debugContrast`) can see them. A VIDEO banner would
-/// need a live blur instead; there is none today.
+/// and it is a frost: every `UIBlurEffect` style carries a tint, white-ish on
+/// a light page. These levels are the picture itself, blurred once (vImage,
+/// 7–40ms on a background queue) when it lands or when its displayed size
+/// changes — so they keep the picture's own colours, cost nothing per frame
+/// beyond compositing six masked layers, and render in `layer.render(in:)`,
+/// where the contrast instrument (`HeroInk.debugContrast`) can see them. A
+/// VIDEO banner would need a live blur instead; there is none today.
 ///
 /// The progressive radius is approximated by stacking levels of increasing
 /// sigma, each fading in over the stretch where the wanted sigma climbs from
@@ -54,12 +67,20 @@ public enum HeroBannerFade {
         /// Where the page's tone starts arriving, and where it is opaque.
         public var rampStart: CGFloat
         public var rampEnd: CGFloat
+        /// Where the page's tone has already reached `shoulderAlpha`, eased
+        /// in from `rampStart` — the type's ground — before climbing on to
+        /// the foot. Nil: one cubic from `rampStart` to `rampEnd`.
+        public var rampShoulder: CGFloat?
 
-        public init(blurStart: CGFloat, blurFull: CGFloat, rampStart: CGFloat, rampEnd: CGFloat) {
+        public init(
+            blurStart: CGFloat, blurFull: CGFloat, rampStart: CGFloat, rampEnd: CGFloat,
+            rampShoulder: CGFloat? = nil
+        ) {
             self.blurStart = blurStart
             self.blurFull = blurFull
             self.rampStart = rampStart
             self.rampEnd = rampEnd
+            self.rampShoulder = rampShoulder
         }
 
         /// The same fade, `dy` further down — for handing it to a view whose
@@ -67,66 +88,121 @@ public enum HeroBannerFade {
         public func offset(by dy: CGFloat) -> Geometry {
             Geometry(
                 blurStart: blurStart + dy, blurFull: blurFull + dy,
-                rampStart: rampStart + dy, rampEnd: rampEnd + dy
+                rampStart: rampStart + dy, rampEnd: rampEnd + dy,
+                rampShoulder: rampShoulder.map { $0 + dy }
             )
         }
     }
 
-    /// How far above the type the blur's container starts.
+    /// How far above the identity's top — a profile's avatar, a place's
+    /// name — the container starts.
     ///
-    /// ⚠️ 140, not the 96 it had while the blur was whole at the type's top:
-    /// with the ease-in running on to the banner's foot, 96 left the name a
-    /// third of the way down the curve, on sigma ~5 — a busy picture's
-    /// stripes still showed through (4.18:1 in the better ink). At 140 it
-    /// stands about 40% down, on sigma ~9, and the container's top is still
-    /// well inside a poster's stage, the subject above it sharp.
-    public static let blurLead: CGFloat = 140
-    /// The page's tone arrives over this much, centred on the banner's edge.
-    ///
-    /// Sized by the SEAM it crosses, not by taste: the edge sits between two
-    /// lines of type in both headers — white on the picture above, page ink
-    /// on the page below — and each needs its own ground whole. The profile
-    /// leaves ~8pt of air there (the handle's line foot to the counters'
-    /// top), the place 16pt; a ramp longer than the seam lays page tone
-    /// under white type or leaves page ink on the picture.
-    public static let rampLength: CGFloat = 12
+    /// ⚠️ A FEW POINTS, not the 140 above the name it was: the user wants
+    /// the blur "almost nil at the top of the container, so just above the
+    /// avatar" (30 September 2026). 140 started it inside a poster's stage,
+    /// and with #331's quadratic curve the name already stood on sigma ~9 —
+    /// "far too strong".
+    public static let blurLead: CGFloat = 8
+
+    /// The run-out for an identity whose top is `identityTop` on a banner
+    /// whose foot is `foot`: the blur and the page's tone both climbing from
+    /// `blurLead` above it all the way down.
+    public static func geometry(identityTop: CGFloat, foot: CGFloat) -> Geometry {
+        let top = identityTop - blurLead
+        return Geometry(blurStart: top, blurFull: foot, rampStart: top, rampEnd: foot)
+    }
+
     /// The levels' blur, as Gaussian sigmas in on-screen points. Doubling,
     /// so each blend is between two neighbours close enough that no double
     /// image shows through the mix.
     ///
     /// ⚠️ UP TO 56pt at the banner's foot, a wash of the picture's colours
-    /// rather than a softened picture: the type's ink is picked from the
-    /// ground (`HeroInk.tone`), and one ink per block is only right over an
-    /// even one. Measured under a place's name while it stood on the
-    /// strongest level: at 13pt the ground ran from luminance 0.04 (hair) to
-    /// 0.40 (a wall), 2.34:1 in the better ink; at 56pt, 0.15 to 0.20.
+    /// rather than a softened picture — the page's tone arrives over it
+    /// there, and a wash dissolves into a flat tone without a seam.
     public static let blurSigmas: [CGFloat] = [1.5, 3.5, 7, 14, 28, 56]
-
-    /// The fade for type whose first line's top is `typeTop` on a banner whose
-    /// edge — where the page takes over — is at `edge`: the page's tone over
-    /// `rampLength`, centred on the edge, whose foot is the banner's; the
-    /// blur climbing from `lead` above the type all the way to that foot.
-    public static func geometry(typeTop: CGFloat, edge: CGFloat, lead: CGFloat = blurLead) -> Geometry {
-        Geometry(
-            blurStart: typeTop - lead, blurFull: edge + rampLength / 2,
-            rampStart: edge - rampLength / 2, rampEnd: edge + rampLength / 2
-        )
-    }
 
     /// The blur's curve: at `t` of the way down its container the sigma is
     /// `t^blurCurveExponent` of the strongest.
     ///
-    /// ⚠️ QUADRATIC, an ease-in (user, 30 September 2026: 0% at the
-    /// container's top, 100% at its bottom, non-linear, sharp longer at the
-    /// top). Linear spent its visible change in the first few points — sigma
-    /// 5.6 already a tenth of the way down, read as a line where the blur
-    /// starts. Quadratic keeps the upper third under sigma 6 (still reads as
-    /// the picture) and thickens through the lower half. Cubic was the other
-    /// candidate and was rejected: it leaves the type — a third to a half of
-    /// the way down — on sigma 2–7, where a portrait's features still show
-    /// through, and one ink per block needs a calm ground (`HeroInk.tone`).
-    public static let blurCurveExponent: CGFloat = 2
+    /// ⚠️ CUBIC (user, 30 September 2026: "almost nil at the top of the
+    /// container… increasing progressively toward the bottom, non-linearly —
+    /// the further down, the more the rate accentuates, up to 100%"). The
+    /// quadratic #331 shipped was "far too strong": over a container that
+    /// began 140pt above the name it put sigma ~9 under the type. Cubic keeps
+    /// the first half of the container under sigma 7 (an eighth of the
+    /// strongest) and spends the rest in its lower half.
+    public static let blurCurveExponent: CGFloat = 3
 
+    /// The page tone's curve: at `t` of the way down its ramp the tone is
+    /// `t^rampCurveExponent` opaque.
+    ///
+    /// ⚠️ CUBIC TOO, so the page never gets under type before the blur has
+    /// calmed the picture it is fading: a few percent under a profile's
+    /// name, an eighth half way down, whole at the foot. Squared or less
+    /// climbed the photograph as the white wash the ramp was taken out for.
+    public static let rampCurveExponent: CGFloat = 3
+
+    /// How much of the page's tone already stands under the type on a
+    /// shouldered ramp (`shoulderedGeometry`).
+    ///
+    /// ⚠️ THE USER'S CALL AFTER #335's AUDIT (30 September 2026): "start the
+    /// OPACITY effect a bit earlier, without touching the blur". With the
+    /// blur almost nil under the name, a poster's name stood on the sharp
+    /// picture — dark hair beside a white shirt — at 1.5:1 in either ink.
+    /// A flat ink needs the ground's spread closed, and only the page's tone
+    /// closes it without blurring: under ~half of it the darkest hair and the
+    /// brightest shirt both land on one side of the inks' crossover.
+    /// Measured (`-profile-ink-audit` / `-place-ink-audit`, worst pixel,
+    /// iPhone 18 Pro): at 0.55 every poster and place line clears AA in
+    /// both appearances, the tightest a poster's name in the dark (5.69). At
+    /// 0.5 the mock photographs cleared too (4.84), but a white picture under
+    /// the dark page sat on the inks' crossover (a poster caption at 4.49 in
+    /// the unit suite); at 0.4 the name fell to 3.52. Past half, the ground
+    /// is always on the page's side of the crossover: a poster and a place
+    /// wear the page's ink whatever the picture.
+    public static let shoulderAlpha: CGFloat = 0.55
+    /// How far above the shoulder the page's tone starts climbing to it —
+    /// the stage above stays the picture. It does not move the contrast (48
+    /// measured the same); 72 only makes the veil's top edge softer.
+    public static let shoulderRise: CGFloat = 72
+
+    /// The run-out for type that stands on the picture right from the
+    /// container's top — a poster's name, a place's name: the blur as in
+    /// `geometry(identityTop:foot:)`, and the page's tone eased in over
+    /// `shoulderRise` to `shoulderAlpha` by the container's top, then on to
+    /// whole at the foot.
+    public static func shoulderedGeometry(identityTop: CGFloat, foot: CGFloat) -> Geometry {
+        var geometry = geometry(identityTop: identityTop, foot: foot)
+        geometry.rampShoulder = geometry.blurStart
+        geometry.rampStart = geometry.blurStart - shoulderRise
+        return geometry
+    }
+
+    /// The page tone's opacity at `y`, in the fade's coordinates.
+    ///
+    /// With a shoulder: a smoothstep from clear to `shoulderAlpha` over the
+    /// rise, then the cubic from there to whole — both flat at the shoulder,
+    /// so the two halves meet without a crease.
+    public static func rampAlpha(at y: CGFloat, geometry: Geometry) -> CGFloat {
+        func progress(_ y: CGFloat, from start: CGFloat, to end: CGFloat) -> CGFloat? {
+            let length = end - start
+            guard length > 0 else { return nil }
+            return max(0, min((y - start) / length, 1))
+        }
+        if let shoulder = geometry.rampShoulder,
+           shoulder > geometry.rampStart, shoulder < geometry.rampEnd {
+            if y <= shoulder {
+                let t = progress(y, from: geometry.rampStart, to: shoulder) ?? 1
+                return shoulderAlpha * t * t * (3 - 2 * t)
+            }
+            let t = progress(y, from: shoulder, to: geometry.rampEnd) ?? 1
+            return shoulderAlpha + (1 - shoulderAlpha) * pow(t, rampCurveExponent)
+        }
+        guard let t = progress(y, from: geometry.rampStart, to: geometry.rampEnd) else {
+            return y >= geometry.rampEnd ? 1 : 0
+        }
+        return pow(t, rampCurveExponent)
+    }
     /// Where each level fades in: from where the wanted sigma passes the
     /// previous level's to where it reaches this one's, along
     /// `blurCurveExponent` — so the levels crowd towards the foot, where the
@@ -144,19 +220,28 @@ public enum HeroBannerFade {
         }
     }
 
-    /// How many segments the ramp's ease is sampled in.
-    static let rampSamples = 4
+    /// How many segments the ramp's curve is sampled in — a gradient's
+    /// stops are joined by straight lines, and the cubic needs enough of
+    /// them not to show a kink.
+    static let rampSamples = 10
 
     /// The ramp's stops, as (location, alpha) pairs, for a view of `height`:
-    /// clear, a smoothstep to the page's tone, then the page.
+    /// clear, the curve to the page's tone (`rampAlpha`, sampled — each
+    /// half of a shouldered one on its own), then the page.
     public static func rampStops(height: CGFloat, geometry: Geometry) -> [(CGFloat, CGFloat)] {
         guard height > 0 else { return [] }
         func fraction(_ y: CGFloat) -> CGFloat { max(0, min(y / height, 1)) }
+        var spans: [(CGFloat, CGFloat)] = [(geometry.rampStart, geometry.rampEnd)]
+        if let shoulder = geometry.rampShoulder,
+           shoulder > geometry.rampStart, shoulder < geometry.rampEnd {
+            spans = [(geometry.rampStart, shoulder), (shoulder, geometry.rampEnd)]
+        }
         var stops: [(CGFloat, CGFloat)] = [(0, 0)]
-        for sample in 0...rampSamples {
-            let t = CGFloat(sample) / CGFloat(rampSamples)
-            let y = geometry.rampStart + (geometry.rampEnd - geometry.rampStart) * t
-            stops.append((fraction(y), t * t * (3 - 2 * t)))
+        for (index, span) in spans.enumerated() {
+            for sample in (index == 0 ? 0 : 1)...rampSamples {
+                let y = span.0 + (span.1 - span.0) * CGFloat(sample) / CGFloat(rampSamples)
+                stops.append((fraction(y), rampAlpha(at: y, geometry: geometry)))
+            }
         }
         stops.append((1, 1))
         return stops
@@ -246,7 +331,7 @@ public enum HeroBannerFade {
 /// since the blur's masks belong to the banner, not to the picture: a
 /// parallax slides the picture UNDER a blur that stays with the type.
 ///
-/// Put the page's tone over it with a `HeroBannerRampView` in the same
+/// Fade it into the page with a `HeroBannerRampView` over it, in the same
 /// coordinates.
 public final class HeroBannerPictureView: UIView {
     /// The picture. Setting the same instance again does nothing.
@@ -309,15 +394,24 @@ public final class HeroBannerPictureView: UIView {
     /// the ground under its type and pick its ink (`HeroInk.tone`).
     public var onLevelsChanged: (() -> Void)?
 
-    /// The blurred picture's pixels behind `rect` (this view's coordinates),
-    /// with the picture AT REST — the parallax is not the picture's to
-    /// decide an ink by. Nil until the levels are baked.
+    /// The tone the paired `HeroBannerRampView` fades the picture into — the
+    /// page the header sits on. Only read here to tell the type what it
+    /// stands on (`groundPixels`); the ramp draws it.
+    public var pageTone: UIColor = Surface.page
+
+    /// The ground behind `rect` (this view's coordinates) — the blurred
+    /// picture with the page's tone over it as the ramp lays it, with the
+    /// picture AT REST: the parallax is not the picture's to decide an ink
+    /// by. Nil until the levels are baked.
     ///
     /// Read from the level that is WHOLE at the rect's top — the least
     /// blurred ground the block stands on, since the blur keeps climbing
     /// under the type down to the banner's foot (`HeroBannerFade`): an ink
     /// that holds over it holds over the blurrier rows below. Above the
-    /// faintest level's full point, the faintest level stands in. Read on
+    /// faintest level's full point, the faintest level stands in. Each row
+    /// then takes the page's tone at its own height — ⚠️ the ramp climbs
+    /// under the lower lines of a block, and an ink picked from the picture
+    /// alone would be white on a light page's arriving tone. Read on
     /// demand, only the rect's pixels, so nothing is kept between bakes.
     public func groundPixels(behind rect: CGRect) -> [SIMD3<Float>]? {
         guard baked != nil, let fade else { return nil }
@@ -352,12 +446,23 @@ public final class HeroBannerPictureView: UIView {
             return true
         }
         guard drawn else { return nil }
+        var tone = (r: CGFloat(0), g: CGFloat(0), b: CGFloat(0), a: CGFloat(0))
+        pageTone.resolvedColor(with: traitCollection).getRed(&tone.r, green: &tone.g, blue: &tone.b, alpha: &tone.a)
+        let page = SIMD3(Float(tone.r), Float(tone.g), Float(tone.b))
         var pixels: [SIMD3<Float>] = []
         pixels.reserveCapacity(width * height)
-        for index in stride(from: 0, to: bytes.count, by: 4) {
-            pixels.append(SIMD3(
-                Float(bytes[index]) / 255, Float(bytes[index + 1]) / 255, Float(bytes[index + 2]) / 255
-            ))
+        for row in 0..<height {
+            // The row's middle, back in this view's space: the crop's rows
+            // run top-down from `pixelRect`'s, `scale` points apart.
+            let y = origin.y + (pixelRect.minY + CGFloat(row) + 0.5) * scale
+            let alpha = Float(HeroBannerFade.rampAlpha(at: y, geometry: fade))
+            for column in 0..<width {
+                let index = (row * width + column) * 4
+                let picture = SIMD3(
+                    Float(bytes[index]) / 255, Float(bytes[index + 1]) / 255, Float(bytes[index + 2]) / 255
+                )
+                pixels.append(picture + (page - picture) * alpha)
+            }
         }
         return pixels
     }
@@ -382,6 +487,12 @@ public final class HeroBannerPictureView: UIView {
             host.addSubview(picture)
             addSubview(host)
             return Level(host: host, mask: mask, picture: picture)
+        }
+        // The page's tone is part of the ground (`groundPixels`): a flip of
+        // the appearance is a new ground, to be read again like a new bake.
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: HeroBannerPictureView, _) in
+            guard self.baked != nil else { return }
+            self.onLevelsChanged?()
         }
     }
 
@@ -418,10 +529,31 @@ public final class HeroBannerPictureView: UIView {
         }
         #if DEBUG
         layoutMaterialComparison()
+        traceLayout()
         #endif
     }
 
     #if DEBUG
+    private static let tracesBlur = ProcessInfo.processInfo.arguments.contains("-hero-blur-trace")
+    private var lastLayoutTrace = ""
+
+    /// `-hero-blur-trace`: one line whenever what the levels show changes —
+    /// how many are up, over what fade, baked or baking, on screen or not.
+    private func traceLayout() {
+        guard Self.tracesBlur else { return }
+        let shown = levels.filter { !$0.host.isHidden && $0.picture.image != nil }.count
+        let line = String(
+            format: "HERO-BLUR layout %.0fx%.0f fade=%@ baked=%@ baking=%@ window=%@ shown=%d/%d",
+            bounds.width, bounds.height,
+            fade.map { String(format: "%.0f…%.0f ramp %.0f…%.0f", $0.blurStart, $0.blurFull, $0.rampStart, $0.rampEnd) }
+                ?? "nil",
+            baked == nil ? "no" : "yes", baking == nil ? "no" : "yes", window == nil ? "no" : "yes",
+            shown, levels.count
+        )
+        guard line != lastLayoutTrace else { return }
+        lastLayoutTrace = line
+        print(line)
+    }
     /// `-hero-blur-material`: the public-API alternative this view rejected —
     /// one `UIVisualEffectView` blur under a gradient mask over the same
     /// climb — in place of the baked levels, for side-by-side screenshots.
@@ -498,7 +630,7 @@ public final class HeroBannerPictureView: UIView {
         }
         guard !matches(baked), !matches(baking) else { return }
         let key = (identity, scale)
-        guard window != nil else {
+        guard isInVisibleWindow else {
             let began = CACurrentMediaTime()
             guard let images = HeroBannerFade.bakeLevels(of: image, displayScale: scale) else { return }
             adopt(images, for: key, size: size, milliseconds: (CACurrentMediaTime() - began) * 1000)
@@ -563,9 +695,10 @@ public final class HeroBannerPictureView: UIView {
     #endif
 }
 
-/// The page's tone over the foot of a `HeroBannerPictureView` — the short
-/// ramp of `HeroBannerFade`. Pin it over the picture in the same
-/// coordinates and hand it the same `fade`.
+/// The page's tone climbing a `HeroBannerPictureView` — the picture's fade
+/// into the page, `HeroBannerFade`'s ramp. Pin it over the picture in the
+/// same coordinates and hand it the same `fade` (and, if it is not the
+/// page's, the same tone as the picture's `pageTone`).
 public final class HeroBannerRampView: UIView {
     override public class var layerClass: AnyClass { CAGradientLayer.self }
 
@@ -613,6 +746,25 @@ public final class HeroBannerRampView: UIView {
     public var debugLocations: [CGFloat] { (gradient?.locations ?? []).map { CGFloat($0.doubleValue) } }
     public var debugAlphas: [CGFloat] { (gradient?.colors as? [CGColor] ?? []).map { $0.alpha } }
     #endif
+}
+
+public extension UIView {
+    /// Whether anyone can see this view's frames: it is in a window, and
+    /// the window is not hidden. What decides between doing a picture-led
+    /// header's work in place (a header being built, a test) and doing it
+    /// the on-screen way (a background bake, a dissolve).
+    ///
+    /// ⚠️ NOT `window != nil`: a unit test hosts the header in a HIDDEN
+    /// window, because off a window the test host ignores
+    /// `overrideUserInterfaceStyle` — every view reports the simulator's
+    /// own appearance (measured, iOS 27: a `.dark` override read back
+    /// `.light`), so a "dark" ink test was drawing and reading the light
+    /// page. A hidden window carries the override, and nobody sees its
+    /// frames.
+    var isInVisibleWindow: Bool {
+        guard let window else { return false }
+        return !window.isHidden
+    }
 }
 
 /// An image view sized by its constraints or frame only: a loaded bitmap's

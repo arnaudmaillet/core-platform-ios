@@ -19,10 +19,10 @@ import Foundation
 /// ```
 ///
 /// In both, the name and the handle beside the disc's top half stand ON the
-/// picture, in its ink (`HeroInk`: white or black by the picture), over its
-/// progressively blurred foot, and the page's tone arrives over a short ramp
-/// at the edge (`HeroBannerFade`). What differs is the stage and where the
-/// edge is:
+/// picture, in its ink (`HeroInk`: white or black by the picture), and from
+/// just above the disc the picture blurs and fades into the page, whole at
+/// the edge (`HeroBannerFade`). What differs is the stage and where the edge
+/// is:
 ///
 /// **Band** is the social-network header: a short strip across the top — the
 /// picture behind the chrome and the identity row's top half, no more. Its
