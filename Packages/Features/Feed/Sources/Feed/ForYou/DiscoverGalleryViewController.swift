@@ -39,18 +39,18 @@ import UIKit
 ///
 /// # Its chrome
 ///
-/// No tab bar (`hidesBottomBarWhenPushed`, UIKit's own choreography); the
-/// header is `[‹] ———— [points][search]` over "For you" as a large title, the
-/// one every screen For You pushes wears (`PushedScreenHeader`, product calls
-/// 2026-09-29 and 2026-09-30). The name is For You's own section's — "For you"
-/// is the heading the chunks sit under — not "Discover".
+/// No tab bar (`hidesBottomBarWhenPushed`, UIKit's own choreography) and no
+/// title: the header is `[‹] ———— [points][search]`, the one every screen For
+/// You pushes wears (`PushedScreenHeader`, product call 2026-09-29; #323's
+/// "For you" large title was taken back on 2026-09-30). The back chevron is
+/// how the viewer leaves; the mosaic has the whole screen.
 ///
 /// # Holding still under a post
 ///
 /// The mosaic's inset is pinned from a tap until the screen is back
 /// (`ForYouGridPage.openHoldingStill`), for the reason
 /// `ForYouPostListViewController` gives: a gallery that tracked the safe area
-/// while covered came back shifted by about a bar's height.
+/// while covered came back shifted.
 @MainActor
 final class DiscoverGalleryViewController: UIViewController {
     private let page: ForYouGridPage
@@ -71,9 +71,6 @@ final class DiscoverGalleryViewController: UIViewController {
     /// number, because this is For You's mosaic.
     private static let seedWindow = 40
 
-    /// The large title: For You's own section, whose mosaic this is.
-    static let title = "For you"
-
     init(
         imagePipeline: ImagePipeline,
         videoPlayback: VideoPlaybackController?,
@@ -89,7 +86,7 @@ final class DiscoverGalleryViewController: UIViewController {
         // finds no dock to give back (`showsAppTabBar(for:)` reads this flag),
         // which is right: this screen never shows one.
         hidesBottomBarWhenPushed = true
-        header.install(on: self, title: Self.title)
+        header.install(on: self)
     }
 
     @available(*, unavailable)
@@ -99,9 +96,6 @@ final class DiscoverGalleryViewController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = Surface.page
         page.pin(to: view)
-        // The large title folds with the mosaic — named, since UIKit's search
-        // does not find a scroller nested in the page.
-        setContentScrollView(page.minimizeScrollView, for: .top)
         page.onItemTapped = { [weak self] index in self?.openTile(at: index) }
         page.onNearEnd = { [weak self] in self?.onNearEnd?() }
         page.onRefresh = { [weak self] in self?.onRefresh?() }

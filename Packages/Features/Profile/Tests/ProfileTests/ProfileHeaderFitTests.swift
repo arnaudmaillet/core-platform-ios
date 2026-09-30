@@ -43,8 +43,7 @@ struct ProfileHeaderFitTests {
             isVerified: false,
             followerCount: .exact(4),
             followingCount: .exact(4),
-            reactionCount: .exact(1_000),
-            viewCount: .unavailable
+            reactionCount: .exact(1_000)
         )))
         // ⚠️ The FULL tray, because the tray's width is what squeezes the
         // avatar and the avatar is what squeezed the name. Left at its default

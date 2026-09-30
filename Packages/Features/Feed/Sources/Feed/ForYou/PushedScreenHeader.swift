@@ -3,33 +3,19 @@ import CoreStorage
 import DesignSystem
 import UIKit
 
-/// The header every screen For You PUSHES wears: `[‹] ———— [points][search]`
-/// over the screen's name as a LARGE title.
+/// The header every screen For You PUSHES wears: `[‹] ———— [points][search]`.
 ///
-/// ```
-///   ‹                               (123) 🔍
-///   Following                                  ← large title, collapses on scroll
-/// ```
+/// No title, on purpose (product call, 2026-09-29, restated 2026-09-30 after
+/// #323's large titles were tried and taken back): the back chevron says where
+/// the viewer came from and the content says where they are, so a word in the
+/// bar — or under it — only competes with both. The trailing run is the
+/// root's own, in the root's order — the balance inboard, search at the edge —
+/// so the two items read as the same controls carried one level in rather
+/// than as a second header.
 ///
-/// The name is a large title (product call, 2026-09-30, reversing #311's "no
-/// title"): "Following", "Friends", and "For you" over the mosaic "View all"
-/// pushes. In the bar's own row it would compete with the chevron and the
-/// trailing run; below it, it is the page's heading, and it folds into the bar
-/// as the list scrolls. The trailing run is the root's own, in the root's
-/// order — the balance inboard, search at the edge — so the two items read as
-/// the same controls carried one level in rather than as a second header.
-///
-/// ⚠️ A LARGE TITLE NEEDS THE BAR TO ALLOW ONE. `.always` is only honoured by
-/// a bar with `prefersLargeTitles`, which For You's stack turns on before it
-/// pushes one of these (`allowLargeTitles(on:)`). Everything else that can
-/// land on that stack says `.never` for itself — For You, a profile and its
-/// relationship lists, the snap feed, search and its results, the post page,
-/// a conversation thread, a place page — because an item left `.automatic`
-/// INHERITS the item under it, and a feed pushed from a large-titled list
-/// would otherwise open under a tall large-title bar reading "Timeline"
-/// (audited against every `RouteResolver` route and every push these screens
-/// make, 2026-09-30). A new screen that can be pushed there must say `.never`
-/// too.
+/// `.never` is stated rather than left `.automatic`, and For You's stack never
+/// turns `prefersLargeTitles` on: no tab stack does, so nothing pushed over
+/// these screens has a large title to inherit.
 ///
 /// # Why it is an object, and why it is not the shell's installer
 ///
@@ -121,28 +107,16 @@ final class PushedScreenHeader: NSObject {
         refresh()
     }
 
-    /// Dresses `host`'s navigation item: `title` as a large title, a bare
-    /// chevron for anything pushed above it, and the trailing run. Call once,
-    /// from `viewDidLoad` or earlier; the header re-applies itself when the
-    /// badge changes width.
-    func install(on host: UIViewController, title: String) {
+    /// Dresses `host`'s navigation item: no title, a bare chevron for anything
+    /// pushed above it, and the trailing run. Call once, from `viewDidLoad` or
+    /// earlier; the header re-applies itself when the badge changes width.
+    func install(on host: UIViewController) {
         self.host = host
-        host.navigationItem.title = title
-        host.navigationItem.largeTitleDisplayMode = .always
-        // The chevron of whatever is pushed from here stays bare — the budget
-        // every pushed bar was measured against (`ForYouViewController`).
+        host.title = nil
+        host.navigationItem.title = nil
+        host.navigationItem.largeTitleDisplayMode = .never
         host.navigationItem.backButtonDisplayMode = .minimal
         apply()
-    }
-
-    /// Lets `navigationController`'s bar draw large titles at all — asked by
-    /// For You before it pushes a screen wearing this header. Idempotent, and
-    /// never turned back off: every other item on the stack states `.never`
-    /// (see the type's note), so the preference only shows where an item asks
-    /// for it.
-    static func allowLargeTitles(on navigationController: UINavigationController) {
-        guard !navigationController.navigationBar.prefersLargeTitles else { return }
-        navigationController.navigationBar.prefersLargeTitles = true
     }
 
     /// ⚠️ `[0]` IS THE SCREEN EDGE: search keeps the corner, the balance sits

@@ -96,8 +96,6 @@ struct ProfileRepositoryTests {
 
         #expect(profile.followerCount == .unavailable)
         #expect(profile.followingCount == .unavailable)
-        // VIEW has no counter projection and no fallback source at all.
-        #expect(profile.viewCount == .unavailable)
     }
 
     @Test func readsProfileReactionsFromCounterAggregate() async throws {

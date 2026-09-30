@@ -165,8 +165,8 @@ struct ForYouRepositoryTests {
         #expect(page.posts.first?.thumbnailURL?.absoluteString == "https://cdn.example/full.jpg")
     }
 
-    /// The timeline read hydrates likes only. Comments and views must stay
-    /// ABSENT rather than be asserted as zero — the cells hide a counter with
+    /// The timeline read hydrates likes only. Comments must stay ABSENT
+    /// rather than be asserted as zero — the cells hide a counter with
     /// no value, and a rendered "0" would be a lie.
     @Test func carriesLikesAndLeavesUnhydratedCountersAbsent() async throws {
         let repository = ForYouRepository(feed: StubFeed(first: FeedPage(
@@ -177,7 +177,6 @@ struct ForYouRepositoryTests {
         let post = try #require(page.posts.first)
         #expect(post.reactionCount == 42)
         #expect(post.commentCount == nil)
-        #expect(post.viewCount == nil)
         #expect(page.nextPageToken == "next")
     }
 

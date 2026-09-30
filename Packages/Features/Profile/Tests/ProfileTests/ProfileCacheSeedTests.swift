@@ -33,8 +33,7 @@ private func someone() -> UserProfile {
         isVerified: true,
         followerCount: .exact(1),
         followingCount: .exact(2),
-        reactionCount: .unavailable,
-        viewCount: .unavailable
+        reactionCount: .unavailable
     )
 }
 

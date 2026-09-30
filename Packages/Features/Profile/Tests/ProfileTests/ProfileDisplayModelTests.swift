@@ -11,8 +11,7 @@ struct ProfileDisplayModelTests {
         avatarURL: URL? = nil,
         followers: CountEstimate = .unavailable,
         following: CountEstimate = .unavailable,
-        reactions: CountEstimate = .unavailable,
-        views: CountEstimate = .unavailable
+        reactions: CountEstimate = .unavailable
     ) -> UserProfile {
         UserProfile(
             id: ProfileID("prof-1"),
@@ -24,8 +23,7 @@ struct ProfileDisplayModelTests {
             isVerified: false,
             followerCount: followers,
             followingCount: following,
-            reactionCount: reactions,
-            viewCount: views
+            reactionCount: reactions
         )
     }
 
@@ -86,18 +84,19 @@ struct ProfileDisplayModelTests {
         #expect(ProfileDisplayModel.websiteDisplay(nil) == nil)
     }
 
-    @Test func formatsReactionsAndViews() {
-        let model = ProfileDisplayModel(profile: profile(reactions: .exact(1_234), views: .atLeast(200)))
-        #expect(model.reactionsText == "1.2K")
-        #expect(model.viewsText == "200+")
+    /// The header's third column is LIKES (2026-09-30: views are shown
+    /// nowhere) — counter.v1's profile-scoped LIKE, abbreviated like every
+    /// other count, "+" on a bounded estimate.
+    @Test func formatsLikes() {
+        #expect(ProfileDisplayModel(profile: profile(reactions: .exact(1_234))).likesText == "1.2K")
+        #expect(ProfileDisplayModel(profile: profile(reactions: .atLeast(200))).likesText == "200+")
     }
 
-    @Test func reactionsAndViewsAreHiddenWhenUnprojected() {
-        // Wherever counter.v1 doesn't project these metrics (the fleet, and
-        // views on the mock), the band must not claim "0" — nor draw a dash.
+    @Test func likesAreHiddenWhenUnprojected() {
+        // Wherever counter.v1 doesn't project the metric (the fleet today),
+        // the band must not claim "0" — nor draw a dash.
         let model = ProfileDisplayModel(profile: profile())
-        #expect(model.reactionsText == nil)
-        #expect(model.viewsText == nil)
+        #expect(model.likesText == nil)
     }
 
     @Test func bannerMirrorsAvatarUntilCoverAssetExists() {

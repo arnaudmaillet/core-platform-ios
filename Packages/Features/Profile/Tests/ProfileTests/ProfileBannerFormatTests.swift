@@ -27,8 +27,7 @@ struct ProfileBannerFormatTests {
             isVerified: false,
             followerCount: .exact(4),
             followingCount: .exact(4),
-            reactionCount: .exact(1_000),
-            viewCount: .exact(12)
+            reactionCount: .exact(1_000)
         )))
         header.configureAction(.following)
         if picture { header.setBannerFormat(format) }

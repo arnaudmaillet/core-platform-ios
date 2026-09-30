@@ -322,14 +322,16 @@ struct DiscoverGalleryTests {
         )
     }
 
-    /// `[‹] ———— [points][search]` over "For you" as a large title (the
-    /// section the mosaic's chunks sit under, 2026-09-30), no tab bar, and the
-    /// root's two trailing items in the root's order — search at the edge.
+    /// `[‹] ———— [points][search]` and no title at all — neither in the bar nor
+    /// as a large title (#323's "For you" was taken back, 2026-09-30) — no tab
+    /// bar, and the root's two trailing items in the root's order — search at
+    /// the edge.
     @Test func theHeaderIsBackThenPointsAndSearch() {
         let gallery = Self.gallery(wallet: Self.wallet())
         gallery.loadViewIfNeeded()
-        #expect(gallery.navigationItem.title == "For you")
-        #expect(gallery.navigationItem.largeTitleDisplayMode == .always)
+        #expect(gallery.title == nil)
+        #expect(gallery.navigationItem.title == nil)
+        #expect(gallery.navigationItem.largeTitleDisplayMode == .never)
         #expect(gallery.hidesBottomBarWhenPushed, "the tab bar leaves with the push, UIKit's way")
         #expect(gallery.navigationItem.rightBarButtonItems?.map(\.identifier) == [
             PushedScreenHeader.searchItemIdentifier, PushedScreenHeader.walletItemIdentifier

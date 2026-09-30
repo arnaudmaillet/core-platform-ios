@@ -127,17 +127,18 @@ struct ForYouRowsTests {
         return list
     }
 
-    /// `[‹] ———— [points][search]` over the page's name as a large title, no
-    /// tab bar — the header every screen For You pushes wears. With nothing new
+    /// `[‹] ———— [points][search]` with no title at all (#323's large titles
+    /// were taken back, 2026-09-30), no tab bar — the header every screen For
+    /// You pushes wears. With nothing new
     /// the posts are ONE section, "Recent", titled (2026-09-30: Friends is
     /// usually all seen, and an untitled run made it a different screen from
     /// Following), in the order they came.
     @Test func aPushedListWearsTheSharedHeaderAndNoTabBar() {
         let list = makeList()
         #expect(list.hidesBottomBarWhenPushed)
-        #expect(list.navigationItem.title == "Friends")
-        #expect(list.navigationItem.largeTitleDisplayMode == .always)
-        #expect(makeList(.following).navigationItem.title == "Following")
+        #expect(list.navigationItem.title == nil)
+        #expect(list.navigationItem.largeTitleDisplayMode == .never)
+        #expect(makeList(.following).navigationItem.title == nil)
         #expect(list.navigationItem.rightBarButtonItems?.map(\.identifier) == [
             PushedScreenHeader.searchItemIdentifier
         ])

@@ -148,8 +148,7 @@ private actor QRStubProvider: ProfileProviding {
             isVerified: false,
             followerCount: .unavailable,
             followingCount: .unavailable,
-            reactionCount: .unavailable,
-            viewCount: .unavailable
+            reactionCount: .unavailable
         )
     }
     func profile(id: ProfileID) async throws -> UserProfile { try await currentUserProfile() }

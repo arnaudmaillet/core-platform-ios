@@ -19,8 +19,10 @@ import UIKit
 /// - a HERO BANNER wearing the place's TOP post (highest engagement — the
 ///   same ranking the Gallery leads with, so banner, pin face and first tile
 ///   are one post);
-/// - a two-metric band: the place's aggregated REACTIONS and VIEWS. No
-///   avatar, no bio, no edit/share — a place is not an account;
+/// - a metric band: the place's rank, when it has one, and its aggregated
+///   LIKES — likes, not views, since no surface shows views any more (product
+///   call, 2026-09-30). No avatar, no bio, no edit/share — a place is not an
+///   account;
 /// - two tabs under the metrics — **Discover** (the popularity grid) and
 ///   **Activity** (every post as CARDS, most popular first) — Activity on the
 ///   left, Discover on the right (`tabOrder`) — a `PagedTabBar`
@@ -55,8 +57,10 @@ final class PlaceProfileViewController: UIViewController {
     private let bannerScrim = GradientScrimView()
     /// "#3 City Rank" — the first counter, when the place has a rank to show.
     private let rankMetric = PlaceMetricView(title: "Rank")
-    private let reactionsMetric = PlaceMetricView(title: "Reactions")
-    private let viewsMetric = PlaceMetricView(title: "Views")
+    /// The heart every tile of this page counts, summed. It used to sit beside
+    /// a "Views" total and be called "Reactions"; the views went (2026-09-30)
+    /// and the word became the tiles' own.
+    private let likesMetric = PlaceMetricView(title: "Likes")
 
     /// The page's two tabs, by what they ARE rather than where they sit.
     enum Tab: Equatable {
@@ -652,10 +656,6 @@ final class PlaceProfileViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        // `.never`, stated rather than inherited — see `PushedScreenHeader`:
-        // the one bar that allows large titles is For You's, and a place pushed
-        // over a large-titled screen there would inherit one.
-        navigationItem.largeTitleDisplayMode = .never
         // The page the cards lie on, a step below them — see `Surface`.
         view.backgroundColor = Surface.page
         configureHeader()
@@ -666,8 +666,7 @@ final class PlaceProfileViewController: UIViewController {
             (self: PlaceProfileViewController, _) in
             self.applyHeroLegibility()
             self.rankMetric.applyBannerLegibility()
-            self.reactionsMetric.applyBannerLegibility()
-            self.viewsMetric.applyBannerLegibility()
+            self.likesMetric.applyBannerLegibility()
         }
         configureTabs()
         page.render(.loading)
@@ -907,7 +906,7 @@ final class PlaceProfileViewController: UIViewController {
         if let rank {
             rankMetric.setText(rank.positionText, title: rank.label)
         }
-        let metrics = UIStackView(arrangedSubviews: [rankMetric, reactionsMetric, viewsMetric])
+        let metrics = UIStackView(arrangedSubviews: [rankMetric, likesMetric])
         metrics.distribution = .fillEqually
         // No spacing: the cells ARE the spacing, equal across the column, as
         // on the profile. (The old +xxl answered a centred pair that clumped
@@ -1353,9 +1352,7 @@ final class PlaceProfileViewController: UIViewController {
         // numbers, and a check-in with no photograph is still something that
         // happened here — dropping it from a total because a grid cannot draw
         // it would make the place look quieter than it is.
-        let totals = Self.aggregatedMetrics(of: members)
-        reactionsMetric.setValue(totals.reactions)
-        viewsMetric.setValue(totals.views)
+        likesMetric.setValue(Self.aggregatedLikes(of: members))
         renderBanner(for: Self.bannerPost(in: gallery))
     }
 
@@ -1425,8 +1422,8 @@ final class PlaceProfileViewController: UIViewController {
     /// Popularity is REACTIONS (likes), then recency, then id — `ranked`'s
     /// words, not a new formula. It is the number every other popularity
     /// surface already reads: For You's Trending, this page's banner and first
-    /// tile, and the map marker's face ("its most-liked member"). Comments and
-    /// views were not folded in: nothing else ranks by them, and a second
+    /// tile, and the map marker's face ("its most-liked member"). Comments were
+    /// not folded in: nothing else ranks by them, and a second
     /// definition here would let this list and the marker above it disagree
     /// about which post is the place's loudest.
     ///
@@ -1441,14 +1438,12 @@ final class PlaceProfileViewController: UIViewController {
         ranked(posts)
     }
 
-    /// The place's aggregated counters. Missing values count as zero rather
-    /// than poisoning the sum — a counter the read-model never projected is
-    /// absence, not information.
-    static func aggregatedMetrics(of posts: [GalleryPost]) -> (reactions: Int64, views: Int64) {
-        posts.reduce(into: (reactions: Int64(0), views: Int64(0))) { totals, post in
-            totals.reactions += post.reactionCount ?? 0
-            totals.views += post.viewCount ?? 0
-        }
+    /// The place's likes: every member's, summed — client-side, since
+    /// counter.v1 has no place entity to ask (`dev/BACKEND_GAPS.md`). Missing
+    /// values count as zero rather than poisoning the sum — a counter the
+    /// read-model never projected is absence, not information.
+    static func aggregatedLikes(of posts: [GalleryPost]) -> Int64 {
+        posts.reduce(0) { $0 + ($1.reactionCount ?? 0) }
     }
 
     /// What the Discover grid currently shows, in its rendered order — for
@@ -2260,9 +2255,7 @@ extension PlaceProfileViewController {
         default: Int(argument).flatMap { tabOrder.indices.contains($0) ? $0 : nil }
         }
     }
-    var debugMetrics: (reactions: Int64, views: Int64) {
-        (reactionsMetric.debugValue, viewsMetric.debugValue)
-    }
+    var debugLikes: Int64 { likesMetric.debugValue }
     var debugHeroName: String? { heroNameLabel.text }
     /// How far the identity's foot clears the banner's edge — the invariant the
     /// old -18 constant broke the moment the selector moved onto the banner.
@@ -2318,15 +2311,15 @@ private final class PlaceMetricView: UIView {
         // from 28:22 — two bolds arguing about which is the headline — to
         // 34:20, which reads as a title and a measurement.
         // ⚠️ THE PROFILE'S COUNTER TYPE (headline over caption1), since the
-        // row is the profile's row now: three cells across the column, the
-        // same shape as Followers / Following / Reactions.
+        // row is the profile's row now: cells across the column, the same
+        // shape as Followers / Following / Likes.
         valueLabel.font = .preferredFont(forTextStyle: .headline)
         valueLabel.adjustsFontForContentSizeCategory = true
         valueLabel.textColor = .label
         valueLabel.textAlignment = .center
         valueLabel.text = "—"
         // footnote, not caption1: the profile's counters are caption1 because
-        // FOUR of them share one cell. Two on a full banner can afford a step.
+        // three of them share one row. Two on a full banner can afford a step.
         titleLabel.font = .preferredFont(forTextStyle: .caption1)
         titleLabel.adjustsFontForContentSizeCategory = true
         titleLabel.textColor = .secondaryLabel

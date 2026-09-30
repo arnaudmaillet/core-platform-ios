@@ -13,6 +13,12 @@ import UIKit
 /// worn and the pushed list's "New" header repeats — then a chevron, the
 /// platform's sign that a screen will be PUSHED.
 ///
+/// ⚠️ THE PILL BELONGS TO THE CHEVRON, NOT TO THE TITLE (product call,
+/// 2026-09-30): `Title ——— (3)›` — the gap after the title is WIDER than the
+/// one between the pill and the chevron, so `(3)›` reads as one element, "3
+/// new, this way", rather than a count hanging off the word. With no pill the
+/// chevron keeps the plain gap it always had after the title (`Metrics`).
+///
 /// ⚠️ BESIDE THE TITLE, NOT AT THE EDGE (product call, 2026-09-30). #312 put
 /// the badge and chevron at the trailing edge, where they read as a control of
 /// their own a screen-width away from the word they qualify; after the title
@@ -54,7 +60,19 @@ public final class SectionLinkHeaderView: UIView {
     /// past the 44pt minimum.
     public static let height: CGFloat = 44
 
+    /// The row's gaps. Their SUM with a pill is the old even `sm + sm`: the
+    /// pill moved toward the chevron and the chevron stayed where it was.
+    enum Metrics {
+        /// Title → pill: the wider gap, the one that separates.
+        static let titleToCount = Spacing.md
+        /// Pill → chevron: the tight one, the one that joins.
+        static let countToChevron = Spacing.xs
+        /// Title → chevron, with no pill between them.
+        static let titleToChevron = Spacing.sm
+    }
+
     private let titleLabel = UILabel()
+    private let row: UIStackView
     private let countBadge = NotificationCountBadge()
     private let chevron = UIImageView(
         image: UIImage(
@@ -82,6 +100,7 @@ public final class SectionLinkHeaderView: UIView {
 
     public init(title: String? = nil, isLink: Bool = true) {
         self.isLink = isLink
+        row = UIStackView()
         super.init(frame: .zero)
         titleLabel.text = title
         titleLabel.font = UIFontMetrics(forTextStyle: .title3).scaledFont(
@@ -108,11 +127,16 @@ public final class SectionLinkHeaderView: UIView {
         // its spacing, so the chevron closes up on the title when the count
         // goes to zero (`SectionLinkHeaderTests.aCountGoingToZeroClosesTheGap`).
         // At the trailing edge a kept gap was invisible; after the title it is
-        // not.
-        let row = UIStackView(arrangedSubviews: [titleLabel, countBadge, chevron])
+        // not. The two gaps are uneven on purpose — see `Metrics` — and the
+        // title's is restated with the count (`applySpacing`): a stack puts a
+        // hidden view's PREDECESSOR's custom spacing before the next visible
+        // one, so with no pill the title's gap is the gap to the chevron.
+        for view in [titleLabel, countBadge, chevron] { row.addArrangedSubview(view) }
         row.axis = .horizontal
         row.alignment = .center
-        row.spacing = Spacing.sm
+        row.spacing = Metrics.titleToChevron
+        row.setCustomSpacing(Metrics.countToChevron, after: countBadge)
+        applySpacing()
         // Touches belong to the bar: the stacks are layout only.
         row.isUserInteractionEnabled = false
         row.constrain(in: self) { parent in
@@ -151,9 +175,19 @@ public final class SectionLinkHeaderView: UIView {
     /// The pill's number — "99+" past 99 (`NotificationCountBadge`).
     public func setCount(_ count: Int) {
         countBadge.setCount(count)
+        applySpacing()
         // The run after the title changes length with the pill.
         setNeedsLayout()
         updateAccessibility()
+    }
+
+    /// The title's gap: the wide one before a pill, the plain one before a
+    /// bare chevron.
+    private func applySpacing() {
+        row.setCustomSpacing(
+            countBadge.isHidden ? Metrics.titleToChevron : Metrics.titleToCount,
+            after: titleLabel
+        )
     }
 
     private func updateAccessibility() {

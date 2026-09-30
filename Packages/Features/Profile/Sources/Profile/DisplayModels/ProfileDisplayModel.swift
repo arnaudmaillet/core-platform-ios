@@ -20,12 +20,11 @@ public struct ProfileDisplayModel: Equatable, Sendable {
     /// unreachable — never a misleading "0".
     public let followerText: String?
     public let followingText: String?
-    /// Total reactions received across the profile's posts. Served only by
-    /// counter.v1; "—" wherever that projection isn't live.
-    public let reactionsText: String?
-    /// Total content views. Served only by counter.v1; "—" wherever that
-    /// projection isn't live (it isn't on the fleet or the mock today).
-    public let viewsText: String?
+    /// Total likes received across the profile's posts (counter.v1's
+    /// profile-scoped LIKE). Served only by counter.v1; the column is not
+    /// drawn wherever that projection isn't live. Views are not shown — the
+    /// header counts likes since 2026-09-30, as every gallery tile does.
+    public let likesText: String?
     /// The immersive banner's media. profile.v1 has no dedicated cover asset
     /// yet, so this mirrors the avatar image until the contract grows one —
     /// swap the source here, and the header needs no change.
@@ -46,8 +45,7 @@ public struct ProfileDisplayModel: Equatable, Sendable {
         isVerified = profile.isVerified
         followerText = Self.format(profile.followerCount)
         followingText = Self.format(profile.followingCount)
-        reactionsText = Self.format(profile.reactionCount)
-        viewsText = Self.format(profile.viewCount)
+        likesText = Self.format(profile.reactionCount)
         bannerImageURL = profile.avatarURL
         websiteText = Self.websiteDisplay(profile.websiteURL)
         websiteURL = profile.websiteURL

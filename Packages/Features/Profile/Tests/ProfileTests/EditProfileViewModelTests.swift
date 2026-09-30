@@ -52,8 +52,7 @@ private func viewerProfile() -> UserProfile {
         isVerified: false,
         followerCount: .exact(3),
         followingCount: .exact(5),
-        reactionCount: .unavailable,
-        viewCount: .unavailable
+        reactionCount: .unavailable
     )
 }
 

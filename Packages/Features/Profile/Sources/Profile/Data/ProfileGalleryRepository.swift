@@ -170,7 +170,6 @@ public actor ProfileGalleryRepository: ProfileGalleryProviding {
             var decorated = post
             decorated.reactionCount = counts.likes
             decorated.commentCount = counts.comments
-            decorated.viewCount = counts.views
             return decorated
         }
     }

@@ -212,8 +212,7 @@ struct ProfileGalleryViewModelTests {
             isVerified: false,
             followerCount: .exact(1),
             followingCount: .exact(1),
-            reactionCount: .unavailable,
-            viewCount: .unavailable
+            reactionCount: .unavailable
         )
         let viewModel = ProfileViewModel(
             repository: StubProfileProvider(profile),
@@ -245,7 +244,7 @@ struct ProfileGalleryViewModelTests {
             id: ProfileID("prof-1"), handle: "ada", displayName: "Ada", bio: "",
             avatarURL: nil, websiteURL: nil, isVerified: false,
             followerCount: .exact(0), followingCount: .exact(0),
-            reactionCount: .unavailable, viewCount: .unavailable
+            reactionCount: .unavailable
         )))
         let box = Box<ProfileViewModel.GallerySnapshot>()
         viewModel.onGalleryChange = { box.append($0) }
@@ -337,7 +336,7 @@ struct ProfileGalleryViewModelTests {
                 id: ProfileID("prof-1"), handle: "ada", displayName: "Ada", bio: "",
                 avatarURL: nil, websiteURL: nil, isVerified: false,
                 followerCount: .exact(0), followingCount: .exact(0),
-                reactionCount: .unavailable, viewCount: .unavailable
+                reactionCount: .unavailable
             )),
             gallery: StubGalleryProvider(authored: authored, tagged: tagged),
             galleryPreferences: preferences
@@ -351,7 +350,7 @@ struct ProfileGalleryViewModelTests {
                 id: ProfileID("prof-2"), handle: "grace", displayName: "Grace", bio: "",
                 avatarURL: nil, websiteURL: nil, isVerified: false,
                 followerCount: .exact(0), followingCount: .exact(0),
-                reactionCount: .unavailable, viewCount: .unavailable
+                reactionCount: .unavailable
             )),
             gallery: StubGalleryProvider(authored: authored, tagged: tagged),
             galleryPreferences: preferences
