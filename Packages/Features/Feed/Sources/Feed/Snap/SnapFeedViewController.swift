@@ -497,6 +497,9 @@ final class SnapFeedViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        // `-status-bar-blur` (DEBUG): the progressive blur behind the status
+        // bar, on every full-screen screen — see `StatusBarBlurView`.
+        StatusBarBlurView.install(in: view)
         title = "Timeline"
         // The stored value, not a literal: `setEmptyGround` may legitimately
         // arrive BEFORE this runs — the map route loads this view while it

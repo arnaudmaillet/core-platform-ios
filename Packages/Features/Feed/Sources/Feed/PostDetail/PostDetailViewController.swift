@@ -345,6 +345,9 @@ final class PostDetailViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        // `-status-bar-blur` (DEBUG): the progressive blur behind the status
+        // bar, on every full-screen screen — see `StatusBarBlurView`.
+        StatusBarBlurView.install(in: view)
         title = mode == .commentsOnly ? "Comments" : "Post"
         view.backgroundColor = .systemBackground
         configureViews()

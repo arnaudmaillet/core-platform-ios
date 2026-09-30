@@ -114,6 +114,9 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        // `-status-bar-blur` (DEBUG): the progressive blur behind the status
+        // bar, on every full-screen screen — see `StatusBarBlurView`.
+        StatusBarBlurView.install(in: view)
         // ⚠️ NO TITLE. "Messages" sat here for a while (the tab bar says the
         // word already); it went on 2026-09-22 with the map tab's and For
         // You's. The pinned section pill ("New", "Recent") stays IN THE LIST,
