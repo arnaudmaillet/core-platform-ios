@@ -85,51 +85,55 @@ struct ProfileBannerFormatTests {
         #expect(header.debugTrayFrame.minY > avatar.maxY)
     }
 
-    /// A band ENDS on the avatar's midline: the page's short ramp is centred
-    /// there, the banner's own edge half a ramp lower, where the page's tone
-    /// is already whole.
+    /// A band ENDS on the avatar's midline — a few points under it, in the
+    /// air above the counters — and the page's tone is whole there.
     @Test func aBandEndsOnTheAvatarsMidline() throws {
         let header = header(format: .band)
         let banner = header.debugBannerFrame
         let avatar = header.debugAvatarFrame
         #expect(banner.minY == 0)
-        #expect(abs(banner.maxY - (avatar.midY + HeroBannerFade.rampLength / 2)) < 0.5)
+        #expect(banner.maxY > avatar.midY)
+        #expect(banner.maxY <= avatar.midY + 8)
         let fade = try #require(header.debugBannerFade)
-        #expect(abs((fade.rampStart + fade.rampEnd) / 2 - avatar.midY) < 0.5)
         #expect(abs(fade.rampEnd - banner.maxY) < 0.5)
-        // Short: a seam, not a run-out.
-        #expect(fade.rampEnd - fade.rampStart <= 16)
         // The ramp itself: clear, then the page, opaque at the edge.
         let alphas = header.debugBannerRampAlphas
         #expect(alphas.first == 0)
         #expect(alphas.last == 1)
     }
 
-    /// The blur's container runs from a lead above the name — the poster's
-    /// full lead, the band's shorter one (its picture is mostly behind the
-    /// chrome) — to the banner's FOOT, where it is whole.
+    /// The blur's container — and the page's fade — run from JUST ABOVE THE
+    /// AVATAR (user, 30 September 2026) to the banner's FOOT, where both are
+    /// whole; the stage above it is the picture, untouched.
     @Test(arguments: [ProfileBannerFormat.band, .poster])
-    func theBlurClimbsFromAboveTheNameToTheFoot(format: ProfileBannerFormat) throws {
+    func theRunOutClimbsFromAboveTheAvatarToTheFoot(format: ProfileBannerFormat) throws {
         let header = header(format: format)
         let fade = try #require(header.debugBannerFade)
-        let name = header.debugNameFrame
-        #expect(abs(fade.blurFull - header.debugBannerFrame.maxY) < 0.5)
-        let lead: CGFloat = format == .band ? 64 : HeroBannerFade.blurLead
-        #expect(abs(name.minY - fade.blurStart - lead) < 0.5)
-        // The blur starts above the page's ramp — the long transition is the
-        // blur's, the short one the page's.
-        #expect(fade.blurStart < fade.rampStart - 40)
-        // On a poster the container starts inside the stage, under the
-        // chrome — the subject at the stage's top is left sharp, and the
-        // ease-in keeps the next stretch nearly so.
+        let avatar = header.debugAvatarFrame
+        let foot = header.debugBannerFrame.maxY
+        #expect(abs(fade.blurFull - foot) < 0.5)
+        #expect(abs(fade.rampEnd - foot) < 0.5)
+        #expect(abs(avatar.minY - fade.blurStart - HeroBannerFade.blurLead) < 0.5)
         if format == .poster {
-            #expect(fade.blurStart > header.chromeTopInset + 40)
+            // Shouldered: the page's tone eased in just above the container,
+            // already half there at its top — the blur untouched.
+            #expect(abs((fade.rampShoulder ?? .nan) - fade.blurStart) < 0.5)
+            #expect(abs(fade.rampStart - (fade.blurStart - HeroBannerFade.shoulderRise)) < 0.5)
+        } else {
+            #expect(fade.rampShoulder == nil)
+            #expect(fade.rampStart >= fade.blurStart - 0.5)
         }
+        // The blur is next to nothing under the name: sigma under 3.5pt.
+        let spans = HeroBannerFade.levelSpans(fade)
+        try #require(spans.count > 2)
+        #expect(spans[1].full > header.debugNameFrame.midY)
     }
 
     /// A poster runs to the tray's FOOT — not cut at the midline (user, 30
     /// September 2026): the whole identity block stands on the picture, and
-    /// the page arrives only behind the tray's buttons.
+    /// the page is whole behind the tray's foot. Under the name the page's
+    /// tone is already half there (the shoulder), and the counters are
+    /// still on the picture.
     @Test func aPosterRunsToTheTraysFoot() throws {
         let header = header(format: .poster)
         let banner = header.debugBannerFrame
@@ -137,23 +141,22 @@ struct ProfileBannerFormatTests {
         #expect(abs(banner.maxY - tray.maxY) < 0.5)
         let fade = try #require(header.debugBannerFade)
         #expect(abs(fade.rampEnd - banner.maxY) < 0.5)
-        // Behind the buttons (the row carries 12pt of air above them).
-        #expect(abs(fade.rampStart - (tray.minY + 12)) < 0.5)
-        // The counters and the bio are above it, on the blurred picture.
-        #expect(header.debugStatsFrame.maxY < fade.rampStart)
+        let underName = HeroBannerFade.rampAlpha(at: header.debugNameFrame.minY, geometry: fade)
+        #expect(underName >= HeroBannerFade.shoulderAlpha - 0.001)
+        #expect(HeroBannerFade.rampAlpha(at: header.debugStatsFrame.maxY, geometry: fade) < 0.7)
         let alphas = header.debugBannerRampAlphas
         #expect(alphas.first == 0)
         #expect(alphas.last == 1)
     }
 
-    /// On a band the name and the handle stand on the picture — above the
-    /// ramp's middle — and the counters on the page, below it.
+    /// On a band the name and the handle stand on the picture — the page's
+    /// tone still thin behind them — and the counters on the page, nearly
+    /// whole behind them.
     @Test func onABandTheNameStandsOnThePictureAndTheCountersOnThePage() throws {
         let header = header(format: .band)
         let fade = try #require(header.debugBannerFade)
-        let edge = (fade.rampStart + fade.rampEnd) / 2
-        #expect(header.debugHandleFrame.maxY <= edge + 0.5)
-        #expect(header.debugStatsFrame.minY >= edge - 0.5)
+        #expect(HeroBannerFade.rampAlpha(at: header.debugNameFrame.maxY, geometry: fade) < 0.2)
+        #expect(HeroBannerFade.rampAlpha(at: header.debugStatsFrame.minY, geometry: fade) > 0.7)
         #expect(header.debugNameFrame.minY >= header.debugBannerFrame.minY)
     }
 
@@ -215,11 +218,14 @@ struct ProfileBannerFormatTests {
         #expect(abs(header.bounds.height - self.header(format: .band).bounds.height) < 0.5)
     }
 
-    /// ⚠️ THE TRAY IS FLAT. Glass is for chrome over content; these buttons
-    /// sit on the page, and glass there is a blur of nothing. One prominent
-    /// filled capsule for Follow, grey capsules and bubbles for the rest.
-    @Test func theTrayWearsNoGlass() {
-        let header = header(format: .band)
+    /// ⚠️ THE TRAY IS FLAT AND OPAQUE. Glass is for chrome over content;
+    /// these buttons sit on the page, and glass there is a blur of nothing.
+    /// One prominent filled capsule for Follow, grey capsules and bubbles for
+    /// the rest — an opaque grey (user, 30 September 2026: the translucent
+    /// one let a poster's picture through), the tone the translucent one
+    /// made on the page.
+    @Test func theTrayWearsNoGlassAndLetsNothingThrough() {
+        let header = header(format: .poster)
         for button in header.debugTrayButtons {
             #expect(button.configuration?.background.visualEffect == nil)
         }
@@ -228,8 +234,69 @@ struct ProfileBannerFormatTests {
         let message = header.debugTrayButtons[1]
         #expect(follow.configuration?.title == "Follow")
         #expect(follow.configuration?.background.visualEffect == nil)
-        // Follow is the one prominent capsule: it does not wear the quiet
-        // grey the others do.
-        #expect(follow.configuration?.background.backgroundColor != message.configuration?.background.backgroundColor)
+        // Follow is the one prominent capsule, in the tint: it does not wear
+        // the quiet grey the others do.
+        #expect(follow.configuration?.baseBackgroundColor == nil)
+        for style in [UIUserInterfaceStyle.light, .dark] {
+            let traits = UITraitCollection(userInterfaceStyle: style)
+            for button in header.debugTrayButtons where button !== follow {
+                let fill = button.configuration?.baseBackgroundColor?.resolvedColor(with: traits)
+                #expect(fill?.cgColor.alpha == 1, "\(button.configuration?.title ?? "bubble") \(style.rawValue)")
+            }
+            // The grey the page showed through the platform's translucent
+            // fill: darker than a light page, lighter than a dark one.
+            var fill = (r: CGFloat(0), g: CGFloat(0), b: CGFloat(0), a: CGFloat(0))
+            var page = fill
+            message.configuration?.baseBackgroundColor?.resolvedColor(with: traits)
+                .getRed(&fill.r, green: &fill.g, blue: &fill.b, alpha: &fill.a)
+            Surface.page.resolvedColor(with: traits).getRed(&page.r, green: &page.g, blue: &page.b, alpha: &page.a)
+            #expect(style == .light ? fill.g < page.g : fill.g > page.g)
+        }
+    }
+
+    /// The opaque grey IS the tone the platform's translucent gray button
+    /// made on the page — measured, not assumed: a `.gray()` capsule drawn
+    /// over the page, read back beside the title.
+    @Test(arguments: [UIUserInterfaceStyle.light, .dark])
+    func theOpaqueGreyIsTheGrayButtonOnThePage(style: UIUserInterfaceStyle) throws {
+        let page = UIView(frame: CGRect(x: 0, y: 0, width: 200, height: 44))
+        page.overrideUserInterfaceStyle = style
+        page.backgroundColor = Surface.page
+        var configuration = UIButton.Configuration.gray()
+        configuration.cornerStyle = .capsule
+        configuration.title = "x"
+        let button = UIButton(configuration: configuration)
+        button.frame = page.bounds
+        page.addSubview(button)
+        // In a (never shown) window of the style being measured: off one,
+        // the button's background resolves in the light style whatever the
+        // view's override says.
+        let window = UIWindow(frame: page.bounds)
+        window.overrideUserInterfaceStyle = style
+        window.addSubview(page)
+        button.updateConfiguration()
+        window.layoutIfNeeded()
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(bounds: page.bounds, format: format).image { context in
+            page.layer.render(in: context.cgContext)
+        }
+        page.removeFromSuperview()
+        let cgImage = try #require(image.cgImage)
+        var pixel = [UInt8](repeating: 0, count: 4)
+        let context = try #require(CGContext(
+            data: &pixel, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+        ))
+        // (40, 22): inside the capsule, clear of its rounding and of the title.
+        context.draw(cgImage, in: CGRect(x: -40, y: -(CGFloat(cgImage.height) - 1 - 22), width: CGFloat(cgImage.width), height: CGFloat(cgImage.height)))
+        var fill = (r: CGFloat(0), g: CGFloat(0), b: CGFloat(0), a: CGFloat(0))
+        ProfileHeaderView.trayFill.resolvedColor(with: UITraitCollection(userInterfaceStyle: style))
+            .getRed(&fill.r, green: &fill.g, blue: &fill.b, alpha: &fill.a)
+        let expected = [fill.r, fill.g, fill.b].map { Int(($0 * 255).rounded()) }
+        let drawn = pixel.prefix(3).map(Int.init)
+        for (a, b) in zip(expected, drawn) {
+            #expect(abs(a - b) <= 3, "style \(style.rawValue): trayFill \(expected) vs .gray() on the page \(drawn)")
+        }
     }
 }

@@ -17,11 +17,12 @@ import UIKit
 ///   halves of the avatar's height — the display name (+ verified badge)
 ///   over the @handle in the TOP half, standing on the picture in its ink
 ///   (`HeroInk`), and the 3-metric counter row (Followers / Following /
-///   Likes) in the BOTTOM half. The picture grows progressively blurred
-///   from above the name (`HeroBannerFade`, shared with a place's banner)
-///   and dissolves into the page over a few points: at the midline on a
-///   band, so its counters are on the page in page ink; behind the tray on a
-///   poster, whose counters, bio and link stand on the picture too;
+///   Likes) in the BOTTOM half. From just above the avatar the picture
+///   grows progressively blurred and fades into the page, both barely under
+///   the name and whole at the banner's foot (`HeroBannerFade`, shared with
+///   a place's banner): the midline on a band, so its counters are on the
+///   page in page ink; the tray's foot on a poster, whose counters, bio and
+///   link stand on the picture too;
 /// - below, full width: bio, website link and the flat action tray (Follow /
 ///   Message or Edit Profile capsules, map pin, QR code and see-more
 ///   bubbles), closing the header right above the content threshold.
@@ -55,10 +56,13 @@ final class ProfileHeaderView: UIView {
         /// The air between the chrome's bottom edge and the avatar, on a band
         /// and on a header with no picture.
         static let bandGap: CGFloat = Spacing.md
-        /// How far above the name a band's blur starts climbing. Shorter than
-        /// a poster's (`HeroBannerFade.blurLead`): a band's picture is mostly
-        /// behind the chrome, and a full lead would blur all of it.
-        static let bandBlurLead: CGFloat = 64
+        /// How far below the avatar's midline a band's picture ends: the
+        /// counters' half starts at the midline, their type a few points
+        /// lower, and the page must be whole by then.
+        static let bandFootBelowMidline: CGFloat = 6
+        /// How far above the avatar's midline a band's page tone starts
+        /// arriving — see `placeBannerFade`.
+        static let bandRampAboveMidline: CGFloat = 12
         /// The air above the tray, carried by the tray itself so it holds
         /// whether or not a website row sits above it.
         static let trayGap: CGFloat = Spacing.md
@@ -93,15 +97,15 @@ final class ProfileHeaderView: UIView {
     /// tile of the gallery below counts. Was "Reactions" beside a "Views"
     /// total until 2026-09-30.
     private let likesStat = ProfileStatView(caption: "Likes")
-    private let messageButton = UIButton(configuration: .gray())
-    private let editButton = UIButton(configuration: .gray())
+    private let messageButton = UIButton(configuration: .filled())
+    private let editButton = UIButton(configuration: .filled())
     /// Keep-this-profile-on-the-map's-people-rails, immediately right of
     /// Message. Hidden unless the viewer follows this profile — see
     /// `configureMapPin`.
-    private let mapPinButton = UIButton(configuration: .gray())
-    private let followButton = UIButton(configuration: .gray())
-    private let qrCodeButton = UIButton(configuration: .gray())
-    private let moreButton = UIButton(configuration: .gray())
+    private let mapPinButton = UIButton(configuration: .filled())
+    private let followButton = UIButton(configuration: .filled())
+    private let qrCodeButton = UIButton(configuration: .filled())
+    private let moreButton = UIButton(configuration: .filled())
     private var columnTopConstraint: NSLayoutConstraint?
 
     /// Pins the banner's top to the scroll viewport's top edge (required,
@@ -266,7 +270,7 @@ final class ProfileHeaderView: UIView {
         }
         guard tones != inkTones else { return }
         inkTones = tones
-        guard window != nil else { return applyIdentityInk(force: true) }
+        guard isInVisibleWindow else { return applyIdentityInk(force: true) }
         UIView.transition(
             with: self, duration: 0.2, options: [.transitionCrossDissolve, .allowUserInteraction]
         ) {
@@ -284,8 +288,6 @@ final class ProfileHeaderView: UIView {
     private var hasAppliedBannerFormat = false
     private var bannerEndsInAvatar: NSLayoutConstraint?
     private var bannerEndsAtTray: NSLayoutConstraint?
-    /// The tray's row, whose buttons a poster's page ramp stands behind.
-    private weak var trayRow: UIView?
     private let topRow = UIStackView()
     private let statsRow = UIStackView()
     /// The name and the handle, in the identity row's top half.
@@ -399,7 +401,7 @@ final class ProfileHeaderView: UIView {
         // one) when on screen, so the ink's change is its own.
         bannerView.onLevelsChanged = { [weak self] in
             guard let self else { return }
-            guard window != nil else { return updateInkTones(force: true) }
+            guard isInVisibleWindow else { return updateInkTones(force: true) }
             DispatchQueue.main.async { [weak self] in self?.updateInkTones(force: true) }
         }
         setBannerFormat(.unresolved)
@@ -788,9 +790,20 @@ final class ProfileHeaderView: UIView {
     /// profile screen on the platform has settled on, and it is the same
     /// grey the cards' pills wear, so the tray and the list read as one
     /// system.
+    ///
+    /// ⚠️ OPAQUE (user, 30 September 2026: the buttons were "a bit
+    /// transparent"). The platform's `.gray()` is a translucent fill, made to
+    /// be seen on the page — on a poster the tray stands on the picture's
+    /// foot, and the picture showed through every quiet button. They are
+    /// `.filled()` in `trayFill`, the grey they wore on the page, so nothing
+    /// changes where there is no picture, and the system's own highlight and
+    /// disabled treatments still apply.
     private static func capsule(prominent: Bool) -> UIButton.Configuration {
-        var config: UIButton.Configuration = prominent ? .filled() : .gray()
-        if !prominent { config.baseForegroundColor = .label }
+        var config = UIButton.Configuration.filled()
+        if !prominent {
+            config.baseBackgroundColor = trayFill
+            config.baseForegroundColor = .label
+        }
         config.cornerStyle = .capsule
         // md, not lg, side insets: the capsule shares the avatar-side column
         // with three bubbles; the tighter title keeps the tray within budget.
@@ -805,10 +818,30 @@ final class ProfileHeaderView: UIView {
         return config
     }
 
-    /// A circular flat bubble holding a single SF Symbol, in the same grey as
-    /// the quiet capsules beside it, with page ink.
+    /// The quiet buttons' grey: the platform's gray-button fill
+    /// (`secondarySystemFill` — measured, see the test
+    /// `theOpaqueGreyIsTheGrayButtonOnThePage`) laid over the page once, so
+    /// it is the tone those buttons showed on the page — without the
+    /// translucency that let a poster's picture through (see `capsule`).
+    static let trayFill = UIColor { traits in
+        var fill = (r: CGFloat(0), g: CGFloat(0), b: CGFloat(0), a: CGFloat(0))
+        var page = (r: CGFloat(0), g: CGFloat(0), b: CGFloat(0), a: CGFloat(0))
+        UIColor.secondarySystemFill.resolvedColor(with: traits)
+            .getRed(&fill.r, green: &fill.g, blue: &fill.b, alpha: &fill.a)
+        Surface.page.resolvedColor(with: traits).getRed(&page.r, green: &page.g, blue: &page.b, alpha: &page.a)
+        return UIColor(
+            red: page.r + (fill.r - page.r) * fill.a,
+            green: page.g + (fill.g - page.g) * fill.a,
+            blue: page.b + (fill.b - page.b) * fill.a,
+            alpha: 1
+        )
+    }
+
+    /// A circular flat bubble holding a single SF Symbol, in the same opaque
+    /// grey as the quiet capsules beside it, with page ink.
     private static func bubble(systemImage: String) -> UIButton.Configuration {
-        var config = UIButton.Configuration.gray()
+        var config = UIButton.Configuration.filled()
+        config.baseBackgroundColor = trayFill
         config.baseForegroundColor = .label
         config.cornerStyle = .capsule
         config.image = UIImage(systemName: systemImage)
@@ -876,6 +909,8 @@ final class ProfileHeaderView: UIView {
             if abs(self.monogramLabel.font.pointSize - monogramSize) > 0.5 {
                 self.monogramLabel.font = .systemFont(ofSize: monogramSize, weight: .semibold)
             }
+            // The disc's frame is final here — see `placeBannerFade`.
+            self.placeBannerFade()
         }
 
         // Followers and Following open the relationship lists; Likes is a
@@ -960,7 +995,7 @@ final class ProfileHeaderView: UIView {
             for: .primaryActionTriggered
         )
 
-        // Edit Profile: the own-profile action, a glass capsule sharing the
+        // Edit Profile: the own-profile action, a quiet capsule sharing the
         // leading slot with Message (never both shown). Same capsule styling as
         // Message so the two read as one action affordance beside the avatar.
         var editConfig = Self.capsule(prominent: false)
@@ -1201,22 +1236,22 @@ final class ProfileHeaderView: UIView {
         //
         // ⚠️ A BAND ENDS ON THE AVATAR'S MIDLINE — the line between the
         // name's half and the counters' half, so the name stands on the strip
-        // and the counters on the page. The ramp into the page is centred on
-        // it: the banner's own edge sits half a ramp lower, where the page's
-        // tone is already whole. (It used to end a quarter of the way down the
-        // avatar, the name below it on the page.)
+        // and the counters on the page. The banner's own edge sits a few
+        // points lower (`bandFootBelowMidline`), in the air above the
+        // counters, where `HeroBannerFade`'s ramp is all but the page. (It
+        // used to end a quarter of the way down the avatar, the name below it
+        // on the page.)
         //
         // ⚠️ A POSTER RUNS TO THE TRAY'S FOOT, the whole identity block on the
         // picture — cut at the midline, it read as a band with a tall stage
-        // (user, 30 September 2026). Its long page-toned run-out over the
-        // counters, a white wash climbing the photograph, is gone:
-        // `HeroBannerFade`'s blur carries the block and the page arrives only
-        // behind the tray.
+        // (user, 30 September 2026). `HeroBannerFade` carries the block: the
+        // blur climbs from just above the avatar, barely there under the
+        // name, and the page's tone is half there already (shouldered), both
+        // whole at the tray's foot.
         bannerEndsInAvatar = bannerView.bottomAnchor.constraint(
-            equalTo: avatarView.centerYAnchor, constant: HeroBannerFade.rampLength / 2
+            equalTo: avatarView.centerYAnchor, constant: Metrics.bandFootBelowMidline
         )
         bannerEndsAtTray = bannerView.bottomAnchor.constraint(equalTo: actionRow.bottomAnchor)
-        trayRow = actionRow
         NSLayoutConstraint.activate([
             avatarView.widthAnchor.constraint(equalTo: avatarView.heightAnchor),
             avatarSide,
@@ -1228,35 +1263,57 @@ final class ProfileHeaderView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        guard bannerFormat != .none else { return }
         // The nested stacks settle AFTER this pass — the note on
         // `CircleAvatarView` — so they are settled here by hand before the
         // frames are read: the fade is placed against where the name and the
         // avatar actually are, not where they were a pass ago.
         topRow.superview?.layoutIfNeeded()
-        let name = nameLabel.convert(nameLabel.bounds, to: bannerView)
+        placeBannerFade()
+    }
+
+    /// Hands the banner its run-out from where the avatar actually stands.
+    ///
+    /// ⚠️ ALSO CALLED WHEN THE AVATAR IS SIZED (`onSideLengthChange`). On a
+    /// fresh push the header's first — and, until a scroll, ONLY — pass saw
+    /// the disc still at zero size even after settling the stacks above:
+    /// the guard below returned, the banner never got a fade, and its baked
+    /// blur levels stayed hidden until a scroll moved the header and ran a
+    /// second pass (user, on device, 30 September 2026: "the blur doesn't
+    /// appear until you scroll"; `-hero-blur-trace` showed `avatar=(20, 316,
+    /// 0, 0)` then `fade=nil … shown=0/6`). The disc's own layout is the
+    /// moment its frame is final, so it places the fade too.
+    private func placeBannerFade() {
+        guard bannerFormat != .none else { return }
         let avatar = avatarView.convert(avatarView.bounds, to: bannerView)
-        guard name.height > 0, avatar.height > 0 else { return }
-        switch bannerFormat {
-        case .band:
-            // The blur climbing from above the name to the strip's foot, the
-            // page arriving at the midline.
-            bannerView.setFade(HeroBannerFade.geometry(
-                typeTop: name.minY, edge: avatar.midY, lead: Metrics.bandBlurLead
-            ))
-        case .poster:
-            // The blur climbing from above the name all the way down, under
-            // the counters and the bio too, whole at the banner's foot; the
-            // page arrives only behind the tray's buttons.
-            guard let trayRow else { return }
-            let tray = trayRow.convert(trayRow.bounds, to: bannerView)
-            bannerView.setFade(HeroBannerFade.Geometry(
-                blurStart: name.minY - HeroBannerFade.blurLead, blurFull: tray.maxY,
-                rampStart: tray.minY + Metrics.trayGap, rampEnd: tray.maxY
-            ))
-        case .none:
-            break
+        let foot = bannerView.bounds.height
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-hero-blur-trace") {
+            print("HERO-BLUR header fade format=\(bannerFormat) avatar=\(avatar) foot=\(foot)")
         }
+        #endif
+        guard avatar.height > 0, foot > avatar.minY else { return }
+        // One container for both shapes: from just above the avatar to the
+        // banner's foot — the avatar's midline on a band, the tray's foot on
+        // a poster — the blur and the page's tone climbing it together.
+        var fade = HeroBannerFade.geometry(identityTop: avatar.minY, foot: foot)
+        if bannerFormat == .poster {
+            // The whole block stands on the picture from the container's
+            // top, where the blur is still nil: the page's tone is already
+            // half there under the name (user, 30 September 2026: "start
+            // the opacity a bit earlier, without touching the blur").
+            fade = HeroBannerFade.shoulderedGeometry(identityTop: avatar.minY, foot: foot)
+        }
+        if bannerFormat == .band {
+            // ⚠️ A BAND'S PAGE ARRIVES UNDER THE HANDLE, NOT THE NAME. Its
+            // container is only the name's half (~60pt) and the handle
+            // stands in its lower part: the cubic over the whole of it laid
+            // up to 60% of a light page under a white handle over a dark
+            // strip — 2.61:1 (`-profile-ink-audit`, prof-0). The blur keeps
+            // the whole container; the page's tone climbs from the handle's
+            // line, through the air above the counters, to the foot.
+            fade.rampStart = max(fade.rampStart, avatar.midY - Metrics.bandRampAboveMidline)
+        }
+        bannerView.setFade(fade)
         updateInkTones()
     }
 }

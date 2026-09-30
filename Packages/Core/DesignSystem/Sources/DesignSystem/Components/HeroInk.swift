@@ -64,26 +64,39 @@ public enum HeroInk {
     /// Scored by the WORST pixel of each tone's weaker ink (`secondary`). A
     /// block that is legible in its current ink keeps it; one that is not
     /// takes the other only when that does clearly better.
+    ///
+    /// ⚠️ WHEN NEITHER INK IS LEGIBLE EVERYWHERE, THE TYPICAL PIXEL DECIDES.
+    /// Since the blur starts just above the identity (30 September 2026),
+    /// the type near the container's top stands on a nearly sharp picture —
+    /// dark hair beside a white shirt — where both inks' worst pixels sit
+    /// around 1.5:1 and the worst-pixel score is noise: a poster's counters
+    /// kept white over a mostly white ground (1.51:1 at the MEDIAN). There the
+    /// ink that reads over most of the ground (its median contrast) wins.
     public static func tone(forGround ground: [SIMD3<Float>], current: Tone?) -> Tone {
         guard !ground.isEmpty else { return current ?? defaultTone }
-        func worst(_ tone: Tone) -> CGFloat {
+        func contrasts(_ tone: Tone) -> [CGFloat] {
             var ink = (r: CGFloat(0), g: CGFloat(0), b: CGFloat(0), a: CGFloat(0))
             tone.secondary.getRed(&ink.r, green: &ink.g, blue: &ink.b, alpha: &ink.a)
-            var lowest = CGFloat.greatestFiniteMagnitude
-            for pixel in ground {
+            return ground.map { pixel in
                 let back = [CGFloat(pixel.x), CGFloat(pixel.y), CGFloat(pixel.z)]
                 let front = zip([ink.r, ink.g, ink.b], back).map { $0 * ink.a + $1 * (1 - ink.a) }
-                lowest = min(lowest, contrast(luminance(front), luminance(back)))
-            }
-            return lowest
+                return contrast(luminance(front), luminance(back))
+            }.sorted()
         }
-        let light = worst(.light)
-        let dark = worst(.dark)
-        let better: Tone = light >= dark ? .light : .dark
+        let light = contrasts(.light)
+        let dark = contrasts(.dark)
+        func score(_ sorted: [CGFloat], worst: Bool) -> CGFloat {
+            worst ? sorted[0] : sorted[sorted.count / 2]
+        }
+        // Worst pixels while either ink clears everywhere; medians otherwise.
+        let byWorst = max(light[0], dark[0]) >= legible
+        let lightScore = score(light, worst: byWorst)
+        let darkScore = score(dark, worst: byWorst)
+        let better: Tone = lightScore >= darkScore ? .light : .dark
         guard let current else { return better }
-        let mine = current == .light ? light : dark
-        let theirs = current == .light ? dark : light
-        if mine >= legible { return current }
+        let mine = current == .light ? lightScore : darkScore
+        let theirs = current == .light ? darkScore : lightScore
+        if byWorst, mine >= legible { return current }
         return theirs > mine + switchMargin ? (current == .light ? .dark : .light) : current
     }
 

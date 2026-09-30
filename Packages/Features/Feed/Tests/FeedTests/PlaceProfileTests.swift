@@ -176,14 +176,14 @@ struct PlaceProfileTests {
     }
 
     /// The picture runs under the whole identity — the name and the counters
-    /// — and the page arrives only over the banner's last few points, whole
-    /// by its edge, so the list below starts on the page with no seam.
+    /// — fading into the page from just above the name, whole by the
+    /// banner's edge, so the list below starts on the page with no seam.
     @Test func thePictureRunsUnderTheIdentityToTheFoot() throws {
         let profile = makeProfile()
         laidOut(profile)
         let fade = try #require(profile.debugBannerFade)
         let box = profile.debugBannerBoxFrame
-        #expect(fade.rampStart > profile.debugMetricsFrame.maxY)
+        #expect(fade.rampStart < profile.debugNameFrame.minY)
         #expect(abs(fade.rampEnd - box.maxY) < 0.5)
         #expect(profile.debugRampAlphas.last == 1)
     }
