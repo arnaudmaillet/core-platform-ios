@@ -22,7 +22,7 @@ import UIKit
 /// layouts, the bubbles don't move" means.
 ///
 /// And with or without the flag, the composer's INPUT ROW rests on the
-/// toolbar — `sm` above its glass — while the column keeps its place above.
+/// toolbar — `glassGap` above its glass — while the column keeps its place above.
 @MainActor
 struct SnapActionColumnLayoutTests {
     static let screen = CGRect(x: 0, y: 0, width: 390, height: 844)
@@ -120,6 +120,14 @@ struct SnapActionColumnLayoutTests {
         return (controller, window)
     }
 
+    /// ⚠️ How far the package TEST HOST stands the toolbar's glass under the
+    /// safe-area line: 8pt, where the app on the same simulator stands it 10
+    /// (`SnapActionColumn.toolbarGlassDrop`, measured with `-dump-bars` and
+    /// in screenshots). A test that measures a real bar here reads every gap
+    /// to the glass 2pt short of the app's — the app's field stands 12pt
+    /// (`glassGap`) above the glass on screen, this host's 10.
+    static let testHostGlassDrop: CGFloat = 8
+
     /// Where the toolbar's glass begins, in screen coordinates: the drop under
     /// the footer line (`SnapActionColumn.toolbarGlassDrop`).
     static var toolbarGlassTop: CGFloat {
@@ -128,16 +136,23 @@ struct SnapActionColumnLayoutTests {
 
     // MARK: - The toolbar's glass
 
-    /// ⚠️ THE ONE MEASURED NUMBER, CHECKED AGAINST A REAL BAR. Every composer
-    /// rests its input row `sm` above the toolbar's glass, and where the glass
-    /// begins is a constant (`SnapActionColumn.toolbarGlassDrop`) — reading
-    /// the private floating bar at runtime would put a frame of UIKit's own
-    /// layout into the composer's, a frame late, during every push. So this
-    /// puts a toolbar in a window at the iPhone 18 Pro's size and reads where
-    /// its bubble actually stands under the screen's safe-area line: a 36pt
-    /// item centred in its 48pt glass bubble (iOS 27). If UIKit moves the bar,
-    /// this fails, and the constant is what to re-measure.
+    /// ⚠️ THE ONE MEASURED NUMBER, AND A SENTINEL ON THE BAR IT CAME FROM.
+    /// Every composer rests its input row `glassGap` above the toolbar's glass, and
+    /// where the glass begins is a constant (`SnapActionColumn.toolbarGlassDrop`)
+    /// — reading the private floating bar at runtime would put a frame of
+    /// UIKit's own layout into the composer's, a frame late, during every push.
+    ///
+    /// The constant is the APP's reading: 10pt (iPhone 18 Pro, iOS 27 —
+    /// safe-area line 788, glass 798…846 by `-dump-bars`, the field's bottom
+    /// measured at 790 in a screenshot). The package test host, on the same
+    /// simulator, stands the same bar's glass 8pt under its line — a
+    /// difference of hosting this test does not explain — so it cannot check
+    /// the 10 itself. What it can say is that UIKit's bar has not moved: it
+    /// reads the host's drop off a real toolbar (a 36pt item centred in its
+    /// 48pt glass bubble), and if that leaves 8, re-measure the constant in
+    /// the app with `-dump-bars`.
     @Test func theToolbarsGlassStandsWhereTheComposerExpectsIt() async throws {
+        #expect(SnapActionColumn.toolbarGlassDrop == 10, "re-measured? update the sentinel below with it")
         let screen = UIViewController()
         let more = SnapFooterToolbar.makeMoreButton(menu: UIMenu(children: []))
         screen.toolbarItems = [.flexibleSpace(), UIBarButtonItem(customView: more)]
@@ -159,8 +174,8 @@ struct SnapActionColumnLayoutTests {
         ).y
         let bubbleHeight: CGFloat = 48
         let glassTop = more.convert(CGPoint(x: 0, y: more.bounds.midY), to: window).y - bubbleHeight / 2
-        #expect(abs(glassTop - (safeLine + SnapActionColumn.toolbarGlassDrop)) <= 1,
-                "the glass starts \(glassTop - safeLine)pt under the safe-area line, not \(SnapActionColumn.toolbarGlassDrop)")
+        #expect(abs(glassTop - (safeLine + Self.testHostGlassDrop)) <= 1,
+                "the glass starts \(glassTop - safeLine)pt under the safe-area line, not \(Self.testHostGlassDrop): UIKit moved the bar")
     }
 
     // MARK: - Flag off: no repost bubble, the input row on the toolbar
@@ -188,7 +203,7 @@ struct SnapActionColumnLayoutTests {
         #expect(bar.debugFieldVoiceButton.isHidden, "no waveform in the field without the flag")
     }
 
-    /// ⚠️ THE INPUT ROW RESTS ON THE TOOLBAR, flag off: the field's bottom `sm`
+    /// ⚠️ THE INPUT ROW RESTS ON THE TOOLBAR, flag off: the field's bottom `glassGap`
     /// above the toolbar's glass, and the stake and mic where they stood
     /// before — `sm` above the footer line, so a little higher than the field.
     @Test func withoutTheFlagTheFieldRestsOnTheToolbarAndTheColumnKeepsItsPlace() throws {
@@ -196,8 +211,8 @@ struct SnapActionColumnLayoutTests {
         let composer = try Self.composerColumn(in: controller.view, space: window)
         let footerLine = Self.screen.height - Self.insets.bottom
 
-        #expect(abs(composer.field.maxY - (Self.toolbarGlassTop - Spacing.sm)) < 0.5,
-                "the field ends at \(composer.field.maxY), not sm above the glass at \(Self.toolbarGlassTop)")
+        #expect(abs(composer.field.maxY - (Self.toolbarGlassTop - SnapActionColumn.glassGap)) < 0.5,
+                "the field ends at \(composer.field.maxY), not glassGap above the glass at \(Self.toolbarGlassTop)")
         #expect(abs(composer.rail.maxY - (footerLine - Spacing.sm)) < 0.5, "the mic moved: \(composer.rail)")
         let stake = try #require(composer.stake)
         #expect(abs(stake.maxY - (composer.rail.minY - Spacing.sm)) < 0.5, "the stake left its station over the mic")
@@ -249,8 +264,8 @@ struct SnapActionColumnLayoutTests {
         #expect(stake == media.like, "stake \(stake) vs like \(media.like)")
         #expect(composer.rail == media.repost, "rail \(composer.rail) vs repost \(media.repost)")
         #expect(composer.bar.debugRailSymbol == PostActionSymbol.repost)
-        #expect(abs(composer.field.maxY - (Self.toolbarGlassTop - Spacing.sm)) < 0.5,
-                "the field ends at \(composer.field.maxY), not sm above the glass at \(Self.toolbarGlassTop)")
+        #expect(abs(composer.field.maxY - (Self.toolbarGlassTop - SnapActionColumn.glassGap)) < 0.5,
+                "the field ends at \(composer.field.maxY), not glassGap above the glass at \(Self.toolbarGlassTop)")
         _ = window
     }
 

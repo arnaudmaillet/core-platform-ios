@@ -374,7 +374,7 @@ final class ConversationThreadViewController: UIViewController {
         // constraint — the safe area, which the footer toolbar inflates — is
         // what holds the bar while the keyboard is down, and the inequality
         // lifts it the moment the keyboard rises past it. At rest the input
-        // row sits `sm` above the toolbar's glass, flag or no flag; the bar
+        // row sits `glassGap` above the toolbar's glass, flag or no flag; the bar
         // lifts its own column (`SnapActionColumn`).
         view.keyboardLayoutGuide.usesBottomSafeArea = false
         let ceiling = composeBar.bottomAnchor.constraint(

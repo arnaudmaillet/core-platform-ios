@@ -1128,7 +1128,7 @@ final class PostDetailViewController: UIViewController {
         let keyboard = composeBar.bottomAnchor.constraint(
             lessThanOrEqualTo: view.keyboardLayoutGuide.topAnchor, constant: -Spacing.sm
         )
-        // The rest line: the input row `sm` above the toolbar's glass. The bar
+        // The rest line: the input row `glassGap` above the toolbar's glass. The bar
         // lifts its own column off that line — under `-snap-layout-v2` onto
         // the media layout's like and repost bubbles (`usesActionColumn`).
         let rest = composeBar.bottomAnchor.constraint(

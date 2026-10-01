@@ -1417,7 +1417,8 @@ struct SnapCommentsPresentationTests {
         }
         let found = labels(in: view)
         let name = try #require(found.first { $0.text == "Quentin Dubois" })
-        let meta = try #require(found.first { $0.text == "@quentin.dubois · 71d" })
+        // The pill says the handle alone — the post's age is not the pill's.
+        let meta = try #require(found.first { $0.text == "@quentin.dubois" })
         #expect(
             name.contentCompressionResistancePriority(for: .horizontal)
                 < meta.contentCompressionResistancePriority(for: .horizontal)

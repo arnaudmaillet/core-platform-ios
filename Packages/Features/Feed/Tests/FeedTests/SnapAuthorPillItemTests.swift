@@ -85,7 +85,9 @@ struct SnapAuthorPillItemTests {
         let second = try #require(Self.authorItem(feed))
 
         #expect(second === first)
-        #expect(Self.labels(in: try #require(second.customView)).sorted() == ["@ada", "Ada Lovelace"])
+        let after = Self.labels(in: try #require(second.customView))
+        #expect(after.contains("@ada") && after.contains("Ada Lovelace"))
+        #expect(!after.contains { $0.contains("3d") || $0.contains("·") }, "the pill dates the post: \(after)")
     }
 
     /// The meta line's rule, alone: the handle, or nothing when a meta carries

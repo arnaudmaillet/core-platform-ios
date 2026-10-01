@@ -30,6 +30,13 @@ enum SnapFooterToolbar {
     /// padded inside it, its content cut short of the visible ends — and a
     /// fixed space takes the flexible one's place, which would otherwise
     /// claim the room.
+    ///
+    /// ⚠️ A fixed space ADDS to the gap UIKit already leaves between two glass
+    /// groups (12pt on iOS 27: the feed's [🔖 ⇄] capsule stands 12 + 8 = 20pt
+    /// from ⋯). So a filling leading item's separator is ZERO wide: it still
+    /// splits the groups — ⋯ keeps its own bubble — and the strip runs to the
+    /// bar's own 12pt gap, the gap every neighbouring bubble in the bar keeps
+    /// (measured 2026-10-01: 20pt with `sm`, which read as a hole).
     static func items(
         leading: UIView, leadingFills: Bool = false, actions: [UIButton], more: UIButton
     ) -> [UIBarButtonItem] {
@@ -37,7 +44,7 @@ enum SnapFooterToolbar {
         leadingItem.hidesSharedBackground = leadingFills
         var items: [UIBarButtonItem] = [
             leadingItem,
-            leadingFills ? .fixedSpace(Spacing.sm) : .flexibleSpace(),
+            leadingFills ? .fixedSpace(actions.isEmpty ? 0 : Spacing.sm) : .flexibleSpace(),
         ]
         if !actions.isEmpty {
             let cluster = UIStackView(arrangedSubviews: actions)

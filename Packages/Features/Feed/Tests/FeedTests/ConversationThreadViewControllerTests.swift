@@ -186,9 +186,34 @@ struct ConversationThreadViewControllerTests {
             CGPoint(x: 0, y: screen.view.bounds.height - screen.view.safeAreaInsets.bottom), to: window
         ).y
         #expect(abs(composer.rail.maxY - (footerLine - Spacing.sm)) < 0.5, "the mic moved: \(composer.rail)")
-        #expect(abs(composer.field.maxY - (footerLine + SnapActionColumn.toolbarGlassDrop - Spacing.sm)) < 0.5,
-                "the field ends at \(composer.field.maxY), not sm above the toolbar's glass")
+        #expect(abs(composer.field.maxY - (footerLine + SnapActionColumn.toolbarGlassDrop - SnapActionColumn.glassGap)) < 0.5,
+                "the field ends at \(composer.field.maxY), not glassGap above the toolbar's glass")
         #expect(composer.bar.debugRailButton.isHidden, "no pin without the flag")
+    }
+
+    /// ⚠️ THE GAP ON SCREEN, against the real toolbar this screen shows: the
+    /// field's bottom to the ⋯ bubble's glass top (a 36pt item centred in its
+    /// 48pt glass) is `glassGap` — the gap UIKit leaves between neighbouring
+    /// bubbles of that bar — in the app. This test host stands the same bar's
+    /// glass 2pt higher than the app does
+    /// (`SnapActionColumnLayoutTests.testHostGlassDrop`), so it reads the gap
+    /// that much short; the app's 12 is measured on screen.
+    @Test func theFieldStandsOneGlassGapAboveTheToolbar() async throws {
+        let (screen, _, _, window) = makeScreen()
+        screen.navigationController?.setToolbarHidden(false, animated: false)
+        let more = try #require(screen.toolbarItems?.last?.customView)
+        for _ in 0..<30 where more.window == nil || more.bounds.height == 0 {
+            screen.navigationController?.view.setNeedsLayout()
+            screen.navigationController?.view.layoutIfNeeded()
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try #require(more.window != nil, "the bar never hosted ⋯")
+        let composer = try SnapActionColumnLayoutTests.composerColumn(in: screen.view, space: window)
+        let glassTop = more.convert(CGPoint(x: 0, y: more.bounds.midY), to: window).y - 24
+        let gap = glassTop - composer.field.maxY
+        let hostShortfall = SnapActionColumn.toolbarGlassDrop - SnapActionColumnLayoutTests.testHostGlassDrop
+        #expect(abs(gap - (SnapActionColumn.glassGap - hostShortfall)) <= 1,
+                "the field stands \(gap)pt above the toolbar's glass (field \(composer.field.maxY), glass \(glassTop))")
     }
 
     /// `-snap-layout-v2`: the thread shares the post's composer, so it shares

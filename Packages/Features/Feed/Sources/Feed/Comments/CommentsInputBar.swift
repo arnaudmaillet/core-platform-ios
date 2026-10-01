@@ -20,7 +20,7 @@ import UIKit
 ///
 /// The INPUT ROW — avatar and field — is the bar's bottom edge: a host rests
 /// the bar `SnapActionColumn.inputRestingGap` above its footer line, which is
-/// `sm` above the toolbar's glass (asked 2026-10-01: the field sat too far
+/// `SnapActionColumn.glassGap` above the toolbar's glass (asked 2026-10-01: the field sat too far
 /// above the toolbar). The trailing COLUMN — the mic/send slot and the stake
 /// (boost) bubble over it — keeps the place it had before the row moved down:
 /// it stands `columnLift` off the bar's bottom, so it is a little higher than
@@ -958,11 +958,11 @@ final class CommentsInputBar: UIView {
     private var ranComposerDraftQA = false
 
     /// `-composer-draft <text>` (DEBUG): puts `<text>` in the draft ~2 s after
-    /// the bar is SHOWN (in a window, opaque — an engagement's bar waits
-    /// offstage at alpha 0), then empties it ~3 s later — the slot's two faces
-    /// (send over a draft, the rest face over an empty field) without a
-    /// keyboard, which the simulator does not show. Prints `[composer-draft]`
-    /// with the slot's face at each step.
+    /// the bar is SHOWN (on screen, every ancestor opaque — an engagement's
+    /// bar waits offstage at alpha 0), then empties it ~6 s later: the slot's
+    /// two faces (send over a draft, the rest face over an empty field)
+    /// without a keyboard, which the simulator does not show. Prints
+    /// `[composer-draft] <epoch s> <step>` with the slot's face at each step.
     private func runComposerDraftQAIfAsked() {
         let arguments = ProcessInfo.processInfo.arguments
         guard !ranComposerDraftQA, let index = arguments.firstIndex(of: "-composer-draft"),
@@ -974,19 +974,27 @@ final class CommentsInputBar: UIView {
             let face = self.usesRailButton
                 ? "rail=\(self.railFaceSymbol ?? "-") label=\(self.railButton.accessibilityLabel ?? "-")"
                 : "send.alpha=\(self.sendButton.alpha) mic.alpha=\(self.utilityButton.alpha)"
+            let frame = self.window.map { self.convert(self.bounds, to: $0) } ?? .zero
             // stderr: unbuffered, so a detached `--stderr=` sink is live.
-            FileHandle.standardError.write(Data("[composer-draft] \(step) draft=\"\(self.draftText)\" \(face)\n".utf8))
+            FileHandle.standardError.write(Data(
+                "[composer-draft] \(Int(Date().timeIntervalSince1970)) \(step) draft=\"\(self.draftText)\" \(face) frame=\(frame)\n".utf8
+            ))
         }
+        // SHOWN means on screen: every ancestor visible and opaque (a panel
+        // is mounted on pages that are not the one showing), and the bar
+        // inside the window's bounds.
         QAWait.until("-composer-draft", timeout: 30, { [weak self] in
-            guard let self else { return false }
-            return self.window != nil && !self.isHidden && self.alpha > 0.99
+            guard let self, let window = self.window, self.bounds.height > 0 else { return false }
+            let ancestorsShown = sequence(first: self as UIView, next: \.superview)
+                .allSatisfy { !$0.isHidden && $0.alpha > 0.99 }
+            return ancestorsShown && window.bounds.contains(self.convert(self.bounds, to: window))
         }) {
             report("shown")
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
                 self?.draftText = text
                 report("typed")
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 8.0) { [weak self] in
                 self?.draftText = ""
                 report("cleared")
             }

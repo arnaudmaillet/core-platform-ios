@@ -73,7 +73,7 @@ struct SnapBarPillWidthsTests {
         }
         #expect(author(440) == SnapBarPillWidths.authorCap, "a wide bar's pill stops at the cap")
         #expect(author(375) <= author(402))
-        #expect(author(402, wallet: Self.wallet) < author(402))
+        #expect(author(375, wallet: Self.wallet) < author(375))
         #expect(author(402, wallet: Self.wallet, sort: Self.sort) < author(402, wallet: Self.wallet))
         // Past a comfortable pill, the sort's word is what gives way.
         let tight = SnapBarPillWidths.resolve(

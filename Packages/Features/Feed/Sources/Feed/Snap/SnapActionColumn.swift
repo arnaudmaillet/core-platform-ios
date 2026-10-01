@@ -39,7 +39,7 @@ import UIKit
 /// test is what says the column moved.
 ///
 /// **THE INPUT ROW RESTS ON THE TOOLBAR, flag or no flag** (asked 2026-10-01).
-/// The composer's field sits `sm` above the toolbar's glass, and the trailing
+/// The composer's field sits `glassGap` above the toolbar's glass, and the trailing
 /// column keeps the place it had: the composer lifts the column off its own
 /// bottom by `columnLift`, so the rail bubble stands a little higher than the
 /// field — accepted, the field is what reads as "right above the toolbar".
@@ -91,7 +91,7 @@ enum SnapActionColumn {
     /// `-dump-bars`: line at 788, glass from 798 to 846 on an 874pt screen).
     /// Not published by UIKit; re-measure if the bar's metrics move —
     /// `SnapActionColumnLayoutTests.theToolbarsGlassStandsWhereTheComposerExpectsIt`
-    /// reads it off a real bar and fails when it does.
+    /// keeps a sentinel on a real bar in the test host and fails when it does.
     ///
     /// A CONSTANT, NOT A READING. The glass lives in a private floating-bar
     /// container that UIKit lays out after the screen does, and fades in and
@@ -102,10 +102,23 @@ enum SnapActionColumn {
     /// (`ios27-bar-item-width-traps`, `bar-item-wrapper-drift`).
     static let toolbarGlassDrop: CGFloat = 10
 
+    /// ⚠️ THE ONE GAP between the composer's field and the toolbar's glass:
+    /// the gap UIKit itself leaves between two neighbouring glass bubbles in
+    /// that same bar, so the field reads as one more member of the bar.
+    /// Measured on iOS 27 (iPhone 18 Pro, `-dump-bars`): the toolbar's
+    /// attribution capsule ends at 212 and the actions capsule starts at 224,
+    /// and the nav bar's wallet badge ends at 198 and the author pill starts
+    /// at 210 — 12pt both. Asked 2026-10-01: the field sat too far above the
+    /// bar (18pt), then too close (8pt, `sm`); Liquid Glass bars space their
+    /// neighbours by one gap, and this is it. Not below 8 (the HIG's spacing
+    /// between related controls), not above ~12 (tighter than before was
+    /// the point).
+    static let glassGap: CGFloat = 12
+
     /// The composer's INPUT ROW (its bottom edge) above the bottom margin line
-    /// at rest: `sm` above the toolbar's glass — which is below the line, so
-    /// this is the glass drop short of `sm` (and may be negative).
-    static var inputRestingGap: CGFloat { Spacing.sm - toolbarGlassDrop }
+    /// at rest: `glassGap` above the toolbar's glass — which is below the
+    /// line, so this is the glass drop short of the gap (and may be negative).
+    static var inputRestingGap: CGFloat { glassGap - toolbarGlassDrop }
 
     /// Where the composer's trailing COLUMN rests above the bottom margin
     /// line: the action column's lift when the experiment is on, the classic
