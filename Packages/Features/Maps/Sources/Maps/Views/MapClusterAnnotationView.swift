@@ -123,26 +123,19 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerD
     /// image the hero transition flies. Called from the map delegate, which
     /// owns the image pipeline.
     func configure(
-        with cluster: MapComputedCluster, imagePipeline: ImagePipeline,
+        with cluster: MapComputedCluster, dress: MapMarkerDress = .neutral, imagePipeline: ImagePipeline,
         iconCatalog: AnimatedIconCatalog? = nil, previewCatalog: AnimatedIconCatalog? = nil
     ) {
         self.iconCatalog = iconCatalog
         self.previewCatalog = previewCatalog
         let url = cluster.representative.thumbnailURL
         let face = PinCardView.Face.of(cluster.representative)
-        // The hierarchy ring, ABOVE the idempotence guard: a reconcile can
-        // change the marker's level (a re-layout that gains or loses the
-        // shared place) while the representative — and so the face and URL —
-        // stays put. Re-applying an unchanged ring is a cheap set; missing a
-        // level change leaves the wrong color on a live marker. Only the
-        // active band's OWN markers wear a color: a local-band proximity
-        // cluster sharing a leaf place keeps its gallery tap but dresses
-        // neutral.
-        let kind = cluster.isHierarchyMarker ? cluster.place?.kind : nil
-        card.setRing(color: MapMarkerRing.color(for: kind), width: MapMarkerRing.width(for: kind))
-        #if DEBUG
-        applyDebugBandingBorder(for: kind)
-        #endif
+        // The dress, ABOVE the idempotence guard: a reconcile can change the
+        // marker's level (a re-layout that gains or loses the shared place) or
+        // its lock (an unlock) while the representative — and so the face and
+        // URL — stays put. Re-applying an unchanged dress is a cheap set;
+        // missing a change leaves the wrong flag on a live marker.
+        applyDress(dress)
         // Idempotent: a tracked cluster is re-configured on every reconcile even
         // when its face is unchanged (same representative thumbnail). Blanking
         // and re-fetching it then would flash the card, so leave it be.
@@ -338,33 +331,18 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerD
         card.setPreviewSheet(nil)
         card.imageView.image = nil
         card.setTextAvatar(nil)
-        card.setRing(color: MapMarkerRing.color(for: nil), width: MapMarkerRing.width(for: nil))
-        #if DEBUG
-        applyDebugBandingBorder(for: nil)
-        #endif
+        applyDress(.neutral)
         applyFace(.media)
     }
 
-    #if DEBUG
-    /// DEBUG-ONLY banding verifier, compiled out of release builds: a square
-    /// outline on this outer view — blue for a COUNTRY cluster, red for a
-    /// CITY one — so a screenshot says which band produced every marker.
-    /// Deliberately square (the product ring is rounded, on the card) and on
-    /// a separate layer, so the two never mix; a color that doesn't follow
-    /// trait changes is fine for a diagnostic. `nil` (a generic cluster)
-    /// wears no debug border.
-    private func applyDebugBandingBorder(for kind: MapPlace.Kind?) {
-        switch kind {
-        case .country:
-            layer.borderColor = UIColor.systemBlue.cgColor
-            layer.borderWidth = 2
-        case .city:
-            layer.borderColor = UIColor.systemRed.cgColor
-            layer.borderWidth = 2
-        case nil:
-            layer.borderColor = nil
-            layer.borderWidth = 0
-        }
+    /// Wears `dress` — see `MapMarkerDress` — and gives way on the map when
+    /// locked: a locked country's marker loses its place to an open one's
+    /// (MapKit hides the lower priority of two colliding annotations), so
+    /// what the viewer can open is never covered by what they cannot.
+    private func applyDress(_ dress: MapMarkerDress) {
+        card.setDress(dress)
+        displayPriority = dress.isLocked ? MapMarkerDress.lockedPriority : .required
+        accessibilityHint = dress.isLocked ? "Locked country. Shows how to unlock it" : nil
     }
-    #endif
 }
+

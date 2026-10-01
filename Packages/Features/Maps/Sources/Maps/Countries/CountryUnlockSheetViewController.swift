@@ -76,7 +76,7 @@ final class CountryUnlockSheetViewController: UIViewController {
 
         let metrics = UIStackView(arrangedSubviews: [
             Self.metric(value: standing.map { "#\($0.rank)" } ?? "—", caption: "Rank"),
-            Self.metric(value: standing.map { LockedCountryAnnotationView.compact($0.likes) } ?? "—",
+            Self.metric(value: standing.map { CountryStanding.compact($0.likes) } ?? "—",
                         caption: "Likes", heart: true),
             Self.metric(value: standing.map { "\($0.posts)" } ?? "—", caption: "Posts"),
         ])

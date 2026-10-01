@@ -136,9 +136,7 @@ struct PinTextFaceAvatarTests {
         )
     }
 
-    private func face(of card: PinCardView) -> UIView? {
-        card.subviews.first { String(describing: type(of: $0)).contains("TextFace") }
-    }
+    private func face(of card: PinCardView) -> UIView? { card.debugTextFace }
 
     /// The avatar view is above the glyph and hides it — the author replaces
     /// the symbol rather than decorating it.

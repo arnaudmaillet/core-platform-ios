@@ -194,10 +194,13 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing
     /// Renders the pin's thumbnail and (dormant) video badge — or, for a
     /// text-only post, the symbol face instead of a cover.
     func configure(
-        with pin: MapPin, imagePipeline: ImagePipeline,
+        with pin: MapPin, dress: MapMarkerDress = .neutral, imagePipeline: ImagePipeline,
         iconCatalog: AnimatedIconCatalog? = nil, previewCatalog: AnimatedIconCatalog? = nil
     ) {
         self.imagePipeline = imagePipeline
+        // ABOVE the guard, like the cluster's: an unlock changes the dress of
+        // a pin whose post — and so everything below — is unchanged.
+        applyDress(dress)
         // Idempotent: a reconcile re-configures every surviving marker, so a
         // marker already showing this post must be left exactly as it is —
         // blanking and re-fetching an unchanged thumbnail is what flashes it.
@@ -214,7 +217,7 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing
         case .text: "text"
         }
         #endif
-        playBadge.isHidden = pin.kind != .video
+        playBadge.isHidden = pin.kind != .video || dress.isLocked
         // Set on every configure, not only for text: this view is recycled, so
         // a media pin dequeuing a view that last wore the text face has to take
         // it off again — and get its square back.
@@ -386,7 +389,18 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing
         // photograph is worse than a stale avatar: it moves.
         applyIconArt(nil)
         card.setTextAvatar(nil)
+        applyDress(.neutral)
         applyFace(.media)
         playBadge.isHidden = true
+    }
+
+    /// See `MapClusterAnnotationView.applyDress`. A lone pin speaks for no
+    /// place, so all it can wear beyond the neutral ring is the lock — and a
+    /// locked pin's play badge would promise a video it will not open.
+    private func applyDress(_ dress: MapMarkerDress) {
+        card.setDress(dress)
+        displayPriority = dress.isLocked ? MapMarkerDress.lockedPriority : .required
+        accessibilityHint = dress.isLocked ? "Locked country. Shows how to unlock it" : nil
+        playBadge.isHidden = dress.isLocked || representedPin?.kind != .video
     }
 }

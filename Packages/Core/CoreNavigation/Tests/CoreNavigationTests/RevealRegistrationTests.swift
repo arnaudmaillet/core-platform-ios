@@ -588,4 +588,34 @@ private final class SceneryBox {
         #expect(RevealStage.closingPageOpacity(sourceFill: .clear) == 1,
                 "a stated colour is a statement, even a transparent one: only ABSENCE means no ground")
     }
+
+    /// A dismissal's stand-in rides inside the window's host — clipped by its
+    /// mask — unless it says it draws outside its own frame, in which case it
+    /// sits just above the host, still over the page.
+    @Test func anOverhangingStandInIsMountedAboveTheWindow() {
+        final class StandIn: UIView, RevealStandInShaping {
+            var overhangs = false
+            func setCornerRadius(_ radius: CGFloat) {}
+            func setContentOpacity(_ alpha: CGFloat) {}
+            var revealStandInOverhangsWindow: Bool { overhangs }
+        }
+        let container = UIView(frame: CGRect(x: 0, y: 0, width: 375, height: 667))
+        let page = UIView(frame: CGRect(x: 0, y: 0, width: 375, height: 667))
+        let (host, _) = RevealStage.makeHost(around: page, in: container, pageFrame: CGRect(x: 0, y: 0, width: 375, height: 667))
+
+        let clipped = StandIn()
+        RevealStage.mountDismissStandIn(clipped, in: host)
+        #expect(clipped.superview === host)
+        #expect(host.subviews.last === clipped, "over the page")
+
+        let overhanging = StandIn()
+        overhanging.overhangs = true
+        // Through the existential, as the transition sees it.
+        let shaped: any RevealStandInShaping = overhanging
+        #expect(shaped.revealStandInOverhangsWindow)
+        RevealStage.mountDismissStandIn(overhanging, in: host)
+        #expect(overhanging.superview === container)
+        let index = container.subviews.firstIndex(of: overhanging) ?? -1
+        #expect(index == (container.subviews.firstIndex(of: host) ?? .max) + 1, "just above the host")
+    }
 }
