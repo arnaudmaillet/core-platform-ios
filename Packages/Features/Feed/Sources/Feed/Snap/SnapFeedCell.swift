@@ -473,13 +473,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// the VC owns the tally and the refund.
     var onRequestBoostUndo: ((PostID) -> Void)?
 
-    /// Whether the page lays out the experimental action column (the repost
-    /// bubble under the boost anchor — `SnapActionColumn`). The screen pushes
-    /// its own answer at dequeue; idempotent.
-    func setUsesActionColumn(_ uses: Bool) {
-        chrome.usesActionColumn = uses
-    }
-
     /// Boost feedback pass-throughs — the chrome owns the anchor and its
     /// theatre; the VC owns the wallet verdict that picks which one plays.
     func playBoostConfirmation(amount: Int) { chrome.playBoostConfirmation(amount: amount) }

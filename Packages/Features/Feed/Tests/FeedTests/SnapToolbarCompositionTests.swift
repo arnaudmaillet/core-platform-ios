@@ -14,8 +14,7 @@ import UIKit
 /// edits the builder next.
 ///
 /// ```
-///  [♫ attribution 🔊] ————————————— [🔖 ⇄] [⋯]
-///                                            ├ Share
+///  [♫ attribution 🔊] ————————————— [⇪ 🔖] [⋯]
 ///                                            ├ Not interested
 ///                                            └ Report            (destructive)
 /// ```
@@ -25,16 +24,12 @@ import UIKit
 /// cannot say which action a glyph carries.
 @MainActor
 struct SnapToolbarCompositionTests {
-    private func feed(
-        reporting: (any ContentReporting)? = StubReporter(), actionColumn: Bool = false
-    ) -> SnapFeedViewController {
+    private func feed(reporting: (any ContentReporting)? = StubReporter()) -> SnapFeedViewController {
         let controller = SnapFeedViewController(
             viewModel: FeedViewModel(repository: EmptyProvider()),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             reporting: reporting
         )
-        // Before the view loads: the toolbar is built once, in `viewDidLoad`.
-        controller.usesActionColumn = actionColumn
         controller.loadViewIfNeeded()
         controller.view.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
         controller.seedProjection([
@@ -70,29 +65,20 @@ struct SnapToolbarCompositionTests {
 
     // MARK: - The bar
 
-    /// ⚠️ SAVE AND REPOST, in that order, and nothing else beside the ⋯.
+    /// ⚠️ SHARE AND SAVE, in that order, and nothing else beside the ⋯.
     ///
-    /// Share used to hold the middle slot. It moved into the menu: saving and
-    /// passing on are the two things a reader does WITH a post, and share is
-    /// something they do to it once in a while.
-    @Test func theTrailingRunIsSaveRepostAndTheMenu() {
+    /// Repost is a bubble on the page, under the like anchor
+    /// (`SnapActionColumn`), so share took its place in the capsule — first:
+    /// [⇪ 🔖] [⋯].
+    @Test func theTrailingRunIsShareSaveAndTheMenu() {
         let buttons = toolbarButtons(feed())
-
-        #expect(labels(buttons) == ["Save", "Repost", "More actions"],
-                "the trailing run is not [save, repost, ⋯]: \(labels(buttons))")
-    }
-
-    /// Share is GONE from the bar — not hidden, not disabled.
-    @Test func theBarNoLongerCarriesShare() {
-        #expect(labels(toolbarButtons(feed())).contains("Share") == false)
-    }
-
-    /// `-snap-layout-v2`: repost is a bubble on the page, under the like
-    /// anchor, and SHARE takes its place in the capsule — first: [⇪ 🔖] [⋯].
-    @Test func underTheActionColumnTheCapsuleIsShareThenSave() {
-        let buttons = toolbarButtons(feed(actionColumn: true))
         #expect(labels(buttons) == ["Share", "Save", "More actions"],
                 "the trailing run is not [share, save, ⋯]: \(labels(buttons))")
+    }
+
+    /// Repost is GONE from the bar — it stands on the page.
+    @Test func theBarNoLongerCarriesRepost() {
+        #expect(labels(toolbarButtons(feed())).contains("Repost") == false)
     }
 
     /// The attribution keeps the leading end, with the dynamic space between:
@@ -133,7 +119,7 @@ struct SnapToolbarCompositionTests {
         let items = try #require(feed().toolbarItems)
 
         let actions = try #require(items.dropFirst(3).first?.customView as? UIStackView)
-        #expect(actions.arrangedSubviews.count == 2, "the capsule is not [save, repost]")
+        #expect(actions.arrangedSubviews.count == 2, "the capsule is not [share, save]")
         #expect(items.dropFirst(4).first?.customView == nil, "no separator before the ⋯")
         let more = try #require(items.last?.customView as? UIButton)
         #expect(more.accessibilityLabel == "More actions")
@@ -144,11 +130,12 @@ struct SnapToolbarCompositionTests {
     /// ⚠️ NOT NAVIGATION. "View comments" and "View profile" are gone: both
     /// were second doors to places one tap already opens (the comment count,
     /// the author pill), and a menu of things you can reach anyway crowds out
-    /// the things that have nowhere else to live.
-    @Test func theMenuOffersShareNotInterestedAndReport() {
+    /// the things that have nowhere else to live. Share has its own button in
+    /// the capsule, so it is not here either.
+    @Test func theMenuOffersNotInterestedAndReport() {
         let titles = feed().debugMoreMenuTitles(for: PostID("p1"))
 
-        #expect(titles == ["Share", "Not interested", "Report"], "the menu reads: \(titles)")
+        #expect(titles == ["Not interested", "Report"], "the menu reads: \(titles)")
     }
 
     /// Report is destructive and LAST — the gallery card's own menu ordering.
@@ -161,12 +148,12 @@ struct SnapToolbarCompositionTests {
     }
 
     /// ⚠️ WITHHELD, NOT DISABLED. With nobody to file a report with, the row
-    /// is absent — an action that cannot act is not offered. The other two
-    /// stand: neither needs a backend.
+    /// is absent — an action that cannot act is not offered. The other one
+    /// stands: it needs no backend.
     @Test func theReportRowIsAbsentWithoutSomewhereToFileIt() {
         let titles = feed(reporting: nil).debugMoreMenuTitles(for: PostID("p1"))
 
-        #expect(titles == ["Share", "Not interested"])
+        #expect(titles == ["Not interested"])
     }
 }
 

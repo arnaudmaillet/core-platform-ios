@@ -88,13 +88,10 @@ enum SnapCommentsLayout {
     /// The engaged-state spring, shared by every leg of the one animation —
     /// and symmetric: the return runs the same envelope. ONE rhythm: the
     /// media's recede, the backdrop's wash, the chrome fades, the stream's
-    /// fade-and-expand, and the composer's slide all breathe in this single
+    /// fade-and-expand, and the composer's fade all breathe in this single
     /// block.
     static let engageDuration: TimeInterval = 0.45
     static let disengageDuration: TimeInterval = 0.45
-    /// The composer's entrance micro-translation: it slides up into place
-    /// as it fades, arriving into its stacked seat above the native bar.
-    static let composerEntranceOffset: CGFloat = 15
     /// The stream's entrance scale: the whole comments layer EXPANDS into
     /// place as it fades in, rather than simply appearing there. This
     /// carries the engagement's motion now that neither the media nor a

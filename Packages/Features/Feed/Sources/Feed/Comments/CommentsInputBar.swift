@@ -15,34 +15,31 @@ import UIKit
 /// AN INPUT ROW AND A TRAILING COLUMN, one view:
 ///
 ///     ——————————————————————[stake]
-///     ——————————————————————[mic/send]
-///     [avatar][field      ]  ↑ columnLift
+///     ——————————————————————[repost/pin/send]
+///     [avatar][field   ☺ 〰]  ↑ columnLift
 ///
 /// The INPUT ROW — avatar and field — is the bar's bottom edge: a host rests
 /// the bar `SnapActionColumn.inputRestingGap` above its footer line, which is
-/// `SnapActionColumn.glassGap` above the toolbar's glass (asked 2026-10-01: the field sat too far
-/// above the toolbar). The trailing COLUMN — the mic/send slot and the stake
-/// (boost) bubble over it — keeps the place it had before the row moved down:
-/// it stands `columnLift` off the bar's bottom, so it is a little higher than
-/// the field (accepted). The stake is the post's headline action, at UIKit's
-/// default glass-button size; it rides the field's top when a growing field
-/// outgrows the slot. Everything is INSIDE the bar's bounds, so the bar's
-/// height (and `restingHeight(for:)`) include it and every host's clearance
-/// follows; the empty run left of the column is NOT part of the bar for
-/// touches (`point(inside:with:)`), so the stream behind it keeps its taps.
+/// `SnapActionColumn.glassGap` above the toolbar's glass (asked 2026-10-01:
+/// the field sat too far above the toolbar). The trailing COLUMN — the rail
+/// slot and the stake (boost) bubble over it — is the ACTION COLUMN's two
+/// bubbles (`SnapActionColumn`): both the comment band's height, one md apart,
+/// standing exactly on the media layout's like and repost bubbles. It stands
+/// `columnLift` off the bar's bottom, so it is a little higher than the field
+/// (accepted). The stake holds its station over the slot, and a growing field
+/// rises BESIDE it. Everything is INSIDE the bar's bounds, so the bar's height
+/// (and `restingHeight(for:)`) include it and every host's clearance follows;
+/// the empty run left of the column is NOT part of the bar for touches
+/// (`point(inside:with:)`), so the stream behind it keeps its taps.
+///
+/// With a `railFace` the slot is ONE glass button wearing the host's action —
+/// REPOST on a post, PIN in a conversation — that turns into the SEND arrow
+/// while there is text (a symbol replace), and the voice note is a waveform
+/// INSIDE the field, beside the emote button. Without one (`.voice`, a draft
+/// post) the slot is the waveform/send crossfade.
 ///
 /// `showsStake = false` (a conversation: there is nothing to like) leaves the
 /// column the slot alone.
-///
-/// **`-snap-layout-v2` (experimental, `usesActionColumn`):** the stake and
-/// the slot are the trailing ACTION COLUMN's two bubbles (`SnapActionColumn`)
-/// — both the comment band's height, one md apart — standing on the media
-/// layout's like and repost bubbles exactly. The stake holds its station over
-/// the slot, and a growing field rises BESIDE it. With a `railFace` the slot
-/// is ONE glass button wearing the host's action — REPOST on a post, PIN in a
-/// conversation — that turns into the SEND arrow while there is text (a symbol
-/// replace), and the voice note moves INTO the field as a waveform beside the
-/// emote button.
 final class CommentsInputBar: UIView {
     /// Fired with trimmed, non-empty text; the field clears itself first.
     var onSend: ((String) -> Void)?
@@ -54,8 +51,8 @@ final class CommentsInputBar: UIView {
     /// Fired by the boost menu's Undo entry — the host refunds the session
     /// spend (it owns the tally and the wallet; the bar only shows the door).
     var onBoostUndo: (() -> Void)?
-    /// Fired by the MICROPHONE face (the idle trailing slot): the voice-note
-    /// seam. Unwired for now — an honest affordance whose capture flow does
+    /// Fired by the WAVEFORM (the idle trailing slot, or inside the field
+    /// beside the emote button under a rail face): the voice-note seam. Unwired for now — an honest affordance whose capture flow does
     /// not exist yet.
     ///
     /// The slot used to hold a ✕ that collapsed the engagement. The exit
@@ -75,7 +72,7 @@ final class CommentsInputBar: UIView {
     /// and the host drives `contentOffset` directly. `translation`/
     /// `velocity` are the pan's vertical components; up (negative) pages to
     /// the next post. Wiring this ENABLES the drive AND marks a feed
-    /// engagement (so the idle slot wears the microphone); hosts that leave
+    /// engagement (so the idle slot wears the waveform); hosts that leave
     /// it nil (the pushed comments screen) have no page-swipe and keep a
     /// permanent send.
     var onPageSwipe: ((PageSwipePhase, _ translation: CGFloat, _ velocity: CGFloat) -> Void)? {
@@ -90,10 +87,10 @@ final class CommentsInputBar: UIView {
         }
     }
 
-    /// What the rail slot wears at rest under `-snap-layout-v2` — see
-    /// `railFace`.
+    /// What the rail slot wears at rest — see `railFace`.
     enum RailFace: Equatable {
-        /// The voice note in the slot (the classic mic, the column's waveform).
+        /// The voice note in the slot: a waveform crossfading with send (a
+        /// draft post, which has nothing to repost yet).
         case voice
         /// The post's repost — drawn without an action today, like the
         /// toolbar's (`onRailAction` is the host's to wire).
@@ -102,10 +99,9 @@ final class CommentsInputBar: UIView {
         case pin(isPinned: Bool)
     }
 
-    /// `-snap-layout-v2`: the slot's resting face. Anything but `.voice` makes
-    /// the slot one glass button that wears this face over an empty field and
-    /// the send arrow over a draft, and puts the waveform inside the field.
-    /// Ignored without the action column.
+    /// The slot's resting face. Anything but `.voice` makes the slot one
+    /// glass button that wears this face over an empty field and the send
+    /// arrow over a draft, and puts the waveform inside the field.
     var railFace: RailFace = .voice {
         didSet {
             guard railFace != oldValue else { return }
@@ -143,11 +139,9 @@ final class CommentsInputBar: UIView {
     /// asks a text view set up like the bar's own (`updateFieldHeight`), and
     /// gets the answer the bar will reach. Cached per size.
     ///
-    /// With `actionColumn` (`-snap-layout-v2`) the column is two bubbles and
-    /// their gap, and the field grows beside the stake rather than under it.
-    static func restingHeight(
-        for category: UIContentSizeCategory, actionColumn: Bool = false, showsStake: Bool = true
-    ) -> CGFloat {
+    /// The column is two bubbles and their gap (one without the stake), and
+    /// the field grows beside the stake rather than under it.
+    static func restingHeight(for category: UIContentSizeCategory, showsStake: Bool = true) -> CGFloat {
         let field: CGFloat
         if let cached = restingFieldHeights[category] {
             field = cached
@@ -162,23 +156,12 @@ final class CommentsInputBar: UIView {
             field = max(ceil(fitting), Metrics.controlSize)
             restingFieldHeights[category] = field
         }
-        let lift = SnapActionColumn.columnLift(actionColumn: actionColumn)
-        guard actionColumn else {
-            let stake = showsStake ? stakeRowHeight : 0
-            // The stake rides whichever is higher: the slot, or the field.
-            return max(lift + Metrics.controlSize, field) + stake
-        }
         let bubble = SnapActionColumn.bubbleSize
-        let column = lift + bubble + (showsStake ? bubble + SnapActionColumn.gap : 0)
+        let column = SnapActionColumn.columnLift + bubble + (showsStake ? bubble + SnapActionColumn.gap : 0)
         return max(column, field)
     }
 
     private static var restingFieldHeights: [UIContentSizeCategory: CGFloat] = [:]
-
-    /// What the stake row adds above the input row: the bubble and the gap
-    /// under it. A constant — the bubble does not scale with the text size,
-    /// like every other round control on the bar.
-    static let stakeRowHeight: CGFloat = Metrics.stakeButtonSize + Metrics.stakeRowGap
 
     private enum Metrics {
         static let maxLines: CGFloat = 4
@@ -190,12 +173,6 @@ final class CommentsInputBar: UIView {
         /// the glass read as a rim around it; that ring of glass read as a
         /// margin instead, and the face is the thing worth the room.
         static let avatarDiameter: CGFloat = controlSize
-        /// The stake bubble: UIKit's default glass-button size, a notch above
-        /// the input row's 38pt controls — the bar's one action on the post,
-        /// sized as a system button rather than as a peer of the field.
-        static let stakeButtonSize: CGFloat = 44
-        /// Between the stake bubble and the input row below it.
-        static let stakeRowGap: CGFloat = Spacing.sm
     }
 
     /// The viewer's face, leading the bar — the composer's answer to the
@@ -206,7 +183,7 @@ final class CommentsInputBar: UIView {
     private let avatarView = MonogramAvatarView(diameter: Metrics.avatarDiameter)
     private let avatarImageView = AvatarImageView()
     /// The glass bubble the avatar sits in, and the button that owns its
-    /// touches. The bubble matches the mic/send button at the row's other end — the composer
+    /// touches. The bubble matches the input row's other glass controls — the composer
     /// reads as one row of glass controls with a face at its head — and the
     /// button carries the profile switcher menu.
     ///
@@ -234,19 +211,19 @@ final class CommentsInputBar: UIView {
     /// See `visibilityMenu`.
     private let visibilityButton = UIButton(configuration: .glass())
     private let sendButton = UIButton(configuration: .prominentGlass())
-    /// The trailing slot's idle face (send's overlay partner): the
-    /// MICROPHONE (voice note), keyboard up or down. Send takes the slot
-    /// while there is text to send (or a submission in flight).
+    /// The trailing slot's idle face without a rail face (send's overlay
+    /// partner): the voice note's WAVEFORM, keyboard up or down. Send takes
+    /// the slot while there is text to send (or a submission in flight).
     ///
     /// It used to morph into a dismiss-keyboard chevron while the keyboard
     /// was up over an empty field. A tap on the stream retires the keyboard
     /// (the hosts' stream tap), so the chevron only duplicated it — at the
     /// cost of the slot changing meaning under the thumb.
     private let utilityButton = UIButton(configuration: .glass())
-    /// `-snap-layout-v2` with a `railFace`: the slot as ONE button — the
+    /// With a `railFace`: the slot as ONE button — the
     /// host's action (repost, pin) over an empty field, send over a draft —
     /// swapping its glyph with a symbol replace instead of crossfading two
-    /// buttons. Send and the mic stand down while it shows.
+    /// buttons. Send and the slot's waveform stand down while it shows.
     private let railButton = UIButton(configuration: .glass())
     /// The voice note's door when the rail slot wears the host's action: a
     /// waveform INSIDE the field, beside the emote button.
@@ -262,12 +239,6 @@ final class CommentsInputBar: UIView {
     /// own deinit does the unregistering (the VC-side pattern).
     private let keyboardObservers = NotificationObserverTokenBag()
     private var fieldHeight: NSLayoutConstraint!
-    /// The two geometries' own constraints (everything else is shared):
-    /// exactly one set is active — see `applyActionColumn`.
-    private var classicConstraints: [NSLayoutConstraint] = []
-    private var actionColumnConstraints: [NSLayoutConstraint] = []
-    /// The slot's bottom: `columnLift` above the bar's (the input row's).
-    private var slotBottom: NSLayoutConstraint!
     /// The stake's claim on the bar's top — off while `showsStake` is false.
     private var stakeStationConstraints: [NSLayoutConstraint] = []
     /// The emote toggle's trailing edge: the field's end, or the waveform's
@@ -275,16 +246,9 @@ final class CommentsInputBar: UIView {
     private var emoteAtFieldEnd: NSLayoutConstraint!
     private var fieldVoiceConstraints: [NSLayoutConstraint] = []
 
-    /// `-snap-layout-v2`: the stake and mic/send become the action column's
-    /// two bubbles (`SnapActionColumn`), the mic a waveform. Off by default —
-    /// the HOST decides, because the host is the one that rests the bar on
-    /// the column's line.
-    var usesActionColumn = false {
-        didSet {
-            guard usesActionColumn != oldValue else { return }
-            applyActionColumn()
-        }
-    }
+    /// The column's glyphs: the like anchor's size, so the crossfade between
+    /// the two layouts reads as ONE bubble.
+    private static let glyphConfiguration = UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -362,13 +326,11 @@ final class CommentsInputBar: UIView {
         field.clipsToBounds = true
         field.cornerConfiguration = .capsule(maximumRadius: Metrics.controlSize / 2)
 
-        // The boost (stake) control, on its own row above mic/send: tap
+        // The boost (stake) control, the column's upper bubble: tap
         // spends the default denomination, long-press opens the amount menu
         // (the rail anchor's exact contract — one post, two surfaces, one
         // behavior).
-        boostButton.configuration?.image = PointsSymbol.glyphImage(
-            UIImage.SymbolConfiguration(weight: .semibold)
-        )
+        boostButton.configuration?.image = PointsSymbol.glyphImage(Self.glyphConfiguration)
         boostButton.configuration?.cornerStyle = .capsule
         boostButton.accessibilityLabel = "Boost post"
         boostButton.addAction(
@@ -389,8 +351,7 @@ final class CommentsInputBar: UIView {
         )
 
         visibilityButton.configuration?.image = UIImage(
-            systemName: "globe",
-            withConfiguration: UIImage.SymbolConfiguration(weight: .semibold)
+            systemName: "globe", withConfiguration: Self.glyphConfiguration
         )
         visibilityButton.configuration?.cornerStyle = .capsule
         visibilityButton.accessibilityLabel = "Post visibility"
@@ -406,8 +367,7 @@ final class CommentsInputBar: UIView {
         sendButton.addAction(UIAction { [weak self] _ in self?.sendTapped() }, for: .primaryActionTriggered)
 
         utilityButton.configuration?.image = UIImage(
-            systemName: "mic",
-            withConfiguration: UIImage.SymbolConfiguration(weight: .semibold)
+            systemName: "waveform", withConfiguration: Self.glyphConfiguration
         )
         utilityButton.configuration?.cornerStyle = .capsule
         utilityButton.accessibilityLabel = "Record voice comment"
@@ -481,15 +441,16 @@ final class CommentsInputBar: UIView {
         // trailing COLUMN. The row is the bar's bottom edge — the host rests
         // that edge on the toolbar — and the field grows upward from it.
         //
-        // The column: the slot (mic and send OVERLAY it and crossfade; or the
-        // rail button wears it alone) stands `columnLift` off the bar's
-        // bottom, where it stood before the row moved down; the stake bubble
-        // stands over it. The avatar opens the row (a composer says who is
-        // speaking before it offers anything else); it is silent and never
-        // moves.
-        slotBottom = sendButton.bottomAnchor.constraint(
-            equalTo: bottomAnchor, constant: -SnapActionColumn.columnLift(actionColumn: false)
-        )
+        // The column: the slot (waveform and send OVERLAY it and crossfade;
+        // or the rail button wears it alone) stands `columnLift` off the bar's
+        // bottom, on the media layout's repost bubble; the stake bubble stands
+        // one `gap` over it, on the like anchor. Both are the comment band's
+        // height (`SnapActionColumn.bubbleSize`) — read once, here, like the
+        // band reads its own at init. The stake holds its station over the
+        // slot: a growing field rises beside it, not under it. The avatar
+        // opens the row (a composer says who is speaking before it offers
+        // anything else); it is silent and never moves.
+        let bubble = SnapActionColumn.bubbleSize
         NSLayoutConstraint.activate([
             fieldHeight,
             avatarBubble.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -501,7 +462,9 @@ final class CommentsInputBar: UIView {
             field.topAnchor.constraint(greaterThanOrEqualTo: topAnchor),
             sendButton.leadingAnchor.constraint(equalTo: field.trailingAnchor, constant: Spacing.sm),
             sendButton.trailingAnchor.constraint(equalTo: trailingAnchor),
-            slotBottom,
+            sendButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -SnapActionColumn.columnLift),
+            sendButton.widthAnchor.constraint(equalToConstant: bubble),
+            sendButton.heightAnchor.constraint(equalToConstant: bubble),
             sendButton.topAnchor.constraint(greaterThanOrEqualTo: topAnchor),
             utilityButton.centerXAnchor.constraint(equalTo: sendButton.centerXAnchor),
             utilityButton.centerYAnchor.constraint(equalTo: sendButton.centerYAnchor),
@@ -512,6 +475,9 @@ final class CommentsInputBar: UIView {
             railButton.widthAnchor.constraint(equalTo: sendButton.widthAnchor),
             railButton.heightAnchor.constraint(equalTo: sendButton.heightAnchor),
             boostButton.trailingAnchor.constraint(equalTo: trailingAnchor),
+            boostButton.bottomAnchor.constraint(equalTo: sendButton.topAnchor, constant: -SnapActionColumn.gap),
+            boostButton.widthAnchor.constraint(equalToConstant: bubble),
+            boostButton.heightAnchor.constraint(equalToConstant: bubble),
             // The boost's own station: the two never show at once.
             visibilityButton.centerXAnchor.constraint(equalTo: boostButton.centerXAnchor),
             visibilityButton.centerYAnchor.constraint(equalTo: boostButton.centerYAnchor),
@@ -535,27 +501,6 @@ final class CommentsInputBar: UIView {
             stakeHug,
         ]
         NSLayoutConstraint.activate(stakeStationConstraints)
-        // The classic stake: over the slot, and over the field too once a
-        // growing field rises past the slot — it rides the higher of the two.
-        let stakeOnSlot = boostButton.bottomAnchor.constraint(
-            equalTo: sendButton.topAnchor, constant: -Metrics.stakeRowGap
-        )
-        stakeOnSlot.priority = UILayoutPriority(500)
-        classicConstraints = [
-            sendButton.widthAnchor.constraint(equalToConstant: Metrics.controlSize),
-            sendButton.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
-            boostButton.bottomAnchor.constraint(lessThanOrEqualTo: sendButton.topAnchor, constant: -Metrics.stakeRowGap),
-            boostButton.bottomAnchor.constraint(lessThanOrEqualTo: field.topAnchor, constant: -Metrics.stakeRowGap),
-            stakeOnSlot,
-            boostButton.widthAnchor.constraint(equalToConstant: Metrics.stakeButtonSize),
-            boostButton.heightAnchor.constraint(equalToConstant: Metrics.stakeButtonSize),
-        ]
-        NSLayoutConstraint.activate(classicConstraints)
-
-        // The action column's set, built now and activated by the host's
-        // switch (`usesActionColumn`).
-        buildActionColumnConstraints()
-
         // The disc is NEVER empty. Before an identity resolves the bar shows
         // the unknown-viewer placeholder, not a blank circle — the same
         // "monogram is the rendered state" rule the comment rows follow,
@@ -596,21 +541,6 @@ final class CommentsInputBar: UIView {
         return station.frame.contains(point)
     }
 
-    /// The action column's geometry (`-snap-layout-v2`). Bubble size is the
-    /// comment band's height — read once, here, like the band reads its own
-    /// at init. The stake holds its station over the slot: a growing field
-    /// rises beside it, not under it.
-    private func buildActionColumnConstraints() {
-        let bubble = SnapActionColumn.bubbleSize
-        actionColumnConstraints = [
-            sendButton.widthAnchor.constraint(equalToConstant: bubble),
-            sendButton.heightAnchor.constraint(equalToConstant: bubble),
-            boostButton.bottomAnchor.constraint(equalTo: sendButton.topAnchor, constant: -SnapActionColumn.gap),
-            boostButton.widthAnchor.constraint(equalToConstant: bubble),
-            boostButton.heightAnchor.constraint(equalToConstant: bubble),
-        ]
-    }
-
     /// The stake's station on or off the column (`showsStake`): its claim on
     /// the bar's top, and both of its faces.
     private func applyStakeStation() {
@@ -624,9 +554,8 @@ final class CommentsInputBar: UIView {
         setNeedsLayout()
     }
 
-    /// Whether the slot is the one rail button (`railFace`), which needs the
-    /// action column.
-    private var usesRailButton: Bool { usesActionColumn && railFace != .voice }
+    /// Whether the slot is the one rail button (`railFace`).
+    private var usesRailButton: Bool { railFace != .voice }
 
     /// Puts the voice note where the slot's mode wants it — in the slot, or in
     /// the field beside the emote button — and refreshes the slot.
@@ -641,38 +570,6 @@ final class CommentsInputBar: UIView {
         }
         fieldVoiceButton.isHidden = !inField
         updateTrailingButtons(animated: false)
-        setNeedsLayout()
-    }
-
-    /// The column's glyphs: the like anchor's size, so the crossfade between
-    /// the two layouts reads as ONE bubble. The classic bar keeps the system's.
-    private var glyphConfiguration: UIImage.SymbolConfiguration {
-        usesActionColumn
-            ? UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
-            : UIImage.SymbolConfiguration(weight: .semibold)
-    }
-
-    /// Swaps the geometry and the faces: the column's lift and sizes, the
-    /// waveform for the mic, the like anchor's glyph size on the column's
-    /// bubbles, and the rail button when the host gave the slot a face.
-    private func applyActionColumn() {
-        if usesActionColumn {
-            NSLayoutConstraint.deactivate(classicConstraints)
-            NSLayoutConstraint.activate(actionColumnConstraints)
-        } else {
-            NSLayoutConstraint.deactivate(actionColumnConstraints)
-            NSLayoutConstraint.activate(classicConstraints)
-        }
-        slotBottom.constant = -SnapActionColumn.columnLift(actionColumn: usesActionColumn)
-        applyRailMode()
-        utilityButton.configuration?.image = UIImage(
-            systemName: usesActionColumn ? "waveform" : "mic", withConfiguration: glyphConfiguration
-        )
-        // The number face (a spend on the post) carries no image to resize.
-        if boostSpentTotal == 0 {
-            boostButton.configuration?.image = PointsSymbol.glyphImage(glyphConfiguration)
-        }
-        visibilityButton.configuration?.image = UIImage(systemName: "globe", withConfiguration: glyphConfiguration)
         setNeedsLayout()
     }
 
@@ -780,7 +677,7 @@ final class CommentsInputBar: UIView {
         }
     }
 
-    /// The idle face — the mic over an empty field — outside a feed
+    /// The idle face — the waveform over an empty field — outside a feed
     /// engagement too. The conversation screen is the text page's bar without
     /// a pager behind it; everywhere else this stays false and the rule is
     /// exactly the page-swipe marker it always was.
@@ -838,7 +735,8 @@ final class CommentsInputBar: UIView {
         textViewDidChange(textView)
     }
 
-    /// The mic's tap: the voice-note seam, keyboard up or down.
+    /// The waveform's tap (in the slot or in the field): the voice-note seam,
+    /// keyboard up or down.
     private func utilityTapped() {
         onVoiceNote?()
     }
@@ -973,7 +871,7 @@ final class CommentsInputBar: UIView {
             guard let self else { return }
             let face = self.usesRailButton
                 ? "rail=\(self.railFaceSymbol ?? "-") label=\(self.railButton.accessibilityLabel ?? "-")"
-                : "send.alpha=\(self.sendButton.alpha) mic.alpha=\(self.utilityButton.alpha)"
+                : "send.alpha=\(self.sendButton.alpha) voice.alpha=\(self.utilityButton.alpha)"
             let frame = self.window.map { self.convert(self.bounds, to: $0) } ?? .zero
             // stderr: unbuffered, so a detached `--stderr=` sink is live.
             FileHandle.standardError.write(Data(
@@ -1064,7 +962,7 @@ final class CommentsInputBar: UIView {
             boostButton.configuration?.contentInsets = .zero
         } else {
             boostButton.configuration?.attributedTitle = nil
-            boostButton.configuration?.image = PointsSymbol.glyphImage(glyphConfiguration)
+            boostButton.configuration?.image = PointsSymbol.glyphImage(Self.glyphConfiguration)
         }
         boostButton.accessibilityValue = total > 0 ? "\(total) points spent" : nil
         // The receipt moves the cap's remainder, and the remainder moves
@@ -1209,19 +1107,19 @@ final class CommentsInputBar: UIView {
         boostButton.layer.add(shake, forKey: "boost.denied")
     }
 
-    /// The trailing slot's two faces:
+    /// The trailing slot's two faces without a rail face:
     ///   has text (or a send in flight) → send
-    ///   empty                          → 🎙 microphone (voice note)
-    /// The keyboard plays no part. The mic stays up while nothing is typed,
-    /// and a draft is sendable with the keyboard down: a shared link or an
-    /// emote lands in the field precisely to be sent, and a mic over a draft
-    /// turned the one action there into a "not available" notice.
-    /// The mic belongs to a FEED ENGAGEMENT, or to a bar that asks for it
+    ///   empty                          → 〰 waveform (voice note)
+    /// The keyboard plays no part. The waveform stays up while nothing is
+    /// typed, and a draft is sendable with the keyboard down: a shared link or
+    /// an emote lands in the field precisely to be sent, and a voice note over
+    /// a draft turned the one action there into a "not available" notice.
+    /// The waveform belongs to a FEED ENGAGEMENT, or to a bar that asks for it
     /// (`showsIdleUtilityFaces` — the conversation, the draft post); the
     /// pushed comments screen does neither and keeps a permanent send.
     /// Swapped as a short alpha crossfade, never a pop.
     ///
-    /// With a rail face (`-snap-layout-v2`) the slot is the ONE rail button
+    /// With a rail face the slot is the ONE rail button
     /// instead: the host's face over an empty field, the send arrow over a
     /// draft — a symbol replace on its glyph, no crossfade.
     private func updateTrailingButtons(animated: Bool) {
@@ -1275,7 +1173,7 @@ final class CommentsInputBar: UIView {
         }
         if railFaceSymbol != symbol {
             railFaceSymbol = symbol
-            railButton.configuration?.image = UIImage(systemName: symbol, withConfiguration: glyphConfiguration)
+            railButton.configuration?.image = UIImage(systemName: symbol, withConfiguration: Self.glyphConfiguration)
         }
         if railButton.configuration?.showsActivityIndicator != isSending {
             railButton.configuration?.showsActivityIndicator = isSending
