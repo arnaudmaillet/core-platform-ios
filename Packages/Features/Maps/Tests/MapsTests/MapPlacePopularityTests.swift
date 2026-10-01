@@ -82,27 +82,34 @@ struct MapPlacePopularityTests {
         #expect(Set(items[0].memberIDs) == [PostID("post-1"), PostID("post-2"), PostID("post-3")])
     }
 
-    /// Same-band markers folded by the collision pass keep the popularity
-    /// rule EXACT: each marker's face is already its own group's most-liked/
-    /// lowest-id member, so choosing among faces IS choosing over the whole
-    /// union — and the memberIDs rotation still leads with that face.
-    @Test func aMergedBandClusterWearsTheUnionsMostLikedFace() {
+    /// Same-band markers that collide are never folded together: the place
+    /// whose face is the MOST LIKED keeps its marker — its own posts only,
+    /// led by that face — and the other gives way until the zoom separates
+    /// them. Popularity decides the face AND which place stays on screen.
+    @Test func aCollidingBandKeepsTheMostTrendingPlace() {
         let spain = MapPlace(
             id: "country:spain", name: "Spain", kind: .country,
             h3Index: H3CellGeometry.makeIndex(resolution: 1, baseCell: 20)
         )
         let world = 402.0 / 268_435_456.0
+        let pins = [
+            pin("post-1", lat: 48.80, lng: 2.30, likes: 40, places: [paris, france]),
+            pin("post-2", lat: 48.90, lng: 2.40, likes: 3, places: [paris, france]),
+            pin("post-3", lat: 40.42, lng: -3.70, likes: 250, places: [spain]),
+            pin("post-4", lat: 41.39, lng: 2.17, likes: 1, places: [spain]),
+        ]
+        var occlusion = MapClusterEngine.Occlusion()
         let items = MapClusterEngine.cluster(
-            [
-                pin("post-1", lat: 48.80, lng: 2.30, likes: 40, places: [paris, france]),
-                pin("post-2", lat: 48.90, lng: 2.40, likes: 3, places: [paris, france]),
-                pin("post-3", lat: 40.42, lng: -3.70, likes: 250, places: [spain]),
-            ],
-            zoomScale: world, cellPoints: 64, viewportDiagonalKm: 9000
+            pins, zoomScale: world, cellPoints: 64, viewportDiagonalKm: 9000, occlusion: &occlusion
         )
         #expect(items.count == 1)
+        #expect(items[0].place == spain)
         #expect(items[0].representative.postID == PostID("post-3"))
-        #expect(items[0].memberIDs == [PostID("post-3"), PostID("post-1"), PostID("post-2")])
+        #expect(items[0].memberIDs == [PostID("post-3"), PostID("post-4")])
+        // France is hidden whole, still wearing its own most-liked face.
+        #expect(occlusion.hiddenItems.count == 1)
+        #expect(occlusion.hiddenItems.first?.place == france)
+        #expect(occlusion.hiddenItems.first?.memberIDs == [PostID("post-1"), PostID("post-2")])
     }
 
     // MARK: - The counter hydration
