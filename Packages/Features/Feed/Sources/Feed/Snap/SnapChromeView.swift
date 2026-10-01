@@ -211,7 +211,12 @@ final class SnapChromeView: UIView {
         }
 
         buildLayout()
+        // ⚠️ APPLIED BY HAND: a property set inside the class's own `init`
+        // does not fire its `didSet`, so the assignment alone would store
+        // `true` with nothing laid out — and every later `true` would no-op
+        // against it.
         usesActionColumn = SnapActionColumn.isEnabled
+        if usesActionColumn { applyActionColumn() }
     }
 
     @available(*, unavailable)
