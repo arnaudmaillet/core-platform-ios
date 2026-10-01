@@ -192,12 +192,9 @@ struct ConversationThreadViewControllerTests {
     }
 
     /// ⚠️ THE GAP ON SCREEN, against the real toolbar this screen shows: the
-    /// field's bottom to the ⋯ bubble's glass top (a 36pt item centred in its
-    /// 48pt glass) is `glassGap` — the gap UIKit leaves between neighbouring
-    /// bubbles of that bar — in the app. This test host stands the same bar's
-    /// glass 2pt higher than the app does
-    /// (`SnapActionColumnLayoutTests.testHostGlassDrop`), so it reads the gap
-    /// that much short; the app's 12 is measured on screen.
+    /// field's bottom to the ⋯ bubble's glass top — read off the glass UIKit
+    /// drew (`SnapActionColumnLayoutTests.glassFrame`) — is `glassGap`, the
+    /// gap UIKit leaves between neighbouring bubbles of that bar.
     @Test func theFieldStandsOneGlassGapAboveTheToolbar() async throws {
         let (screen, _, _, window) = makeScreen()
         screen.navigationController?.setToolbarHidden(false, animated: false)
@@ -209,11 +206,10 @@ struct ConversationThreadViewControllerTests {
         }
         try #require(more.window != nil, "the bar never hosted ⋯")
         let composer = try SnapActionColumnLayoutTests.composerColumn(in: screen.view, space: window)
-        let glassTop = more.convert(CGPoint(x: 0, y: more.bounds.midY), to: window).y - 24
-        let gap = glassTop - composer.field.maxY
-        let hostShortfall = SnapActionColumn.toolbarGlassDrop - SnapActionColumnLayoutTests.testHostGlassDrop
-        #expect(abs(gap - (SnapActionColumn.glassGap - hostShortfall)) <= 1,
-                "the field stands \(gap)pt above the toolbar's glass (field \(composer.field.maxY), glass \(glassTop))")
+        let glass = try #require(SnapActionColumnLayoutTests.glassFrame(of: more, in: window))
+        let gap = glass.minY - composer.field.maxY
+        #expect(abs(gap - SnapActionColumn.glassGap) < 0.5,
+                "iOS \(ProcessInfo.processInfo.operatingSystemVersion.majorVersion): the field stands \(gap)pt above the toolbar's glass (field \(composer.field.maxY), glass \(glass))")
     }
 
     /// `-snap-layout-v2`: the thread shares the post's composer, so it shares

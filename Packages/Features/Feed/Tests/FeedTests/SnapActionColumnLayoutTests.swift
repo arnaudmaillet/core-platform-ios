@@ -120,39 +120,40 @@ struct SnapActionColumnLayoutTests {
         return (controller, window)
     }
 
-    /// ⚠️ How far the package TEST HOST stands the toolbar's glass under the
-    /// safe-area line: 8pt, where the app on the same simulator stands it 10
-    /// (`SnapActionColumn.toolbarGlassDrop`, measured with `-dump-bars` and
-    /// in screenshots). A test that measures a real bar here reads every gap
-    /// to the glass 2pt short of the app's — the app's field stands 12pt
-    /// (`glassGap`) above the glass on screen, this host's 10.
-    static let testHostGlassDrop: CGFloat = 8
-
     /// Where the toolbar's glass begins, in screen coordinates: the drop under
     /// the footer line (`SnapActionColumn.toolbarGlassDrop`).
     static var toolbarGlassTop: CGFloat {
         screen.height - insets.bottom + SnapActionColumn.toolbarGlassDrop
     }
 
+    /// The glass bubble a toolbar item stands in, in `window`: its first
+    /// ancestor taller than the item (UIKit insets the item in its glass).
+    ///
+    /// ⚠️ READ OFF THE BAR, NEVER ASSUMED. The bubble's height is UIKit's:
+    /// 48pt in the app on iOS 27, 44pt for the same lone ⋯ in the package
+    /// test host — and a test that took the item's centre minus 24 read the
+    /// host's drop 2pt short and called the host unfaithful (it is not).
+    static func glassFrame(of item: UIView, in window: UIWindow) -> CGRect? {
+        var node = item.superview
+        while let view = node, view !== window {
+            if view.bounds.height > item.bounds.height + 0.5 { return view.convert(view.bounds, to: window) }
+            node = view.superview
+        }
+        return nil
+    }
+
     // MARK: - The toolbar's glass
 
-    /// ⚠️ THE ONE MEASURED NUMBER, AND A SENTINEL ON THE BAR IT CAME FROM.
-    /// Every composer rests its input row `glassGap` above the toolbar's glass, and
-    /// where the glass begins is a constant (`SnapActionColumn.toolbarGlassDrop`)
+    /// ⚠️ THE ONE MEASURED NUMBER, CHECKED AGAINST A REAL BAR on whatever
+    /// runtime runs the suite. Every composer rests its input row `glassGap`
+    /// above the toolbar's glass, and where the glass begins under the
+    /// safe-area line is a per-OS constant (`SnapActionColumn.toolbarGlassDrop`)
     /// — reading the private floating bar at runtime would put a frame of
-    /// UIKit's own layout into the composer's, a frame late, during every push.
-    ///
-    /// The constant is the APP's reading: 10pt (iPhone 18 Pro, iOS 27 —
-    /// safe-area line 788, glass 798…846 by `-dump-bars`, the field's bottom
-    /// measured at 790 in a screenshot). The package test host, on the same
-    /// simulator, stands the same bar's glass 8pt under its line — a
-    /// difference of hosting this test does not explain — so it cannot check
-    /// the 10 itself. What it can say is that UIKit's bar has not moved: it
-    /// reads the host's drop off a real toolbar (a 36pt item centred in its
-    /// 48pt glass bubble), and if that leaves 8, re-measure the constant in
-    /// the app with `-dump-bars`.
+    /// UIKit's own layout into the composer's, a frame late, during every
+    /// push. This puts a toolbar in a window and reads the drop off the glass
+    /// UIKit actually drew; if UIKit moves its bar, this fails with the new
+    /// number, and the constant is what to update.
     @Test func theToolbarsGlassStandsWhereTheComposerExpectsIt() async throws {
-        #expect(SnapActionColumn.toolbarGlassDrop == 10, "re-measured? update the sentinel below with it")
         let screen = UIViewController()
         let more = SnapFooterToolbar.makeMoreButton(menu: UIMenu(children: []))
         screen.toolbarItems = [.flexibleSpace(), UIBarButtonItem(customView: more)]
@@ -172,10 +173,10 @@ struct SnapActionColumnLayoutTests {
         let safeLine = screen.view.convert(
             CGPoint(x: 0, y: screen.view.bounds.height - screen.view.safeAreaInsets.bottom), to: window
         ).y
-        let bubbleHeight: CGFloat = 48
-        let glassTop = more.convert(CGPoint(x: 0, y: more.bounds.midY), to: window).y - bubbleHeight / 2
-        #expect(abs(glassTop - (safeLine + Self.testHostGlassDrop)) <= 1,
-                "the glass starts \(glassTop - safeLine)pt under the safe-area line, not \(Self.testHostGlassDrop): UIKit moved the bar")
+        let glass = try #require(Self.glassFrame(of: more, in: window), "no glass around the item")
+        let drop = glass.minY - safeLine
+        #expect(abs(drop - SnapActionColumn.toolbarGlassDrop) < 0.5,
+                "iOS \(ProcessInfo.processInfo.operatingSystemVersion.majorVersion): the glass \(glass) starts \(drop)pt under the safe-area line \(safeLine), not \(SnapActionColumn.toolbarGlassDrop)")
     }
 
     // MARK: - Flag off: no repost bubble, the input row on the toolbar
