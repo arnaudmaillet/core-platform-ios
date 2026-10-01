@@ -127,6 +127,7 @@ final class ProfileHeaderView: UIView {
     /// bleeds to y = 0.
     var chromeTopInset: CGFloat = 0 {
         didSet {
+            if chromeTopInset != oldValue { layoutRevision += 1 }
             columnTopConstraint?.constant = columnTopConstant
             // The status bar's scrim covers the chrome, and stops there.
             bannerView.topScrimHeight = chromeTopInset > 0 ? chromeTopInset : 160
@@ -152,6 +153,7 @@ final class ProfileHeaderView: UIView {
     func setBannerFormat(_ format: ProfileBannerFormat) {
         guard format != bannerFormat || !hasAppliedBannerFormat else { return }
         hasAppliedBannerFormat = true
+        layoutRevision += 1
         bannerFormat = format
         columnTopConstraint?.constant = columnTopConstant
         bannerView.isHidden = format == .none
@@ -446,29 +448,71 @@ final class ProfileHeaderView: UIView {
 
     // MARK: - Configuration
 
+    /// Applies `model`, touching only what differs from the model already on
+    /// screen.
+    ///
+    /// ⚠️ A REFRESH LANDS HERE, AND MOSTLY WITH NEWS FOR ONE NUMBER. Each
+    /// write below re-measures its view — the website button rebuilds its
+    /// configuration, the bio re-lays its emotes — and the header's height is
+    /// measured again after any of them (`layoutRevision`). The same model
+    /// again does nothing at all, and does NOT supersede a staggered apply
+    /// still landing it.
     func configure(with model: ProfileDisplayModel) {
+        guard model != appliedModel else { return }
         // Supersedes any staggered group still waiting to land.
         configureGeneration += 1
-        monogramLabel.text = model.avatarMonogram
-        nameLabel.text = model.displayName
-        handleLabel.text = model.handle
-        verifiedBadge.isHidden = !model.isVerified
+        layoutRevision += 1
+        #if DEBUG
+        debugConfigureCount += 1
+        #endif
+        // Nil when the screen's state is not a model's: first configure,
+        // under the bones, or a staggered apply cut short. Then everything.
+        let old = appliedModel
+        appliedModel = model
+        func changed<T: Equatable>(_ field: KeyPath<ProfileDisplayModel, T>) -> Bool {
+            guard let old else { return true }
+            return old[keyPath: field] != model[keyPath: field]
+        }
+        if changed(\.avatarMonogram) { monogramLabel.text = model.avatarMonogram }
+        if changed(\.displayName) { nameLabel.text = model.displayName }
+        if changed(\.handle) { handleLabel.text = model.handle }
+        if changed(\.isVerified) { verifiedBadge.isHidden = !model.isVerified }
 
-        bioLabel.text = model.bio
-        bioLabel.isHidden = !model.hasBio
+        if changed(\.bio) || changed(\.hasBio) {
+            bioLabel.text = model.bio
+            bioLabel.isHidden = !model.hasBio
+        }
 
         websiteURL = model.websiteURL
-        websiteButton.configuration?.title = model.websiteText
-        websiteButton.isHidden = model.websiteText == nil
+        if changed(\.websiteText) {
+            websiteButton.configuration?.title = model.websiteText
+            websiteButton.isHidden = model.websiteText == nil
+        }
 
-        followersStat.setValue(model.followerText)
-        followingStat.setValue(model.followingText)
-        likesStat.setValue(model.likesText)
+        if changed(\.followerText) { followersStat.setValue(model.followerText) }
+        if changed(\.followingText) { followingStat.setValue(model.followingText) }
+        if changed(\.likesText) { likesStat.setValue(model.likesText) }
 
         applyBannerPresence(model.bannerImageURL)
         bannerView.setImageURL(model.bannerImageURL)
         loadAvatar(model.avatarURL)
     }
+
+    /// The model whose every field is on screen — nil until one is, and again
+    /// whenever something else wrote over them (the bones, a staggered apply).
+    private var appliedModel: ProfileDisplayModel?
+
+    /// Bumped by everything that can change how tall the header is: content,
+    /// the bones, the tray, the banner's shape, the chrome it starts under.
+    /// The screen measures the header again only when this (or the width,
+    /// the safe area, Dynamic Type) moved — never because it scrolled.
+    private(set) var layoutRevision = 0
+
+    #if DEBUG
+    /// How many configures actually applied something — what a refresh that
+    /// brought nothing new must leave untouched.
+    private(set) var debugConfigureCount = 0
+    #endif
 
     /// No picture, no banner — and a picture arriving on a header that had
     /// none takes the unresolved shape until it has said which it is.
@@ -504,6 +548,9 @@ final class ProfileHeaderView: UIView {
         }
         configureGeneration += 1
         let generation = configureGeneration
+        // Lands over three dispatches: until the last, the screen is no one
+        // model, and the next plain configure must apply everything.
+        appliedModel = nil
         // Identity first: the banner's colour field and the avatar carry most of
         // the "this is someone else now" signal, and the name says it outright.
         dissolve([bannerView, avatarView, nameLabel, handleLabel, verifiedBadge], after: 0, generation: generation) {
@@ -551,6 +598,7 @@ final class ProfileHeaderView: UIView {
         _ changes: @escaping () -> Void
     ) {
         let run = {
+            self.layoutRevision += 1
             var pending = views
             guard let first = pending.popLast() else { return changes() }
             // Nested so every view dissolves within ONE animation block: separate
@@ -595,6 +643,7 @@ final class ProfileHeaderView: UIView {
     /// has been taken, so Following reads as a state rather than a second
     /// call to action.
     func configureAction(_ state: ProfileViewModel.FollowButton) {
+        layoutRevision += 1
         switch state {
         case .follow, .following:
             followButton.isHidden = false
@@ -675,6 +724,7 @@ final class ProfileHeaderView: UIView {
     /// carry the checkmarks, and the state they mark is exactly what this call
     /// is delivering.
     func configureMapPin(_ state: ProfileViewModel.MapPinButton) {
+        layoutRevision += 1
         mapPinButton.isHidden = state == .hidden
         guard state != .hidden else {
             mapPinButton.menu = nil
@@ -725,8 +775,12 @@ final class ProfileHeaderView: UIView {
     func setRedacted(_ redacted: Bool, animated: Bool = false) {
         guard redacted != isRedacted else { return }
         isRedacted = redacted
+        layoutRevision += 1
 
         if redacted {
+            // The ballast below writes over the labels: no model is on
+            // screen any more.
+            appliedModel = nil
             // Layout ballast: one blank line per single-line label, two for
             // the bio's typical measure. The website row is reserved too —
             // hiding it here and inserting it at reveal would push the whole

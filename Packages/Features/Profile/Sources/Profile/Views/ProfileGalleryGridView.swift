@@ -141,6 +141,26 @@ final class ProfileGalleryGridView: UIView {
     /// height re-pin out of the hydration cross-fade.
     private(set) var showsSkeleton = false
 
+    #if DEBUG
+    /// Full reloads, and items re-dressed in place — what a refresh that
+    /// brought nothing new must leave at zero.
+    private(set) var debugReloadCount = 0
+    private(set) var debugReconfiguredItems = 0
+    /// The empty state's fitting passes — which a scroll must not add to.
+    private(set) var debugEmptyStateMeasureCount = 0
+    #endif
+
+    /// What `emptyStateHeight` was last measured for.
+    private struct EmptyStateKey: Equatable {
+        var width: CGFloat
+        var revision: Int
+        var contentSize: UIContentSizeCategory
+    }
+    private var emptyStateHeightCache: (key: EmptyStateKey, height: CGFloat)?
+    /// Bumped whenever the empty state is configured — its height is what it
+    /// says.
+    private var emptyStateRevision = 0
+
     /// List pages show a column of placeholder cards; the mosaic shows one
     /// full 8-brick pattern.
     /// Derived exactly as For You derives it: two slices' worth, so the loading
@@ -312,6 +332,7 @@ final class ProfileGalleryGridView: UIView {
             // know — "no media in reposts" says why this page is narrower than
             // the profile, which is the thing worth reading. A tab that is
             // simply empty has nothing to add, and falls back to its own line.
+            emptyStateRevision += 1
             emptyStateView.configure(
                 symbolName: copy.symbol,
                 title: copy.title,
@@ -324,6 +345,7 @@ final class ProfileGalleryGridView: UIView {
             // having both: the glyph and the headline have to read as "this did
             // not work" rather than as "there is nothing here", or a viewer
             // retries nothing and concludes the profile is bare.
+            emptyStateRevision += 1
             emptyStateView.configure(
                 symbolName: "exclamationmark.triangle",
                 title: "Couldn't Load",
@@ -336,12 +358,30 @@ final class ProfileGalleryGridView: UIView {
 
     private func apply(_ posts: [GalleryPost], skeleton: Bool) {
         guard self.posts != posts || showsSkeleton != skeleton else { return }
+        // ⚠️ The same posts in the same places — a refresh bringing new
+        // counts — re-dress only the cells whose post changed. A reload
+        // rebuilt every visible cell and its media for a number.
+        if !showsSkeleton, !skeleton, self.posts.count == posts.count,
+           zip(self.posts, posts).allSatisfy({ $0.id == $1.id }) {
+            let changed = posts.indices.filter { self.posts[$0] != posts[$0] }
+            self.posts = posts
+            HeroScreenCost.measure("gallery.reconfigure") {
+                collectionView.reconfigureItems(at: changed.map { IndexPath(item: $0, section: 0) })
+            }
+            #if DEBUG
+            debugReconfiguredItems += changed.count
+            #endif
+            return
+        }
         // Hydration retires the skeleton with a cross-dissolve: the shimmer
         // hands off to content inside the same silhouette instead of popping.
         let dissolving = showsSkeleton && !skeleton && !posts.isEmpty && window != nil
         self.posts = posts
         showsSkeleton = skeleton
         let reload = {
+            #if DEBUG
+            self.debugReloadCount += 1
+            #endif
             HeroScreenCost.measure("gallery.reload") {
                 self.collectionView.reloadData()
                 self.collectionView.invalidateIntrinsicContentSize()
@@ -1043,12 +1083,26 @@ extension ProfileGalleryGridView {
     /// The empty state's own height — asked of it rather than assumed, because
     /// the block's height is its glyph, title, subtitle and optional action, and
     /// which of those it carries changes with the state being shown.
+    ///
+    /// ⚠️ Measured once per state and width, not per scroll: it is read on
+    /// every frame the page moves — on a page with posts, where the block is
+    /// not even shown — and each read was a fitting pass.
     private var emptyStateHeight: CGFloat {
-        emptyStateView.systemLayoutSizeFitting(
+        let key = EmptyStateKey(
+            width: bounds.width, revision: emptyStateRevision,
+            contentSize: traitCollection.preferredContentSizeCategory
+        )
+        if let cached = emptyStateHeightCache, cached.key == key { return cached.height }
+        #if DEBUG
+        debugEmptyStateMeasureCount += 1
+        #endif
+        let height = emptyStateView.systemLayoutSizeFitting(
             CGSize(width: bounds.width, height: UIView.layoutFittingCompressedSize.height),
             withHorizontalFittingPriority: .required,
             verticalFittingPriority: .fittingSizeLevel
         ).height
+        emptyStateHeightCache = (key, height)
+        return height
     }
 
     func setContentBottomInset(_ inset: CGFloat) {

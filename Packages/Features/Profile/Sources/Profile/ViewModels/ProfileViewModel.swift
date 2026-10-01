@@ -177,6 +177,12 @@ public final class ProfileViewModel {
     }
     private var followButton: FollowButton = .hidden {
         didSet {
+            // ⚠️ AN ANSWER THAT AGREES WITH THE SCREEN SAYS NOTHING. Every
+            // refresh reads the relationship again, and each identical answer
+            // used to re-pose the tray's capsule, cross-dissolve the whole
+            // navigation bar and re-ask the map star — a landing turn's worth
+            // of work, on a pull-to-refresh, to arrive where it already was.
+            guard followButton != oldValue else { return }
             onFollowButtonChange?(followButton)
             // The pin is offered only while the viewer follows, so the two
             // move together — including the optimistic flip a follow tap makes
@@ -429,9 +435,15 @@ public final class ProfileViewModel {
     private var galleryWasSeeded = false
 
     /// Pull-to-refresh. Coalesced: a refresh while one is in flight is ignored.
+    ///
+    /// ⚠️ A REFRESH NEVER FALLS BACK TO BONES. The grid revalidates in place:
+    /// what is on screen stays until the new pages land, and pages that came
+    /// back identical publish nothing at all. It used to reset the corpora,
+    /// so every pull blanked all three pages to their skeletons and rebuilt
+    /// them under a cross-dissolve a moment later — the release's hitch.
     public func refresh() {
         guard load == nil else { return }
-        reload()
+        reload(galleryRevalidates: true)
     }
 
     /// Revalidates after an account switch, rendering `id` from cache first
@@ -779,7 +791,7 @@ public final class ProfileViewModel {
             taggedFailed = false
         }
         guard galleryLoad == nil else { return }
-        renderGallery() // all pages report loading
+        renderGallery() // all pages report loading — or, revalidating, what they hold
         galleryLoad = Task { [weak self] in
             async let authoredFetch = gallery.authoredPosts(for: profile.id)
             async let taggedFetch = gallery.taggedPosts(for: profile.id, handle: profile.handle)
@@ -824,13 +836,22 @@ public final class ProfileViewModel {
                 : .content(tiles)
         }
 
-        onGalleryChange?(GallerySnapshot(
+        let snapshot = GallerySnapshot(
             activity: page(.activity),
             media: page(.media),
             short: page(.short),
             saved: savedPage
-        ))
+        )
+        // The same pages again is no news: a revalidation that agrees with
+        // the screen must cost the screen nothing.
+        guard snapshot != publishedGallery else { return }
+        publishedGallery = snapshot
+        onGalleryChange?(snapshot)
     }
+
+    /// The pages last handed to the view — what `renderGallery` compares a
+    /// new answer against.
+    private var publishedGallery: GallerySnapshot?
 
     /// Rebuilds the Saved page from the pile the viewer has curated.
     ///
@@ -889,7 +910,7 @@ public final class ProfileViewModel {
 
     // MARK: - Loading
 
-    private func reload() {
+    private func reload(galleryRevalidates: Bool = false) {
         load?.cancel()
         relationshipLoad?.cancel()
         // Deliberately NOT resetting `followButton` here: the controller may
@@ -931,7 +952,7 @@ public final class ProfileViewModel {
                 // pull-to-refresh picks up new posts alongside the header —
                 // except right after a cache seed, whose grid is loading or
                 // loaded already and only needs confirming.
-                self.loadGallery(for: profile, reset: !self.galleryWasSeeded)
+                self.loadGallery(for: profile, reset: !self.galleryWasSeeded && !galleryRevalidates)
                 self.galleryWasSeeded = false
             } catch is CancellationError {
                 // Superseded by a newer load; leave the phase alone.
