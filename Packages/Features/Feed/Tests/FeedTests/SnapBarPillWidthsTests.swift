@@ -85,6 +85,18 @@ struct SnapBarPillWidthsTests {
         #expect(roomy.author >= SnapBarPillWidths.comfortableAuthor)
     }
 
+    /// The author pill lost the post's age, and its width with it: one
+    /// narrower cap, while the audio capsule — whose lines did not change —
+    /// keeps the old one. On the iPhone 18 Pro with a "250" balance (71pt) the
+    /// pill is the cap, no longer the bar's 193pt of room.
+    @Test func theAuthorPillIsNarrowerThanTheAudioCapsuleCap() {
+        #expect(SnapBarPillWidths.authorCap < SnapBarPillWidths.attributionCap)
+        #expect(SnapBarPillWidths.authorCap >= SnapBarPillWidths.comfortableAuthor)
+        let pro = SnapBarPillWidths.resolve(navBarWidth: 402, toolbarWidth: 402, walletWidth: 71, sort: nil)
+        #expect(pro.author == SnapBarPillWidths.authorCap)
+        #expect(pro.author < 193)
+    }
+
     /// Nothing pathological asks for a negative width.
     @Test func anImpossibleBarStillGetsABubble() {
         let widths = SnapBarPillWidths.resolve(

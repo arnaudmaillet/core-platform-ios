@@ -8,22 +8,27 @@ import UIKit
 /// ```
 ///   media layout                         comments layout
 ///   ~~~~ band ~~~~~~~~~~~~~~ [♥]          ———————————————————— [♥]
-///   caption…                 [⇪]          [☺][field…        ] [〰]
-///   ━━━ progress ━━━                      (stake above waveform/send)
-///   [♫ attribution]  …  [🔖 ⇄] [⋯]        [♫ attribution]  …  [🔖 ⇄] [⋯]
+///   caption…                 [⇄]          ———————————————————— [⇄ / ↑]
+///   ━━━ progress ━━━                      [◉][field…        ☺ 〰]
+///   [♫ attribution]  …  [⇪ 🔖] [⋯]        [♫ attribution]  …  [⇪ 🔖] [⋯]
 /// ```
 ///
 /// - Media layout: the points/like anchor (`SnapRailBoostButton`) where it has
-///   always been, and a SHARE bubble directly below it, beside the caption and
-///   the page strip (which give up that width). Share leaves the toolbar's ⋯.
-/// - Comments layout and the Messages thread: the composer's stake bubble
-///   stands on the like anchor's frame, and its trailing mic/send slot — the
-///   mic now a WAVEFORM — on the share bubble's frame. Same size, same place:
-///   switching layouts is an alpha crossfade between two bubbles that never
-///   move.
+///   always been, and a REPOST bubble directly below it, beside the caption
+///   and the page strip (which give up that width). The toolbar's capsule is
+///   [share][bookmark]: share took repost's place there, and left the ⋯.
+/// - Comments layout: the composer's stake bubble stands on the like anchor's
+///   frame, and its trailing rail slot on the repost bubble's — a REPOST face
+///   that turns into the SEND arrow while there is text (a symbol replace, one
+///   bubble). Same size, same place: switching layouts is an alpha crossfade
+///   between two bubbles that never move. The voice note is a waveform INSIDE
+///   the field, beside the emote button.
+/// - The Messages thread: no stake (a conversation has nothing to like), and
+///   the rail slot is a PIN for the conversation, turning into send the same
+///   way.
 ///
-/// Off, everything is exactly as before — every surface asks `isEnabled` once,
-/// at construction, and keeps its classic geometry when it is false.
+/// Off, everything is as before — every surface asks `isEnabled` once, at
+/// construction, and keeps its classic geometry when it is false.
 ///
 /// ⚠️ ONE SET OF NUMBERS, two layouts that never see each other. The media
 /// layout is constraints inside `SnapChromeView` (band → caption floor →
@@ -32,6 +37,12 @@ import UIKit
 /// `SnapActionColumnLayoutTests` measures both in window coordinates and
 /// asserts the frames are EQUAL — if either side's anchoring changes, that
 /// test is what says the column moved.
+///
+/// **THE INPUT ROW RESTS ON THE TOOLBAR, flag or no flag** (asked 2026-10-01).
+/// The composer's field sits `sm` above the toolbar's glass, and the trailing
+/// column keeps the place it had: the composer lifts the column off its own
+/// bottom by `columnLift`, so the rail bubble stands a little higher than the
+/// field — accepted, the field is what reads as "right above the toolbar".
 enum SnapActionColumn {
     /// The launch argument that turns the experiment on.
     static let launchArgument = "-snap-layout-v2"
@@ -60,25 +71,45 @@ enum SnapActionColumn {
     static let trailingInset: CGFloat = Spacing.md
 
     /// Between the like bubble and the bubble under it. The like anchor's
-    /// bottom is the band's, and the share bubble's top is the caption
+    /// bottom is the band's, and the repost bubble's top is the caption
     /// floor's — the band → caption seam.
     static let gap: CGFloat = Spacing.md
 
     /// How far the LOWER bubble's bottom stands above the bottom margin line
-    /// (the toolbar's top edge — the line the feed's safe area stops at).
+    /// (the line the feed's safe area stops at, just above the toolbar).
     ///
-    /// In the media layout the share bubble's top is the caption floor's top,
+    /// In the media layout the repost bubble's top is the caption floor's top,
     /// which stands `xl` (the caption's bottom gap) + the floor's two lines
-    /// above that line; its bottom is one bubble lower. A composer resting with
-    /// its bottom this high puts its mic/send slot on the share bubble.
+    /// above that line; its bottom is one bubble lower.
     @MainActor static var restingLift: CGFloat {
         Spacing.xl + SnapChromeView.captionFloorHeight - bubbleSize
     }
 
-    /// The composer's resting gap above the bottom margin line — the column's
-    /// lift when the experiment is on, the classic `sm` breath otherwise.
-    @MainActor static func composerRestingGap(actionColumn: Bool) -> CGFloat {
+    /// ⚠️ MEASURED: how far the floating toolbar's GLASS stands below the
+    /// bottom safe-area line — the safe area a screen with a toolbar reports
+    /// stops short of the bar's capsules by this much (iOS 27, iPhone 18 Pro,
+    /// `-dump-bars`: line at 788, glass from 798 to 846 on an 874pt screen).
+    /// Not published by UIKit; re-measure if the bar's metrics move.
+    static let toolbarGlassDrop: CGFloat = 10
+
+    /// The composer's INPUT ROW (its bottom edge) above the bottom margin line
+    /// at rest: `sm` above the toolbar's glass — which is below the line, so
+    /// this is the glass drop short of `sm` (and may be negative).
+    static var inputRestingGap: CGFloat { Spacing.sm - toolbarGlassDrop }
+
+    /// Where the composer's trailing COLUMN rests above the bottom margin
+    /// line: the action column's lift when the experiment is on, the classic
+    /// `sm` breath otherwise — where both stood before the input row moved
+    /// down onto the toolbar.
+    @MainActor static func columnRestingGap(actionColumn: Bool) -> CGFloat {
         actionColumn ? restingLift : Spacing.sm
+    }
+
+    /// What the composer puts between its own bottom (the input row's) and
+    /// its trailing column's bottom, so a bar resting at `inputRestingGap`
+    /// stands its column at `columnRestingGap`.
+    @MainActor static func columnLift(actionColumn: Bool) -> CGFloat {
+        columnRestingGap(actionColumn: actionColumn) - inputRestingGap
     }
 
     /// The composer's trailing inset from the screen's edge — the column's
@@ -88,21 +119,24 @@ enum SnapActionColumn {
     }
 }
 
-/// The media layout's share bubble (`-snap-layout-v2`): a Liquid Glass circle
-/// the like anchor's size, directly under it. A tap is the post's share — the
-/// same sheet ⋯ used to open.
+/// The media layout's repost bubble (`-snap-layout-v2`): a Liquid Glass circle
+/// the like anchor's size, directly under it.
+///
+/// ⚠️ DRAWN WITHOUT AN ACTION, like the toolbar's repost it replaces: the
+/// client has no path that publishes a repost yet (see the feed's
+/// `configureToolbarItems`).
 ///
 /// Configured PLAIN at init; the glass materializes on first window attach —
 /// the like anchor's doctrine (`SnapRailBoostButton`): creating a system
 /// material contacts the render server, a multi-second main-thread stall on
 /// headless CI simulators, where unit-tested views never join a window.
-final class SnapRailShareButton: UIButton {
+final class SnapRailRepostButton: UIButton {
     private var hasGlass = false
 
     init() {
         super.init(frame: .zero)
         applyFace()
-        accessibilityLabel = "Share"
+        accessibilityLabel = "Repost"
     }
 
     @available(*, unavailable)
@@ -121,7 +155,7 @@ final class SnapRailShareButton: UIButton {
     private func applyFace() {
         var config: UIButton.Configuration = hasGlass ? .glass() : .plain()
         config.image = UIImage(
-            systemName: "square.and.arrow.up",
+            systemName: PostActionSymbol.repost,
             withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
         )
         config.baseForegroundColor = .white

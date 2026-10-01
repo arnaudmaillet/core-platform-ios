@@ -326,9 +326,9 @@ final class SnapAuthorIdentityView: UIView {
     /// item's glass stays where it is — at its fixed width in the feed, so
     /// the glass does not so much as change size.
     ///
-    /// Paging between posts by the same author moves only the per-post meta
-    /// line (the post's age) — through the same blur, and without refetching
-    /// a face.
+    /// The meta line is the author's HANDLE alone (`pillMetaLine`): the post's
+    /// age is not the pill's to say (asked 2026-10-01) — so paging between
+    /// posts by the same author changes nothing on it at all.
     ///
     /// The pill's STATE (`shownAuthor`, the tap target) is the new author at
     /// once; only the drawing waits for the transition's midpoint.
@@ -336,21 +336,22 @@ final class SnapAuthorIdentityView: UIView {
     func setAuthor(_ model: FeedItemDisplayModel, pipeline: ImagePipeline, animated: Bool = true) {
         guard model != renderedModel else { return }
         // The fast path is for PAGING between posts by one person: the face and
-        // the name are already right, so only the time moves and there is no
-        // reason to refetch an avatar.
+        // the name are already right, and there is no reason to refetch an
+        // avatar. Only a handle the projection lacked can still move.
         let sameFace = showsSameFace(as: model)
+        let meta = Self.pillMetaLine(fromMeta: model.metaText)
         renderedModel = model
         authorID = model.authorID
         guard !sameFace else {
-            guard metaLabel.text != model.metaText else { return }
-            contentTransition.perform(animated: animated) { self.metaLabel.text = model.metaText }
+            guard metaLabel.text != meta else { return }
+            contentTransition.perform(animated: animated) { self.metaLabel.text = meta }
             return
         }
         let cached = model.avatarURL.flatMap(SnapAuthorFaceCache.face(for:))
         contentTransition.perform(animated: animated) {
             self.setRedacted(false)
             self.nameLabel.text = model.authorName
-            self.metaLabel.text = model.metaText
+            self.metaLabel.text = meta
             self.showFace(cached, animated: false)
             self.monogramView.setMonogram(MonogramAvatarView.monogram(
                 name: model.authorName, handle: Self.handle(fromMeta: model.metaText)
@@ -381,7 +382,7 @@ final class SnapAuthorIdentityView: UIView {
     }
 
     /// Whether `model` would draw the same face and name this pill draws now —
-    /// so only its meta line (the post's age) differs.
+    /// so at most its handle line differs.
     ///
     /// ⚠️ It has to check what is DRAWN, not just who it belongs to. A page
     /// is configured twice from one id — the grid's projection, then the real
@@ -462,6 +463,14 @@ final class SnapAuthorIdentityView: UIView {
         } completion: { _ in
             self.monogramView.isCovered = self.avatarView.image != nil
         }
+    }
+
+    /// What the pill's second line says for a post's meta ("@handle · 3m"):
+    /// the "@handle" alone — never the age, which is the post's, not the
+    /// author's. Empty when the meta carries no handle.
+    static func pillMetaLine(fromMeta meta: String) -> String {
+        let handle = handle(fromMeta: meta)
+        return handle.isEmpty ? "" : "@" + handle
     }
 
     /// "@handle" off a meta line ("@handle · 3m"); empty when it carries none.

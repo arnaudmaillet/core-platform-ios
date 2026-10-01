@@ -1454,10 +1454,12 @@ struct SnapCommentsPresentationTests {
         #expect(button.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width >= titled - 0.5)
     }
 
-    /// The bar's two rows. The INPUT row: the viewer's AVATAR opens it, the
-    /// field takes the flexible width, then the mic/send toggle at the
-    /// trailing edge. The STAKE row above it: the boost alone, 44pt (UIKit's
-    /// default glass button), its trailing edge over mic/send's.
+    /// The bar's INPUT row and trailing COLUMN. The row: the viewer's AVATAR
+    /// opens it, the field takes the flexible width — and both stand on the
+    /// bar's bottom edge, which the host rests on the toolbar. The column at
+    /// the trailing edge: the mic/send toggle, lifted `columnLift` off that
+    /// edge (where it stood before the row moved down), and the stake over it,
+    /// 44pt (UIKit's default glass button).
     @Test func composerRowsRunAvatarFieldToggleUnderTheStake() throws {
         let bar = CommentsInputBar()
         bar.onPageSwipe = { _, _, _ in }
@@ -1489,20 +1491,24 @@ struct SnapCommentsPresentationTests {
         #expect(send.frame.maxX == bar.bounds.width)
         #expect(mic.frame == send.frame)
 
-        // Every input-row control keeps a full tap target, and they share the
-        // bottom baseline the field grows away from.
+        // Every control keeps a full tap target. The input row shares the
+        // bar's bottom edge, the field growing away from it; the slot stands
+        // `columnLift` higher.
         for control in [avatar, send] {
             #expect(control.frame.height == 38)
-            #expect(control.frame.maxY == bar.bounds.height)
         }
+        #expect(avatar.frame.maxY == bar.bounds.height)
+        #expect(field.frame.maxY == bar.bounds.height)
+        let lift = SnapActionColumn.columnLift(actionColumn: false)
+        #expect(abs(bar.bounds.height - send.frame.maxY - lift) < 0.5)
 
-        // The stake row: on top, trailing-aligned over mic/send, clear of the
+        // The stake: on top, trailing-aligned over mic/send, clear of the
         // field, at the system button size.
         #expect(stake.frame.size == CGSize(width: 44, height: 44))
         #expect(stake.frame.minY == 0)
         #expect(stake.frame.maxX == send.frame.maxX)
         #expect(stake.frame.maxY < field.frame.minY)
-        #expect(bar.bounds.height == field.frame.height + CommentsInputBar.stakeRowHeight)
+        #expect(abs(bar.bounds.height - (lift + 38 + CommentsInputBar.stakeRowHeight)) < 0.5)
 
         // The row's empty leading run is not the bar's: the stream behind it
         // keeps those touches. The stake and the input row are.

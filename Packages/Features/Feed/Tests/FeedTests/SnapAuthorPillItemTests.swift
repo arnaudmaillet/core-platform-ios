@@ -68,18 +68,33 @@ struct SnapAuthorPillItemTests {
         #expect(pills.count == 1)
     }
 
-    /// Paging between two posts by one person only moves the post's age — no
-    /// new identity to announce, so no new item.
-    @Test func theSameAuthorKeepsTheItemAndMovesOnlyTheTime() throws {
+    /// ⚠️ NO DATE ON THE PILL (asked 2026-10-01): its second line is the
+    /// author's handle alone — the post's age is the post's, not the
+    /// author's. So paging between two posts by one person changes nothing on
+    /// it: same item, same words.
+    @Test func thePillShowsTheHandleWithoutThePostsAge() throws {
         let (_, feed) = Self.feed()
         feed.showAuthor(Self.model(id: "p1", author: "Ada Lovelace", authorID: "prof-1", meta: "@ada · 2h"))
         let first = try #require(Self.authorItem(feed))
+        let pill = try #require(first.customView)
+        #expect(Self.labels(in: pill).contains("@ada"))
+        #expect(!Self.labels(in: pill).contains { $0.contains("2h") || $0.contains("·") },
+                "the pill still dates the post: \(Self.labels(in: pill))")
 
         feed.showAuthor(Self.model(id: "p2", author: "Ada Lovelace", authorID: "prof-1", meta: "@ada · 3d"))
         let second = try #require(Self.authorItem(feed))
 
         #expect(second === first)
-        #expect(Self.labels(in: try #require(second.customView)).contains("@ada · 3d"))
+        #expect(Self.labels(in: try #require(second.customView)).sorted() == ["@ada", "Ada Lovelace"])
+    }
+
+    /// The meta line's rule, alone: the handle, or nothing when a meta carries
+    /// no handle (an age alone is still not the pill's to say).
+    @Test func thePillsMetaLineIsTheHandleAlone() {
+        #expect(SnapAuthorIdentityView.pillMetaLine(fromMeta: "@sam.whitfield · 28 May") == "@sam.whitfield")
+        #expect(SnapAuthorIdentityView.pillMetaLine(fromMeta: "@ana") == "@ana")
+        #expect(SnapAuthorIdentityView.pillMetaLine(fromMeta: "3m") == "")
+        #expect(SnapAuthorIdentityView.pillMetaLine(fromMeta: "") == "")
     }
 
     /// Across authors the pill keeps what the host configured: its taps still

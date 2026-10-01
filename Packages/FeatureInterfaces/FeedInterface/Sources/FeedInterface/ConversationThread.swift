@@ -101,6 +101,11 @@ public protocol ConversationThreadDriving: AnyObject {
     var onReplyStateChange: ((ConversationThreadReplyDraft?) -> Void)? { get set }
     /// A notice to present: `(title, message)`.
     var onActionNotice: ((String, String) -> Void)? { get set }
+    /// Whether the conversation is pinned to the top of the inbox — the
+    /// inbox's own pin, so the list behind the screen agrees with it. Nil
+    /// while there is no conversation to pin (a draft whose conversation has
+    /// not resolved yet). Fired on every change, wherever it was made.
+    var onPinnedChange: ((Bool?) -> Void)? { get set }
 
     func viewDidLoad()
     func refresh()
@@ -110,6 +115,9 @@ public protocol ConversationThreadDriving: AnyObject {
     func forward(_ messageID: String)
     func delete(_ messageID: String)
     func didTapIdentity()
+    /// Pins the conversation, or unpins it. A no-op while there is nothing to
+    /// pin (`onPinnedChange` said nil).
+    func togglePinned()
 }
 
 /// What sits in the footer where a post shows its music: for a conversation,

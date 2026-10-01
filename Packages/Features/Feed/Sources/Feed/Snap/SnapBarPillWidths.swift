@@ -66,7 +66,13 @@ struct SnapBarPillWidths: Equatable {
     static let backButtonWidth: CGFloat = 36
     /// The widest the author pill gets, however wide the bar: past it a short
     /// name floats in a lot of empty glass.
-    static let authorCap: CGFloat = 220
+    ///
+    /// 168 since the pill lost the post's age (2026-10-01): its second line is
+    /// the handle alone, so the line that used to set the width ("@handle ·
+    /// 12 weeks") is gone. 168 leaves the labels ~83pt — a first and last
+    /// name — beside the face, the follow slot and their gaps; on the iPhone
+    /// 18 Pro it was 193 (the bar's room, under the old 220 cap).
+    static let authorCap: CGFloat = 168
     /// What the arithmetic keeps back, so a rounding or an unmeasured point
     /// is never the one that folds the run.
     static let slack: CGFloat = 8
@@ -83,8 +89,9 @@ struct SnapBarPillWidths: Equatable {
     static let toolbarReserve: CGFloat = 28 + 10 + soundSlot + 8 + 86 + 8 + 48 + 28 + 16
     /// What the mute button adds to the capsule it shares.
     static let soundSlot: CGFloat = 48
-    /// The attribution's cap, the author pill's.
-    static let attributionCap: CGFloat = authorCap
+    /// The attribution's cap — the author pill's old one: the sound's two
+    /// lines did not change.
+    static let attributionCap: CGFloat = 220
 
     /// The narrowest the author pill is left for the sort's WORD: below it the
     /// sort drops to its glyph and gives the pill the difference — the old

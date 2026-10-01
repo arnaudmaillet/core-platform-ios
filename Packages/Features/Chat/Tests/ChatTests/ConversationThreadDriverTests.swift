@@ -126,4 +126,45 @@ struct ConversationThreadDriverTests {
         #expect(await stub.sentBodies == ["On my way"])
         #expect(last.last?.body == "On my way")
     }
+
+    /// The screen's pin IS the inbox's: a toggle from the thread writes the
+    /// catalog the inbox projects (so the list behind already shows it
+    /// pinned), and a toggle made in the inbox reaches the screen.
+    @Test func thePinIsTheInboxsPin() async {
+        let stub = Stub(messages: Self.seed)
+        let catalog = InboxCatalog(repository: stub)
+        let viewModel = ConversationViewModel(conversationID: ConversationID("c1"), repository: stub)
+        let driver = ConversationThreadDriver(viewModel: viewModel, viewer: stub, avatars: nil, pins: catalog)
+        var reported: [Bool?] = []
+        driver.onPinnedChange = { reported.append($0) }
+        driver.viewDidLoad()
+        #expect(reported == [false], "the screen hears the pin from its first frame")
+
+        driver.togglePinned()
+        #expect(catalog.isPinned(ConversationID("c1")))
+        #expect(reported == [false, true])
+
+        catalog.togglePin(ConversationID("c1"))
+        #expect(reported == [false, true, false])
+
+        // Another conversation's pin is not this screen's news.
+        catalog.togglePin(ConversationID("c2"))
+        #expect(reported == [false, true, false])
+    }
+
+    /// A draft has no conversation to pin until it resolves.
+    @Test func aDraftHasNoPinYet() {
+        let stub = Stub(messages: [])
+        let catalog = InboxCatalog(repository: stub)
+        let viewModel = ConversationViewModel(
+            target: .draft(peer: ProfileID("them"), displayName: "Ava"), repository: stub
+        )
+        let driver = ConversationThreadDriver(viewModel: viewModel, viewer: stub, avatars: nil, pins: catalog)
+        var reported: [Bool?] = []
+        driver.onPinnedChange = { reported.append($0) }
+        driver.viewDidLoad()
+        #expect(reported.first == .some(nil))
+        driver.togglePinned()
+        #expect(!catalog.isPinned(ConversationID("dm")), "a draft pinned something")
+    }
 }

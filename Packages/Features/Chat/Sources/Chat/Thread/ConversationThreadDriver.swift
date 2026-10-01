@@ -16,6 +16,7 @@ final class ConversationThreadDriver: ConversationThreadDriving {
     var onSendingChange: ((Bool) -> Void)?
     var onReplyStateChange: ((ConversationThreadReplyDraft?) -> Void)?
     var onActionNotice: ((String, String) -> Void)?
+    var onPinnedChange: ((Bool?) -> Void)?
 
     /// What the viewer's own rows are signed with.
     ///
@@ -30,6 +31,15 @@ final class ConversationThreadDriver: ConversationThreadDriving {
     private let viewModel: ConversationViewModel
     private let viewer: any ViewerIdentityProviding
     private let avatars: (any PeerAvatarProviding)?
+    /// The INBOX's pins — the screen's pin writes the very set the list reads,
+    /// so the row behind the thread is already where it belongs when the
+    /// viewer swipes back. Nil for a screen with no inbox (a peek, a test).
+    private let pins: InboxCatalog?
+    private var pinObservation: InboxCatalog.ObservationToken?
+    /// What `onPinnedChange` last said, so a catalog change that leaves this
+    /// conversation alone (another row read, a reload) says nothing.
+    private var forwardedPin: Bool?
+    private var hasForwardedPin = false
 
     private var peer = ConversationThreadPerson(id: nil, name: "", avatarURL: nil)
     /// The last transcript, kept so a late peer name re-signs the quotes.
@@ -38,11 +48,13 @@ final class ConversationThreadDriver: ConversationThreadDriving {
     init(
         viewModel: ConversationViewModel,
         viewer: any ViewerIdentityProviding,
-        avatars: (any PeerAvatarProviding)?
+        avatars: (any PeerAvatarProviding)?,
+        pins: InboxCatalog? = nil
     ) {
         self.viewModel = viewModel
         self.viewer = viewer
         self.avatars = avatars
+        self.pins = pins
         viewModel.onPhaseChange = { [weak self] phase in self?.forward(phase) }
         // The name and the id arrive as a pair, name first; both are forwarded
         // synchronously so a warm conversation's header is right on the push's
@@ -56,13 +68,36 @@ final class ConversationThreadDriver: ConversationThreadDriving {
             })
         }
         viewModel.onActionNotice = { [weak self] title, message in self?.onActionNotice?(title, message) }
+        // Every catalog change re-reads this conversation's pin — a toggle
+        // from here or from the inbox's own menu, and a draft resolving into
+        // a conversation (the builder refreshes the catalog when it does).
+        pinObservation = pins?.observe { [weak self] _ in self?.forwardPinned() }
     }
 
     func viewDidLoad() {
         // Signed from frame one; the face arrives when the avatar does.
         onViewerChange?(ConversationThreadPerson(id: nil, name: Self.viewerName, avatarURL: nil))
+        // The pin from frame one too: the observation above answered before
+        // the screen was listening.
+        hasForwardedPin = false
+        forwardPinned()
         resolveViewer()
         viewModel.viewDidLoad()
+    }
+
+    func togglePinned() {
+        guard let pins, let id = viewModel.currentConversationID else { return }
+        pins.togglePin(id)
+    }
+
+    /// This conversation's pin, or nil while there is no conversation (a
+    /// draft) or no inbox to pin it in.
+    private func forwardPinned() {
+        let pinned = viewModel.currentConversationID.flatMap { id in pins.map { $0.isPinned(id) } }
+        guard !hasForwardedPin || pinned != forwardedPin else { return }
+        hasForwardedPin = true
+        forwardedPin = pinned
+        onPinnedChange?(pinned)
     }
 
     func refresh() { viewModel.refresh() }

@@ -6,7 +6,8 @@ import UIKit
 ///
 /// ```
 ///  [leading] ———————————————— [🔖 ⇄] [⋯]     the post: a pill, then space
-///  [leading ————————————————] [🔖 ⇄] [⋯]     `leadingFills`: the emote strip
+///  [leading ————————————————————————] [⋯]     `leadingFills`, no actions:
+///                                              a conversation's emote strip
 /// ```
 ///
 /// Every item is a custom view, so iOS 26 gives each its own glass bubble; the
@@ -18,7 +19,9 @@ import UIKit
 /// `SnapToolbarCompositionTests`); this mirrors it rather than feeding it. Moving
 /// the feed onto this factory is the follow-up that makes the two one.
 enum SnapFooterToolbar {
-    /// The bar's items, left to right.
+    /// The bar's items, left to right. `actions` share one capsule between
+    /// the leading item and ⋯ — the post's [🔖 ⇄]; none, and there is no
+    /// capsule (a conversation: nothing there to save or repost).
     ///
     /// `leadingFills`: `leading` draws its own capsule and stretches by Auto
     /// Layout over every point the trailing bubbles leave (lowest hugging, a
@@ -28,19 +31,20 @@ enum SnapFooterToolbar {
     /// fixed space takes the flexible one's place, which would otherwise
     /// claim the room.
     static func items(
-        leading: UIView, leadingFills: Bool = false, bookmark: UIButton, repost: UIButton, more: UIButton
+        leading: UIView, leadingFills: Bool = false, actions: [UIButton], more: UIButton
     ) -> [UIBarButtonItem] {
-        let shareCluster = UIStackView(arrangedSubviews: [bookmark, repost])
-        shareCluster.axis = .horizontal
         let leadingItem = UIBarButtonItem(customView: leading)
         leadingItem.hidesSharedBackground = leadingFills
-        return [
+        var items: [UIBarButtonItem] = [
             leadingItem,
             leadingFills ? .fixedSpace(Spacing.sm) : .flexibleSpace(),
-            UIBarButtonItem(customView: shareCluster),
-            .fixedSpace(Spacing.sm),
-            UIBarButtonItem(customView: more),
         ]
+        if !actions.isEmpty {
+            let cluster = UIStackView(arrangedSubviews: actions)
+            cluster.axis = .horizontal
+            items += [UIBarButtonItem(customView: cluster), .fixedSpace(Spacing.sm)]
+        }
+        return items + [UIBarButtonItem(customView: more)]
     }
 
     static func makeSaveButton() -> UIButton {
