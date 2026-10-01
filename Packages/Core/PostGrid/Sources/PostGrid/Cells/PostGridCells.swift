@@ -1579,7 +1579,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         reactions.set(baseReactionCount)
         reactions.setGlyph(
             systemName: viewerStake > 0 ? PointsSymbol.glyph : ActionSymbol.like,
-            color: viewerStake > 0 ? PointsSymbol.tint : PostCardPillView.Emphasis.primary.ink
+            color: viewerStake > 0 ? PointsSymbol.tint : PostCardPillView.ink
         )
         closingLikesPill.accessibilityValue = baseReactionCount.map(PostMetadata.count)
         closingLikesPill.syncVisibilityToContents()
@@ -1703,16 +1703,17 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     private var showMoreRange: NSRange?
     private let mediaView = UIImageView()
     private static let metaFont = UIFont.preferredFont(forTextStyle: .footnote)
-    /// The closing line's counters — the card's PRIMARY actions, glyph and
-    /// count in one ink (`PostCardPillView.Emphasis.primary`).
+    /// The closing line's counters — the card's PRIMARY actions, ranked by
+    /// carrying a count and holding the line's end rather than by a darker
+    /// ink: glyph and count in the line's one ink (`PostCardPillView.ink`).
     private let reactions = PostMetricLabel(
         symbol: ActionSymbol.like, font: PostMetaPillView.font,
-        color: PostCardPillView.Emphasis.primary.ink,
+        color: PostCardPillView.ink,
         glyphPointSize: PostActionPillView.glyphPointSize
     )
     private let comments = PostMetricLabel(
         symbol: ActionSymbol.comments, font: PostMetaPillView.font,
-        color: PostCardPillView.Emphasis.primary.ink,
+        color: PostCardPillView.ink,
         glyphPointSize: PostActionPillView.glyphPointSize
     )
     private var closingLikesPill: PostCardPillView!
@@ -1726,11 +1727,11 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// control per verb, so a hidden one closes its own slot.
     private let repostButton = PostActionPillView.makeGlyphControl(
         systemName: ActionSymbol.repost, label: "Repost",
-        width: PostActionPillView.plainControlWidth, emphasis: .secondary
+        width: PostActionPillView.plainControlWidth
     )
     private let bookmarkButton = PostActionPillView.makeGlyphControl(
         systemName: ActionSymbol.save, label: "Save",
-        width: PostActionPillView.plainControlWidth, emphasis: .secondary
+        width: PostActionPillView.plainControlWidth
     )
     private var repostPill: PostActionPillView!
     private var bookmarkPill: PostActionPillView!

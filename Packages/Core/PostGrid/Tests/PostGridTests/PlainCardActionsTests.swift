@@ -5,8 +5,8 @@ import Testing
 import UIKit
 @testable import PostGrid
 
-/// The closing line's actions are PLAIN (2026-09-30): no capsule, two ranks of
-/// ink — comments and likes primary, repost and save secondary — new glyphs
+/// The closing line's actions are PLAIN (2026-09-30): no capsule, ONE ink
+/// (2026-10-01; two ranks before, the primary pair read too dark) — new glyphs
 /// for comments and repost, and the ink rather than an invisible box on the
 /// line's column (`actionLineInset`). What stays of the capsule is its box: the press region,
 /// the press wash, the hold's menu.
@@ -89,11 +89,14 @@ struct PlainCardActionsTests {
         #expect(indicator.contentView.backgroundColor == .tertiarySystemFill)
     }
 
-    // MARK: - Two ranks of ink
+    // MARK: - One ink
 
-    /// Comments and likes are the card's primary actions: glyph AND count in
-    /// `.label`. Repost and save are secondary: `.secondaryLabel`.
-    @Test func thePrimaryPairOutranksTheSecondaryPair() throws {
+    /// ⚠️ ONE INK for the whole line (2026-10-01): the comments and likes —
+    /// glyph AND count — draw in the same `.secondaryLabel` as repost and
+    /// save. Their `.label` read too dark beside the caption; the pair is
+    /// ranked by its counts, not by colour (`PostCardPillView.ink`).
+    @Test func everyActionDrawsInTheLinesOneInk() throws {
+        #expect(PostCardPillView.ink == .secondaryLabel)
         let line = actions(in: row())
         #expect(line.count == 4)
         let (save, repost, comments, likes) = (line[0], line[1], line[2], line[3])
@@ -104,13 +107,16 @@ struct PlainCardActionsTests {
         }
         for primary in [comments, likes] {
             let metric = try #require(walk(primary, PostMetricLabel.self).first)
-            #expect(metric.icon.tintColor == .label)
+            #expect(metric.icon.tintColor == .secondaryLabel)
             let count = try #require(walk(metric, UILabel.self).first { !$0.isHidden })
-            #expect(count.textColor == .label, "a count follows its glyph's rank")
+            #expect(count.textColor == .secondaryLabel, "a count wears its glyph's ink")
+            // The rank the colour no longer carries: only the primary pair
+            // has a number, and it is the line's semibold type.
+            #expect(count.font == PostMetaPillView.font)
         }
     }
 
-    /// A staked heart is still the points' red — the primary ink is the
+    /// A staked heart is still the points' red — the line's ink is the
     /// heart at rest, not a heart the viewer has filled.
     @Test func aStakedHeartIsStillRed() throws {
         let cell = row()
@@ -120,7 +126,7 @@ struct PlainCardActionsTests {
         #expect(heart.icon.tintColor == PointsSymbol.tint)
         #expect(String(describing: heart.icon.image as Any).contains(PointsSymbol.glyph))
         cell.setViewerStake(0)
-        #expect(heart.icon.tintColor == .label)
+        #expect(heart.icon.tintColor == .secondaryLabel)
     }
 
     // MARK: - Glyphs
@@ -256,7 +262,21 @@ struct PlainCardActionsTests {
             #expect(abs(rowFrame.maxX - standInFrame.maxX) < 0.5)
             #expect(abs(rowFrame.minY - standInFrame.minY) < 0.5)
             #expect(glyph(of: a) == glyph(of: b))
+            #expect(ink(of: a) == ink(of: b), "the stand-in's ink must be the row's")
         }
+        // And that ink is the line's one ink, on the stand-in too.
+        for pill in standInLine {
+            #expect(ink(of: pill).allSatisfy { $0 == PostCardPillView.ink })
+        }
+    }
+
+    /// Every colour an action draws in: a button's foreground, or a counter's
+    /// glyph tint and visible count.
+    private func ink(of pill: PostCardPillView) -> [UIColor] {
+        walk(pill, UIButton.self).compactMap { $0.configuration?.baseForegroundColor }
+            + walk(pill, PostMetricLabel.self).flatMap { metric in
+                [metric.icon.tintColor].compactMap { $0 } + walk(metric, UILabel.self).filter { !$0.isHidden }.compactMap(\.textColor)
+            }
     }
 
     /// ⚠️ A STAKED heart flies home red — filmed without this: the stand-in's
