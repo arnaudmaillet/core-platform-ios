@@ -284,8 +284,8 @@ public final class CountryShopViewController: UIViewController {
         guard let country = atlas.country(code: code), let standing = access.standing(of: code) else { return }
         cell.configure(
             flag: flag(for: country), name: country.name, rank: standing.rank,
-            likes: LockedCountryAnnotationView.compact(standing.likes),
-            posts: LockedCountryAnnotationView.compact(Int64(standing.posts))
+            likes: CountryStanding.compact(standing.likes),
+            posts: CountryStanding.compact(Int64(standing.posts))
         )
 
         let trailing: UIView

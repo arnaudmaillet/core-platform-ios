@@ -159,13 +159,3 @@ final class CountryFlagAnnotationView: MKAnnotationView {
         onSelect?()
     }
 }
-
-/// ⚠️ A NAME KEPT FOR ONE CALLER. The locked country's capsule badge this was
-/// is gone — a locked country now wears its busiest post's marker, darkened,
-/// or a `CountryFlagAnnotationView` — but `CountryShopViewController` still
-/// formats its counts through it. The formatter itself lives on
-/// `CountryStanding.compact`; move the shop there and delete this.
-enum LockedCountryAnnotationView {
-    /// "12.4K", "3.1M", "860" — see `CountryStanding.compact`.
-    static func compact(_ value: Int64) -> String { CountryStanding.compact(value) }
-}
