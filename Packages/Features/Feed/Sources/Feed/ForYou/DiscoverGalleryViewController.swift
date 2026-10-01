@@ -7,9 +7,10 @@ import MediaPlayback
 import PostGrid
 import UIKit
 
-/// Discover's whole mosaic, pushed from a chunk's "View all": the chaotic grid
-/// that WAS the Discover tab until the tab became a list (2026-09-28), now a
-/// screen of its own with the platform's back button.
+/// Discover's whole mosaic, pushed from a chunk's "View all" or the "For you ›"
+/// heading over the list (`ForYouRailsView`): the chaotic grid that WAS the
+/// Discover tab until the tab became a list (2026-09-28), now a screen of its
+/// own with the platform's back button.
 ///
 /// # What it is, and what it borrows
 ///
