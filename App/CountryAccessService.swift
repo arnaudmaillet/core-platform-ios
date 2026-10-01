@@ -24,6 +24,9 @@ final class CountryAccessService: CountryAccess {
     private let unlocks: CountryUnlockStore
     private let byCode: [String: CountryStanding]
     private let ordered: [CountryStanding]
+    /// The countries with posts of their own — the corpus's, without the
+    /// standings' population baseline, which gives every country a count.
+    private let postedCountries: Set<String>
     private var observers: [NSObjectProtocol] = []
 
     init(
@@ -37,6 +40,7 @@ final class CountryAccessService: CountryAccess {
         let ordered = Self.standings(activity: activity, homeCountry: homeCountry)
         self.ordered = ordered
         self.byCode = Dictionary(uniqueKeysWithValues: ordered.map { ($0.code, $0) })
+        self.postedCountries = Set(activity.filter { $0.value.posts > 0 }.keys.map { $0.uppercased() })
         // Gems and unlocks change elsewhere too (a stake settling, another
         // screen): the map re-reads on either.
         for name in [WalletStore.didChangeNotification, CountryUnlockStore.didChangeNotification] {
@@ -56,6 +60,11 @@ final class CountryAccessService: CountryAccess {
     func standing(of code: String) -> CountryStanding? { byCode[code.uppercased()] }
 
     func standings() -> [CountryStanding] { ordered }
+
+    /// The corpus's own posts, NOT the standing's count: a standing's posts
+    /// carry a population baseline so every country ranks plausibly, and
+    /// would say every country has some.
+    func hasPosts(in code: String) -> Bool { postedCountries.contains(code.uppercased()) }
 
     func unlock(_ code: String) -> CountryUnlockOutcome {
         guard let standing = standing(of: code) else { return .unknownCountry }

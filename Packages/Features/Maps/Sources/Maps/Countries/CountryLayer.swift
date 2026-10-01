@@ -241,9 +241,17 @@ final class CountryLayer: NSObject {
         refreshBadges()
     }
 
-    /// The disc a country wears, or nil when a post marker stands for it.
+    /// The disc a country wears, or nil when a post marker stands for it — or
+    /// when it HAS posts at all (`CountryAccess.hasPosts`).
+    ///
+    /// ⚠️ The disc says "nothing posted here", so it answers to the country's
+    /// posts, not to the map's current query: the world framing's query does
+    /// not bring every country's posts, and Brazil — posts and all — wore the
+    /// empty disc there. A country with posts and no marker in view shows
+    /// nothing until a marker stands for it.
     func wantsFlag(for country: CountryAtlas.Country) -> (isLocked: Bool, rank: Int)? {
         guard !countriesWithMarkers.contains(country.code) else { return nil }
+        if let access, access.hasPosts(in: country.code) { return nil }
         let isLocked = access.map { !$0.isUnlocked(country.code) } ?? false
         let rank = access?.standing(of: country.code)?.rank
             ?? populationRanks[country.code]

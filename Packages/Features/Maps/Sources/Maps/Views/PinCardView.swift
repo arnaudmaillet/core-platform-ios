@@ -421,8 +421,14 @@ final class PinCardView: UIView {
     /// the live one, which mid-flight is the page's. From there autoresizing
     /// keeps it at the same distance from the corner as the card grows.
     private func positionBadge() {
+        // An icon has no shape of its own (radius 0 IS "no circle"), but its
+        // mark — an emote's face, a sticker — is drawn within the disc its
+        // square inscribes, and the square's corner is empty. Seated on that
+        // corner the badge sat apart from the mark; on the disc's arc it hugs
+        // the mark the way it hugs a text marker's disc.
+        let radius = face == .icon ? Face.icon.side / 2 : face.cornerRadius
         let center = MapMarkerBadgeView.center(
-            in: bounds.size, cornerRadius: face.cornerRadius, inside: badgeSitsInside
+            in: bounds.size, cornerRadius: radius, inside: badgeSitsInside
         )
         let side = MapMarkerBadgeView.side
         badgeView.frame = CGRect(x: center.x - side / 2, y: center.y - side / 2, width: side, height: side)

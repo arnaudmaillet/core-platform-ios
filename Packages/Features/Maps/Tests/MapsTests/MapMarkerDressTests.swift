@@ -193,6 +193,37 @@ struct MapMarkerDressTests {
         #expect(card.debugBadge.bounds.width == MapMarkerBadgeView.side, "its own size, not the card's")
     }
 
+    /// An emote's badge hugs the MARK — on the arc of the disc its square
+    /// inscribes, overlapping it like a text disc's — not the square's empty
+    /// corner, where it sat apart from the face (Morocco, on the simulator).
+    @Test func anEmotesBadgeHugsTheMark() {
+        let card = card(.icon, dress: .resolve(kind: .country, countryCode: "MA", isLocked: false))
+        card.setIcon((emote(), 0))
+        let side = PinCardView.Face.icon.side
+        let arc = side / 2 * (1 + 1 / 2.squareRoot())
+        #expect(abs(card.debugBadge.center.x - arc) < 0.5 && abs(card.debugBadge.center.y - arc) < 0.5,
+                "badge centre \(card.debugBadge.center), arc point \(arc)")
+        let text = self.card(.text, dress: .resolve(kind: .country, countryCode: "MA", isLocked: false))
+        #expect(abs(card.debugBadge.center.x - text.debugBadge.center.x) < 0.5,
+                "the same seat as a text marker's disc of the same side")
+        #expect(card.revealStandInOverhangsWindow)
+    }
+
+    /// An OPEN emote is drawn at full strength: no dimming, no veil, no lock —
+    /// including one whose country was just unlocked.
+    @Test func anOpenEmoteIsNotWashedOut() {
+        let card = card(.icon, dress: .resolve(kind: .country, countryCode: "MA", isLocked: true))
+        card.setIcon((emote(), 0))
+        card.setDress(.resolve(kind: .country, countryCode: "MA", isLocked: false))
+        #expect(card.debugIconFaceAlpha == 1)
+        #expect(card.debugLockVeil.isHidden && card.debugLockGlyph.isHidden)
+        #expect(card.alpha == 1)
+        let fresh = self.card(.icon, dress: .resolve(kind: .country, countryCode: "MA", isLocked: false))
+        fresh.setIcon((emote(), 0))
+        #expect(fresh.debugIconFaceAlpha == 1)
+        #expect(fresh.debugLockVeil.isHidden && fresh.debugLockGlyph.isHidden)
+    }
+
     // MARK: - Locked
 
     @Test func aLockedMediaCardIsDarkenedUnderALock() {

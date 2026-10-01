@@ -248,8 +248,8 @@ final class MapMarkerBadgeView: UIView {
     /// nothing of it overhangs a window the card becomes.
     ///
     /// Otherwise ON the corner's arc, at 45°, overlapping the edge — a disc
-    /// (a text marker, an empty country) or a bare icon's square, neither of
-    /// which has a corner to sit in.
+    /// (a text marker, an empty country, the disc an emote's mark is drawn in
+    /// — `PinCardView.positionBadge`), which has no corner to sit in.
     nonisolated static func center(in size: CGSize, cornerRadius radius: CGFloat, inside: Bool) -> CGPoint {
         if inside {
             // The badge is wider than the corner's inner curve (its radius
