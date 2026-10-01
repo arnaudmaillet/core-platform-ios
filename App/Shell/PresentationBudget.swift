@@ -63,7 +63,25 @@ enum PresentationBudget {
     private static var judgeFrom: CFAbsoluteTime = .greatestFiniteMagnitude
     private static var shellSeen = false
     private static var installedAt: CFAbsoluteTime = 0
-    private static var sink: FileHandle?
+    /// Written once at install, before the first `emit`; read only on
+    /// `logQueue` after that.
+    nonisolated(unsafe) private static var sink: FileHandle?
+    /// Every log line is written here, in order. Never behind `symbolQueue`:
+    /// a line (a hold, the next turn) is not held hostage by a report.
+    nonisolated private static let logQueue = DispatchQueue(
+        label: "presentation-budget-log", qos: .utility)
+    /// ⚠️ An over-budget turn's samples are NAMED here, never on the main
+    /// thread. `dladdr` scans the debug dylib's symbol table per address:
+    /// ~480 ms over one turn's samples on the iPhone 18 Pro simulator. On the
+    /// main thread (after the turn's own timing closed) that time was in no
+    /// turn's number, yet every main-queue timer and MainActor continuation
+    /// waited behind it — a profile whose data was ready in ~45 ms read as
+    /// 340–900 ms under the harness. The main thread copies raw addresses
+    /// only; the report lands in the log when it is ready, naming its turn.
+    /// `.userInitiated`, not `.utility`: on a loaded host (load average ~50)
+    /// a utility queue took 10–19 s over one turn's samples.
+    nonisolated private static let symbolQueue = DispatchQueue(
+        label: "presentation-budget-symbols", qos: .userInitiated)
 
     // Per-turn state, main thread only.
     private static var turnStart: CFAbsoluteTime = 0
@@ -78,6 +96,9 @@ enum PresentationBudget {
     private static var overTurns = 0
     private static var worst: (name: String, ms: Double) = ("", 0)
     private static var worstHot: [String] = []
+    /// Which over-budget turn `worst` is, so a symbolication that lands
+    /// after a worse turn replaced it does not paint its frames on it.
+    private static var worstOverTurn = 0
     private static let probe = UIView(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
 
     // The sampler's view of the turn, shared across threads behind a lock.
@@ -232,18 +253,40 @@ enum PresentationBudget {
         if isScreen && over {
             overTurns += 1
             let name = turnEvents.first ?? "?"
-            let hot = hottestFrames(in: taken)
-            if elapsed > worst.ms {
+            let overTurn = overTurns
+            let isWorst = elapsed > worst.ms
+            if isWorst {
                 worst = (name, elapsed)
-                worstHot = hot.prefix(3).map { shortSymbol($0.0) }
+                worstHot = []
+                worstOverTurn = overTurn
             }
-            if !hot.isEmpty {
-                emit("[budget]   samples=\(taken.count) hottest app frames:")
-                for (frame, count) in hot { emit("[budget]     \(count)x \(frame)") }
-            } else if taken.isEmpty {
+            if taken.isEmpty {
                 emit("[budget]   samples=0 (the watchdog took none: the turn ended before its first 2ms tick)")
+            } else {
+                // Only raw addresses were copied above; naming them is
+                // `symbolQueue`'s job.
+                let turn = "turn=\(format(elapsed))ms \(name)"
+                if traps {
+                    // The process ends below: the report is written first,
+                    // so the log names the frames the trap is about.
+                    symbolQueue.sync { _ = reportHottestFrames(in: taken, of: turn) }
+                } else {
+                    symbolQueue.async {
+                        let hot = reportHottestFrames(in: taken, of: turn)
+                        guard isWorst else { return }
+                        let short = hot.prefix(3).map { shortSymbol($0.0) }
+                        DispatchQueue.main.async {
+                            MainActor.assumeIsolated {
+                                guard worstOverTurn == overTurn else { return }
+                                worstHot = short
+                                publishProbe()
+                            }
+                        }
+                    }
+                }
             }
             if traps {
+                logQueue.sync {}
                 fatalError("[budget] TRAP: \(name) took \(format(elapsed))ms in its presentation turn, budget \(budgetMs)ms — see the log above")
             }
         }
@@ -463,23 +506,48 @@ enum PresentationBudget {
         #endif
     }
 
+    /// Names an over-budget turn's samples and logs them as one block,
+    /// headed by the turn they belong to (other lines may have landed in
+    /// between). On `symbolQueue` only.
+    nonisolated private static func reportHottestFrames(in taken: [[UInt]], of turn: String) -> [(String, Int)] {
+        let start = CFAbsoluteTimeGetCurrent()
+        let looked = lookups
+        let hot = hottestFrames(in: taken)
+        let named = format((CFAbsoluteTimeGetCurrent() - start) * 1000)
+        let lines = ["[budget]   samples=\(taken.count) of \(turn): hottest app frames"
+                     + (hot.isEmpty ? " none" : ":")
+                     + " (named off the main thread in \(named)ms, \(lookups - looked) dladdr)"]
+            + hot.map { "[budget]     \($0.1)x \($0.0)" }
+        logQueue.async { lines.forEach(write) }
+        return hot
+    }
+
+    /// Return address → the app's own symbol there, nil when it is not one.
+    /// The same frames recur in every sample and every turn. `symbolQueue` only.
+    nonisolated(unsafe) private static var symbols: [UInt: String?] = [:]
+    /// The `__TEXT` ranges of the app's own images, read at the first report
+    /// (they are linked at launch). `symbolQueue` only.
+    nonisolated(unsafe) private static var appText: [ClosedRange<UInt>]?
+    /// `dladdr` calls so far, for the report line. `symbolQueue` only.
+    nonisolated(unsafe) private static var lookups = 0
+
     /// The app's own symbols across every sample, most frequent first. A
     /// sample counts each symbol once, so a deep recursion does not outvote a
-    /// hot leaf.
+    /// hot leaf. `symbolQueue` only.
     nonisolated private static func hottestFrames(in samples: [[UInt]]) -> [(String, Int)] {
-        guard !samples.isEmpty else { return [] }
         var counts: [String: Int] = [:]
         var order: [String] = []
         for sample in samples {
             var seen = Set<String>()
             for address in sample {
-                var info = Dl_info()
-                guard dladdr(UnsafeRawPointer(bitPattern: address), &info) != 0,
-                      isAppImage(info.dli_fname),
-                      let symbol = info.dli_sname.map({ canonical(demangle(String(cString: $0))) }),
-                      !isNoise(symbol)
-                else { continue }
-                guard seen.insert(symbol).inserted else { continue }
+                let symbol: String?
+                if let known = symbols[address] {
+                    symbol = known
+                } else {
+                    symbol = appSymbol(at: address)
+                    symbols[address] = symbol
+                }
+                guard let symbol, seen.insert(symbol).inserted else { continue }
                 if counts[symbol] == nil { order.append(symbol) }
                 counts[symbol, default: 0] += 1
             }
@@ -488,6 +556,48 @@ enum PresentationBudget {
             .sorted { $0.1 > $1.1 }
             .prefix(12)
             .map { ($0.0, $0.1) }
+    }
+
+    /// The app's own, non-noise symbol at a return address, or nil. A frame
+    /// outside the app's `__TEXT` (UIKit, Core Animation: most of a stack)
+    /// never reaches `dladdr`.
+    nonisolated private static func appSymbol(at address: UInt) -> String? {
+        let ranges = appText ?? appTextRanges()
+        appText = ranges
+        guard ranges.contains(where: { $0.contains(address) }) else { return nil }
+        lookups += 1
+        var info = Dl_info()
+        guard dladdr(UnsafeRawPointer(bitPattern: address), &info) != 0,
+              isAppImage(info.dli_fname),
+              let symbol = info.dli_sname.map({ canonical(demangle(String(cString: $0))) }),
+              !isNoise(symbol)
+        else { return nil }
+        return symbol
+    }
+
+    nonisolated private static func appTextRanges() -> [ClosedRange<UInt>] {
+        var ranges: [ClosedRange<UInt>] = []
+        for index in 0..<_dyld_image_count() {
+            guard isAppImage(_dyld_get_image_name(index)),
+                  let header = _dyld_get_image_header(index),
+                  header.pointee.magic == MH_MAGIC_64
+            else { continue }
+            let slide = UInt(bitPattern: _dyld_get_image_vmaddr_slide(index))
+            var command = UnsafeRawPointer(header).advanced(by: MemoryLayout<mach_header_64>.size)
+            for _ in 0..<header.pointee.ncmds {
+                let load = command.assumingMemoryBound(to: load_command.self).pointee
+                if load.cmd == LC_SEGMENT_64 {
+                    let segment = command.assumingMemoryBound(to: segment_command_64.self).pointee
+                    let name = withUnsafeBytes(of: segment.segname) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
+                    if name == "__TEXT", segment.vmsize > 0 {
+                        let lower = UInt(segment.vmaddr) &+ slide
+                        ranges.append(lower...(lower + UInt(segment.vmsize) - 1))
+                    }
+                }
+                command = command.advanced(by: Int(load.cmdsize))
+            }
+        }
+        return ranges
     }
 
     private typealias Demangle = @convention(c) (
@@ -558,7 +668,12 @@ enum PresentationBudget {
         emit(line)
     }
 
-    private static func emit(_ text: String) {
+    nonisolated private static func emit(_ text: String) {
+        logQueue.async { write(text) }
+    }
+
+    /// `logQueue` only.
+    nonisolated private static func write(_ text: String) {
         print(text)
         sink?.write(Data((text + "\n").utf8))
     }
