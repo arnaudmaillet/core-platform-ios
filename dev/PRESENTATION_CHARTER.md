@@ -95,6 +95,28 @@ dressed up as one.
 - **P12 — Nothing awaits before `push`/`present` is called.** A builder is
   synchronous. If a screen needs a value the builder does not have, the screen
   fetches it itself after `viewDidLoad`, over its skeleton.
+- **P12a — …except a BOUNDED hold for a screen whose data is one fast round
+  trip away and cannot be seeded.** The pusher may wait for the destination
+  to say its first frame is its settled self (`PresentationReadying`), never
+  longer than `PresentationHold.defaultCeiling` (250 ms); past the ceiling it
+  pushes the skeleton exactly as P12 would. The builder stays synchronous;
+  the screen loads its view early so its own `viewDidLoad` starts the loads,
+  and no layout runs before the push (P15). Today: routed profiles
+  (`RouteResolver`, every `.profile` entry point). Why: the profile's header,
+  follow state, pictures and first cards were all a few milliseconds away on
+  the mock, yet landed after the slide had started — filmed on device
+  (1 October 2026) as one page sliding in and a different one arriving.
+  "Settled" for a profile = header data, follow state, map star (it widens
+  the tray), both pictures, and the open gallery page — not the cards' own
+  media (P13). Measured on the simulator, mock: 43–48 ms from Messages,
+  46–132 ms from For You (the star's rail read is the long pole); a revisit
+  seeds the header from the cache (P7) and waits only for its gallery and
+  star. Every hold logs `[budget] hold <Screen> waited=…ms ready|CEILING`;
+  `-presentation-hold-off` restores the immediate push for A/B films.
+  ⚠️ Measure holds WITHOUT `-presentation-budget`: the instrument
+  symbolicates an over-budget turn on the main thread after the turn closes
+  (~300–500 ms of `dladdr`, invisible to its own turn log), which delays the
+  hold's data and its ceiling alike.
 - **P13 — Heavy per-item work is off the main actor and per item, not per
   screen.** Thumbnails, text measurement for display models, film-strip
   sampling, QR rendering and CoreImage all run in a detached task or an actor,

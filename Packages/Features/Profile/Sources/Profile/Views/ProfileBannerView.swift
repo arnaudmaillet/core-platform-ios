@@ -59,6 +59,13 @@ final class ProfileBannerView: UIView {
     /// the first layout, or from a fetch afterwards — so the header can read
     /// its shape off it. See `ProfileBannerFormat`.
     var onImageResolved: ((UIImage) -> Void)?
+    /// Whether the picture has stopped changing: drawn, absent, or failed —
+    /// anything but a fetch still on its way. The screen holds its push on it
+    /// (`ProfileViewController.isSettledForPresentation`), so the shape and
+    /// the picture a viewer first sees are the ones that stay.
+    private(set) var isPictureSettled = true
+    /// Fires when `isPictureSettled` becomes true after a fetch.
+    var onPictureSettled: (() -> Void)?
     /// The shape the banner is drawn in — which decides whether it fades out
     /// on the way up (a poster does, a band does not).
     private var format: ProfileBannerFormat = .unresolved
@@ -107,6 +114,7 @@ final class ProfileBannerView: UIView {
         imageTask?.cancel()
         picture.image = nil
 
+        isPictureSettled = true
         guard let url else { return }
         let pipeline = imagePipeline
         // Synchronously from the cache when it can: the shape is read off the
@@ -117,9 +125,16 @@ final class ProfileBannerView: UIView {
             onImageResolved?(cached)
             return
         }
+        isPictureSettled = false
         imageTask = Task { [weak self] in
-            guard let image = try? await pipeline.image(for: url) else { return }
+            let image = try? await pipeline.image(for: url)
             guard let self, !Task.isCancelled, self.currentImageURL == url else { return }
+            // A failure settles too: the backdrop is what stays.
+            defer {
+                self.isPictureSettled = true
+                self.onPictureSettled?()
+            }
+            guard let image else { return }
             // A full-bleed surface landing abruptly is the loudest pop on the
             // screen; dissolve it over the neutral backdrop.
             UIView.transition(
