@@ -139,10 +139,9 @@ final class ConversationThreadViewController: UIViewController {
         // The footer belongs to this screen only — the inbox behind it has
         // none. Shown during the push so it slides in with the transition.
         navigationController?.setToolbarHidden(false, animated: animated)
-        // Before the bars first lay these out, not only after: a budget that
+        // Before the bars first lay it out, not only after: a budget that
         // arrives late is a bar that has already collapsed into a `•••`.
         fitTrailingRun()
-        fitAccessory()
     }
 
     override func viewIsAppearing(_ animated: Bool) {
@@ -178,7 +177,6 @@ final class ConversationThreadViewController: UIViewController {
             }
             return
         }
-        fitAccessory()
         syncBottomClearance()
         // After the clearance, in the same pass: see `pinToTail`.
         if owesTailPin { pinToTail() }
@@ -362,7 +360,8 @@ final class ConversationThreadViewController: UIViewController {
         ])
     }
 
-    /// The post's footer, with the emote strip where the music would be.
+    /// The post's footer, with the emote strip where the music would be —
+    /// stretched over every point the trailing bubbles leave.
     private func configureToolbar() {
         guard let accessory else { return }
         accessory.onInsertText = { [weak self] text in self?.composeBar.insertIntoComposer(text) }
@@ -377,6 +376,7 @@ final class ConversationThreadViewController: UIViewController {
         ]))
         toolbarItems = SnapFooterToolbar.items(
             leading: accessory.view,
+            leadingFills: true,
             bookmark: save,
             repost: SnapFooterToolbar.makeRepostButton(),
             more: more
@@ -748,12 +748,6 @@ final class ConversationThreadViewController: UIViewController {
             budget -= badge + itemPadding + Spacing.sm
         }
         peerPill.setWidthBudget(budget)
-    }
-
-    private func fitAccessory() {
-        let bar = navigationController?.toolbar.bounds.width ?? view.bounds.width
-        guard bar > 0 else { return }
-        accessory?.setPreferredWidth(SnapFooterToolbar.leadingWidthBudget(barWidth: bar))
     }
 
     private func refreshWalletBadge() {

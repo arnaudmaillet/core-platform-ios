@@ -113,15 +113,19 @@ public protocol ConversationThreadDriving: AnyObject {
 }
 
 /// What sits in the footer where a post shows its music: for a conversation,
-/// the emote strip. A view and the one fact it cannot work out — its width.
+/// the emote strip.
+///
+/// The view is a bar item's custom view that draws its OWN glass capsule and
+/// FILLS the bar by Auto Layout (lowest hugging, a huge lowest-priority
+/// width): the host hides the bar's shared bubble around it and puts no
+/// flexible space beside it, and the bar stretches it over whatever the other
+/// items leave.
 @MainActor
 public protocol ConversationThreadAccessory: AnyObject {
     var view: UIView { get }
-    /// Text the accessory wants in the composer (an emote's emoji).
+    /// Text the accessory wants in the composer (an emoji, or a house emote's
+    /// `:code:`).
     var onInsertText: ((String) -> Void)? { get set }
-    /// A bar item's custom view has no intrinsic width and is not in the
-    /// bar's hierarchy before layout, so the host hands it its budget.
-    func setPreferredWidth(_ width: CGFloat)
 }
 
 @MainActor

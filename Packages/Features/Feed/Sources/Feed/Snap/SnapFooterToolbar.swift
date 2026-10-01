@@ -5,7 +5,8 @@ import UIKit
 /// with its own leading item:
 ///
 /// ```
-///  [leading] ———————————————— [🔖 ⇄] [⋯]
+///  [leading] ———————————————— [🔖 ⇄] [⋯]     the post: a pill, then space
+///  [leading ————————————————] [🔖 ⇄] [⋯]     `leadingFills`: the emote strip
 /// ```
 ///
 /// Every item is a custom view, so iOS 26 gives each its own glass bubble; the
@@ -18,12 +19,24 @@ import UIKit
 /// the feed onto this factory is the follow-up that makes the two one.
 enum SnapFooterToolbar {
     /// The bar's items, left to right.
-    static func items(leading: UIView, bookmark: UIButton, repost: UIButton, more: UIButton) -> [UIBarButtonItem] {
+    ///
+    /// `leadingFills`: `leading` draws its own capsule and stretches by Auto
+    /// Layout over every point the trailing bubbles leave (lowest hugging, a
+    /// huge lowest-priority width — see `ConversationThreadAccessory`). Its
+    /// item hides the bar's shared bubble — a capsule in a bubble would be
+    /// padded inside it, its content cut short of the visible ends — and a
+    /// fixed space takes the flexible one's place, which would otherwise
+    /// claim the room.
+    static func items(
+        leading: UIView, leadingFills: Bool = false, bookmark: UIButton, repost: UIButton, more: UIButton
+    ) -> [UIBarButtonItem] {
         let shareCluster = UIStackView(arrangedSubviews: [bookmark, repost])
         shareCluster.axis = .horizontal
+        let leadingItem = UIBarButtonItem(customView: leading)
+        leadingItem.hidesSharedBackground = leadingFills
         return [
-            UIBarButtonItem(customView: leading),
-            .flexibleSpace(),
+            leadingItem,
+            leadingFills ? .fixedSpace(Spacing.sm) : .flexibleSpace(),
             UIBarButtonItem(customView: shareCluster),
             .fixedSpace(Spacing.sm),
             UIBarButtonItem(customView: more),
@@ -50,20 +63,5 @@ enum SnapFooterToolbar {
         button.showsMenuAsPrimaryAction = true
         button.menu = menu
         return button
-    }
-
-    /// What the leading item may take on a bar `barWidth` wide: the bar less
-    /// its margins, the two trailing bubbles with their glass padding, the
-    /// fixed space and a breath of flexible space.
-    ///
-    /// The padding is MEASURED, not published (~18pt per custom item — the
-    /// same figure the feed's nav arithmetic is calibrated against), and the
-    /// cost of getting it wrong is the whole bar collapsing into a `•••`.
-    static func leadingWidthBudget(barWidth: CGFloat) -> CGFloat {
-        let itemPadding: CGFloat = 18
-        let barMargin: CGFloat = 16
-        let bubble: CGFloat = 36
-        let trailing = (bubble * 2 + itemPadding) + Spacing.sm + (bubble + itemPadding)
-        return max(0, barWidth - barMargin * 2 - trailing - itemPadding - Spacing.sm)
     }
 }

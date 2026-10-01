@@ -24,15 +24,7 @@ let package = Package(
         // The conversation is drawn by Feed's text-post screen. The INTERFACE
         // only — features never import each other — the same edge Maps and
         // Profile already have.
-        .package(path: "../../FeatureInterfaces/FeedInterface"),
-        // The stickers the composer's favorite strip shows — files and
-        // catalogue — shared with the upload editor, which is why they are not
-        // Chat's resources any more.
-        .package(path: "../../Core/StickerKit"),
-        // The strip plays a tapped sticker itself. dotLottie (.lottie) is a
-        // zipped bundle of Bodymovin JSON, so a real player is required —
-        // there is no UIImage path for it.
-        .package(url: "https://github.com/airbnb/lottie-ios.git", from: "4.5.0")
+        .package(path: "../../FeatureInterfaces/FeedInterface")
     ],
     targets: [
         .target(
@@ -47,9 +39,7 @@ let package = Package(
                 "DesignSystem",
                 "EmoteKit",
                 "FeedInterface",
-                "MediaCore",
-                "StickerKit",
-                .product(name: "Lottie", package: "lottie-ios")
+                "MediaCore"
             ]
         ),
         .testTarget(
