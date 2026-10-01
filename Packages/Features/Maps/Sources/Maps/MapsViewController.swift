@@ -2894,6 +2894,9 @@ extension MapsViewController: MKMapViewDelegate {
                 guard let self, let view else { return }
                 popChoreographer.release(view)
             }
+            // Back from a flight: reclaim the place a flag disc took while
+            // the marker was hidden (see `MapAnnotationView.onReappear`).
+            view?.onReappear = { [weak self] view in self?.countryLayer.giveWay(to: view.frame) }
             return view
         }
         guard let pinAnnotation = annotation as? MapAnnotation else { return nil }
@@ -2912,8 +2915,10 @@ extension MapsViewController: MKMapViewDelegate {
             guard let self, let view else { return }
             popChoreographer.release(view)
         }
+        view?.onReappear = { [weak self] view in self?.countryLayer.giveWay(to: view.frame) }
         return view
     }
+
 
     /// Opens a tapped marker's post(s) with the hero transition — a single pin
     /// opens its post, a cluster opens all its members (their ids are already

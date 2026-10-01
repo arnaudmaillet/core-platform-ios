@@ -67,6 +67,13 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerD
     /// Fired the instant the cluster is tapped — see `installInstantTap`.
     var onSelect: (() -> Void)?
 
+    /// See `MapAnnotationView.onReappear`.
+    var onReappear: ((MKAnnotationView) -> Void)?
+
+    override var isHidden: Bool {
+        didSet { if oldValue, !isHidden { onReappear?(self) } }
+    }
+
     override init(annotation: (any MKAnnotation)?, reuseIdentifier: String?) {
         super.init(annotation: annotation, reuseIdentifier: reuseIdentifier)
         // Square collision + center anchoring, identical to a single pin.

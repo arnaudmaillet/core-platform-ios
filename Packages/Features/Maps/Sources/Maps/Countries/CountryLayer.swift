@@ -269,8 +269,58 @@ final class CountryLayer: NSObject {
         let gone = flags.filter { wanted[$0.key] !== $0.value }.map(\.value)
         let new = wanted.filter { flags[$0.key] !== $0.value }.map(\.value)
         if !gone.isEmpty { mapView.removeAnnotations(gone) }
-        if !new.isEmpty { mapView.addAnnotations(new) }
         flags = wanted
+        // Busiest first: the discs MapKit should keep land first.
+        pendingFlags = (pendingFlags + new.sorted { $0.rank < $1.rank })
+            .filter { flags[$0.code] === $0 }
+        drainPendingFlags()
+    }
+
+    /// Discs waiting to go on the map — see `drainPendingFlags`.
+    private var pendingFlags: [CountryFlagAnnotation] = []
+    private var isDrainingFlags = false
+    /// How many discs go on the map per run-loop turn.
+    private static let flagsPerTurn = 10
+
+    /// ⚠️ A FEW DISCS PER TURN, NOT TWO HUNDRED IN ONE. The first refresh puts
+    /// a disc on nearly every country, and MapKit realises every one in view
+    /// in the turn they are added — measured as one 89 ms turn at the world
+    /// zoom (`-presentation-budget`). Spread over turns, busiest first, the
+    /// map keeps drawing while the discs arrive.
+    private func drainPendingFlags() {
+        guard !isDrainingFlags, let mapView, !pendingFlags.isEmpty else { return }
+        let batch = Array(pendingFlags.prefix(Self.flagsPerTurn))
+        pendingFlags.removeFirst(batch.count)
+        mapView.addAnnotations(batch)
+        guard !pendingFlags.isEmpty else { return }
+        isDrainingFlags = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            isDrainingFlags = false
+            // Still wanted? A refresh in between may have replaced or dropped
+            // some (an unlock, a marker now standing for the country).
+            pendingFlags = pendingFlags.filter { self.flags[$0.code] === $0 }
+            drainPendingFlags()
+        }
+    }
+
+    /// Makes every flag disc drawn over `rect` (map-view points) give way
+    /// again: a post marker coming back from a flight reclaims its place.
+    ///
+    /// ⚠️ MapKit settles collisions on a region change and when an annotation
+    /// ARRIVES, never when a hidden view is shown again — so the discs that
+    /// won the marker's place while it was hidden are re-added, which is an
+    /// arrival, and collide against the marker now on screen. Only the few
+    /// discs over the marker, so nothing else on the map moves.
+    func giveWay(to rect: CGRect) {
+        guard let mapView else { return }
+        let covering = flags.values.filter { flag in
+            guard let view = mapView.view(for: flag), !view.isHidden, view.alpha > 0 else { return false }
+            return view.frame.intersects(rect)
+        }
+        guard !covering.isEmpty else { return }
+        mapView.removeAnnotations(covering)
+        mapView.addAnnotations(covering)
     }
 
     /// The disc view for a country.

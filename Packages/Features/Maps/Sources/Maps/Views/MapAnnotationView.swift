@@ -100,6 +100,22 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing
     /// Fired the instant the pin is tapped — see `installInstantTap`.
     var onSelect: (() -> Void)?
 
+    /// Fired when the marker comes back from being hidden — a flight or a
+    /// reveal window conceals it for as long as its twin is in the air.
+    ///
+    /// ⚠️ MapKit's collisions ignore a hidden view, so while the marker was
+    /// away a lower-priority annotation it had been covering (an empty
+    /// country's flag disc) won its place — and MapKit does not take it back
+    /// when the marker returns, only at the next region change. Filmed: a
+    /// closed flight landed its marker under Andorra's disc. The host uses
+    /// this to make what overlaps the marker give way again
+    /// (`CountryLayer.giveWay(to:)`).
+    var onReappear: ((MKAnnotationView) -> Void)?
+
+    override var isHidden: Bool {
+        didSet { if oldValue, !isHidden { onReappear?(self) } }
+    }
+
     /// Reveals the live-preview surface over the thumbnail (playback is attached
     /// by the coordinator via `videoRenderView`). Seeds the render view's poster
     /// with the already-loaded thumbnail so the pin shows the still image — not a
