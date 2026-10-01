@@ -10,9 +10,14 @@ import UIKit
 /// radius, border, or crop rules left to drift apart.
 ///
 /// Layer order (bottom → top): arrival cover image, DEPARTURE cover image,
-/// live video surface, text face, border ring. The card itself clips and
-/// rounds; the ring draws the pin's border above whichever media surface is
-/// showing, so a live-previewing pin keeps its ring too. During a flight the
+/// live video surface, text face, icon face, lock veil — all inside
+/// `contentView`, which clips and rounds — then the CHROME: the border ring
+/// (neutral, or the flag gradient of `MapFlagBorderView`) and the corner
+/// badge. The chrome sits OUTSIDE the clip, because the badge overlaps the
+/// card's corner like an app icon's badge; the card's own layer is unclipped
+/// and only draws the rounded ground. The ring draws the pin's border above
+/// whichever media surface is showing, so a live-previewing pin keeps its ring
+/// too. During a flight the
 /// animator animates `frame`, `setCornerRadius`, `ringView.alpha` and — only
 /// when a departure picture was handed in — the blend alphas; everything else
 /// tracks via autoresizing.
@@ -22,8 +27,7 @@ final class PinCardView: UIView {
     /// so must be able to from outside the main actor.
     nonisolated static let cornerRadius: CGFloat = 12
     // `nonisolated` like `cornerRadius` above: a UIView subclass's statics are
-    // `@MainActor` by inference, and `MapMarkerRing` reads this from a
-    // nonisolated default value.
+    // `@MainActor` by inference, and this one is read off the main actor too.
     nonisolated static let ringWidth: CGFloat = 2
 
     /// The glyph a text-only post's marker shows in place of a cover. Product
@@ -150,6 +154,32 @@ final class PinCardView: UIView {
     /// way home).
     let ringView = UIView()
 
+    /// Every picture the card draws, clipped to the card's rounded shape.
+    ///
+    /// ⚠️ THE CLIP MOVED HERE FROM THE CARD ITSELF, and only so the badge can
+    /// leave it: a badge overlapping the corner is half outside the card, and
+    /// a clipping card clips every descendant. The card keeps its radius and
+    /// its ground (a layer rounds its own background without masking), this
+    /// view takes the same radius and does the masking, and the two are
+    /// written together in `setCornerRadius`.
+    private let contentView = UIView()
+    /// The marker's furniture, unclipped: the neutral ring, the flag border and
+    /// the corner badge. It is the flight's `zoomRestingChrome`, so all three
+    /// fade together as the card leaves the marker.
+    private let chromeView = UIView()
+    /// The border in the country's flag colours (`MapMarkerDress.borderFlag`).
+    private let flagBorder = MapFlagBorderView()
+    /// The flag, city or lock in the bottom-right corner.
+    private let badgeView = MapMarkerBadgeView()
+    /// A locked country's marker: the face darkened under a lock.
+    private let lockVeil = UIView()
+    private let lockGlyph = UIImageView()
+    /// What the marker wears around its face — see `MapMarkerDress`.
+    private(set) var dress: MapMarkerDress = .neutral
+    /// A locked EMOTE has no ground for the veil to darken, so the mark itself
+    /// is dimmed instead.
+    private static let lockedIconAlpha: CGFloat = 0.45
+
     #if DEBUG
     /// The stacked faces, BY NAME.
     ///
@@ -173,10 +203,16 @@ final class PinCardView: UIView {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        clipsToBounds = true
+        clipsToBounds = false
         backgroundColor = .black
         layer.cornerRadius = Self.cornerRadius
         layer.cornerCurve = .continuous
+        contentView.clipsToBounds = true
+        contentView.layer.cornerRadius = Self.cornerRadius
+        contentView.layer.cornerCurve = .continuous
+        contentView.frame = bounds
+        contentView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        addSubview(contentView)
 
         imageView.contentMode = .scaleAspectFill
         imageView.clipsToBounds = true
@@ -189,7 +225,7 @@ final class PinCardView: UIView {
         imageView.backgroundColor = .black
         imageView.frame = bounds
         imageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        addSubview(imageView)
+        contentView.addSubview(imageView)
 
         departureCoverView.contentMode = .scaleAspectFill
         departureCoverView.clipsToBounds = true
@@ -220,17 +256,17 @@ final class PinCardView: UIView {
         previewSheetView.frame = bounds
         previewSheetView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         previewSheetView.isHidden = true
-        addSubview(previewSheetView)
+        contentView.addSubview(previewSheetView)
 
         departureCoverView.frame = bounds
         departureCoverView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        addSubview(departureCoverView)
+        contentView.addSubview(departureCoverView)
 
         videoRenderView.frame = bounds
         videoRenderView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         videoRenderView.clipsToBounds = true
         videoRenderView.isHidden = true
-        addSubview(videoRenderView)
+        contentView.addSubview(videoRenderView)
 
         // Same z-position as the card's own surface — the two are alternatives,
         // never a stack — and above the departure still, which is only this
@@ -239,12 +275,12 @@ final class PinCardView: UIView {
         donatedMediaHost.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         donatedMediaHost.clipsToBounds = true
         donatedMediaHost.isHidden = true
-        addSubview(donatedMediaHost)
+        contentView.addSubview(donatedMediaHost)
 
         textFaceView.frame = bounds
         textFaceView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         textFaceView.isHidden = true
-        addSubview(textFaceView)
+        contentView.addSubview(textFaceView)
 
         iconFaceView.frame = bounds
         // ⚠️ NO autoresizing mask: `layoutSubviews` centres it at marker size.
@@ -252,7 +288,28 @@ final class PinCardView: UIView {
         // stand-in out at the WINDOW's frame, so a filling icon was blown up to
         // several hundred points as the window opened.
         iconFaceView.isHidden = true
-        addSubview(iconFaceView)
+        contentView.addSubview(iconFaceView)
+
+        // Above every face: a locked marker is its face, darkened, under a
+        // lock. Never on a card that flies — a locked marker does not open.
+        lockVeil.backgroundColor = UIColor.black.withAlphaComponent(0.45)
+        lockVeil.frame = bounds
+        lockVeil.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        lockVeil.isUserInteractionEnabled = false
+        lockVeil.isHidden = true
+        contentView.addSubview(lockVeil)
+        lockGlyph.image = UIImage(
+            systemName: "lock.fill",
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
+        )
+        lockGlyph.tintColor = .white
+        lockGlyph.contentMode = .center
+        lockGlyph.layer.shadowColor = UIColor.black.cgColor
+        lockGlyph.layer.shadowOpacity = 0.5
+        lockGlyph.layer.shadowRadius = 2
+        lockGlyph.layer.shadowOffset = .zero
+        lockGlyph.isHidden = true
+        contentView.addSubview(lockGlyph)
 
         // ⚠️ TOP-LEFT ANCHORED, and this is a REGISTER fix rather than a layout
         // preference.
@@ -282,8 +339,8 @@ final class PinCardView: UIView {
         // and a donated surface are both centred by `ZoomFlight`, and under a
         // zero anchor `center` would move their top-left corner instead. Nor
         // for `iconFaceView`, which `layoutIconFace` centres by hand.
-        for child in [imageView, previewSheetView, departureCoverView, donatedMediaHost,
-                      textFaceView, videoRenderView] {
+        for child in [contentView, imageView, previewSheetView, departureCoverView, donatedMediaHost,
+                      textFaceView, videoRenderView, lockVeil] {
             child.layer.anchorPoint = .zero
             child.frame = bounds
         }
@@ -301,7 +358,25 @@ final class PinCardView: UIView {
         ringView.layer.anchorPoint = .zero
         ringView.frame = bounds
         ringView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        addSubview(ringView)
+
+        // The chrome: unclipped, above the content, anchored like it.
+        chromeView.isUserInteractionEnabled = false
+        chromeView.layer.anchorPoint = .zero
+        chromeView.frame = bounds
+        chromeView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        addSubview(chromeView)
+        chromeView.addSubview(ringView)
+        flagBorder.layer.anchorPoint = .zero
+        flagBorder.frame = bounds
+        flagBorder.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        flagBorder.setShape(radius: Self.cornerRadius, curve: .continuous)
+        flagBorder.isHidden = true
+        chromeView.addSubview(flagBorder)
+        // Kept at its distance from the card's bottom-right corner as the card
+        // grows: the badge rides the corner of a flying card, at its own size.
+        badgeView.autoresizingMask = [.flexibleLeftMargin, .flexibleTopMargin]
+        chromeView.addSubview(badgeView)
+        positionBadge()
 
         // `borderColor` is a CGColor and doesn't follow dark/light on its own —
         // re-resolve whatever ring color is CURRENTLY worn (neutral, or a
@@ -313,19 +388,48 @@ final class PinCardView: UIView {
         }
     }
 
-    /// The ring's current color — neutral by default, a hierarchy color when
-    /// the marker speaks for a city/region/country (see `MapMarkerRing`).
-    /// Stored as the DYNAMIC color so trait changes can re-resolve it.
-    private var ringColor: UIColor = .systemBackground
+    /// The neutral ring's color. Dynamic, so trait changes re-resolve it.
+    private let ringColor: UIColor = .systemBackground
 
-    /// Dresses the ring for the marker's hierarchy level. One call sets both
-    /// halves so a marker can never wear one level's color at another's
-    /// weight.
-    func setRing(color: UIColor, width: CGFloat) {
-        ringColor = color
-        ringView.layer.borderColor = color.resolvedColor(with: traitCollection).cgColor
-        ringView.layer.borderWidth = width
+    /// Dresses the marker: its border, its corner badge and its lock — see
+    /// `MapMarkerDress`. Cheap to re-apply with an unchanged dress (a reconcile
+    /// re-configures every surviving marker).
+    ///
+    /// A place marker swaps the neutral ring for the flag border: the two are
+    /// alternatives, never a stack. Which one a DRESSED icon shows is neither
+    /// — an emote has no card to frame — and that rule stays with the face
+    /// (`applyFaceVisibility`).
+    func setDress(_ dress: MapMarkerDress) {
+        // A reconcile re-dresses every marker many times a second under a
+        // pan; an unchanged dress must not even touch the faces' layout.
+        guard dress != self.dress else { return }
+        self.dress = dress
+        flagBorder.setFlag(dress.borderFlag)
+        badgeView.setBadge(dress.badge)
+        positionBadge()
+        applyFaceVisibility()
+        applyBlend()
     }
+
+    /// Seats the badge on the RESTING card's corner — the face's radius, not
+    /// the live one, which mid-flight is the page's. From there autoresizing
+    /// keeps it at the same distance from the corner as the card grows.
+    private func positionBadge() {
+        let center = MapMarkerBadgeView.center(in: bounds.size, cornerRadius: face.cornerRadius)
+        let side = MapMarkerBadgeView.side
+        badgeView.frame = CGRect(x: center.x - side / 2, y: center.y - side / 2, width: side, height: side)
+    }
+
+    #if DEBUG
+    /// The decorations, by name — see `debugTextFace` for why never by index.
+    var debugContentView: UIView { contentView }
+    var debugChromeView: UIView { chromeView }
+    var debugFlagBorder: MapFlagBorderView { flagBorder }
+    var debugBadge: MapMarkerBadgeView { badgeView }
+    var debugLockVeil: UIView { lockVeil }
+    var debugLockGlyph: UIView { lockGlyph }
+    var debugIconFaceAlpha: CGFloat { iconFaceView.alpha }
+    #endif
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -450,6 +554,7 @@ final class PinCardView: UIView {
         // somebody's footage.
         if face != .media { setPreviewSheet(nil) }
         setCornerRadius(face.cornerRadius)
+        positionBadge()
         // ⚠️ AFTER `setCornerRadius`, which writes the ring's radius from the
         // face. Called before it, the floor's round ring was overwritten by the
         // icon face's 0 one line later — the assertion said 0 and the marker
@@ -528,7 +633,18 @@ final class PinCardView: UIView {
         // The ring belongs to the disc, so it follows the disc rather than the
         // face: a bare icon wearing the text floor should look like a text
         // marker, ring included.
-        ringView.isHidden = face == .icon && !iconIsBare
+        //
+        // A DRESSED icon — an emote, a GIF — wears no border of any kind, the
+        // flag's included: it is a mark on the map, with no card to frame. Its
+        // badge stays; that says where it is, not what it is.
+        let bordersSuppressed = face == .icon && !iconIsBare
+        let wearsFlagBorder = dress.borderFlag != nil && !bordersSuppressed
+        ringView.isHidden = bordersSuppressed || wearsFlagBorder
+        flagBorder.isHidden = !wearsFlagBorder
+        // The lock: a veil over a face that has a ground, the mark itself
+        // dimmed when it has none (`applyBlend`), and the glyph over either.
+        lockGlyph.isHidden = !dress.isLocked
+        lockVeil.isHidden = !dress.isLocked || bordersSuppressed
         // ⚠️ AND IT MUST TAKE THE DISC'S SHAPE. `ringView` draws the marker's
         // border on the CARD's rectangle, which under `.icon` is a square with
         // radius 0 — that is the whole meaning of "no circle". Left alone it
@@ -551,15 +667,16 @@ final class PinCardView: UIView {
         // window that is the mask's radius, growing toward the page's — and
         // re-asserting `face.cornerRadius` here would undo it one line later.
         if iconIsBare, cardRadius == 0 {
-            ringView.layer.cornerRadius = floorRadius
-            ringView.layer.cornerCurve = .circular
+            applyRingShape(radius: floorRadius, curve: .circular)
+            // The veil darkens the floor's disc, not the square around it.
+            lockVeil.layer.cornerRadius = floorRadius
         } else {
+            lockVeil.layer.cornerRadius = 0
             // The card's LIVE radius, not the face's constant: in a reveal
             // window that is the mask's, and asserting the face's would undo
             // what `setCornerRadius` wrote one line earlier. At rest the two
             // are the same value, so the dressed icon still goes back to 0.
-            ringView.layer.cornerRadius = cardRadius
-            ringView.layer.cornerCurve = face == .text ? .circular : .continuous
+            applyRingShape(radius: cardRadius, curve: face == .text ? .circular : .continuous)
         }
     }
 
@@ -746,7 +863,7 @@ final class PinCardView: UIView {
             departureCoverView.alpha = 1
             videoRenderView.alpha = 1
             textFaceView.alpha = 1
-            iconFaceView.alpha = 1
+            iconFaceView.alpha = dress.isLocked ? Self.lockedIconAlpha : 1
             return
         }
         switch face {
@@ -809,10 +926,21 @@ final class PinCardView: UIView {
         let side = min(Face.icon.side, min(bounds.width, bounds.height))
         iconFaceView.bounds = CGRect(x: 0, y: 0, width: side, height: side)
         iconFaceView.center = CGPoint(x: bounds.midX, y: bounds.midY)
+        lockGlyph.bounds = CGRect(x: 0, y: 0, width: 24, height: 24)
+        lockGlyph.center = iconFaceView.center
+    }
+
+    /// Every border takes the same shape: the neutral ring and the flag one
+    /// are alternatives, and whichever is showing must match the card.
+    private func applyRingShape(radius: CGFloat, curve: CALayerCornerCurve) {
+        ringView.layer.cornerRadius = radius
+        ringView.layer.cornerCurve = curve
+        flagBorder.setShape(radius: radius, curve: curve)
     }
 
     func setCornerRadius(_ radius: CGFloat) {
         layer.cornerRadius = radius
+        contentView.layer.cornerRadius = radius
         ringView.layer.cornerRadius = radius
         // The floor tracks the card. The reveal drives this every frame with
         // the mask's radius, and a floor that kept the marker's disc while the
@@ -893,7 +1021,8 @@ final class PinCardView: UIView {
     /// quadrant, and recorded in `ZoomFlight.poseFloating`.
     func prepareVideoForFlight(destinationSize: CGSize) {
         let surface: UIView = donatedSurface ?? videoRenderView
-        let host: UIView = surface === videoRenderView ? self : donatedMediaHost
+        let host: UIView = surface === videoRenderView ? contentView : donatedMediaHost
+
         surface.transform = .identity
         surface.autoresizingMask = []
         surface.layer.anchorPoint = CGPoint(x: 0.5, y: 0.5)
@@ -1104,6 +1233,7 @@ extension PinCardView: RevealStandInShaping {
         if face == .icon, wornIcon != nil {
             iconFaceView.alpha = 1
             ringView.alpha = alpha
+            setDecorationOpacity(alpha)
             imageView.alpha = alpha
             return
         }
@@ -1111,6 +1241,7 @@ extension PinCardView: RevealStandInShaping {
         textFaceView.setContentOpacity(alpha)
         imageView.alpha = alpha
         ringView.alpha = alpha
+        setDecorationOpacity(alpha)
         // ⚠️ WITH A DEPARTURE PICTURE, THIS CHANNEL IS ALSO THE BLEND.
         //
         // A window closing onto a marker now hands its stand-in the picture it
@@ -1123,6 +1254,18 @@ extension PinCardView: RevealStandInShaping {
         // Only when there IS a second operand. Without one this is the channel
         // it has always been, byte for byte.
         if departureCoverView.image != nil { setBlend(alpha) }
+    }
+
+    /// A badge overlaps the corner, half outside the card: a window that
+    /// clipped it would close onto a marker missing a piece and hand the
+    /// landing the rest of the disc in one frame.
+    var revealStandInOverhangsWindow: Bool { !badgeView.isHidden }
+
+    /// The flag border and the badge go with the ring: furniture of a marker,
+    /// an outline around the screen at full size.
+    private func setDecorationOpacity(_ alpha: CGFloat) {
+        flagBorder.alpha = alpha
+        badgeView.alpha = alpha
     }
 
     /// The colour a page wears while a reveal opened from a TEXT marker is
@@ -1140,8 +1283,9 @@ extension PinCardView: ZoomFlightCard {
     /// page-shaped, and this is the endpoint the sweep runs back to.
     var zoomRestingCornerRadius: CGFloat { face.cornerRadius }
 
-    /// The pin's border, which must not survive into the page pose.
-    var zoomRestingChrome: UIView? { ringView }
+    /// The pin's furniture — ring, flag border and badge — which must not
+    /// survive into the page pose.
+    var zoomRestingChrome: UIView? { chromeView }
 
     /// The surface the flight poses — a donated one first, because when a page
     /// has handed its picture over that IS what the card is flying.
@@ -1204,7 +1348,7 @@ extension PinCardView: ZoomFlightCard {
             + " gravity=\((surface as? VideoRenderView)?.debugVideoGravity ?? "-")"
             + " videoRect=\((surface as? VideoRenderView)?.debugVideoRect.map { NSCoder.string(for: $0) } ?? "-")"
             + " onHost=\(surface?.superview === donatedMediaHost ? "Y" : "n")"
-            + " onCard=\(surface?.superview === self ? "Y" : "n")"
+            + " onCard=\(surface?.superview === contentView ? "Y" : "n")"
             // The two that actually decide what is on screen.
             + " sPres=\(surface?.layer.presentation().map { NSCoder.string(for: $0.bounds) } ?? "nil")"
             + " sAnim=[\(surface?.layer.animationKeys()?.joined(separator: ",") ?? "-")]"

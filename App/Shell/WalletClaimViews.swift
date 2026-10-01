@@ -1,15 +1,13 @@
 import CoreModels
 import CoreStorage
 import DesignSystem
-import MapsInterface
 import MediaCore
 import PostGrid
 import UIKit
 
 // The pieces of the wallet sheet (`WalletClaimViewController`): the summary at
 // its head — the two currencies side by side over the streak and today's
-// earnings — the stake rows under it, their section headers, and the compact
-// bar the summary collapses into on scroll.
+// earnings — the stake rows under it, and their section headers.
 //
 // ⚠️ **CARDS ONLY FOR WHAT CAN BE PRESSED** (26 September 2026). The summary
 // used to sit in three filled cards — two balances and a streak card — and a
@@ -588,124 +586,5 @@ final class WalletSectionHeader: UICollectionReusableView {
         detailLabel.attributedText = detail
         detailLabel.isHidden = (detail?.length ?? 0) == 0
         titleView.setNeedsLayout()
-    }
-}
-
-// MARK: - Compact bar
-
-/// What the summary collapses into once it has scrolled away: both balances
-/// on one line, pinned under the grabber, so the list below is never read
-/// without them. The list passing under it is blurred by the system's soft
-/// scroll-edge effect (the sheet registers this bar with the list's top edge);
-/// the bar itself draws nothing but the line.
-final class WalletCompactBar: UIView {
-    private let label = UILabel()
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        isUserInteractionEnabled = false
-        label.textAlignment = .center
-        label.alpha = 0
-        label.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(label)
-        NSLayoutConstraint.activate([
-            label.centerXAnchor.constraint(equalTo: centerXAnchor),
-            label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Spacing.sm),
-        ])
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    /// 0 at rest, 1 once the summary has gone beneath the bar.
-    var progress: CGFloat = 0 {
-        didSet {
-            guard progress != oldValue else { return }
-            label.alpha = progress
-        }
-    }
-
-    func configure(points: Int, gems: Int) {
-        let font = UIFont.monospacedDigitSystemFont(ofSize: 15, weight: .semibold)
-        let text = NSMutableAttributedString()
-        text.append(walletAmount(points.formatted(), glyph: PointsSymbol.glyphImage(), font: font))
-        text.append(NSAttributedString(string: "      ", attributes: [.font: font]))
-        text.append(walletAmount(gems.formatted(), glyph: GemSymbol.glyphImage(), font: font))
-        label.attributedText = text
-        accessibilityLabel = "\(points) points, \(gems) gems"
-    }
-}
-
-// MARK: - Countries
-
-/// The door to the Shop, under the balances: what the gems buy.
-///
-/// ```
-///  ┌──────────────────────────────────────┐
-///  │ (🌍)  Countries                   ›  │
-///  │       3 of 237 unlocked · Shop       │
-///  └──────────────────────────────────────┘
-/// ```
-///
-/// The card keeps the countries' name and globe — it is what the gems buy —
-/// and names the screen it opens, the Shop (`CountryShopEntry.title`).
-final class WalletCountriesCell: UICollectionViewCell {
-    private let subtitleLabel = UILabel()
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        contentView.backgroundColor = WalletSheetMetrics.cardFill
-        contentView.layer.cornerRadius = WalletSheetMetrics.rowCorner
-        contentView.layer.cornerCurve = .continuous
-        Surface.applyCardEdge(to: contentView)
-        PressFeedback.attach(toView: contentView, sound: nil)
-
-        let disc = UIImageView(image: UIImage(systemName: "globe.europe.africa.fill")?
-            .applyingSymbolConfiguration(.init(pointSize: 20, weight: .medium)))
-        disc.tintColor = .white
-        disc.contentMode = .center
-        disc.backgroundColor = GemSymbol.tint
-        disc.layer.cornerRadius = WalletSheetMetrics.thumbnail / 2
-        disc.layer.cornerCurve = .circular
-        disc.clipsToBounds = true
-
-        let title = UILabel()
-        title.text = "Countries"
-        title.font = .systemFont(ofSize: 15, weight: .semibold)
-        subtitleLabel.font = .systemFont(ofSize: 13)
-        subtitleLabel.textColor = .secondaryLabel
-        let column = UIStackView(arrangedSubviews: [title, subtitleLabel])
-        column.axis = .vertical
-        column.spacing = 2
-
-        let chevron = UIImageView(image: UIImage(systemName: "chevron.right")?
-            .applyingSymbolConfiguration(.init(pointSize: 13, weight: .semibold)))
-        chevron.tintColor = .tertiaryLabel
-        chevron.setContentHuggingPriority(.required, for: .horizontal)
-
-        let row = UIStackView(arrangedSubviews: [disc, column, chevron])
-        row.alignment = .center
-        row.spacing = Spacing.md
-        row.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(row)
-        NSLayoutConstraint.activate([
-            disc.widthAnchor.constraint(equalToConstant: WalletSheetMetrics.thumbnail),
-            disc.heightAnchor.constraint(equalToConstant: WalletSheetMetrics.thumbnail),
-            row.topAnchor.constraint(equalTo: contentView.topAnchor, constant: Spacing.md),
-            row.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: Spacing.md),
-            row.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -Spacing.md),
-            row.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -Spacing.md),
-        ])
-        isAccessibilityElement = true
-        accessibilityTraits = .button
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    func configure(owned: Int, total: Int) {
-        subtitleLabel.text = "\(owned) of \(total) unlocked · \(CountryShopEntry.title)"
-        accessibilityLabel = "Countries, \(owned) of \(total) unlocked"
-        accessibilityHint = "Opens the \(CountryShopEntry.title)"
     }
 }

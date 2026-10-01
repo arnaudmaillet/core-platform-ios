@@ -35,7 +35,7 @@ enum MapPinRevealSource {
         mapView: MKMapView,
         annotation: any MKAnnotation,
         face: PinCardView.Face,
-        ringKind: MapPlace.Kind?,
+        dress: MapMarkerDress,
         concealMarker: @escaping (Bool) -> Void,
         depthView: @escaping () -> UIView?,
         dismissalDidEnd: @escaping (Bool) -> Void = { _ in }
@@ -99,7 +99,7 @@ enum MapPinRevealSource {
             // viewer never saw on the pin.
             makeDismissStandIn: { [weak mapView] _ in
                 marker(
-                    face: face, ringKind: ringKind,
+                    face: face, dress: mapView?.wornDress(for: annotation) ?? dress,
                     avatar: mapView?.wornAvatar(for: annotation),
                     cover: mapView?.wornCover(for: annotation),
                     icon: mapView?.wornIcon(for: annotation),
@@ -108,7 +108,7 @@ enum MapPinRevealSource {
             },
             makePresentStandIn: { [weak mapView] in
                 marker(
-                    face: face, ringKind: ringKind,
+                    face: face, dress: mapView?.wornDress(for: annotation) ?? dress,
                     avatar: mapView?.wornAvatar(for: annotation),
                     cover: mapView?.wornCover(for: annotation),
                     icon: mapView?.wornIcon(for: annotation),
@@ -162,7 +162,7 @@ enum MapPinRevealSource {
     /// marker closed correctly from a MEDIA post — that leg is the hero, and
     /// the hero's own card has always been handed the thumbnail.
     private static func marker(
-        face: PinCardView.Face, ringKind: MapPlace.Kind?,
+        face: PinCardView.Face, dress: MapMarkerDress,
         avatar: UIImage? = nil, cover: UIImage? = nil,
         icon: (art: AnimatedIconArt, phase: Int)? = nil,
         preview: (art: AnimatedIconArt, phase: Int)? = nil
@@ -182,9 +182,9 @@ enum MapPinRevealSource {
         // marker must carry the moving picture the viewer was looking at, and
         // fall to the same frame it does.
         card.setPreviewSheet(preview)
-        card.setRing(
-            color: MapMarkerRing.color(for: ringKind), width: MapMarkerRing.width(for: ringKind)
-        )
+        // The marker's furniture — flag border, corner badge — so the window
+        // opens out of, and closes onto, the marker the viewer sees.
+        card.setDress(dress.unlocked)
         card.isUserInteractionEnabled = false
         return card
     }
@@ -235,7 +235,19 @@ extension MKMapView {
         }
     }
 
+    /// What the marker wears around its face — flag border, badge, lock — read
+    /// off the view at the same moment as everything else it wears, so a
+    /// transition carries the dress on screen rather than one recomputed.
+    func wornDress(for annotation: any MKAnnotation) -> MapMarkerDress? {
+        switch view(for: annotation) {
+        case let pin as MapAnnotationView: pin.card.dress
+        case let cluster as MapClusterAnnotationView: cluster.card.dress
+        default: nil
+        }
+    }
+
     /// The marker's PREVIEW SHEET — a video marker's moving picture — read the
+
     /// same way and at the same moment as its cover, its author and its icon.
     ///
     /// ⚠️ Without it every flight off a video marker was a STILL. The card is

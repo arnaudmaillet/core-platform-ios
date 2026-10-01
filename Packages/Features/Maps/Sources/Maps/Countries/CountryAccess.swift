@@ -21,6 +21,16 @@ public struct CountryStanding: Sendable, Equatable {
         self.price = price
     }
 
+    /// A count as the offer and the shop print it: "12.4K", "3.1M", "860".
+    public static func compact(_ value: Int64) -> String {
+        switch value {
+        case 1_000_000...: String(format: "%.1fM", Double(value) / 1_000_000)
+        case 10_000...: String(format: "%.0fK", Double(value) / 1_000)
+        case 1_000...: String(format: "%.1fK", Double(value) / 1_000)
+        default: "\(value)"
+        }
+    }
+
     /// The price tiers by rank: the busiest countries cost the most.
     public static func price(forRank rank: Int) -> Int {
         switch rank {
