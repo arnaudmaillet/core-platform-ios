@@ -274,27 +274,20 @@ jobs:
           fi
           echo "Using simulator id=$DEST_ID (attempt $attempt)"
 
-          # ⚠️ THE SIMULATOR BOOTS WHILE THE PACKAGE COMPILES. `xcodebuild test`
-          # booted it only after the build, and a lane then sat ~1 minute
-          # between its last compile and its first test (Upload in run
-          # 36793858807: build done 00:21:11, first test 00:22:18) — on every
-          # lane, of every run. Booting is CoreSimulator's work, not the
-          # compiler's, so it overlaps: build for testing, wait for the boot,
-          # then run what was built. `bootstatus -b` is the join, and it boots
-          # the device itself if the background boot failed for any reason.
-          xcrun simctl boot "$DEST_ID" >/dev/null 2>&1 &
-          BOOT_PID=$!
-
-          COMMON=(-scheme "$SCHEME" -destination "id=$DEST_ID"
-                  -clonedSourcePackagesDirPath "$SPM" -skipMacroValidation "$NO_INDEX")
-          xcodebuild build-for-testing "${COMMON[@]}"
-
-          wait "$BOOT_PID" || true
-          xcrun simctl bootstatus "$DEST_ID" -b >/dev/null
-
+          # ⚠️ DO NOT BOOT THE SIMULATOR DURING THE BUILD. The ~1 minute between
+          # a lane's last compile and its first test is the boot, and it looks
+          # free to overlap (`simctl boot &`, build-for-testing, then
+          # test-without-building). Measured on PR #354: it is not. A first
+          # boot on a 3-core, 7 GB runner starves the compiler — Upload took
+          # 3 min just to load its package graph and 7 min to compile (2.5
+          # before), MediaPlayback 5 min to build (~1). The boot stays where
+          # `xcodebuild test` puts it, after the build.
+          #
           # No sysdiagnose on a red test: it added ~1m40s to every failing lane
           # (run 36904429986, EmoteKit) and nothing ever downloads it.
-          xcodebuild test-without-building "${COMMON[@]}" -collect-test-diagnostics never
+          xcodebuild test -scheme "$SCHEME" -destination "id=$DEST_ID" \
+            -clonedSourcePackagesDirPath "$SPM" -skipMacroValidation "$NO_INDEX" \
+            -collect-test-diagnostics never
 
   # ── The required check ───────────────────────────────────────────────────
   # `develop`'s branch protection requires a status check literally named
