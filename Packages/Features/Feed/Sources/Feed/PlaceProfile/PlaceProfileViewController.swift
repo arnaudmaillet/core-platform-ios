@@ -466,6 +466,28 @@ final class PlaceProfileViewController: UIViewController {
                 }
             }
         }
+        // `-place-scroll-sweep`: once the page holds posts and its picture,
+        // scrolls it from the top to 240pt and back, frame by frame, 3s each
+        // way — the profile's `-profile-scroll-sweep` — and says what each
+        // frame cost (`HERO-SCROLL place …` on standard error, see
+        // `HeroScrollFrameProbe`).
+        if arguments.contains("-place-scroll-sweep") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                QAWait.until("-place-scroll-sweep", { [weak self] in
+                    guard let self, self.hostedPages.indices.contains(self.activeIndex),
+                          let grid = self.hostedPages[self.activeIndex] as? ForYouGridPage
+                    else { return false }
+                    return !grid.posts.isEmpty && self.bannerView.image != nil
+                }) { [weak self] in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                        guard let self else { return }
+                        debugSweepStep(
+                            began: CACurrentMediaTime(), probe: HeroScrollFrameProbe(name: "place", root: headerHost)
+                        )
+                    }
+                }
+            }
+        }
         // `-maps-place-open-tile <index>`: opens a post from whichever tab is
         // up, which is the gesture that decides where a dismissal has to come
         // BACK to. Runs after the tab drive so a run can ask for "open the
@@ -559,6 +581,17 @@ final class PlaceProfileViewController: UIViewController {
                     ZoomTransitionController.debugMostRecent?.debugScriptedGrab(axis: axis)
                 }
             }
+        }
+    }
+
+    /// One frame of `-place-scroll-sweep`: 0 → 240pt → 0, eased, 3s a leg.
+    private func debugSweepStep(began: CFTimeInterval, probe: HeroScrollFrameProbe) {
+        let t = CACurrentMediaTime() - began
+        guard t < 6 else { return probe.finish() }
+        let leg = t < 3 ? t / 3 : (6 - t) / 3
+        probe.frame { debugScrollActivePage(to: CGFloat(240 * leg * leg * (3 - 2 * leg))) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 60) { [weak self] in
+            self?.debugSweepStep(began: began, probe: probe)
         }
     }
 

@@ -846,10 +846,13 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         }
         // `-profile-scroll-sweep`: scrolls the page from the top to 240pt and
         // back, frame by frame, 3s each way (after 2.5s) — the header's fade
-        // and parallax filmed without touch injection.
+        // and parallax filmed without touch injection — and says what each
+        // frame cost (`HeroScrollFrameProbe`: `HERO-SCROLL profile …` on
+        // standard error).
         if arguments.contains("-profile-scroll-sweep") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
-                self?.debugSweepStep(began: CACurrentMediaTime())
+                guard let self else { return }
+                debugSweepStep(began: CACurrentMediaTime(), probe: HeroScrollFrameProbe(name: "profile", root: headerView))
             }
         }
         // `-profile-bar-tree`: the navigation bar's real subview tree. The own
@@ -1100,13 +1103,15 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
 
     #if DEBUG
     /// One frame of `-profile-scroll-sweep`: 0 → 240pt → 0, eased, 3s a leg.
-    private func debugSweepStep(began: CFTimeInterval) {
+    private func debugSweepStep(began: CFTimeInterval, probe: HeroScrollFrameProbe) {
         let t = CACurrentMediaTime() - began
-        guard t < 6 else { return }
+        guard t < 6 else { return probe.finish() }
         let leg = t < 3 ? t / 3 : (6 - t) / 3
-        _ = galleryPager.debugSetVerticalOffset(CGFloat(240 * leg * leg * (3 - 2 * leg)))
+        probe.frame {
+            _ = galleryPager.debugSetVerticalOffset(CGFloat(240 * leg * leg * (3 - 2 * leg)))
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 60) { [weak self] in
-            self?.debugSweepStep(began: began)
+            self?.debugSweepStep(began: began, probe: probe)
         }
     }
 
