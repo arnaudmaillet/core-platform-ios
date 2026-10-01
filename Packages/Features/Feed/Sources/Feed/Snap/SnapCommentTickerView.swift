@@ -192,14 +192,7 @@ final class SnapCommentTickerView: UIView {
     private let animatorBag = KineticAnimatorBag()
 
     override init(frame: CGRect) {
-        // The band height fits BOTH the caption line (+ insets) and the
-        // compact avatar, so a leading circle sits centered without growing
-        // the lane.
-        bubbleHeight = max(
-            TickerBubbleView.avatarDiameter,
-            ceil(UIFont.preferredFont(forTextStyle: .caption1).lineHeight)
-                + TickerBubbleView.textInsets.top + TickerBubbleView.textInsets.bottom
-        )
+        bubbleHeight = Self.laneBubbleHeight
         super.init(frame: frame)
         isHidden = true
         // CLIPPED at the band's own edges: the trailing edge is no longer
@@ -257,6 +250,26 @@ final class SnapCommentTickerView: UIView {
             width: UIView.noIntrinsicMetric,
             height: CGFloat(Self.laneCount) * bubbleHeight + CGFloat(Self.laneCount - 1) * Self.laneSpacing
         )
+    }
+
+    /// One lane's height: it fits BOTH the caption line (+ insets) and the
+    /// compact avatar, so a leading circle sits centered without growing the
+    /// lane. Read once per band, at init (the band never re-measures).
+    private static var laneBubbleHeight: CGFloat {
+        max(
+            TickerBubbleView.avatarDiameter,
+            ceil(UIFont.preferredFont(forTextStyle: .caption1).lineHeight)
+                + TickerBubbleView.textInsets.top + TickerBubbleView.textInsets.bottom
+        )
+    }
+
+    /// The band's height in the current text size — what a band built now
+    /// would report as its intrinsic height. The engagement corner's HEIGHT
+    /// AUTHORITY (the boost anchor's square is this tall), stated without a
+    /// band in hand, for a surface that has to stand a control the same size
+    /// somewhere else (`SnapActionColumn`).
+    static var bandHeight: CGFloat {
+        CGFloat(laneCount) * laneBubbleHeight + CGFloat(laneCount - 1) * laneSpacing
     }
 
     // MARK: - Content & lifecycle

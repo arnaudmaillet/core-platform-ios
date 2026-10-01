@@ -24,6 +24,15 @@ import UIKit
 /// height (and `restingHeight(for:)`) include it and every host's clearance
 /// follows; the row's empty leading run is NOT part of the bar for touches
 /// (`point(inside:with:)`), so the stream behind it keeps its taps and drags.
+///
+/// **`-snap-layout-v2` (experimental, `usesActionColumn`):** the stake and
+/// mic/send are the trailing ACTION COLUMN's two bubbles (`SnapActionColumn`)
+/// — both the comment band's height, one md apart, the mic a WAVEFORM — so a
+/// host that rests the bar on the column's line puts them on the media
+/// layout's like and share bubbles exactly. The stake no longer rides the
+/// field's top: it holds its station over mic/send, and a growing field rises
+/// BESIDE it (the field ends at mic/send's leading edge, the stake starts
+/// there). Avatar and field centre on the bigger slot.
 final class CommentsInputBar: UIView {
     /// Fired with trimmed, non-empty text; the field clears itself first.
     var onSend: ((String) -> Void)?
@@ -79,21 +88,38 @@ final class CommentsInputBar: UIView {
     /// large sizes, about 80pt at the largest accessibility size — so this
     /// asks a text view set up like the bar's own (`updateFieldHeight`), and
     /// gets the answer the bar will reach. Cached per size.
-    static func restingHeight(for category: UIContentSizeCategory) -> CGFloat {
-        if let cached = restingHeights[category] { return cached }
-        let probe = UITextView()
-        probe.font = .preferredFont(
-            forTextStyle: .body,
-            compatibleWith: UITraitCollection(preferredContentSizeCategory: category)
-        )
-        probe.textContainerInset = UIEdgeInsets(top: Spacing.sm, left: Spacing.sm, bottom: Spacing.sm, right: Spacing.sm)
-        let fitting = probe.sizeThatFits(CGSize(width: 320, height: CGFloat.greatestFiniteMagnitude)).height
-        let height = max(ceil(fitting), Metrics.controlSize) + stakeRowHeight
-        restingHeights[category] = height
-        return height
+    ///
+    /// With `actionColumn` (`-snap-layout-v2`) it is the column's two bubbles
+    /// and their gap, or the field (centred on the lower bubble) when a large
+    /// text size makes it the taller of the two.
+    static func restingHeight(for category: UIContentSizeCategory, actionColumn: Bool = false) -> CGFloat {
+        let field: CGFloat
+        if let cached = restingFieldHeights[category] {
+            field = cached
+        } else {
+            let probe = UITextView()
+            probe.font = .preferredFont(
+                forTextStyle: .body,
+                compatibleWith: UITraitCollection(preferredContentSizeCategory: category)
+            )
+            probe.textContainerInset = UIEdgeInsets(top: Spacing.sm, left: Spacing.sm, bottom: Spacing.sm, right: Spacing.sm)
+            let fitting = probe.sizeThatFits(CGSize(width: 320, height: CGFloat.greatestFiniteMagnitude)).height
+            field = max(ceil(fitting), Metrics.controlSize)
+            restingFieldHeights[category] = field
+        }
+        guard actionColumn else { return field + stakeRowHeight }
+        let bubble = SnapActionColumn.bubbleSize
+        return max(2 * bubble + SnapActionColumn.gap, field + columnRowInset)
     }
 
-    private static var restingHeights: [UIContentSizeCategory: CGFloat] = [:]
+    private static var restingFieldHeights: [UIContentSizeCategory: CGFloat] = [:]
+
+    /// The action column's input-row inset: how far the field's (and the
+    /// avatar's) bottom stands above the mic/send bubble's, so a one-line
+    /// field CENTRES on the bigger bubble instead of sharing its bottom edge.
+    static var columnRowInset: CGFloat {
+        max(0, (SnapActionColumn.bubbleSize - Metrics.controlSize) / 2)
+    }
 
     /// What the stake row adds above the input row: the bubble and the gap
     /// under it. A constant — the bubble does not scale with the text size,
@@ -174,6 +200,21 @@ final class CommentsInputBar: UIView {
     /// own deinit does the unregistering (the VC-side pattern).
     private let keyboardObservers = NotificationObserverTokenBag()
     private var fieldHeight: NSLayoutConstraint!
+    /// The two geometries' own constraints (everything else is shared):
+    /// exactly one set is active — see `applyActionColumn`.
+    private var classicConstraints: [NSLayoutConstraint] = []
+    private var actionColumnConstraints: [NSLayoutConstraint] = []
+
+    /// `-snap-layout-v2`: the stake and mic/send become the action column's
+    /// two bubbles (`SnapActionColumn`), the mic a waveform. Off by default —
+    /// the HOST decides, because the host is the one that rests the bar on
+    /// the column's line.
+    var usesActionColumn = false {
+        didSet {
+            guard usesActionColumn != oldValue else { return }
+            applyActionColumn()
+        }
+    }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -347,31 +388,38 @@ final class CommentsInputBar: UIView {
         NSLayoutConstraint.activate([
             fieldHeight,
             avatarBubble.leadingAnchor.constraint(equalTo: leadingAnchor),
-            avatarBubble.bottomAnchor.constraint(equalTo: bottomAnchor),
+            avatarBubble.bottomAnchor.constraint(equalTo: field.bottomAnchor),
             avatarBubble.widthAnchor.constraint(equalToConstant: Metrics.controlSize),
             avatarBubble.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
             field.leadingAnchor.constraint(equalTo: avatarBubble.trailingAnchor, constant: Spacing.sm),
-            field.bottomAnchor.constraint(equalTo: bottomAnchor),
             sendButton.leadingAnchor.constraint(equalTo: field.trailingAnchor, constant: Spacing.sm),
             sendButton.trailingAnchor.constraint(equalTo: trailingAnchor),
             sendButton.bottomAnchor.constraint(equalTo: bottomAnchor),
-            sendButton.widthAnchor.constraint(equalToConstant: Metrics.controlSize),
-            sendButton.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
             utilityButton.centerXAnchor.constraint(equalTo: sendButton.centerXAnchor),
             utilityButton.centerYAnchor.constraint(equalTo: sendButton.centerYAnchor),
-            utilityButton.widthAnchor.constraint(equalToConstant: Metrics.controlSize),
-            utilityButton.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
-            boostButton.topAnchor.constraint(equalTo: topAnchor),
-            boostButton.bottomAnchor.constraint(equalTo: field.topAnchor, constant: -Metrics.stakeRowGap),
+            utilityButton.widthAnchor.constraint(equalTo: sendButton.widthAnchor),
+            utilityButton.heightAnchor.constraint(equalTo: sendButton.heightAnchor),
             boostButton.trailingAnchor.constraint(equalTo: trailingAnchor),
-            boostButton.widthAnchor.constraint(equalToConstant: Metrics.stakeButtonSize),
-            boostButton.heightAnchor.constraint(equalToConstant: Metrics.stakeButtonSize),
             // The boost's own station: the two never show at once.
             visibilityButton.centerXAnchor.constraint(equalTo: boostButton.centerXAnchor),
             visibilityButton.centerYAnchor.constraint(equalTo: boostButton.centerYAnchor),
-            visibilityButton.widthAnchor.constraint(equalToConstant: Metrics.stakeButtonSize),
-            visibilityButton.heightAnchor.constraint(equalToConstant: Metrics.stakeButtonSize),
+            visibilityButton.widthAnchor.constraint(equalTo: boostButton.widthAnchor),
+            visibilityButton.heightAnchor.constraint(equalTo: boostButton.heightAnchor),
         ])
+        classicConstraints = [
+            field.bottomAnchor.constraint(equalTo: bottomAnchor),
+            sendButton.widthAnchor.constraint(equalToConstant: Metrics.controlSize),
+            sendButton.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
+            boostButton.topAnchor.constraint(equalTo: topAnchor),
+            boostButton.bottomAnchor.constraint(equalTo: field.topAnchor, constant: -Metrics.stakeRowGap),
+            boostButton.widthAnchor.constraint(equalToConstant: Metrics.stakeButtonSize),
+            boostButton.heightAnchor.constraint(equalToConstant: Metrics.stakeButtonSize),
+        ]
+        NSLayoutConstraint.activate(classicConstraints)
+
+        // The action column's set, built now and activated by the host's
+        // switch (`usesActionColumn`).
+        buildActionColumnConstraints()
 
         // The disc is NEVER empty. Before an identity resolves the bar shows
         // the unknown-viewer placeholder, not a blank circle — the same
@@ -409,6 +457,64 @@ final class CommentsInputBar: UIView {
         if point.y >= field.frame.minY { return true }
         let station = visibilityMenu == nil ? boostButton : visibilityButton
         return station.frame.contains(point)
+    }
+
+    /// The action column's geometry (`-snap-layout-v2`). Bubble size is the
+    /// comment band's height — read once, here, like the band reads its own
+    /// at init.
+    ///
+    /// The bar's TOP is the higher of the stake's and the field's: the stake
+    /// holds its station over mic/send (a growing field rises beside it, not
+    /// under it), so the top hugs the stake until the field outgrows it. Two
+    /// required floors and two hugs at DISTINCT priorities — equal ones would
+    /// leave the solver a choice it could make differently pass to pass.
+    private func buildActionColumnConstraints() {
+        let bubble = SnapActionColumn.bubbleSize
+        let stakeHug = boostButton.topAnchor.constraint(equalTo: topAnchor)
+        stakeHug.priority = UILayoutPriority(251)
+        let fieldHug = field.topAnchor.constraint(equalTo: topAnchor)
+        fieldHug.priority = UILayoutPriority(250)
+        actionColumnConstraints = [
+            field.bottomAnchor.constraint(equalTo: sendButton.bottomAnchor, constant: -Self.columnRowInset),
+            sendButton.widthAnchor.constraint(equalToConstant: bubble),
+            sendButton.heightAnchor.constraint(equalToConstant: bubble),
+            boostButton.bottomAnchor.constraint(equalTo: sendButton.topAnchor, constant: -SnapActionColumn.gap),
+            boostButton.widthAnchor.constraint(equalToConstant: bubble),
+            boostButton.heightAnchor.constraint(equalToConstant: bubble),
+            boostButton.topAnchor.constraint(greaterThanOrEqualTo: topAnchor),
+            field.topAnchor.constraint(greaterThanOrEqualTo: topAnchor),
+            stakeHug,
+            fieldHug,
+        ]
+    }
+
+    /// The column's glyphs: the like anchor's size, so the crossfade between
+    /// the two layouts reads as ONE bubble. The classic bar keeps the system's.
+    private var glyphConfiguration: UIImage.SymbolConfiguration {
+        usesActionColumn
+            ? UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
+            : UIImage.SymbolConfiguration(weight: .semibold)
+    }
+
+    /// Swaps the geometry and the faces: the waveform for the mic, and the
+    /// like anchor's glyph size on the column's bubbles.
+    private func applyActionColumn() {
+        if usesActionColumn {
+            NSLayoutConstraint.deactivate(classicConstraints)
+            NSLayoutConstraint.activate(actionColumnConstraints)
+        } else {
+            NSLayoutConstraint.deactivate(actionColumnConstraints)
+            NSLayoutConstraint.activate(classicConstraints)
+        }
+        utilityButton.configuration?.image = UIImage(
+            systemName: usesActionColumn ? "waveform" : "mic", withConfiguration: glyphConfiguration
+        )
+        // The number face (a spend on the post) carries no image to resize.
+        if boostSpentTotal == 0 {
+            boostButton.configuration?.image = PointsSymbol.glyphImage(glyphConfiguration)
+        }
+        visibilityButton.configuration?.image = UIImage(systemName: "globe", withConfiguration: glyphConfiguration)
+        setNeedsLayout()
     }
 
     /// The input row's top — the field's top edge, which rises as it grows.
@@ -739,9 +845,7 @@ final class CommentsInputBar: UIView {
             boostButton.configuration?.contentInsets = .zero
         } else {
             boostButton.configuration?.attributedTitle = nil
-            boostButton.configuration?.image = PointsSymbol.glyphImage(
-                UIImage.SymbolConfiguration(weight: .semibold)
-            )
+            boostButton.configuration?.image = PointsSymbol.glyphImage(glyphConfiguration)
         }
         boostButton.accessibilityValue = total > 0 ? "\(total) points spent" : nil
         // The receipt moves the cap's remainder, and the remainder moves
