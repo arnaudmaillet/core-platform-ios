@@ -312,7 +312,7 @@ final class AppContainer {
                 self.feedFeature.presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)
             },
             countries: countryAccess
-        )
+        ).wrappedInSheet()
     }
 
     /// The Text Post page's drafts: ONE store for the app's lifetime.

@@ -3,7 +3,7 @@ import MapsInterface
 import UIKit
 
 /// Every country, and unlocking them: the Shop behind the Explore header's
-/// storefront and the wallet's Countries card.
+/// storefront and the wallet sheet's Shop item.
 ///
 /// ```
 ///  ┌──────────────────────────────────────┐
@@ -35,12 +35,17 @@ import UIKit
 /// takes you TO the country (`onShowCountry`); opened from the wallet, there
 /// is no map to show it on.
 ///
-/// # Bare chrome over the list
-/// The collection view is the sheet's whole content, edge to edge; the bar —
-/// gems on the left, the title, the close button on the right — and the
-/// search field float over it with NO material behind them, the app's rule
-/// for every header (`prefersClearTopEdge`). The bar items are plain bar
-/// items, so the system draws their glass.
+/// # A plain list under the system's soft edge
+/// The collection view is the sheet's whole content, edge to edge, and a
+/// PLAIN list: rows run the sheet's full width on its standard margins, with
+/// inset separators — no inset-grouped card around each section, whose own
+/// margins doubled the sheet's (2026-10-01). The bar — gems on the left, the
+/// title, the close button on the right — and the search field float over
+/// it, and the rows passing under them soften into UIKit's own SOFT top edge
+/// effect: a progressive blur, the one exception (with the notifications
+/// drawer and the sound sheet's gallery) to the app's bare headers
+/// (`prefersClearTopEdge`), asked for on 2026-10-01. The bar items are plain
+/// bar items, so the system draws their glass.
 ///
 /// # Collapsed, then full
 /// The sheet opens at `.medium()` — the progress block and the first rows —
@@ -124,17 +129,23 @@ public final class CountryShopViewController: UIViewController {
             self?.close()
         })
         close.identifier = Self.closeItemIdentifier
+        close.accessibilityIdentifier = Self.closeItemIdentifier
         navigationItem.rightBarButtonItem = close
 
         // The whole sheet: the bar and the search field float over it.
         collectionView.backgroundColor = .clear
         collectionView.delegate = self
         collectionView.keyboardDismissMode = .onDrag
-        // No effect under the bar: the rows run up under the pills untouched
-        // — see `prefersClearTopEdge`.
-        collectionView.prefersClearTopEdge()
+        // The system's progressive blur under the bar and the search field
+        // (see the type's note). STATED rather than left `.automatic`: under
+        // a titled bar the automatic style is the tinted frost over the whole
+        // header that the app rejected (2026-09-22).
+        collectionView.topEdgeEffect.style = .soft
         view.addSubview(collectionView)
         collectionView.pin(to: view)
+        // Named, not searched for: the effect is drawn where the bar meets
+        // the scroll view it TRACKS, and the empty state is a sibling.
+        setContentScrollView(collectionView, for: .top)
 
         let progressRegistration = UICollectionView.CellRegistration<CountryShopProgressCell, Item> {
             [weak self] cell, _, _ in
@@ -408,13 +419,26 @@ public final class CountryShopViewController: UIViewController {
         navigationItem.leftBarButtonItem = item
     }
 
+    /// The list's appearance — plain: rows the sheet's full width.
+    static let listAppearance = UICollectionLayoutListConfiguration.Appearance.plain
+
     private func makeLayout() -> UICollectionViewLayout {
         UICollectionViewCompositionalLayout { [weak self] index, environment in
             let section = self?.dataSource?.sectionIdentifier(for: index) ?? .progress
-            var configuration = UICollectionLayoutListConfiguration(appearance: .insetGrouped)
+            // PLAIN, not inset-grouped: full-width rows on the standard
+            // margins (see the type's note).
+            var configuration = UICollectionLayoutListConfiguration(appearance: Self.listAppearance)
             configuration.backgroundColor = .clear
             configuration.headerMode = section == .progress ? .none : .supplementary
+            // The progress block is a heading of the page, not a row.
+            configuration.showsSeparators = section != .progress
             let layout = NSCollectionLayoutSection.list(using: configuration, layoutEnvironment: environment)
+            // A plain list pins its headers; these scroll with their rows.
+            // "Unlocked" and "Locked" are landmarks in one list, and pinned on
+            // a clear background they would sit over the rows passing under.
+            for header in layout.boundarySupplementaryItems {
+                header.pinToVisibleBounds = false
+            }
             if section == .progress {
                 // The block sits on the page, just under the search field; the
                 // first header's own top padding is the gap below it.
@@ -523,6 +547,16 @@ final class CountryShopRowCell: UICollectionViewListCell {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// No resting ground: the row lies on the sheet, whose glass (collapsed)
+    /// or opaque ground (full) runs behind the whole list. A plain list cell's
+    /// default background is opaque and painted white bands over the glass.
+    /// A press draws the list's full-width wash.
+    override func updateConfiguration(using state: UICellConfigurationState) {
+        var background = UIBackgroundConfiguration.clear()
+        background.backgroundColor = state.isHighlighted || state.isSelected ? .systemFill : .clear
+        backgroundConfiguration = background
+    }
 
     func configure(flag: UIImage, name: String, rank: Int, likes: String, posts: String) {
         flagView.image = flag
