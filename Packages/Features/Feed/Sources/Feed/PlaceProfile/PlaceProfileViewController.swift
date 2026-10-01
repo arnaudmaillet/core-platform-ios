@@ -488,6 +488,29 @@ final class PlaceProfileViewController: UIViewController {
                 }
             }
         }
+        // `-place-stretch-sweep`: the profile's `-profile-stretch-sweep` —
+        // the page pulled past its top, the banner stretching, held, let go
+        // and settled (`HERO-SCROLL place-stretch/<phase> …`). No refresh:
+        // the place's pages refresh through their own control, which a
+        // scripted offset does not trip.
+        if arguments.contains("-place-stretch-sweep") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                QAWait.until("-place-stretch-sweep", { [weak self] in
+                    guard let self, self.hostedPages.indices.contains(self.activeIndex),
+                          let grid = self.hostedPages[self.activeIndex] as? ForYouGridPage
+                    else { return false }
+                    return !grid.posts.isEmpty && self.bannerView.image != nil
+                }) { [weak self] in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                        guard let self else { return }
+                        debugStretchStep(
+                            began: CACurrentMediaTime(),
+                            probe: HeroScrollFrameProbe(name: "place-stretch", root: headerHost), phase: nil
+                        )
+                    }
+                }
+            }
+        }
         // `-maps-place-open-tile <index>`: opens a post from whichever tab is
         // up, which is the gesture that decides where a dismissal has to come
         // BACK to. Runs after the tab drive so a run can ask for "open the
@@ -592,6 +615,18 @@ final class PlaceProfileViewController: UIViewController {
         probe.frame { debugScrollActivePage(to: CGFloat(240 * leg * leg * (3 - 2 * leg))) }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 60) { [weak self] in
             self?.debugSweepStep(began: began, probe: probe)
+        }
+    }
+
+    /// One frame of `-place-stretch-sweep` (`HeroStretchSweep`).
+    private func debugStretchStep(
+        began: CFTimeInterval, probe: HeroScrollFrameProbe, phase: HeroStretchSweep.Phase?
+    ) {
+        guard let (now, offset) = HeroStretchSweep.at(CACurrentMediaTime() - began) else { return probe.finish() }
+        if now != phase { probe.beginPhase(now.rawValue) }
+        probe.frame { debugScrollActivePage(to: offset) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 60) { [weak self] in
+            self?.debugStretchStep(began: began, probe: probe, phase: now)
         }
     }
 
@@ -1154,6 +1189,10 @@ final class PlaceProfileViewController: UIViewController {
     /// picks each one's ink. Runs when the picture is re-baked and when the
     /// type moves; a change of ink on screen cross-dissolves.
     private func updateHeroInk(force: Bool = false) {
+        HeroBannerCost.measure(.ink) { readHeroInk(force: force) }
+    }
+
+    private func readHeroInk(force: Bool) {
         let blocks = [heroNameLabel, rankMetric, likesMetric].map { $0.convert($0.bounds, to: bannerBox) }
         let moved = blocks.count != heroInkReadFor.count
             || zip(blocks, heroInkReadFor).contains { abs($0.minY - $1.minY) > 2 || abs($0.height - $1.height) > 2 }

@@ -723,6 +723,10 @@ public final class HeroBannerPictureView: UIView {
 
     override public func layoutSubviews() {
         super.layoutSubviews()
+        HeroBannerCost.measure(.layout) { layoutPicture() }
+    }
+
+    private func layoutPicture() {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         defer { CATransaction.commit() }
@@ -773,7 +777,19 @@ public final class HeroBannerPictureView: UIView {
             top: top, rows: rows, fade: fade, picture: picture, bake: ObjectIdentifier(bake.rows)
         )
         guard composition != composed else { return }
+        HeroBannerCost.measure(.compose) {
+            compose(composition, spans: spans, bake: bake, picture: picture)
+        }
+    }
+
+    /// `composeBlur`'s work, once it has found the blur out of date.
+    private func compose(
+        _ composition: Composition, spans: [(start: CGFloat, full: CGFloat)], bake: HeroBannerFade.Bake,
+        picture: CGRect
+    ) {
+        let top = composition.top, rows = composition.rows
         #if DEBUG
+        debugComposeCount += 1
         let began = CACurrentMediaTime()
         defer { HeroScrollFrameProbe.recordCompose((CACurrentMediaTime() - began) * 1000, rows: rows) }
         #endif
@@ -919,11 +935,18 @@ public final class HeroBannerPictureView: UIView {
         let key = (identity, scale)
         guard isInVisibleWindow else {
             let began = CACurrentMediaTime()
+            #if DEBUG
+            debugBakeCount += 1
+            #endif
             guard let bake = HeroBannerFade.bake(of: image, displayScale: scale) else { return }
             adopt(bake, for: key, size: size, milliseconds: (CACurrentMediaTime() - began) * 1000)
             return
         }
         baking = key
+        #if DEBUG
+        debugBakeCount += 1
+        #endif
+        HeroBannerCost.countBake()
         DispatchQueue.global(qos: .userInitiated).async {
             let began = CACurrentMediaTime()
             let bake = HeroBannerFade.bake(of: image, displayScale: scale)
@@ -944,6 +967,13 @@ public final class HeroBannerPictureView: UIView {
     }
 
     private func adopt(
+        _ bake: HeroBannerFade.Bake, for key: (image: ObjectIdentifier, scale: CGFloat), size: CGSize,
+        milliseconds: Double
+    ) {
+        HeroBannerCost.measure(.adopt) { adoptNow(bake, for: key, size: size, milliseconds: milliseconds) }
+    }
+
+    private func adoptNow(
         _ bake: HeroBannerFade.Bake, for key: (image: ObjectIdentifier, scale: CGFloat), size: CGSize,
         milliseconds: Double
     ) {
@@ -972,6 +1002,11 @@ public final class HeroBannerPictureView: UIView {
     /// The last bake's cost, for the trace and the tests.
     public private(set) var debugLastBakeMilliseconds: Double = 0
     public private(set) var debugLastBakeBytes = 0
+    /// How many times the blur was composed, and the levels baked (started),
+    /// since the view was made — what a gesture that should only move them
+    /// must leave alone.
+    public private(set) var debugComposeCount = 0
+    public private(set) var debugBakeCount = 0
     /// The levels showing, and where each one fades in, in this view's
     /// space — clamped to the view, as a mask's stops were.
     public var debugVisibleLevels: [(start: CGFloat, full: CGFloat)] {
@@ -1015,6 +1050,10 @@ public final class HeroBannerRampView: UIView {
 
     override public func layoutSubviews() {
         super.layoutSubviews()
+        HeroBannerCost.measure(.ramp) { layoutRamp() }
+    }
+
+    private func layoutRamp() {
         guard let gradient else { return }
         CATransaction.begin()
         CATransaction.setDisableActions(true)

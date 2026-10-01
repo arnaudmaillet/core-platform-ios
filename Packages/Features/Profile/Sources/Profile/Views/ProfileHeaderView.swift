@@ -240,6 +240,10 @@ final class ProfileHeaderView: UIView {
     /// a change of ink on screen cross-dissolves.
     private func updateInkTones(force: Bool = false) {
         guard bannerFormat != .none else { return }
+        HeroBannerCost.measure(.ink) { readInkTones(force: force) }
+    }
+
+    private func readInkTones(force: Bool) {
         func frame(of views: [UIView]) -> CGRect {
             views.filter { !$0.isHidden }
                 .map { $0.convert($0.bounds, to: bannerView) }
