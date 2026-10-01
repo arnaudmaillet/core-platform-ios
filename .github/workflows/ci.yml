@@ -143,9 +143,22 @@ jobs:
       #
       # It is a compile, not a test run — the point is the configuration, and
       # the tests all build Debug for the simulator anyway.
+      #
+      # So a pull request compiles Release WITHOUT the optimiser: the
+      # configuration (no DEBUG condition, Release's own settings) is what
+      # catches a fenced member, and `-O` over the whole graph was 5.7 of this
+      # job's 9.8 minutes (PR #354). The optimiser still runs on every push to
+      # develop, where a crash inside it would surface — nobody waits on that
+      # run.
       - name: Build app (Release)
+        env:
+          EVENT: ${{ github.event_name }}
         run: |
           set -o pipefail
+          OPT=()
+          if [ "$EVENT" = "pull_request" ]; then
+            OPT=(SWIFT_OPTIMIZATION_LEVEL=-Onone GCC_OPTIMIZATION_LEVEL=0)
+          fi
           xcodebuild build \
             -project core-platform-ios.xcodeproj \
             -scheme core-platform-ios \
@@ -153,7 +166,7 @@ jobs:
             -configuration Release \
             -clonedSourcePackagesDirPath .spm \
             -skipMacroValidation \
-            CODE_SIGNING_ALLOWED=NO ARCHS=arm64 "$NO_INDEX"
+            CODE_SIGNING_ALLOWED=NO ARCHS=arm64 "$NO_INDEX" "${OPT[@]}"
 
   # ── One lane per package ─────────────────────────────────────────────────
   # Was a sequential loop in a single job: 18 invocations, 45 min, of which
