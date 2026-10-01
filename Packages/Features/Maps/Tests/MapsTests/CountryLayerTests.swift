@@ -40,24 +40,28 @@ struct CountryLayerTests {
         #expect(view.point(inside: CGPoint(x: view.bounds.midX, y: view.bounds.midY), with: nil))
     }
 
-    /// An empty country is its flag in a disc, inside the flag-gradient
-    /// border — darkened with a lock in its corner when locked, plain when
-    /// open — and it gives way to every post marker.
+    /// An empty country's disc IS its round flag, edge to edge — darkened with
+    /// a lock in its corner when locked, plain when open — and it gives way to
+    /// every post marker.
     @Test func anEmptyCountryWearsItsFlag() throws {
         let japan = try #require(CountryAtlas.shared.country(code: "JP"))
+        let round = try #require(FlagPalette.roundFlag(for: "JP"))
         let locked = CountryFlagAnnotationView(
             annotation: CountryFlagAnnotation(country: japan, isLocked: true, rank: 12), reuseIdentifier: nil
         )
         #expect(locked.debugIsDarkened)
+        #expect(locked.debugVeilAlpha == CountryFlagAnnotationView.lockedVeilAlpha)
         #expect(locked.debugBadge == .lock)
-        #expect(locked.debugBorderFlag == "JP")
-        #expect(locked.debugFlagImage != nil)
+        #expect(locked.debugFlagImage?.pngData() == round.pngData(), "the round flag, not the emoji")
+        #expect(locked.debugFlagFrame == locked.debugDiscBounds, "the disc is the flag")
         let open = CountryFlagAnnotationView(
             annotation: CountryFlagAnnotation(country: japan, isLocked: false, rank: 12), reuseIdentifier: nil
         )
         #expect(!open.debugIsDarkened)
         #expect(open.debugBadge == nil)
-        #expect(open.debugBorderFlag == "JP")
+        #expect(open.debugFlagImage?.pngData() == round.pngData())
+        #expect(open.debugFlagFrame == open.debugDiscBounds)
+        #expect(open.debugDiscBounds.width == CountryFlagAnnotationView.side)
         // Under every post marker, open or locked; the busier, the higher.
         #expect(open.displayPriority.rawValue < MapMarkerDress.lockedPriority.rawValue)
         #expect(CountryFlagAnnotationView.priority(forRank: 1).rawValue

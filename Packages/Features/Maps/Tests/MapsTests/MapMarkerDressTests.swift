@@ -124,10 +124,41 @@ struct MapMarkerDressTests {
         #expect(card.debugBadge.badge == .flag("FR"))
     }
 
-    /// The badge overlaps the corner — half outside the card — so the card must
-    /// not clip it, while the pictures stay clipped to the card's shape.
-    @Test func theBadgeOverlapsTheCornerOutsideTheClip() {
+    /// The badge is the country's ROUND flag, edge to edge in its disc — not
+    /// the emoji sitting as a band inside it.
+    @Test func theFlagBadgeIsTheRoundFlag() throws {
         let card = card(.media, dress: .resolve(kind: .country, countryCode: "FR", isLocked: false))
+        let round = try #require(FlagPalette.roundFlag(for: "FR"))
+        let shown = try #require(card.debugBadge.debugImage)
+        #expect(shown.pngData() == round.pngData(), "the catalog's round flag, not the emoji")
+        #expect(card.debugBadge.debugImageFrame == card.debugBadge.bounds, "the flag fills the badge's disc")
+    }
+
+    /// On a SQUARE card (a media marker) the badge sits INSIDE the
+    /// bottom-right corner, clear of the border — nothing of it outside the
+    /// card.
+    @Test func onASquareCardTheBadgeSitsInsideTheCorner() {
+        for dress in [MapMarkerDress.resolve(kind: .country, countryCode: "FR", isLocked: false),
+                      .resolve(kind: .city, countryCode: "FR", isLocked: false),
+                      .resolve(kind: .country, countryCode: "MX", isLocked: true)] {
+            let card = card(.media, dress: dress)
+            let badge = card.debugBadge.frame
+            let clear = MapFlagBorderView.lineWidth + MapMarkerBadgeView.insideGap
+            #expect(card.bounds.insetBy(dx: clear - 0.01, dy: clear - 0.01).contains(badge),
+                    "\(String(describing: dress.badge)): \(badge) in \(card.bounds)")
+            // In the bottom-right corner: past the middle both ways.
+            #expect(badge.minX > card.bounds.midX && badge.minY > card.bounds.midY)
+            #expect(abs(badge.maxX - (card.bounds.maxX - clear)) < 0.01)
+            #expect(abs(badge.maxY - (card.bounds.maxY - clear)) < 0.01)
+            #expect(!card.revealStandInOverhangsWindow, "nothing overhangs a window it becomes")
+        }
+    }
+
+    /// A DISC (a text marker) has no corner to sit in: the badge overlaps its
+    /// edge — half outside the card — so the card must not clip it, while the
+    /// pictures stay clipped to the card's shape.
+    @Test func onADiscTheBadgeOverlapsTheEdgeOutsideTheClip() {
+        let card = card(.text, dress: .resolve(kind: .country, countryCode: "FR", isLocked: false))
         let badge = card.debugBadge.frame
         #expect(badge.maxX > card.bounds.maxX && badge.maxY > card.bounds.maxY)
         #expect(badge.minX < card.bounds.maxX && badge.minY < card.bounds.maxY)
@@ -135,6 +166,7 @@ struct MapMarkerDressTests {
         #expect(card.debugContentView.clipsToBounds)
         #expect(card.debugContentView.layer.cornerRadius == card.layer.cornerRadius)
         #expect(!card.debugChromeView.clipsToBounds)
+        #expect(card.revealStandInOverhangsWindow, "a window must not clip the overhang off")
     }
 
     /// The badge and the flag border are the flight's resting chrome, so they
@@ -292,7 +324,8 @@ struct MapMarkerDressTests {
     }
 }
 
-/// The flag colours, read off the emoji itself.
+/// The flag colours, read off the round flag itself (the emoji for a code the
+/// catalog lacks).
 @MainActor
 struct FlagPaletteTests {
     private func hsb(_ color: UIColor) -> (h: CGFloat, s: CGFloat, b: CGFloat) {
@@ -311,6 +344,7 @@ struct FlagPaletteTests {
         #expect(entry.colors.count >= 2, "\(code) gave \(entry.colors.count)")
         #expect(entry.colors.count <= 3)
         #expect(entry.image != nil)
+        #expect(entry.isRound, "read off the round flag, not the emoji")
     }
 
     /// France reads as it flies: blue, white, red, left to right.
@@ -346,12 +380,40 @@ struct FlagPaletteTests {
     }
 
     /// Every country the atlas draws gets a border of at least two colours
-    /// and a picture for its badge.
-    @Test func everyCountryHasAPalette() {
+    /// and its ROUND flag from the catalog — no atlas country falls back to
+    /// the emoji (`Scripts/import-circle-flags.py` imports exactly the atlas).
+    @Test func everyCountryHasARoundFlagAndAPalette() {
+        #expect(CountryAtlas.shared.countries.count == 237)
         for country in CountryAtlas.shared.countries {
             let entry = FlagPalette.entry(for: country.code)
             #expect(entry.colors.count >= 2, "\(country.code)")
             #expect(entry.image != nil, "\(country.code)")
+            #expect(entry.isRound, "\(country.code) has no round flag in Flags.xcassets")
+            if let image = entry.image {
+                #expect(image.size == CGSize(width: 40, height: 40), "\(country.code): rendered for the 40pt disc")
+            }
         }
+    }
+
+    /// A code the catalog has no round flag for (Bonaire is not in the
+    /// atlas) still wears its flag: the emoji, drawn and trimmed, with its
+    /// colours read off it.
+    @Test func aCodeWithoutARoundFlagFallsBackToTheEmoji() {
+        #expect(FlagPalette.roundFlag(for: "BQ") == nil)
+        let entry = FlagPalette.entry(for: "BQ")
+        #expect(!entry.isRound)
+        #expect(entry.image != nil)
+        #expect(entry.colors.count >= 2)
+    }
+
+    /// The round flags are flat artwork: France's white is the flag's own
+    /// near-white, not an emoji's shaded grey, and its bands run in order.
+    @Test func roundFlagColoursAreTheArtworks() throws {
+        let entry = FlagPalette.entry(for: "FR")
+        #expect(entry.isRound)
+        try #require(entry.colors.count == 3)
+        var white: CGFloat = 0
+        entry.colors[1].getWhite(&white, alpha: nil)
+        #expect(white > 0.9, "white \(white)")
     }
 }

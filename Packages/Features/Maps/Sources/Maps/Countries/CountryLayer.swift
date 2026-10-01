@@ -105,7 +105,7 @@ final class CountryRenderer: MKMultiPolygonRenderer {
 /// `access`, and what a tap on one DOES is the host's (`onMapTapped`,
 /// `onLockedCountryTapped`, `onCountryTapped`). A country that no post marker
 /// stands for — the host says which do (`setCountriesWithMarkers`) — wears
-/// its flag in a disc at its label point (`CountryFlagAnnotation`), darkened
+/// its round flag at its label point (`CountryFlagAnnotation`), darkened
 /// under a lock when it is locked.
 ///
 /// ⚠️ **A TAP ON A MARKER IS THE MARKER'S.** The country tap runs alongside
@@ -193,7 +193,7 @@ final class CountryLayer: NSObject {
             let countries = await Task.detached(priority: .userInitiated) { CountryAtlas.shared.countries }.value
             self?.addBorders(for: countries)
             // ⚠️ THE DISCS WAIT FOR THEIR FLAGS, THE BORDERS DO NOT. Every
-            // flag's picture and colours are rendered off the main thread
+            // flag's picture is loaded and its colours read off the main thread
             // first — the world zoom asks for two hundred of them in one turn
             // — and nothing the map shows waits on it: the borders are already
             // in, and the discs arrive when their pictures are.
@@ -221,8 +221,8 @@ final class CountryLayer: NSObject {
         mapView.addOverlays(shapes, level: .aboveRoads)
     }
 
-    /// Whether every flag has been rendered (`install`) — the discs go on the
-    /// map only then, so no disc ever renders its flag on the main thread.
+    /// Whether every flag has been loaded (`install`) — the discs go on the
+    /// map only then, so no disc ever loads its flag on the main thread.
     private var flagsReady = false
 
     /// The style `code` is drawn in: open, or locked.

@@ -13,8 +13,9 @@ import UIKit
 /// live video surface, text face, icon face, lock veil — all inside
 /// `contentView`, which clips and rounds — then the CHROME: the border ring
 /// (neutral, or the flag gradient of `MapFlagBorderView`) and the corner
-/// badge. The chrome sits OUTSIDE the clip, because the badge overlaps the
-/// card's corner like an app icon's badge; the card's own layer is unclipped
+/// badge. The chrome sits OUTSIDE the clip, because on a text disc or an icon
+/// the badge overlaps the edge like an app icon's badge (a media card's sits
+/// inside its corner); the card's own layer is unclipped
 /// and only draws the rounded ground. The ring draws the pin's border above
 /// whichever media surface is showing, so a live-previewing pin keeps its ring
 /// too. During a flight the
@@ -411,11 +412,18 @@ final class PinCardView: UIView {
         applyBlend()
     }
 
+    /// Whether the badge sits INSIDE the card's corner: only a media card is a
+    /// square with a corner to sit in. A text marker's disc and a bare icon
+    /// wear it overlapping their edge — see `MapMarkerBadgeView.center`.
+    var badgeSitsInside: Bool { face == .media }
+
     /// Seats the badge on the RESTING card's corner — the face's radius, not
     /// the live one, which mid-flight is the page's. From there autoresizing
     /// keeps it at the same distance from the corner as the card grows.
     private func positionBadge() {
-        let center = MapMarkerBadgeView.center(in: bounds.size, cornerRadius: face.cornerRadius)
+        let center = MapMarkerBadgeView.center(
+            in: bounds.size, cornerRadius: face.cornerRadius, inside: badgeSitsInside
+        )
         let side = MapMarkerBadgeView.side
         badgeView.frame = CGRect(x: center.x - side / 2, y: center.y - side / 2, width: side, height: side)
     }
@@ -1256,10 +1264,11 @@ extension PinCardView: RevealStandInShaping {
         if departureCoverView.image != nil { setBlend(alpha) }
     }
 
-    /// A badge overlaps the corner, half outside the card: a window that
-    /// clipped it would close onto a marker missing a piece and hand the
-    /// landing the rest of the disc in one frame.
-    var revealStandInOverhangsWindow: Bool { !badgeView.isHidden }
+    /// A disc's or an icon's badge overlaps the edge, half outside the card: a
+    /// window that clipped it would close onto a marker missing a piece and
+    /// hand the landing the rest of the disc in one frame. A media card's
+    /// badge sits inside its corner and rides inside the window's mask.
+    var revealStandInOverhangsWindow: Bool { !badgeView.isHidden && !badgeSitsInside }
 
     /// The flag border and the badge go with the ring: furniture of a marker,
     /// an outline around the screen at full size.
