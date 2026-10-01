@@ -405,6 +405,15 @@ final class ProfileHeaderView: UIView {
     private let imagePipeline: ImagePipeline
     private var avatarTask: Task<Void, Never>?
     private var currentAvatarURL: URL?
+    private var isAvatarSettled = true
+
+    /// Whether both pictures — the avatar and the banner — have stopped
+    /// changing: drawn, absent, or failed. What a push waits for so the
+    /// header it shows is the one that stays (no initials that become a face,
+    /// no banner shape decided after the slide).
+    var arePicturesSettled: Bool { isAvatarSettled && bannerView.isPictureSettled }
+    /// Fires when either picture settles after a fetch.
+    var onPicturesSettled: (() -> Void)?
     private var websiteURL: URL?
 
     init(imagePipeline: ImagePipeline) {
@@ -416,6 +425,7 @@ final class ProfileHeaderView: UIView {
         bannerView.onImageResolved = { [weak self] image in
             self?.setBannerFormat(.resolved(forImageSize: image.size))
         }
+        bannerView.onPictureSettled = { [weak self] in self?.onPicturesSettled?() }
         // The blurred picture decides the type's ink — read it again the
         // moment it changes. Off the bake's own dissolve (it lands inside
         // one) when on screen, so the ink's change is its own.
@@ -592,6 +602,8 @@ final class ProfileHeaderView: UIView {
             config.title = state == .follow ? "Follow" : "Following"
             followButton.configuration = config
             followButton.accessibilityLabel = config.title
+            followButton.isUserInteractionEnabled = true
+            followButton.isAccessibilityElement = true
             messageButton.isHidden = false
             editButton.isHidden = true
         case .edit:
@@ -599,11 +611,42 @@ final class ProfileHeaderView: UIView {
             messageButton.isHidden = true
             editButton.isHidden = false
         case .hidden:
-            followButton.isHidden = true
-            messageButton.isHidden = true
+            // ⚠️ NOT YET KNOWN IS NOT "FOLLOW". The capsule used to open on a
+            // prominent Follow — "the statistical prior" — and a followed
+            // author's profile then arrived wearing a blue call to action that
+            // turned grey a moment later (filmed, 1 October 2026). Until the
+            // relationship is read the slot holds a BLANK quiet capsule as
+            // wide as Following, inert, beside Message: the tray's geometry is
+            // already right, and nothing on it claims an answer it does not
+            // have. The push normally waits for the answer (see
+            // `ProfileViewController.prepareForPresentation`); this is what a
+            // slow read shows instead.
+            followButton.isHidden = false
+            var config = Self.capsule(prominent: false)
+            config.title = "Following"
+            config.baseForegroundColor = .clear
+            followButton.configuration = config
+            followButton.accessibilityLabel = nil
+            followButton.isUserInteractionEnabled = false
+            followButton.isAccessibilityElement = false
+            messageButton.isHidden = false
             editButton.isHidden = true
         }
     }
+
+    #if DEBUG
+    /// What the relationship capsule currently says — nil while it is the
+    /// blank placeholder or hidden. For tests and QA probes.
+    var debugFollowTitle: String? {
+        guard !followButton.isHidden, followButton.isUserInteractionEnabled else { return nil }
+        return followButton.configuration?.title
+    }
+    var debugFollowIsProminent: Bool {
+        followButton.configuration?.baseBackgroundColor != Self.trayFill
+    }
+    var debugIsRedacted: Bool { isRedacted }
+    var debugHasAvatarPicture: Bool { avatarView.image != nil }
+    #endif
 
     #if DEBUG
     /// Fires the follow capsule's own action — the simulator cannot tap it
@@ -876,12 +919,29 @@ final class ProfileHeaderView: UIView {
         avatarTask?.cancel()
         avatarView.image = nil // fall back to the monogram until (and unless) the image resolves
         monogramLabel.isHidden = false
+        isAvatarSettled = true
 
         guard let url else { return }
         let pipeline = imagePipeline
+        // Synchronously from the cache when it can, as the banner does: the
+        // picture is usually already decoded (the origin drew it — a chat
+        // pill, a feed row), and an await here put the initials on screen for
+        // the frames it took to come back with it.
+        if let cached = pipeline.cachedImage(for: url) {
+            avatarView.image = cached
+            monogramLabel.isHidden = true
+            return
+        }
+        isAvatarSettled = false
         avatarTask = Task { [weak self] in
-            guard let image = try? await pipeline.image(for: url) else { return }
+            let image = try? await pipeline.image(for: url)
             guard let self, !Task.isCancelled, self.currentAvatarURL == url else { return }
+            // A failure settles too: the initials are what stays.
+            defer {
+                self.isAvatarSettled = true
+                self.onPicturesSettled?()
+            }
+            guard let image else { return }
             // Async arrival dissolves over the monogram instead of popping.
             UIView.transition(
                 with: self.avatarView, duration: 0.25,

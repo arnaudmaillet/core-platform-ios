@@ -172,6 +172,9 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     public var followEvents: FollowGraphEvents?
 
     public func makeProfileViewController(for profileID: ProfileID, identityStub: ProfileIdentityStub?) -> UIViewController {
+        // Idempotent: the cache hears the follow channel from the first
+        // routed profile on (the channel is set after this builder is made).
+        cache.observe(followEvents)
         let controller = ProfileViewController(
             viewModel: ProfileViewModel(
                 repository: repository,

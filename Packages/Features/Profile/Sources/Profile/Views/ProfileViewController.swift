@@ -221,6 +221,20 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
 
     private var followButtonState: ProfileViewModel.FollowButton = .hidden
 
+    /// The pusher's callback while it holds the push for this screen — see
+    /// `prepareForPresentation`. Nil once called, and for a screen that was
+    /// never held.
+    private var presentationReady: (@MainActor () -> Void)?
+    /// The phase last rendered, for `isSettledForPresentation`.
+    private var renderedPhase: ProfileViewModel.Phase = .loading
+    /// The gallery as last rendered, for `isSettledForPresentation`.
+    private var lastGallerySnapshot: ProfileViewModel.GallerySnapshot?
+    #if DEBUG
+    private var hasLoggedFirstFrame = false
+    fileprivate var lastTracedReadiness = ""
+    fileprivate let debugBornAt = CACurrentMediaTime()
+    #endif
+
     /// Where the filter tray lives, and with it whether a bottom bar survives
     /// below this screen. Fixed at construction — the host knows, and the screen
     /// cannot work it out for itself (a nav root inside a tab bar and a pushed
@@ -320,11 +334,15 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         if let identityStub {
             currentHandle = "@" + identityStub.handle
         }
-        // Frame-1 default for the relationship capsule when the origin didn't
-        // know the follow state: "Follow" on another user's profile (the
-        // statistical prior — most viewed profiles aren't followed), "Edit
-        // Profile" on surfaces that are the viewer's own by construction. If
-        // the relationship read disagrees, the capsule cross-fades in place.
+        // Frame-1 state for the relationship capsule. "Edit Profile" on
+        // surfaces that are the viewer's own by construction; the origin's
+        // answer when it had one; otherwise `.hidden` — a blank placeholder
+        // capsule, NOT "Follow". The prior used to be "Follow" ("most viewed
+        // profiles aren't followed"), and every followed author's profile
+        // then arrived wearing a blue call to action that turned grey a
+        // moment later. The push waits for the real answer (see
+        // `prepareForPresentation`); the placeholder is only what a read
+        // slower than the hold shows.
         if identityStub?.isSelf == true || makeEditViewController != nil {
             // Own profile: Edit from frame 1. Checked BEFORE any follow hint,
             // because "do I follow myself" is not a question — a stub that
@@ -335,7 +353,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         } else if makeEditViewController != nil {
             followButtonState = .edit
         } else {
-            followButtonState = .follow
+            followButtonState = .hidden
         }
     }
 
@@ -373,9 +391,13 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
             // still animating; bind the bar inside the transition so the
             // toolbar composes during the animation, not after it.
             self.alongsideTransition { $0.applyNavigationState() }
+            self.settlePresentationIfReady()
         }
+        viewModel.onRelationshipSettled = { [weak self] in self?.settlePresentationIfReady() }
+        headerView.onPicturesSettled = { [weak self] in self?.settlePresentationIfReady() }
         viewModel.onMapPinButtonChange = { [weak self] state in
             self?.headerView.configureMapPin(state)
+            self?.settlePresentationIfReady()
         }
         headerView.makeMapPinMenu = { [weak self] in
             self?.makeMapFavoriteMenu() ?? UIMenu()
@@ -407,7 +429,9 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         }
         viewModel.onLoadSettled = { [weak self] in self?.isSwitchingProfile = false }
         viewModel.onGalleryChange = { [weak self] snapshot in
+            self?.lastGallerySnapshot = snapshot
             self?.galleryPager.render(snapshot)
+            self?.settlePresentationIfReady()
             #if DEBUG
             self?.auditPostMenu(snapshot)
             #endif
@@ -508,6 +532,21 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         // so the title and Follow item ride the push natively instead of
         // popping in after it.
         applyNavigationState()
+        #if DEBUG
+        // `-profile-first-frame-log`: what the slide's first frame carries —
+        // the state a push held for it (charter P12a) should have settled.
+        if !hasLoggedFirstFrame, ProcessInfo.processInfo.arguments.contains("-profile-first-frame-log") {
+            hasLoggedFirstFrame = true
+            print("[profile-first-frame] settled=\(isSettledForPresentation) "
+                  + "redacted=\(debugIsHeaderRedacted) follow=\(debugFollowTitle ?? "placeholder") "
+                  + "avatar=\(debugHasAvatarPicture ? "picture" : "initials") "
+                  + "banner=\(headerView.bannerFormat) gallerySettled=\(isGallerySettled)")
+        }
+        #endif
+        // On screen, the hold is over however it ended — a ceiling release
+        // never hears back from here, so its callback is dropped now rather
+        // than kept alive until the page happens to settle.
+        presentationReady = nil
         // ⚠️ On every appearance, not once. The saved pile is mutable from
         // outside this screen — the feed's bookmark button writes to the same
         // store — so a Saved tab bound at load would be stale the first time
@@ -2542,6 +2581,8 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     // MARK: - Render
 
     private func render(_ phase: ProfileViewModel.Phase) {
+        renderedPhase = phase
+        defer { settlePresentationIfReady() }
         switch phase {
         case .loading:
             // First load renders the REAL screen in skeleton state: the
@@ -2598,7 +2639,88 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     }
 }
 
+// MARK: - Presentation readiness (charter P12a)
+
+extension ProfileViewController: PresentationReadying {
+    /// Starts the loads now — they begin in `viewDidLoad`, which loading the
+    /// view runs — so the pusher can hold the slide until they land.
+    ///
+    /// Loading the view early is the same work the push would do a few
+    /// milliseconds later, moved before it; no layout runs here (the first
+    /// pass is still the push's own, P15). Everything that lands while the
+    /// screen is off-window applies without its on-screen cross-fades, which
+    /// is the point: the first frame of the slide is the finished page.
+    func prepareForPresentation(ready: @escaping @MainActor () -> Void) {
+        presentationReady = ready
+        loadViewIfNeeded()
+        settlePresentationIfReady()
+    }
+
+    /// Whether the page, pushed now, would be the page that stays: the header
+    /// has its profile, the follow capsule has its answer (and, for someone
+    /// followed, the map star its rails — it widens the tray), both pictures are
+    /// drawn (or known absent), and the gallery's open page has left its
+    /// bones. A failed load is settled too — nothing more is coming.
+    ///
+    /// The cards' own media are NOT waited for: those are per item, P13.
+    var isSettledForPresentation: Bool {
+        switch renderedPhase {
+        case .loading: return false
+        case .failed: return true
+        case .content:
+            let relationshipKnown = followButtonState != .hidden || viewModel.isRelationshipSettled
+            return relationshipKnown && viewModel.isMapPinSettled
+                && headerView.arePicturesSettled && isGallerySettled
+        }
+    }
+
+    private var isGallerySettled: Bool {
+        guard viewModel.hasGallery else { return true }
+        guard let snapshot = lastGallerySnapshot, tabs.indices.contains(galleryPager.activePageIndex) else {
+            return false
+        }
+        return snapshot.state(for: tabs[galleryPager.activePageIndex]) != .loading
+    }
+
+    func settlePresentationIfReady() {
+        #if DEBUG
+        traceReadiness()
+        #endif
+        guard let ready = presentationReady, isSettledForPresentation else { return }
+        presentationReady = nil
+        ready()
+    }
+}
+
 #if DEBUG
+extension ProfileViewController {
+    /// What the header's relationship capsule says, nil while it is the blank
+    /// placeholder — for tests and QA probes.
+    var debugFollowTitle: String? { headerView.debugFollowTitle }
+    var debugFollowIsProminent: Bool { headerView.debugFollowIsProminent }
+    var debugIsHeaderRedacted: Bool { headerView.debugIsRedacted }
+    var debugHasAvatarPicture: Bool { headerView.debugHasAvatarPicture }
+
+    /// `-profile-first-frame-log`: each readiness milestone as it lands,
+    /// stamped from the screen's construction — what a held push is waiting
+    /// on, by name.
+    fileprivate func traceReadiness() {
+        guard ProcessInfo.processInfo.arguments.contains("-profile-first-frame-log") else { return }
+        let phase: String = switch renderedPhase {
+        case .loading: "loading"
+        case .content: "content"
+        case .failed: "failed"
+        }
+        let state = "phase=\(phase) relationship=\(followButtonState != .hidden || viewModel.isRelationshipSettled) "
+            + "pin=\(viewModel.isMapPinSettled) "
+            + "pictures=\(headerView.arePicturesSettled) gallery=\(isGallerySettled)"
+        guard state != lastTracedReadiness else { return }
+        lastTracedReadiness = state
+        let ms = (CACurrentMediaTime() - debugBornAt) * 1000
+        print(String(format: "[profile-ready] +%.0fms ", ms) + state + (presentationReady == nil ? "" : " (held)"))
+    }
+}
+
 extension ProfileViewController: DebugItemSelectable {
     /// Taps the active gallery page's first tile through its own delegate
     /// method — the path that builds a hero origin and flies.

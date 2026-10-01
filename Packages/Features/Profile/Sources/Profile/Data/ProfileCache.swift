@@ -27,31 +27,72 @@ public final class ProfileCache {
     /// other people. Past it the oldest read is dropped — the cost of a miss is
     /// one fetch, which is what would have happened anyway.
     private let limit: Int
-    private var profiles: [ProfileID: UserProfile] = [:]
+    private struct Entry {
+        var profile: UserProfile?
+        var relationship: ProfileRelationship?
+    }
+    private var entries: [ProfileID: Entry] = [:]
     /// Ids in least-recently-used order.
     private var recency: [ProfileID] = []
+    /// Keeps cached relationships agreeing with a follow made anywhere else
+    /// while no screen for that profile is alive to hear it.
+    private var followSubscription: FollowGraphSubscription?
 
     public init(limit: Int = 16) {
         self.limit = limit
     }
 
     public func profile(for id: ProfileID) -> UserProfile? {
-        guard let profile = profiles[id] else { return nil }
+        guard let profile = entries[id]?.profile else { return nil }
         touch(id)
         return profile
     }
 
     public func store(_ profile: UserProfile) {
-        profiles[profile.id] = profile
+        entries[profile.id, default: Entry()].profile = profile
         touch(profile.id)
-        while recency.count > limit, let oldest = recency.first {
-            recency.removeFirst()
-            profiles[oldest] = nil
+    }
+
+    /// The viewer's relationship to `id` as last read or changed here — the
+    /// Follow / Following a revisit opens on. Stale-while-revalidate like the
+    /// profile: the screen reads it again and corrects in place.
+    public func relationship(for id: ProfileID) -> ProfileRelationship? {
+        entries[id]?.relationship
+    }
+
+    public func store(_ relationship: ProfileRelationship, for id: ProfileID) {
+        entries[id, default: Entry()].relationship = relationship
+        touch(id)
+    }
+
+    /// Hears the app's follow channel, once. A follow accepted on a card or
+    /// in a list updates the cached answer, so the next visit does not open
+    /// on the old one and flip.
+    public func observe(_ events: FollowGraphEvents?) {
+        guard followSubscription == nil, let events else { return }
+        followSubscription = events.subscribeOnMain { [weak self] change in
+            self?.followGraphDidChange(change)
         }
+    }
+
+    private func followGraphDidChange(_ change: FollowChange) {
+        guard case .other(let wasFollowing, let isMutual, let isBlocked)? = entries[change.profileID]?.relationship,
+              wasFollowing != change.isFollowing else { return }
+        // Mutual implies following: an unfollow ends it. A follow cannot say
+        // whether they follow back, so it keeps what was known.
+        entries[change.profileID]?.relationship = .other(
+            isFollowing: change.isFollowing,
+            isMutual: change.isFollowing && isMutual,
+            isBlocked: isBlocked
+        )
     }
 
     private func touch(_ id: ProfileID) {
         recency.removeAll { $0 == id }
         recency.append(id)
+        while recency.count > limit, let oldest = recency.first {
+            recency.removeFirst()
+            entries[oldest] = nil
+        }
     }
 }
