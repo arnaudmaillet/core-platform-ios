@@ -50,6 +50,17 @@ public final class PresentationHold {
         case ceiling
     }
 
+    /// When the hold gives up on the destination.
+    public enum Ceiling: Equatable, Sendable {
+        /// After this long on the main queue's clock — the product's ceiling.
+        case after(TimeInterval)
+        /// Only when `releaseAtCeiling()` is called. For tests: a starved CI
+        /// runner stretches any wall-clock ceiling past the work it bounds, so
+        /// a test that asserts `.ready` must not race a timer at all, and a
+        /// test that asserts `.ceiling` fires it itself.
+        case manual
+    }
+
     /// Long enough for a warm fleet's round trip and every mock answer;
     /// short enough that a tap still reads as instant when it runs out —
     /// about the length of the system's own tap-to-push feedback.
@@ -73,7 +84,7 @@ public final class PresentationHold {
     @discardableResult
     public static func begin(
         _ destination: UIViewController,
-        ceiling: TimeInterval = defaultCeiling,
+        ceiling: Ceiling = .after(defaultCeiling),
         present: @escaping @MainActor (Release, _ waited: TimeInterval) -> Void
     ) -> PresentationHold {
         let hold = PresentationHold(present: present)
@@ -81,15 +92,23 @@ public final class PresentationHold {
             hold.release(.ready)
             return hold
         }
-        readying.prepareForPresentation { [weak hold] in hold?.release(.ready) }
-        if hold.isPending {
-            // Strong on purpose: the ceiling must fire even if the caller
-            // dropped its handle — a dropped hold is not a cancelled one.
-            DispatchQueue.main.asyncAfter(deadline: .now() + ceiling) {
+        // Both strong on purpose: a dropped handle is not a cancelled hold.
+        // The cycle through the destination ends when it presents (or is
+        // cancelled): `release` lets go of `present`, and the destination
+        // drops its callback once called or once it appears.
+        readying.prepareForPresentation { hold.release(.ready) }
+        if hold.isPending, case .after(let delay) = ceiling {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                 hold.release(.ceiling)
             }
         }
         return hold
+    }
+
+    /// Gives up on the destination now, as the ceiling would. A no-op once
+    /// the hold has presented or been cancelled.
+    public func releaseAtCeiling() {
+        release(.ceiling)
     }
 
     /// Drops the presentation: a newer route superseded it.

@@ -17,25 +17,35 @@ import UIKit
 ///
 /// The push is now held (`PresentationHold`) until the screen says it is
 /// settled, and an unknown relationship no longer draws as "Follow" at all.
+///
+/// ⚠️ NO TEST HERE RACES A CLOCK. Every hold runs with a `.manual` ceiling:
+/// a test that asserts `.ready` has no timer to lose to, and the one that
+/// asserts `.ceiling` fires it itself. Waits poll the actual signal, with no
+/// bound but the suite's time limit. CI's first run of this suite took ~105 s
+/// per test — the whole package was starved — and every wall-clock ceiling,
+/// even a "generous" 60 s, fired before the page it bounded had settled.
 @MainActor
+@Suite(.timeLimit(.minutes(10)))
 struct ProfilePushFirstFrameTests {
     // MARK: - Fixtures
 
-    /// What these tests assert is WHY the hold let go, never how fast: the
-    /// package's suites run in parallel on one main thread, and a full run
-    /// was measured starving it for seven seconds. A ceiling the data can
-    /// lose to under that load would make a timing bet of a behaviour test.
-    private static let generousCeiling: TimeInterval = 60
+    /// A 4×6 PNG, as bytes. Not drawn per fetch: rendering one needs the
+    /// main actor, and a starved main actor is exactly what this suite must
+    /// not depend on.
+    nonisolated private static let picture = Data(
+        base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAQAAAAGCAYAAADkOT91AAAAEklEQVR4nGPQWLDqPzJmoIUAAI6fOpk1HP8vAAAAAElFTkSuQmCC"
+    )!
 
     /// Real PNG bytes, so the pipeline decodes a picture rather than failing.
     private struct PictureFetcher: ImageFetching {
-        func fetchImageData(for url: URL) async throws -> Data {
-            await MainActor.run {
-                UIGraphicsImageRenderer(size: CGSize(width: 8, height: 12)).pngData { context in
-                    UIColor.systemTeal.setFill()
-                    context.fill(CGRect(x: 0, y: 0, width: 8, height: 12))
-                }
-            }
+        func fetchImageData(for url: URL) async throws -> Data { ProfilePushFirstFrameTests.picture }
+    }
+
+    /// Returns once `condition` holds — polled, never timed. A cancelled test
+    /// (the suite's time limit) stops polling.
+    private func settle(until condition: () -> Bool) async {
+        while !condition(), !Task.isCancelled {
+            try? await Task.sleep(for: .milliseconds(5))
         }
     }
 
@@ -57,7 +67,8 @@ struct ProfilePushFirstFrameTests {
         func relationship(for profileID: ProfileID) async throws -> ProfileRelationship {
             relationshipReads += 1
             guard let relationship else {
-                try await Task.sleep(for: .seconds(30))
+                // Never answers: suspended until the test is torn down.
+                try await Task.sleep(for: .seconds(3600))
                 throw CancellationError()
             }
             return relationship
@@ -102,12 +113,11 @@ struct ProfilePushFirstFrameTests {
         )
     }
 
-    /// Runs the hold the router runs, and reports why and when it let go.
-    private func hold(
-        _ screen: ProfileViewController, ceiling: TimeInterval
-    ) async -> PresentationHold.Release {
+    /// Runs the hold the router runs — with no ceiling: the only way out is
+    /// the screen saying it is ready.
+    private func holdUntilReady(_ screen: ProfileViewController) async -> PresentationHold.Release {
         await withCheckedContinuation { continuation in
-            PresentationHold.begin(screen, ceiling: ceiling) { release, _ in
+            PresentationHold.begin(screen, ceiling: .manual) { release, _ in
                 continuation.resume(returning: release)
             }
         }
@@ -121,8 +131,8 @@ struct ProfilePushFirstFrameTests {
     @Test func aProfileWhoseDataArrivesInTimeIsPushedAsItself() async {
         let screen = routedProfile(Profiles(relationship: .other(isFollowing: true, isBlocked: false)))
 
-        let release = await hold(screen, ceiling: Self.generousCeiling)
-        #expect(release == .ready, "the hold ran out instead of the page settling")
+        let release = await holdUntilReady(screen)
+        #expect(release == .ready)
         #expect(!screen.debugIsHeaderRedacted, "pushed on the header's bones")
         #expect(screen.debugFollowTitle == "Following", "pushed wearing \(String(describing: screen.debugFollowTitle))")
         #expect(!screen.debugFollowIsProminent, "Following is a state, not the blue call to action")
@@ -134,7 +144,7 @@ struct ProfilePushFirstFrameTests {
     @Test func aStrangersProfileSettlesOnFollow() async {
         let screen = routedProfile(Profiles(relationship: .other(isFollowing: false, isBlocked: false)))
 
-        let release = await hold(screen, ceiling: Self.generousCeiling)
+        let release = await holdUntilReady(screen)
 
         #expect(release == .ready)
         #expect(screen.debugFollowTitle == "Follow")
@@ -142,13 +152,21 @@ struct ProfilePushFirstFrameTests {
     }
 
     /// The ceiling is what keeps the hold honest: a read that never answers
-    /// costs the tap a bounded wait, and the screen goes on as it is.
-    @Test func aRelationshipThatNeverAnswersReleasesAtTheCeiling() async {
+    /// is never waited out — the push goes ahead on what the page has, and
+    /// what it has is a placeholder, not a guess.
+    @Test func aRelationshipThatNeverAnswersIsPushedOnItsPlaceholder() async {
         let screen = routedProfile(Profiles(relationship: nil))
+        var releases: [PresentationHold.Release] = []
+        let hold = PresentationHold.begin(screen, ceiling: .manual) { release, _ in releases.append(release) }
 
-        let release = await hold(screen, ceiling: 0.3)
+        // The profile lands; the relationship never does, so nothing releases.
+        await settle(until: { !screen.debugIsHeaderRedacted })
+        #expect(releases.isEmpty, "released without a relationship")
 
-        #expect(release == .ceiling)
+        hold.releaseAtCeiling()
+
+        #expect(releases == [.ceiling])
+        #expect(screen.debugFollowTitle == nil, "pushed wearing \(String(describing: screen.debugFollowTitle))")
     }
 
     // MARK: - An unknown relationship is never "Follow"
@@ -163,9 +181,7 @@ struct ProfilePushFirstFrameTests {
         #expect(screen.debugFollowTitle == nil, "the first frame claimed \(String(describing: screen.debugFollowTitle))")
 
         // The profile itself lands; the relationship does not.
-        for _ in 0..<2000 where screen.debugIsHeaderRedacted {
-            try? await Task.sleep(for: .milliseconds(5))
-        }
+        await settle(until: { !screen.debugIsHeaderRedacted })
         #expect(!screen.debugIsHeaderRedacted, "the profile never loaded")
         #expect(screen.debugFollowTitle == nil, "an unread relationship drew as \(String(describing: screen.debugFollowTitle))")
         #expect(!screen.debugFollowIsProminent)
@@ -189,20 +205,28 @@ struct ProfilePushFirstFrameTests {
     /// to fetch releases the hold before `begin` even returns — the push
     /// starts on the tap, already finished. (A gallery or a map star still
     /// costs its own read: measured ~90 ms on the simulator.)
-    @Test func aRevisitsHeaderIsReadyBeforeAnyAwait() async {
+    ///
+    /// Everything it reads is its own — a fresh cache and a fresh pipeline —
+    /// so no other suite can warm or cool it. Its CI failure was the first
+    /// visit's hold running out on a starved runner before the picture was
+    /// decoded: the second visit then really did have to wait for it. The
+    /// first visit now ends on READY, and the test says so before relying on it.
+    @Test func aRevisitsHeaderIsReadyBeforeAnyAwait() async throws {
+        let id = ProfileID("prof-kenji")
         let cache = ProfileCache()
         let repository = Profiles(relationship: .other(isFollowing: true, isBlocked: false))
         // First visit: fills the cache (profile, relationship, picture).
         let pipeline = ImagePipeline(fetcher: PictureFetcher())
         let first = ProfileViewController(
-            viewModel: ProfileViewModel(
-                repository: repository, source: .profile(ProfileID("prof-kenji")), cache: cache
-            ),
+            viewModel: ProfileViewModel(repository: repository, source: .profile(id), cache: cache),
             imagePipeline: pipeline,
             onLogout: nil
         )
-        _ = await hold(first, ceiling: Self.generousCeiling)
-        #expect(cache.relationship(for: ProfileID("prof-kenji")) != nil, "the read was not remembered")
+        #expect(await holdUntilReady(first) == .ready)
+        try #require(cache.profile(for: id) != nil, "the first visit's profile was not cached")
+        try #require(cache.relationship(for: id) != nil, "the first visit's relationship was not cached")
+        let avatar = try #require(ProfilePushFirstFrameTests.kenji().avatarURL)
+        try #require(pipeline.cachedImage(for: avatar) != nil, "the first visit's picture was not cached")
 
         let second = ProfileViewController(
             viewModel: ProfileViewModel(
@@ -212,7 +236,7 @@ struct ProfilePushFirstFrameTests {
             onLogout: nil
         )
         var releasedSynchronously = false
-        PresentationHold.begin(second, ceiling: 5) { release, _ in
+        PresentationHold.begin(second, ceiling: .manual) { release, _ in
             releasedSynchronously = release == .ready
         }
         #expect(releasedSynchronously, "a fully cached profile still waited for the network")
@@ -229,9 +253,7 @@ struct ProfilePushFirstFrameTests {
         cache.store(.other(isFollowing: false, isBlocked: false), for: id)
 
         events.publish(FollowChange(profileID: id, isFollowing: true))
-        for _ in 0..<2000 where cache.relationship(for: id) == .other(isFollowing: false, isBlocked: false) {
-            try? await Task.sleep(for: .milliseconds(5))
-        }
+        await settle(until: { cache.relationship(for: id) != .other(isFollowing: false, isBlocked: false) })
 
         #expect(cache.relationship(for: id) == .other(isFollowing: true, isBlocked: false))
     }
@@ -269,21 +291,21 @@ struct ProfilePushFirstFrameTests {
             imagePipeline: ImagePipeline(fetcher: PictureFetcher()),
             onLogout: nil
         )
-        var released = false
-        PresentationHold.begin(screen, ceiling: Self.generousCeiling) { _, _ in released = true }
-        for _ in 0..<2000 where !(viewModel.isRelationshipSettled && viewModel.profile != nil) {
-            try? await Task.sleep(for: .milliseconds(5))
-        }
-        try? await Task.sleep(for: .milliseconds(50))
-        #expect(!released, "pushed before the star knew its rails")
+        var releases: [PresentationHold.Release] = []
+        let hold = PresentationHold.begin(screen, ceiling: .manual) { release, _ in releases.append(release) }
+        // Everything but the star lands; the rails are gated shut.
+        await settle(until: {
+            viewModel.isRelationshipSettled && !screen.debugIsHeaderRedacted && screen.debugHasAvatarPicture
+        })
+        #expect(releases.isEmpty, "pushed before the star knew its rails")
         #expect(!viewModel.isMapPinSettled)
 
         await pinning.open()
-        for _ in 0..<2000 where !released {
-            try? await Task.sleep(for: .milliseconds(5))
-        }
-        #expect(released)
+        await settle(until: { !releases.isEmpty })
+
+        #expect(releases == [.ready])
         #expect(viewModel.mapPinButton.isFavorited)
+        withExtendedLifetime(hold) {}
     }
 
     // MARK: - The two reads run side by side
@@ -294,13 +316,13 @@ struct ProfilePushFirstFrameTests {
     @Test func theRelationshipIsReadAlongsideTheProfile() async {
         let repository = Profiles(relationship: .other(isFollowing: true, isBlocked: false))
         let viewModel = ProfileViewModel(repository: repository, source: .profile(ProfileID("prof-kenji")))
+        var settled = false
+        viewModel.onLoadSettled = { settled = true }
         viewModel.viewDidLoad()
-        for _ in 0..<2000 where !viewModel.isRelationshipSettled {
-            try? await Task.sleep(for: .milliseconds(5))
-        }
-        #expect(viewModel.isRelationshipSettled)
-        // Settle the profile load too, then count: one read, not one per stage.
-        try? await Task.sleep(for: .milliseconds(50))
-        #expect(await repository.relationshipReads == 1)
+        // Both reads have landed: the profile load says so itself, and the
+        // relationship flag is the read's own answer.
+        await settle(until: { settled && viewModel.isRelationshipSettled })
+
+        #expect(await repository.relationshipReads == 1, "one read, not one per stage")
     }
 }

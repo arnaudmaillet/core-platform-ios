@@ -5,7 +5,12 @@ import UIKit
 
 /// `PresentationHold`: a push waits for its destination's settled first frame,
 /// never past a ceiling, and presents exactly once.
+///
+/// No test here asserts a duration, and only one runs a real timer — the one
+/// whose subject IS the timer, and it asserts the outcome alone. The rest use
+/// a `.manual` ceiling, so a starved runner cannot reorder anything.
 @MainActor
+@Suite(.timeLimit(.minutes(5)))
 struct PresentationHoldTests {
     /// A destination that answers when told to — or never.
     private final class Destination: UIViewController, PresentationReadying {
@@ -43,7 +48,7 @@ struct PresentationHoldTests {
     @Test func aDestinationIsPresentedWhenItSaysSo() async {
         let destination = Destination()
         var releases: [PresentationHold.Release] = []
-        let hold = PresentationHold.begin(destination, ceiling: 5) { release, _ in releases.append(release) }
+        let hold = PresentationHold.begin(destination, ceiling: .manual) { release, _ in releases.append(release) }
         #expect(releases.isEmpty, "presented before the destination was ready")
         #expect(hold.isPending)
 
@@ -55,28 +60,42 @@ struct PresentationHoldTests {
 
     /// ⚠️ THE CEILING IS THE CONTRACT: a destination that never answers is
     /// pushed as it is, and a late answer does not push it a second time.
-    @Test func theCeilingPresentsOnceAndALateAnswerIsIgnored() async {
+    @Test func theCeilingPresentsOnceAndALateAnswerIsIgnored() {
         let destination = Destination()
         var releases: [PresentationHold.Release] = []
-        PresentationHold.begin(destination, ceiling: 0.05) { release, _ in releases.append(release) }
+        let hold = PresentationHold.begin(destination, ceiling: .manual) { release, _ in releases.append(release) }
 
-        for _ in 0..<100 where releases.isEmpty {
-            try? await Task.sleep(for: .milliseconds(5))
-        }
+        hold.releaseAtCeiling()
         destination.becomeReady()
+        hold.releaseAtCeiling()
 
         #expect(releases == [.ceiling])
     }
 
-    /// Superseded — the viewer asked for something else — means never.
-    @Test func aCancelledHoldNeverPresents() async {
+    /// The product's ceiling is a real timer, and it does fire on its own.
+    /// Outcome only: how late it fires on a loaded runner is not the question.
+    @Test func aTimedCeilingFiresWithoutBeingAsked() async {
         let destination = Destination()
         var releases: [PresentationHold.Release] = []
-        let hold = PresentationHold.begin(destination, ceiling: 0.05) { release, _ in releases.append(release) }
+        PresentationHold.begin(destination, ceiling: .after(0.01)) { release, _ in releases.append(release) }
+
+        while releases.isEmpty, !Task.isCancelled {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+
+        #expect(releases == [.ceiling])
+    }
+
+    /// Superseded — the viewer asked for something else — means never, by
+    /// readiness or by ceiling.
+    @Test func aCancelledHoldNeverPresents() {
+        let destination = Destination()
+        var releases: [PresentationHold.Release] = []
+        let hold = PresentationHold.begin(destination, ceiling: .manual) { release, _ in releases.append(release) }
 
         hold.cancel()
         destination.becomeReady()
-        try? await Task.sleep(for: .milliseconds(120))
+        hold.releaseAtCeiling()
 
         #expect(releases.isEmpty)
     }
