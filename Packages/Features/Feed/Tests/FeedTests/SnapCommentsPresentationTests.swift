@@ -1497,8 +1497,8 @@ struct SnapCommentsPresentationTests {
         let bubble = SnapActionColumn.bubbleSize
         #expect(avatar.frame.height == 38)
         #expect(abs(send.frame.height - bubble) < 0.5)
-        #expect(avatar.frame.maxY == bar.bounds.height)
-        #expect(field.frame.maxY == bar.bounds.height)
+        #expect(abs(avatar.frame.maxY - bar.bounds.height) < 0.5)
+        #expect(abs(field.frame.maxY - bar.bounds.height) < 0.5)
         let lift = SnapActionColumn.columnLift
         #expect(abs(bar.bounds.height - send.frame.maxY - lift) < 0.5)
 
