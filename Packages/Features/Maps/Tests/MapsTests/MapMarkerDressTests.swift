@@ -156,7 +156,8 @@ struct MapMarkerDressTests {
         let card = card(.media, dress: .resolve(kind: .country, countryCode: "FR", isLocked: false))
         let before = card.bounds.maxX - card.debugBadge.center.x
         card.frame = CGRect(x: 0, y: 0, width: 400, height: 800)
-        #expect(abs((card.bounds.maxX - card.debugBadge.center.x) - before) < 0.001)
+        #expect(abs((card.bounds.maxX - card.debugBadge.center.x) - before) < 0.5, // autoresizing rounds to the pixel
+                "before \(before) after \(card.bounds.maxX - card.debugBadge.center.x) chrome \(card.debugChromeView.frame) badge \(card.debugBadge.frame)")
         #expect(card.debugBadge.bounds.width == MapMarkerBadgeView.side, "its own size, not the card's")
     }
 
