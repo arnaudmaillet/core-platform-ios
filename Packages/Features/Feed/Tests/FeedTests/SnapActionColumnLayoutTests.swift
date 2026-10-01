@@ -126,6 +126,43 @@ struct SnapActionColumnLayoutTests {
         screen.height - insets.bottom + SnapActionColumn.toolbarGlassDrop
     }
 
+    // MARK: - The toolbar's glass
+
+    /// ⚠️ THE ONE MEASURED NUMBER, CHECKED AGAINST A REAL BAR. Every composer
+    /// rests its input row `sm` above the toolbar's glass, and where the glass
+    /// begins is a constant (`SnapActionColumn.toolbarGlassDrop`) — reading
+    /// the private floating bar at runtime would put a frame of UIKit's own
+    /// layout into the composer's, a frame late, during every push. So this
+    /// puts a toolbar in a window at the iPhone 18 Pro's size and reads where
+    /// its bubble actually stands under the screen's safe-area line: a 36pt
+    /// item centred in its 48pt glass bubble (iOS 27). If UIKit moves the bar,
+    /// this fails, and the constant is what to re-measure.
+    @Test func theToolbarsGlassStandsWhereTheComposerExpectsIt() async throws {
+        let screen = UIViewController()
+        let more = SnapFooterToolbar.makeMoreButton(menu: UIMenu(children: []))
+        screen.toolbarItems = [.flexibleSpace(), UIBarButtonItem(customView: more)]
+        let nav = UINavigationController(rootViewController: screen)
+        nav.setToolbarHidden(false, animated: false)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        window.rootViewController = nav
+        window.isHidden = false
+        defer { window.isHidden = true }
+        for _ in 0..<30 {
+            nav.view.setNeedsLayout()
+            nav.view.layoutIfNeeded()
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try #require(more.window != nil, "the bar never hosted its item")
+
+        let safeLine = screen.view.convert(
+            CGPoint(x: 0, y: screen.view.bounds.height - screen.view.safeAreaInsets.bottom), to: window
+        ).y
+        let bubbleHeight: CGFloat = 48
+        let glassTop = more.convert(CGPoint(x: 0, y: more.bounds.midY), to: window).y - bubbleHeight / 2
+        #expect(abs(glassTop - (safeLine + SnapActionColumn.toolbarGlassDrop)) <= 1,
+                "the glass starts \(glassTop - safeLine)pt under the safe-area line, not \(SnapActionColumn.toolbarGlassDrop)")
+    }
+
     // MARK: - Flag off: no repost bubble, the input row on the toolbar
 
     /// Off, the chrome carries no repost bubble at all — not even hidden — and

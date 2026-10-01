@@ -89,7 +89,17 @@ enum SnapActionColumn {
     /// bottom safe-area line — the safe area a screen with a toolbar reports
     /// stops short of the bar's capsules by this much (iOS 27, iPhone 18 Pro,
     /// `-dump-bars`: line at 788, glass from 798 to 846 on an 874pt screen).
-    /// Not published by UIKit; re-measure if the bar's metrics move.
+    /// Not published by UIKit; re-measure if the bar's metrics move —
+    /// `SnapActionColumnLayoutTests.theToolbarsGlassStandsWhereTheComposerExpectsIt`
+    /// reads it off a real bar and fails when it does.
+    ///
+    /// A CONSTANT, NOT A READING. The glass lives in a private floating-bar
+    /// container that UIKit lays out after the screen does, and fades in and
+    /// out with every push and hero flight; the feed hands its comments panel
+    /// the rest line (`setEngagedInsets`) before that bar exists. A composer
+    /// resting on the bar's live frame would land a frame late and move with
+    /// the bar's own transitions — the item-width feedback family
+    /// (`ios27-bar-item-width-traps`, `bar-item-wrapper-drift`).
     static let toolbarGlassDrop: CGFloat = 10
 
     /// The composer's INPUT ROW (its bottom edge) above the bottom margin line
