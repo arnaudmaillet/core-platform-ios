@@ -87,11 +87,21 @@ enum SnapActionColumn {
 
     /// ⚠️ MEASURED: how far the floating toolbar's GLASS stands below the
     /// bottom safe-area line — the safe area a screen with a toolbar reports
-    /// stops short of the bar's capsules by this much (iOS 27, iPhone 18 Pro,
-    /// `-dump-bars`: line at 788, glass from 798 to 846 on an 874pt screen).
+    /// stops short of the bar's capsules by this much. The SAME 10pt on both
+    /// runtimes the app meets, whatever height the bubble draws (the line
+    /// moves with the bar):
+    /// - iOS 27, iPhone 18 Pro: the app's feed, `-dump-bars` — line 788, glass
+    ///   798…846 (48pt bubbles); the package test host's lone ⋯ — line 792,
+    ///   glass 802…846 (a 44pt bubble).
+    /// - iOS 26.2, iPhone 16e (CI): the package test host, read off the glass
+    ///   frame UIKit drew — 10pt, and the field 12pt (`glassGap`) above it.
     /// Not published by UIKit; re-measure if the bar's metrics move —
     /// `SnapActionColumnLayoutTests.theToolbarsGlassStandsWhereTheComposerExpectsIt`
-    /// keeps a sentinel on a real bar in the test host and fails when it does.
+    /// reads it off a real bar on whichever runtime runs the suite, and fails
+    /// with the new number. ⚠️ Read the bubble's frame, never its centre less
+    /// 24: the 48pt that assumes is the app's bubble, not UIKit's only one —
+    /// that arithmetic read iOS 27's drop as 8 and iOS 26's as 10 and made a
+    /// per-OS difference out of nothing (#344, 2026-10-01).
     ///
     /// A CONSTANT, NOT A READING. The glass lives in a private floating-bar
     /// container that UIKit lays out after the screen does, and fades in and
