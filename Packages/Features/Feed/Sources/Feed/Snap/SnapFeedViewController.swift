@@ -72,6 +72,11 @@ final class SnapFeedViewController: UIViewController {
     /// fixed width (`applyBarPillWidths`). The engagement no longer touches the
     /// footer — see `configureToolbarItems` for why the trailing ✕ left it.
     private var defaultToolbarItems: [UIBarButtonItem] = []
+    /// `-snap-layout-v2` (experimental, `SnapActionColumn`): share stands as a
+    /// bubble under the boost anchor on every media page, and leaves ⋯. The
+    /// launch flag by default; a test flips it for this screen's own
+    /// decisions (the menu, the pages it dequeues).
+    var usesActionColumn = SnapActionColumn.isEnabled
     /// The nav bar's two trailing items, held so comment mode can add the
     /// sort selector beside the author pill and take it away again.
     private var authorItem = UIBarButtonItem()
@@ -1416,6 +1421,10 @@ final class SnapFeedViewController: UIViewController {
                 cell.onRequestBoostUndo = { [weak self, weak cell] id in
                     self?.performBoostUndo(on: id, feedbackCell: cell)
                 }
+                // `-snap-layout-v2`: the share bubble under the anchor is the
+                // post's share — the sheet ⋯ opens without the experiment.
+                cell.setUsesActionColumn(self.usesActionColumn)
+                cell.onRequestShare = { [weak self] id in self?.presentShareSheet(for: id) }
                 // The anchor's number face and wallet context: what this
                 // viewer has already put on this post (the ledger), what
                 // the balance can still afford, and whether any of it is
@@ -4910,15 +4919,20 @@ final class SnapFeedViewController: UIViewController {
     /// So it is the three that do: pass the post on, ask for less like it, and
     /// report it. Report is destructive and last, which is the ordering the
     /// gallery card's own menu uses.
+    ///
+    /// Under `-snap-layout-v2` Share is not here: it has its own bubble on the
+    /// page, under the boost anchor (`SnapActionColumn`), and a second door to
+    /// it in a menu would be the kind of duplicate this menu exists to avoid.
     private func moreMenuActions(for id: PostID) -> [UIMenuElement] {
-        var actions: [UIMenuElement] = [
-            UIAction(title: "Share", image: UIImage(systemName: "square.and.arrow.up")) { [weak self] _ in
+        var actions: [UIMenuElement] = []
+        if !usesActionColumn {
+            actions.append(UIAction(title: "Share", image: UIImage(systemName: "square.and.arrow.up")) { [weak self] _ in
                 self?.presentShareSheet(for: id)
-            },
-            UIAction(title: "Not interested", image: UIImage(systemName: "hand.thumbsdown")) { [weak self] _ in
-                self?.markNotInterested(id)
-            },
-        ]
+            })
+        }
+        actions.append(UIAction(title: "Not interested", image: UIImage(systemName: "hand.thumbsdown")) { [weak self] _ in
+            self?.markNotInterested(id)
+        })
         // Withheld rather than disabled when there is nobody to file with — an
         // action that cannot act is not offered.
         if reporting != nil {

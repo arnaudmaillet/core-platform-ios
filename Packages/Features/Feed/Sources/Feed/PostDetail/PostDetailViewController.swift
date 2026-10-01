@@ -185,6 +185,35 @@ final class PostDetailViewController: UIViewController {
     private var mediaAspectConstraint: NSLayoutConstraint?
     private var composeBottomDefault: NSLayoutConstraint?
     private var composeBottomEngaged: [NSLayoutConstraint] = []
+    /// The composer's trailing edge — the column's inset under
+    /// `-snap-layout-v2`, the classic `lg` otherwise.
+    private var composeTrailing: NSLayoutConstraint?
+    /// The engaged rest constraint and the inset it was built from, kept so a
+    /// change of geometry (`usesActionColumn`) re-rests the bar in place.
+    private weak var composeRestEngaged: NSLayoutConstraint?
+    private var engagedBottomInset: CGFloat?
+
+    /// **`-snap-layout-v2` (experimental, `SnapActionColumn`).** The engaged
+    /// composer stands its stake and mic/send ON the media layout's like and
+    /// share bubbles — same size, same screen coordinates — so opening and
+    /// closing the comments crossfades two bubbles that never move:
+    ///
+    /// - AT REST the bar's bottom sits the column's lift above the footer line
+    ///   (not `sm`), and its trailing edge the column's inset from the screen's
+    ///   (not `lg`); the entrance is alpha only — no micro-translation.
+    /// - KEYBOARD UP the required ceiling wins, exactly as before: the bar rides
+    ///   the keyboard's top, `sm` above it. The column is a resting position;
+    ///   typing is not resting, and a bar held at the column's line would sit
+    ///   under the keyboard.
+    ///
+    /// The launch flag by default; a host or a test sets it before the engaged
+    /// insets (a later change re-rests the bar in place).
+    var usesActionColumn = SnapActionColumn.isEnabled {
+        didSet {
+            guard usesActionColumn != oldValue else { return }
+            applyComposerColumn()
+        }
+    }
     private var scrollBottomDefault: NSLayoutConstraint?
     private var scrollBottomEngaged: NSLayoutConstraint?
     /// The engaged footer's frost: rows gliding behind the composer stay
@@ -728,6 +757,7 @@ final class PostDetailViewController: UIViewController {
     }
 
     private func configureComposeBar() {
+        composeBar.usesActionColumn = usesActionColumn
         // The Liquid Glass composer (Private Messages' recipe): a floating
         // capsule field, no opaque bar, no separator — the glass carries
         // its own boundary against whatever is behind it.
@@ -816,9 +846,14 @@ final class PostDetailViewController: UIViewController {
             equalTo: view.keyboardLayoutGuide.topAnchor, constant: -Spacing.sm
         )
         composeBottomDefault = bottom
+        let trailing = composeBar.trailingAnchor.constraint(
+            equalTo: view.trailingAnchor,
+            constant: -SnapActionColumn.composerTrailingInset(actionColumn: usesActionColumn)
+        )
+        composeTrailing = trailing
         NSLayoutConstraint.activate([
             composeBar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Spacing.lg),
-            composeBar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -Spacing.lg),
+            trailing,
             bottom,
             composerBackdrop.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             composerBackdrop.trailingAnchor.constraint(equalTo: view.trailingAnchor),
@@ -899,7 +934,9 @@ final class PostDetailViewController: UIViewController {
     /// Set offstage BEFORE the spring; animate to onstage INSIDE it.
     func setComposerEntranceState(offstage: Bool) {
         composeBar.alpha = offstage ? 0 : 1
-        composeBar.transform = offstage
+        // The action column's bubbles stand on the media layout's: a slide
+        // would move them, so its entrance is the alpha alone.
+        composeBar.transform = offstage && !usesActionColumn
             ? CGAffineTransform(translationX: 0, y: SnapCommentsLayout.composerEntranceOffset)
             : .identity
         // The footer band rides the same seam — this already runs inside the
@@ -967,7 +1004,37 @@ final class PostDetailViewController: UIViewController {
     /// Extra bottom room so resting content clears the composer band: the
     /// input row's band (62), plus the stake row standing on it — the stake
     /// bubble sits at the trailing edge, where a resting row's ♥ would be.
-    private static let engagedFooterClearance: CGFloat = 62 + CommentsInputBar.stakeRowHeight
+    private static let classicFooterClearance: CGFloat = 62 + CommentsInputBar.stakeRowHeight
+
+    /// The clearance for the bar this screen draws: the action column's
+    /// (`-snap-layout-v2`) stands higher by its lift and is taller by its two
+    /// bubbles, and the clearance grows by both differences.
+    private var engagedFooterClearance: CGFloat {
+        guard usesActionColumn else { return Self.classicFooterClearance }
+        return Self.classicFooterClearance
+            + (SnapActionColumn.restingLift - Spacing.sm)
+            + CommentsInputBar.restingHeight(for: .large, actionColumn: true)
+            - CommentsInputBar.restingHeight(for: .large)
+    }
+
+    /// The composer's resting gap above the footer line — see
+    /// `usesActionColumn`.
+    private var composerRestingGap: CGFloat {
+        SnapActionColumn.composerRestingGap(actionColumn: usesActionColumn)
+    }
+
+    /// Applies a change of `usesActionColumn` to a screen already built: the
+    /// bar's faces and geometry, its trailing edge, and — when engaged — its
+    /// rest line and the stream's clearance under it.
+    private func applyComposerColumn() {
+        composeBar.usesActionColumn = usesActionColumn
+        composeTrailing?.constant = -SnapActionColumn.composerTrailingInset(actionColumn: usesActionColumn)
+        if let bottomInset = engagedBottomInset {
+            composeRestEngaged?.constant = -(bottomInset + composerRestingGap)
+            collectionView.contentInset.bottom = bottomInset + engagedFooterClearance
+            engagedStreamInsets?.bottom = bottomInset + engagedFooterClearance
+        }
+    }
 
     /// Freezes the comment stream for the length of a gesture that owns the
     /// screen — a dismissal swipe.
@@ -1021,14 +1088,15 @@ final class PostDetailViewController: UIViewController {
             scrollBottomEngaged = collectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         }
         scrollBottomEngaged?.isActive = true
-        collectionView.contentInset.bottom = max(0, bottomInset) + Self.engagedFooterClearance
+        collectionView.contentInset.bottom = max(0, bottomInset) + engagedFooterClearance
         // Recorded so the empty page can be sized against the SETTLED
         // geometry on frame 0 — the stream is still growing into these
         // numbers while the transition runs.
         engagedStreamInsets = (
             top: max(0, top),
-            bottom: max(0, bottomInset) + Self.engagedFooterClearance
+            bottom: max(0, bottomInset) + engagedFooterClearance
         )
+        engagedBottomInset = max(0, bottomInset)
         composerBackdrop.isHidden = false
         // Z-ORDER, load-bearing: the scroll view is added AFTER the compose
         // bar at build time (harmless while it ended at the bar's top), so
@@ -1052,10 +1120,14 @@ final class PostDetailViewController: UIViewController {
         let keyboard = composeBar.bottomAnchor.constraint(
             lessThanOrEqualTo: view.keyboardLayoutGuide.topAnchor, constant: -Spacing.sm
         )
+        // The rest line: `sm` above the footer — or, under `-snap-layout-v2`,
+        // the action column's lift, which stands the stake and mic/send on the
+        // media layout's like and share bubbles (`usesActionColumn`).
         let rest = composeBar.bottomAnchor.constraint(
-            equalTo: view.bottomAnchor, constant: -(max(0, bottomInset) + Spacing.sm)
+            equalTo: view.bottomAnchor, constant: -(max(0, bottomInset) + composerRestingGap)
         )
         rest.priority = .defaultHigh
+        composeRestEngaged = rest
         composeBottomEngaged = [keyboard, rest]
         composerKeyboardCeiling = keyboard
         keyboard.isActive = composerTracksKeyboard
@@ -1912,8 +1984,8 @@ final class PostDetailViewController: UIViewController {
         guard let engaged = engagedStreamInsets, view.bounds.height > 0 else { return nil }
         let rowTop = engaged.top + streamSectionTopInset + captionHeight
         let top = captionHeight > 0 ? rowTop : engaged.top - SnapCommentsLayout.streamTopBreath
-        let restingBottomInset = engaged.bottom - Self.engagedFooterClearance
-        var composerBottom = view.bounds.height - restingBottomInset - Spacing.sm
+        let restingBottomInset = engaged.bottom - engagedFooterClearance
+        var composerBottom = view.bounds.height - restingBottomInset - composerRestingGap
         // ⚠️ CONVERTED HERE, NEVER STORED CONVERTED. The sheet grows to its
         // large height FOR the keyboard, which moves this view under a frame
         // that has not moved: a top converted when the notification arrived
@@ -1922,7 +1994,9 @@ final class PostDetailViewController: UIViewController {
         if composerTracksKeyboard, let covered = keyboardHeightFromBottom {
             composerBottom = min(composerBottom, view.bounds.height - covered - Spacing.sm)
         }
-        let composerHeight = CommentsInputBar.restingHeight(for: traitCollection.preferredContentSizeCategory)
+        let composerHeight = CommentsInputBar.restingHeight(
+            for: traitCollection.preferredContentSizeCategory, actionColumn: usesActionColumn
+        )
         return StreamSpace(rowTop: rowTop, top: top, bottom: composerBottom - composerHeight)
     }
 
@@ -2007,9 +2081,9 @@ final class PostDetailViewController: UIViewController {
         // footer clearance stops covering once the field outgrows one small
         // line (accessibility sizes: the field reaches ~80pt).
         let rowTop = engaged.top + streamSectionTopInset + caption
-        let restingBottomInset = engaged.bottom - Self.engagedFooterClearance
-        let composerHeight = CommentsInputBar.restingHeight(for: contentSizeCategory)
-        let blockClearsComposer = rowTop + block + Spacing.sm + composerHeight + restingBottomInset
+        let restingBottomInset = engaged.bottom - engagedFooterClearance
+        let composerHeight = CommentsInputBar.restingHeight(for: contentSizeCategory, actionColumn: usesActionColumn)
+        let blockClearsComposer = rowTop + block + composerRestingGap + composerHeight + restingBottomInset
         return ceil(max(rowHoldsBlock, blockClearsComposer))
     }
 

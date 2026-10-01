@@ -52,6 +52,29 @@ final class ConversationThreadViewController: UIViewController {
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
     private let contextMenu = ThreadRowContextMenu()
     private let composeBar = CommentsInputBar()
+    /// The composer's rest line and trailing edge, kept so the action column
+    /// can be switched on a screen already built.
+    private var composeRest: NSLayoutConstraint?
+    private var composeTrailing: NSLayoutConstraint?
+
+    /// **`-snap-layout-v2` (experimental, `SnapActionColumn`).** The post's
+    /// composer, so the post's geometry: at rest the stake and mic/send stand
+    /// where the snap feed's like and share bubbles stand (the column's lift
+    /// above the footer, its inset from the trailing edge), the mic a
+    /// waveform; keyboard up, the bar rides the keyboard as before. The launch
+    /// flag by default; a test flips it.
+    var usesActionColumn = SnapActionColumn.isEnabled {
+        didSet {
+            guard usesActionColumn != oldValue else { return }
+            applyComposerColumn()
+        }
+    }
+
+    private func applyComposerColumn() {
+        composeBar.usesActionColumn = usesActionColumn
+        composeRest?.constant = -SnapActionColumn.composerRestingGap(actionColumn: usesActionColumn)
+        composeTrailing?.constant = -SnapActionColumn.composerTrailingInset(actionColumn: usesActionColumn)
+    }
     private let headerFrost = ProgressiveFrostView(
         maskColors: SnapCommentsLayout.headerFrostMaskColors,
         maskLocations: SnapCommentsLayout.headerFrostMaskLocations
@@ -346,9 +369,12 @@ final class ConversationThreadViewController: UIViewController {
             equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -Spacing.sm
         )
         rest.priority = .defaultHigh
+        let trailing = composeBar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -Spacing.lg)
+        composeRest = rest
+        composeTrailing = trailing
         NSLayoutConstraint.activate([
             composeBar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Spacing.lg),
-            composeBar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -Spacing.lg),
+            trailing,
             ceiling,
             rest,
             composerBackdrop.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -360,6 +386,7 @@ final class ConversationThreadViewController: UIViewController {
                 equalTo: composeBar.inputRowTopAnchor, constant: -SnapCommentsLayout.footerFrostLead
             ),
         ])
+        applyComposerColumn()
     }
 
     /// The post's footer, with the emote strip where the music would be.

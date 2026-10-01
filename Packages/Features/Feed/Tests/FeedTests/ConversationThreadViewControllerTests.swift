@@ -170,6 +170,24 @@ struct ConversationThreadViewControllerTests {
     /// sendable with the keyboard down (a shared link or an emote lands in
     /// the field to be sent), and an empty field wears the mic, keyboard up
     /// or down.
+    /// `-snap-layout-v2`: the thread shares the post's composer, so it shares
+    /// the post's action column — at rest the stake and the waveform stand
+    /// exactly where the snap feed's like and share bubbles stand under the
+    /// same footer (`SnapActionColumnLayoutTests` holds the post to it).
+    @Test func theActionColumnStandsWhereTheFeedsBubblesStand() throws {
+        let (screen, _, _, window) = makeScreen()
+        screen.usesActionColumn = true
+        screen.view.layoutIfNeeded()
+        let media = SnapActionColumnLayoutTests.mediaColumn(insets: UIEdgeInsets(
+            top: screen.view.safeAreaInsets.top, left: 0,
+            bottom: screen.view.safeAreaInsets.bottom, right: 0
+        ))
+        let composer = try SnapActionColumnLayoutTests.composerColumn(in: screen.view, space: window)
+
+        #expect(composer.stake == media.like, "stake \(composer.stake) vs like \(media.like)")
+        #expect(composer.mic == media.share, "waveform \(composer.mic) vs share \(media.share)")
+    }
+
     @Test func aDraftIsSendableWithTheKeyboardDown() throws {
         let bar = CommentsInputBar()
         bar.showsIdleUtilityFaces = true
