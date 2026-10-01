@@ -12,8 +12,15 @@ final class MapAnnotation: NSObject, MKAnnotation {
 
     private(set) var pin: MapPin
 
-    init(pin: MapPin) {
+    /// The hierarchy depth this lone pin speaks for when it is a band's
+    /// group of one (`MapClusterEngine.Item.hierarchyKind`) — so it wears its
+    /// country's or city's dress, like a band cluster — or nil for an
+    /// ordinary local pin. Set by the map's reconcile on every layout.
+    var hierarchyKind: MapPlace.Kind?
+
+    init(pin: MapPin, hierarchyKind: MapPlace.Kind? = nil) {
         self.pin = pin
+        self.hierarchyKind = hierarchyKind
         self.coordinate = CLLocationCoordinate2D(latitude: pin.latitude, longitude: pin.longitude)
         super.init()
     }

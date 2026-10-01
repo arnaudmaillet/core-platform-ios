@@ -1,6 +1,7 @@
 import CoreContracts
 import CoreLocation
 import CoreModels
+import MapKit
 import CoreNetworkingMocks
 import Testing
 @testable import Maps
@@ -126,6 +127,55 @@ struct MockWorldSeedTests {
             let trending = country.cities.flatMap(seeded).max { $0.post.likes < $1.post.likes }
             #expect(marker?.representative.postID.rawValue == trending?.postID,
                     "\(country.name) wears \(marker?.representative.postID.rawValue ?? "nothing")")
+        }
+    }
+
+    /// The world framed (the user's screenshot, 2026-10-01): every marker on
+    /// screen is a COUNTRY's — never a neutral group fusing two of them. A
+    /// country whose marker would overlap a stronger one is hidden, and the
+    /// stronger one is always the open one first, the more trending second.
+    @Test func theWorldFramedShowsOnlyCountriesAndTheStrongerOneOfEachCollision() async throws {
+        let pins = try await worldPins(around: MockWorldSeed.countries.flatMap(\.cities))
+        let locked = Set(MockWorldSeed.lockedCountryCodes)
+        func isOpen(_ pin: MapPin) -> Bool {
+            let owner = CountryAtlas.shared.country(
+                owning: CLLocationCoordinate2D(latitude: pin.latitude, longitude: pin.longitude)
+            )
+            return !locked.contains(owner?.code ?? "")
+        }
+        let world = 402.0 / 268_435_456.0
+        let cell = 64 / world
+        var occlusion = MapClusterEngine.Occlusion()
+        let shown = MapClusterEngine.cluster(
+            pins, zoomScale: world, cellPoints: 64, viewportDiagonalKm: 20_000,
+            isOpen: isOpen, occlusion: &occlusion
+        )
+        #expect(!occlusion.hiddenItems.isEmpty, "the world framing must collide somewhere")
+        for item in shown {
+            #expect(item.isHierarchyMarker && item.place?.kind == .country,
+                    "\(item.place?.id ?? "a placeless group") is not a country marker")
+        }
+        // Every country is on the books, shown or hidden — once.
+        let books = (shown + occlusion.hiddenItems).compactMap { $0.place?.id }
+        #expect(Set(books) == Set(MockWorldSeed.countries.map(\.placeID)))
+        #expect(books.count == Set(books).count)
+
+        func point(_ item: MapClusterEngine.Item) -> MKMapPoint {
+            MKMapPoint(CLLocationCoordinate2D(latitude: item.latitude, longitude: item.longitude))
+        }
+        func open(_ item: MapClusterEngine.Item) -> Bool { isOpen(item.representative) }
+        for hidden in occlusion.hiddenItems {
+            let p = point(hidden)
+            let blockers = shown.filter {
+                let q = point($0)
+                return max(abs(p.x - q.x), abs(p.y - q.y)) < cell
+            }
+            #expect(!blockers.isEmpty, "\(hidden.place?.id ?? "?") is hidden behind nothing")
+            #expect(blockers.contains { blocker in
+                open(blocker) != open(hidden)
+                    ? open(blocker)
+                    : blocker.representative.likeCount >= hidden.representative.likeCount
+            }, "\(hidden.place?.id ?? "?") is hidden behind a weaker marker")
         }
     }
 }
