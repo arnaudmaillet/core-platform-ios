@@ -83,6 +83,10 @@ final class ForYouGridPage: UIView {
     /// The page scrolled near its end and wants another page.
     var onNearEnd: (() -> Void)?
     var onRefresh: (() -> Void)?
+    /// Fired when a drag ends, with how far the page was pulled past its top
+    /// — the pull of a page whose host draws the indicator and owns the
+    /// threshold (`handPullToHost`).
+    var onPullReleased: ((CGFloat) -> Void)?
     /// A row's author was tapped — its disc, its name or its handle.
     var onAuthorTapped: ((GalleryPost) -> Void)?
     /// What a row's "..." should offer. Asked at press time, per row.
@@ -806,6 +810,20 @@ final class ForYouGridPage: UIView {
         applyBottomInset()
     }
 
+    /// Drops the stock `UIRefreshControl`: the host reads the pull from
+    /// `onPullReleased` and draws its own indicator.
+    ///
+    /// ⚠️ **FOR A PAGE UNDER A FLOATING HEADER.** The stock control positions
+    /// itself against the content top, which is under the header there — its
+    /// spinner turns behind the banner — and on the place page a real drag
+    /// stretched the banner without ever tripping it, while the same drag
+    /// tripped For You's. The profile retired it for the same layout
+    /// (`HeroPullToRefreshView`). `onRefresh` stays: it is also the failed
+    /// state's "Try Again".
+    func handPullToHost() {
+        collectionView.refreshControl = nil
+    }
+
     /// Scrolls to a travel offset, clamped to what the content can hold.
     /// What keeps a floating header still across a tab switch: the page
     /// arriving is put level with the page leaving BEFORE it shows.
@@ -1393,6 +1411,19 @@ final class ForYouGridPage: UIView {
     /// How many cells the collection view currently has laid out — the number
     /// `updateAutoplay` walks to find candidates.
     var debugVisibleItemCount: Int { collectionView.indexPathsForVisibleItems.count }
+
+    /// Pulls the page `distance` past its top and lets go, through the drag's
+    /// own delegate callback — what a finger reaches. A scripted offset alone
+    /// never ends a drag, so it never asks for a refresh.
+    func debugReleasePull(by distance: CGFloat) {
+        setVerticalOffset(-distance)
+        scrollViewDidEndDragging(collectionView, willDecelerate: false)
+        // And springs back, as a released page does.
+        setVerticalOffset(0)
+    }
+
+    /// Whether the page still carries the stock control.
+    var debugHasRefreshControl: Bool { collectionView.refreshControl != nil }
 
     func debugSelectItem(at index: Int) -> Bool {
         guard posts.indices.contains(index) else { return false }
@@ -3393,6 +3424,7 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
     /// the throttled pass may have been velocity-gated right up to the stop.
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
         if !decelerate { updateAutoplay() }
+        onPullReleased?(max(0, -verticalOffset))
     }
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {

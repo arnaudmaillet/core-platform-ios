@@ -1,13 +1,13 @@
-import DesignSystem
 import UIKit
 
-/// The profile's pull-to-refresh indicator, hosted at the very top of the
-/// screen — above the header, not inside the list.
+/// The pull-to-refresh indicator of the picture-led pages — the profile and
+/// the place — hosted at the very top of the screen: above the header, not
+/// inside the list.
 ///
 /// ## Why this is not a `UIRefreshControl`
 ///
 /// A `UIRefreshControl` positions itself against its scroll view's content
-/// top. The profile's lists are inset below a floating header, so the stock
+/// top. These pages' lists are inset below a floating header, so the stock
 /// control drew its spinner *under the identity block*, mid-screen, pointing at
 /// the grid rather than at the page being refreshed. There is no outer scroll
 /// view to move it to: the header is a floating passthrough layer over a pager,
@@ -22,17 +22,24 @@ import UIKit
 /// gesture feels connected. At or past it the spinner is solid. Nothing snaps,
 /// and there is no "release to refresh" text — the arc filling IS the message,
 /// which is the same language the platform's own control speaks.
-final class ProfilePullToRefreshView: UIView {
+///
+/// ⚠️ **ON THE PLACE PAGE THE STOCK CONTROL WAS WORSE THAN MISPLACED.** Its
+/// lists kept a `UIRefreshControl` under the same floating header, and a real
+/// drag in the simulator stretched the banner without ever tripping it, while
+/// the same drag tripped For You's; a release through the control's own path
+/// started a spinner nothing ever stopped (no host answered it). One
+/// indicator, one threshold, for every page that floats a header.
+public final class HeroPullToRefreshView: UIView {
     /// How far the list must be pulled past its top before releasing refreshes.
     ///
     /// Matches the distance `UIRefreshControl` uses, so the gesture costs the
     /// same effort here as everywhere else in the app.
-    static let threshold: CGFloat = 120
+    public static let threshold: CGFloat = 120
 
     private let spinner = UIActivityIndicatorView(style: .medium)
     private var isRefreshing = false
 
-    override init(frame: CGRect) {
+    override public init(frame: CGRect) {
         super.init(frame: frame)
         // Nothing to hit: the list underneath owns every touch in this band.
         isUserInteractionEnabled = false
@@ -56,7 +63,7 @@ final class ProfilePullToRefreshView: UIView {
 
     /// Tracks an in-progress pull. `distance` is how far the list is past its
     /// top, in points.
-    func setPull(_ distance: CGFloat) {
+    public func setPull(_ distance: CGFloat) {
         guard !isRefreshing else { return }
         let progress = min(max(distance / Self.threshold, 0), 1)
         spinner.alpha = progress
@@ -66,11 +73,11 @@ final class ProfilePullToRefreshView: UIView {
     }
 
     /// Whether a release at `distance` should refresh.
-    func shouldRefresh(releasedAt distance: CGFloat) -> Bool {
+    public func shouldRefresh(releasedAt distance: CGFloat) -> Bool {
         !isRefreshing && distance >= Self.threshold
     }
 
-    func beginRefreshing() {
+    public func beginRefreshing() {
         guard !isRefreshing else { return }
         isRefreshing = true
         spinner.transform = .identity
@@ -79,12 +86,12 @@ final class ProfilePullToRefreshView: UIView {
     }
 
     #if DEBUG
-    var debugIsRefreshing: Bool { isRefreshing }
+    public var debugIsRefreshing: Bool { isRefreshing }
     #endif
 
-    /// Ends the spin. Idempotent — the profile reports `.content` on every
-    /// load, refreshed or not, so this is called far more often than it acts.
-    func endRefreshing() {
+    /// Ends the spin. Idempotent — a host stops it wherever a load settles,
+    /// refreshed or not, so this is called far more often than it acts.
+    public func endRefreshing() {
         guard isRefreshing else { return }
         isRefreshing = false
         UIView.animate(withDuration: 0.2) {

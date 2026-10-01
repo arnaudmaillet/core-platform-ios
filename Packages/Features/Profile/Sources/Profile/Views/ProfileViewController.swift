@@ -140,8 +140,8 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         }
     }
     /// The pull indicator, above the header rather than inside a list — see
-    /// `ProfilePullToRefreshView` for why the stock control could not be used.
-    private let pullIndicator = ProfilePullToRefreshView()
+    /// `HeroPullToRefreshView` for why the stock control could not be used.
+    private let pullIndicator = HeroPullToRefreshView()
     /// The band the spinner centres in, under the navigation bar.
     private static let pullIndicatorHeight: CGFloat = 44
     private let statusLabel = UILabel()
@@ -2792,7 +2792,7 @@ extension ProfileViewController {
     /// Releases a pull past the threshold, through the pager's own callback —
     /// what a finger letting go does.
     func debugReleasePull() {
-        galleryPager.onPullReleased?(ProfilePullToRefreshView.threshold + 40)
+        galleryPager.onPullReleased?(HeroPullToRefreshView.threshold + 40)
     }
 
     /// Puts the active page at `offset` (negative: pulled past its top) and
