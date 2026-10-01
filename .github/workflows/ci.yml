@@ -10,6 +10,19 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Compile-time savings that change nothing a build can catch:
+#
+# - No index store (NO_INDEX, on every compile). xcodebuild indexes while it
+#   builds by default; CI never opens the index.
+# - ARCHS=arm64 on the app builds. `generic/platform=iOS Simulator`
+#   has no active arch, so Debug and Release each compiled the whole graph
+#   TWICE, arm64 and x86_64 (1354 SwiftCompile lines of each in run
+#   36793858807). Every runner and every Mac this project targets is Apple
+#   silicon; the test lanes already build arm64 only, through their concrete
+#   destination.
+env:
+  NO_INDEX: COMPILER_INDEX_STORE_ENABLE=NO
+
 jobs:
   # ── Which packages have tests ────────────────────────────────────────────
   # Ubuntu, not macOS: this is a `find` over the working tree, and macOS
@@ -21,7 +34,20 @@ jobs:
     outputs:
       matrix: ${{ steps.list.outputs.matrix }}
       count: ${{ steps.list.outputs.count }}
+      app: ${{ steps.list.outputs.app }}
     steps:
+      # ⚠️ A PUSH TO DEVELOP WAITS ITS TURN. Every merge is followed within a
+      # minute by `update-branch` on the next pull request, so the develop run
+      # and that pull request's run were queued together — and the develop run,
+      # a few seconds older and twice the size (every lane), took the macOS
+      # slots first: the pull request someone is waiting on queued behind a
+      # backstop nobody is. Three minutes of an Ubuntu runner (free here) puts
+      # the backstop behind it instead, and a merge landing in those three
+      # minutes cancels it before it has cost a single macOS minute.
+      - name: Let pull request runs go first
+        if: ${{ github.event_name == 'push' }}
+        run: sleep 180
+
       - uses: actions/checkout@v4
         with:
           # Full history: the lane selection diffs against the pull request's
@@ -37,9 +63,14 @@ jobs:
         run: python3 .github/scripts/select_packages.py
 
   # ── The app itself ───────────────────────────────────────────────────────
-  # Off the critical path: this runs alongside the test lanes.
+  # Runs alongside the test lanes. It is the whole critical path of a pull
+  # request that reaches one lane or none, so every minute here is a minute of
+  # waiting on those.
   build-app:
     name: build app
+    needs: discover
+    # Skipped only for a documentation-only change (see select_packages.py).
+    if: ${{ needs.discover.outputs.app == 'true' }}
     runs-on: macos-latest
     timeout-minutes: 60
     steps:
@@ -65,6 +96,23 @@ jobs:
           echo "--- installed iOS runtimes ---"
           xcrun simctl list runtimes | grep -i ios || true
 
+      # The remote packages' git mirrors (SwiftProtobuf, Connect and the NIO
+      # stack, Lottie) in SwiftPM's shared cache, which xcodebuild clones from
+      # before it touches the network. A cold runner fetched all nine from
+      # GitHub in every job: 0.3-1.4 min per lane, ~14 macOS minutes per full
+      # run. Only the MIRRORS: `.spm`'s checkouts and workspace state are
+      # recreated from them in seconds, and restoring a stale checkout is how a
+      # cache starts answering for a resolution it did not make. This job
+      # resolves the app, which reaches every remote package, so it is the one
+      # that saves; the lanes only restore. A mirror holds every tag, so the
+      # lanes' own (older) pins resolve from it too.
+      - name: Cache Swift package mirrors
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/org.swift.swiftpm/repositories
+          key: spm-mirrors-${{ hashFiles('**/Package.resolved') }}
+          restore-keys: spm-mirrors-
+
       - name: Resolve Swift packages
         run: |
           set -o pipefail
@@ -83,7 +131,7 @@ jobs:
             -configuration Debug \
             -clonedSourcePackagesDirPath .spm \
             -skipMacroValidation \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_ALLOWED=NO ARCHS=arm64 "$NO_INDEX"
 
       # ⚠️ RELEASE TOO, AND THIS STEP EXISTS BECAUSE ITS ABSENCE SHIPPED.
       #
@@ -105,7 +153,7 @@ jobs:
             -configuration Release \
             -clonedSourcePackagesDirPath .spm \
             -skipMacroValidation \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_ALLOWED=NO ARCHS=arm64 "$NO_INDEX"
 
   # ── One lane per package ─────────────────────────────────────────────────
   # Was a sequential loop in a single job: 18 invocations, 45 min, of which
@@ -126,10 +174,13 @@ jobs:
     strategy:
       fail-fast: false      # one red package must not hide the others
       # The free plan allows 5 concurrent macOS jobs across the account.
-      # 4 leaves a slot so a second PR's run is not starved behind this one;
-      # raise it if the concurrency ceiling ever does.
-      max-parallel: 4
+      # A pull request takes 4 (the app build is the fifth). The develop
+      # backstop takes 2, so a pull request queued after it still finds
+      # slots; it is the run nobody is waiting on.
+      max-parallel: ${{ github.event_name == 'push' && 2 || 4 }}
       matrix:
+        # Longest lane first (select_packages.py), so the last slot to free
+        # up is not running Upload alone.
         pkg: ${{ fromJSON(needs.discover.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
@@ -144,6 +195,14 @@ jobs:
           fi
           echo "Selecting $XC"
           sudo xcode-select -s "$XC/Contents/Developer"
+
+      # Restore only: `build app` saves these (see there).
+      - name: Restore Swift package mirrors
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/Library/Caches/org.swift.swiftpm/repositories
+          key: spm-mirrors-${{ hashFiles('**/Package.resolved') }}
+          restore-keys: spm-mirrors-
 
       - name: Test ${{ matrix.pkg.label }}
         working-directory: ${{ matrix.pkg.dir }}
@@ -215,8 +274,27 @@ jobs:
           fi
           echo "Using simulator id=$DEST_ID (attempt $attempt)"
 
-          xcodebuild test -scheme "$SCHEME" -destination "id=$DEST_ID" \
-            -clonedSourcePackagesDirPath "$SPM" -skipMacroValidation
+          # ⚠️ THE SIMULATOR BOOTS WHILE THE PACKAGE COMPILES. `xcodebuild test`
+          # booted it only after the build, and a lane then sat ~1 minute
+          # between its last compile and its first test (Upload in run
+          # 36793858807: build done 00:21:11, first test 00:22:18) — on every
+          # lane, of every run. Booting is CoreSimulator's work, not the
+          # compiler's, so it overlaps: build for testing, wait for the boot,
+          # then run what was built. `bootstatus -b` is the join, and it boots
+          # the device itself if the background boot failed for any reason.
+          xcrun simctl boot "$DEST_ID" >/dev/null 2>&1 &
+          BOOT_PID=$!
+
+          COMMON=(-scheme "$SCHEME" -destination "id=$DEST_ID"
+                  -clonedSourcePackagesDirPath "$SPM" -skipMacroValidation "$NO_INDEX")
+          xcodebuild build-for-testing "${COMMON[@]}"
+
+          wait "$BOOT_PID" || true
+          xcrun simctl bootstatus "$DEST_ID" -b >/dev/null
+
+          # No sysdiagnose on a red test: it added ~1m40s to every failing lane
+          # (run 36904429986, EmoteKit) and nothing ever downloads it.
+          xcodebuild test-without-building "${COMMON[@]}" -collect-test-diagnostics never
 
   # ── The required check ───────────────────────────────────────────────────
   # `develop`'s branch protection requires a status check literally named
@@ -238,7 +316,12 @@ jobs:
           echo "test:      ${{ needs.test.result }}"   # aggregate of every lane
           FAILED=()
           [ "${{ needs.discover.result }}"  = "success" ] || FAILED+=("discover")
-          [ "${{ needs.build-app.result }}" = "success" ] || FAILED+=("build-app")
+          # "skipped" is a pass ONLY when discover said so (documentation-only
+          # change). A build skipped for any other reason is not a green build.
+          case "${{ needs.build-app.result }}/${{ needs.discover.outputs.app }}" in
+            success/*|skipped/false) ;;
+            *) FAILED+=("build-app") ;;
+          esac
           # "skipped" is a pass here: it means the change could not reach any
           # package. Without this the required check fails on a docs-only or
           # app-only pull request.
@@ -250,7 +333,9 @@ jobs:
             echo "::error::Failed: ${FAILED[*]} — open the job list above for the failing lane"
             exit 1
           fi
-          if [ "${{ needs.test.result }}" = "skipped" ]; then
+          if [ "${{ needs.build-app.result }}" = "skipped" ]; then
+            echo "Documentation-only change: nothing to build or test."
+          elif [ "${{ needs.test.result }}" = "skipped" ]; then
             echo "App builds (Debug + Release) passed. No package could be reached by this change, so no lane ran."
           else
             echo "App builds (Debug + Release) and every selected package test passed."

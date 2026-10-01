@@ -4,8 +4,12 @@ import Testing
 
 /// What a bake costs the MAIN thread, measured the way a user feels it: how
 /// long the main run loop is busy, turn by turn, while a cold emote bakes.
+///
+/// ⚠️ ALONE (`.measuresMainThread`): the meter books every main-thread turn
+/// to the bake, including the turns of the suites running beside it — see
+/// `MainThreadAccess`.
 @MainActor
-@Suite(.serialized)
+@Suite(.serialized, .measuresMainThread)
 struct EmoteBakeCostTests {
     /// The numbers for the record: 🥶 (Noto's most expensive frames), 😂 and
     /// 🔥, cold, at the text bucket. Prints, and asserts only a bound ~10×

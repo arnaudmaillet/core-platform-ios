@@ -35,6 +35,23 @@ APP_ONLY = ("App/", "UITests/", "core-platform-ios.xcodeproj/", "dev/")
 # generates sources into the packages.
 EVERYTHING = (".github/", "Scripts/", "buf.gen.yaml")
 
+# Median minutes per lane on the hosted runner (first-attempt green runs,
+# 2026-09-29 to 10-01). Only the ORDER matters: lanes are started in matrix
+# order under `max-parallel`, so the longest go first and the short ones fill
+# the gaps at the end. Alphabetical order started Upload (12-13 min) LAST and
+# ran it alone for its whole length, ~7 minutes of tail on a ten-lane run.
+# A package missing here sorts as an average one; the table needs no upkeep to
+# stay correct, only to stay optimal.
+LANE_MINUTES = {
+    "Upload": 12.6, "Feed": 8.4, "MediaPlayback": 7.8, "Profile": 6.7,
+    "Search": 6.1, "Maps": 6.0, "EmoteKit": 5.8, "PostGrid": 5.6,
+    "MediaPlayback (legacy AVPlayerLayer)": 5.4, "Chat": 5.2,
+    "StickerKit": 4.3, "DesignSystem": 4.2, "Notifications": 3.8, "Auth": 3.6,
+    "CoreRealtime": 3.2, "CoreNetworking": 3.1, "CoreNavigation": 3.0,
+    "MediaCore": 2.4, "CoreStorage": 2.2, "CoreModels": 2.0,
+}
+DEFAULT_LANE_MINUTES = 5.0
+
 DEP_RE = re.compile(r'\.package\(\s*path:\s*"([^"]+)"')
 NAME_RE = re.compile(r'name:\s*"([^"]+)"')
 
@@ -131,13 +148,31 @@ def entries(pkgs, dirs):
         out.append({"label": "MediaPlayback (legacy AVPlayerLayer)",
                     "name": "MediaPlayback", "dir": mp,
                     "scheme": "MediaPlayback", "avsbdl": "0"})
+    # Longest first (stable, so ties keep their directory order).
+    out.sort(key=lambda e: -LANE_MINUTES.get(e["label"], DEFAULT_LANE_MINUTES))
     return out
+
+
+def docs_only(files):
+    """True when every changed file is documentation: nothing to build or test.
+
+    Deliberately narrow — `.md` and nothing else, and never under a
+    `Resources/` or `Fixtures/` directory: a README there can be bundled (or be
+    named by a manifest), so it is a build input like any other resource. No
+    DocC catalog exists to make Markdown elsewhere an input either.
+    """
+    def is_doc(f):
+        parts = f.split("/")
+        return f.endswith(".md") and "Resources" not in parts and "Fixtures" not in parts
+    return bool(files) and all(is_doc(f) for f in files)
 
 
 def main():
     pkgs = packages()
     base = os.environ.get("BASE_SHA", "").strip()
     testable = {d for d, m in pkgs.items() if m["has_tests"]}
+    # The app build runs unless the change is documentation only.
+    build_app = True
 
     if not base:
         chosen, why = testable, "not a pull request - testing everything"
@@ -145,6 +180,9 @@ def main():
         files = changed_files(base)
         if files is None:
             chosen, why = testable, f"cannot diff against {base[:7]} - testing everything"
+        elif docs_only(files):
+            chosen, why = set(), "documentation only - nothing to build or test"
+            build_app = False
         else:
             touched = select(pkgs, files)
             if touched is None:
@@ -159,7 +197,8 @@ def main():
 
     matrix = entries(pkgs, chosen)
     print(f"Reason: {why}")
-    print(f"Lanes: {len(matrix)} of {len(testable) + 1}")
+    print(f"App build: {'yes' if build_app else 'no'}")
+    print(f"Lanes: {len(matrix)} of {len(testable) + 1} (longest first)")
     for e in matrix:
         print(f"  - {e['label']}")
     out = os.environ.get("GITHUB_OUTPUT")
@@ -167,6 +206,7 @@ def main():
         with open(out, "a", encoding="utf-8") as fh:
             fh.write(f"matrix={json.dumps(matrix, separators=(',', ':'))}\n")
             fh.write(f"count={len(matrix)}\n")
+            fh.write(f"app={'true' if build_app else 'false'}\n")
     else:
         print(json.dumps(matrix, separators=(",", ":")))
     return 0

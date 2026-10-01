@@ -4,6 +4,7 @@ import UIKit
 @testable import EmoteKit
 
 /// The pure rules of composing: insertion, deletion, inline queries, sections.
+@Suite(.sharesMainThread)
 struct EmoteComposingTests {
     private let catalog = EmoteCatalog.shared
 
@@ -76,6 +77,7 @@ struct EmoteComposingTests {
 
 /// Recents: order, dedup, limit, and persistence across launches.
 @MainActor
+@Suite(.sharesMainThread)
 struct EmoteRecentsTests {
     private let catalog = EmoteCatalog.shared
 
@@ -115,7 +117,7 @@ struct EmoteRecentsTests {
 /// The keyboard controller on a real text view: panel picks, inline search,
 /// backspace, and the delegate told like typing.
 @MainActor
-@Suite(.serialized)
+@Suite(.serialized, .sharesMainThread)
 struct EmoteKeyboardTests {
     private let catalog = EmoteCatalog.shared
 
@@ -210,7 +212,7 @@ struct EmoteKeyboardTests {
 /// The panel stands in for the system keyboard at EXACTLY its height, so a
 /// composer riding the keyboard does not move on the swap.
 @MainActor
-@Suite(.serialized)
+@Suite(.serialized, .sharesMainThread)
 struct EmoteKeyboardHeightTests {
     private let screen = CGRect(x: 0, y: 0, width: 402, height: 874)
 

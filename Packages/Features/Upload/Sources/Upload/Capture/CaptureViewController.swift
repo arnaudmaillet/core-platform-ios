@@ -913,7 +913,12 @@ final class CaptureViewController: UIViewController {
             let picture = await Task.detached(priority: .userInitiated) {
                 CaptureLiveView.snapshot(of: frame, side: side)
             }.value
-            guard let self, openOption == .filters, let picture else { return }
+            // ⚠️ OFF SCREEN, A LATE SNAPSHOT IS DROPPED. Stopping the timer when
+            // the camera leaves does not stop the snapshot already in flight,
+            // and on a loaded runner it landed after the camera had gone:
+            // the cards redrew once while away (CaptureFlowTests, 3 red CI
+            // runs Sep 30 – Oct 1). Coming back redraws them at once anyway.
+            guard let self, openOption == .filters, viewIfLoaded?.window != nil, let picture else { return }
             debugCardRefreshes += 1
             filterRow.show(picture)
             filterRow.setSelected(settings.filter)

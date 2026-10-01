@@ -4,6 +4,7 @@ import UIKit
 @testable import EmoteKit
 
 /// Parsing: which characters are emotes, and what stays exactly as typed.
+@Suite(.sharesMainThread)
 struct EmoteParserTests {
     private let catalog = EmoteCatalog.shared
 
@@ -93,6 +94,7 @@ struct EmoteParserTests {
 }
 
 /// The attributed rendering: marks, replacement, and attributes kept.
+@Suite(.sharesMainThread)
 struct EmoteTextTests {
     private let catalog = EmoteCatalog.shared
     private let font = UIFont.systemFont(ofSize: 17)
@@ -141,6 +143,7 @@ struct EmoteTextTests {
 }
 
 /// The catalogue a picker reads.
+@Suite(.sharesMainThread)
 struct EmoteCatalogTests {
     private let catalog = EmoteCatalog.shared
 

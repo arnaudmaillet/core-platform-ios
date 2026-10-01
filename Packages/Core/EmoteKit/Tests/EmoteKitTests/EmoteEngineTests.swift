@@ -6,6 +6,7 @@ import UIKit
 @testable import EmoteKit
 
 /// The bake plan: frame counts, grids and the two caps.
+@Suite(.sharesMainThread)
 struct EmoteBakePlanTests {
     @Test func aTwoSecondLoopIs60FramesAt30fps() {
         let plan = EmoteBakePlan.make(seconds: 2, side: 64)
@@ -64,7 +65,7 @@ struct EmoteBakePlanTests {
 
 /// Baking real emotes, caching, dedup and cancellation.
 @MainActor
-@Suite(.serialized)
+@Suite(.serialized, .sharesMainThread)
 struct EmoteEngineTests {
     private let catalog = EmoteCatalog.shared
 
