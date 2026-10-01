@@ -190,15 +190,27 @@ final class CountryLayer: NSObject {
             mapView.addGestureRecognizer(watcher)
         }
         Task { [weak self] in
-            let countries = await Task.detached(priority: .userInitiated) {
-                let countries = CountryAtlas.shared.countries
-                // Every flag's picture and colours, off the main thread, before
-                // the discs go on the map — the world zoom asks for two hundred
-                // of them in one turn.
-                FlagPalette.warm(countries.map(\.code))
-                return countries
-            }.value
+            let countries = await Task.detached(priority: .userInitiated) { CountryAtlas.shared.countries }.value
             self?.addBorders(for: countries)
+            // ⚠️ THE DISCS WAIT FOR THEIR FLAGS, THE BORDERS DO NOT. Every
+            // flag's picture and colours are rendered off the main thread
+            // first — the world zoom asks for two hundred of them in one turn
+            // — and nothing the map shows waits on it: the borders are already
+            // in, and the discs arrive when their pictures are.
+            let codes = countries.map(\.code)
+            #if DEBUG
+            let started = CACurrentMediaTime()
+            #endif
+            await Task.detached(priority: .utility) { FlagPalette.warm(codes) }.value
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-maps-flag-log") {
+                print(String(format: "[flags] warmed %d flags in %.1f ms (off main)",
+                             codes.count, (CACurrentMediaTime() - started) * 1000))
+            }
+            #endif
+            guard let self else { return }
+            flagsReady = true
+            refreshBadges()
         }
     }
 
@@ -207,8 +219,11 @@ final class CountryLayer: NSObject {
         let shapes = countries.map { CountryShape(country: $0) }
         self.shapes = Dictionary(uniqueKeysWithValues: shapes.map { ($0.code, $0) })
         mapView.addOverlays(shapes, level: .aboveRoads)
-        refreshBadges()
     }
+
+    /// Whether every flag has been rendered (`install`) — the discs go on the
+    /// map only then, so no disc ever renders its flag on the main thread.
+    private var flagsReady = false
 
     /// The style `code` is drawn in: open, or locked.
     func style(for code: String) -> CountryStyle {
@@ -240,7 +255,8 @@ final class CountryLayer: NSObject {
     /// it off every country one now does. A disc whose lock or rank changed is
     /// replaced (its view reads both when it is configured).
     func refreshBadges() {
-        guard let mapView, !shapes.isEmpty else { return }
+        guard let mapView, !shapes.isEmpty, flagsReady else { return }
+
         var wanted: [String: CountryFlagAnnotation] = [:]
         for country in atlas.countries {
             guard let flag = wantsFlag(for: country) else { continue }
