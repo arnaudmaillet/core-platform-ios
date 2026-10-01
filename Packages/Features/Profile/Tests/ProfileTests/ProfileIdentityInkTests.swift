@@ -107,9 +107,12 @@ struct ProfileIdentityInkTests {
     /// ⚠️ TWO KNOWN ISSUES, BOTH ON A BAND, whose name half stands on the
     /// picture with the blur nil (it starts just above the avatar) and only
     /// a thin page tone (a band's ramp starts at the handle): over hard 2px
-    /// stripes no single ink holds (name 1.04, handle 4.49 worst; median
-    /// 5.32), and on the crossover grey in the dark the page arriving under
-    /// the handle's foot takes it to 4.43. A poster clears everywhere: half
+    /// stripes no single ink holds (name 1.02, handle 1.12 worst; median
+    /// 5.2–5.4 — the handle was 4.49 until the band's blur climbed the
+    /// ladder of levels, gentle enough now to leave the stripes under it;
+    /// a photograph's band measures ≥ 7:1, `-profile-ink-audit` on prof-0),
+    /// and on the crossover grey in the dark the page arriving under the
+    /// handle's foot takes it to 4.49. A poster clears everywhere: half
     /// the page's tone under its type (the shoulder) closes the spread.
     @Test(arguments: Picture.allCases, [UIUserInterfaceStyle.light, .dark])
     func theTypeClearsAAOverAnyPicture(picture: Picture, style: UIUserInterfaceStyle) throws {
