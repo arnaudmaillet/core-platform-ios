@@ -126,6 +126,10 @@ public final class ProfileViewModel {
 
     public var onPhaseChange: ((Phase) -> Void)?
     public var onFollowButtonChange: ((FollowButton) -> Void)?
+    /// Fires once the first relationship read has ANSWERED, whatever it
+    /// answered — including a failure, which leaves the button `.hidden` and
+    /// is still an answer: nothing more is coming for the screen to wait on.
+    public var onRelationshipSettled: (() -> Void)?
     public var onMapPinButtonChange: ((MapPinButton) -> Void)?
     public var onGalleryChange: ((GallerySnapshot) -> Void)?
     /// Fired when a load finishes, however it finished — new data, identical
@@ -232,6 +236,14 @@ public final class ProfileViewModel {
 
     private var load: Task<Void, Never>?
     private var relationshipLoad: Task<Void, Never>?
+    /// Whether the follow state on screen is an answer rather than a wait:
+    /// a relationship read has come back (or failed), or a cache seeded one.
+    public private(set) var isRelationshipSettled = false {
+        didSet {
+            guard isRelationshipSettled, !oldValue else { return }
+            onRelationshipSettled?()
+        }
+    }
 
     // MARK: Gallery state
 
@@ -400,9 +412,14 @@ public final class ProfileViewModel {
         if case .profile(let id) = source, let cached = cache?.profile(for: id) {
             profile = cached
             phase = .content(ProfileDisplayModel(profile: cached))
-            loadRelationship(for: id)
             loadGallery(for: cached, reset: true)
             galleryWasSeeded = true
+        }
+        // The relationship is seeded the same way, and for the same reason:
+        // a revisit that knew "Following" a minute ago must not open on a
+        // placeholder for it. The read in `reload` still runs and corrects.
+        if case .profile(let id) = source, let relationship = cache?.relationship(for: id) {
+            apply(relationship)
         }
         reload()
     }
@@ -495,6 +512,14 @@ public final class ProfileViewModel {
         }
     }
 
+    /// Whether the star's answer is in: not offered at all, or offered with
+    /// its rails read. False only while a followed profile's rails are still
+    /// being asked for — the star would otherwise land beside Message after
+    /// the screen is up and squeeze the tray's capsules to make room.
+    public var isMapPinSettled: Bool {
+        !(mapPinning != nil && profile != nil && followButton == .following && mapCategories == nil)
+    }
+
     /// The visibility rule, in one place: only a followed profile can be kept
     /// on a rail, and only when there is somewhere to keep them.
     private func refreshMapPinButton() {
@@ -579,6 +604,7 @@ public final class ProfileViewModel {
                 // a re-entry before the next relationship read agrees.
                 self.isFollowing = false
                 self.followButton = .follow
+                self.rememberRelationship()
                 self.onActionResult?(.blocked(handle: "@" + profile.handle, profileCount: count))
                 self.onDismissRequested?()
             } catch {
@@ -602,6 +628,7 @@ public final class ProfileViewModel {
             do {
                 try await self.repository.setBlocked(false, for: profile.id)
                 self.isBlocked = false
+                self.rememberRelationship()
                 self.onActionResult?(.unblocked(handle: "@" + profile.handle))
             } catch {
                 self.onActionResult?(.failed(message: "Couldn't unblock this profile."))
@@ -869,6 +896,19 @@ public final class ProfileViewModel {
         // have pre-seeded a provisional state from the route's identity stub,
         // and a refresh keeps showing the last known state. The relationship
         // read overwrites with the authoritative answer when it lands.
+        // ⚠️ THE RELATIONSHIP IS READ ALONGSIDE THE PROFILE, NOT AFTER IT.
+        // It needs only the id, which a routed profile has from the start;
+        // chained behind the profile fetch it was a second round trip in
+        // series, and the button it decides is the one thing on the header a
+        // push would otherwise have to show as a placeholder. Only the
+        // viewer's own profile, whose id the fetch resolves, still chains.
+        let readsRelationshipUpFront: Bool
+        if case .profile(let id) = source {
+            loadRelationship(for: id)
+            readsRelationshipUpFront = true
+        } else {
+            readsRelationshipUpFront = false
+        }
         load = Task { [weak self] in
             guard let self else { return }
             do {
@@ -884,7 +924,9 @@ public final class ProfileViewModel {
                 if !unchanged {
                     self.phase = .content(ProfileDisplayModel(profile: profile))
                 }
-                self.loadRelationship(for: profile.id)
+                if !readsRelationshipUpFront {
+                    self.loadRelationship(for: profile.id)
+                }
                 // Every (re)load refreshes the grid too: the caches reset so
                 // pull-to-refresh picks up new posts alongside the header —
                 // except right after a cache seed, whose grid is loading or
@@ -926,20 +968,46 @@ public final class ProfileViewModel {
                 try? await Task.sleep(for: .seconds(3))
             }
             #endif
-            guard let relationship = try? await self.repository.relationship(for: id) else { return }
-            switch relationship {
-            case .me:
-                self.isFollowing = false
-                self.isBlocked = false
-                self.followButton = .edit
-            case .other(let following, let mutual, let blocked):
-                self.isFollowing = following
-                self.isMutual = mutual
-                self.isBlocked = blocked
-                self.followButton = following ? .following : .follow
+            let relationship: ProfileRelationship
+            do {
+                relationship = try await self.repository.relationship(for: id)
+            } catch {
+                // Superseded by a newer read: that one answers. Otherwise a
+                // failure is still an answer — the button stays as it is.
+                guard !Task.isCancelled else { return }
+                self.isRelationshipSettled = true
+                self.relationshipLoad = nil
+                return
             }
+            guard !Task.isCancelled else { return }
+            self.apply(relationship)
+            self.cache?.store(relationship, for: id)
             self.relationshipLoad = nil
         }
+    }
+
+    /// Puts a relationship on screen — the read's answer or the cache's.
+    private func apply(_ relationship: ProfileRelationship) {
+        switch relationship {
+        case .me:
+            isFollowing = false
+            isBlocked = false
+            followButton = .edit
+        case .other(let following, let mutual, let blocked):
+            isFollowing = following
+            isMutual = mutual
+            isBlocked = blocked
+            followButton = following ? .following : .follow
+        }
+        isRelationshipSettled = true
+    }
+
+    /// The relationship as this screen now holds it, for the cache — so the
+    /// next visit opens on what the viewer last saw here, including a follow
+    /// they just made.
+    private func rememberRelationship() {
+        guard let id = profile?.id, followButton == .follow || followButton == .following else { return }
+        cache?.store(.other(isFollowing: isFollowing, isMutual: isMutual, isBlocked: isBlocked), for: id)
     }
 
     /// Applies a follow state everywhere it shows: the button and the
@@ -947,6 +1015,7 @@ public final class ProfileViewModel {
     private func applyFollow(_ following: Bool, on profile: UserProfile) {
         isFollowing = following
         followButton = following ? .following : .follow
+        defer { rememberRelationship() }
 
         let updated = UserProfile(
             id: profile.id,
