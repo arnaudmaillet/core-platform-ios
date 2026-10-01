@@ -21,6 +21,15 @@ import UIKit
 /// Every animating tile holds one of `EmoteEngine.maxAnimatedEmotes` slots,
 /// and gives it back when it is reused or leaves the window. Under Reduce
 /// Motion an emoji stays its glyph and a house emote shows its first frame.
+///
+/// ## Playing or still
+///
+/// A tile plays unless its owner says otherwise (`setPlaying`). A still tile
+/// keeps its art and its slot and holds one frame (`AnimatedIconView.pause`):
+/// dressed still, it
+/// shows the art's poster frame (`AnimatedIconArt.posterFrame`, never a
+/// blank opening frame); stopped mid-loop, it holds the frame it is on, and
+/// plays on from there when told to.
 @MainActor
 final class EmoteTileView: UIView {
     /// The sheet side tiles ask for: the text bucket, so a sheet baked for a
@@ -28,7 +37,7 @@ final class EmoteTileView: UIView {
     static let pixelSide = 64
 
     private let glyphLabel = UILabel()
-    private let player = AnimatedIconView(frame: .zero)
+    let player = AnimatedIconView(frame: .zero)
     private var request: EmoteRequest?
     private var holdsSlot = false
     private(set) var emote: Emote?
@@ -37,6 +46,18 @@ final class EmoteTileView: UIView {
 
     /// Whether art is showing over the glyph.
     private(set) var isShowingArt = false
+    /// Whether the art may move. See "Playing or still".
+    private(set) var isPlaying = true
+
+    /// Poster frames by the art's own image (by identity, held weakly):
+    /// worked out once per art, forgotten with it, and never answered for
+    /// another art of the same emote.
+    private static let posterFrames = NSMapTable<UIImage, NSNumber>(
+        keyOptions: [.weakMemory, .objectPointerPersonality], valueOptions: .strongMemory
+    )
+
+    /// Whether the art on show is moving right now.
+    var isAnimating: Bool { isShowingArt && player.isAnimating && !player.isPaused }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -63,12 +84,14 @@ final class EmoteTileView: UIView {
         player.frame = square
     }
 
-    /// Shows `emote`, animating it if the rules above allow.
-    func configure(_ emote: Emote, engine: EmoteEngine, prefersAnimation: Bool) {
+    /// Shows `emote`, animating it if the rules above allow — still, on its
+    /// poster frame, unless `playing`.
+    func configure(_ emote: Emote, engine: EmoteEngine, prefersAnimation: Bool, playing: Bool = true) {
         reset()
         self.emote = emote
         self.engine = engine
         self.prefersAnimation = prefersAnimation
+        isPlaying = playing
         glyphLabel.text = emote.glyph
         glyphLabel.isHidden = false
         accessibilityLabel = emote.name
@@ -94,10 +117,34 @@ final class EmoteTileView: UIView {
             guard engine.acquirePlaybackSlot(waiter: self) else { return }
             holdsSlot = true
         }
-        player.setArt(art)
+        player.setArt(art, phase: posterFrame(of: art), paused: !isPlaying)
         player.isHidden = false
         glyphLabel.isHidden = true
         isShowingArt = true
+    }
+
+    /// Starts or stops the art where it is: stopping holds the frame
+    /// on show, starting plays on from it.
+    func setPlaying(_ playing: Bool) {
+        guard playing != isPlaying else { return }
+        isPlaying = playing
+        guard isShowingArt else { return }
+        if playing { player.resume() } else { player.pause() }
+    }
+
+    /// The frame a still dressing shows. A loop's own first frame unless that
+    /// is (nearly) blank; the same art always answers the same.
+    private func posterFrame(of art: AnimatedIconArt) -> Int {
+        guard art.frameCount > 1 else { return 0 }
+        let image: UIImage
+        switch art {
+        case .sheet(let sheet): image = sheet.sheet
+        case .decomposed(let still): image = still.mark
+        }
+        if let known = Self.posterFrames.object(forKey: image) { return known.intValue }
+        let frame = art.posterFrame()
+        Self.posterFrames.setObject(NSNumber(value: frame), forKey: image)
+        return frame
     }
 
     /// Drops the art, the request and the slot — reuse, or leaving the window.
@@ -128,7 +175,7 @@ final class EmoteTileView: UIView {
             if holdsSlot || request != nil { reset() }
         } else if let emote, let engine, !isShowingArt, request == nil {
             // Back on screen (the picker came back up): ask again.
-            configure(emote, engine: engine, prefersAnimation: prefersAnimation)
+            configure(emote, engine: engine, prefersAnimation: prefersAnimation, playing: isPlaying)
         }
     }
 }
@@ -170,8 +217,8 @@ final class EmoteTileCell: UICollectionViewCell {
         }
     }
 
-    func configure(_ emote: Emote, engine: EmoteEngine, prefersAnimation: Bool) {
-        tile.configure(emote, engine: engine, prefersAnimation: prefersAnimation)
+    func configure(_ emote: Emote, engine: EmoteEngine, prefersAnimation: Bool, playing: Bool = true) {
+        tile.configure(emote, engine: engine, prefersAnimation: prefersAnimation, playing: playing)
         accessibilityLabel = emote.code.map { "\(emote.name), \($0)" } ?? emote.name
     }
 }
