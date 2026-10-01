@@ -42,8 +42,6 @@ struct ConversationThreadViewControllerTests {
     private final class FakeAccessory: ConversationThreadAccessory {
         let view: UIView = UIView()
         var onInsertText: ((String) -> Void)?
-        private(set) var widths: [CGFloat] = []
-        func setPreferredWidth(_ width: CGFloat) { widths.append(width) }
     }
 
     /// `minutes` past the START of today — anchored to the calendar day, not
@@ -225,11 +223,14 @@ struct ConversationThreadViewControllerTests {
         #expect(driver.sent.isEmpty)
     }
 
-    /// The post's footer, with the emote strip where the music would be.
+    /// The post's footer, with the emote strip where the music would be — its
+    /// own capsule, not one inside the bar's bubble, which pads it and cuts its
+    /// content short of the visible ends.
     @Test func theFooterIsThePostsWithTheAccessoryLeading() throws {
         let (screen, _, accessory, _) = makeScreen()
         let items = try #require(screen.toolbarItems)
         #expect(items.first?.customView === accessory.view)
+        #expect(items.first?.hidesSharedBackground == true, "a capsule in a bubble")
         let labels = items.compactMap(\.customView).flatMap { view -> [String] in
             if let button = view as? UIButton { return [button.accessibilityLabel].compactMap { $0 } }
             return view.subviews.compactMap { ($0 as? UIButton)?.accessibilityLabel }

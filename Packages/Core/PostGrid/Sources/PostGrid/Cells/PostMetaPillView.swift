@@ -93,10 +93,9 @@ public class PostMetaPillView: UIVisualEffectView {
     /// promoting the cluster to `.label` would have put three near-black marks
     /// beside a `.label` author name.
     ///
-    /// ⚠️ NOT the closing line's rule any more (30 September 2026): there the
-    /// ACTIONS are ranked instead of glyph against number — comments and likes
-    /// in `.label`, glyph and count alike, repost and save in
-    /// `.secondaryLabel`. See `PostCardPillView.Emphasis`.
+    /// ⚠️ NOT the closing line's rule: its four actions draw glyph AND count
+    /// in one ink, `PostCardPillView.ink`, and no action outranks another by
+    /// colour. See that constant for why.
     public static let glyphForeground: UIColor = .secondaryLabel
 
     /// The pill's inner padding.
@@ -361,12 +360,8 @@ extension UIView {
 ///   before and a held one a deeper one — the container appears only while a
 ///   finger is on it, the way the system's plain buttons answer a press.
 ///
-/// ⚠️ **TWO RANKS OF INK** (`Emphasis`). Comments and likes are what a card is
-/// for and draw in `.label`; repost and save are secondary and draw in
-/// `.secondaryLabel`. The rank is the ACTION's, so a count follows its glyph —
-/// the card-wide rule "the number is the datum, the glyph names it"
-/// (`PostMetaPillView.glyphForeground`) still governs the band and the media
-/// chips, where no action outranks another.
+/// ⚠️ **ONE INK FOR THE WHOLE LINE** (`ink`) — glyphs and counts, primary
+/// actions and secondary ones. See `ink` for the two-rank version it replaced.
 ///
 /// ⚠️ The padding shrank with the ground (`plainInsets`, 8 rather than 12): 12
 /// was what a WORD needs to sit off a capsule's ends, and with no capsule to
@@ -376,20 +371,38 @@ extension UIView {
 /// column (`PostGridListRowCell.actionLineInset`, one of these paddings
 /// inside the caption's).
 public class PostCardPillView: PostMetaPillView {
-    /// How loudly an action speaks on the card.
-    public enum Emphasis: Sendable {
-        /// Comments and likes: glyph and count in `.label`.
-        case primary
-        /// Repost and save: `.secondaryLabel`.
-        case secondary
-
-        public var ink: UIColor {
-            switch self {
-            case .primary: .label
-            case .secondary: .secondaryLabel
-            }
-        }
-    }
+    /// The ink of every action on a card: `.secondaryLabel`, for the glyphs
+    /// and for the counts beside them. A staked heart is the one exception,
+    /// and it is the points' red (`PointsSymbol.tint`), not a darker grey.
+    ///
+    /// ⚠️ THERE WERE TWO RANKS (30 September – 1 October 2026): comments and
+    /// likes in `.label`, glyph and count alike, repost and save in
+    /// `.secondaryLabel`. On the card it read too dark — a semibold `.label`
+    /// count is the same ink as the author's name and the caption, so the two
+    /// counters competed with the post's own words, and the line's two halves
+    /// looked like two different components rather than one row of verbs.
+    ///
+    /// The rank did not need the colour. The primary pair is still the
+    /// heavier one: it is the only one carrying a NUMBER, so each of its
+    /// boxes is a glyph plus a semibold count against a lone glyph; it holds
+    /// the trailing end, where the eye finishes the line; and the like turns
+    /// red the moment the viewer stakes. Apple's own action rows rank the same
+    /// way: Photos' bar (share, favourite, info, delete) and Mail's toolbar
+    /// draw every action in ONE tint, and the favourite heart says "yours" by
+    /// filling, not by a darker shade at rest — fill, a badge or a count do
+    /// the ranking, never two greys a step apart.
+    ///
+    /// ❌ Rejected: an intermediate grey (`.label` at ~75%). It is a THIRD
+    /// grey on a card that already has `.label` (name, caption) and
+    /// `.secondaryLabel` (handle, date), it leaves the semantic scale — so
+    /// Increase Contrast would no longer darken it unless re-derived by hand —
+    /// and beside `.secondaryLabel` glyphs a step away it reads as a rendering
+    /// accident, not as a decision.
+    ///
+    /// Same ink as the band's "..." (`glyphForeground`), the handle and the
+    /// closing date: the card has two inks, words in `.label` and everything
+    /// around them in `.secondaryLabel`.
+    public static let ink: UIColor = .secondaryLabel
 
     /// A plain action's padding: enough for the press wash to read as a
     /// capsule around the ink, and no more — see the type's note.
@@ -495,17 +508,13 @@ public final class PostActionPillView: PostCardPillView {
     /// Zero content insets, rather than padding a glyph out to size: the width
     /// is set by a constraint, so insets would only fight it. `.medium`
     /// weight, one step up from regular and deliberately not two: regular
-    /// reads thin, semibold empties the repost arrows into a blob.
-    ///
-    /// - Parameter emphasis: `.secondary` by default — the band's "..." and
-    ///   the closing line's repost and save never outrank the name or the
-    ///   primary actions beside them.
-    public static func glyphConfiguration(
-        systemName: String, emphasis: Emphasis = .secondary
-    ) -> UIButton.Configuration {
+    /// reads thin, semibold empties the repost arrows into a blob. In the
+    /// card's one action ink (`PostCardPillView.ink`): the band's "..." and
+    /// the closing line's repost and save never outrank the name above them.
+    public static func glyphConfiguration(systemName: String) -> UIButton.Configuration {
         var configuration = UIButton.Configuration.plain()
         configuration.image = UIImage(systemName: systemName)
-        configuration.baseForegroundColor = emphasis.ink
+        configuration.baseForegroundColor = PostCardPillView.ink
         configuration.contentInsets = .zero
         configuration.preferredSymbolConfigurationForImage = glyphSymbolConfiguration
         return configuration
@@ -526,10 +535,10 @@ public final class PostActionPillView: PostCardPillView {
     ///   `plainControlWidth` for an action on the closing line.
     public static func makeGlyphControl(
         systemName: String, label: String,
-        width: CGFloat = controlWidth, emphasis: Emphasis = .secondary
+        width: CGFloat = controlWidth
     ) -> UIButton {
         let button = PostGlyphButton(type: .system)
-        button.configuration = glyphConfiguration(systemName: systemName, emphasis: emphasis)
+        button.configuration = glyphConfiguration(systemName: systemName)
         button.accessibilityLabel = label
         button.setContentCompressionResistancePriority(.required, for: .horizontal)
         button.setContentHuggingPriority(.required, for: .horizontal)
