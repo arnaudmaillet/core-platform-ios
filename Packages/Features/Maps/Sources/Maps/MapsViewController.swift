@@ -938,7 +938,8 @@ final class MapsViewController: UIViewController {
         countryLayer.onMapTapped = { [weak self] country in self?.mapTapped(country) }
         countryLayer.onTouchDown = { [weak self] in self?.cancelPendingOffer() }
         countryLayer.onMapGesture = { [weak self] in self?.mapMovedByUser() }
-        countryLayer.onLockedBadgeTapped = { [weak self] country in self?.offer(country) }
+        countryLayer.onLockedCountryTapped = { [weak self] country in self?.offer(country) }
+        countryLayer.onCountryTapped = { [weak self] country in self?.showCountry(country.code) }
         countryLayer.install(on: mapView)
         NotificationCenter.default.addObserver(
             self, selector: #selector(countryAccessChanged), name: .countryAccessDidChange, object: nil
@@ -1130,20 +1131,56 @@ final class MapsViewController: UIViewController {
         reconcileClusters()
     }
 
-    /// Whether `pin`'s post is on the map: its country is unlocked (or there
-    /// is nothing locked at all). A pin just offshore is its coast's
-    /// (`CountryAtlas.country(owning:)`); one on the open sea is shown.
+    /// Whether `pin`'s post is OPEN to the viewer: its country is unlocked (or
+    /// there is nothing locked at all). A pin just offshore is its coast's
+    /// (`CountryAtlas.country(owning:)`); one on the open sea is open.
+    ///
+    /// A post in a locked country is still on the map — its country's markers
+    /// wear its busiest posts, darkened under a lock — but it never opens.
     private func isInUnlockedCountry(_ pin: MapPin) -> Bool {
         guard let countryAccess else { return true }
-        let code: String
-        if let cached = pinCountries[pin.postID] {
-            code = cached
-        } else {
-            let coordinate = CLLocationCoordinate2D(latitude: pin.latitude, longitude: pin.longitude)
-            code = CountryAtlas.shared.country(owning: coordinate)?.code ?? ""
-            pinCountries[pin.postID] = code
-        }
+        let code = countryCode(of: pin)
         return code.isEmpty || countryAccess.isUnlocked(code)
+    }
+
+    /// The country `pin`'s post stands in (ISO alpha-2), "" at sea. Cached per
+    /// post: the point-in-polygon walk is the expensive half of the question,
+    /// and a reconcile asks it of every pin.
+    private func countryCode(of pin: MapPin) -> String {
+        if let cached = pinCountries[pin.postID] { return cached }
+        let coordinate = CLLocationCoordinate2D(latitude: pin.latitude, longitude: pin.longitude)
+        let code = CountryAtlas.shared.country(owning: coordinate)?.code ?? ""
+        pinCountries[pin.postID] = code
+        return code
+    }
+
+    /// What `annotation`'s marker wears around its face: the flag border and
+    /// badge of the place it speaks for, and the lock of a locked country —
+    /// see `MapMarkerDress`. The country is the REPRESENTATIVE's: a city's
+    /// border wears its country's flag, and every member of a locked marker is
+    /// locked (`reconcileClusters` never lays out open and locked posts
+    /// together).
+    private func dress(for annotation: any MKAnnotation) -> MapMarkerDress {
+        let cluster = annotation as? MapComputedCluster
+        guard let pin = cluster?.representative ?? (annotation as? MapAnnotation)?.pin else { return .neutral }
+        let code = countryCode(of: pin)
+        return MapMarkerDress.resolve(
+            kind: cluster.flatMap { $0.isHierarchyMarker ? $0.place?.kind : nil },
+            countryCode: code,
+            isLocked: !isInUnlockedCountry(pin)
+        )
+    }
+
+    /// What a tap on a marker does: open its posts, or — for a locked
+    /// country's — offer the country. Pure, so the routing is pinned without
+    /// a live map.
+    enum MarkerTap: Equatable {
+        case open
+        case offer(countryCode: String)
+    }
+
+    static func markerTap(for dress: MapMarkerDress, countryCode: String) -> MarkerTap {
+        dress.isLocked && !countryCode.isEmpty ? .offer(countryCode: countryCode) : .open
     }
 
     private func configureFilterBar() {
@@ -1923,34 +1960,40 @@ final class MapsViewController: UIViewController {
         // `collide`). A dictionary's values re-order whenever it is mutated, and
         // every return to this screen re-queries — so the markers moved on a map
         // nobody had panned.
-        // Only the unlocked countries' posts: the rest of the world is sold
-        // by its country's badge (`CountryLayer`), not shown.
-        let ordered = pins.values.filter(isInUnlockedCountry).sorted { $0.postID.rawValue < $1.postID.rawValue }
-        // Singles go through the SAME reconciliation below, so what the flag
-        // measures is the real marker lifecycle and not a parallel code path
-        // that happens to look similar.
-        let items: [MapClusterEngine.Item] = unclustered
-            ? ordered.map {
-                MapClusterEngine.Item(
-                    representative: $0, memberIDs: [$0.postID],
-                    latitude: $0.latitude, longitude: $0.longitude, place: $0.place
-                )
+        let ordered = pins.values.sorted { $0.postID.rawValue < $1.postID.rawValue }
+        // ⚠️ OPEN AND LOCKED POSTS ARE LAID OUT APART, and never merged.
+        //
+        // A locked country's posts are on the map — its markers wear its
+        // busiest posts, darkened under a lock — but a marker is ONE tap: it
+        // opens every post it holds, or it offers a country. A group mixing
+        // the two would either open locked posts or lock open ones. So each
+        // side runs the engine alone; where their markers collide, MapKit
+        // keeps the open one (`MapMarkerDress.lockedPriority`).
+        let open = ordered.filter(isInUnlockedCountry)
+        let locked = countryAccess == nil ? [] : ordered.filter { !isInUnlockedCountry($0) }
+        let items = layOut(open, unclustered: unclustered) + layOut(locked, unclustered: unclustered)
+        reportCountriesWithMarkers(items)
+        reconcile(items)
+    }
+
+    /// Tells the country layer which countries a post marker now stands for —
+    /// every member's, so a country whose posts merged into a neighbour's
+    /// marker does not also wear an empty country's disc.
+    private func reportCountriesWithMarkers(_ items: [MapClusterEngine.Item]) {
+        var codes = Set<String>()
+        for item in items {
+            for id in item.memberIDs {
+                guard let pin = pins[id] else { continue }
+                let code = countryCode(of: pin)
+                if !code.isEmpty { codes.insert(code) }
             }
-            : MapClusterEngine.cluster(
-                ordered,
-                // Snapped, so an epsilon in the viewport cannot move every grid
-                // line at once — see `MapClusterEngine.snapZoom`.
-                zoomScale: MapClusterEngine.snapZoom(currentZoomScale),
-                cellPoints: Double(Self.clusterCellPoints),
-                // The semantic pre-pass's two banding inputs: the zoom level is
-                // the FALLBACK for an H3-less corpus; the viewport diagonal
-                // drives the dynamic cell-span rule (`MapHierarchyBanding`)
-                // whenever the ladder carries H3 indexes.
-                zoomLevel: MapViewport.zoomLevel(
-                    forLongitudeSpan: mapView.region.span.longitudeDelta
-                ),
-                viewportDiagonalKm: currentViewportDiagonalKm
-            )
+        }
+        countryLayer.setCountriesWithMarkers(codes)
+    }
+
+    /// Reconciles `items` — the engine's layout — against the markers on the
+    /// map. See `reconcileClusters`.
+    private func reconcile(_ items: [MapClusterEngine.Item]) {
         var target = Set<String>()
         target.reserveCapacity(items.count)
         var toAdd: [MKAnnotation] = []
@@ -2041,6 +2084,36 @@ final class MapsViewController: UIViewController {
         refreshVideoPlayback()
     }
 
+    /// One side's layout — open posts or locked ones (see `reconcileClusters`).
+    /// Singles go through the SAME reconciliation, so what
+    /// `-maps-no-clustering` measures is the real marker lifecycle and not a
+    /// parallel code path that happens to look similar.
+    private func layOut(_ ordered: [MapPin], unclustered: Bool) -> [MapClusterEngine.Item] {
+        guard !ordered.isEmpty else { return [] }
+        return unclustered
+            ? ordered.map {
+                MapClusterEngine.Item(
+                    representative: $0, memberIDs: [$0.postID],
+                    latitude: $0.latitude, longitude: $0.longitude, place: $0.place
+                )
+            }
+            : MapClusterEngine.cluster(
+                ordered,
+                // Snapped, so an epsilon in the viewport cannot move every grid
+                // line at once — see `MapClusterEngine.snapZoom`.
+                zoomScale: MapClusterEngine.snapZoom(currentZoomScale),
+                cellPoints: Double(Self.clusterCellPoints),
+                // The semantic pre-pass's two banding inputs: the zoom level is
+                // the FALLBACK for an H3-less corpus; the viewport diagonal
+                // drives the dynamic cell-span rule (`MapHierarchyBanding`)
+                // whenever the ladder carries H3 indexes.
+                zoomLevel: MapViewport.zoomLevel(
+                    forLongitudeSpan: mapView.region.span.longitudeDelta
+                ),
+                viewportDiagonalKm: currentViewportDiagonalKm
+            )
+    }
+
     private static func singleIdentity(_ postID: PostID) -> String { "p:" + postID.rawValue }
 
     /// Splits a batch of realized views into the ones that are ARRIVING and the
@@ -2091,7 +2164,7 @@ final class MapsViewController: UIViewController {
                 annotation: annotation,
                 thumbnail: thumbnail,
                 face: Self.face(of: annotation),
-                ringKind: cluster.flatMap { $0.isHierarchyMarker ? $0.place?.kind : nil },
+                dress: self.dress(for: annotation),
                 // ⚠️ THE WHOLE DEPARTING SCREEN, not a post's cover. Every other
                 // departure on this source is one post leaving another; here a
                 // GRID is collapsing into an icon, and without an operand the
@@ -2232,11 +2305,17 @@ final class MapsViewController: UIViewController {
         if let cluster = annotation as? MapComputedCluster {
             cluster.apply(item)
             (mapView.view(for: cluster) as? MapClusterAnnotationView)?
-                .configure(with: cluster, imagePipeline: imagePipeline, iconCatalog: iconCatalog, previewCatalog: previewCatalog)
+                .configure(
+                    with: cluster, dress: dress(for: cluster), imagePipeline: imagePipeline,
+                    iconCatalog: iconCatalog, previewCatalog: previewCatalog
+                )
         } else if let single = annotation as? MapAnnotation {
             single.update(pin: item.representative)
             (mapView.view(for: single) as? MapAnnotationView)?
-                .configure(with: item.representative, imagePipeline: imagePipeline, iconCatalog: iconCatalog, previewCatalog: previewCatalog)
+                .configure(
+                    with: item.representative, dress: dress(for: single), imagePipeline: imagePipeline,
+                    iconCatalog: iconCatalog, previewCatalog: previewCatalog
+                )
         }
     }
 
@@ -2289,7 +2368,10 @@ final class MapsViewController: UIViewController {
                 spokenPin = group.representative
                 host = mapView.view(for: group) as? MapClusterAnnotationView
             }
+            // A locked country's marker plays nothing: it is a teaser, darkened,
+            // and its post is not the viewer's to watch.
             guard let pin = spokenPin, let host,
+                  isInUnlockedCountry(pin),
                   pin.kind == .video,
                   let url = pin.previewVideoURL,
                   visibleRect.contains(MKMapPoint(annotation.coordinate))
@@ -2506,9 +2588,10 @@ final class MapsViewController: UIViewController {
         var seen = Set<PostID>()
         func add(_ id: PostID) { if seen.insert(id).inserted { ids.append(id) } }
         for element in visible {
-            if let pin = element as? MapAnnotation {
+            // A locked marker never opens, so there is nothing to warm.
+            if let pin = element as? MapAnnotation, isInUnlockedCountry(pin.pin) {
                 add(pin.pin.postID)
-            } else if let cluster = element as? MapComputedCluster {
+            } else if let cluster = element as? MapComputedCluster, isInUnlockedCountry(cluster.representative) {
                 cluster.memberIDs.forEach(add)
             }
         }
@@ -2791,15 +2874,18 @@ extension MapsViewController: MKMapViewDelegate {
         #if DEBUG
         MapChurnCounters.viewFor += 1
         #endif
-        if let badge = annotation as? LockedCountryAnnotation {
-            return countryLayer.view(for: badge, in: mapView)
+        if let flag = annotation as? CountryFlagAnnotation {
+            return countryLayer.view(for: flag, in: mapView)
         }
         if let cluster = annotation as? MapComputedCluster {
             let view = mapView.dequeueReusableAnnotationView(
                 withIdentifier: MapClusterAnnotationView.reuseIdentifier,
                 for: annotation
             ) as? MapClusterAnnotationView
-            view?.configure(with: cluster, imagePipeline: imagePipeline, iconCatalog: iconCatalog, previewCatalog: previewCatalog)
+            view?.configure(
+                with: cluster, dress: dress(for: cluster), imagePipeline: imagePipeline,
+                iconCatalog: iconCatalog, previewCatalog: previewCatalog
+            )
             // Instant tap — bypasses MapKit's ~0.3s selection delay.
             view?.onSelect = { [weak self, weak view] in
                 self?.openAnnotation(cluster, thumbnail: view?.heroImage)
@@ -2808,6 +2894,9 @@ extension MapsViewController: MKMapViewDelegate {
                 guard let self, let view else { return }
                 popChoreographer.release(view)
             }
+            // Back from a flight: reclaim the place a flag disc took while
+            // the marker was hidden (see `MapAnnotationView.onReappear`).
+            view?.onReappear = { [weak self] view in self?.countryLayer.giveWay(to: view.frame) }
             return view
         }
         guard let pinAnnotation = annotation as? MapAnnotation else { return nil }
@@ -2815,7 +2904,10 @@ extension MapsViewController: MKMapViewDelegate {
             withIdentifier: MapAnnotationView.reuseIdentifier,
             for: annotation
         ) as? MapAnnotationView
-        view?.configure(with: pinAnnotation.pin, imagePipeline: imagePipeline, iconCatalog: iconCatalog, previewCatalog: previewCatalog)
+        view?.configure(
+            with: pinAnnotation.pin, dress: dress(for: pinAnnotation), imagePipeline: imagePipeline,
+            iconCatalog: iconCatalog, previewCatalog: previewCatalog
+        )
         view?.onSelect = { [weak self, weak view] in
             self?.openAnnotation(pinAnnotation, thumbnail: view?.heroImage)
         }
@@ -2823,8 +2915,10 @@ extension MapsViewController: MKMapViewDelegate {
             guard let self, let view else { return }
             popChoreographer.release(view)
         }
+        view?.onReappear = { [weak self] view in self?.countryLayer.giveWay(to: view.frame) }
         return view
     }
+
 
     /// Opens a tapped marker's post(s) with the hero transition — a single pin
     /// opens its post, a cluster opens all its members (their ids are already
@@ -2836,6 +2930,13 @@ extension MapsViewController: MKMapViewDelegate {
         guard openGate.canOpen else { return }
         let postIDs = Self.postIDs(of: annotation)
         guard !postIDs.isEmpty else { return }
+        // A locked country's marker is a teaser, not a door: it offers the
+        // country — what the old locked badge did — and opens nothing.
+        if let pin = (annotation as? MapComputedCluster)?.representative ?? (annotation as? MapAnnotation)?.pin,
+           case .offer(let code) = Self.markerTap(for: dress(for: annotation), countryCode: countryCode(of: pin)) {
+            if let country = CountryAtlas.shared.country(code: code) { offer(country) }
+            return
+        }
         let face = Self.face(of: annotation)
         #if DEBUG
         // Which face a tapped marker wears decides its TRANSITION
@@ -2899,9 +3000,7 @@ extension MapsViewController: MKMapViewDelegate {
                     mapView: mapView,
                     annotation: annotation,
                     face: face,
-                    ringKind: (annotation as? MapComputedCluster).flatMap {
-                        $0.isHierarchyMarker ? $0.place?.kind : nil
-                    },
+                    dress: dress(for: annotation),
                     // Exactly what the hero does to the same marker
                     // (`MapPinZoomSource.setZoomSourceHidden`), for the same
                     // reason: while the window is elsewhere the disc must not
@@ -2981,9 +3080,7 @@ extension MapsViewController: MKMapViewDelegate {
             mapView: mapView,
             annotation: annotation,
             face: Self.face(of: annotation),
-            ringKind: (annotation as? MapComputedCluster).flatMap {
-                $0.isHierarchyMarker ? $0.place?.kind : nil
-            },
+            dress: dress(for: annotation),
             concealMarker: { [weak mapView] concealed in
                 mapView?.view(for: annotation)?.isHidden = concealed
             },
@@ -3081,12 +3178,11 @@ extension MapsViewController: MKMapViewDelegate {
             annotation: annotation,
             thumbnail: thumbnail,
             face: Self.face(of: annotation),
-            // The marker's hierarchy ring rides the flight, so the card is
-            // the tapped marker's twin down to its border color — neutral
-            // for anything that isn't the active band's own marker.
-            ringKind: (annotation as? MapComputedCluster).flatMap {
-                $0.isHierarchyMarker ? $0.place?.kind : nil
-            },
+            // The marker's flag border and badge ride the flight, so the card
+            // is the tapped marker's twin down to its furniture — neutral for
+            // anything that isn't the active band's own marker.
+            dress: dress(for: annotation),
+
             mirrorLive: tappedID.map { id in
                 { renderView in coordinator.mirrorLivePreview(of: id, to: renderView) }
             },

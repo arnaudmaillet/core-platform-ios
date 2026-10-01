@@ -304,6 +304,20 @@ public protocol RevealStandInShaping: AnyObject {
     /// The card's opacity INSIDE the stand-in, separate from the stand-in's
     /// own — see `RevealStage.swapToStandIn`.
     func setContentOpacity(_ alpha: CGFloat)
+    /// Whether the stand-in draws OUTSIDE its own frame — a map marker's corner
+    /// badge overlaps the marker's edge — and so must not ride inside the
+    /// window's mask on a dismissal, which would clip that overhang off the
+    /// card and hand the landing a marker missing a piece. Default false: a
+    /// stand-in that relies on the window to clip its content keeps it.
+    ///
+    /// ⚠️ Declared HERE, in the protocol body, and not only in the extension:
+    /// a requirement with a default is dispatched dynamically through an
+    /// existential, an extension-only member is not (`ZoomExistentialDispatchTests`).
+    var revealStandInOverhangsWindow: Bool { get }
+}
+
+public extension RevealStandInShaping {
+    var revealStandInOverhangsWindow: Bool { false }
 }
 
 // MARK: - Shared staging
@@ -1040,6 +1054,22 @@ enum RevealStage {
         standIn?.layoutIfNeeded()
     }
 
+    /// Puts a DISMISSAL's stand-in over the page: inside the window's host,
+    /// clipped by its mask — or, for a stand-in that draws outside its own
+    /// frame (`RevealStandInShaping.revealStandInOverhangsWindow`), just above
+    /// the host instead. The two are the same picture everywhere the stand-in
+    /// is inside its frame: the stand-in always takes the mask's exact rect and
+    /// radius (`apply`), and the host spans the container, so the coordinates
+    /// agree. Either way the caller removes it before `unwrap`.
+    static func mountDismissStandIn(_ standIn: UIView, in host: UIView) {
+        if (standIn as? RevealStandInShaping)?.revealStandInOverhangsWindow == true,
+           let container = host.superview {
+            container.insertSubview(standIn, aboveSubview: host)
+        } else {
+            host.addSubview(standIn)
+        }
+    }
+
     /// Puts `page` back where the transition context expects to find it and
     /// retires the host. Called on every outcome — committed, cancelled, or
     /// failed — because a page left inside a removed host is a blank screen.
@@ -1635,7 +1665,7 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         // still and fade.
         let standIn = geometry.makeDismissStandIn()
         if let standIn {
-            host.addSubview(standIn)
+            RevealStage.mountDismissStandIn(standIn, in: host)
             standIn.alpha = RevealStage.fill(at: 0, carriesPage: geometry.pageFit.carriesPage)
             (standIn as? RevealStandInShaping)?.setContentOpacity(
                 RevealStage.contentOpacity(at: 0, carriesPage: geometry.pageFit.carriesPage)
