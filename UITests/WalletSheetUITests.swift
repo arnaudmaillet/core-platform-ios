@@ -46,8 +46,11 @@ final class WalletSheetUITests: XCTestCase {
         XCTAssertTrue(search.waitForExistence(timeout: 8), "the Shop item did not present the shop")
 
         // A plain list: a country's row spans its list's full width.
-        // A country row reads "<name>, rank <n>, …" (whichever is first).
-        let row = app.cells.matching(NSPredicate(format: "label CONTAINS ', rank '")).firstMatch
+        // A country row is one accessibility element, "<name>, rank <n>, …"
+        // (whichever leads — the mock world decides). UIKit exposes it as a
+        // static text, not a cell, so it is matched by label at any type.
+        let row = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS ', rank '")).firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 5), "no country row in the shop")
         let listFrame = app.collectionViews
             .containing(NSPredicate(format: "label CONTAINS ', rank '")).firstMatch.frame
