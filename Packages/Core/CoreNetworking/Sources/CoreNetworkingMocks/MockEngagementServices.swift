@@ -20,7 +20,9 @@ public final class MockCounterStore: @unchecked Sendable {
         var views: [String: Int64] = [:]
         var comments: [String: Int64] = [:]
         for (index, post) in dataset.posts.enumerated() {
-            likeCounts[post.postID] = Int64(12 + (index * 37) % 900)
+            // A seeded count wins (the world seed's trending posts); the rest
+            // keep the array-index formula their fixtures are measured on.
+            likeCounts[post.postID] = post.seededLikes ?? Int64(12 + (index * 37) % 900)
             views[post.postID] = Int64(140 + (index * 271) % 24_000)
             comments[post.postID] = Int64((index * 13) % 220)
         }

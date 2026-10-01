@@ -22,7 +22,8 @@ public struct MockBackend: Sendable {
     /// `mediaCatalog` defaults to `.synthetic` so tests and previews stay
     /// offline; `AppContainer` passes `.realAssets` under `-rich-media`.
     /// `seedsMapHierarchy` spreads a third of the corpus across the European
-    /// geo anchors (`MockGeoDiscoveryService`) — the app passes true in mock
+    /// geo anchors (`MockGeoDiscoveryService`) and appends the posts
+    /// published beyond France (`MockWorldSeed`) — the app passes true in mock
     /// mode (semantic map clusters are the default experience, opt out with
     /// `-maps-mock-no-places`); the false default keeps tests and previews
     /// on the Paris-only scatter their fixtures are calibrated against.
@@ -31,9 +32,11 @@ public struct MockBackend: Sendable {
         mediaCatalog: MockSocialDataset.MediaCatalog = .synthetic,
         seedsMapHierarchy: Bool = false
     ) {
+        // The world beyond France (`MockWorldSeed`) rides the same decision
+        // as the European seed: it is what the map's places are for.
         let dataset = Self.seededPostCount.map {
-            MockSocialDataset(postCount: $0, mediaCatalog: mediaCatalog)
-        } ?? MockSocialDataset(mediaCatalog: mediaCatalog)
+            MockSocialDataset(postCount: $0, mediaCatalog: mediaCatalog, seedsWorld: seedsMapHierarchy)
+        } ?? MockSocialDataset(mediaCatalog: mediaCatalog, seedsWorld: seedsMapHierarchy)
         let counterStore = MockCounterStore(dataset: dataset)
         let blobStore = MockBlobStore()
         let postStore = MockPostStore()
