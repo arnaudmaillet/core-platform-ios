@@ -627,4 +627,171 @@ struct PlaceProfileTests {
                 "nothing may draw the name at full strength in the bar")
     }
 
+
+    // MARK: - Pull to refresh
+
+    /// A place whose answers a test hands out one at a time: each hydration
+    /// takes the next, and `held` keeps one in flight until it is let go.
+    @MainActor
+    private final class Answers {
+        struct Failure: Error {}
+        var queue: [Result<[GalleryPost], Failure>]
+        var held = false
+        private(set) var calls = 0
+
+        init(_ queue: [Result<[GalleryPost], Failure>]) { self.queue = queue }
+
+        func next() async throws -> [GalleryPost] {
+            calls += 1
+            while held { try? await Task.sleep(for: .milliseconds(2)) }
+            let answer = queue.count > 1 ? queue.removeFirst() : queue[0]
+            return try answer.get()
+        }
+    }
+
+    private func makeProfile(answers: Answers) -> PlaceProfileViewController {
+        PlaceProfileViewController(
+            postIDs: [PostID("p1")],
+            placeName: "Paris • City Cluster",
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            videoPlayback: nil,
+            loadPosts: { try await answers.next() },
+            openPost: { _, _, _ in }
+        )
+    }
+
+    /// Waits for `condition`, for at most two seconds — long enough for any
+    /// hydration here, short enough that a spinner that never stops fails
+    /// the test instead of hanging it.
+    private func settle(until condition: () -> Bool) async {
+        let deadline = Date().addingTimeInterval(2)
+        while !condition(), Date() < deadline { try? await Task.sleep(for: .milliseconds(5)) }
+    }
+
+    /// The first hydration, landed.
+    private func hydrated(_ answers: Answers) async -> PlaceProfileViewController {
+        let profile = makeProfile(answers: answers)
+        profile.beginLoading()
+        await settle(until: { !profile.renderedActivity.isEmpty })
+        return profile
+    }
+
+    enum RefreshOutcome: CaseIterable, Sendable { case sameMembers, newMembers, failure }
+
+    /// ⚠️ A PULL ALWAYS ENDS ITS SPINNER — on either tab, whatever the
+    /// refresh brought back.
+    ///
+    /// Both pages carried a `UIRefreshControl` and nothing answered it: a
+    /// release through the control started a spinner that never stopped. The
+    /// identical answer is the case a render-driven stop would miss (it
+    /// publishes nothing), and the failure the case an error path would.
+    @Test(arguments: RefreshOutcome.allCases, [PlaceProfileViewController.Tab.activity, .discover])
+    func aPullAlwaysEndsItsSpinner(outcome: RefreshOutcome, tab: PlaceProfileViewController.Tab) async {
+        let first = [post("p1", reactions: 10), post("p2", reactions: 5)]
+        let refreshed: Result<[GalleryPost], Answers.Failure> = switch outcome {
+        case .sameMembers: .success(first)
+        case .newMembers: .success(first + [post("p3", reactions: 50)])
+        case .failure: .failure(Answers.Failure())
+        }
+        let answers = Answers([.success(first), refreshed])
+        let profile = await hydrated(answers)
+
+        profile.debugReleasePull(on: tab)
+        #expect(profile.debugIsRefreshing, "the release did not start the spinner")
+        await settle(until: { !profile.debugIsRefreshing })
+
+        #expect(!profile.debugIsRefreshing, "the spinner never stopped")
+        #expect(answers.calls == 2, "the pull must load the place again")
+    }
+
+    /// The pull is the profile's: the pages carry no stock control (it sat
+    /// under the banner, and a real drag never tripped it), and a release
+    /// short of the indicator's threshold refreshes nothing.
+    @Test func thePullIsTheIndicatorsNotAStockControl() async {
+        let answers = Answers([.success([post("p1", reactions: 10)])])
+        let profile = await hydrated(answers)
+        #expect(!profile.debugPagesCarryRefreshControl)
+
+        profile.debugReleasePull(on: .activity, by: HeroPullToRefreshView.threshold - 20)
+        await settle(until: { answers.calls > 1 })
+
+        #expect(answers.calls == 1, "a pull short of the threshold refreshed")
+        #expect(!profile.debugIsRefreshing)
+    }
+
+    /// The same members again is no news: nothing reaches the page.
+    @Test func aRefreshThatBringsNothingNewPublishesNothing() async {
+        let answers = Answers([.success([post("p1", reactions: 10), post("p2", reactions: 5)])])
+        let profile = await hydrated(answers)
+        #expect(profile.debugRenderCount == 1)
+
+        profile.debugReleasePull(on: .activity)
+        await settle(until: { !profile.debugIsRefreshing })
+
+        #expect(profile.debugRenderCount == 1, "an identical answer re-rendered the page")
+        #expect(profile.renderedActivity.map(\.id.rawValue) == ["p1", "p2"])
+    }
+
+    /// New members land in place, through the same fan-out as the first
+    /// hydration: both tabs and the place's numbers.
+    @Test func aRefreshThatBringsNewPostsLandsThemInPlace() async {
+        let answers = Answers([
+            .success([post("p1", reactions: 10)]),
+            .success([post("p1", reactions: 10), post("p2", reactions: 90)]),
+        ])
+        let profile = await hydrated(answers)
+
+        profile.debugReleasePull(on: .discover)
+        await settle(until: { !profile.debugIsRefreshing })
+
+        #expect(profile.renderedActivity.map(\.id.rawValue) == ["p2", "p1"])
+        #expect(profile.renderedPosts.map(\.id.rawValue) == ["p2", "p1"])
+        #expect(profile.debugLikes == 100)
+    }
+
+    /// A failed revalidation leaves the place it already showed.
+    @Test func aFailedRefreshKeepsWhatIsOnScreen() async {
+        let answers = Answers([.success([post("p1", reactions: 10)]), .failure(Answers.Failure())])
+        let profile = await hydrated(answers)
+
+        profile.debugReleasePull(on: .activity)
+        await settle(until: { !profile.debugIsRefreshing })
+
+        #expect(profile.renderedActivity.map(\.id.rawValue) == ["p1"])
+    }
+
+    /// A pull during the first hydration starts nothing of its own — and the
+    /// hydration's settle still ends its spinner.
+    @Test func aPullDuringTheFirstHydrationEndsWithIt() async {
+        let answers = Answers([.success([post("p1", reactions: 10)])])
+        answers.held = true
+        let profile = makeProfile(answers: answers)
+        profile.beginLoading()
+        await settle(until: { answers.calls == 1 })
+
+        profile.debugReleasePull(on: .activity)
+        #expect(profile.debugIsRefreshing)
+        answers.held = false
+        await settle(until: { !profile.debugIsRefreshing })
+
+        #expect(!profile.debugIsRefreshing, "the coalesced pull's spinner never stopped")
+        #expect(answers.calls == 1, "a pull in flight must not start a second load")
+        #expect(profile.renderedActivity.map(\.id.rawValue) == ["p1"])
+    }
+
+    /// The failed page's "Try Again" (and a pull on it) loads the place
+    /// again — it used to be a button that did nothing.
+    @Test func aRetryAfterAFailedHydrationLoadsThePlace() async {
+        let answers = Answers([.failure(Answers.Failure()), .success([post("p1", reactions: 10)])])
+        let profile = makeProfile(answers: answers)
+        profile.beginLoading()
+        await settle(until: { answers.calls == 1 && !profile.debugIsLoading })
+        #expect(profile.renderedActivity.isEmpty)
+
+        profile.debugReleasePull(on: .activity)
+        await settle(until: { !profile.renderedActivity.isEmpty && !profile.debugIsRefreshing })
+
+        #expect(profile.renderedActivity.map(\.id.rawValue) == ["p1"])
+        #expect(!profile.debugIsRefreshing)
+    }
 }

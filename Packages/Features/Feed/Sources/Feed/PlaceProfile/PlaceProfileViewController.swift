@@ -198,6 +198,17 @@ final class PlaceProfileViewController: UIViewController {
     /// post the viewer was on once a close stages it at the head of the list.
     private var anchorID: PostID
     private var loadTask: Task<Void, Never>?
+    /// The pull's spinner, pinned under the status bar — the profile's.
+    private let pullIndicator = HeroPullToRefreshView()
+    /// The band the spinner centres in — the profile's height.
+    private static let pullIndicatorHeight: CGFloat = 44
+    /// A hydration is in flight — what coalesces a pull (`refresh`).
+    private var isLoading = false
+    /// The members last fanned out to the page — what a refresh compares its
+    /// answer against. Nil until a hydration has landed.
+    private var renderedMembers: [GalleryPost]?
+    /// How many hydrations actually reached the page.
+    private var renders = 0
 
     // MARK: - The map return flight
 
@@ -491,8 +502,8 @@ final class PlaceProfileViewController: UIViewController {
         // `-place-stretch-sweep`: the profile's `-profile-stretch-sweep` —
         // the page pulled past its top, the banner stretching, held, let go
         // and settled (`HERO-SCROLL place-stretch/<phase> …`). No refresh:
-        // the place's pages refresh through their own control, which a
-        // scripted offset does not trip.
+        // a refresh is asked by a drag ENDING past the threshold, which a
+        // scripted offset never does — `-place-pull-refresh` does.
         if arguments.contains("-place-stretch-sweep") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
                 QAWait.until("-place-stretch-sweep", { [weak self] in
@@ -507,6 +518,34 @@ final class PlaceProfileViewController: UIViewController {
                             began: CACurrentMediaTime(),
                             probe: HeroScrollFrameProbe(name: "place-stretch", root: headerHost), phase: nil
                         )
+                    }
+                }
+            }
+        }
+        // `-place-pull-refresh`: releases a pull past the threshold on the
+        // active page through the drag's own end, the path a finger takes,
+        // and says how long the spinner ran — or `[qa] GAVE UP`, which is
+        // what a release through the stock control did while nothing
+        // answered it.
+        if arguments.contains("-place-pull-refresh") {
+            QAWait.until("-place-pull-refresh ready", { [weak self] in
+                guard let self else { return false }
+                return !renderedActivity.isEmpty && !isLoading
+            }) { [weak self] in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                    guard let self else { return }
+                    let began = CACurrentMediaTime()
+                    let rendersBefore = renders
+                    debugReleasePull(on: Self.tabOrder[activeIndex])
+                    print("[place] pull released on \(Self.tabOrder[activeIndex].title)"
+                        + " refreshing=\(debugIsRefreshing)")
+                    QAWait.until("-place-pull-refresh spinner", timeout: 10, { [weak self] in
+                        self?.debugIsRefreshing == false
+                    }) { [weak self] in
+                        guard let self else { return }
+                        print("[place] pull settled after"
+                            + " \(Int((CACurrentMediaTime() - began) * 1000))ms"
+                            + " renders=\(renders - rendersBefore)")
                     }
                 }
             }
@@ -649,6 +688,8 @@ final class PlaceProfileViewController: UIViewController {
     }
     #endif
     private var bannerTask: Task<Void, Never>?
+    /// The cover the banner wears.
+    private var bannerURL: URL?
 
     /// How many posts seed a feed opened from a tile — the same window (and
     /// the same reason) as For You's.
@@ -750,6 +791,13 @@ final class PlaceProfileViewController: UIViewController {
         configureTabs()
         page.render(.loading)
         activityPage.render(.loading)
+        // Either page's "Try Again" reloads the whole place: one hydration
+        // feeds both (`render`). The pull is the indicator's — `configureTabs`.
+        page.onRefresh = { [weak self] in self?.refresh() }
+        activityPage.onRefresh = { [weak self] in self?.refresh() }
+        page.handPullToHost()
+        activityPage.handPullToHost()
+        installPullIndicator()
         page.onItemTapped = { [weak self] index in self?.openTile(at: index, in: self?.page) }
         activityPage.onItemTapped = { [weak self] index in
             self?.openTile(at: index, in: self?.activityPage)
@@ -1096,6 +1144,16 @@ final class PlaceProfileViewController: UIViewController {
             hosted.onVerticalScroll = { [weak self] offset in
                 guard let self, index == activeIndex else { return }
                 applyHeaderOffset(offset)
+                // Negative travel is the overscroll the indicator draws from.
+                pullIndicator.setPull(max(0, -offset))
+            }
+            // The profile's release rule, verbatim: the indicator owns the
+            // threshold, and a release past it refreshes the whole place.
+            hosted.onPullReleased = { [weak self] distance in
+                guard let self, index == activeIndex,
+                      pullIndicator.shouldRefresh(releasedAt: distance) else { return }
+                pullIndicator.beginRefreshing()
+                refresh()
             }
         }
         // Tap → the destination takes its aligned position BEFORE it
@@ -1466,14 +1524,54 @@ final class PlaceProfileViewController: UIViewController {
     func beginLoading() {
         guard loadTask == nil else { return }
         loadViewIfNeeded()
+        load()
+    }
+
+    /// Pull-to-refresh, and the failed state's "Try Again" — the profile's
+    /// rule (`ProfileViewModel.refresh`): the page REVALIDATES IN PLACE.
+    ///
+    /// ⚠️ BOTH PAGES CARRIED A `UIRefreshControl` THAT NOTHING ANSWERED. A
+    /// release through it started a spinner that never stopped (measured:
+    /// still spinning 10s on, `-place-pull-refresh`), a real drag never even
+    /// tripped it under the floating header, and "Try Again" was a button
+    /// that did nothing. A place's posts move — likes tick, a member is
+    /// deleted — so the pull is kept and given the profile's behaviour, its
+    /// indicator included (`HeroPullToRefreshView`), rather than removed:
+    /// - what is on screen stays until the new hydration lands (no bones);
+    /// - an answer identical to the one on screen publishes nothing;
+    /// - the spinner stops when the load SETTLES, however it settled —
+    ///   landed, identical, failed or superseded.
+    ///
+    /// Coalesced: a pull while a load is in flight starts nothing, and that
+    /// load's settle ends its spinner — including the first hydration's.
+    func refresh() {
+        guard !isLoading else { return }
+        // A page with nothing to keep (it failed) shows that it is trying
+        // again.
+        if renderedMembers == nil {
+            page.render(.loading)
+            activityPage.render(.loading)
+        }
+        load()
+    }
+
+    /// The one hydration path: the builder's first load and every refresh.
+    private func load() {
+        isLoading = true
         loadTask = Task { [weak self] in
             guard let self else { return }
+            defer { settleLoad() }
             do {
                 let members = try await loadPosts()
                 guard !Task.isCancelled else { return }
                 render(members)
             } catch {
                 guard !Task.isCancelled else { return }
+                // A revalidation that failed leaves the place it already
+                // showed: those posts are still the place's, and replacing
+                // them with an error over a pull would trade a stale page for
+                // an empty one.
+                guard renderedMembers == nil else { return }
                 // The members were already open in the feed above, so a failed
                 // hydration here is almost certainly transient — say so
                 // plainly rather than rendering a dead end.
@@ -1483,9 +1581,49 @@ final class PlaceProfileViewController: UIViewController {
         }
     }
 
+    /// Where every load ends, and so where the spinner stops — a refresh that
+    /// brought nothing new publishes nothing, so no render can be the thing
+    /// that stops it.
+    private func settleLoad() {
+        isLoading = false
+        pullIndicator.endRefreshing()
+    }
+
+    /// The profile's indicator, above the header rather than inside a list —
+    /// see `HeroPullToRefreshView` for why the pages carry no stock control.
+    private func installPullIndicator() {
+        // In the band between the safe-area top and the banner's type: the
+        // header slides down past it on a pull, and it draws over the picture.
+        pullIndicator.constrain(in: view) { parent in
+            pullIndicator.topAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.topAnchor)
+            pullIndicator.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
+            pullIndicator.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
+            pullIndicator.heightAnchor.constraint(equalToConstant: Self.pullIndicatorHeight)
+        }
+        view.bringSubviewToFront(pullIndicator)
+    }
+
     /// One place fans the hydrated corpus out to every surface of the page,
     /// so they can never disagree about what the place contains.
+    ///
+    /// ⚠️ THE SAME CORPUS AGAIN IS NO NEWS. Compared before anything is
+    /// touched: re-rendering identical members would re-rank the Activity
+    /// list (undoing the post a close from the map moved to its head), reset
+    /// the counter and fetch and cross-dissolve the banner again — a
+    /// landing's worth of work for a refresh that changed nothing.
     private func render(_ members: [GalleryPost]) {
+        guard members != renderedMembers else { return }
+        // ⚠️ A REFRESH IS A RE-RANKED CORPUS, NOT A PAGE APPENDED. The grid
+        // reads a delivery that only ADDS posts as pagination and inserts
+        // them at the tail — so a new post more popular than everything on
+        // screen landed last (caught by `aRefreshThatBringsNewPostsLandsThemInPlace`).
+        // For You says the same on a corpus reset (`onCorpusReset`).
+        if renderedMembers != nil {
+            page.invalidateIncrementalUpdates()
+            activityPage.invalidateIncrementalUpdates()
+        }
+        renderedMembers = members
+        renders += 1
         // ⚠️ THE TWO TABS NO LONGER SHOW THE SAME POSTS, only the same place.
         // Discover is a GRID of covers and drops what has none; Activity is a
         // column of cards and keeps everything. One hydration still fans out to
@@ -1511,11 +1649,15 @@ final class PlaceProfileViewController: UIViewController {
     /// text check-in) keeps the neutral fill — honest, and never a broken
     /// image.
     private func renderBanner(for post: GalleryPost?) {
-        guard let url = post?.thumbnailURL else { return }
+        // A refresh whose top post kept its cover keeps the picture on screen.
+        guard let url = post?.thumbnailURL, url != bannerURL else { return }
         bannerTask?.cancel()
         bannerTask = Task { [weak self] in
             guard let self, let image = try? await imagePipeline.image(for: url),
                   !Task.isCancelled else { return }
+            // Remembered once it is ON the banner, so a fetch that failed is
+            // tried again by the next refresh.
+            bannerURL = url
             UIView.transition(
                 with: bannerView, duration: 0.25, options: [.transitionCrossDissolve]
             ) {
@@ -2449,6 +2591,22 @@ extension PlaceProfileViewController {
         }
     }
     var debugLikes: Int64 { likesMetric.debugValue }
+    /// How many hydrations reached the page — a refresh that brought the same
+    /// members must leave it where it was.
+    var debugRenderCount: Int { renders }
+    /// Releases a pull on the page for `tab`, as a finger letting go does.
+    /// Selects `tab` first: only the page in front answers a pull.
+    func debugReleasePull(on tab: Tab, by distance: CGFloat = HeroPullToRefreshView.threshold + 40) {
+        debugSelectTab(tab)
+        (hostedPages[Self.index(of: tab)] as? ForYouGridPage)?.debugReleasePull(by: distance)
+    }
+    /// Whether the pull's spinner is still turning.
+    var debugIsRefreshing: Bool { pullIndicator.debugIsRefreshing }
+    /// Whether any page still carries a stock `UIRefreshControl`.
+    var debugPagesCarryRefreshControl: Bool {
+        page.debugHasRefreshControl || activityPage.debugHasRefreshControl
+    }
+    var debugIsLoading: Bool { isLoading }
     var debugHeroName: String? { heroNameLabel.text }
     /// How far the identity's foot clears the banner's edge — the invariant the
     /// old -18 constant broke the moment the selector moved onto the banner.
@@ -2477,6 +2635,7 @@ extension PlaceProfileViewController {
 @MainActor
 protocol PlaceProfileHostedPage: UIView {
     var onVerticalScroll: ((CGFloat) -> Void)? { get set }
+    var onPullReleased: ((CGFloat) -> Void)? { get set }
     var verticalOffset: CGFloat { get }
     func setVerticalOffset(_ offset: CGFloat)
     func setHostedInsets(top: CGFloat, bottom: CGFloat)
