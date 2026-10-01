@@ -29,10 +29,11 @@ final class MapPinZoomSource: ZoomTransitionSource {
     /// a card to mirror onto. `nil` for a source that was never given the
     /// probe — see `zoomFlightCarriesLivePlayer`.
     private let isLivePreviewing: (() -> Bool)?
-    /// The hierarchy level the tapped marker's ring announced (a semantic
-    /// cluster's city/country color), so the flying card takes off as
-    /// the marker's exact twin — ring included. `nil` flies the neutral ring.
-    private var ringKind: MapPlace.Kind?
+    /// What the tapped marker wears around its face — its flag border and
+    /// corner badge (`MapMarkerDress`) — so the flying card takes off as the
+    /// marker's exact twin, furniture included. Re-read off the marker at
+    /// staging and at card build, like its picture.
+    private var dress: MapMarkerDress
     /// Which picture the card must show at the DEPARTURE end, asked when a
     /// dismissal stages and never before — the viewer's position in the feed is
     /// the one thing about this flight that is unknowable at the tap.
@@ -81,7 +82,7 @@ final class MapPinZoomSource: ZoomTransitionSource {
         annotation: any MKAnnotation,
         thumbnail: UIImage?,
         face: PinCardView.Face = .media,
-        ringKind: MapPlace.Kind? = nil,
+        dress: MapMarkerDress = .neutral,
         mirrorLive: ((VideoRenderView) -> Bool)? = nil,
         isLivePreviewing: (() -> Bool)? = nil,
         departureCover: (() -> MapReturnCover)? = nil,
@@ -91,7 +92,7 @@ final class MapPinZoomSource: ZoomTransitionSource {
         self.annotation = annotation
         self.thumbnail = thumbnail
         self.face = face
-        self.ringKind = ringKind
+        self.dress = dress
         self.mirrorLive = mirrorLive
         self.isLivePreviewing = isLivePreviewing
         self.departureCover = departureCover
@@ -115,10 +116,10 @@ final class MapPinZoomSource: ZoomTransitionSource {
         }
         if let cluster = annotation as? MapComputedCluster {
             face = PinCardView.Face.of(cluster.representative)
-            ringKind = cluster.isHierarchyMarker ? cluster.place?.kind : nil
         } else if let pin = (annotation as? MapAnnotation)?.pin {
             face = PinCardView.Face.of(pin)
         }
+        if let worn = mapView?.wornDress(for: annotation) { dress = worn }
 
         stagedCover = departureCover?() ?? .none
         guard case .none = stagedCover, let awaitDepartureCover else { return }
@@ -141,9 +142,11 @@ final class MapPinZoomSource: ZoomTransitionSource {
         // Counted, so a soak can see it disappear — see `markAsTransitionCard`.
         card.markAsTransitionCard()
         card.setFace(face)
-        card.setRing(
-            color: MapMarkerRing.color(for: ringKind), width: MapMarkerRing.width(for: ringKind)
-        )
+        // ⚠️ READ NOW, like the picture below: the marker re-dresses on every
+        // reconcile, and its furniture — flag border, badge — must leave the
+        // map with the card rather than vanish with the hidden marker.
+        card.setDress((mapView?.wornDress(for: annotation) ?? dress).unlocked)
+
         // ⚠️ READ NOW, for the reason the avatar and the icon below both give.
         // `thumbnail` is a snapshot taken at the TAP, and a marker's cover
         // arrives asynchronously — so a card built from it flies whatever the

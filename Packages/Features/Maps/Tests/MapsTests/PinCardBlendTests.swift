@@ -63,20 +63,29 @@ struct PinCardBlendTests {
     /// departure cover it stays opaque while that cover fades, which hides the
     /// blend completely and hands the flight over to a picture nobody can see.
     /// It is the marker's OWN content, so it belongs in the arrival stack.
+    ///
+    /// Since the corner badge, the pictures live in a clipping CONTENT view
+    /// and the ring in an unclipped CHROME view above it — so the badge can
+    /// overlap the card's corner. The pictures' order inside the content view
+    /// is the contract this test has always pinned; nine since the lock veil
+    /// and its glyph joined the top of it.
     @Test func theCardStacksItsLayersInTheContractedOrder() {
         let card = makeCard()
-        #expect(card.subviews.count == 8)
-        #expect(card.subviews.first === card.imageView)
-        #expect(card.subviews.last === card.ringView)
+        #expect(card.subviews == [card.debugContentView, card.debugChromeView])
+        #expect(card.debugChromeView.subviews.first === card.ringView)
+        let content = card.debugContentView.subviews
+        #expect(content.count == 9)
+        #expect(content.first === card.imageView)
+        #expect(content.suffix(2) == [card.debugLockVeil, card.debugLockGlyph])
         // The preview is BENEATH the departure operand, or the blend cannot be
         // seen. This is the assertion that would have caught it.
-        let previewIndex = card.subviews.firstIndex(of: previewSheet(of: card)) ?? .max
-        let departureIndex = card.subviews.firstIndex(of: departureCover(of: card)) ?? -1
+        let previewIndex = content.firstIndex(of: previewSheet(of: card)) ?? .max
+        let departureIndex = content.firstIndex(of: departureCover(of: card)) ?? -1
         #expect(previewIndex < departureIndex)
         // And the donated surface's host is ABOVE the departure still, for the
         // same reason the card's own live surface is: on a dismissal that
         // surface IS the departing page's picture and the still is its poster.
-        let hostIndex = card.subviews.firstIndex(of: card.debugDonatedMediaHost) ?? -1
+        let hostIndex = content.firstIndex(of: card.debugDonatedMediaHost) ?? -1
         #expect(hostIndex > departureIndex)
     }
 

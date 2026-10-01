@@ -4,6 +4,7 @@ import CoreStorage
 import DesignSystem
 import FeedInterface
 import Maps
+import MapsInterface
 import MediaCore
 import PostGrid
 import UIKit
@@ -21,6 +22,9 @@ import UIKit
 ///     outcome.
 ///
 /// # Anatomy, top to bottom
+///   • the BAR — `[storefront Shop] ······ [✕]`: the Shop (what the gems buy,
+///     presented as a sheet OVER this one, so closing it comes back here) and
+///     the close button, plain bar items the system draws in glass;
 ///   • the SUMMARY — Points and Gems side by side in big type, then the
 ///     streak and today's earnings, bare on the page (`WalletSummaryView`);
 ///   • ACTIVE STAKES — each post, the points on it, and how long until it
@@ -37,16 +41,21 @@ import UIKit
 /// earlier "forget small once large" rule was reversed the same day). Its
 /// ground is the SYSTEM's: glass while small, opaque once large, exactly as a
 /// native sheet (the profile's QR sheet) behaves — so the view is clear and
-/// paints nothing of its own. Once the summary has scrolled away it collapses
-/// into a compact bar under the grabber (`WalletCompactBar`), so the list is
-/// never read without the balances.
+/// paints nothing of its own. The summary scrolls away with the list and
+/// nothing replaces it: the compact balances that used to fade in under the
+/// grabber went when the bar took that band (2026-10-01).
 ///
 /// # The edges
-/// The list passes under the compact bar and the Claim button through the
-/// system's own SOFT scroll-edge effect — a blur that ramps in strength rather
-/// than a material faded by a mask. The hand-built material blurs this
-/// replaced read as two frosted slabs: "beaucoup trop opaque, on n'aperçoit
-/// pas la collection view".
+/// The list passes under the bar and the Claim button through the system's
+/// own SOFT scroll-edge effect — a blur that ramps in strength rather than a
+/// material faded by a mask. The hand-built material blurs this replaced read
+/// as two frosted slabs: "beaucoup trop opaque, on n'aperçoit pas la
+/// collection view".
+///
+/// # Presented in its own navigation stack
+/// The bar is a navigation bar, so the sheet is this screen as the root of a
+/// navigation controller (`wrappedInSheet()`), and the sheet's configuration
+/// lives on THAT controller's presentation — the one presented.
 ///
 /// Everything derives from one `WalletSnapshot` and one `stakes()` reading per
 /// refresh; the only per-second work is the claim countdown and the active
@@ -64,15 +73,13 @@ final class WalletClaimViewController: UIViewController {
     private let lookUpPosts: PostLookup?
     private let imagePipeline: ImagePipeline?
     private let openFeedHero: OpenFeedHero?
-    /// The account's countries — the Countries card and its shop. Nil hides
-    /// the card (the fleet, until the backend carries unlocks).
+    /// The account's countries — what the Shop sells. Nil hides the Shop item
+    /// (the fleet, until the backend carries unlocks).
     private let countries: (any CountryAccess)?
 
     private nonisolated enum Section: Hashable { case summary, active, settled }
     private nonisolated enum Item: Hashable {
         case summary
-        /// The Shop's door: what the gems buy.
-        case countries
         case stake(String)
         case noActiveStakes
     }
@@ -80,7 +87,6 @@ final class WalletClaimViewController: UIViewController {
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
     private weak var summaryCell: WalletSummaryCell?
-    private let compactBar = WalletCompactBar()
     private let claimButton = UIButton(configuration: .prominentGlass())
     /// The Claim button's container, registered with the list's BOTTOM scroll
     /// edge so the system's soft edge effect grows to sit behind it.
@@ -109,9 +115,13 @@ final class WalletClaimViewController: UIViewController {
     private var buttonMargin: CGFloat = WalletSheetMetrics.sideMargin
     private var appliedSheetRadius: CGFloat = 0
 
-    private static let compactBarHeight: CGFloat = 44
-    /// Room under the grabber before the summary starts.
-    private static let topInset: CGFloat = Spacing.xl
+    /// Room under the bar before the summary starts.
+    private static let topInset: CGFloat = Spacing.sm
+
+    /// Stable identifiers for the bar items: a reused identifier is how
+    /// iOS 26 matches an item across a reinstall.
+    static let shopItemIdentifier = "wallet.shop"
+    static let closeItemIdentifier = "wallet.close"
 
     init(
         wallet: WalletStore,
@@ -127,8 +137,22 @@ final class WalletClaimViewController: UIViewController {
         self.imagePipeline = imagePipeline
         self.snapshot = wallet.snapshot()
         super.init(nibName: nil, bundle: nil)
-        modalPresentationStyle = .pageSheet
-        if let sheet = sheetPresentationController {
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// The sheet as it is presented: this screen as the root of a navigation
+    /// controller that shows its bar (the Shop and close items), set up as a
+    /// page sheet with the small and large detents.
+    ///
+    /// ⚠️ The sheet's configuration lives on the NAVIGATION controller's
+    /// presentation — the one presented — and every read of it below goes
+    /// through `sheet`.
+    func wrappedInSheet() -> UINavigationController {
+        let navigation = UINavigationController(rootViewController: self)
+        navigation.modalPresentationStyle = .pageSheet
+        if let sheet = navigation.sheetPresentationController {
             sheet.detents = [
                 .custom(identifier: Self.smallDetent) { [weak self] _ in self?.smallDetentHeight ?? 460 },
                 .large(),
@@ -141,10 +165,13 @@ final class WalletClaimViewController: UIViewController {
             // then corrected to the device's on the first layout visibly
             // popped from one to the other as the sheet rose.
         }
+        return navigation
     }
 
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    /// The presented sheet — the navigation controller's.
+    private var sheet: UISheetPresentationController? {
+        navigationController?.sheetPresentationController
+    }
 
     // MARK: - Lifecycle
 
@@ -158,16 +185,11 @@ final class WalletClaimViewController: UIViewController {
         view.backgroundColor = .clear
         buildCollection()
         buildChrome()
+        buildBar()
 
         walletObservers.tokens = [
             NotificationCenter.default.addObserver(
                 forName: WalletStore.didChangeNotification, object: wallet, queue: .main
-            ) { [weak self] _ in
-                MainActor.assumeIsolated { self?.refresh() }
-            },
-            // An unlock moves the Countries card's count.
-            NotificationCenter.default.addObserver(
-                forName: .countryAccessDidChange, object: nil, queue: .main
             ) { [weak self] _ in
                 MainActor.assumeIsolated { self?.refresh() }
             },
@@ -197,9 +219,13 @@ final class WalletClaimViewController: UIViewController {
         // up reaches, so it can be screenshotted.
         if arguments.contains("-wallet-sheet-large") {
             QAWait.until("-wallet-sheet-large", landed) { [weak self] in
-                guard let sheet = self?.sheetPresentationController else { return }
+                guard let sheet = self?.sheet else { return }
                 sheet.animateChanges { sheet.selectedDetentIdentifier = .large }
             }
+        }
+        // `-wallet-open-shop`: the Shop item's own path, once the sheet is up.
+        if arguments.contains("-wallet-open-shop") {
+            QAWait.until("-wallet-open-shop", landed) { [weak self] in self?.openShop() }
         }
         // `-wallet-open-stake <n>`: opens the n-th stake row's post (0-based,
         // list order) once its post has loaded — the row's own tap path.
@@ -221,8 +247,8 @@ final class WalletClaimViewController: UIViewController {
                 self?.openFeed(fromStake: id)
             }
         }
-        // `-wallet-sheet-scroll <pt>`: scrolls the list, so the collapsed
-        // header can be screenshotted. Pair with `-wallet-sheet-large`.
+        // `-wallet-sheet-scroll <pt>`: scrolls the list, so the rows under
+        // the bar can be screenshotted. Pair with `-wallet-sheet-large`.
         if let index = arguments.firstIndex(of: "-wallet-sheet-scroll"), index + 1 < arguments.count,
            let offset = Double(arguments[index + 1]) {
             QAWait.until("-wallet-sheet-scroll", landed) { [weak self] in
@@ -250,7 +276,6 @@ final class WalletClaimViewController: UIViewController {
         super.viewDidLayoutSubviews()
         applyButtonMargins()
         updateSmallDetent()
-        updateCompactBar()
     }
 
     // MARK: - Layout
@@ -319,11 +344,6 @@ final class WalletClaimViewController: UIViewController {
             )
         }
         let emptyRegistration = UICollectionView.CellRegistration<WalletEmptyStakesCell, Item> { _, _, _ in }
-        let countriesRegistration = UICollectionView.CellRegistration<WalletCountriesCell, Item> { [weak self] cell, _, _ in
-            guard let countries = self?.countries else { return }
-            let standings = countries.standings()
-            cell.configure(owned: standings.filter { countries.isUnlocked($0.code) }.count, total: standings.count)
-        }
         dataSource = UICollectionViewDiffableDataSource(collectionView: collectionView) { collectionView, indexPath, item in
             switch item {
             case .summary:
@@ -332,8 +352,6 @@ final class WalletClaimViewController: UIViewController {
                 collectionView.dequeueConfiguredReusableCell(using: stakeRegistration, for: indexPath, item: item)
             case .noActiveStakes:
                 collectionView.dequeueConfiguredReusableCell(using: emptyRegistration, for: indexPath, item: item)
-            case .countries:
-                collectionView.dequeueConfiguredReusableCell(using: countriesRegistration, for: indexPath, item: item)
             }
         }
         let headerRegistration = UICollectionView.SupplementaryRegistration<WalletSectionHeader>(
@@ -370,21 +388,16 @@ final class WalletClaimViewController: UIViewController {
         }
     }
 
-    /// The compact bar and the Claim button, above the list — each registered
-    /// with the list's scroll edge on its side, so the system draws the soft
-    /// edge effect behind them (`UIScrollEdgeElementContainerInteraction`).
+    /// The soft edges, and the Claim button above the list — its container
+    /// registered with the list's bottom scroll edge, so the system draws the
+    /// soft edge effect behind it (`UIScrollEdgeElementContainerInteraction`).
+    /// The top edge is the navigation bar's: the system draws the effect
+    /// under the bar it tracks.
     private func buildChrome() {
         collectionView.topEdgeEffect.style = .soft
-        // Hidden at rest; `updateCompactBar` shows it with the bar.
-        collectionView.topEdgeEffect.isHidden = true
         collectionView.bottomEdgeEffect.style = .soft
-
-        compactBar.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(compactBar)
-        let topEdge = UIScrollEdgeElementContainerInteraction()
-        topEdge.scrollView = collectionView
-        topEdge.edge = .top
-        compactBar.addInteraction(topEdge)
+        // Named, not searched for: the bar's edge effect reads THIS list.
+        setContentScrollView(collectionView, for: .top)
 
         claimBar.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(claimBar)
@@ -404,10 +417,6 @@ final class WalletClaimViewController: UIViewController {
         let trailing = claimButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -margin)
         let bottom = claimButton.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -margin)
         NSLayoutConstraint.activate([
-            compactBar.topAnchor.constraint(equalTo: view.topAnchor),
-            compactBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            compactBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            compactBar.heightAnchor.constraint(equalToConstant: Self.compactBarHeight),
             claimButton.heightAnchor.constraint(equalToConstant: WalletSheetMetrics.claimHeight),
             leading, trailing, bottom,
             // The container spans from just above the button to the foot —
@@ -450,13 +459,11 @@ final class WalletClaimViewController: UIViewController {
     /// typed, so Dynamic Type, a longer streak line or a list of one cannot
     /// cut a row in half. Skipped once the sheet has forgotten the detent.
     private func updateSmallDetent() {
-        guard let sheet = sheetPresentationController,
+        guard let sheet,
               sheet.detents.contains(where: { $0.identifier == Self.smallDetent }) else { return }
         var bottom: CGFloat?
-        // The Countries card sits under the summary and is always shown; the
-        // rows counted are the stakes under it.
         let rows = dataSource.snapshot().itemIdentifiers
-            .filter { $0 != .summary && $0 != .countries }.prefix(Self.smallDetentRows)
+            .filter { $0 != .summary }.prefix(Self.smallDetentRows)
         for item in rows {
             guard let path = dataSource.indexPath(for: item),
                   let frame = collectionView.layoutAttributesForItem(at: path)?.frame else { continue }
@@ -473,34 +480,77 @@ final class WalletClaimViewController: UIViewController {
         let bottomInset = window?.safeAreaInsets.bottom ?? 0
         // `Spacing.xl` above the button: the bottom blur starts there, so the
         // last row shown ends where the dissolve begins and reads whole.
-        let height = (Self.topInset + bottom + Spacing.xl + WalletSheetMetrics.claimHeight
+        let height = (barClearance() + Self.topInset + bottom + Spacing.xl + WalletSheetMetrics.claimHeight
             + buttonMargin - bottomInset).rounded()
         guard abs(height - smallDetentHeight) > 0.5 else { return }
         smallDetentHeight = height
         sheet.invalidateDetents()
     }
 
-    /// The summary collapses into the compact bar as it scrolls under the
-    /// grabber: the bar fades in while the summary's last `Spacing.lg` slides
-    /// beneath it, and is opaque once the card has fully passed under.
-    private func updateCompactBar() {
-        guard let summary = summaryCell else { return }
-        // The summary's bottom edge, in the sheet's own coordinates.
-        let visibleBottom = summary.frame.maxY - collectionView.contentOffset.y
-        let progress = min(1, max(0, (Self.compactBarHeight + Spacing.lg - visibleBottom) / Spacing.lg))
-        compactBar.progress = progress
-        // ⚠️ THE TOP EDGE EFFECT ONLY WHILE THE BAR IS THERE. The compact bar
-        // is registered with the list's top edge and spans the first 44pt of
-        // the sheet — which, at rest, is where the summary's "Points" and
-        // "Gems" labels sit. The system shows the effect once the list has
-        // scrolled at all and keeps it on the way back up, so after one
-        // round trip the labels rested under a blur (device screenshots,
-        // 26 September 2026). With nothing collapsed there is nothing for the
-        // blur to separate.
-        let hidesTopEdge = progress == 0
-        if collectionView.topEdgeEffect.isHidden != hidesTopEdge {
-            collectionView.topEdgeEffect.isHidden = hidesTopEdge
+    /// The band the navigation bar takes at the sheet's top, which the list
+    /// starts under: the top safe area once laid out; before that (the first
+    /// measure, in `viewDidLoad`) the bar's own fitted height, so the sheet
+    /// does not present at a guess and then jump to the answer.
+    private func barClearance() -> CGFloat {
+        if view.safeAreaInsets.top > 0 { return view.safeAreaInsets.top }
+        guard let bar = navigationController?.navigationBar else { return 0 }
+        return bar.sizeThatFits(CGSize(width: view.bounds.width, height: 0)).height
+    }
+
+    // MARK: - Bar
+
+    /// `[storefront Shop] ······ [✕]` — no title: the summary under it says
+    /// what the sheet is.
+    private func buildBar() {
+        navigationItem.largeTitleDisplayMode = .never
+        let close = UIBarButtonItem(systemItem: .close, primaryAction: UIAction { [weak self] _ in
+            self?.dismiss(animated: true)
+        })
+        close.identifier = Self.closeItemIdentifier
+        close.accessibilityIdentifier = Self.closeItemIdentifier
+        navigationItem.rightBarButtonItem = close
+        if countries != nil {
+            navigationItem.leftBarButtonItem = makeShopItem()
         }
+    }
+
+    /// The Shop: the store's own glyph (`CountryShopEntry.symbolName`, the
+    /// Explore header's door) AND its name. A stock bar item draws one or the
+    /// other, never both, so it is a PLAIN button as the item's custom view —
+    /// no material of its own, the bar's glass is the only capsule (a glass
+    /// button inside would stack a second one).
+    private func makeShopItem() -> UIBarButtonItem {
+        var configuration = UIButton.Configuration.plain()
+        configuration.image = UIImage(systemName: CountryShopEntry.symbolName)
+        configuration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(
+            pointSize: 15, weight: .semibold
+        )
+        configuration.title = CountryShopEntry.title
+        configuration.imagePadding = 6
+        configuration.baseForegroundColor = .label
+        configuration.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 12)
+        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
+            var attributes = attributes
+            attributes.font = UIFont.systemFont(ofSize: 17, weight: .semibold)
+            return attributes
+        }
+        let button = UIButton(configuration: configuration)
+        // The Explore header's door is also "Shop": the identifier tells
+        // the two apart in the accessibility tree.
+        button.accessibilityIdentifier = Self.shopItemIdentifier
+        button.addAction(UIAction { [weak self] _ in self?.openShop() }, for: .primaryActionTriggered)
+        button.sizeToFit()
+        let item = UIBarButtonItem(customView: button)
+        item.identifier = Self.shopItemIdentifier
+        item.accessibilityLabel = CountryShopEntry.title
+        return item
+    }
+
+    /// The Shop, as a sheet OVER this one — where the gems go; closing it
+    /// comes back to the balance they came from.
+    func openShop() {
+        guard let countries, presentedViewController == nil else { return }
+        present(CountryShopViewController.sheet(access: countries), animated: true)
     }
 
     // MARK: - State
@@ -511,13 +561,11 @@ final class WalletClaimViewController: UIViewController {
         stakesByID = Dictionary(uniqueKeysWithValues: stakes.map { ($0.targetID, $0) })
 
         summaryCell?.summary.configure(with: snapshot)
-        compactBar.configure(points: snapshot.balance, gems: snapshot.gems)
         applyClaimButtonState()
 
         var list = NSDiffableDataSourceSnapshot<Section, Item>()
         list.appendSections([.summary, .active])
         list.appendItems([.summary], toSection: .summary)
-        if countries != nil { list.appendItems([.countries], toSection: .summary) }
         let active = stakes.filter { !$0.isSettled }
         list.appendItems(active.isEmpty ? [.noActiveStakes] : active.map { .stake($0.targetID) }, toSection: .active)
         let settled = stakes.filter(\.isSettled)
@@ -529,7 +577,7 @@ final class WalletClaimViewController: UIViewController {
         let previous = Set(dataSource.snapshot().itemIdentifiers)
         list.reconfigureItems(list.itemIdentifiers.filter {
             switch $0 {
-            case .stake, .countries: previous.contains($0)
+            case .stake: previous.contains($0)
             default: false
             }
         })
@@ -746,32 +794,18 @@ final class WalletClaimViewController: UIViewController {
 }
 
 extension WalletClaimViewController: UICollectionViewDelegate {
-    func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        updateCompactBar()
-    }
-
-    /// A stake row opens its post, the Countries card its shop; nothing else
-    /// on the sheet is pressable.
+    /// A stake row opens its post; nothing else on the list is pressable.
     func collectionView(_ collectionView: UICollectionView, shouldSelectItemAt indexPath: IndexPath) -> Bool {
         switch dataSource.itemIdentifier(for: indexPath) {
         case .stake(let id): entries[PostID(id)] != nil && openFeedHero != nil
-        case .countries: true
         default: false
         }
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         collectionView.deselectItem(at: indexPath, animated: false)
-        switch dataSource.itemIdentifier(for: indexPath) {
-        case .stake(let id):
+        if case .stake(let id) = dataSource.itemIdentifier(for: indexPath) {
             openFeed(fromStake: id)
-        case .countries:
-            // Over the wallet: the shop is where the gems go, and closing it
-            // comes back to the balance they came from.
-            guard let countries, presentedViewController == nil else { return }
-            present(CountryShopViewController.sheet(access: countries), animated: true)
-        default:
-            break
         }
     }
 }

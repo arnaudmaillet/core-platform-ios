@@ -312,7 +312,7 @@ final class AppContainer {
                 self.feedFeature.presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)
             },
             countries: countryAccess
-        )
+        ).wrappedInSheet()
     }
 
     /// The Text Post page's drafts: ONE store for the app's lifetime.
@@ -465,12 +465,22 @@ final class AppContainer {
     /// post until then would be broken, not locked.
     private(set) lazy var countryAccess: CountryAccessService? = {
         guard environment == .mock else { return nil }
+        let unlocks = CountryUnlockStore()
+        // The mock account owns the world seed's countries from the first
+        // launch, as if it had bought them (`MockWorldSeed`; Mexico and
+        // South Korea stay locked WITH posts, for the locked design). Seeded
+        // ONCE per code into the same store a purchase writes, so a later
+        // unlock or relock of the account's own survives every relaunch.
+        // `-countries-no-seed` skips it (with `-countries-reset`: home only).
+        if !ProcessInfo.processInfo.arguments.contains("-countries-no-seed") {
+            unlocks.seedUnlocks(MockWorldSeed.unlockedCountryCodes, for: MockAuthService.accountID)
+        }
         return CountryAccessService(
             accountID: MockAuthService.accountID,
             // The account's own country. The mock account lives in Paris.
             homeCountry: "FR",
             wallet: walletStore,
-            unlocks: CountryUnlockStore(),
+            unlocks: unlocks,
             activity: CountryAccessService.mockActivity(in: mockBackend)
         )
     }()

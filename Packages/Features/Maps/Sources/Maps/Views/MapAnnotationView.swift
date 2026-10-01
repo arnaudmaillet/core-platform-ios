@@ -100,6 +100,22 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing
     /// Fired the instant the pin is tapped — see `installInstantTap`.
     var onSelect: (() -> Void)?
 
+    /// Fired when the marker comes back from being hidden — a flight or a
+    /// reveal window conceals it for as long as its twin is in the air.
+    ///
+    /// ⚠️ MapKit's collisions ignore a hidden view, so while the marker was
+    /// away a lower-priority annotation it had been covering (an empty
+    /// country's flag disc) won its place — and MapKit does not take it back
+    /// when the marker returns, only at the next region change. Filmed: a
+    /// closed flight landed its marker under Andorra's disc. The host uses
+    /// this to make what overlaps the marker give way again
+    /// (`CountryLayer.giveWay(to:)`).
+    var onReappear: ((MKAnnotationView) -> Void)?
+
+    override var isHidden: Bool {
+        didSet { if oldValue, !isHidden { onReappear?(self) } }
+    }
+
     /// Reveals the live-preview surface over the thumbnail (playback is attached
     /// by the coordinator via `videoRenderView`). Seeds the render view's poster
     /// with the already-loaded thumbnail so the pin shows the still image — not a
@@ -194,10 +210,13 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing
     /// Renders the pin's thumbnail and (dormant) video badge — or, for a
     /// text-only post, the symbol face instead of a cover.
     func configure(
-        with pin: MapPin, imagePipeline: ImagePipeline,
+        with pin: MapPin, dress: MapMarkerDress = .neutral, imagePipeline: ImagePipeline,
         iconCatalog: AnimatedIconCatalog? = nil, previewCatalog: AnimatedIconCatalog? = nil
     ) {
         self.imagePipeline = imagePipeline
+        // ABOVE the guard, like the cluster's: an unlock changes the dress of
+        // a pin whose post — and so everything below — is unchanged.
+        applyDress(dress)
         // Idempotent: a reconcile re-configures every surviving marker, so a
         // marker already showing this post must be left exactly as it is —
         // blanking and re-fetching an unchanged thumbnail is what flashes it.
@@ -214,7 +233,7 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing
         case .text: "text"
         }
         #endif
-        playBadge.isHidden = pin.kind != .video
+        playBadge.isHidden = pin.kind != .video || dress.isLocked
         // Set on every configure, not only for text: this view is recycled, so
         // a media pin dequeuing a view that last wore the text face has to take
         // it off again — and get its square back.
@@ -386,7 +405,18 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing
         // photograph is worse than a stale avatar: it moves.
         applyIconArt(nil)
         card.setTextAvatar(nil)
+        applyDress(.neutral)
         applyFace(.media)
         playBadge.isHidden = true
+    }
+
+    /// See `MapClusterAnnotationView.applyDress`. A lone pin speaks for no
+    /// place, so all it can wear beyond the neutral ring is the lock — and a
+    /// locked pin's play badge would promise a video it will not open.
+    private func applyDress(_ dress: MapMarkerDress) {
+        card.setDress(dress)
+        displayPriority = dress.isLocked ? MapMarkerDress.lockedPriority : .required
+        accessibilityHint = dress.isLocked ? "Locked country. Shows how to unlock it" : nil
+        playBadge.isHidden = dress.isLocked || representedPin?.kind != .video
     }
 }

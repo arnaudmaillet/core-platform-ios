@@ -103,8 +103,10 @@ final class CountryRenderer: MKMultiPolygonRenderer {
 /// the selected one's lifted copy. The map view controller installs it and
 /// forwards `rendererFor` and `viewFor`; which countries are open comes from
 /// `access`, and what a tap on one DOES is the host's (`onMapTapped`,
-/// `onLockedBadgeTapped`). Locked countries also wear a badge at their centre
-/// (`LockedCountryAnnotation`) with their rank.
+/// `onLockedCountryTapped`, `onCountryTapped`). A country that no post marker
+/// stands for — the host says which do (`setCountriesWithMarkers`) — wears
+/// its flag in a disc at its label point (`CountryFlagAnnotation`), darkened
+/// under a lock when it is locked.
 ///
 /// ⚠️ **A TAP ON A MARKER IS THE MARKER'S.** The country tap runs alongside
 /// the map's own recognisers and stands down when the touch landed on an
@@ -124,14 +126,27 @@ final class CountryLayer: NSObject {
     /// The user started moving the map: a pan, a pinch or a rotation.
     var onMapGesture: (() -> Void)?
 
-    /// A locked country's badge was tapped.
-    var onLockedBadgeTapped: ((CountryAtlas.Country) -> Void)?
+    /// A locked country's flag disc was tapped.
+    var onLockedCountryTapped: ((CountryAtlas.Country) -> Void)?
+    /// An open country's flag disc was tapped.
+    var onCountryTapped: ((CountryAtlas.Country) -> Void)?
     /// Which countries are open, and their standings. Nil: every country is
     /// open and nothing is sold (the fleet, until the backend carries it).
     var access: (any CountryAccess)?
 
     private weak var mapView: MKMapView?
-    private var badges: [String: LockedCountryAnnotation] = [:]
+    private var flags: [String: CountryFlagAnnotation] = [:]
+    /// The countries a post marker currently stands for — no disc for those.
+    private var countriesWithMarkers: Set<String> = []
+    /// Every country's place by population, for the discs' priority where
+    /// there is no standing (the fleet, or a country the backend has not
+    /// ranked).
+    private lazy var populationRanks: [String: Int] = Dictionary(
+        uniqueKeysWithValues: atlas.countries
+            .sorted { $0.population > $1.population }
+            .enumerated()
+            .map { ($1.code, $0 + 1) }
+    )
     private var shapes: [String: CountryShape] = [:]
     private var renderers: [String: CountryRenderer] = [:]
     private var lifted: (shape: CountryShape, renderer: CountryRenderer?)?
@@ -153,8 +168,8 @@ final class CountryLayer: NSObject {
     func install(on mapView: MKMapView) {
         self.mapView = mapView
         mapView.register(
-            LockedCountryAnnotationView.self,
-            forAnnotationViewWithReuseIdentifier: LockedCountryAnnotationView.reuseIdentifier
+            CountryFlagAnnotationView.self,
+            forAnnotationViewWithReuseIdentifier: CountryFlagAnnotationView.reuseIdentifier
         )
         let tap = UITapGestureRecognizer(target: self, action: #selector(tapped(_:)))
         tap.delegate = self
@@ -177,6 +192,25 @@ final class CountryLayer: NSObject {
         Task { [weak self] in
             let countries = await Task.detached(priority: .userInitiated) { CountryAtlas.shared.countries }.value
             self?.addBorders(for: countries)
+            // ⚠️ THE DISCS WAIT FOR THEIR FLAGS, THE BORDERS DO NOT. Every
+            // flag's picture and colours are rendered off the main thread
+            // first — the world zoom asks for two hundred of them in one turn
+            // — and nothing the map shows waits on it: the borders are already
+            // in, and the discs arrive when their pictures are.
+            let codes = countries.map(\.code)
+            #if DEBUG
+            let started = CACurrentMediaTime()
+            #endif
+            await Task.detached(priority: .utility) { FlagPalette.warm(codes) }.value
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-maps-flag-log") {
+                print(String(format: "[flags] warmed %d flags in %.1f ms (off main)",
+                             codes.count, (CACurrentMediaTime() - started) * 1000))
+            }
+            #endif
+            guard let self else { return }
+            flagsReady = true
+            refreshBadges()
         }
     }
 
@@ -185,8 +219,11 @@ final class CountryLayer: NSObject {
         let shapes = countries.map { CountryShape(country: $0) }
         self.shapes = Dictionary(uniqueKeysWithValues: shapes.map { ($0.code, $0) })
         mapView.addOverlays(shapes, level: .aboveRoads)
-        refreshBadges()
     }
+
+    /// Whether every flag has been rendered (`install`) — the discs go on the
+    /// map only then, so no disc ever renders its flag on the main thread.
+    private var flagsReady = false
 
     /// The style `code` is drawn in: open, or locked.
     func style(for code: String) -> CountryStyle {
@@ -194,40 +231,123 @@ final class CountryLayer: NSObject {
         return access.isUnlocked(code) ? .unlocked : .locked
     }
 
-    /// Puts a badge on every locked country that has a standing, and takes
-    /// it off every unlocked one.
-    func refreshBadges() {
-        guard let mapView, !shapes.isEmpty else { return }
-        var wanted: [String: LockedCountryAnnotation] = [:]
-        if let access {
-            for country in atlas.countries where !access.isUnlocked(country.code) {
-                guard let standing = access.standing(of: country.code) else { continue }
-                wanted[country.code] = badges[country.code]?.standing == standing
-                    ? badges[country.code]
-                    : LockedCountryAnnotation(country: country, standing: standing)
-            }
-        }
-        let gone = badges.filter { wanted[$0.key] !== $0.value }.map(\.value)
-        let new = wanted.filter { badges[$0.key] !== $0.value }.map(\.value)
-        if !gone.isEmpty { mapView.removeAnnotations(gone) }
-        if !new.isEmpty { mapView.addAnnotations(new) }
-        badges = wanted
+    /// The countries a post marker stands for right now, told by the host
+    /// after every layout: those wear no disc, every other country does.
+    /// Free when nothing changed — the map re-lays out many times a second
+    /// under a finger, and a set that did not move must not touch the map.
+    func setCountriesWithMarkers(_ codes: Set<String>) {
+        guard codes != countriesWithMarkers else { return }
+        countriesWithMarkers = codes
+        refreshBadges()
     }
 
-    /// The badge view for a locked country.
-    func view(for badge: LockedCountryAnnotation, in mapView: MKMapView) -> MKAnnotationView {
-        let view = mapView.dequeueReusableAnnotationView(
-            withIdentifier: LockedCountryAnnotationView.reuseIdentifier, for: badge
-        ) as? LockedCountryAnnotationView ?? LockedCountryAnnotationView(
-            annotation: badge, reuseIdentifier: LockedCountryAnnotationView.reuseIdentifier
-        )
-        view.annotation = badge
-        view.onSelect = { [weak self] in
-            guard let self, let country = self.atlas.country(code: badge.code) else { return }
-            self.onLockedBadgeTapped?(country)
+    /// The disc a country wears, or nil when a post marker stands for it.
+    func wantsFlag(for country: CountryAtlas.Country) -> (isLocked: Bool, rank: Int)? {
+        guard !countriesWithMarkers.contains(country.code) else { return nil }
+        let isLocked = access.map { !$0.isUnlocked(country.code) } ?? false
+        let rank = access?.standing(of: country.code)?.rank
+            ?? populationRanks[country.code]
+            ?? atlas.countries.count
+        return (isLocked, rank)
+    }
+
+    /// Puts a flag disc on every country no post marker stands for, and takes
+    /// it off every country one now does. A disc whose lock or rank changed is
+    /// replaced (its view reads both when it is configured).
+    func refreshBadges() {
+        guard let mapView, !shapes.isEmpty, flagsReady else { return }
+
+        var wanted: [String: CountryFlagAnnotation] = [:]
+        for country in atlas.countries {
+            guard let flag = wantsFlag(for: country) else { continue }
+            if let current = flags[country.code], current.isLocked == flag.isLocked, current.rank == flag.rank {
+                wanted[country.code] = current
+            } else {
+                wanted[country.code] = CountryFlagAnnotation(country: country, isLocked: flag.isLocked, rank: flag.rank)
+            }
         }
+        let gone = flags.filter { wanted[$0.key] !== $0.value }.map(\.value)
+        let new = wanted.filter { flags[$0.key] !== $0.value }.map(\.value)
+        if !gone.isEmpty { mapView.removeAnnotations(gone) }
+        flags = wanted
+        // Busiest first: the discs MapKit should keep land first.
+        pendingFlags = (pendingFlags + new.sorted { $0.rank < $1.rank })
+            .filter { flags[$0.code] === $0 }
+        drainPendingFlags()
+    }
+
+    /// Discs waiting to go on the map — see `drainPendingFlags`.
+    private var pendingFlags: [CountryFlagAnnotation] = []
+    private var isDrainingFlags = false
+    /// How many discs go on the map per run-loop turn.
+    private static let flagsPerTurn = 10
+
+    /// ⚠️ A FEW DISCS PER TURN, NOT TWO HUNDRED IN ONE. The first refresh puts
+    /// a disc on nearly every country, and MapKit realises every one in view
+    /// in the turn they are added — measured as one 89 ms turn at the world
+    /// zoom (`-presentation-budget`). Spread over turns, busiest first, the
+    /// map keeps drawing while the discs arrive.
+    private func drainPendingFlags() {
+        guard !isDrainingFlags, let mapView, !pendingFlags.isEmpty else { return }
+        let batch = Array(pendingFlags.prefix(Self.flagsPerTurn))
+        pendingFlags.removeFirst(batch.count)
+        mapView.addAnnotations(batch)
+        guard !pendingFlags.isEmpty else { return }
+        isDrainingFlags = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            isDrainingFlags = false
+            // Still wanted? A refresh in between may have replaced or dropped
+            // some (an unlock, a marker now standing for the country).
+            pendingFlags = pendingFlags.filter { self.flags[$0.code] === $0 }
+            drainPendingFlags()
+        }
+    }
+
+    /// Makes every flag disc drawn over `rect` (map-view points) give way
+    /// again: a post marker coming back from a flight reclaims its place.
+    ///
+    /// ⚠️ MapKit settles collisions on a region change and when an annotation
+    /// ARRIVES, never when a hidden view is shown again — so the discs that
+    /// won the marker's place while it was hidden are re-added, which is an
+    /// arrival, and collide against the marker now on screen. Only the few
+    /// discs over the marker, so nothing else on the map moves.
+    func giveWay(to rect: CGRect) {
+        guard let mapView else { return }
+        let covering = flags.values.filter { flag in
+            guard let view = mapView.view(for: flag), !view.isHidden, view.alpha > 0 else { return false }
+            return view.frame.intersects(rect)
+        }
+        guard !covering.isEmpty else { return }
+        mapView.removeAnnotations(covering)
+        mapView.addAnnotations(covering)
+    }
+
+    /// The disc view for a country.
+    func view(for flag: CountryFlagAnnotation, in mapView: MKMapView) -> MKAnnotationView {
+        let view = mapView.dequeueReusableAnnotationView(
+            withIdentifier: CountryFlagAnnotationView.reuseIdentifier, for: flag
+        ) as? CountryFlagAnnotationView ?? CountryFlagAnnotationView(
+            annotation: flag, reuseIdentifier: CountryFlagAnnotationView.reuseIdentifier
+        )
+        configure(view, for: flag)
         return view
     }
+
+    /// Dresses a disc and says what its tap does: a locked country is
+    /// OFFERED, an open one is shown.
+    func configure(_ view: CountryFlagAnnotationView, for flag: CountryFlagAnnotation) {
+        view.annotation = flag
+        view.onSelect = { [weak self] in
+            guard let self, let country = self.atlas.country(code: flag.code) else { return }
+            if flag.isLocked {
+                self.onLockedCountryTapped?(country)
+            } else {
+                self.onCountryTapped?(country)
+            }
+        }
+    }
+
 
     func renderer(for overlay: any MKOverlay) -> MKOverlayRenderer? {
         guard let shape = overlay as? CountryShape else { return nil }

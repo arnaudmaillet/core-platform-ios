@@ -28,17 +28,86 @@ struct CountryLayerTests {
         #expect(lifted.alpha == 0.5)
     }
 
-    /// A badge's view carries an empty margin MapKit collides on, but only
-    /// the badge itself takes a touch.
-    @Test func aBadgeKeepsItsDistanceButOnlyItsBodyIsTappable() throws {
+    /// A disc's view carries an empty margin MapKit collides on, but only
+    /// the disc itself takes a touch.
+    @Test func aFlagDiscKeepsItsDistanceButOnlyItsBodyIsTappable() throws {
         let spain = try #require(CountryAtlas.shared.country(code: "ES"))
-        let badge = LockedCountryAnnotation(
-            country: spain, standing: CountryStanding(code: "ES", rank: 4, likes: 1, posts: 1, price: 50)
-        )
-        let view = LockedCountryAnnotationView(annotation: badge, reuseIdentifier: nil)
-        let margin = LockedCountryAnnotationView.collisionMargin
+        let flag = CountryFlagAnnotation(country: spain, isLocked: true, rank: 4)
+        let view = CountryFlagAnnotationView(annotation: flag, reuseIdentifier: nil)
+        let margin = CountryFlagAnnotationView.collisionMargin
         #expect(view.bounds.width > 2 * margin.width && view.bounds.height > 2 * margin.height)
         #expect(!view.point(inside: CGPoint(x: 2, y: 2), with: nil), "the margin is empty map")
         #expect(view.point(inside: CGPoint(x: view.bounds.midX, y: view.bounds.midY), with: nil))
+    }
+
+    /// An empty country is its flag in a disc, inside the flag-gradient
+    /// border — darkened with a lock in its corner when locked, plain when
+    /// open — and it gives way to every post marker.
+    @Test func anEmptyCountryWearsItsFlag() throws {
+        let japan = try #require(CountryAtlas.shared.country(code: "JP"))
+        let locked = CountryFlagAnnotationView(
+            annotation: CountryFlagAnnotation(country: japan, isLocked: true, rank: 12), reuseIdentifier: nil
+        )
+        #expect(locked.debugIsDarkened)
+        #expect(locked.debugBadge == .lock)
+        #expect(locked.debugBorderFlag == "JP")
+        #expect(locked.debugFlagImage != nil)
+        let open = CountryFlagAnnotationView(
+            annotation: CountryFlagAnnotation(country: japan, isLocked: false, rank: 12), reuseIdentifier: nil
+        )
+        #expect(!open.debugIsDarkened)
+        #expect(open.debugBadge == nil)
+        #expect(open.debugBorderFlag == "JP")
+        // Under every post marker, open or locked; the busier, the higher.
+        #expect(open.displayPriority.rawValue < MapMarkerDress.lockedPriority.rawValue)
+        #expect(CountryFlagAnnotationView.priority(forRank: 1).rawValue
+                > CountryFlagAnnotationView.priority(forRank: 40).rawValue)
+    }
+
+    /// Tapping a locked disc OFFERS the country; an open one is shown.
+    @Test func tappingALockedDiscOffersTheCountry() throws {
+        let spain = try #require(CountryAtlas.shared.country(code: "ES"))
+        let layer = CountryLayer()
+        var offered: String?
+        var shown: String?
+        layer.onLockedCountryTapped = { offered = $0.code }
+        layer.onCountryTapped = { shown = $0.code }
+        let view = CountryFlagAnnotationView(annotation: nil, reuseIdentifier: nil)
+        layer.configure(view, for: CountryFlagAnnotation(country: spain, isLocked: true, rank: 4))
+        view.onSelect?()
+        #expect(offered == "ES")
+        #expect(shown == nil)
+        layer.configure(view, for: CountryFlagAnnotation(country: spain, isLocked: false, rank: 4))
+        view.onSelect?()
+        #expect(shown == "ES")
+    }
+
+    /// A country a post marker stands for wears no disc; every other one
+    /// does, locked or open as the account has it.
+    @Test func onlyCountriesWithoutAMarkerWearADisc() throws {
+        let layer = CountryLayer()
+        layer.access = FakeAccess()
+        let france = try #require(CountryAtlas.shared.country(code: "FR"))
+        let spain = try #require(CountryAtlas.shared.country(code: "ES"))
+        let japan = try #require(CountryAtlas.shared.country(code: "JP"))
+        layer.setCountriesWithMarkers(["FR"])
+        #expect(layer.wantsFlag(for: france) == nil)
+        #expect(layer.wantsFlag(for: spain)?.isLocked == true)
+        #expect(layer.wantsFlag(for: spain)?.rank == 2, "the standing's rank")
+        #expect(layer.wantsFlag(for: japan)?.isLocked == true)
+        layer.setCountriesWithMarkers(["ES"])
+        #expect(layer.wantsFlag(for: france)?.isLocked == false, "home: open")
+        #expect(layer.wantsFlag(for: spain) == nil)
+    }
+
+    private final class FakeAccess: CountryAccess {
+        let homeCountry = "FR"
+        let gems = 0
+        func isUnlocked(_ code: String) -> Bool { code == "FR" }
+        func standing(of code: String) -> CountryStanding? {
+            code == "ES" ? CountryStanding(code: "ES", rank: 2, likes: 10, posts: 3, price: 50) : nil
+        }
+        func standings() -> [CountryStanding] { [] }
+        func unlock(_ code: String) -> CountryUnlockOutcome { .unknownCountry }
     }
 }

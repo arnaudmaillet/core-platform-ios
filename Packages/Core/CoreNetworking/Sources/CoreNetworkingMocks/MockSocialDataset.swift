@@ -56,6 +56,14 @@ public struct MockSocialDataset: Sendable {
         /// Non-empty = this post is a repost of `parentID` (post.v1 lineage:
         /// a repost is the author's own post referencing its source).
         public let parentID: String
+        /// A like count chosen for this post, instead of the counter store's
+        /// array-index formula. Only the world seed sets it (`MockWorldSeed`):
+        /// a city's trending post has to be the trending post on purpose.
+        public var seededLikes: Int64?
+        /// Where this post was published, when the seed says so — the geo
+        /// mock otherwise derives one (a venue, or the scatter). Only the
+        /// world seed sets it.
+        public var location: (latitude: Double, longitude: Double)?
     }
 
     /// The profile owned by the mock login account (MockAuthService.accountID).
@@ -588,6 +596,15 @@ public struct MockSocialDataset: Sendable {
         return posts.reduce(into: [:]) { result, post in
             guard post.media == nil else { return }
             guard let index = Self.numericSuffix(of: post.postID) else { return }
+            // The world's text posts say for themselves which wear an icon
+            // (`MockWorldSeed.Kind.text(iconFace:)`): their ids do not run on
+            // the corpus's three-kind cycle the rule below reads.
+            if post.postID.hasPrefix(MockWorldSeed.postIDPrefix) {
+                if MockWorldSeed.wearsIconFace(post.postID) {
+                    result[post.postID] = catalogue[index % catalogue.count]
+                }
+                return
+            }
             // Text posts are `index % 3 == 2` in this corpus, so `index / 3`
             // numbers them 0, 1, 2 … — skipping every third leaves a visible
             // minority wearing the author's face instead.
@@ -706,7 +723,12 @@ public struct MockSocialDataset: Sendable {
     /// vary their output by it (the geo pin projection) can ask.
     public let mediaCatalog: MediaCatalog
 
-    public init(postCount: Int = 120, mediaCatalog: MediaCatalog = .synthetic) {
+    /// `seedsWorld` appends the posts published beyond France
+    /// (`MockWorldSeed`) at the TAIL. Off by default, so every test that
+    /// builds a dataset keeps the corpus its fixtures are calibrated
+    /// against; the app turns it on with the map's place seed
+    /// (`MockBackend(seedsMapHierarchy:)`).
+    public init(postCount: Int = 120, mediaCatalog: MediaCatalog = .synthetic, seedsWorld: Bool = false) {
         self.mediaCatalog = mediaCatalog
         // (handle, name, bio, website) — bios vary from empty to multi-line so
         // the profile header exercises every identity-row combination. Many
@@ -871,9 +893,19 @@ public struct MockSocialDataset: Sendable {
         }
         // Five posts that arrived AFTER the viewer last looked, at the head of
         // the timeline. See `justArrivedRecords`.
-        posts = Self.justArrivedRecords(authors: authors, mediaCatalog: mediaCatalog)
+        let seeded = Self.justArrivedRecords(authors: authors, mediaCatalog: mediaCatalog)
             + records
             + Self.viewerRecords(mediaCatalog: mediaCatalog, after: postCount)
+        // The world goes LAST: like counts and the geo mock's venue walk read
+        // array positions, so anything inserted ahead would move them all.
+        // Authored by the first eight authors, whose profiles already carry
+        // galleries.
+        posts = seedsWorld
+            ? seeded + MockWorldSeed.records(
+                authors: Array(authors.prefix(8)),
+                olderThanMS: seeded.map(\.publishedAtMS).min() ?? newestMS
+            )
+            : seeded
 
         // Twelve follows, not four: the compose picker expands the viewer's
         // first eight follows into friend-of-friend candidates

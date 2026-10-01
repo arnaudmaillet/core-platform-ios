@@ -10,7 +10,8 @@ import UIKit
 
 /// How For You's rows answer a finger (2026-09-29 follow-up): the headers push
 /// through their OWN tap path, a long press lifts a preview whose commit opens
-/// what a tap would, "For you" titles the list, the Friends row holds its
+/// what a tap would, "For you ›" titles the list and pushes Discover's whole
+/// mosaic (2026-10-01), the Friends row holds its
 /// order while the viewer is on the screen, and a card's caption animates its
 /// emotes.
 @MainActor
@@ -59,10 +60,36 @@ struct ForYouRowsInteractionTests {
         var pushed: [String] = []
         rails.onFriendsHeaderTapped = { pushed.append("friends") }
         rails.onFollowingHeaderTapped = { pushed.append("following") }
+        rails.onListHeaderTapped = { pushed.append("for you") }
         rails.render(railsState(friends: [story("ana", unseen: true)], following: [post("c", by: "bo")]))
         rails.debugTapFriendsHeader()
         rails.debugTapFollowingHeader()
-        #expect(pushed == ["friends", "following"])
+        rails.debugTapListHeader()
+        #expect(pushed == ["friends", "following", "for you"])
+    }
+
+    /// "For you ›" pushes Discover's whole mosaic — the very screen a chunk's
+    /// "View all" pushes, through the same entry point (asked for 2026-10-01).
+    /// Through the heading's OWN recogniser and the screen's real wiring, so a
+    /// heading drawn with a chevron but wired to nothing fails here.
+    @Test func theForYouHeadingPushesTheGalleryViewAllPushes() {
+        func pushed(by press: (ForYouViewController) -> Void) -> UIViewController? {
+            let screen = ForYouViewController(
+                viewModel: ForYouViewModel(repository: EmptyForYouProvider()),
+                imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
+                makeSnapFeed: { _ in UIViewController() },
+                prewarm: { _ in }
+            )
+            let nav = UINavigationController(rootViewController: screen)
+            screen.loadViewIfNeeded()
+            press(screen)
+            return nav.topViewController
+        }
+        let byHeading = pushed { $0.debugRails.debugTapListHeader() }
+        let byViewAll = pushed { $0.debugPressViewAll() }
+        #expect(byHeading is DiscoverGalleryViewController)
+        #expect(byViewAll is DiscoverGalleryViewController)
+        #expect(byHeading?.hidesBottomBarWhenPushed == true, "the gallery pushes without the tab bar")
     }
 
     /// "For you" under the rows — and nothing at all without rows.
@@ -82,8 +109,8 @@ struct ForYouRowsInteractionTests {
     }
 
     /// The three titles are the app's ONE section title (2026-09-30):
-    /// `Friends 2 ›` with the count as secondary text, "For you" a plain
-    /// heading — every one standing `SectionTitleView.Metrics.surfaceInset`
+    /// `Friends 2 ›` with the count as secondary text, `For you ›` a link
+    /// with no count (2026-10-01) — every one standing `SectionTitleView.Metrics.surfaceInset`
     /// from the list's edge, the same line the pushed lists' and the sound
     /// sheet's titles stand on.
     @Test func theRowTitlesAreTheAppsSectionTitle() {
@@ -100,7 +127,7 @@ struct ForYouRowsInteractionTests {
         for header in headers { header.layoutIfNeeded() }
         #expect(headers.map(\.debugTitleText) == ["Friends", "Following", "For you"])
         #expect(headers.map(\.debugCountText) == ["2", nil, nil])
-        #expect(headers.map(\.debugShowsChevron) == [true, true, false])
+        #expect(headers.map(\.debugShowsChevron) == [true, true, true])
         for header in headers {
             let x = header.convert(header.debugFrames.title, to: list).minX
             #expect(abs(x - SectionTitleView.Metrics.surfaceInset) < 0.5, "\(header.debugTitleText ?? "") at \(x)")
@@ -109,6 +136,11 @@ struct ForYouRowsInteractionTests {
         #expect(abs(friends.count.minX - friends.title.maxX - SectionTitleView.Metrics.titleToCount) < 0.5)
         #expect(abs(friends.chevron.minX - friends.count.maxX - SectionTitleView.Metrics.countToChevron) < 0.5)
         #expect(headers[0].accessibilityValue == "2 new")
+        // "For you ›": the chevron a word space after the title, as on a row
+        // header with nothing new.
+        let forYou = headers[2].debugFrames
+        #expect(abs(forYou.chevron.minX - forYou.title.maxX - SectionTitleView.Metrics.titleToChevron) < 0.5)
+        #expect(headers[2].accessibilityTraits.contains(.button))
     }
 
     // MARK: - Long press
@@ -218,4 +250,10 @@ struct ForYouRowsInteractionTests {
         )
         #expect(overlay.subviews.contains { $0 is EmoteLabel })
     }
+}
+
+/// Pages nothing — the heading's push needs the screen, not its content.
+private final class EmptyForYouProvider: ForYouProviding, @unchecked Sendable {
+    func firstPage() async throws -> ForYouPage { ForYouPage(posts: [], nextPageToken: nil) }
+    func page(after token: String) async throws -> ForYouPage { ForYouPage(posts: [], nextPageToken: nil) }
 }

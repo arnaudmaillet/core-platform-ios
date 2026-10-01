@@ -159,7 +159,7 @@ final class RevealDismissInteractionController: NSObject,
         // home is the card, not the page it was read from.
         let standIn = geometry.makeDismissStandIn()
         if let standIn {
-            host.addSubview(standIn)
+            RevealStage.mountDismissStandIn(standIn, in: host)
             standIn.alpha = RevealStage.fill(at: 0, carriesPage: geometry.pageFit.carriesPage)
             (standIn as? RevealStandInShaping)?.setContentOpacity(
                 RevealStage.contentOpacity(at: 0, carriesPage: geometry.pageFit.carriesPage)

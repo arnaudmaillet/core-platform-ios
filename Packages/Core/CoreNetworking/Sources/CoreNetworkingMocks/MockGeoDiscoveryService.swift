@@ -133,8 +133,11 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
     /// kinds deliberately so the client's kind-BLIND clustering has something
     /// to prove itself on. Nothing downstream — not the tile query, not the
     /// engine — asks what a post is in order to group it.
-    private static func venueAssignments(for posts: [MockSocialDataset.PostRecord]) -> [String: Venue] {
+    private static func venueAssignments(for corpus: [MockSocialDataset.PostRecord]) -> [String: Venue] {
         var assignments: [String: Venue] = [:]
+        // A post that says where it was published (the world seed) stands
+        // there — no Paris venue may claim it.
+        let posts = corpus.filter { $0.location == nil }
         // ⚠️ TEXT MEMBERS COME FROM THE CORPUS BODY, NEVER FROM THE ARRIVALS —
         // and that is what keeps the mixed venue wearing a text face.
         //
@@ -419,10 +422,17 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
     /// the mock's per-country standings, which the backend will own.
     public func placements() -> [(postID: String, latitude: Double, longitude: Double)] {
         dataset.posts.enumerated().map { index, post in
-            let (lat, lng) = venues[post.postID].map { ($0.lat, $0.lng) }
-                ?? coordinate(forIndex: index, postID: post.postID)
+            let (lat, lng) = position(of: post, at: index)
             return (post.postID, lat, lng)
         }
+    }
+
+    /// Where a post stands: its own seeded location (the world seed), a
+    /// venue's shared address, or its scatter point.
+    private func position(of post: MockSocialDataset.PostRecord, at index: Int) -> (lat: Double, lng: Double) {
+        if let location = post.location { return (location.latitude, location.longitude) }
+        return venues[post.postID].map { ($0.lat, $0.lng) }
+            ?? coordinate(forIndex: index, postID: post.postID)
     }
 
     public func register(on bff: MockBFF) {
@@ -457,9 +467,9 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
 
         let pins = dataset.posts.enumerated().compactMap { index, post -> GeoDiscovery_V1_RadarPin? in
             // A venue's members share ONE coordinate exactly, so they cluster
-            // at every zoom; everything else keeps its own scattered point.
-            let (lat, lng) = venues[post.postID].map { ($0.lat, $0.lng) }
-                ?? coordinate(forIndex: index, postID: post.postID)
+            // at every zoom; a world post stands where it was published;
+            // everything else keeps its own scattered point.
+            let (lat, lng) = position(of: post, at: index)
             guard Self.contains(viewport: viewport, lat: lat, lng: lng),
                   matches(filter: filter, post: post, lat: lat, lng: lng, viewport: viewport)
             else { return nil }
