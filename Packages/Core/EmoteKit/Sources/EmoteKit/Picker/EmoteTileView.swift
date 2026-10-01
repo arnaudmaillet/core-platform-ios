@@ -15,6 +15,9 @@ import UIKit
 ///   most `EmoteRecents.limit` recents), and what a person reaches for;
 /// - everything else stays on its system glyph, which is the emoji itself.
 ///
+/// (`EmoteStripView` is the exception that asks for everything: one row,
+/// about ten tiles displayed at a time.)
+///
 /// Every animating tile holds one of `EmoteEngine.maxAnimatedEmotes` slots,
 /// and gives it back when it is reused or leaves the window. Under Reduce
 /// Motion an emoji stays its glyph and a house emote shows its first frame.
@@ -109,6 +112,14 @@ final class EmoteTileView: UIView {
             holdsSlot = false
             engine?.releasePlaybackSlot()
         }
+    }
+
+    /// `reset()`, and forgets the emote too, so a window re-attach does not
+    /// ask again — for a cell the collection view stopped displaying but
+    /// keeps, hidden, in its hierarchy.
+    func clear() {
+        reset()
+        emote = nil
     }
 
     override func didMoveToWindow() {
