@@ -1,3 +1,4 @@
+import CoreLocation
 import Foundation
 
 /// DEBUG stand-in for the semantic-cluster metadata the backend cannot send
@@ -188,8 +189,129 @@ enum MapMockPlaces {
         if (49.90...58.70).contains(pin.latitude), (-8.20...1.80).contains(pin.longitude) {
             return [unitedKingdom]
         }
+        // The world beyond Europe (`MockWorldSeed`): its city circles, then
+        // the country's real BORDER rather than a box — the Americas'
+        // rectangles would overlap (Montreal sits inside any box that holds
+        // New York's latitude), and the border is what the map unlocks by
+        // anyway (`CountryAtlas`). Only these few countries are tested, each
+        // behind its bounds check, so the cost is a handful of comparisons.
+        for circle in worldCities where within(pin, of: circle.center, radius: 0.15) {
+            return [circle.city, circle.country]
+        }
+        let coordinate = CLLocationCoordinate2D(latitude: pin.latitude, longitude: pin.longitude)
+        for entry in worldCountries
+        where CountryAtlas.shared.country(code: entry.code)?.contains(coordinate) == true {
+            return [entry.place]
+        }
         return []
     }
+
+    // MARK: - The world beyond Europe
+
+    // Cities res 5 and countries res 1 like the European roster (the
+    // banding's span table is per KIND). Base cells are stand-ins, as above.
+    // Ranks are fictional, continuing the European ones.
+    static let milan = MapPlace(
+        id: "city:milan", name: "Milan", kind: .city,
+        h3Index: H3CellGeometry.makeIndex(resolution: 5, baseCell: 21), rank: 19
+    )
+    static let newYork = MapPlace(
+        id: "city:new-york", name: "New York", kind: .city,
+        h3Index: H3CellGeometry.makeIndex(resolution: 5, baseCell: 30), rank: 7
+    )
+    static let losAngeles = MapPlace(
+        id: "city:los-angeles", name: "Los Angeles", kind: .city,
+        h3Index: H3CellGeometry.makeIndex(resolution: 5, baseCell: 30), rank: 15
+    )
+    static let tokyo = MapPlace(
+        id: "city:tokyo", name: "Tokyo", kind: .city,
+        h3Index: H3CellGeometry.makeIndex(resolution: 5, baseCell: 40), rank: 8
+    )
+    static let kyoto = MapPlace(
+        id: "city:kyoto", name: "Kyoto", kind: .city,
+        h3Index: H3CellGeometry.makeIndex(resolution: 5, baseCell: 40), rank: 18
+    )
+    static let rioDeJaneiro = MapPlace(
+        id: "city:rio-de-janeiro", name: "Rio de Janeiro", kind: .city,
+        h3Index: H3CellGeometry.makeIndex(resolution: 5, baseCell: 80), rank: 11
+    )
+    static let marrakech = MapPlace(
+        id: "city:marrakech", name: "Marrakech", kind: .city,
+        h3Index: H3CellGeometry.makeIndex(resolution: 5, baseCell: 50), rank: 16
+    )
+    static let sydney = MapPlace(
+        id: "city:sydney", name: "Sydney", kind: .city,
+        h3Index: H3CellGeometry.makeIndex(resolution: 5, baseCell: 110), rank: 13
+    )
+    static let montreal = MapPlace(
+        id: "city:montreal", name: "Montreal", kind: .city,
+        h3Index: H3CellGeometry.makeIndex(resolution: 5, baseCell: 16), rank: 17
+    )
+    static let mexicoCity = MapPlace(
+        id: "city:mexico-city", name: "Mexico City", kind: .city,
+        h3Index: H3CellGeometry.makeIndex(resolution: 5, baseCell: 60), rank: 14
+    )
+    static let seoul = MapPlace(
+        id: "city:seoul", name: "Seoul", kind: .city,
+        h3Index: H3CellGeometry.makeIndex(resolution: 5, baseCell: 41), rank: 10
+    )
+    static let unitedStates = MapPlace(
+        id: "country:us", name: "United States", kind: .country,
+        h3Index: H3CellGeometry.makeIndex(resolution: 1, baseCell: 30), rank: 6
+    )
+    static let japan = MapPlace(
+        id: "country:japan", name: "Japan", kind: .country,
+        h3Index: H3CellGeometry.makeIndex(resolution: 1, baseCell: 40), rank: 7
+    )
+    static let brazil = MapPlace(
+        id: "country:brazil", name: "Brazil", kind: .country,
+        h3Index: H3CellGeometry.makeIndex(resolution: 1, baseCell: 80), rank: 9
+    )
+    static let morocco = MapPlace(
+        id: "country:morocco", name: "Morocco", kind: .country,
+        h3Index: H3CellGeometry.makeIndex(resolution: 1, baseCell: 50), rank: 13
+    )
+    static let australia = MapPlace(
+        id: "country:australia", name: "Australia", kind: .country,
+        h3Index: H3CellGeometry.makeIndex(resolution: 1, baseCell: 110), rank: 10
+    )
+    static let canada = MapPlace(
+        id: "country:canada", name: "Canada", kind: .country,
+        h3Index: H3CellGeometry.makeIndex(resolution: 1, baseCell: 16), rank: 12
+    )
+    static let mexico = MapPlace(
+        id: "country:mexico", name: "Mexico", kind: .country,
+        h3Index: H3CellGeometry.makeIndex(resolution: 1, baseCell: 60), rank: 11
+    )
+    static let southKorea = MapPlace(
+        id: "country:south-korea", name: "South Korea", kind: .country,
+        h3Index: H3CellGeometry.makeIndex(resolution: 1, baseCell: 41), rank: 8
+    )
+
+    /// The world seed's city circles. Centers mirror `MockWorldSeed`'s
+    /// cities verbatim — the mock-parity contract,
+    /// `MockWorldSeedParityTests`. (Barcelona, Madrid, Rome, London and
+    /// Berlin are already the European roster's circles above.)
+    static let worldCities: [(center: (lat: Double, lng: Double), city: MapPlace, country: MapPlace)] = [
+        ((45.4642, 9.1900), milan, italy),
+        ((40.7128, -74.0060), newYork, unitedStates),
+        ((34.0522, -118.2437), losAngeles, unitedStates),
+        ((35.6762, 139.6503), tokyo, japan),
+        ((35.0116, 135.7681), kyoto, japan),
+        ((-22.9068, -43.1729), rioDeJaneiro, brazil),
+        ((31.6295, -7.9811), marrakech, morocco),
+        ((-33.8688, 151.2093), sydney, australia),
+        ((45.5019, -73.5674), montreal, canada),
+        ((19.4326, -99.1332), mexicoCity, mexico),
+        ((37.5665, 126.9780), seoul, southKorea)
+    ]
+
+    /// The world seed's countries outside the European boxes, by the ISO
+    /// code `CountryAtlas` keys their border with.
+    static let worldCountries: [(code: String, place: MapPlace)] = [
+        ("US", unitedStates), ("CA", canada), ("MX", mexico), ("BR", brazil),
+        ("MA", morocco), ("JP", japan), ("KR", southKorea), ("AU", australia)
+    ]
 
     private static func within(
         _ pin: MapPin, of anchor: (lat: Double, lng: Double), radius: Double
