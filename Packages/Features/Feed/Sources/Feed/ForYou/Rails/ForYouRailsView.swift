@@ -16,7 +16,7 @@ import UIKit
 ///   │ Ana  │ │ Bo   │ │           and each wears its first two
 ///   │ two… │ │ two… │ │           lines over its foot
 ///   └──────┘ └──────┘ └───
-///     For you                     ← a heading, not a way in
+///     For you ›                   ← the whole mosaic, pushed
 ///   ─── Discover's list ─────────────────────────────
 /// ```
 ///
@@ -53,12 +53,15 @@ import UIKit
 /// the inbox's rule for its sections — and with both empty the header is zero
 /// tall and the list starts at the top.
 ///
-/// Each row's header is a way in — the app's one section title
-/// (`SectionTitleView`) as a link: the whole bar pushes its screen, and the
-/// secondary number after the title counts what is new in the row. The third,
-/// "For you", names the list under the rows and pushes nothing; it is drawn
-/// only under rows, since alone at the top of the screen it would title the
-/// only thing there.
+/// Each header is a way in — the app's one section title (`SectionTitleView`)
+/// as a link: the whole bar pushes its screen, and the secondary number after
+/// a row's title counts what is new in the row. The third, "For you", names
+/// the list under the rows and pushes Discover's whole mosaic — the screen a
+/// chunk's "View all" pushes (asked for, 2026-10-01: a chevron after it like
+/// the rows'); it carries no count, since nothing in the list is counted as
+/// new. It is drawn only under rows, since alone at the top of the screen it
+/// would title the only thing there — the chunks' "View all" still reach the
+/// mosaic then.
 @MainActor
 final class ForYouRailsView: UIView {
     enum Metrics {
@@ -146,6 +149,10 @@ final class ForYouRailsView: UIView {
     var onFollowingHeaderTapped: (() -> Void)? {
         didSet { followingHeader.onTap = onFollowingHeaderTapped }
     }
+    /// "For you" was tapped: the host pushes Discover's whole mosaic.
+    var onListHeaderTapped: (() -> Void)? {
+        didSet { listHeader.onTap = onListHeaderTapped }
+    }
     /// What a long press on a friend offers under the preview, after "Open"
     /// — the host's rows (View Profile, Unfollow), since this view can service
     /// none of them.
@@ -174,8 +181,9 @@ final class ForYouRailsView: UIView {
 
     private let friendsHeader = SectionTitleView(content: .init(title: "Friends", isLink: true))
     private let followingHeader = SectionTitleView(content: .init(title: "Following", isLink: true))
-    /// The list's own title, under the rows: a heading, not a way in.
-    private let listHeader = SectionTitleView(content: .init(title: "For you"))
+    /// The list's own title, under the rows — and, like the rows', a way in:
+    /// Discover's whole mosaic.
+    private let listHeader = SectionTitleView(content: .init(title: "For you", isLink: true))
     private let storiesView: UICollectionView
     private let cardsView: UICollectionView
     /// Also what a card's COPIES read the author's face from — the flight's
@@ -276,6 +284,7 @@ final class ForYouRailsView: UIView {
         cardsView.isHidden = true
         friendsHeader.accessibilityHint = "Shows your friends' posts"
         followingHeader.accessibilityHint = "Shows posts from people you follow"
+        listHeader.accessibilityHint = "Shows every post in Discover's mosaic"
     }
 
     @available(*, unavailable)
@@ -865,6 +874,7 @@ final class ForYouRailsView: UIView {
     /// host's closure: calling the closure is how #312's dead chevron passed.
     func debugTapFriendsHeader() { friendsHeader.debugTap() }
     func debugTapFollowingHeader() { followingHeader.debugTap() }
+    func debugTapListHeader() { listHeader.debugTap() }
     var debugFriendsBadge: String? { friendsHeader.debugCountText }
     var debugFollowingBadge: String? { followingHeader.debugCountText }
     #endif

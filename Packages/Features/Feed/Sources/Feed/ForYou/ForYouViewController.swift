@@ -313,6 +313,8 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         rails.onCardTapped = { [weak self] index in self?.openCard(at: index) }
         rails.onFriendsHeaderTapped = { [weak self] in self?.pushList(.friends) }
         rails.onFollowingHeaderTapped = { [weak self] in self?.pushList(.following) }
+        // "For you ›" and a chunk's "View all" are one way in to one screen.
+        rails.onListHeaderTapped = { [weak self] in self?.pushDiscoverGallery() }
         rails.storyMenuElements = { [weak self] story in self?.storyMenuElements(for: story) ?? [] }
         rails.cardMenuElements = { [weak self] post in self?.cardMenuElements(for: post) ?? [] }
         // The rows' players keep time with the list's: the list's reconcile
@@ -1099,8 +1101,9 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
 
     // MARK: - Discover's whole mosaic
 
-    /// "View all" under a chunk: pushes the mosaic Discover used to be, over
-    /// the same corpus (`DiscoverGalleryViewController`).
+    /// "View all" under a chunk, or the "For you" heading over the list:
+    /// pushes the mosaic Discover used to be, over the same corpus
+    /// (`DiscoverGalleryViewController`).
     ///
     /// Only from rest — this screen on top, no flight of its own in the air —
     /// so a tap landing mid-transition cannot stack a push on a pop.
@@ -2803,5 +2806,12 @@ extension ForYouViewController: DebugItemSelectable {
     func debugSelectFirstItem() -> Bool {
         page.debugSelectItem(at: 0)
     }
+}
+
+extension ForYouViewController {
+    /// The rows leading the list — their headers' own tap paths.
+    var debugRails: ForYouRailsView { rails }
+    /// Presses a chunk's "View all", as its footer does.
+    func debugPressViewAll() { page.onViewAllTapped?() }
 }
 #endif
