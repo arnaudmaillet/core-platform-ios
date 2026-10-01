@@ -195,7 +195,7 @@ final class ProfileHeaderView: UIView {
     /// How much of the name's and the handle's ink is the picture's: 1 on a
     /// banner at rest, 0 with no picture. A poster fades out as it scrolls up
     /// (`setTravelled`) — picture ink kept over the page could vanish — so
-    /// the ink follows the banner's own alpha back to the page's. A band
+    /// the ink follows the banner's visibility back to the page's. A band
     /// never fades: it scrolls away under the type it carries.
     private var identityInkOnPicture: CGFloat = 0
     /// The same for what stands BELOW the name — the counters, the bio and
@@ -204,7 +204,7 @@ final class ProfileHeaderView: UIView {
     private var bodyInkOnPicture: CGFloat = 0
 
     private func applyIdentityInk(force: Bool = false) {
-        let onPicture = bannerFormat == .none ? 0 : bannerView.alpha
+        let onPicture = bannerFormat == .none ? 0 : bannerView.visibility
         if force || onPicture != identityInkOnPicture {
             identityInkOnPicture = onPicture
             let tone = inkTones.name
@@ -218,7 +218,7 @@ final class ProfileHeaderView: UIView {
                 HeroInk.applyShadow(to: label, tone: tone, onPicture: onPicture)
             }
         }
-        let bodyOnPicture = bannerFormat == .poster ? bannerView.alpha : 0
+        let bodyOnPicture = bannerFormat == .poster ? bannerView.visibility : 0
         guard force || bodyOnPicture != bodyInkOnPicture else { return }
         bodyInkOnPicture = bodyOnPicture
         for stat in [followersStat, followingStat, likesStat] {
@@ -321,7 +321,9 @@ final class ProfileHeaderView: UIView {
     }
     var debugBannerRampLocations: [CGFloat] { bannerView.debugRampLocations }
     var debugBannerRampAlphas: [CGFloat] { bannerView.debugRampAlphas }
-    var debugBannerAlpha: CGFloat { bannerView.alpha }
+    /// How much of the banner shows — its veil's complement (a poster's
+    /// fade is a page-toned veil, not the view's alpha).
+    var debugBannerAlpha: CGFloat { bannerView.visibility }
     var debugBannerPictureShift: CGFloat { bannerView.debugPictureShift }
     var debugBannerHasPicture: Bool { bannerView.debugHasPicture }
     var debugBlurBakeMilliseconds: Double { bannerView.debugLastBlurBakeMilliseconds }

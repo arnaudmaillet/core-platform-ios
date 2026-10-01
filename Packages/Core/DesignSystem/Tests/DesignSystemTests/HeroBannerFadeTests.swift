@@ -171,6 +171,108 @@ struct HeroBannerFadeTests {
         #expect(previous < 40)
     }
 
+    // MARK: - The blur as one image (`HeroBannerBlurRows`)
+
+    /// A 10x100 level whose every pixel in row `r` is `value(r)` grey.
+    private func level(_ value: (Int) -> UInt8) throws -> UIImage {
+        let width = 10, height = 100
+        var bytes = [UInt8](repeating: 255, count: width * height * 4)
+        for row in 0..<height {
+            for column in 0..<width {
+                let index = (row * width + column) * 4
+                bytes[index] = value(row); bytes[index + 1] = value(row); bytes[index + 2] = value(row)
+            }
+        }
+        let space = try #require(CGColorSpace(name: CGColorSpace.sRGB))
+        let info = CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+        let context = try #require(CGContext(
+            data: &bytes, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+            space: space, bitmapInfo: info
+        ))
+        let image = try #require(context.makeImage())
+        return UIImage(cgImage: image)
+    }
+
+    /// The (grey, alpha) of `image`'s pixel in `row`, middle column.
+    private func pixel(_ image: CGImage, row: Int) throws -> (grey: Int, alpha: Int) {
+        let data = try #require(image.dataProvider?.data)
+        let bytes = try #require(CFDataGetBytePtr(data))
+        let index = row * image.bytesPerRow + image.width / 2 * 4
+        return (Int(bytes[index + 2]), Int(bytes[index + 3]))
+    }
+
+    /// Row for row, the blur image is what the six masked layers drew: clear
+    /// above the climb; over the first span the faintest level fading in
+    /// (premultiplied, over the sharp picture drawn under it); below, two
+    /// neighbours mixed at the row's weight; the strongest alone at the foot.
+    @Test func theCompositeMixesNeighboursRowByRow() throws {
+        let greys: [UInt8] = [20, 60, 100, 140, 180, 220]
+        let levels = try greys.map { grey in try level { _ in grey } }
+        let rows = try #require(HeroBannerBlurRows(levels: levels))
+        let spans = (0..<6).map { index -> (start: CGFloat, full: CGFloat) in
+            let start = CGFloat(20 + 10 * index)
+            return (start, start + 10)
+        }
+        let image = try #require(rows.composite(rows: 100, from: 0, spans: spans, pictureTop: 0, rowPitch: 1))
+        #expect(image.height == 100)
+        let above = try pixel(image, row: 10)
+        #expect(above.grey == 0 && above.alpha == 0)
+        // Row 25's middle, 25.5, is 55% into the first span.
+        let fadingIn = try pixel(image, row: 25)
+        #expect(abs(fadingIn.alpha - 140) <= 1)
+        #expect(abs(fadingIn.grey - 11) <= 1)
+        // 55% from the first level to the second.
+        let mixed = try pixel(image, row: 35)
+        #expect(abs(mixed.grey - 42) <= 1)
+        #expect(mixed.alpha == 255)
+        let foot = try pixel(image, row: 90)
+        #expect(foot.grey == 220 && foot.alpha == 255)
+    }
+
+    /// The parallax: a picture slid down reads each row from the picture's
+    /// row now behind it — between two rows, the two mixed.
+    @Test func theCompositeReadsWhereThePictureSlid() throws {
+        let ramp = try level { UInt8($0) }
+        let rows = try #require(HeroBannerBlurRows(levels: Array(repeating: ramp, count: 6)))
+        let spans = (0..<6).map { index -> (start: CGFloat, full: CGFloat) in
+            let start = CGFloat(10 * index)
+            return (start, start + 10)
+        }
+        let still = try #require(rows.composite(rows: 100, from: 0, spans: spans, pictureTop: 0, rowPitch: 1))
+        let stillPixel = try pixel(still, row: 80)
+        #expect(stillPixel.grey == 80)
+        let slid = try #require(rows.composite(rows: 100, from: 0, spans: spans, pictureTop: 5, rowPitch: 1))
+        let slidPixel = try pixel(slid, row: 80)
+        #expect(slidPixel.grey == 75)
+        let halfway = try #require(rows.composite(rows: 100, from: 0, spans: spans, pictureTop: 5.5, rowPitch: 1))
+        let halfwayPixel = try pixel(halfway, row: 80)
+        #expect(abs(halfwayPixel.grey - 74) <= 1)
+    }
+
+    /// What makes the banner cheap to scroll: its whole tree draws nothing
+    /// offscreen — no mask, no group, no shadow — before and after the
+    /// picture slides, with every level showing. #331's six masked layers
+    /// were six offscreen passes on every frame of a scroll.
+    @Test func theBlurDrawsNothingOffscreen() throws {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let stripes = UIGraphicsImageRenderer(size: CGSize(width: 40, height: 60), format: format).image { context in
+            UIColor.black.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 40, height: 60))
+            UIColor.white.setFill()
+            for y in stride(from: 0, to: 60, by: 6) { context.fill(CGRect(x: 0, y: y, width: 40, height: 3)) }
+        }
+        let view = HeroBannerPictureView(frame: CGRect(x: 0, y: 0, width: 400, height: 600))
+        view.image = stripes
+        view.fade = HeroBannerFade.geometry(identityTop: 300, foot: 600)
+        view.layoutIfNeeded()
+        #expect(view.debugVisibleLevels.count == HeroBannerFade.blurSigmas.count)
+        #expect(HeroScrollFrameProbe.Census(of: view.layer).offscreen == 0)
+        view.pictureShift = 30
+        view.layoutIfNeeded()
+        #expect(HeroScrollFrameProbe.Census(of: view.layer).offscreen == 0)
+    }
+
     // MARK: - The ink the ground picks (`HeroInk.tone`)
 
     private func ground(_ grey: Float, count: Int = 50) -> [SIMD3<Float>] {

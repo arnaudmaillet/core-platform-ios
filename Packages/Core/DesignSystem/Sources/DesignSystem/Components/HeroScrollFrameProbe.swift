@@ -68,6 +68,16 @@ public final class HeroScrollFrameProbe {
         }
     }
 
+    /// Every blur composition on the main thread while a probe runs
+    /// (`HeroBannerPictureView.composeBlur`): its milliseconds and rows —
+    /// the CPU the masks' offscreen passes were traded for.
+    private static var composeSamples: [(milliseconds: Double, rows: Int)] = []
+
+    /// Called by the banner after each composition.
+    public static func recordCompose(_ milliseconds: Double, rows: Int) {
+        composeSamples.append((milliseconds, rows))
+    }
+
     private let name: String
     private weak var root: UIView?
     private var mainMilliseconds: [Double] = []
@@ -82,6 +92,7 @@ public final class HeroScrollFrameProbe {
         let link = CADisplayLink(target: Ticker(self), selector: #selector(Ticker.tick(_:)))
         link.add(to: .main, forMode: .common)
         self.link = link
+        Self.composeSamples = []
     }
 
     /// One frame of the scroll: `step` moves it, and the layout and commit
@@ -116,6 +127,8 @@ public final class HeroScrollFrameProbe {
         let hitches = intervals.filter { $0 > target * 1.5 }.count
         let line = "HERO-SCROLL \(name) frames=\(mainMilliseconds.count) main[\(stats(mainMilliseconds))]ms "
             + "link[frames=\(intervals.count) hitches=\(hitches) \(stats(intervals))]ms "
+            + "compose[n=\(Self.composeSamples.count) rows=\(Self.composeSamples.map(\.rows).max() ?? 0) "
+            + "\(stats(Self.composeSamples.map(\.milliseconds)))]ms "
             + "offscreen-max[\(census)]\n"
         FileHandle.standardError.write(Data(line.utf8))
     }

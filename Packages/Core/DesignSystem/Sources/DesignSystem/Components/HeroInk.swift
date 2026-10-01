@@ -157,12 +157,46 @@ public enum HeroInk {
     /// how much of the ink is the picture's; none at all on the page. (The
     /// contrast instrument hides the labels, shadows and all, so it never
     /// counts in the numbers.)
+    ///
+    /// ⚠️ RASTERIZED WHILE IT CASTS. A text shadow has no `shadowPath` to
+    /// give: its shape is the glyphs' alpha, which the render server draws
+    /// OFFSCREEN for every frame the label is composited — and a scroll
+    /// moves the label on every frame. Up to nine of them stand on a
+    /// poster, five on a place, each a render pass of its own per frame on
+    /// top of the banner (`HeroScrollFrameProbe` counts them). Rasterized,
+    /// the label and its shadow are drawn offscreen once and moved as a
+    /// bitmap until the text or its ink changes — at the screen's own
+    /// scale, kept in step with the label's traits so it is never drawn
+    /// soft.
     @MainActor public static func applyShadow(to label: UILabel, tone: Tone, onPicture t: CGFloat) {
         label.layer.shadowColor = (tone == .light ? UIColor.black : UIColor.white).cgColor
         label.layer.shadowOffset = CGSize(width: 0, height: tone == .light ? 1 : 0.5)
         label.layer.shadowRadius = 3
         let strength: CGFloat = tone == .light ? 0.3 : 0.2
         label.layer.shadowOpacity = Float(strength * max(0, min(t, 1)))
+        let casts = label.layer.shadowOpacity > 0
+        label.layer.shouldRasterize = casts
+        guard casts else { return }
+        rasterizeAtDisplayScale(label)
+    }
+
+    /// Keeps `label`'s rasterization at its screen's scale — read now, and
+    /// again whenever its traits say the scale changed (off a window a view
+    /// reports no scale; it learns it on the way in).
+    @MainActor private static func rasterizeAtDisplayScale(_ label: UILabel) {
+        func apply(_ label: UILabel) {
+            let scale = label.traitCollection.displayScale
+            label.layer.rasterizationScale = scale > 0 ? scale : UITraitCollection.current.displayScale
+        }
+        apply(label)
+        // Once per label: the layer carries the mark (a key-value slot any
+        // `CALayer` has), so no global table is needed.
+        let mark = "heroInk.rasterizationFollowsScale"
+        guard label.layer.value(forKey: mark) == nil else { return }
+        label.layer.setValue(true, forKey: mark)
+        label.registerForTraitChanges([UITraitDisplayScale.self]) { (label: UILabel, _) in
+            apply(label)
+        }
     }
 }
 
