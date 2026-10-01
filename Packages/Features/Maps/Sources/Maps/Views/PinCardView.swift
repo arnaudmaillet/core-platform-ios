@@ -408,6 +408,8 @@ final class PinCardView: UIView {
         flagBorder.setFlag(dress.borderFlag)
         badgeView.setBadge(dress.badge)
         positionBadge()
+        // The lock leans away from an inside badge (`lockGlyphOffset`).
+        layoutIconFace()
         applyFaceVisibility()
         applyBlend()
     }
@@ -421,17 +423,39 @@ final class PinCardView: UIView {
     /// the live one, which mid-flight is the page's. From there autoresizing
     /// keeps it at the same distance from the corner as the card grows.
     private func positionBadge() {
-        // An icon has no shape of its own (radius 0 IS "no circle"), but its
-        // mark — an emote's face, a sticker — is drawn within the disc its
-        // square inscribes, and the square's corner is empty. Seated on that
-        // corner the badge sat apart from the mark; on the disc's arc it hugs
-        // the mark the way it hugs a text marker's disc.
-        let radius = face == .icon ? Face.icon.side / 2 : face.cornerRadius
-        let center = MapMarkerBadgeView.center(
-            in: bounds.size, cornerRadius: radius, inside: badgeSitsInside
-        )
+        let center: CGPoint
+        if face == .icon {
+            center = iconBadgeCenter()
+        } else {
+            center = MapMarkerBadgeView.center(
+                in: bounds.size, cornerRadius: face.cornerRadius, inside: badgeSitsInside
+            )
+        }
         let side = MapMarkerBadgeView.side
         badgeView.frame = CGRect(x: center.x - side / 2, y: center.y - side / 2, width: side, height: side)
+    }
+
+    /// An icon's badge hugs its MARK, not its square.
+    ///
+    /// An icon has no shape of its own (radius 0 IS "no circle"), and its
+    /// square's corner is empty: the art sits inside the cell with a margin
+    /// (`MapIconMarkBounds`), so a badge seated by the square sat apart from
+    /// anything drawn. It goes on the 45° arc of the disc inscribed in the
+    /// mark's bounds instead — overlapping the mark the way it overlaps a
+    /// text marker's disc, whether the mark is round (an emote's face) or a
+    /// rounded square. With no art yet the text disc stands in, and the
+    /// badge takes that disc's seat.
+    private func iconBadgeCenter() -> CGPoint {
+        // The mark's square, as `layoutIconFace` lays it out.
+        let side = min(Face.icon.side, min(bounds.width, bounds.height))
+        let square = CGRect(x: bounds.midX - side / 2, y: bounds.midY - side / 2, width: side, height: side)
+        let unit = wornIcon.map { MapIconMarkBounds.unitBounds(of: $0.art) } ?? MapIconMarkBounds.full
+        let mark = CGRect(
+            x: square.minX + unit.minX * side, y: square.minY + unit.minY * side,
+            width: unit.width * side, height: unit.height * side
+        )
+        let inset = min(mark.width, mark.height) / 2 * (1 - 1 / 2.squareRoot())
+        return CGPoint(x: mark.maxX - inset, y: mark.maxY - inset)
     }
 
     #if DEBUG
@@ -569,6 +593,7 @@ final class PinCardView: UIView {
         if face != .media { setPreviewSheet(nil) }
         setCornerRadius(face.cornerRadius)
         positionBadge()
+        layoutIconFace()
         // ⚠️ AFTER `setCornerRadius`, which writes the ring's radius from the
         // face. Called before it, the floor's round ring was overwritten by the
         // icon face's 0 one line later — the assertion said 0 and the marker
@@ -595,6 +620,8 @@ final class PinCardView: UIView {
         // mid-flight has to re-point the channel rather than leave it fading a
         // view nobody can see.
         applyBlend()
+        // The badge hugs the mark, and the mark came with the art.
+        if face == .icon { positionBadge() }
     }
 
     /// Which unit of the card is drawn — and the ICON FACE'S FLOOR.
@@ -941,7 +968,18 @@ final class PinCardView: UIView {
         iconFaceView.bounds = CGRect(x: 0, y: 0, width: side, height: side)
         iconFaceView.center = CGPoint(x: bounds.midX, y: bounds.midY)
         lockGlyph.bounds = CGRect(x: 0, y: 0, width: 24, height: 24)
-        lockGlyph.center = iconFaceView.center
+        lockGlyph.center = CGPoint(
+            x: iconFaceView.center.x + lockGlyphOffset, y: iconFaceView.center.y + lockGlyphOffset
+        )
+    }
+
+    /// How far the lock leans up and left of the centre: only on a square
+    /// card whose badge sits inside the corner, where the 20pt badge
+    /// (centred 15pt in) reached the bottom-right of the centred lock —
+    /// filmed on Mexico's marker. 3pt clears it by about 4pt and keeps the
+    /// lock reading as centred.
+    private var lockGlyphOffset: CGFloat {
+        badgeSitsInside && dress.badge != nil ? -3 : 0
     }
 
     /// Every border takes the same shape: the neutral ring and the flag one

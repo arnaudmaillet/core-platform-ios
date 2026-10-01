@@ -209,6 +209,29 @@ struct MapMarkerDressTests {
         #expect(card.revealStandInOverhangsWindow)
     }
 
+    /// A mark drawn SMALL inside its cell (Morocco's petal covers 44% of its
+    /// side) pulls the badge in with it: the badge overlaps the mark's own
+    /// bottom-right, not the empty corner of the square.
+    @Test func anEmotesBadgeFollowsAMarkSmallerThanItsCell() {
+        let cell = CGSize(width: 100, height: 100)
+        let image = UIGraphicsImageRenderer(size: cell).image { context in
+            UIColor.systemPink.setFill()
+            context.fill(CGRect(x: 30, y: 30, width: 40, height: 40))
+        }
+        let art = AnimatedIconArt.sheet(AnimatedIconSheet(sheet: image, frameCount: 1, columns: 1, frameDuration: 0.1))
+        #expect(MapIconMarkBounds.unitBounds(of: art).insetBy(dx: -0.02, dy: -0.02)
+            .contains(CGRect(x: 0.3, y: 0.3, width: 0.4, height: 0.4)))
+        let card = card(.icon, dress: .resolve(kind: .country, countryCode: "MA", isLocked: false))
+        card.setIcon((art, 0))
+        let side = PinCardView.Face.icon.side
+        let mark = CGRect(x: 0.3 * side, y: 0.3 * side, width: 0.4 * side, height: 0.4 * side)
+        let expected = mark.maxX - mark.width / 2 * (1 - 1 / 2.squareRoot())
+        #expect(abs(card.debugBadge.center.x - expected) < 1.0 && abs(card.debugBadge.center.y - expected) < 1.0,
+                "badge centre \(card.debugBadge.center), expected \(expected)")
+        #expect(card.debugBadge.frame.intersects(mark), "it touches the mark")
+        #expect(card.debugBadge.frame.maxX < side, "and no longer reaches the square's corner")
+    }
+
     /// An OPEN emote is drawn at full strength: no dimming, no veil, no lock —
     /// including one whose country was just unlocked.
     @Test func anOpenEmoteIsNotWashedOut() {
@@ -243,6 +266,25 @@ struct MapMarkerDressTests {
         #expect(!card.debugLockGlyph.isHidden)
         #expect(card.debugIconFaceAlpha < 1)
         #expect(card.debugFlagBorder.isHidden)
+    }
+
+    /// On a locked SQUARE card the lock leans up and left, clear of the badge
+    /// inside the corner; on a disc (badge outside) it stays centred.
+    @Test func theLockClearsAnInsideBadge() {
+        let card = card(.media, dress: .resolve(kind: .country, countryCode: "MX", isLocked: true))
+        let lock = card.debugLockGlyph.center
+        let badge = card.debugBadge.center
+        #expect(lock.x < card.bounds.midX && lock.y < card.bounds.midY, "lock \(lock)")
+        // The lock symbol's body reaches ~5pt right of and ~7pt below its
+        // centre at 15pt: that point must sit outside the badge's disc.
+        let corner = CGPoint(x: lock.x + 5.5, y: lock.y + 7)
+        let gap = hypot(badge.x - corner.x, badge.y - corner.y) - MapMarkerBadgeView.side / 2
+        #expect(gap > 2, "gap \(gap)")
+        let disc = self.card(.text, dress: .resolve(kind: .country, countryCode: "MX", isLocked: true))
+        #expect(disc.debugLockGlyph.center == CGPoint(x: disc.bounds.midX, y: disc.bounds.midY))
+        let open = self.card(.media, dress: .resolve(kind: nil, countryCode: "MX", isLocked: true))
+        #expect(open.debugLockGlyph.center == CGPoint(x: open.bounds.midX, y: open.bounds.midY),
+                "no badge, nothing to clear")
     }
 
     @Test func unlockingTakesTheLockOff() {
