@@ -2,50 +2,92 @@ import Testing
 import UIKit
 @testable import DesignSystem
 
-/// `StatusBarBlurView`: the switch, the band geometry and the mask ramp. The
-/// look itself was judged on simulator screenshots; these pin the rules the
-/// look rests on. No test attaches the view to a window, so no blur effect is
-/// ever materialised here (the headless-CI render-server stall).
+/// `StatusBarBlurView`: always installed, the inert scroll view that owns the
+/// blur, and the band geometry. The look itself — the Map's edge effect, filter
+/// for filter — was established on simulator dumps; these pin the rules it
+/// rests on. No test attaches the view to a window.
 @MainActor
 struct StatusBarBlurViewTests {
 
-    // MARK: Switch
+    // MARK: Install
 
-    @Test func theLaunchArgumentTurnsItOn() {
-        #expect(StatusBarBlurView.isEnabled(arguments: ["app", "-status-bar-blur"]))
-        #expect(!StatusBarBlurView.isEnabled(arguments: ["app", "-status-bar-blur-style", "thin"]))
-        #expect(!StatusBarBlurView.isEnabled(arguments: ["app"]))
+    /// No launch argument any more: installing always adds the blur.
+    @Test func installingAddsTheBlur() {
+        let host = UIView(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        let blur = StatusBarBlurView.install(in: host)
+        #expect(blur.superview === host)
     }
 
-    @Test func installingWhileOffAddsNothing() {
+    @Test func installingTwiceKeepsOneBlur() {
         let host = UIView(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
-        #expect(StatusBarBlurView.install(in: host, enabled: false) == nil)
-        #expect(host.subviews.isEmpty)
-    }
-
-    @Test func installingTwiceKeepsOneBlur() throws {
-        let host = UIView(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
-        let first = try #require(StatusBarBlurView.install(in: host, enabled: true))
-        let second = StatusBarBlurView.install(in: host, enabled: true)
+        let first = StatusBarBlurView.install(in: host)
+        let second = StatusBarBlurView.install(in: host)
         #expect(first === second)
         #expect(host.subviews.filter { $0 is StatusBarBlurView }.count == 1)
     }
 
     /// Above the host's content whatever is added later, and never in the way
     /// of a touch.
-    @Test func itSitsAboveContentAndTakesNoTouches() throws {
+    @Test func itSitsAboveContentAndTakesNoTouches() {
         let host = UIView()
-        let blur = try #require(StatusBarBlurView.install(in: host, enabled: true))
+        let blur = StatusBarBlurView.install(in: host)
         host.addSubview(UIView())
         #expect(blur.layer.zPosition > 0)
         #expect(!blur.isUserInteractionEnabled)
     }
 
-    /// The blur is only materialised once the view reaches a window.
-    @Test func noBlurIsMaterialisedOffWindow() throws {
-        let blur = try #require(StatusBarBlurView.install(in: UIView(), enabled: true))
-        #expect(!blur.blurLayers.isEmpty)
-        #expect(blur.blurLayers.allSatisfy { $0.effect == nil })
+    /// It covers the whole host, so its scroll view gets the same safe area a
+    /// real list there would — what UIKit sizes the effect from.
+    @Test func itCoversTheWholeHost() {
+        let host = UIView(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        let blur = StatusBarBlurView.install(in: host)
+        host.layoutIfNeeded()
+        #expect(blur.frame == host.bounds)
+        #expect(blur.edgeScrollView.frame == blur.bounds)
+    }
+
+    // MARK: The inert scroll view
+
+    /// ⚠️ Two on-screen scroll views answering the status-bar tap means NEITHER
+    /// scrolls: the screen's real list would lose tap-to-top.
+    @Test func theScrollViewNeverAnswersTheStatusBarTap() {
+        let blur = StatusBarBlurView.install(in: UIView())
+        #expect(!blur.edgeScrollView.scrollsToTop)
+    }
+
+    @Test func theScrollViewNeverScrollsNorTakesTouches() {
+        let blur = StatusBarBlurView.install(in: UIView())
+        #expect(!blur.edgeScrollView.isScrollEnabled)
+        #expect(!blur.edgeScrollView.isUserInteractionEnabled)
+    }
+
+    /// VoiceOver never lands on it — not the blur, not its scroll view.
+    @Test func itIsInvisibleToAccessibility() {
+        let blur = StatusBarBlurView.install(in: UIView())
+        #expect(blur.accessibilityElementsHidden)
+        #expect(blur.edgeScrollView.accessibilityElementsHidden)
+        #expect(!blur.edgeScrollView.isAccessibilityElement)
+    }
+
+    /// The blur IS the top edge effect left as UIKit makes it — `.automatic`,
+    /// shown — the style the Map's own effect resolves from. A
+    /// `prefersClearTopEdge()` or a `.soft` here would be a different look.
+    @Test func theTopEdgeEffectIsTheSystemDefault() {
+        let blur = StatusBarBlurView.install(in: UIView())
+        #expect(!blur.edgeScrollView.topEdgeEffect.isHidden)
+        #expect(blur.edgeScrollView.topEdgeEffect.style == .automatic)
+    }
+
+    /// The effect only shows over content scrolled under the edge, so the
+    /// empty content sits one screen past its top.
+    @Test func theScrollViewIsScrolledPastItsTop() {
+        let host = UIView(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        let blur = StatusBarBlurView.install(in: host)
+        host.layoutIfNeeded()
+        blur.layoutIfNeeded()
+        let scroll = blur.edgeScrollView
+        #expect(scroll.contentOffset == CGPoint(x: 0, y: 874))
+        #expect(scroll.contentSize == CGSize(width: 402, height: 874 * 3))
     }
 
     // MARK: Geometry
@@ -72,57 +114,12 @@ struct StatusBarBlurViewTests {
         #expect(StatusBarBlurView.bandHeight(statusBandHeight: 62, hostTopInWindow: -30) == 62)
     }
 
-    // MARK: Mask ramp
-
-    @Test func eachLayerStartsAtItsPeakAndEndsClear() {
-        for count in 1...4 {
-            for index in 0..<count {
-                let stops = StatusBarBlurView.maskStops(index: index, count: count, peak: 0.8)
-                #expect(stops.first?.location == 0)
-                #expect(abs((stops.first?.alpha ?? 0) - 0.8) < 0.0001)
-                #expect(stops.last?.location == 1)
-                #expect(stops.last?.alpha == 0)
-            }
-        }
-    }
-
-    /// Layer `i` of `n` is clear from `(i + 1) / n` of the band down, so the
-    /// deepest layer reaches the band's foot and nothing reaches past it.
-    @Test func layerIndexSetsWhereItFadesOut() {
-        let stops = StatusBarBlurView.maskStops(index: 0, count: 3)
-        let firstClear = stops.first { $0.alpha < 0.0001 }
-        #expect(abs((firstClear?.location ?? 0) - 1.0 / 3.0) < 0.0001)
-        let deepest = StatusBarBlurView.maskStops(index: 2, count: 3)
-        let deepestClear = deepest.first { $0.alpha < 0.0001 }
-        #expect(abs((deepestClear?.location ?? 0) - 1) < 0.0001)
-    }
-
-    @Test func theRampNeverBrightensGoingDown() {
-        let stops = StatusBarBlurView.maskStops(index: 0, count: 1)
-        for (upper, lower) in zip(stops, stops.dropFirst()) {
-            #expect(lower.location >= upper.location)
-            #expect(lower.alpha <= upper.alpha)
-        }
-    }
-
-    @Test func thePeakIsClamped() {
-        #expect(StatusBarBlurView.maskStops(index: 0, count: 1, peak: 3).first?.alpha == 1)
-        #expect(StatusBarBlurView.maskStops(index: 0, count: 1, peak: -1).first?.alpha == 0)
-    }
-
-    // MARK: Tuning arguments
-
-    @Test func theDefaultsAreOneUltraThinLayerAtFullStrength() {
-        #expect(StatusBarBlurView.tunedStyle(arguments: []) == .systemUltraThinMaterial)
-        #expect(StatusBarBlurView.tunedLayerCount(arguments: []) == 1)
-        #expect(StatusBarBlurView.tunedPeak(arguments: []) == 1)
-    }
-
-    @Test func tuningArgumentsAreReadAndClamped() {
-        #expect(StatusBarBlurView.tunedStyle(arguments: ["-status-bar-blur-style", "plain"]) == .regular)
-        #expect(StatusBarBlurView.tunedLayerCount(arguments: ["-status-bar-blur-layers", "9"]) == 6)
-        #expect(StatusBarBlurView.tunedLayerCount(arguments: ["-status-bar-blur-layers", "0"]) == 1)
-        #expect(StatusBarBlurView.tunedPeak(arguments: ["-status-bar-blur-peak", "0.4"]) == 0.4)
-        #expect(StatusBarBlurView.tunedPeak(arguments: ["-status-bar-blur-peak", "2"]) == 1)
+    /// Off-window there is no band, so the view stays hidden.
+    @Test func offWindowItIsHidden() {
+        let host = UIView(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        let blur = StatusBarBlurView.install(in: host)
+        host.layoutIfNeeded()
+        blur.layoutIfNeeded()
+        #expect(blur.isHidden)
     }
 }
