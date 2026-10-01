@@ -1197,11 +1197,11 @@ final class PlaceProfileViewController: UIViewController {
     }
 
     private func readHeroInk(force: Bool) {
-        // In the HOST's space — the box's at rest, what the ground is read
-        // in: the type rides the box's foot, and in the box's own space a
-        // pull-down (the box stretching up) moved it down its ground and read
-        // the ground again every two points of the pull.
-        let blocks = [heroNameLabel, rankMetric, likesMetric].map { $0.convert($0.bounds, to: headerHost) }
+        // In the box's space AT REST, what the ground is read in: the type
+        // rides the box's foot, and in the box's own space a pull-down (the
+        // box stretching up) moved it down its ground and read the ground
+        // again every two points of the pull.
+        let blocks = [heroNameLabel, rankMetric, likesMetric].map(restingFrame(of:))
         let moved = blocks.count != heroInkReadFor.count
             || zip(blocks, heroInkReadFor).contains { abs($0.minY - $1.minY) > 2 || abs($0.height - $1.height) > 2 }
         guard force || moved, let nameGround = bannerView.groundPixels(behind: blocks[0]) else { return }
@@ -1249,11 +1249,10 @@ final class PlaceProfileViewController: UIViewController {
     private func placeHeroFade() {
         guard let metricsBand else { return }
         bannerBox.layoutIfNeeded()
-        // In the host's space, which is the box's AT REST (its top rests on
-        // the host's): a pull-down stretches the box above, and must not move
-        // the fade — see `HeroBannerPictureView`.
-        let name = heroNameLabel.convert(heroNameLabel.bounds, to: headerHost)
-        let foot = bannerBox.frame.maxY
+        // In the box's space AT REST: a pull-down stretches the box above,
+        // and must not move the fade — see `HeroBannerPictureView`.
+        let name = restingFrame(of: heroNameLabel)
+        let foot = bannerBox.bounds.height - restingDrop
         guard name.height > 0, metricsBand.frame.height > 0, foot > name.minY else { return }
         // Shouldered, as a profile's poster: the name stands on the picture
         // where the blur is still nil, so the page's tone is already half
@@ -1262,6 +1261,25 @@ final class PlaceProfileViewController: UIViewController {
         bannerView.fade = fade
         bannerRamp.fade = fade
         updateHeroInk()
+    }
+
+    /// How far a pull-down has stretched the box above its resting top:
+    /// what it is taller than its resting height (`bannerHeight`, its foot
+    /// below the host's top, which is where its top rests).
+    ///
+    /// ⚠️ READ OFF THE BOX'S OWN BOUNDS, not its frame in the host: this
+    /// runs in the controller's layout pass, before the host has placed the
+    /// box, and the host-relative frame lagged the box's insides by a
+    /// frame's travel — on a quick release the fade wandered 8pt and the
+    /// blur was recomposed on every frame of it. The box's bounds and the
+    /// type inside it are laid out together (`bannerBox.layoutIfNeeded()`).
+    private var restingDrop: CGFloat {
+        max(0, bannerBox.bounds.height - (bannerHeightConstraint?.constant ?? bannerBox.bounds.height))
+    }
+
+    /// `view`'s frame in the box's resting space — the stretch taken off.
+    private func restingFrame(of view: UIView) -> CGRect {
+        view.convert(view.bounds, to: bannerBox).offsetBy(dx: 0, dy: -restingDrop)
     }
 
     /// Slides the image within its viewport so it lags the scroll.

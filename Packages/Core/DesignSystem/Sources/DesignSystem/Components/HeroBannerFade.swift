@@ -106,6 +106,30 @@ public enum HeroBannerFade {
 
         /// The same fade, `dy` further down — for handing it to a view whose
         /// origin sits `-dy` from the one it was measured in.
+        /// Whether `other` is this fade give or take a pixel's rounding —
+        /// the same curve, every edge within `tolerance` points.
+        ///
+        /// ⚠️ WHAT THE VIEWS COMPARE A NEW FADE WITH, NOT `==`. The owners
+        /// measure the type in their resting space from frames the layout
+        /// engine rounds to the pixel each on its own: under a pull (the
+        /// header travelling a fraction of a point a frame) the same fade
+        /// came back a third of a point either way, and every one of those
+        /// recomposed the blur — 88 compositions over a place's sweep.
+        public func isClose(to other: Geometry, tolerance: CGFloat = 0.5) -> Bool {
+            func near(_ a: CGFloat, _ b: CGFloat) -> Bool { abs(a - b) <= tolerance }
+            func near(_ a: CGFloat?, _ b: CGFloat?) -> Bool {
+                switch (a, b) {
+                case (nil, nil): true
+                case let (a?, b?): near(a, b)
+                default: false
+                }
+            }
+            return blurCurve == other.blurCurve
+                && near(blurStart, other.blurStart) && near(blurFull, other.blurFull)
+                && near(rampStart, other.rampStart) && near(rampEnd, other.rampEnd)
+                && near(rampShoulder, other.rampShoulder)
+        }
+
         public func offset(by dy: CGFloat) -> Geometry {
             Geometry(
                 blurStart: blurStart + dy, blurFull: blurFull + dy,
@@ -315,6 +339,15 @@ public enum HeroBannerFade {
         }
         stops.append((1, 1))
         return stops
+    }
+
+    /// A stretched view's height at rest: its height less the stretch,
+    /// snapped to the pixel (see `HeroBannerPictureView.restBounds`). At
+    /// rest, the height as it is.
+    @MainActor static func restingHeight(of view: UIView, stretch: CGFloat) -> CGFloat {
+        guard stretch > 0 else { return max(0, view.bounds.height) }
+        let scale = view.traitCollection.displayScale > 0 ? view.traitCollection.displayScale : 3
+        return max(0, ((view.bounds.height - stretch) * scale).rounded() / scale)
     }
 
     // MARK: - Baking
@@ -666,8 +699,16 @@ public final class HeroBannerPictureView: UIView {
     /// its top rests, `stretch` below its top while it is stretched. Nil
     /// shows the picture sharp.
     public var fade: HeroBannerFade.Geometry? {
-        didSet { if fade != oldValue { setNeedsLayout() } }
+        get { settledFade }
+        set {
+            // A pixel's rounding is not a new fade (`Geometry.isClose`).
+            if let newValue, let settledFade, newValue.isClose(to: settledFade) { return }
+            guard newValue != settledFade else { return }
+            settledFade = newValue
+            setNeedsLayout()
+        }
     }
+    private var settledFade: HeroBannerFade.Geometry?
 
     /// Where the picture stands, slid by the parallax, in this view's
     /// coordinates at rest.
@@ -680,8 +721,13 @@ public final class HeroBannerPictureView: UIView {
 
     /// The view as it rests, in its resting coordinates: its bounds without
     /// the stretch.
+    ///
+    /// ⚠️ SNAPPED TO THE PIXEL: the stretched height less the stretch is the
+    /// resting height give or take a float's noise, and a row count taken
+    /// off 181.9999 instead of 182 flipped between 62 and 63 — a
+    /// recomposition each time, a dozen over a sweep.
     private var restBounds: CGRect {
-        CGRect(x: 0, y: 0, width: bounds.width, height: max(0, bounds.height - stretch))
+        CGRect(x: 0, y: 0, width: bounds.width, height: HeroBannerFade.restingHeight(of: self, stretch: stretch))
     }
 
     /// The picture and its blur, laid out at rest — the view's resting
@@ -912,6 +958,13 @@ public final class HeroBannerPictureView: UIView {
         let top = composition.top, rows = composition.rows
         #if DEBUG
         debugComposeCount += 1
+        if Self.tracesBlur {
+            print(String(
+                format: "HERO-BLUR compose top=%.2f rows=%d picture=%@ stretch=%.1f height=%.1f fade=%.2f…%.2f",
+                top, rows, NSCoder.string(for: picture), stretch, bounds.height,
+                composition.fade.blurStart, composition.fade.blurFull
+            ))
+        }
         let began = CACurrentMediaTime()
         defer { HeroScrollFrameProbe.recordCompose((CACurrentMediaTime() - began) * 1000, rows: rows) }
         #endif
@@ -1156,8 +1209,16 @@ public final class HeroBannerRampView: UIView {
     /// The fade, in this view's coordinates at rest (see
     /// `HeroBannerPictureView.fade`). Nil draws nothing.
     public var fade: HeroBannerFade.Geometry? {
-        didSet { if fade != oldValue { setNeedsLayout() } }
+        get { settledFade }
+        set {
+            // A pixel's rounding is not a new fade (`Geometry.isClose`).
+            if let newValue, let settledFade, newValue.isClose(to: settledFade) { return }
+            guard newValue != settledFade else { return }
+            settledFade = newValue
+            setNeedsLayout()
+        }
     }
+    private var settledFade: HeroBannerFade.Geometry?
 
     /// How far the view's top stands above where it rests — the picture's
     /// `stretch`. Above its resting top the ramp is clear.
@@ -1197,7 +1258,7 @@ public final class HeroBannerRampView: UIView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         defer { CATransaction.commit() }
-        let height = max(0, bounds.height - stretch)
+        let height = HeroBannerFade.restingHeight(of: self, stretch: stretch)
         gradient.frame = CGRect(x: 0, y: stretch, width: bounds.width, height: height)
         guard let fade, height > 0 else {
             gradient.colors = []
