@@ -494,8 +494,8 @@ final class SnapFeedViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        // `-status-bar-blur` (DEBUG): the progressive blur behind the status
-        // bar, on every full-screen screen — see `StatusBarBlurView`.
+        // The blur behind the status bar, the Map's own (UIKit's edge
+        // effect) — see `StatusBarBlurView`.
         StatusBarBlurView.install(in: view)
         title = "Timeline"
         // The stored value, not a literal: `setEmptyGround` may legitimately
