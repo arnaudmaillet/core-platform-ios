@@ -27,6 +27,20 @@ final class ProfileBannerView: UIView {
     /// Over the media (and a loading bone), in this view's coordinates.
     private let ramp = HeroBannerRampView()
     private let topScrim = CAGradientLayer()
+    /// The page's tone over everything above, at `1 - visibility`: how a
+    /// poster fades away on the way up (`setTravelled`).
+    ///
+    /// ⚠️ A VEIL, NOT THE VIEW'S ALPHA. A view's partial alpha over a
+    /// subtree is group opacity — the picture, its blur, the ramp and the
+    /// scrim flattened OFFSCREEN, then faded, on every frame of the scroll
+    /// that fades it. The page's tone laid over at the complement is the
+    /// same picture, because what stands behind the banner is the page
+    /// (the controller's view; the gallery under the header is clear), and
+    /// it is one flat layer.
+    private let veil = UIView()
+    /// How much of the banner shows: 1 at rest; a poster's falls to 0 as it
+    /// scrolls away. What the type's ink follows (`ProfileHeaderView`).
+    private(set) var visibility: CGFloat = 1
     /// How far down the top scrim reaches — the chrome's own height, set by
     /// the header (`chromeTopInset`).
     ///
@@ -71,6 +85,13 @@ final class ProfileBannerView: UIView {
             UIColor.black.withAlphaComponent(0).cgColor
         ]
         layer.addSublayer(topScrim)
+
+        // Over the scrim too: the veil fades the whole banner, as the
+        // view's alpha did.
+        veil.backgroundColor = Surface.page
+        veil.isUserInteractionEnabled = false
+        veil.isHidden = true
+        veil.pin(to: self)
     }
 
     @available(*, unavailable)
@@ -135,11 +156,24 @@ final class ProfileBannerView: UIView {
     func setTravelled(_ travelled: CGFloat, fadeOutTravel: CGFloat) {
         let climb = max(0, travelled)
         picture.pictureShift = min(climb * Self.parallaxShare, Self.parallaxReserve)
-        guard format == .poster, fadeOutTravel > 0 else {
-            alpha = 1
-            return
-        }
-        alpha = max(0, 1 - climb / fadeOutTravel)
+        guard format == .poster, fadeOutTravel > 0 else { return setVisibility(1) }
+        setVisibility(max(0, 1 - climb / fadeOutTravel))
+    }
+
+    /// Shows `value` of the banner: the veil at the complement in between;
+    /// at nothing, the view is not drawn at all (alpha 0 skips its tree).
+    private func setVisibility(_ value: CGFloat) {
+        guard value != visibility else { return }
+        visibility = value
+        alpha = value > 0 ? 1 : 0
+        veil.alpha = 1 - value
+        veil.isHidden = value >= 1 || value <= 0
+    }
+
+    /// Touches as the view's alpha gave them: a banner all but gone is not
+    /// there to be touched.
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        visibility < 0.01 ? nil : super.hitTest(point, with: event)
     }
 
     /// Called when the blurred picture changes — the moment to read the

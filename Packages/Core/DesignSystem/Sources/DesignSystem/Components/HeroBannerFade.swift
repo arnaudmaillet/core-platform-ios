@@ -46,15 +46,33 @@ import UIKit
 /// and it is a frost: every `UIBlurEffect` style carries a tint, white-ish on
 /// a light page. These levels are the picture itself, blurred once (vImage,
 /// 7–40ms on a background queue) when it lands or when its displayed size
-/// changes — so they keep the picture's own colours, cost nothing per frame
-/// beyond compositing six masked layers, and render in `layer.render(in:)`,
-/// where the contrast instrument (`HeroInk.debugContrast`) can see them. A
-/// VIDEO banner would need a live blur instead; there is none today.
+/// changes — so they keep the picture's own colours and render in
+/// `layer.render(in:)`, where the contrast instrument
+/// (`HeroInk.debugContrast`) can see them. A VIDEO banner would need a live
+/// blur instead; there is none today.
 ///
 /// The progressive radius is approximated by stacking levels of increasing
 /// sigma, each fading in over the stretch where the wanted sigma climbs from
 /// the previous level's to its own — at any height at most two neighbouring
 /// levels blend, which is what keeps the climb free of visible steps.
+///
+/// ⚠️ **THE LEVELS ARE BLENDED INTO ONE PICTURE, NOT STACKED UNDER MASKS.**
+/// #331 drew them as six full-width layers, each under a gradient MASK, and
+/// a mask is an offscreen render pass of its own — every frame the masked
+/// layer's content moves, and the parallax moves it on every frame of a
+/// scroll. Six passes a frame, on top of the type's shadows: on a device the
+/// frame rate fell apart while scrolling either header (user, 1 October
+/// 2026; the simulator draws on the Mac's GPU and could not show it —
+/// `HeroScrollFrameProbe` counts the passes instead). Since at any height
+/// only two neighbouring levels mix, the same picture is a ROW-BY-ROW blend
+/// (`HeroBannerBlurRows`): each row of the run-out takes its two levels at
+/// the row's weights, the picture's rows read where the parallax has slid
+/// them. Recomposed on the CPU when the picture slides (a few hundred rows
+/// of vImage blends), it reaches the render server as one plain image — no
+/// mask, no offscreen pass. Metal would draw the same blend on the GPU, but
+/// a Metal layer is invisible to `layer.render(in:)` — the ink audit and its
+/// tests would read the sharp picture — and would have to present in step
+/// with the scroll's own transaction.
 public enum HeroBannerFade {
     /// Where the fade runs, in the coordinates of the view it is handed to.
     public struct Geometry: Equatable, Sendable {
@@ -290,16 +308,39 @@ public enum HeroBannerFade {
         return levels
     }
 
-    /// Three box passes — a Gaussian to within a few percent — at the box
-    /// width whose three-fold variance is `sigma`².
-    private static func blur(_ image: CGImage, sigma: CGFloat) -> CGImage? {
-        guard var format = vImage_CGImageFormat(
+    /// What one bake yields: the levels as baked (the ground the type's ink
+    /// is read from, `groundPixels`) and the same levels at one pixel per
+    /// point, ready to be blended row by row (`HeroBannerBlurRows`).
+    struct Bake: Sendable {
+        var levels: [UIImage]
+        var rows: HeroBannerBlurRows
+    }
+
+    /// `bakeLevels`, then the levels brought to one resolution.
+    static func bake(of image: UIImage, displayScale: CGFloat) -> Bake? {
+        guard let levels = bakeLevels(of: image, displayScale: displayScale),
+              let rows = HeroBannerBlurRows(levels: levels)
+        else { return nil }
+        return Bake(levels: levels, rows: rows)
+    }
+
+    /// Every bitmap here: 8-bit BGRA, premultiplied, sRGB — Core
+    /// Animation's own layout, so an image made in it is handed to the
+    /// render server without a conversion.
+    static var pixelFormat: vImage_CGImageFormat? {
+        vImage_CGImageFormat(
             bitsPerComponent: 8, bitsPerPixel: 32,
             colorSpace: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
             bitmapInfo: CGBitmapInfo(
                 rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
             )
-        ) else { return nil }
+        )
+    }
+
+    /// Three box passes — a Gaussian to within a few percent — at the box
+    /// width whose three-fold variance is `sigma`².
+    private static func blur(_ image: CGImage, sigma: CGFloat) -> CGImage? {
+        guard let format = pixelFormat else { return nil }
         guard var source = try? vImage_Buffer(cgImage: image, format: format) else { return nil }
         defer { source.free() }
         guard var scratch = try? vImage_Buffer(
@@ -323,13 +364,195 @@ public enum HeroBannerFade {
     }
 }
 
+/// `HeroBannerFade`'s levels at one pixel per point of the picture as baked
+/// — the faintest level's own resolution; the stronger ones, baked at a half
+/// and a quarter, scaled up to it once at the bake — blended row by row into
+/// the one image a `HeroBannerPictureView` shows (`composite`).
+///
+/// Immutable once baked, and read on the main thread only: the scratch rows
+/// are the compositor's, which is why this is `@unchecked Sendable` — it
+/// crosses from the bake's queue once, then stays.
+final class HeroBannerBlurRows: @unchecked Sendable {
+    /// The levels' size, in pixels — one per point of the picture as baked.
+    let width: Int
+    let height: Int
+    private let levels: [vImage_Buffer]
+    /// The operands a planar blend needs: the levels' alpha (they are
+    /// opaque), a row of nothing, and two rows to read a slid picture into.
+    private let opaqueRow: UnsafeMutableRawPointer
+    private let clearRow: UnsafeMutableRawPointer
+    private let lowerScratch: UnsafeMutableRawPointer
+    private let upperScratch: UnsafeMutableRawPointer
+
+    /// How close to one of the levels' rows a read must fall to take that
+    /// row as it is rather than mix two: a sixth of a point, on levels
+    /// blurred by a point and a half at the least.
+    static let rowSnap: CGFloat = 0.15
+
+    /// What the levels hold, in bytes.
+    var byteCount: Int { levels.reduce(0) { $0 + $1.rowBytes * Int($1.height) } }
+
+    init?(levels images: [UIImage]) {
+        guard let format = HeroBannerFade.pixelFormat, let first = images.first?.cgImage else { return nil }
+        var buffers: [vImage_Buffer] = []
+        for image in images {
+            guard let cgImage = image.cgImage,
+                  var source = try? vImage_Buffer(cgImage: cgImage, format: format)
+            else {
+                buffers.forEach { $0.free() }
+                return nil
+            }
+            if cgImage.width == first.width, cgImage.height == first.height {
+                buffers.append(source)
+                continue
+            }
+            defer { source.free() }
+            guard var scaled = try? vImage_Buffer(width: first.width, height: first.height, bitsPerPixel: 32)
+            else {
+                buffers.forEach { $0.free() }
+                return nil
+            }
+            guard vImageScale_ARGB8888(&source, &scaled, nil, vImage_Flags(kvImageEdgeExtend)) == kvImageNoError
+            else {
+                scaled.free()
+                buffers.forEach { $0.free() }
+                return nil
+            }
+            buffers.append(scaled)
+        }
+        width = first.width
+        height = first.height
+        levels = buffers
+        func row(_ byte: UInt8) -> UnsafeMutableRawPointer {
+            let row = UnsafeMutableRawPointer.allocate(byteCount: first.width * 4, alignment: 16)
+            row.initializeMemory(as: UInt8.self, repeating: byte, count: first.width * 4)
+            return row
+        }
+        opaqueRow = row(255)
+        clearRow = row(0)
+        lowerScratch = row(0)
+        upperScratch = row(0)
+    }
+
+    deinit {
+        levels.forEach { $0.free() }
+        for row in [opaqueRow, clearRow, lowerScratch, upperScratch] { row.deallocate() }
+    }
+
+    /// The blurred run-out for `count` rows of one point each, the first at
+    /// `top` in the banner's coordinates: every row the level `spans` fade
+    /// in at its height, over the one before it, read from the picture's
+    /// row behind it — the picture's top (slid by the parallax) at
+    /// `pictureTop`, `rowPitch` points per row of the levels.
+    ///
+    /// What the masked stack drew, row for row: clear above the first span;
+    /// over the first, the faintest level fading in over the sharp picture
+    /// (premultiplied alpha — the sharp picture is drawn under it); below,
+    /// opaque, each row two neighbouring levels at the row's weight. The
+    /// rows are one point apart and the render server scales them up with a
+    /// linear filter, which draws the linear climbs between them exactly.
+    ///
+    /// Only `columns` of the levels (all of them by default): the picture is
+    /// aspect-filled, and a wide one reaches past the banner's sides — on a
+    /// place, most of a row's cost was columns nobody sees (measured on
+    /// `-place-scroll-sweep`: max 1.15ms a composition before the crop).
+    func composite(
+        rows count: Int, from top: CGFloat, spans: [(start: CGFloat, full: CGFloat)],
+        pictureTop: CGFloat, rowPitch: CGFloat, columns: Range<Int>? = nil
+    ) -> CGImage? {
+        let columns = (columns ?? 0..<width).clamped(to: 0..<width)
+        guard count > 0, rowPitch > 0, !spans.isEmpty, spans.count <= levels.count, !columns.isEmpty,
+              let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let output = try? vImage_Buffer(width: columns.count, height: count, bitsPerPixel: 32)
+        else { return nil }
+        let offset = columns.lowerBound * 4
+        let length = columns.count * 4
+        for row in 0..<count {
+            let y = top + CGFloat(row) + 0.5
+            let out = output.data + row * output.rowBytes
+            guard let index = spans.lastIndex(where: { $0.start <= y }) else {
+                out.copyMemory(from: clearRow, byteCount: length)
+                continue
+            }
+            let span = spans[index]
+            let weight = UInt8((255 * max(0, min((y - span.start) / max(span.full - span.start, 1), 1))).rounded())
+            // The picture's row behind this one, in the levels' pixels.
+            let source = (y - pictureTop) / rowPitch - 0.5
+            let upper = read(index, at: source, from: offset, length: length, into: upperScratch)
+            let lower = index == 0
+                ? UnsafeRawPointer(clearRow)
+                : read(index - 1, at: source, from: offset, length: length, into: lowerScratch)
+            mix(upper, weight, over: lower, into: out, length: length)
+        }
+        guard let provider = CGDataProvider(
+            dataInfo: nil, data: output.data, size: output.rowBytes * count,
+            releaseData: { _, data, _ in free(UnsafeMutableRawPointer(mutating: data)) }
+        ) else {
+            output.free()
+            return nil
+        }
+        return CGImage(
+            width: columns.count, height: count, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: output.rowBytes,
+            space: space,
+            bitmapInfo: CGBitmapInfo(
+                rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+            ),
+            provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent
+        )
+    }
+
+    /// Level `index`'s row at `source` (fractional: between two rows, the
+    /// two mixed), `length` bytes from `offset`, or the row itself when it
+    /// falls on one.
+    private func read(
+        _ index: Int, at source: CGFloat, from offset: Int, length: Int, into scratch: UnsafeMutableRawPointer
+    ) -> UnsafeRawPointer {
+        let level = levels[index]
+        let clamped = max(0, min(source, CGFloat(height - 1)))
+        let first = Int(clamped.rounded(.down))
+        let second = min(first + 1, height - 1)
+        let between = clamped - CGFloat(first)
+        let here = UnsafeRawPointer(level.data + first * level.rowBytes + offset)
+        guard between > Self.rowSnap, second != first else { return here }
+        let next = UnsafeRawPointer(level.data + second * level.rowBytes + offset)
+        guard between < 1 - Self.rowSnap else { return next }
+        mix(next, UInt8((255 * between).rounded()), over: here, into: scratch, length: length)
+        return UnsafeRawPointer(scratch)
+    }
+
+    /// `upper` at `weight` over `lower` — premultiplied, every byte alike,
+    /// so the channel order does not matter: an opaque `upper` is the linear
+    /// mix of the two, and over the clear row it is `upper` at `weight`.
+    private func mix(
+        _ upper: UnsafeRawPointer, _ weight: UInt8, over lower: UnsafeRawPointer, into out: UnsafeMutableRawPointer,
+        length: Int
+    ) {
+        if weight == 0 { return out.copyMemory(from: lower, byteCount: length) }
+        if weight == 255 { return out.copyMemory(from: upper, byteCount: length) }
+        func row(_ pointer: UnsafeRawPointer) -> vImage_Buffer {
+            vImage_Buffer(
+                data: UnsafeMutableRawPointer(mutating: pointer), height: 1,
+                width: vImagePixelCount(length), rowBytes: length
+            )
+        }
+        var top = row(upper), alpha = row(opaqueRow), bottom = row(lower), destination = row(out)
+        vImagePremultipliedConstAlphaBlend_Planar8(
+            &top, weight, &alpha, &bottom, &destination, vImage_Flags(kvImageNoFlags)
+        )
+    }
+}
+
 /// A banner's picture with `HeroBannerFade`'s progressive blur: an
 /// aspect-filled image, and over it the baked levels, each masked to where it
 /// fades in. Pin it where the picture shows; give it the fade in its own
 /// coordinates whenever layout moves the type (`fade`), and move the picture
 /// inside it with `pictureOutset` / `pictureShift` — never by moving the view,
-/// since the blur's masks belong to the banner, not to the picture: a
+/// since the blur's climb belongs to the banner, not to the picture: a
 /// parallax slides the picture UNDER a blur that stays with the type.
+///
+/// The levels are not layers: they are blended into ONE image, recomposed
+/// whenever the picture slides (`HeroBannerBlurRows`) — see `HeroBannerFade`
+/// for why six masked layers were too dear to scroll.
 ///
 /// Fade it into the page with a `HeroBannerRampView` over it, in the same
 /// coordinates.
@@ -341,7 +564,8 @@ public final class HeroBannerPictureView: UIView {
             guard newValue !== sharp.image else { return }
             sharp.image = newValue
             baked = nil; baking = nil
-            for level in levels { level.picture.image = nil }
+            bake = nil
+            hideBlur()
             setNeedsLayout()
         }
     }
@@ -353,13 +577,13 @@ public final class HeroBannerPictureView: UIView {
     }
 
     /// How far down the picture is slid inside the view — the parallax. Moves
-    /// the picture and its baked levels together; the masks stay put.
+    /// the picture, and recomposes the blur from the rows that now stand
+    /// behind its climb; the climb stays put.
     public var pictureShift: CGFloat = 0 {
         didSet {
             guard pictureShift != oldValue else { return }
-            let shift = CGAffineTransform(translationX: 0, y: pictureShift)
-            sharp.transform = shift
-            for level in levels { level.picture.transform = shift }
+            sharp.transform = CGAffineTransform(translationX: 0, y: pictureShift)
+            composeBlur()
         }
     }
 
@@ -377,14 +601,22 @@ public final class HeroBannerPictureView: UIView {
     }
 
     private let sharp = FillImageView()
-    private struct Level {
-        /// Clips to the rows the level can show and carries its mask, so the
-        /// offscreen pass a mask costs covers only those rows.
-        let host: UIView
-        let mask: CAGradientLayer
-        let picture: FillImageView
+    /// The blurred run-out over the sharp picture: one image, the levels
+    /// blended row by row (`composeBlur`). A plain view — no mask, nothing
+    /// drawn offscreen.
+    private let blur = UIView()
+    /// The levels, as baked and as rows to blend.
+    private var bake: HeroBannerFade.Bake?
+    /// What the blur image on screen was composed for — so a layout pass or
+    /// a scroll that moves nothing composes nothing.
+    private struct Composition: Equatable {
+        var top: CGFloat
+        var rows: Int
+        var fade: HeroBannerFade.Geometry
+        var picture: CGRect
+        var bake: ObjectIdentifier
     }
-    private var levels: [Level] = []
+    private var composed: Composition?
     /// What the levels were baked for: the picture and its display scale.
     private var baked: (image: ObjectIdentifier, scale: CGFloat)?
 
@@ -414,10 +646,10 @@ public final class HeroBannerPictureView: UIView {
     /// alone would be white on a light page's arriving tone. Read on
     /// demand, only the rect's pixels, so nothing is kept between bakes.
     public func groundPixels(behind rect: CGRect) -> [SIMD3<Float>]? {
-        guard baked != nil, let fade else { return nil }
+        guard baked != nil, let levels = bake?.levels, let fade else { return nil }
         let spans = HeroBannerFade.levelSpans(fade)
         let shown = levels.indices.last { $0 < spans.count && spans[$0].full <= rect.minY } ?? 0
-        guard let image = levels[shown].picture.image?.cgImage,
+        guard let image = levels[shown].cgImage,
               let space = CGColorSpace(name: CGColorSpace.sRGB) else { return nil }
         let frame = pictureFrame.offsetBy(dx: 0, dy: -pictureShift)
         let scale = max(frame.width / CGFloat(image.width), frame.height / CGFloat(image.height))
@@ -474,20 +706,10 @@ public final class HeroBannerPictureView: UIView {
         sharp.contentMode = .scaleAspectFill
         sharp.clipsToBounds = true
         addSubview(sharp)
-        levels = HeroBannerFade.blurSigmas.map { _ in
-            let host = UIView()
-            host.isUserInteractionEnabled = false
-            host.clipsToBounds = true
-            host.isHidden = true
-            let mask = CAGradientLayer()
-            mask.colors = [UIColor.clear.cgColor, UIColor.black.cgColor]
-            host.layer.mask = mask
-            let picture = FillImageView()
-            picture.contentMode = .scaleAspectFill
-            host.addSubview(picture)
-            addSubview(host)
-            return Level(host: host, mask: mask, picture: picture)
-        }
+        blur.isUserInteractionEnabled = false
+        blur.isHidden = true
+        blur.layer.contentsGravity = .resize
+        addSubview(blur)
         // The page's tone is part of the ground (`groundPixels`): a flip of
         // the appearance is a new ground, to be read again like a new bake.
         registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: HeroBannerPictureView, _) in
@@ -508,29 +730,93 @@ public final class HeroBannerPictureView: UIView {
         let rest = pictureFrame.offsetBy(dx: 0, dy: -pictureShift)
         place(sharp, at: rest)
         bakeIfNeeded(for: rest.size)
-        let spans = fade.map(HeroBannerFade.levelSpans) ?? []
-        for (index, level) in levels.enumerated() {
-            guard baked != nil, index < spans.count, bounds.height > 0,
-                  spans[index].start < bounds.height
-            else {
-                level.host.isHidden = true
-                continue
-            }
-            let span = spans[index]
-            let top = max(0, span.start.rounded(.down))
-            level.host.isHidden = false
-            level.host.frame = CGRect(x: 0, y: top, width: bounds.width, height: bounds.height - top)
-            place(level.picture, at: rest.offsetBy(dx: 0, dy: -top))
-            let height = level.host.bounds.height
-            level.mask.frame = level.host.bounds
-            level.mask.locations = [span.start, max(span.full, span.start + 1)].map {
-                NSNumber(value: Double(max(0, min(($0 - top) / height, 1))))
-            }
-        }
+        composeBlur()
         #if DEBUG
         layoutMaterialComparison()
         traceLayout()
         #endif
+    }
+
+    /// The levels' climb over the view, as the spans that can show — each
+    /// fading in from where it starts — or none before a bake or a fade.
+    private var shownSpans: [(start: CGFloat, full: CGFloat)] {
+        guard bake != nil, let fade, bounds.height > 0 else { return [] }
+        return HeroBannerFade.levelSpans(fade).filter { $0.start < bounds.height }
+    }
+
+    /// Blends the levels into the blur image for where the picture stands
+    /// now — the rows from the climb's top to the view's foot, each read
+    /// from the picture's row behind it (`HeroBannerBlurRows.composite`).
+    ///
+    /// Runs on layout and on every change of `pictureShift`: a few hundred
+    /// rows of vImage blends and one image handed to the render server —
+    /// measured by `HeroScrollFrameProbe` on the scripted scrolls.
+    private func composeBlur() {
+        #if DEBUG
+        if Self.comparesMaterial { return hideBlur() }
+        #endif
+        let spans = shownSpans
+        guard let bake, let fade, let image = sharp.image, let first = spans.first,
+              image.size.width > 0, image.size.height > 0
+        else { return hideBlur() }
+        let top = max(0, first.start.rounded(.down))
+        let rows = Int((bounds.height - top).rounded(.up))
+        // The picture as it stands — aspect-filled into its frame, slid by
+        // the parallax — which the levels cover edge to edge.
+        let frame = pictureFrame
+        let fill = max(frame.width / image.size.width, frame.height / image.size.height)
+        let picture = CGRect(
+            x: frame.midX - image.size.width * fill / 2, y: frame.midY - image.size.height * fill / 2,
+            width: image.size.width * fill, height: image.size.height * fill
+        )
+        let composition = Composition(
+            top: top, rows: rows, fade: fade, picture: picture, bake: ObjectIdentifier(bake.rows)
+        )
+        guard composition != composed else { return }
+        #if DEBUG
+        let began = CACurrentMediaTime()
+        defer { HeroScrollFrameProbe.recordCompose((CACurrentMediaTime() - began) * 1000, rows: rows) }
+        #endif
+        // Only the columns inside the view (a pixel of margin either side
+        // for the linear filter): an aspect-filled picture overhangs it.
+        let columnPitch = picture.width / CGFloat(bake.rows.width)
+        let columns = max(0, Int(((0 - picture.minX) / columnPitch).rounded(.down)) - 1)
+            ..< min(bake.rows.width, Int(((bounds.width - picture.minX) / columnPitch).rounded(.up)) + 1)
+        // ⚠️ THE ROWS FOLLOW THE PICTURE'S, a fraction of a point below
+        // `top`. Laid on whole points, a parallax that slid the picture by a
+        // fraction read every row BETWEEN two of the levels' — two more
+        // blends a row, most of the cost (0.64ms a composition on a poster,
+        // measured). Phased so the middle row reads a level row exactly, the
+        // others land within `HeroBannerBlurRows.rowSnap` of one (a level
+        // row is a point give or take the bake's rounding) and are read as
+        // they are — the weights still taken at each row's own height. A
+        // banner stretched by a pull drifts further; there rows are mixed.
+        let rowPitch = picture.height / CGFloat(bake.rows.height)
+        let middle = CGFloat(rows / 2)
+        let source = (top + middle + 0.5 - picture.minY) / rowPitch - 0.5
+        let start = top + (source.rounded(.up) - source) * rowPitch
+        guard rows > 0, !columns.isEmpty, let composite = bake.rows.composite(
+            rows: rows + 1, from: start, spans: spans,
+            pictureTop: picture.minY, rowPitch: rowPitch, columns: columns
+        ) else { return hideBlur() }
+        composed = composition
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        UIView.performWithoutAnimation {
+            blur.layer.contents = composite
+            blur.frame = CGRect(
+                x: picture.minX + CGFloat(columns.lowerBound) * columnPitch, y: start,
+                width: CGFloat(columns.count) * columnPitch, height: CGFloat(rows + 1)
+            )
+            blur.isHidden = false
+        }
+        CATransaction.commit()
+    }
+
+    private func hideBlur() {
+        composed = nil
+        blur.isHidden = true
+        blur.layer.contents = nil
     }
 
     #if DEBUG
@@ -541,7 +827,8 @@ public final class HeroBannerPictureView: UIView {
     /// how many are up, over what fade, baked or baking, on screen or not.
     private func traceLayout() {
         guard Self.tracesBlur else { return }
-        let shown = levels.filter { !$0.host.isHidden && $0.picture.image != nil }.count
+        let shown = blur.isHidden ? 0 : shownSpans.count
+        let levels = HeroBannerFade.blurSigmas
         let line = String(
             format: "HERO-BLUR layout %.0fx%.0f fade=%@ baked=%@ baking=%@ window=%@ shown=%d/%d",
             bounds.width, bounds.height,
@@ -563,7 +850,7 @@ public final class HeroBannerPictureView: UIView {
 
     private func layoutMaterialComparison() {
         guard Self.comparesMaterial, let fade, bounds.height > 0 else { return }
-        for level in levels { level.host.isHidden = true }
+        hideBlur()
         let material = self.material ?? {
             let view = UIVisualEffectView(effect: UIBlurEffect(style: .regular))
             let maskView = MaskView()
@@ -632,24 +919,24 @@ public final class HeroBannerPictureView: UIView {
         let key = (identity, scale)
         guard isInVisibleWindow else {
             let began = CACurrentMediaTime()
-            guard let images = HeroBannerFade.bakeLevels(of: image, displayScale: scale) else { return }
-            adopt(images, for: key, size: size, milliseconds: (CACurrentMediaTime() - began) * 1000)
+            guard let bake = HeroBannerFade.bake(of: image, displayScale: scale) else { return }
+            adopt(bake, for: key, size: size, milliseconds: (CACurrentMediaTime() - began) * 1000)
             return
         }
         baking = key
         DispatchQueue.global(qos: .userInitiated).async {
             let began = CACurrentMediaTime()
-            let images = HeroBannerFade.bakeLevels(of: image, displayScale: scale)
+            let bake = HeroBannerFade.bake(of: image, displayScale: scale)
             let milliseconds = (CACurrentMediaTime() - began) * 1000
             DispatchQueue.main.async { [weak self] in
                 guard let self, let baking = self.baking, baking.image == key.0, baking.scale == key.1
                 else { return }
                 self.baking = nil
-                guard let images, self.sharp.image.map(ObjectIdentifier.init) == key.0 else { return }
+                guard let bake, self.sharp.image.map(ObjectIdentifier.init) == key.0 else { return }
                 UIView.transition(
                     with: self, duration: 0.2, options: [.transitionCrossDissolve, .allowUserInteraction]
                 ) {
-                    self.adopt(images, for: key, size: size, milliseconds: milliseconds)
+                    self.adopt(bake, for: key, size: size, milliseconds: milliseconds)
                     self.layoutIfNeeded()
                 }
             }
@@ -657,24 +944,26 @@ public final class HeroBannerPictureView: UIView {
     }
 
     private func adopt(
-        _ images: [UIImage], for key: (image: ObjectIdentifier, scale: CGFloat), size: CGSize,
+        _ bake: HeroBannerFade.Bake, for key: (image: ObjectIdentifier, scale: CGFloat), size: CGSize,
         milliseconds: Double
     ) {
         #if DEBUG
         debugLastBakeMilliseconds = milliseconds
-        debugLastBakeBytes = images.reduce(0) { total, level in
+        // The levels as baked and as rows — the rows are most of it: six
+        // levels at the faintest one's resolution.
+        debugLastBakeBytes = bake.rows.byteCount + bake.levels.reduce(0) { total, level in
             total + (level.cgImage.map { $0.bytesPerRow * $0.height } ?? 0)
         }
         if ProcessInfo.processInfo.arguments.contains("-hero-blur-trace") {
             print(String(
                 format: "HERO-BLUR baked %d levels for %.0fx%.0fpt in %.1fms (%@), %.0f KB",
-                images.count, size.width, size.height, milliseconds,
+                bake.levels.count, size.width, size.height, milliseconds,
                 window == nil ? "in place" : "background", Double(debugLastBakeBytes) / 1024
             ))
         }
         #endif
         baked = key
-        for (level, image) in zip(levels, images) { level.picture.image = image }
+        self.bake = bake
         setNeedsLayout()
         onLevelsChanged?()
     }
@@ -683,14 +972,12 @@ public final class HeroBannerPictureView: UIView {
     /// The last bake's cost, for the trace and the tests.
     public private(set) var debugLastBakeMilliseconds: Double = 0
     public private(set) var debugLastBakeBytes = 0
-    /// The levels showing, and each one's mask stops in this view's space.
+    /// The levels showing, and where each one fades in, in this view's
+    /// space — clamped to the view, as a mask's stops were.
     public var debugVisibleLevels: [(start: CGFloat, full: CGFloat)] {
-        levels.filter { !$0.host.isHidden && $0.picture.image != nil }.map { level in
-            let locations = (level.mask.locations ?? []).map { CGFloat($0.doubleValue) }
-            let height = level.host.bounds.height
-            return (level.host.frame.minY + (locations.first ?? 0) * height,
-                    level.host.frame.minY + (locations.last ?? 0) * height)
-        }
+        guard !blur.isHidden else { return [] }
+        func clamp(_ y: CGFloat) -> CGFloat { max(0, min(y, bounds.height)) }
+        return shownSpans.map { (clamp($0.start), clamp(max($0.full, $0.start + 1))) }
     }
     #endif
 }
