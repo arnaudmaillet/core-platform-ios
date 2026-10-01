@@ -89,16 +89,19 @@ public enum HeroBannerFade {
         /// in from `rampStart` — the type's ground — before climbing on to
         /// the foot. Nil: one cubic from `rampStart` to `rampEnd`.
         public var rampShoulder: CGFloat?
+        /// How the blur climbs from `blurStart` to `blurFull`.
+        public var blurCurve: BlurCurve
 
         public init(
             blurStart: CGFloat, blurFull: CGFloat, rampStart: CGFloat, rampEnd: CGFloat,
-            rampShoulder: CGFloat? = nil
+            rampShoulder: CGFloat? = nil, blurCurve: BlurCurve = .sigma
         ) {
             self.blurStart = blurStart
             self.blurFull = blurFull
             self.rampStart = rampStart
             self.rampEnd = rampEnd
             self.rampShoulder = rampShoulder
+            self.blurCurve = blurCurve
         }
 
         /// The same fade, `dy` further down — for handing it to a view whose
@@ -107,9 +110,31 @@ public enum HeroBannerFade {
             Geometry(
                 blurStart: blurStart + dy, blurFull: blurFull + dy,
                 rampStart: rampStart + dy, rampEnd: rampEnd + dy,
-                rampShoulder: rampShoulder.map { $0 + dy }
+                rampShoulder: rampShoulder.map { $0 + dy }, blurCurve: blurCurve
             )
         }
+    }
+
+    /// How the blur climbs its container.
+    public enum BlurCurve: Equatable, Sendable {
+        /// The SIGMA eased in: `t^blurCurveExponent` of the strongest at `t`
+        /// of the way down — a poster's and a place's, whose type stands on
+        /// the picture down the whole container.
+        case sigma
+        /// The LADDER of levels eased in — a profile's band: the levels'
+        /// hand-overs fall at `t^bandBlurExponent` of the ladder, so the
+        /// faintest level alone takes the container's first half and the
+        /// stronger ones crowd into its last few points.
+        ///
+        /// ⚠️ THE SIGMA CURVE WAS "FAR TOO STRONG" ON A BAND (user, 1 October
+        /// 2026), cubic as it was: a band's container is only the name's half
+        /// of the avatar (~60pt), and the levels DOUBLE, so an eye reads the
+        /// blur by the level — sigma 7 by half way, the handle on sigma ~14
+        /// to 28 — and a cubic sigma climbs the ladder about evenly. Eased on
+        /// the ladder itself, the blur is a breath under the name (sigma
+        /// ~1 half way down) and rises faster and faster to the same whole
+        /// at the foot, where the page's tone has taken over anyway.
+        case ladder
     }
 
     /// How far above the identity's top — a profile's avatar, a place's
@@ -150,6 +175,10 @@ public enum HeroBannerFade {
     /// the first half of the container under sigma 7 (an eighth of the
     /// strongest) and spends the rest in its lower half.
     public static let blurCurveExponent: CGFloat = 3
+
+    /// A band's ease on the ladder of levels (`BlurCurve.ladder`): at `t` of
+    /// the way down, `t^bandBlurExponent` of the ladder is climbed.
+    public static let bandBlurExponent: CGFloat = 3
 
     /// The page tone's curve: at `t` of the way down its ramp the tone is
     /// `t^rampCurveExponent` opaque.
@@ -225,9 +254,19 @@ public enum HeroBannerFade {
     /// previous level's to where it reaches this one's, along
     /// `blurCurveExponent` — so the levels crowd towards the foot, where the
     /// sigma climbs fastest.
+    ///
+    /// On a band's ladder curve, level `k` of `n` fades in from `(k/n)` to
+    /// `((k+1)/n)` of the ladder, each eased by `bandBlurExponent`.
     public static func levelSpans(_ geometry: Geometry) -> [(start: CGFloat, full: CGFloat)] {
         guard let strongest = blurSigmas.last, strongest > 0 else { return [] }
         let lead = max(0, geometry.blurFull - geometry.blurStart)
+        if geometry.blurCurve == .ladder {
+            let count = CGFloat(blurSigmas.count)
+            func depth(_ step: Int) -> CGFloat {
+                geometry.blurStart + lead * pow(CGFloat(step) / count, 1 / bandBlurExponent)
+            }
+            return blurSigmas.indices.map { (depth($0), depth($0 + 1)) }
+        }
         func depth(_ sigma: CGFloat) -> CGFloat {
             geometry.blurStart + lead * pow(sigma / strongest, 1 / blurCurveExponent)
         }
@@ -236,6 +275,19 @@ public enum HeroBannerFade {
             defer { previous = sigma }
             return (depth(previous), depth(sigma))
         }
+    }
+
+    /// The blur at `y` as the levels draw it: the sigma of the level fading
+    /// in there, interpolated from the one under it (none above the first)
+    /// by the row's weight — what the composition blends, in sigmas.
+    public static func sigma(at y: CGFloat, geometry: Geometry) -> CGFloat {
+        let spans = levelSpans(geometry)
+        guard let index = spans.lastIndex(where: { $0.start <= y }) else { return 0 }
+        let span = spans[index]
+        let length = span.full - span.start
+        let weight = length > 0 ? max(0, min((y - span.start) / length, 1)) : 1
+        let below = index == 0 ? 0 : blurSigmas[index - 1]
+        return below + (blurSigmas[index] - below) * weight
     }
 
     /// How many segments the ramp's curve is sampled in — a gradient's

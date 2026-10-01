@@ -1335,6 +1335,11 @@ final class ProfileHeaderView: UIView {
             // the whole container; the page's tone climbs from the handle's
             // line, through the air above the counters, to the foot.
             fade.rampStart = max(fade.rampStart, avatar.midY - Metrics.bandRampAboveMidline)
+            // ⚠️ AND ITS BLUR CLIMBS THE LADDER, NOT THE SIGMA: over a
+            // container this short the sigma curve put the handle on the
+            // third and fourth levels — "far too strong" (user, 1 October
+            // 2026). See `HeroBannerFade.BlurCurve.ladder`.
+            fade.blurCurve = .ladder
         }
         bannerView.setFade(fade)
         updateInkTones()

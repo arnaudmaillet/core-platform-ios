@@ -40,6 +40,62 @@ struct HeroBannerFadeTests {
         #expect(spans[2].full >= geometry.blurStart + lead * 0.5 - 0.001)
     }
 
+    /// A profile's BAND climbs the ladder of levels, not the sigma (user, 1
+    /// October 2026: "far too strong"): a breath of blur at the container's
+    /// top — under 2% of the strongest a quarter of the way down, under 10%
+    /// half way — rising faster and faster (convex), whole at the foot.
+    @Test func aBandsBlurIsWeakAtItsStartAndConvex() throws {
+        var band = geometry
+        band.blurCurve = .ladder
+        let lead = band.blurFull - band.blurStart
+        let strongest = try #require(HeroBannerFade.blurSigmas.last)
+        func sigma(_ t: CGFloat) -> CGFloat { HeroBannerFade.sigma(at: band.blurStart + lead * t, geometry: band) }
+        #expect(sigma(0) == 0)
+        #expect(sigma(0.25) <= strongest * 0.02, "\(sigma(0.25))")
+        #expect(sigma(0.5) <= strongest * 0.1, "\(sigma(0.5))")
+        #expect(abs(sigma(1) - strongest) < 0.001)
+        // Softer than the sigma curve everywhere above the foot.
+        for step in 1..<20 {
+            let t = CGFloat(step) / 20
+            let plain = HeroBannerFade.sigma(at: geometry.blurStart + lead * t, geometry: geometry)
+            #expect(sigma(t) <= plain + 0.001, "t \(t): \(sigma(t)) vs \(plain)")
+        }
+        // Convex: the climb only ever steepens.
+        let samples = stride(from: CGFloat(0), through: 1, by: 0.01).map(sigma)
+        for index in 2..<samples.count {
+            let second = samples[index] - 2 * samples[index - 1] + samples[index - 2]
+            #expect(second >= -0.001, "at \(index): \(second)")
+        }
+        // Still the levels, tiling the climb without a gap.
+        let spans = HeroBannerFade.levelSpans(band)
+        try #require(spans.count == HeroBannerFade.blurSigmas.count)
+        #expect(spans[0].start == band.blurStart)
+        #expect(abs(spans[spans.count - 1].full - band.blurFull) < 0.001)
+        for (lower, upper) in zip(spans, spans.dropFirst()) {
+            #expect(abs(upper.start - lower.full) < 0.001)
+        }
+    }
+
+    /// Posters and places keep the sigma curve: their spans are exactly
+    /// `t^blurCurveExponent` of the strongest sigma, as before.
+    @Test func postersAndPlacesKeepTheSigmaCurve() throws {
+        let shouldered = HeroBannerFade.shoulderedGeometry(identityTop: 300, foot: 540)
+        #expect(geometry.blurCurve == .sigma)
+        #expect(shouldered.blurCurve == .sigma)
+        let strongest = try #require(HeroBannerFade.blurSigmas.last)
+        for fade in [geometry, shouldered] {
+            let lead = fade.blurFull - fade.blurStart
+            func depth(_ sigma: CGFloat) -> CGFloat {
+                fade.blurStart + lead * pow(sigma / strongest, 1 / HeroBannerFade.blurCurveExponent)
+            }
+            let expected = zip([0] + HeroBannerFade.blurSigmas.dropLast(), HeroBannerFade.blurSigmas)
+                .map { (depth($0), depth($1)) }
+            let spans = HeroBannerFade.levelSpans(fade)
+            #expect(spans.map(\.start) == expected.map(\.0))
+            #expect(spans.map(\.full) == expected.map(\.1))
+        }
+    }
+
     /// The page's tone over the whole container — the picture's fade into
     /// the page, under the blur — clear at its top, whole at the foot, and
     /// eased in: a few percent a third of the way down, where the type
