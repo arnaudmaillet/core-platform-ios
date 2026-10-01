@@ -78,6 +78,10 @@ final class ProfilePullToRefreshView: UIView {
         UIView.animate(withDuration: 0.15) { self.spinner.alpha = 1 }
     }
 
+    #if DEBUG
+    var debugIsRefreshing: Bool { isRefreshing }
+    #endif
+
     /// Ends the spin. Idempotent — the profile reports `.content` on every
     /// load, refreshed or not, so this is called far more often than it acts.
     func endRefreshing() {

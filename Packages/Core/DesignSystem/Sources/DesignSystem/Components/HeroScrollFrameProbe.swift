@@ -39,6 +39,23 @@ public enum HeroBannerCost {
     }
 }
 
+/// The screen's own work around a scroll — a refresh landing (the view
+/// model's answer, the header, the gallery's apply) and the layout a frame
+/// costs outside the banner — timed by name while a probe runs, so a stalled
+/// run-loop turn says what it was spent on. DEBUG only; elsewhere `measure`
+/// is the body.
+public enum HeroScreenCost {
+    /// Runs `body`, timed under `label` while a probe runs.
+    @MainActor @inline(__always)
+    public static func measure<T>(_ label: StaticString, _ body: () throws -> T) rethrows -> T {
+        #if DEBUG
+        return try HeroScrollFrameProbe.measure(named: label, body)
+        #else
+        return try body()
+        #endif
+    }
+}
+
 #if DEBUG
 /// What a scripted scroll of a picture-led header costs, frame by frame —
 /// the instrument behind `-profile-scroll-sweep`, `-place-scroll-sweep` and
@@ -64,6 +81,12 @@ public enum HeroBannerCost {
 /// names them (unbuffered — `print` from an app that never exits reads
 /// empty from a file sink):
 /// `HERO-SCROLL <name>[/phase] frames=… main mean/p95/max … banner … link hitches=… sections … bakes=… offscreen max …`.
+///
+/// Every main run-loop turn is timed as well (wake to sleep, the commit
+/// included, the census taken out): per phase, how many ran past a 120 Hz
+/// frame and the worst one with the `HeroScreenCost` sections it ran — and
+/// the turns a refresh landed in (`landing.*` sections) on their own line,
+/// `HERO-SCROLL <name>/landing turns[…] worst-turn[…]`.
 @MainActor
 public final class HeroScrollFrameProbe {
     /// The layers in a tree that make the render server draw offscreen.
@@ -146,6 +169,25 @@ public final class HeroScrollFrameProbe {
         running?.bakes += 1
     }
 
+    /// Named sections nest (a gallery apply runs its cells): only the
+    /// outermost one is a turn's attributed time; every one is in the ledger.
+    private static var namedDepth = 0
+
+    fileprivate static func measure<T>(named label: StaticString, _ body: () throws -> T) rethrows -> T {
+        guard let probe = running else { return try body() }
+        let began = CACurrentMediaTime()
+        namedDepth += 1
+        defer {
+            namedDepth -= 1
+            let milliseconds = (CACurrentMediaTime() - began) * 1000
+            let key = "\(label)"
+            probe.named[key, default: Ledger()].add(milliseconds)
+            probe.turnNamed[key, default: Ledger()].add(milliseconds)
+            if namedDepth == 0 { probe.turnAttributed += milliseconds }
+        }
+        return try body()
+    }
+
     /// One section's count and total.
     private struct Ledger {
         var count = 0
@@ -162,12 +204,42 @@ public final class HeroScrollFrameProbe {
         var main: [Double] = []
         var banner: [Double] = []
         var intervals: [Double] = []
+        /// Every main run-loop turn — wake to sleep, the commit included —
+        /// whether a step caused it or not (a refresh landing between two).
+        var turns: [Double] = []
+        var worstTurn: Turn?
+    }
+
+    /// One run-loop turn, and the named sections that ran in it.
+    private struct Turn {
+        var milliseconds: Double
+        var attributed: Double
+        var named: [String: Ledger]
+
+        var description: String {
+            let parts = named.sorted { $0.value.milliseconds > $1.value.milliseconds }
+                .map { String(format: "%@ n=%d %.1f", $0.key, $0.value.count, $0.value.milliseconds) }
+            return String(format: "%.1fms (named %.1f: ", milliseconds, attributed)
+                + (parts.isEmpty ? "none" : parts.joined(separator: ", ")) + ")"
+        }
     }
 
     private let name: String
     private weak var root: UIView?
     private var phases: [Phase]
     private var sections: [HeroBannerCost.Section: Ledger] = [:]
+    /// `HeroScreenCost` sections over the whole sweep.
+    private var named: [String: Ledger] = [:]
+    /// ... and over the turn running now.
+    private var turnNamed: [String: Ledger] = [:]
+    private var turnAttributed: Double = 0
+    /// The probe's own census, taken out of the turn it ran in.
+    private var turnOverhead: Double = 0
+    private var turnBegan: CFTimeInterval = 0
+    /// The turns a refresh landed in: any turn that ran a section whose
+    /// name starts with `landing.` — the release's answer, wherever it falls.
+    private var landing = Phase(name: "landing")
+    private var observers: [CFRunLoopObserver] = []
     private var bakes = 0
     private var bannerThisFrame: Double = 0
     private var census = Census()
@@ -183,6 +255,45 @@ public final class HeroScrollFrameProbe {
         self.link = link
         Self.composeSamples = []
         Self.running = self
+        // A turn runs from the wake (first in line) to the sleep (last in
+        // line, after Core Animation's commit at 2_000_000).
+        let wake = CFRunLoopObserverCreateWithHandler(
+            nil, CFRunLoopActivity.afterWaiting.rawValue, true, CFIndex.min
+        ) { [weak self] _, _ in
+            MainActor.assumeIsolated { self?.beginTurn() }
+        }
+        let sleep = CFRunLoopObserverCreateWithHandler(
+            nil, CFRunLoopActivity.beforeWaiting.rawValue, true, CFIndex.max
+        ) { [weak self] _, _ in
+            MainActor.assumeIsolated { self?.endTurn() }
+        }
+        for observer in [wake, sleep].compactMap(\.self) {
+            CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
+            observers.append(observer)
+        }
+        beginTurn()
+    }
+
+    private func beginTurn() {
+        turnBegan = CACurrentMediaTime()
+        turnNamed = [:]
+        turnAttributed = 0
+        turnOverhead = 0
+    }
+
+    private func endTurn() {
+        guard turnBegan > 0 else { return }
+        let turn = Turn(
+            milliseconds: (CACurrentMediaTime() - turnBegan) * 1000 - turnOverhead,
+            attributed: turnAttributed, named: turnNamed
+        )
+        turnBegan = 0
+        func record(_ phase: inout Phase) {
+            phase.turns.append(turn.milliseconds)
+            if turn.milliseconds > phase.worstTurn?.milliseconds ?? -1 { phase.worstTurn = turn }
+        }
+        record(&phases[phases.count - 1])
+        if turn.named.keys.contains(where: { $0.hasPrefix("landing.") }) { record(&landing) }
     }
 
     /// Starts a named phase of the sweep — a pull, a release, the settle
@@ -206,6 +317,8 @@ public final class HeroScrollFrameProbe {
         phases[phases.count - 1].main.append((CACurrentMediaTime() - began) * 1000)
         phases[phases.count - 1].banner.append(bannerThisFrame)
         if let layer = root?.layer {
+            let censusBegan = CACurrentMediaTime()
+            defer { turnOverhead += (CACurrentMediaTime() - censusBegan) * 1000 }
             let now = Census(of: layer)
             census.masks = max(census.masks, now.masks)
             census.shadows = max(census.shadows, now.shadows)
@@ -218,6 +331,8 @@ public final class HeroScrollFrameProbe {
     public func finish() {
         link?.invalidate()
         link = nil
+        for observer in observers { CFRunLoopObserverInvalidate(observer) }
+        observers = []
         if Self.running === self { Self.running = nil }
         func stats(_ values: [Double]) -> String {
             guard !values.isEmpty else { return "n/a" }
@@ -227,20 +342,41 @@ public final class HeroScrollFrameProbe {
             return String(format: "mean=%.2f p95=%.2f max=%.2f", mean, p95, sorted.last ?? 0)
         }
         let target = 1000 / Double(max(1, root?.window?.screen.maximumFramesPerSecond ?? 60))
+        // A turn is judged against a 120 Hz device's budget whatever the
+        // simulator's link runs at: that is the frame a device must make.
+        let deviceFrame = 1000.0 / 120
+        func turns(_ phase: Phase) -> String {
+            let over = phase.turns.filter { $0 > deviceFrame }.count
+            let long = phase.turns.filter { $0 > 2 * deviceFrame }.count
+            return "turns[n=\(phase.turns.count) >8.3ms=\(over) >16.7ms=\(long) \(stats(phase.turns))]ms "
+                + "worst-turn[\(phase.worstTurn?.description ?? "n/a")]"
+        }
         func line(_ label: String, _ phase: Phase) -> String {
             let hitches = phase.intervals.filter { $0 > target * 1.5 }.count
             return "HERO-SCROLL \(label) frames=\(phase.main.count) main[\(stats(phase.main))]ms "
                 + "banner[\(stats(phase.banner))]ms "
-                + "link[frames=\(phase.intervals.count) hitches=\(hitches) \(stats(phase.intervals))]ms"
+                + "link[frames=\(phase.intervals.count) hitches=\(hitches) \(stats(phase.intervals))]ms "
+                + turns(phase)
         }
         var lines: [String] = []
         if phases.count > 1 || !phases[0].name.isEmpty {
             lines += phases.map { line("\(name)/\($0.name)", $0) + "\n" }
         }
-        let total = Phase(
+        if !landing.turns.isEmpty {
+            lines.append("HERO-SCROLL \(name)/landing \(turns(landing))\n")
+        }
+        if !named.isEmpty {
+            let ledger = named.sorted { $0.key < $1.key }
+                .map { String(format: "%@ n=%d %.1fms", $0.key, $0.value.count, $0.value.milliseconds) }
+                .joined(separator: ", ")
+            lines.append("HERO-SCROLL \(name)/named [\(ledger)]\n")
+        }
+        var total = Phase(
             name: "", main: phases.flatMap(\.main), banner: phases.flatMap(\.banner),
             intervals: phases.flatMap(\.intervals)
         )
+        total.turns = phases.flatMap(\.turns)
+        total.worstTurn = phases.compactMap(\.worstTurn).max { $0.milliseconds < $1.milliseconds }
         let ledger = HeroBannerCost.Section.allCases.map { section -> String in
             let entry = sections[section] ?? Ledger()
             return String(format: "%@ n=%d %.1fms", section.rawValue, entry.count, entry.milliseconds)

@@ -233,6 +233,9 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     private var hasLoggedFirstFrame = false
     fileprivate var lastTracedReadiness = ""
     fileprivate let debugBornAt = CACurrentMediaTime()
+    /// How many times the header has been measured — `headerHeight`'s fitting
+    /// passes, which a frame that only scrolls must not add to.
+    private(set) var debugHeaderMeasureCount = 0
     #endif
 
     /// Where the filter tray lives, and with it whether a bottom bar survives
@@ -381,23 +384,27 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         configureViews()
 
         viewModel.onPhaseChange = { [weak self] phase in
-            self?.render(phase)
+            HeroScreenCost.measure("landing.phase") { self?.render(phase) }
         }
         viewModel.onFollowButtonChange = { [weak self] state in
             guard let self else { return }
-            self.followButtonState = state
-            self.headerView.configureAction(state)
-            // The relationship usually resolves while the push/present is
-            // still animating; bind the bar inside the transition so the
-            // toolbar composes during the animation, not after it.
-            self.alongsideTransition { $0.applyNavigationState() }
-            self.settlePresentationIfReady()
+            HeroScreenCost.measure("landing.relationship") {
+                self.followButtonState = state
+                self.headerView.configureAction(state)
+                // The relationship usually resolves while the push/present is
+                // still animating; bind the bar inside the transition so the
+                // toolbar composes during the animation, not after it.
+                self.alongsideTransition { $0.applyNavigationState() }
+                self.settlePresentationIfReady()
+            }
         }
         viewModel.onRelationshipSettled = { [weak self] in self?.settlePresentationIfReady() }
         headerView.onPicturesSettled = { [weak self] in self?.settlePresentationIfReady() }
         viewModel.onMapPinButtonChange = { [weak self] state in
-            self?.headerView.configureMapPin(state)
-            self?.settlePresentationIfReady()
+            HeroScreenCost.measure("landing.mapPin") {
+                self?.headerView.configureMapPin(state)
+                self?.settlePresentationIfReady()
+            }
         }
         headerView.makeMapPinMenu = { [weak self] in
             self?.makeMapFavoriteMenu() ?? UIMenu()
@@ -427,10 +434,18 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         viewModel.onDismissRequested = { [weak self] in
             self?.leaveAfterBlock()
         }
-        viewModel.onLoadSettled = { [weak self] in self?.isSwitchingProfile = false }
+        viewModel.onLoadSettled = { [weak self] in
+            HeroScreenCost.measure("landing.settled") {
+                self?.isSwitchingProfile = false
+                // A refresh that brought nothing new publishes no phase, so
+                // the spinner stops here — where every load ends, however it
+                // ended.
+                self?.pullIndicator.endRefreshing()
+            }
+        }
         viewModel.onGalleryChange = { [weak self] snapshot in
             self?.lastGallerySnapshot = snapshot
-            self?.galleryPager.render(snapshot)
+            HeroScreenCost.measure("landing.gallery") { self?.galleryPager.render(snapshot) }
             self?.settlePresentationIfReady()
             #if DEBUG
             self?.auditPostMenu(snapshot)
@@ -1099,6 +1114,16 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        HeroScreenCost.measure("layout.page") { layoutPages() }
+    }
+
+    private func layoutPages() {
+        // The host has just been laid out by the same constraints the fitting
+        // pass solves: a height it disagrees with is a header that changed
+        // behind `layoutRevision`'s back — measure again rather than trust it.
+        if let cached = headerHeightCache, abs(headerHost.bounds.height - cached.height) > 0.5 {
+            headerHeightCache = nil
+        }
         // The scroll view opts out of automatic inset adjustment (the banner
         // must start at y = 0), so the bottom safe area — which includes the
         // toolbar while it shows — is re-added by hand, plus breathing room
@@ -2417,13 +2442,46 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
 
     /// The height the header takes when nothing is scrolled — what the pages
     /// are inset by so their content starts below it rather than behind it.
+    ///
+    /// ⚠️ MEASURED ONCE PER CONTENT, NOT PER FRAME. It is read five times a
+    /// frame while the page moves — the header's offset, its fade, the pages'
+    /// insets and travels — and each read was a fitting pass over the whole
+    /// header: about 5 ms a frame of a pull on a profile, most of a 120 Hz
+    /// frame's 8.3. The answer only changes with what the header holds
+    /// (`ProfileHeaderView.layoutRevision`), the width, the chrome above it
+    /// and Dynamic Type, so those are its key; and should anything else ever
+    /// resize the header, the laid-out host disagreeing with the cached
+    /// height drops it (`viewDidLayoutSubviews`).
     private var headerHeight: CGFloat {
-        headerHost.systemLayoutSizeFitting(
-            CGSize(width: view.bounds.width, height: UIView.layoutFittingCompressedSize.height),
-            withHorizontalFittingPriority: .required,
-            verticalFittingPriority: .fittingSizeLevel
-        ).height
+        let key = HeaderHeightKey(
+            width: view.bounds.width,
+            safeTop: view.safeAreaInsets.top,
+            contentSize: traitCollection.preferredContentSizeCategory,
+            revision: headerView.layoutRevision
+        )
+        if let cached = headerHeightCache, cached.key == key { return cached.height }
+        let height = HeroScreenCost.measure("layout.headerHeight") {
+            #if DEBUG
+            debugHeaderMeasureCount += 1
+            #endif
+            return headerHost.systemLayoutSizeFitting(
+                CGSize(width: view.bounds.width, height: UIView.layoutFittingCompressedSize.height),
+                withHorizontalFittingPriority: .required,
+                verticalFittingPriority: .fittingSizeLevel
+            ).height
+        }
+        headerHeightCache = (key, height)
+        return height
     }
+
+    /// What `headerHeight` was last measured for.
+    private struct HeaderHeightKey: Equatable {
+        var width: CGFloat
+        var safeTop: CGFloat
+        var contentSize: UIContentSizeCategory
+        var revision: Int
+    }
+    private var headerHeightCache: (key: HeaderHeightKey, height: CGFloat)?
 
     /// How far the header travels before its selector reaches the navigation
     /// bar — the moment it docks.
@@ -2458,6 +2516,10 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     /// which is what the previous architecture spent five fixes trying to
     /// arrange between a resizing container and a scroll view that clamped it.
     private func applyHeaderOffset(_ travelled: CGFloat) {
+        HeroScreenCost.measure("scroll.coordinator") { applyHeaderOffsetNow(travelled) }
+    }
+
+    private func applyHeaderOffsetNow(_ travelled: CGFloat) {
         // ⚠️ **Negative travel is not clamped, and that is the point.** The
         // floor used to be `max(travelled, 0)`, which pinned the header at rest
         // while the list bounced beneath it — pull down at the top of a profile
@@ -2581,6 +2643,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     // MARK: - Render
 
     private func render(_ phase: ProfileViewModel.Phase) {
+        let previous = renderedPhase
         renderedPhase = phase
         defer { settlePresentationIfReady() }
         switch phase {
@@ -2618,7 +2681,12 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
             // Content usually lands mid-push; rebind inside the transition
             // so the bar text doesn't snap in after the animation settles.
             currentHandle = model.handle
-            alongsideTransition { $0.applyNavigationState() }
+            // ⚠️ Once. The bar's state does not follow the model, and a
+            // refresh re-rendering content cross-dissolved the whole bar —
+            // a snapshot of it — for nothing.
+            if case .content = previous {} else {
+                alongsideTransition { $0.applyNavigationState() }
+            }
             // Content first — the labels adopt their text while still
             // invisible under the bones — then the alpha-only reveal.
             // Granular on a switch: each header group dissolves on its own,
@@ -2700,6 +2768,39 @@ extension ProfileViewController {
     var debugFollowIsProminent: Bool { headerView.debugFollowIsProminent }
     var debugIsHeaderRedacted: Bool { headerView.debugIsRedacted }
     var debugHasAvatarPicture: Bool { headerView.debugHasAvatarPicture }
+
+    /// What a refresh landing touched: header applies, gallery reloads and
+    /// re-dressed items, and whether any page fell back to its bones.
+    var debugHeaderConfigureCount: Int { headerView.debugConfigureCount }
+    var debugGalleryReloadCount: Int { galleryPager.debugReloadCount }
+    var debugGalleryReconfiguredItems: Int { galleryPager.debugReconfiguredItems }
+    var debugGalleryRecountedItems: Int { galleryPager.debugRecountedItems }
+    var debugGalleryShowsSkeleton: Bool { galleryPager.debugShowsSkeleton }
+    var debugEmptyStateMeasureCount: Int { galleryPager.debugEmptyStateMeasureCount }
+    var debugIsRefreshing: Bool { pullIndicator.debugIsRefreshing }
+    /// The content inset the pages were handed — the header's height.
+    var debugHeaderHeight: CGFloat { headerHeight }
+    /// The same, measured afresh — what the cached answer must agree with.
+    var debugMeasuredHeaderHeight: CGFloat {
+        headerHost.systemLayoutSizeFitting(
+            CGSize(width: view.bounds.width, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        ).height
+    }
+
+    /// Releases a pull past the threshold, through the pager's own callback —
+    /// what a finger letting go does.
+    func debugReleasePull() {
+        galleryPager.onPullReleased?(ProfilePullToRefreshView.threshold + 40)
+    }
+
+    /// Puts the active page at `offset` (negative: pulled past its top) and
+    /// lays the screen out — one frame of a scroll.
+    func debugScrollFrame(to offset: CGFloat) {
+        _ = galleryPager.debugSetVerticalOffset(offset)
+        view.window?.layoutIfNeeded()
+    }
 
     /// `-profile-first-frame-log`: each readiness milestone as it lands,
     /// stamped from the screen's construction — what a held push is waiting

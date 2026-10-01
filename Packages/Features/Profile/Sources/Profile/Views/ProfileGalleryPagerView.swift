@@ -494,6 +494,16 @@ extension ProfileGalleryPagerView {
     var debugContentOffsetX: CGFloat { scrollView.contentOffset.x }
     var debugScrollView: UIScrollView { scrollView }
     var debugVerticalOffsets: [CGFloat] { pages.map(\.verticalOffset) }
+    /// Every page's full reloads, items updated in place (reconfigured, or
+    /// only their counters rewritten), and empty-state fitting passes, summed.
+    var debugReloadCount: Int { pages.map(\.debugReloadCount).reduce(0, +) }
+    var debugReconfiguredItems: Int {
+        pages.map { $0.debugReconfiguredItems + $0.debugRecountedItems }.reduce(0, +)
+    }
+    var debugRecountedItems: Int { pages.map(\.debugRecountedItems).reduce(0, +) }
+    var debugEmptyStateMeasureCount: Int { pages.map(\.debugEmptyStateMeasureCount).reduce(0, +) }
+    /// Whether any page is showing its bones.
+    var debugShowsSkeleton: Bool { pages.contains(where: \.showsSkeleton) }
     /// Where a given page would be put for the screen's current position —
     /// the split between the screen's share of the offset and the tab's, which
     /// is otherwise only observable by switching tabs and looking.

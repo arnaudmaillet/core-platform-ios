@@ -173,7 +173,11 @@ final class AppCoordinator: Coordinator {
             setRoot(container.authFeature.makeLoginViewController())
         case .authenticated:
             #if DEBUG
-            if container.environment == .mock {
+            // `-mock-likes-still`: no ticking like counts — so a refresh can
+            // come back with exactly what it had (`-profile-stretch-sweep`'s
+            // identical landing).
+            if container.environment == .mock,
+               !ProcessInfo.processInfo.arguments.contains("-mock-likes-still") {
                 container.startMockRealtimeDemo()
             }
             #endif
