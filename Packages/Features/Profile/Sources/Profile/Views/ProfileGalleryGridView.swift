@@ -342,8 +342,10 @@ final class ProfileGalleryGridView: UIView {
         self.posts = posts
         showsSkeleton = skeleton
         let reload = {
-            self.collectionView.reloadData()
-            self.collectionView.invalidateIntrinsicContentSize()
+            HeroScreenCost.measure("gallery.reload") {
+                self.collectionView.reloadData()
+                self.collectionView.invalidateIntrinsicContentSize()
+            }
             // Content landing is a reconcile trigger, and on a page nobody
             // scrolls it is very nearly the only one.
             //
@@ -357,8 +359,10 @@ final class ProfileGalleryGridView: UIView {
             // takes the cached image and returns. Zero starts, no error.
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
-                collectionView.layoutIfNeeded()
-                reconcileAutoplay()
+                HeroScreenCost.measure("landing.gallery.layout") {
+                    self.collectionView.layoutIfNeeded()
+                    self.reconcileAutoplay()
+                }
             }
         }
         if dissolving {
@@ -385,6 +389,10 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
     }
 
     func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
+        HeroScreenCost.measure("gallery.cell") { cell(at: indexPath) }
+    }
+
+    private func cell(at indexPath: IndexPath) -> UICollectionViewCell {
         if showsSkeleton {
             switch style {
             case .list:

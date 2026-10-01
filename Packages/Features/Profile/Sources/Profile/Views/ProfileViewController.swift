@@ -381,23 +381,27 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         configureViews()
 
         viewModel.onPhaseChange = { [weak self] phase in
-            self?.render(phase)
+            HeroScreenCost.measure("landing.phase") { self?.render(phase) }
         }
         viewModel.onFollowButtonChange = { [weak self] state in
             guard let self else { return }
-            self.followButtonState = state
-            self.headerView.configureAction(state)
-            // The relationship usually resolves while the push/present is
-            // still animating; bind the bar inside the transition so the
-            // toolbar composes during the animation, not after it.
-            self.alongsideTransition { $0.applyNavigationState() }
-            self.settlePresentationIfReady()
+            HeroScreenCost.measure("landing.relationship") {
+                self.followButtonState = state
+                self.headerView.configureAction(state)
+                // The relationship usually resolves while the push/present is
+                // still animating; bind the bar inside the transition so the
+                // toolbar composes during the animation, not after it.
+                self.alongsideTransition { $0.applyNavigationState() }
+                self.settlePresentationIfReady()
+            }
         }
         viewModel.onRelationshipSettled = { [weak self] in self?.settlePresentationIfReady() }
         headerView.onPicturesSettled = { [weak self] in self?.settlePresentationIfReady() }
         viewModel.onMapPinButtonChange = { [weak self] state in
-            self?.headerView.configureMapPin(state)
-            self?.settlePresentationIfReady()
+            HeroScreenCost.measure("landing.mapPin") {
+                self?.headerView.configureMapPin(state)
+                self?.settlePresentationIfReady()
+            }
         }
         headerView.makeMapPinMenu = { [weak self] in
             self?.makeMapFavoriteMenu() ?? UIMenu()
@@ -430,7 +434,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         viewModel.onLoadSettled = { [weak self] in self?.isSwitchingProfile = false }
         viewModel.onGalleryChange = { [weak self] snapshot in
             self?.lastGallerySnapshot = snapshot
-            self?.galleryPager.render(snapshot)
+            HeroScreenCost.measure("landing.gallery") { self?.galleryPager.render(snapshot) }
             self?.settlePresentationIfReady()
             #if DEBUG
             self?.auditPostMenu(snapshot)
@@ -1099,6 +1103,10 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        HeroScreenCost.measure("layout.page") { layoutPages() }
+    }
+
+    private func layoutPages() {
         // The scroll view opts out of automatic inset adjustment (the banner
         // must start at y = 0), so the bottom safe area — which includes the
         // toolbar while it shows — is re-added by hand, plus breathing room
@@ -2418,11 +2426,13 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     /// The height the header takes when nothing is scrolled — what the pages
     /// are inset by so their content starts below it rather than behind it.
     private var headerHeight: CGFloat {
-        headerHost.systemLayoutSizeFitting(
-            CGSize(width: view.bounds.width, height: UIView.layoutFittingCompressedSize.height),
-            withHorizontalFittingPriority: .required,
-            verticalFittingPriority: .fittingSizeLevel
-        ).height
+        HeroScreenCost.measure("layout.headerHeight") {
+            headerHost.systemLayoutSizeFitting(
+                CGSize(width: view.bounds.width, height: UIView.layoutFittingCompressedSize.height),
+                withHorizontalFittingPriority: .required,
+                verticalFittingPriority: .fittingSizeLevel
+            ).height
+        }
     }
 
     /// How far the header travels before its selector reaches the navigation
@@ -2458,6 +2468,10 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     /// which is what the previous architecture spent five fixes trying to
     /// arrange between a resizing container and a scroll view that clamped it.
     private func applyHeaderOffset(_ travelled: CGFloat) {
+        HeroScreenCost.measure("scroll.coordinator") { applyHeaderOffsetNow(travelled) }
+    }
+
+    private func applyHeaderOffsetNow(_ travelled: CGFloat) {
         // ⚠️ **Negative travel is not clamped, and that is the point.** The
         // floor used to be `max(travelled, 0)`, which pinned the header at rest
         // while the list bounced beneath it — pull down at the top of a profile
