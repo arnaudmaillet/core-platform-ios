@@ -108,8 +108,10 @@ struct PostDetailStreamShapeTests {
         // Within half a point: fractional-scale CGFloats do not compare
         // exactly (the value read back printed as 96.0 and still failed `==`).
         #expect(abs(stream.contentInset.top - 120) < 0.5)
-        // The input row's band, plus the stake row standing on it.
-        #expect(abs(stream.contentInset.bottom - (34 + 62 + CommentsInputBar.stakeRowHeight)) < 0.5)
+        // The bar's rest gap above the footer line, the resting bar (its
+        // two-bubble column over the input row), and the 16pt breath above it.
+        let clearance = SnapActionColumn.inputRestingGap + CommentsInputBar.restingHeight(for: .large) + 16
+        #expect(abs(stream.contentInset.bottom - (34 + clearance)) < 0.5)
         let topTwo = controller.view.subviews.suffix(2)
         #expect(topTwo.first is ProgressiveFrostView, "the footer's frost sits under the composer")
         #expect(topTwo.last is CommentsInputBar, "the composer caps the view")

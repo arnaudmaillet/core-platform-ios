@@ -5,7 +5,7 @@ import Testing
 import UIKit
 @testable import Feed
 
-/// **`-snap-layout-v2`: the action column holds still across layouts.**
+/// **The action column holds still across layouts.**
 ///
 /// ```
 ///   media layout                         comments layout
@@ -21,8 +21,8 @@ import UIKit
 /// at one screen size and compare the frames. Equal frames are what "switching
 /// layouts, the bubbles don't move" means.
 ///
-/// And with or without the flag, the composer's INPUT ROW rests on the
-/// toolbar — `glassGap` above its glass — while the column keeps its place above.
+/// And the composer's INPUT ROW rests on the toolbar — `glassGap` above its
+/// glass — while the column keeps its place on the media layout's bubbles.
 @MainActor
 struct SnapActionColumnLayoutTests {
     static let screen = CGRect(x: 0, y: 0, width: 390, height: 844)
@@ -44,10 +44,9 @@ struct SnapActionColumnLayoutTests {
     /// The media layout at full screen, as a page lays it out (the chrome IS
     /// the page's overlay, edge to edge — its coordinates are the screen's).
     static func chrome(
-        actionColumn: Bool, insets: UIEdgeInsets = insets, mediaURL: URL? = URL(string: "mock://media/1")
+        insets: UIEdgeInsets = insets, mediaURL: URL? = URL(string: "mock://media/1")
     ) -> SnapChromeView {
         let chrome = SnapChromeView(frame: screen)
-        chrome.usesActionColumn = actionColumn
         chrome.setFixedInsets(insets)
         chrome.configure(with: mediaModel(mediaURL: mediaURL))
         chrome.layoutIfNeeded()
@@ -56,13 +55,13 @@ struct SnapActionColumnLayoutTests {
 
     /// The media layout's two bubbles, in screen coordinates.
     static func mediaColumn(insets: UIEdgeInsets = insets) -> (like: CGRect, repost: CGRect) {
-        let chrome = chrome(actionColumn: true, insets: insets)
+        let chrome = chrome(insets: insets)
         return (chrome.debugBoostButton.frame, chrome.debugRepostButton.frame)
     }
 
     /// The composer's column in `space`: the stake (nil when the bar shows
     /// none), and the rail slot — the rail button when the bar has a rail
-    /// face, the mic otherwise.
+    /// face, the slot's waveform otherwise.
     static func composerColumn(
         in root: UIView, space: UICoordinateSpace
     ) throws -> (stake: CGRect?, rail: CGRect, field: CGRect, bar: CommentsInputBar) {
@@ -95,20 +94,14 @@ struct SnapActionColumnLayoutTests {
         return nil
     }
 
-    private func detail(actionColumn: Bool) -> PostDetailViewController {
+    /// The engaged comments panel, mounted the way the feed mounts it: full
+    /// screen, told the feed's insets.
+    private func engagedPanel() -> (PostDetailViewController, UIWindow) {
         let controller = PostDetailViewController(
             viewModel: PostDetailViewModel(postID: PostID("p"), repository: ColumnSilentProvider()),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             mode: .commentsOnly
         )
-        controller.usesActionColumn = actionColumn
-        return controller
-    }
-
-    /// The engaged comments panel, mounted the way the feed mounts it: full
-    /// screen, told the feed's insets.
-    private func engagedPanel(actionColumn: Bool) -> (PostDetailViewController, UIWindow) {
-        let controller = detail(actionColumn: actionColumn)
         let window = UIWindow(frame: Self.screen)
         window.rootViewController = controller
         window.isHidden = false
@@ -179,54 +172,12 @@ struct SnapActionColumnLayoutTests {
                 "iOS \(ProcessInfo.processInfo.operatingSystemVersion.majorVersion): the glass \(glass) starts \(drop)pt under the safe-area line \(safeLine), not \(SnapActionColumn.toolbarGlassDrop)")
     }
 
-    // MARK: - Flag off: no repost bubble, the input row on the toolbar
-
-    /// Off, the chrome carries no repost bubble at all — not even hidden — and
-    /// the caption runs to its classic margin.
-    @Test func withoutTheFlagThePageHasNoRepostBubble() {
-        let chrome = Self.chrome(actionColumn: false)
-        #expect(!chrome.subviews.contains { $0 is SnapRailRepostButton })
-        #expect(chrome.interactionRoots.count == 5)
-        #expect(abs(chrome.debugCaptionFrame.maxX - (Self.screen.width - Spacing.lg)) < 0.5)
-    }
-
-    @Test func withoutTheFlagTheComposerKeepsItsClassicBubbles() throws {
-        let bar = CommentsInputBar()
-        bar.frame = CGRect(x: 0, y: 0, width: 340, height: CommentsInputBar.restingHeight(for: .large))
-        bar.layoutIfNeeded()
-        let stake = try #require(Self.button(bar, "Boost post"))
-        let mic = try #require(Self.button(bar, "Record voice comment"))
-        #expect(stake.frame.size == CGSize(width: 44, height: 44))
-        #expect(mic.frame.size == CGSize(width: 38, height: 38))
-        let glyph = mic.configuration?.image.map { String(describing: $0) } ?? ""
-        #expect(!glyph.contains("waveform"))
-        #expect(bar.debugRailButton.isHidden, "no rail button without the flag")
-        #expect(bar.debugFieldVoiceButton.isHidden, "no waveform in the field without the flag")
-    }
-
-    /// ⚠️ THE INPUT ROW RESTS ON THE TOOLBAR, flag off: the field's bottom `glassGap`
-    /// above the toolbar's glass, and the stake and mic where they stood
-    /// before — `sm` above the footer line, so a little higher than the field.
-    @Test func withoutTheFlagTheFieldRestsOnTheToolbarAndTheColumnKeepsItsPlace() throws {
-        let (controller, window) = engagedPanel(actionColumn: false)
-        let composer = try Self.composerColumn(in: controller.view, space: window)
-        let footerLine = Self.screen.height - Self.insets.bottom
-
-        #expect(abs(composer.field.maxY - (Self.toolbarGlassTop - SnapActionColumn.glassGap)) < 0.5,
-                "the field ends at \(composer.field.maxY), not glassGap above the glass at \(Self.toolbarGlassTop)")
-        #expect(abs(composer.rail.maxY - (footerLine - Spacing.sm)) < 0.5, "the mic moved: \(composer.rail)")
-        let stake = try #require(composer.stake)
-        #expect(abs(stake.maxY - (composer.rail.minY - Spacing.sm)) < 0.5, "the stake left its station over the mic")
-        #expect(composer.rail.maxY < composer.field.maxY, "the column stands higher than the field")
-        _ = window
-    }
-
     // MARK: - The media layout
 
     /// The repost bubble is the like anchor's twin, one md under it, and the
     /// caption and the page strip stop md short of it.
     @Test func theRepostBubbleStandsUnderTheLikeBubbleBesideTheCaption() {
-        let chrome = Self.chrome(actionColumn: true)
+        let chrome = Self.chrome()
         let like = chrome.debugBoostButton.frame
         let repost = chrome.debugRepostButton.frame
 
@@ -246,7 +197,7 @@ struct SnapActionColumnLayoutTests {
     /// Media chrome, like the anchor: a text page's composer stands in the
     /// column instead.
     @Test func aTextPageHasNoRepostBubble() {
-        let chrome = Self.chrome(actionColumn: true, mediaURL: nil)
+        let chrome = Self.chrome(mediaURL: nil)
         #expect(chrome.debugRepostButton.isHidden)
     }
 
@@ -255,16 +206,17 @@ struct SnapActionColumnLayoutTests {
     /// ⚠️ THE CONTRACT. The engaged composer's stake sits on the like
     /// bubble's frame and its rail slot — a REPOST face — on the repost
     /// bubble's, in screen coordinates: equal, not close. The field rests on
-    /// the toolbar below them.
+    /// the toolbar below them, and the waveform is in the field.
     @Test func theComposerBubblesStandExactlyOnTheMediaLayoutsBubbles() throws {
         let media = Self.mediaColumn()
-        let (controller, window) = engagedPanel(actionColumn: true)
+        let (controller, window) = engagedPanel()
         let composer = try Self.composerColumn(in: controller.view, space: window)
 
         let stake = try #require(composer.stake)
         #expect(stake == media.like, "stake \(stake) vs like \(media.like)")
         #expect(composer.rail == media.repost, "rail \(composer.rail) vs repost \(media.repost)")
         #expect(composer.bar.debugRailSymbol == PostActionSymbol.repost)
+        #expect(!composer.bar.debugFieldVoiceButton.isHidden, "the waveform is in the field")
         #expect(abs(composer.field.maxY - (Self.toolbarGlassTop - SnapActionColumn.glassGap)) < 0.5,
                 "the field ends at \(composer.field.maxY), not glassGap above the glass at \(Self.toolbarGlassTop)")
         _ = window
@@ -272,7 +224,7 @@ struct SnapActionColumnLayoutTests {
 
     /// The column's entrance is alpha only — a slide would move the bubbles.
     @Test func theColumnComposerEntersWithoutSliding() {
-        let (controller, window) = engagedPanel(actionColumn: true)
+        let (controller, window) = engagedPanel()
         controller.setComposerEntranceState(offstage: true)
         let bar = Self.firstView(CommentsInputBar.self, in: controller.view)
         #expect(bar?.alpha == 0)
@@ -282,7 +234,6 @@ struct SnapActionColumnLayoutTests {
 
     private func hostedColumnBar(railFace: CommentsInputBar.RailFace = .voice) -> (CommentsInputBar, UIView) {
         let bar = CommentsInputBar()
-        bar.usesActionColumn = true
         bar.railFace = railFace
         bar.onPageSwipe = { _, _, _ in }
         let host = UIView(frame: CGRect(x: 0, y: 0, width: 360, height: 600))
@@ -299,22 +250,25 @@ struct SnapActionColumnLayoutTests {
 
     /// The bar's own geometry: both bubbles the band's height, md apart, the
     /// slot lifted `columnLift` off the field's bottom, and a field that grows
-    /// BESIDE the stake, never moving it.
+    /// BESIDE the stake, never moving it. Without a rail face (a draft post)
+    /// the slot's idle face is the waveform, and the field holds none.
     @Test func theColumnBarHoldsTheStakeStillWhileTheFieldGrows() throws {
         let (bar, host) = hostedColumnBar()
 
         let stake = try #require(Self.button(bar, "Boost post"))
-        let mic = try #require(Self.button(bar, "Record voice comment"))
+        let voice = try #require(Self.button(bar, "Record voice comment"))
         let field = try #require(Self.fieldView(in: bar))
         let side = SnapActionColumn.bubbleSize
         #expect(stake.frame.size == CGSize(width: side, height: side))
-        #expect(mic.frame.size == CGSize(width: side, height: side))
-        #expect(abs(mic.frame.minY - stake.frame.maxY - SnapActionColumn.gap) < 0.5)
+        #expect(voice.frame.size == CGSize(width: side, height: side))
+        #expect(abs(voice.frame.minY - stake.frame.maxY - SnapActionColumn.gap) < 0.5)
         #expect(abs(field.frame.maxY - bar.bounds.maxY) < 0.5, "the field is the bar's bottom")
-        #expect(abs(bar.bounds.maxY - mic.frame.maxY - SnapActionColumn.columnLift(actionColumn: true)) < 0.5)
-        let glyph = mic.configuration?.image.map { String(describing: $0) } ?? ""
-        #expect(glyph.contains("waveform"), "the mic wears \(glyph)")
-        #expect(abs(bar.bounds.height - CommentsInputBar.restingHeight(for: .large, actionColumn: true)) < 0.5)
+        #expect(abs(bar.bounds.maxY - voice.frame.maxY - SnapActionColumn.columnLift) < 0.5)
+        let glyph = voice.configuration?.image.map { String(describing: $0) } ?? ""
+        #expect(glyph.contains("waveform"), "the slot wears \(glyph)")
+        #expect(bar.debugRailButton.isHidden, "no rail face, no rail button")
+        #expect(bar.debugFieldVoiceButton.isHidden, "the waveform is in the slot, not the field")
+        #expect(abs(bar.bounds.height - CommentsInputBar.restingHeight(for: .large)) < 0.5)
         #expect(!bar.hasAmbiguousLayout)
 
         let stakeInHost = stake.convert(stake.bounds, to: host)
@@ -338,7 +292,7 @@ struct SnapActionColumnLayoutTests {
         let rail = bar.debugRailButton
 
         #expect(!rail.isHidden)
-        #expect(Self.button(bar, "Record voice comment")?.isHidden == true, "the slot's mic stood down")
+        #expect(Self.button(bar, "Record voice comment")?.isHidden == true, "the slot's waveform stood down")
         #expect(Self.button(bar, "Send comment")?.isHidden == true, "send's own button stood down")
         #expect(!bar.debugFieldVoiceButton.isHidden, "the waveform is in the field")
         #expect(rail.configuration?.symbolContentTransition != nil, "the glyph swap is a symbol replace")
@@ -381,17 +335,14 @@ struct SnapActionColumnLayoutTests {
 
     // MARK: - The toolbar and the menu
 
-    /// Share has a button in the toolbar's capsule, so ⋯ stops offering it.
-    @Test func theMenuDropsShareWhenTheColumnCarriesIt() {
+    /// Share has a button in the toolbar's capsule, so ⋯ does not offer it.
+    @Test func theMenuLeavesShareToTheToolbar() {
         let controller = SnapFeedViewController(
             viewModel: FeedViewModel(repository: ColumnSilentProvider()),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             reporting: nil
         )
-        controller.usesActionColumn = true
         #expect(controller.debugMoreMenuTitles(for: PostID("p1")) == ["Not interested"])
-        controller.usesActionColumn = false
-        #expect(controller.debugMoreMenuTitles(for: PostID("p1")) == ["Share", "Not interested"])
     }
 }
 
