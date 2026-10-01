@@ -5,8 +5,9 @@ import UIKit
 @testable import EmoteKit
 
 /// The conversation footer's strip: every emote the build ships, every
-/// DISPLAYED tile animating and nothing else holding a slot, and a scroll view
-/// that runs the capsule's whole width.
+/// DISPLAYED tile dressed and nothing else holding a slot, art that moves only
+/// while the strip scrolls, and a scroll view that runs the capsule's whole
+/// width.
 @MainActor
 @Suite(.serialized)
 struct EmoteStripTests {
@@ -15,14 +16,32 @@ struct EmoteStripTests {
     /// An engine with two-frame art resident for every emote, so tiles present
     /// synchronously — the warm-cache path — and nothing bakes.
     private func warmEngine() -> EmoteEngine {
+        warmEngine(art: EmoteLabelTests.syntheticArt(side: EmoteTileView.pixelSide))
+    }
+
+    private func warmEngine(art: AnimatedIconArt) -> EmoteEngine {
         let engine = EmoteEngine(diskCache: nil)
         for emote in engine.catalog.all {
-            engine.insert(
-                EmoteLabelTests.syntheticArt(side: EmoteTileView.pixelSide), for: emote,
-                pixelSide: EmoteTileView.pixelSide, motion: .loop
-            )
+            engine.insert(art, for: emote, pixelSide: EmoteTileView.pixelSide, motion: .loop)
         }
         return engine
+    }
+
+    /// `frames` solid frames of `step` seconds each, the first `blank` of them
+    /// transparent. ⚠️ Tiny cells: the same art is filed under all ~230
+    /// emotes, each at its byte cost, and full-size cells overflow the
+    /// engine's memory cache — evicted tiles then bake instead of showing.
+    static func sheetArt(frames: Int, step: CFTimeInterval, blank: Int = 0) -> AnimatedIconArt {
+        let side = 8
+        let renderer = UIGraphicsImageRenderer(
+            size: CGSize(width: side * frames, height: side),
+            format: { let f = UIGraphicsImageRendererFormat(); f.scale = 1; f.opaque = false; return f }()
+        )
+        let image = renderer.image { context in
+            UIColor.systemPink.setFill()
+            context.fill(CGRect(x: side * blank, y: 0, width: side * (frames - blank), height: side))
+        }
+        return .sheet(AnimatedIconSheet(sheet: image, frameCount: frames, columns: frames, frameDuration: step))
     }
 
     private func hosted(_ engine: EmoteEngine, recents: EmoteRecents? = nil) -> (EmoteStripView, UIWindow) {
@@ -74,15 +93,15 @@ struct EmoteStripTests {
         #expect(first.bounds.height == Self.size.height - EmoteStripView.cellInset * 2)
     }
 
-    /// Every displayed tile animates; a tile scrolled out gives its slot back
-    /// at once, so the slots in use never exceed what is on screen.
-    @Test func displayedTilesAnimateAndOnlyThose() throws {
+    /// Every displayed tile is dressed; a tile scrolled out gives its slot
+    /// back at once, so the slots in use never exceed what is on screen.
+    @Test func displayedTilesAreDressedAndOnlyThose() throws {
         let engine = warmEngine()
         let (strip, window) = hosted(engine)
         defer { tearDown(window) }
         let tiles = strip.displayedTiles
         try #require(!tiles.isEmpty)
-        #expect(tiles.allSatisfy { $0.isShowingArt }, "every displayed tile animates, emoji or house emote")
+        #expect(tiles.allSatisfy { $0.isShowingArt }, "every displayed tile is dressed, emoji or house emote")
         #expect(engine.animatedCount == tiles.count)
 
         let grid = strip.collectionView
@@ -96,6 +115,104 @@ struct EmoteStripTests {
 
         strip.removeFromSuperview()
         #expect(engine.animatedCount == 0, "off the window, nothing plays")
+    }
+
+    /// At rest nothing moves: the first appearance dresses every tile still,
+    /// on its poster frame, and so does a layout pass that brings tiles in.
+    @Test func atRestNoTilePlays() throws {
+        let (strip, window) = hosted(warmEngine(art: Self.sheetArt(frames: 8, step: 0.1)))
+        defer { tearDown(window) }
+        let tiles = strip.displayedTiles
+        try #require(!tiles.isEmpty)
+        #expect(!strip.isScrolling)
+        #expect(tiles.allSatisfy { $0.isShowingArt && !$0.isAnimating && $0.player.isPaused })
+        #expect(tiles.allSatisfy { $0.player.displayedFrame == 0 }, "the poster frame, not wherever the clock is")
+
+        // Tiles brought in at rest (a layout change, an offset set in code).
+        let grid = strip.collectionView
+        grid.setContentOffset(CGPoint(x: 900, y: grid.contentOffset.y), animated: false)
+        grid.layoutIfNeeded()
+        let shown = strip.displayedTiles
+        try #require(!shown.isEmpty)
+        #expect(shown.allSatisfy { $0.isShowingArt && !$0.isAnimating })
+    }
+
+    /// From the drag's start to the end of the glide every displayed tile
+    /// plays, the ones scrolled in meanwhile too; once the strip stops, none.
+    @Test func displayedTilesPlayOnlyWhileTheStripScrolls() throws {
+        let engine = warmEngine(art: Self.sheetArt(frames: 8, step: 0.1))
+        let (strip, window) = hosted(engine)
+        defer { tearDown(window) }
+        let grid = strip.collectionView
+
+        strip.scrollViewWillBeginDragging(grid)
+        #expect(strip.isScrolling)
+        #expect(strip.displayedTiles.allSatisfy { $0.isAnimating }, "the drag starts them")
+
+        for step in 1...3 {
+            grid.setContentOffset(CGPoint(x: CGFloat(step) * 400, y: grid.contentOffset.y), animated: false)
+            grid.layoutIfNeeded()
+            let shown = strip.displayedTiles
+            try #require(!shown.isEmpty)
+            #expect(shown.allSatisfy { $0.isAnimating }, "step \(step): a tile scrolled in plays")
+            #expect(engine.animatedCount == shown.count, "step \(step): the slots still follow the screen")
+        }
+
+        strip.scrollViewDidEndDragging(grid, willDecelerate: true)
+        #expect(strip.displayedTiles.allSatisfy { $0.isAnimating }, "the glide still plays")
+        strip.scrollViewDidEndDecelerating(grid)
+        #expect(!strip.isScrolling)
+        #expect(strip.displayedTiles.allSatisfy { $0.isShowingArt && !$0.isAnimating }, "stopped, nothing plays")
+
+        // A drag let go without a glide stops it as well.
+        strip.scrollViewWillBeginDragging(grid)
+        #expect(strip.displayedTiles.allSatisfy { $0.isAnimating })
+        strip.scrollViewDidEndDragging(grid, willDecelerate: false)
+        #expect(strip.displayedTiles.allSatisfy { !$0.isAnimating })
+    }
+
+    /// Stopping holds each tile on the frame it reached — no jump back to
+    /// the poster — and the next scroll plays on from that frame.
+    @Test func stoppingHoldsTheFrameAndTheNextScrollPlaysOn() async throws {
+        // A 4 s loop of 0.1 s frames: a fifth of a second of scrolling moves a
+        // couple of frames on and never wraps round to the poster.
+        let frames = 40
+        let (strip, window) = hosted(warmEngine(art: Self.sheetArt(frames: frames, step: 0.1)))
+        defer { tearDown(window) }
+        let grid = strip.collectionView
+        let tile = try #require(strip.displayedTiles.first)
+        #expect(tile.player.displayedFrame == 0)
+
+        strip.scrollViewWillBeginDragging(grid)
+        try await Task.sleep(for: .milliseconds(200))
+        strip.scrollViewDidEndDecelerating(grid)
+        let held = try #require(tile.player.displayedFrame)
+        #expect(held > 0, "it moved while the strip scrolled")
+        #expect(!tile.isAnimating)
+
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(tile.player.displayedFrame == held, "held where it stopped, not reset")
+
+        strip.scrollViewWillBeginDragging(grid)
+        let resumed = try #require(tile.player.displayedFrame)
+        #expect(resumed == held || resumed == (held + 1) % frames, "plays on from \(held), not from the poster: \(resumed)")
+        strip.scrollViewDidEndDecelerating(grid)
+    }
+
+    /// A touch that stops the glide tells the delegate nothing; the strip
+    /// still comes to rest once its scroll view is neither tracked, dragged
+    /// nor decelerating.
+    @Test func aStoppedGlideComesToRestWithoutADelegateCall() async throws {
+        let (strip, window) = hosted(warmEngine(art: Self.sheetArt(frames: 8, step: 0.1)))
+        defer { tearDown(window) }
+        strip.scrollViewWillBeginDragging(strip.collectionView)
+        #expect(strip.displayedTiles.allSatisfy { $0.isAnimating })
+        let deadline = ContinuousClock.now + .seconds(3)
+        while strip.isScrolling, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        #expect(!strip.isScrolling)
+        #expect(strip.displayedTiles.allSatisfy { $0.isShowingArt && !$0.isAnimating })
     }
 
     /// A tap hands the emote over and files it under Recent.

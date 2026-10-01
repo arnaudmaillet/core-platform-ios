@@ -154,9 +154,36 @@ public final class AnimatedIconView: UIView {
     /// card reproduces the exact frame by copying one `Int` — and so that a
     /// field of markers shows different frames without any of them leaving the
     /// shared clock.
-    public func setArt(_ art: AnimatedIconArt?, phase: Int = 0) {
+    ///
+    /// `paused` dresses it STILL on frame `phase`: `resume()` plays on from
+    /// that frame.
+    public func setArt(_ art: AnimatedIconArt?, phase: Int = 0, paused: Bool = false) {
         self.art = art
         self.phase = phase
+        clockShift = 0
+        heldFrame = nil
+        dress()
+        if paused, let art {
+            hold(((phase % art.frameCount) + art.frameCount) % art.frameCount)
+        }
+    }
+
+    /// Re-installs after anything that strips animations — a foreground
+    /// transition does, and so does a motion-policy change.
+    ///
+    /// ⚠️ Unconditional. A "reinstall only if not already running" guard can
+    /// only ever PROMOTE a marker, never demote one, so it silently ignores
+    /// every change into Low Power or Reduce Motion.
+    ///
+    /// A paused view stays paused, on the frame it holds.
+    public func reinstall() {
+        let held = heldFrame
+        heldFrame = nil
+        dress()
+        if let held { hold(held) }
+    }
+
+    private func dress() {
         clearAnimations()
         guard let art else {
             sheetView.isHidden = true
@@ -175,14 +202,95 @@ public final class AnimatedIconView: UIView {
         }
     }
 
-    /// Re-installs after anything that strips animations — a foreground
-    /// transition does, and so does a motion-policy change.
+    // MARK: - Pausing
+
+    /// The frame a paused view holds; nil while it plays.
+    private var heldFrame: Int?
+    /// Every installed animation's `timeOffset`: zero on the shared clock,
+    /// a whole number of keys once a resume has carried a frame over.
+    private var clockShift: CFTimeInterval = 0
+
+    /// Whether the view holds one frame instead of playing.
+    public var isPaused: Bool { heldFrame != nil }
+
+    /// Stops on the frame showing NOW; `resume()` plays on from that very
+    /// frame — no jump back to the first, no flash.
     ///
-    /// ⚠️ Unconditional. A "reinstall only if not already running" guard can
-    /// only ever PROMOTE a marker, never demote one, so it silently ignores
-    /// every change into Low Power or Reduce Motion.
-    public func reinstall() {
-        setArt(art, phase: phase)
+    /// ⚠️ NOT BY STOPPING A LAYER CLOCK. The textbook pause (QA1673: `speed`
+    /// 0 and `timeOffset` on an ancestor) froze this view's presentation
+    /// layer in the app and NOT the screen: inside the Messages footer's
+    /// glass bar the render server kept the icons looping (filmed,
+    /// 2026-10-01, while `presentedTick` stood still). So a pause removes the
+    /// animations and poses the MODEL on the frame — the one thing every
+    /// renderer agrees on, and a paused icon costs nothing at all.
+    public func pause() {
+        guard !isPaused, let frame = displayedFrame else { return }
+        hold(frame)
+    }
+
+    /// Plays on from the held frame. The animations go back on the shared
+    /// clock's grid, shifted by whole keys, so the held frame is the one on
+    /// screen until the grid's next change and the loop runs on from it.
+    public func resume() {
+        guard let frame = heldFrame, let art else { return }
+        heldFrame = nil
+        let count = art.frameCount
+        let (step, keys, keyDuration) = Self.keying(art)
+        let rotation = ((phase % count) + count) % count
+        let key = ((frame - rotation + count) % count) / step
+        let now = sheetView.layer.convertTime(CACurrentMediaTime(), from: nil) - Self.epoch
+        let loop = keyDuration * CFTimeInterval(keys)
+        var shift = (CFTimeInterval(key) - (now / keyDuration).rounded(.down)) * keyDuration
+        shift = shift.truncatingRemainder(dividingBy: loop)
+        if shift < 0 { shift += loop }
+        clockShift = shift
+        dress()
+    }
+
+    private func hold(_ frame: Int) {
+        guard let art else { return }
+        heldFrame = frame
+        clearAnimations()
+        switch art {
+        case .sheet(let sheet):
+            sheetView.layer.contentsRect = sheet.frameRects[frame]
+        case .decomposed(let still):
+            let track = still.track
+            guard track.scales.indices.contains(frame) else { return }
+            markView.layer.transform = CATransform3DConcat(
+                CATransform3DMakeScale(track.scales[frame], track.scales[frame], 1),
+                CATransform3DMakeRotation(track.rotations[frame], 0, 0, 1)
+            )
+            markView.layer.opacity = Float(track.alphas[frame])
+        }
+    }
+
+    /// How the installed keys divide one loop: every `step`-th rotated frame,
+    /// spread evenly (`decimated`, `.discrete`).
+    private static func keying(_ art: AnimatedIconArt) -> (step: Int, keys: Int, keyDuration: CFTimeInterval) {
+        let count = art.frameCount
+        let stride = policy.stride
+        let step = stride > 1 && count > stride ? stride : 1
+        let keys = (count + step - 1) / step
+        return (step, keys, art.frameDuration * CFTimeInterval(count) / CFTimeInterval(keys))
+    }
+
+    /// The art's frame on show: the held one, or the one the clock is on.
+    /// Worked out from the clock rather than read off the render server, so
+    /// it holds headless too. Nil without art.
+    public var displayedFrame: Int? {
+        guard let art else { return nil }
+        if let heldFrame { return heldFrame }
+        let count = art.frameCount
+        let rotation = ((phase % count) + count) % count
+        guard count > 1, isAnimating else { return rotation }
+        let (step, keys, keyDuration) = Self.keying(art)
+        let loop = keyDuration * CFTimeInterval(keys)
+        var elapsed = (sheetView.layer.convertTime(CACurrentMediaTime(), from: nil) - Self.epoch + clockShift)
+            .truncatingRemainder(dividingBy: loop)
+        if elapsed < 0 { elapsed += loop }
+        let key = min(keys - 1, Int(elapsed / keyDuration))
+        return (rotation + key * step) % count
     }
 
     /// A fingerprint of what the render server is presenting right now, or nil
@@ -234,6 +342,7 @@ public final class AnimatedIconView: UIView {
         animation.repeatCount = .infinity
         animation.isRemovedOnCompletion = false
         animation.beginTime = Self.epoch
+        animation.timeOffset = clockShift
         animation.preferredFrameRateRange = Self.rateRange(step: sheet.frameDuration)
         sheetView.layer.contentsRect = values[0]
         sheetView.layer.add(animation, forKey: Self.sheetKey)
@@ -256,32 +365,33 @@ public final class AnimatedIconView: UIView {
 
         if track.movesScale {
             markView.layer.add(
-                Self.animation(track.scales, track: track, keyPath: "transform.scale"),
+                Self.animation(track.scales, track: track, keyPath: "transform.scale", shift: clockShift),
                 forKey: Self.scaleKey
             )
         }
         if track.movesRotation {
             markView.layer.add(
-                Self.animation(track.rotations, track: track, keyPath: "transform.rotation.z"),
+                Self.animation(track.rotations, track: track, keyPath: "transform.rotation.z", shift: clockShift),
                 forKey: Self.rotationKey
             )
         }
         if track.movesAlpha {
             markView.layer.add(
-                Self.animation(track.alphas, track: track, keyPath: "opacity"),
+                Self.animation(track.alphas, track: track, keyPath: "opacity", shift: clockShift),
                 forKey: Self.alphaKey
             )
         }
     }
 
     private static func animation(
-        _ channel: [Double], track: AnimatedIconMotionTrack, keyPath: String
+        _ channel: [Double], track: AnimatedIconMotionTrack, keyPath: String, shift: CFTimeInterval
     ) -> CAKeyframeAnimation {
         let animation = CAKeyframeAnimation(keyPath: keyPath)
         animation.duration = track.loopDuration
         animation.repeatCount = .infinity
         animation.isRemovedOnCompletion = false
         animation.beginTime = epoch
+        animation.timeOffset = shift
         // Discrete, always.
         //
         // ⚠️ Interpolation is what Low Power has to give up, and it cannot be
