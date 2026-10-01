@@ -435,10 +435,13 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
             self?.leaveAfterBlock()
         }
         viewModel.onLoadSettled = { [weak self] in
-            self?.isSwitchingProfile = false
-            // A refresh that brought nothing new publishes no phase, so the
-            // spinner stops here — where every load ends, however it ended.
-            self?.pullIndicator.endRefreshing()
+            HeroScreenCost.measure("landing.settled") {
+                self?.isSwitchingProfile = false
+                // A refresh that brought nothing new publishes no phase, so
+                // the spinner stops here — where every load ends, however it
+                // ended.
+                self?.pullIndicator.endRefreshing()
+            }
         }
         viewModel.onGalleryChange = { [weak self] snapshot in
             self?.lastGallerySnapshot = snapshot
@@ -2771,6 +2774,7 @@ extension ProfileViewController {
     var debugHeaderConfigureCount: Int { headerView.debugConfigureCount }
     var debugGalleryReloadCount: Int { galleryPager.debugReloadCount }
     var debugGalleryReconfiguredItems: Int { galleryPager.debugReconfiguredItems }
+    var debugGalleryRecountedItems: Int { galleryPager.debugRecountedItems }
     var debugGalleryShowsSkeleton: Bool { galleryPager.debugShowsSkeleton }
     var debugEmptyStateMeasureCount: Int { galleryPager.debugEmptyStateMeasureCount }
     var debugIsRefreshing: Bool { pullIndicator.debugIsRefreshing }

@@ -1575,6 +1575,18 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
 
     /// The post's own count, and the heart inked by whether the viewer has a
     /// stake on it.
+    /// Takes `post`'s counters and nothing else — for a refresh whose only
+    /// news is a number. A `configure` (or a collection view's reconfigure)
+    /// re-dresses the whole card, media included, and re-measures it; a count
+    /// is a capsule's text.
+    public func updateCounts(from post: GalleryPost) {
+        baseReactionCount = post.reactionCount
+        applyReactionCount()
+        comments.set(post.commentCount)
+        closingCommentsPill.syncVisibilityToContents()
+        closingCommentsPill.accessibilityValue = post.commentCount.map(PostMetadata.count)
+    }
+
     private func applyReactionCount() {
         reactions.set(baseReactionCount)
         reactions.setGlyph(
@@ -2628,6 +2640,11 @@ public final class PostGridTileCell: UICollectionViewCell {
     /// The count the tile shows, as drawn — nil while it is hidden.
     public var debugCounterText: String? { likes.isHidden ? nil : likes.debugText }
     #endif
+
+    /// Takes `post`'s counter and nothing else — see the list row's.
+    public func updateCounts(from post: GalleryPost) {
+        likes.set(post.reactionCount)
+    }
 
     public func configure(with post: GalleryPost, imagePipeline: ImagePipeline) {
         // Video tiles keep a dark floor: their poster may be unrenderable

@@ -184,22 +184,39 @@ struct ProfileRefreshLandingTests {
 
     // MARK: - A refresh with news lands only the news
 
-    /// New like counts on the same posts: the cells that changed are
-    /// re-dressed in place, nothing reloads, nothing shows its bones.
-    @Test func newCountsOnTheSamePostsReDressOnlyThoseCells() async {
+    /// New like counts on the same posts: the cells that changed are updated
+    /// in place — the ones on screen by their counters alone — nothing
+    /// reloads, nothing shows its bones.
+    @Test func newCountsOnTheSamePostsUpdateOnlyThoseCells() async {
         let profiles = Profiles()
         let gallery = Gallery()
         await hosting(profiles, gallery) { screen, _ in
             let reloads = screen.debugGalleryReloadCount
-            let reconfigured = screen.debugGalleryReconfiguredItems
+            let updated = screen.debugGalleryReconfiguredItems
+            let recounted = screen.debugGalleryRecountedItems
             await gallery.setLikes(2)
 
             await refresh(screen, profiles, gallery)
 
             #expect(screen.debugGalleryReloadCount == reloads, "a count change reloaded whole pages")
-            #expect(screen.debugGalleryReconfiguredItems > reconfigured, "the new counts were never applied")
+            #expect(screen.debugGalleryReconfiguredItems > updated, "the new counts were never applied")
+            #expect(screen.debugGalleryRecountedItems > recounted, "the cards on screen were re-dressed for a number")
             #expect(!screen.debugGalleryShowsSkeleton)
         }
+    }
+
+    @Test func onlyCountersCountAsACountChange() {
+        let post = GalleryPost(
+            id: PostID("p"), kind: .photo, isRepost: false, thumbnailURL: nil, caption: "a", publishedAtMS: 1
+        )
+        var recounted = post
+        recounted.reactionCount = 7
+        recounted.commentCount = 3
+        #expect(ProfileGalleryGridView.differOnlyInCounts(post, recounted))
+        let recaptioned = GalleryPost(
+            id: PostID("p"), kind: .photo, isRepost: false, thumbnailURL: nil, caption: "b", publishedAtMS: 1
+        )
+        #expect(!ProfileGalleryGridView.differOnlyInCounts(post, recaptioned))
     }
 
     /// A new follower count re-applies the header once — and its height,

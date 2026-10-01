@@ -146,6 +146,8 @@ final class ProfileGalleryGridView: UIView {
     /// brought nothing new must leave at zero.
     private(set) var debugReloadCount = 0
     private(set) var debugReconfiguredItems = 0
+    /// Items whose news was only their counters, written in place.
+    private(set) var debugRecountedItems = 0
     /// The empty state's fitting passes — which a scroll must not add to.
     private(set) var debugEmptyStateMeasureCount = 0
     #endif
@@ -356,6 +358,15 @@ final class ProfileGalleryGridView: UIView {
         }
     }
 
+    /// Whether `new` is `old` with other counters — the one change a cell can
+    /// take without being re-dressed or re-measured.
+    static func differOnlyInCounts(_ old: GalleryPost, _ new: GalleryPost) -> Bool {
+        var recounted = new
+        recounted.reactionCount = old.reactionCount
+        recounted.commentCount = old.commentCount
+        return recounted == old
+    }
+
     private func apply(_ posts: [GalleryPost], skeleton: Bool) {
         guard self.posts != posts || showsSkeleton != skeleton else { return }
         // ⚠️ The same posts in the same places — a refresh bringing new
@@ -364,12 +375,35 @@ final class ProfileGalleryGridView: UIView {
         if !showsSkeleton, !skeleton, self.posts.count == posts.count,
            zip(self.posts, posts).allSatisfy({ $0.id == $1.id }) {
             let changed = posts.indices.filter { self.posts[$0] != posts[$0] }
+            // A count is a capsule's text: written straight onto the cells on
+            // screen. Measured on a refresh landing new like counts, a
+            // reconfigure of two cards was 15 ms of the collection view
+            // re-dressing and re-measuring them. Everything else — another
+            // change, or a cell off screen (a prefetched one is not asked
+            // for again) — is reconfigured.
+            let visible = Set(collectionView.indexPathsForVisibleItems.map(\.item))
+            let countsOnly = changed.filter {
+                visible.contains($0) && Self.differOnlyInCounts(self.posts[$0], posts[$0])
+            }
+            let reconfigured = changed.filter { !countsOnly.contains($0) }
             self.posts = posts
-            HeroScreenCost.measure("gallery.reconfigure") {
-                collectionView.reconfigureItems(at: changed.map { IndexPath(item: $0, section: 0) })
+            HeroScreenCost.measure("gallery.counts") {
+                for index in countsOnly {
+                    switch collectionView.cellForItem(at: IndexPath(item: index, section: 0)) {
+                    case let row as PostGridListRowCell: row.updateCounts(from: posts[index])
+                    case let tile as PostGridTileCell: tile.updateCounts(from: posts[index])
+                    default: break
+                    }
+                }
+            }
+            if !reconfigured.isEmpty {
+                HeroScreenCost.measure("gallery.reconfigure") {
+                    collectionView.reconfigureItems(at: reconfigured.map { IndexPath(item: $0, section: 0) })
+                }
             }
             #if DEBUG
-            debugReconfiguredItems += changed.count
+            debugRecountedItems += countsOnly.count
+            debugReconfiguredItems += reconfigured.count
             #endif
             return
         }
