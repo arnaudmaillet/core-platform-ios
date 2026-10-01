@@ -170,6 +170,11 @@ enum MapMockPlaces {
         if within(pin, of: (52.5200, 13.4050), radius: 0.15) { return [berlin, germany] }
         if within(pin, of: (41.8933, 12.4829), radius: 0.15) { return [rome, italy] }
         if within(pin, of: (51.5074, -0.1278), radius: 0.15) { return [london, unitedKingdom] }
+        // The world seed's cities (`MockWorldSeed`) BEFORE any country box:
+        // most specific wins, and Milan sits inside the Italy box below.
+        for circle in worldCities where within(pin, of: circle.center, radius: 0.15) {
+            return [circle.city, circle.country]
+        }
         // Country boxes, France FIRST on purpose: it wins its Alps overlap
         // with Italy and its Channel overlap with the UK box the same way it
         // already wins Alsace against Germany — no seeds sit in any of the
@@ -189,15 +194,12 @@ enum MapMockPlaces {
         if (49.90...58.70).contains(pin.latitude), (-8.20...1.80).contains(pin.longitude) {
             return [unitedKingdom]
         }
-        // The world beyond Europe (`MockWorldSeed`): its city circles, then
-        // the country's real BORDER rather than a box — the Americas'
-        // rectangles would overlap (Montreal sits inside any box that holds
-        // New York's latitude), and the border is what the map unlocks by
-        // anyway (`CountryAtlas`). Only these few countries are tested, each
-        // behind its bounds check, so the cost is a handful of comparisons.
-        for circle in worldCities where within(pin, of: circle.center, radius: 0.15) {
-            return [circle.city, circle.country]
-        }
+        // The world beyond Europe (`MockWorldSeed`) outside its cities: the
+        // country's real BORDER rather than a box — the Americas' rectangles
+        // would overlap (Montreal sits inside any box that holds New York's
+        // latitude), and the border is what the map unlocks by anyway
+        // (`CountryAtlas`). Only these few countries are tested, each behind
+        // its bounds check, so the cost is a handful of comparisons.
         let coordinate = CLLocationCoordinate2D(latitude: pin.latitude, longitude: pin.longitude)
         for entry in worldCountries
         where CountryAtlas.shared.country(code: entry.code)?.contains(coordinate) == true {
