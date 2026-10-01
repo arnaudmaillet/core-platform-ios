@@ -72,16 +72,34 @@ public enum HeroInk {
     /// around 1.5:1 and the worst-pixel score is noise: a poster's counters
     /// kept white over a mostly white ground (1.51:1 at the MEDIAN). There the
     /// ink that reads over most of the ground (its median contrast) wins.
+    ///
+    /// ⚠️ SCALAR ALL THE WAY. It mapped every pixel through three small
+    /// arrays per ink — a name's ground is ~10k pixels, so ~60k allocations
+    /// a block, three blocks on a poster; in a debug build that was tens of
+    /// milliseconds a read, and the headers read again every two points of a
+    /// pull-down (fixed: a stretch no longer moves the type on the ground).
+    /// Each pixel's luminance is now taken once and both inks scored on it.
     public static func tone(forGround ground: [SIMD3<Float>], current: Tone?) -> Tone {
         guard !ground.isEmpty else { return current ?? defaultTone }
+        let backs = ground.map { luminance(red: CGFloat($0.x), green: CGFloat($0.y), blue: CGFloat($0.z)) }
         func contrasts(_ tone: Tone) -> [CGFloat] {
             var ink = (r: CGFloat(0), g: CGFloat(0), b: CGFloat(0), a: CGFloat(0))
             tone.secondary.getRed(&ink.r, green: &ink.g, blue: &ink.b, alpha: &ink.a)
-            return ground.map { pixel in
-                let back = [CGFloat(pixel.x), CGFloat(pixel.y), CGFloat(pixel.z)]
-                let front = zip([ink.r, ink.g, ink.b], back).map { $0 * ink.a + $1 * (1 - ink.a) }
-                return contrast(luminance(front), luminance(back))
-            }.sorted()
+            guard ink.a < 1 else {
+                let front = luminance(red: ink.r, green: ink.g, blue: ink.b)
+                return backs.map { contrast(front, $0) }.sorted()
+            }
+            var ratios = [CGFloat](repeating: 0, count: ground.count)
+            for index in ground.indices {
+                let pixel = ground[index]
+                let front = luminance(
+                    red: ink.r * ink.a + CGFloat(pixel.x) * (1 - ink.a),
+                    green: ink.g * ink.a + CGFloat(pixel.y) * (1 - ink.a),
+                    blue: ink.b * ink.a + CGFloat(pixel.z) * (1 - ink.a)
+                )
+                ratios[index] = contrast(front, backs[index])
+            }
+            return ratios.sorted()
         }
         let light = contrasts(.light)
         let dark = contrasts(.dark)
@@ -117,11 +135,17 @@ public enum HeroInk {
 
     /// WCAG relative luminance of an sRGB colour.
     public static func luminance(_ rgb: [CGFloat]) -> CGFloat {
-        let linear = rgb.map { channel -> CGFloat in
+        luminance(red: rgb[0], green: rgb[1], blue: rgb[2])
+    }
+
+    /// The same, channel by channel — no array to build per pixel.
+    @inline(__always)
+    public static func luminance(red: CGFloat, green: CGFloat, blue: CGFloat) -> CGFloat {
+        func linear(_ channel: CGFloat) -> CGFloat {
             let c = max(0, min(channel, 1))
             return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
         }
-        return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+        return 0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue)
     }
 
     /// WCAG contrast ratio of two relative luminances.

@@ -107,9 +107,12 @@ struct ProfileIdentityInkTests {
     /// ⚠️ TWO KNOWN ISSUES, BOTH ON A BAND, whose name half stands on the
     /// picture with the blur nil (it starts just above the avatar) and only
     /// a thin page tone (a band's ramp starts at the handle): over hard 2px
-    /// stripes no single ink holds (name 1.04, handle 4.49 worst; median
-    /// 5.32), and on the crossover grey in the dark the page arriving under
-    /// the handle's foot takes it to 4.43. A poster clears everywhere: half
+    /// stripes no single ink holds (name 1.02, handle 1.12 worst; median
+    /// 5.2–5.4 — the handle was 4.49 until the band's blur climbed the
+    /// ladder of levels, gentle enough now to leave the stripes under it;
+    /// a photograph's band measures ≥ 7:1, `-profile-ink-audit` on prof-0),
+    /// and on the crossover grey in the dark the page arriving under the
+    /// handle's foot takes it to 4.49. A poster clears everywhere: half
     /// the page's tone under its type (the shoulder) closes the spread.
     @Test(arguments: Picture.allCases, [UIUserInterfaceStyle.light, .dark])
     func theTypeClearsAAOverAnyPicture(picture: Picture, style: UIUserInterfaceStyle) throws {
@@ -235,6 +238,52 @@ struct ProfileIdentityInkTests {
             #expect(header.debugNameInk == ProfileHeaderView.pageNameInk)
             #expect(header.debugNameShadowOpacity == 0)
         }
+    }
+
+    /// A pull-down at the top of a profile — the banner pinned to the
+    /// viewport's top while the header travels down with the content —
+    /// stretches the banner, and every frame of it is a zoom: no blur
+    /// composed, no bake, no ground read for the ink, the fade where it was,
+    /// and the picture still covering the stretched banner to its top. The
+    /// pull used to re-read the ground under the type every two points (on
+    /// a device, the gesture at half the scroll's frame rate).
+    @Test(arguments: [false, true])
+    func aPullDownOnlyZoomsTheBanner(band: Bool) throws {
+        let size = band ? CGSize(width: 160, height: 90) : CGSize(width: 90, height: 160)
+        let header = header(picture: Picture.stripes.image(size: size))
+        #expect(header.bannerFormat == (band ? .band : .poster))
+        let viewport = try #require(header.superview)
+        header.anchorBanner(toViewportTop: viewport.topAnchor)
+        viewport.layoutIfNeeded()
+        let composed = header.debugBlurComposeCount
+        let baked = header.debugBlurBakeCount
+        let reads = header.debugInkReadCount
+        let fade = try #require(header.debugBannerFade)
+        let tones = header.debugInkTones
+        try #require(composed > 0 && baked > 0 && reads > 0)
+        for pull in stride(from: CGFloat(3), through: 180, by: 3) {
+            header.frame.origin.y = pull
+            header.setTravelled(-pull)
+            viewport.layoutIfNeeded()
+            let banner = header.debugBannerFrame
+            #expect(abs(banner.minY + pull) < 0.5, "pull \(pull): the banner stretches \(banner)")
+            #expect(header.debugBlurComposeCount == composed, "pull \(pull)")
+            #expect(header.debugBlurBakeCount == baked, "pull \(pull)")
+            #expect(header.debugInkReadCount == reads, "pull \(pull)")
+            #expect(header.debugBannerFade == fade, "pull \(pull)")
+            let cover = header.debugBannerPictureCover
+            #expect(cover.minY <= banner.minY + 0.5, "pull \(pull): \(cover) in \(banner)")
+            #expect(cover.maxY >= banner.maxY - 0.5, "pull \(pull): \(cover) in \(banner)")
+            // The page's tone stays on the resting banner.
+            #expect(abs(header.debugBannerRampFrame.minY) < 0.5, "pull \(pull)")
+        }
+        #expect(header.debugInkTones == tones)
+        header.frame.origin.y = 0
+        header.setTravelled(0)
+        viewport.layoutIfNeeded()
+        #expect(header.debugBannerFrame.minY == 0)
+        #expect(header.debugBlurComposeCount == composed)
+        #expect(header.debugInkReadCount == reads)
     }
 
     /// The blur's levels are all showing once the picture is in, each fading

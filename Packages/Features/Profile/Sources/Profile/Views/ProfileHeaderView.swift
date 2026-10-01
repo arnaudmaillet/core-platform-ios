@@ -240,9 +240,19 @@ final class ProfileHeaderView: UIView {
     /// a change of ink on screen cross-dissolves.
     private func updateInkTones(force: Bool = false) {
         guard bannerFormat != .none else { return }
+        HeroBannerCost.measure(.ink) { readInkTones(force: force) }
+    }
+
+    private func readInkTones(force: Bool) {
+        // ⚠️ IN THE HEADER'S SPACE — the banner's at rest, which is what its
+        // ground is read in. Converted to the banner, a pull-down (which
+        // stretches the banner up above the header) moved every block down
+        // its ground by the pull, and each two points of it read the ground
+        // again: up to three reads a frame on a poster, the bulk of the
+        // pull's dropped frames on a device.
         func frame(of views: [UIView]) -> CGRect {
             views.filter { !$0.isHidden }
-                .map { $0.convert($0.bounds, to: bannerView) }
+                .map { $0.convert($0.bounds, to: self) }
                 .reduce(CGRect.null) { $0.union($1) }
         }
         let blocks = [
@@ -255,6 +265,9 @@ final class ProfileHeaderView: UIView {
         guard force || moved else { return }
         guard let nameGround = bannerView.groundPixels(behind: blocks[0]) else { return }
         inkTonesReadFor = blocks
+        #if DEBUG
+        debugInkReadCount += 1
+        #endif
         var tones = inkTones
         tones.name = HeroInk.tone(forGround: nameGround, current: inkTones.name)
         #if DEBUG
@@ -296,6 +309,14 @@ final class ProfileHeaderView: UIView {
     private let identityColumn = UIStackView()
 
     #if DEBUG
+    /// How many times the ground under the type was read.
+    private(set) var debugInkReadCount = 0
+    var debugBlurComposeCount: Int { bannerView.debugBlurComposeCount }
+    var debugBlurBakeCount: Int { bannerView.debugBlurBakeCount }
+    /// Where the banner's sharp picture and its ramp are drawn, in the
+    /// header's space.
+    var debugBannerPictureCover: CGRect { bannerView.convert(bannerView.debugPictureCover, to: self) }
+    var debugBannerRampFrame: CGRect { bannerView.convert(bannerView.debugRampFrame, to: self) }
     var debugBannerFrame: CGRect { bannerView.frame }
     var debugAvatarFrame: CGRect { avatarView.convert(avatarView.bounds, to: self) }
     var debugTrayFrame: CGRect { actionRowForDebug?.convert(actionRowForDebug!.bounds, to: self) ?? .zero }
@@ -311,14 +332,11 @@ final class ProfileHeaderView: UIView {
     var debugTrayButtons: [UIButton] {
         [followButton, messageButton, editButton, mapPinButton, qrCodeButton, moreButton]
     }
-    /// The banner's fade, in the HEADER's coordinates.
-    var debugBannerFade: HeroBannerFade.Geometry? {
-        bannerView.debugFade?.offset(by: bannerView.frame.minY)
-    }
+    /// The banner's fade, in the HEADER's coordinates — the banner's at
+    /// rest, which is what it is given in.
+    var debugBannerFade: HeroBannerFade.Geometry? { bannerView.debugFade }
     /// The blur levels showing, in the header's coordinates.
-    var debugBannerBlurLevels: [(start: CGFloat, full: CGFloat)] {
-        bannerView.debugBlurLevels.map { ($0.start + bannerView.frame.minY, $0.full + bannerView.frame.minY) }
-    }
+    var debugBannerBlurLevels: [(start: CGFloat, full: CGFloat)] { bannerView.debugBlurLevels }
     var debugBannerRampLocations: [CGFloat] { bannerView.debugRampLocations }
     var debugBannerRampAlphas: [CGFloat] { bannerView.debugRampAlphas }
     /// How much of the banner shows — its veil's complement (a poster's
@@ -1346,8 +1364,11 @@ final class ProfileHeaderView: UIView {
     /// moment its frame is final, so it places the fade too.
     private func placeBannerFade() {
         guard bannerFormat != .none else { return }
-        let avatar = avatarView.convert(avatarView.bounds, to: bannerView)
-        let foot = bannerView.bounds.height
+        // In the header's space, which is the banner's AT REST: its top
+        // rests on the header's, and a pull-down that stretches it above
+        // must not move the fade (see `HeroBannerPictureView`).
+        let avatar = avatarView.convert(avatarView.bounds, to: self)
+        let foot = bannerView.frame.maxY
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-hero-blur-trace") {
             print("HERO-BLUR header fade format=\(bannerFormat) avatar=\(avatar) foot=\(foot)")
@@ -1374,6 +1395,11 @@ final class ProfileHeaderView: UIView {
             // the whole container; the page's tone climbs from the handle's
             // line, through the air above the counters, to the foot.
             fade.rampStart = max(fade.rampStart, avatar.midY - Metrics.bandRampAboveMidline)
+            // ⚠️ AND ITS BLUR CLIMBS THE LADDER, NOT THE SIGMA: over a
+            // container this short the sigma curve put the handle on the
+            // third and fourth levels — "far too strong" (user, 1 October
+            // 2026). See `HeroBannerFade.BlurCurve.ladder`.
+            fade.blurCurve = .ladder
         }
         bannerView.setFade(fade)
         updateInkTones()

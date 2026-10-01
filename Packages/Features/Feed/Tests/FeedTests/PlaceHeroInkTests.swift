@@ -92,6 +92,38 @@ struct PlaceHeroInkTests {
         }
     }
 
+    /// A pull-down stretches the banner up from the viewport's top while
+    /// the name rides its foot — and only zooms the picture: no blur
+    /// composed, no bake, no ground read again for the ink, the fade where
+    /// it was, the picture still covering the stretched box to its top.
+    @Test func aPullDownOnlyZoomsTheBanner() throws {
+        let profile = place(.stripes, style: .light)
+        let composed = profile.debugBlurComposeCount
+        let baked = profile.debugBlurBakeCount
+        let reads = profile.debugInkReadCount
+        let fade = try #require(profile.debugBannerFade)
+        try #require(composed > 0 && baked > 0 && reads > 0)
+        for pull in stride(from: CGFloat(4), through: 160, by: 4) {
+            profile.debugScrollActivePage(to: -pull)
+            profile.view.layoutIfNeeded()
+            let box = profile.debugBannerBoxFrame
+            #expect(abs(box.minY) < 0.5, "pull \(pull): the box holds the viewport's top \(box)")
+            #expect(profile.debugBlurComposeCount == composed, "pull \(pull)")
+            #expect(profile.debugBlurBakeCount == baked, "pull \(pull)")
+            #expect(profile.debugInkReadCount == reads, "pull \(pull)")
+            let moved = try #require(profile.debugBannerFade)
+            // The fade rides the header down with the content, unchanged.
+            #expect(abs(moved.blurStart - fade.blurStart - pull) < 0.5, "pull \(pull)")
+            #expect(abs(moved.blurFull - box.maxY) < 0.5, "pull \(pull)")
+            let cover = profile.debugBannerPictureCover
+            #expect(cover.minY <= box.minY + 0.5 && cover.maxY >= box.maxY - 0.5, "pull \(pull): \(cover)")
+        }
+        profile.debugScrollActivePage(to: 0)
+        profile.view.layoutIfNeeded()
+        #expect(profile.debugBlurComposeCount == composed)
+        #expect(profile.debugInkReadCount == reads)
+    }
+
     /// With half the page's tone under the type (the shoulder), every block
     /// wears the page's side of the inks whatever the picture — black on a
     /// light page, white on a dark one.

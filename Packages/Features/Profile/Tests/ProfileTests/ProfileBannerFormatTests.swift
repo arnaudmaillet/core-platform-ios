@@ -123,6 +123,9 @@ struct ProfileBannerFormatTests {
             #expect(fade.rampShoulder == nil)
             #expect(fade.rampStart >= fade.blurStart - 0.5)
         }
+        // A band's blur climbs the ladder of levels — the softer curve its
+        // short container needs; a poster keeps the sigma curve.
+        #expect(fade.blurCurve == (format == .band ? .ladder : .sigma))
         // The blur is next to nothing under the name: sigma under 3.5pt.
         let spans = HeroBannerFade.levelSpans(fade)
         try #require(spans.count > 2)
