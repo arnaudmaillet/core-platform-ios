@@ -100,24 +100,10 @@ final class SnapChromeView: UIView {
     /// never from the stream (see there for why the band's hidden state is
     /// the wrong authority for it).
     private let boostButton = SnapRailBoostButton()
-    /// `-snap-layout-v2` (experimental): the REPOST bubble, directly under the
-    /// boost anchor and its size, beside the caption and the page strip — see
-    /// `SnapActionColumn`. Joins the view only when the experiment is on (the
-    /// classic chrome never carries it, not even hidden).
-    private lazy var repostButton = SnapRailRepostButton()
-    /// Whether this chrome lays out the experimental action column (repost
-    /// bubble under the boost anchor, caption and strip narrowed beside it).
-    /// The process's launch flag by default; a test flips it per instance.
-    var usesActionColumn = false {
-        didSet {
-            guard usesActionColumn != oldValue else { return }
-            applyActionColumn()
-        }
-    }
-    /// The caption's two trailing edges: the margin (classic), or one md short
-    /// of the repost bubble (the action column). Exactly one is active.
-    private var captionTrailingClassic: NSLayoutConstraint?
-    private var captionTrailingBesideColumn: NSLayoutConstraint?
+    /// The REPOST bubble, directly under the boost anchor and its size,
+    /// beside the caption and the page strip — see `SnapActionColumn`. Media
+    /// chrome, like the anchor (`applyRepostVisibility`).
+    private let repostButton = SnapRailRepostButton()
     /// The rail's top edge as a cell-relative constant (see `buildLayout`).
     /// Optional: margins change during `init` before the layout exists.
     private var railTopConstraint: NSLayoutConstraint?
@@ -152,8 +138,7 @@ final class SnapChromeView: UIView {
     /// engagement's entry points; hidden views receive no touches, so each
     /// claims taps only while shown).
     var interactionRoots: [UIView] {
-        let roots: [UIView] = [shortcutRail, boostButton, commentEmptyState, subtitleView, commentTicker]
-        return usesActionColumn ? roots + [repostButton] : roots
+        [shortcutRail, boostButton, commentEmptyState, subtitleView, commentTicker, repostButton]
     }
 
     /// A comments surface was tapped (empty-state pill, subtitle zone, or
@@ -207,12 +192,8 @@ final class SnapChromeView: UIView {
         }
 
         buildLayout()
-        // ⚠️ APPLIED BY HAND: a property set inside the class's own `init`
-        // does not fire its `didSet`, so the assignment alone would store
-        // `true` with nothing laid out — and every later `true` would no-op
-        // against it.
-        usesActionColumn = SnapActionColumn.isEnabled
-        if usesActionColumn { applyActionColumn() }
+        installRepostBubble()
+        applyRepostVisibility()
     }
 
     @available(*, unavailable)
@@ -240,8 +221,8 @@ final class SnapChromeView: UIView {
             scrimView.heightAnchor.constraint(equalTo: parent.heightAnchor, multiplier: 0.68)
         }
 
-        // Caption, full-width over the scrim (the engagement rail that once
-        // reserved the trailing edge is gone). The margins guide tracks the
+        // Caption, over the scrim; its trailing edge stops one md short of the
+        // repost bubble (`installRepostBubble`). The margins guide tracks the
         // safe area, so when the navigation controller's toolbar is visible
         // the caption sits above it automatically — live cell and flight
         // replica alike (`setFixedInsets` captures the toolbar-inflated
@@ -253,13 +234,6 @@ final class SnapChromeView: UIView {
             captionLabel.leadingAnchor.constraint(equalTo: parent.layoutMarginsGuide.leadingAnchor, constant: Spacing.lg)
             captionLabel.bottomAnchor.constraint(equalTo: parent.layoutMarginsGuide.bottomAnchor, constant: -Spacing.xl)
         }
-        // Stored: the action column (`-snap-layout-v2`) swaps it for one that
-        // stops short of the repost bubble (`applyActionColumn`).
-        let captionTrailing = captionLabel.trailingAnchor.constraint(
-            equalTo: layoutMarginsGuide.trailingAnchor, constant: -Spacing.lg
-        )
-        captionTrailingClassic = captionTrailing
-        captionTrailing.isActive = true
 
         // The caption FLOOR: a zero-content region co-located with the
         // caption label (same bottom, same horizontal margins) but with a
@@ -468,53 +442,40 @@ final class SnapChromeView: UIView {
         commentTicker.onTap = { [weak self] in self?.onCommentsTapped?() }
     }
 
-    /// Installs (once) and switches the experimental action column
-    /// (`SnapActionColumn`): the repost bubble under the boost anchor, and the
-    /// caption — with the page strip, which shares its trailing edge — ending
-    /// one md short of it.
+    /// The action column's media half (`SnapActionColumn`): the repost bubble
+    /// under the boost anchor, and the caption — with the page strip, which
+    /// shares its trailing edge — ending one md short of it.
     ///
     /// The bubble is the anchor's twin: same trailing margin, same square
     /// (the band's height), its top on the caption FLOOR's top — one md under
     /// the anchor, the band → caption seam — so it sits beside the caption's
     /// first line and the strip runs on under the caption alone.
-    private func applyActionColumn() {
-        if usesActionColumn, repostButton.superview == nil {
-            repostButton.isHidden = true
-            // Framed from outside, like the anchor: zero back-pressure from
-            // its intrinsic size (see the anchor's height-authority note).
-            repostButton.setContentHuggingPriority(UILayoutPriority(1), for: .vertical)
-            repostButton.setContentHuggingPriority(UILayoutPriority(1), for: .horizontal)
-            repostButton.setContentCompressionResistancePriority(UILayoutPriority(1), for: .vertical)
-            repostButton.setContentCompressionResistancePriority(UILayoutPriority(1), for: .horizontal)
-            repostButton.constrain(in: self) { parent in
-                repostButton.trailingAnchor.constraint(
-                    equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -SnapActionColumn.trailingInset
-                )
-                repostButton.widthAnchor.constraint(equalTo: commentTicker.heightAnchor)
-                repostButton.heightAnchor.constraint(equalTo: commentTicker.heightAnchor)
-                repostButton.topAnchor.constraint(equalTo: captionFloorGuide.topAnchor)
-            }
-            captionTrailingBesideColumn = captionLabel.trailingAnchor.constraint(
-                equalTo: repostButton.leadingAnchor, constant: -Spacing.md
+    private func installRepostBubble() {
+        repostButton.isHidden = true
+        // Framed from outside, like the anchor: zero back-pressure from
+        // its intrinsic size (see the anchor's height-authority note).
+        repostButton.setContentHuggingPriority(UILayoutPriority(1), for: .vertical)
+        repostButton.setContentHuggingPriority(UILayoutPriority(1), for: .horizontal)
+        repostButton.setContentCompressionResistancePriority(UILayoutPriority(1), for: .vertical)
+        repostButton.setContentCompressionResistancePriority(UILayoutPriority(1), for: .horizontal)
+        repostButton.constrain(in: self) { parent in
+            repostButton.trailingAnchor.constraint(
+                equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -SnapActionColumn.trailingInset
             )
+            repostButton.widthAnchor.constraint(equalTo: commentTicker.heightAnchor)
+            repostButton.heightAnchor.constraint(equalTo: commentTicker.heightAnchor)
+            repostButton.topAnchor.constraint(equalTo: captionFloorGuide.topAnchor)
         }
-        if usesActionColumn {
-            captionTrailingClassic?.isActive = false
-            captionTrailingBesideColumn?.isActive = true
-        } else {
-            captionTrailingBesideColumn?.isActive = false
-            captionTrailingClassic?.isActive = true
-        }
-        applyRepostVisibility()
-        setNeedsLayout()
+        captionLabel.trailingAnchor.constraint(
+            equalTo: repostButton.leadingAnchor, constant: -Spacing.md
+        ).isActive = true
     }
 
     /// The repost bubble is MEDIA chrome, like the boost anchor above it: a
     /// text page's engagement is its permanent layout, and its composer stands
     /// in the column instead.
     private func applyRepostVisibility() {
-        guard repostButton.superview != nil else { return }
-        repostButton.isHidden = !(usesActionColumn && hasMedia)
+        repostButton.isHidden = !hasMedia
     }
 
     /// The rail's reserved bottom strip is the glass square's height — a
@@ -955,7 +916,7 @@ final class SnapChromeView: UIView {
     /// The page strip and the caption, so a spec can state where the strip sits
     /// in the column — and that its arrival moves nothing else.
     var debugPageBarFrame: CGRect { mediaPageBar.frame }
-    /// The action column's two bubbles (`-snap-layout-v2`), for the spec that
+    /// The action column's two bubbles, for the spec that
     /// holds them still across the media and comments layouts.
     var debugBoostButton: UIButton { boostButton }
     var debugRepostButton: UIButton { repostButton }
@@ -1050,8 +1011,7 @@ final class SnapChromeView: UIView {
     /// the available one — the way out of a post should not blink away because
     /// a thumb landed on a clip's bar.
     private var scrubFadedViews: [UIView] {
-        let views: [UIView] = [captionLabel, commentTicker, subtitleView, commentEmptyState, shortcutRail, boostButton]
-        return usesActionColumn ? views + [repostButton] : views
+        [captionLabel, commentTicker, subtitleView, commentEmptyState, shortcutRail, boostButton, repostButton]
     }
 
     /// What each faded view was worth before the scrub took it, so the fade
@@ -1237,7 +1197,7 @@ final class SnapChromeView: UIView {
         commentTicker.reset()
         applyBandPresence()
         boostButton.isHidden = true
-        if repostButton.superview != nil { repostButton.isHidden = true }
+        repostButton.isHidden = true
         boostButton.setSpentTotal(0)
         // Back to the unwired default (enabled, nothing undoable) — the
         // next configure pushes the real context.

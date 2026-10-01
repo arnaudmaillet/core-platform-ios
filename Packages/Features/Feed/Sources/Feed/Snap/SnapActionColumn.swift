@@ -1,9 +1,9 @@
 import DesignSystem
 import UIKit
 
-/// **EXPERIMENTAL — `-snap-layout-v2` (DEBUG/QA only).** The trailing ACTION
-/// COLUMN: two Liquid Glass bubbles stacked at the screen's trailing edge that
-/// hold the same screen coordinates in BOTH layouts of a post.
+/// The trailing ACTION COLUMN: two Liquid Glass bubbles stacked at the
+/// screen's trailing edge that hold the same screen coordinates in BOTH
+/// layouts of a post.
 ///
 /// ```
 ///   media layout                         comments layout
@@ -27,8 +27,8 @@ import UIKit
 ///   the rail slot is a PIN for the conversation, turning into send the same
 ///   way.
 ///
-/// Off, everything is as before — every surface asks `isEnabled` once, at
-/// construction, and keeps its classic geometry when it is false.
+/// Began as an experiment behind a DEBUG flag (#340, #344); validated
+/// 2026-10-01 and made the only layout — the classic one is gone.
 ///
 /// ⚠️ ONE SET OF NUMBERS, two layouts that never see each other. The media
 /// layout is constraints inside `SnapChromeView` (band → caption floor →
@@ -38,29 +38,13 @@ import UIKit
 /// asserts the frames are EQUAL — if either side's anchoring changes, that
 /// test is what says the column moved.
 ///
-/// **THE INPUT ROW RESTS ON THE TOOLBAR, flag or no flag** (asked 2026-10-01).
-/// The composer's field sits `glassGap` above the toolbar's glass, and the trailing
-/// column keeps the place it had: the composer lifts the column off its own
-/// bottom by `columnLift`, so the rail bubble stands a little higher than the
-/// field — accepted, the field is what reads as "right above the toolbar".
+/// **THE INPUT ROW RESTS ON THE TOOLBAR** (asked 2026-10-01). The composer's
+/// field sits `glassGap` above the toolbar's glass, and the trailing column
+/// keeps its place on the media layout's bubbles: the composer lifts the
+/// column off its own bottom by `columnLift`, so the rail bubble stands a
+/// little higher than the field — accepted, the field is what reads as "right
+/// above the toolbar".
 enum SnapActionColumn {
-    /// The launch argument that turns the experiment on.
-    static let launchArgument = "-snap-layout-v2"
-
-    /// Whether `arguments` ask for the experiment. Release builds never do.
-    static func isEnabled(arguments: [String]) -> Bool {
-        #if DEBUG
-        arguments.contains(launchArgument)
-        #else
-        false
-        #endif
-    }
-
-    /// Whether this process asked for the experiment — the DEFAULT every
-    /// surface takes; tests flip it per instance instead (a process-wide
-    /// switch would leak across parallel suites).
-    static let isEnabled = isEnabled(arguments: ProcessInfo.processInfo.arguments)
-
     /// The bubbles' side: the comment band's height — the like anchor's
     /// square, which the band has always sized. Font-derived, so it follows
     /// the text size the way the anchor does.
@@ -130,34 +114,17 @@ enum SnapActionColumn {
     /// line, so this is the glass drop short of the gap (and may be negative).
     static var inputRestingGap: CGFloat { glassGap - toolbarGlassDrop }
 
-    /// Where the composer's trailing COLUMN rests above the bottom margin
-    /// line: the action column's lift when the experiment is on, the classic
-    /// `sm` breath otherwise — where both stood before the input row moved
-    /// down onto the toolbar.
-    @MainActor static func columnRestingGap(actionColumn: Bool) -> CGFloat {
-        actionColumn ? restingLift : Spacing.sm
-    }
-
     /// What the composer puts between its own bottom (the input row's) and
     /// its trailing column's bottom, so a bar resting at `inputRestingGap`
-    /// stands its column at `columnRestingGap`.
-    @MainActor static func columnLift(actionColumn: Bool) -> CGFloat {
-        columnRestingGap(actionColumn: actionColumn) - inputRestingGap
-    }
-
-    /// The composer's trailing inset from the screen's edge — the column's
-    /// when the experiment is on, the classic `lg` otherwise.
-    static func composerTrailingInset(actionColumn: Bool) -> CGFloat {
-        actionColumn ? trailingInset : Spacing.lg
-    }
+    /// stands its column at `restingLift` — on the media layout's bubbles.
+    @MainActor static var columnLift: CGFloat { restingLift - inputRestingGap }
 }
 
-/// The media layout's repost bubble (`-snap-layout-v2`): a Liquid Glass circle
-/// the like anchor's size, directly under it.
+/// The media layout's repost bubble: a Liquid Glass circle the like anchor's
+/// size, directly under it.
 ///
-/// ⚠️ DRAWN WITHOUT AN ACTION, like the toolbar's repost it replaces: the
-/// client has no path that publishes a repost yet (see the feed's
-/// `configureToolbarItems`).
+/// ⚠️ DRAWN WITHOUT AN ACTION: the client has no path that publishes a repost
+/// yet (see the feed's `configureToolbarItems`).
 ///
 /// Configured PLAIN at init; the glass materializes on first window attach —
 /// the like anchor's doctrine (`SnapRailBoostButton`): creating a system

@@ -53,40 +53,22 @@ final class ConversationThreadViewController: UIViewController {
     private lazy var collectionView = UICollectionView(frame: .zero, collectionViewLayout: makeLayout())
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
     private let contextMenu = ThreadRowContextMenu()
+    /// The post's composer, so the post's geometry (`SnapActionColumn`): at
+    /// rest the rail slot stands where the snap feed's repost bubble stands
+    /// (the column's lift above the footer, its inset from the trailing edge)
+    /// and wears a PIN for this conversation — the send arrow while there is
+    /// text — and the voice note is a waveform in the field; keyboard up, the
+    /// bar rides the keyboard.
     private let composeBar = CommentsInputBar()
-    /// The composer's rest line and trailing edge, kept so the action column
-    /// can be switched on a screen already built.
-    private var composeRest: NSLayoutConstraint?
-    private var composeTrailing: NSLayoutConstraint?
-
-    /// **`-snap-layout-v2` (experimental, `SnapActionColumn`).** The post's
-    /// composer, so the post's geometry: at rest the rail slot stands where
-    /// the snap feed's repost bubble stands (the column's lift above the
-    /// footer, its inset from the trailing edge) and wears a PIN for this
-    /// conversation — the send arrow while there is text — and the voice note
-    /// is a waveform in the field; keyboard up, the bar rides the keyboard as
-    /// before. The launch flag by default; a test flips it.
-    var usesActionColumn = SnapActionColumn.isEnabled {
-        didSet {
-            guard usesActionColumn != oldValue else { return }
-            applyComposerColumn()
-        }
-    }
 
     /// The conversation's pin as the driver last reported it — nil while
     /// there is nothing to pin (a draft).
     private var isPinned: Bool?
 
-    private func applyComposerColumn() {
-        composeBar.usesActionColumn = usesActionColumn
-        composeBar.railFace = usesActionColumn ? .pin(isPinned: isPinned == true) : .voice
-        composeBar.isRailFaceEnabled = isPinned != nil
-        composeTrailing?.constant = -SnapActionColumn.composerTrailingInset(actionColumn: usesActionColumn)
-    }
-
     private func renderPinned(_ pinned: Bool?) {
         isPinned = pinned
-        applyComposerColumn()
+        composeBar.railFace = .pin(isPinned: pinned == true)
+        composeBar.isRailFaceEnabled = pinned != nil
     }
     private let headerFrost = ProgressiveFrostView(
         maskColors: SnapCommentsLayout.headerFrostMaskColors,
@@ -360,9 +342,11 @@ final class ConversationThreadViewController: UIViewController {
             self?.presentNotice("Voice Messages", "Voice messages aren't available yet.")
         }
         // No stake: a conversation has nothing to like. The column keeps its
-        // slot where it was (the mic, or the pin under `-snap-layout-v2`).
+        // slot where it was: the pin.
         composeBar.showsStake = false
-        // `-snap-layout-v2`: the slot's pin, the inbox's own (the driver's).
+        // The slot's pin, the inbox's own (the driver's). Disabled until the
+        // driver reports one (`renderPinned`): a draft has nothing to pin.
+        renderPinned(isPinned)
         composeBar.onRailAction = { [weak self] in self?.driver.togglePinned() }
 
         composerBackdrop.setVeilOpacity(SnapCommentsLayout.frostVeilOpacity(hasMedia: false))
@@ -374,8 +358,8 @@ final class ConversationThreadViewController: UIViewController {
         // constraint — the safe area, which the footer toolbar inflates — is
         // what holds the bar while the keyboard is down, and the inequality
         // lifts it the moment the keyboard rises past it. At rest the input
-        // row sits `glassGap` above the toolbar's glass, flag or no flag; the bar
-        // lifts its own column (`SnapActionColumn`).
+        // row sits `glassGap` above the toolbar's glass; the bar lifts its own
+        // column (`SnapActionColumn`).
         view.keyboardLayoutGuide.usesBottomSafeArea = false
         let ceiling = composeBar.bottomAnchor.constraint(
             lessThanOrEqualTo: view.keyboardLayoutGuide.topAnchor, constant: -Spacing.sm
@@ -384,12 +368,11 @@ final class ConversationThreadViewController: UIViewController {
             equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -SnapActionColumn.inputRestingGap
         )
         rest.priority = .defaultHigh
-        let trailing = composeBar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -Spacing.lg)
-        composeRest = rest
-        composeTrailing = trailing
         NSLayoutConstraint.activate([
             composeBar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Spacing.lg),
-            trailing,
+            composeBar.trailingAnchor.constraint(
+                equalTo: view.trailingAnchor, constant: -SnapActionColumn.trailingInset
+            ),
             ceiling,
             rest,
             composerBackdrop.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -401,7 +384,6 @@ final class ConversationThreadViewController: UIViewController {
                 equalTo: composeBar.inputRowTopAnchor, constant: -SnapCommentsLayout.footerFrostLead
             ),
         ])
-        applyComposerColumn()
     }
 
     /// The post's footer, with the emote strip where the music would be —
