@@ -1,6 +1,7 @@
 import Testing
 @testable import Maps
 import CoreModels
+import MapKit
 
 /// The semantic-cluster rules: which markers are Case B (gallery-backed
 /// feed), and how the NESTED hierarchy (city ⊂ country) renders
@@ -35,10 +36,11 @@ struct MapSemanticClusterTests {
     private let countryDiagonal = 2884.3 // Europe framed (47.0,5.0,20)
 
     private func pin(
-        _ id: String, lat: Double = 48.85, lng: Double = 2.35, places: [MapPlace] = []
+        _ id: String, lat: Double = 48.85, lng: Double = 2.35, likes: Int64 = 0,
+        places: [MapPlace] = []
     ) -> MapPin {
         MapPin(postID: PostID(id), latitude: lat, longitude: lng,
-               thumbnailURL: nil, kind: .text, places: places)
+               thumbnailURL: nil, kind: .text, likeCount: likes, places: places)
     }
 
     private var parisLadder: [MapPlace] { [paris, france] }
@@ -384,42 +386,188 @@ struct MapSemanticClusterTests {
 
     // MARK: - Same-band collisions
 
-    /// Zoomed out far enough that two countries' markers would stack on
-    /// screen, they fuse into ONE cluster — and a group spanning places
-    /// speaks for none: `place == nil`, neutral dress, plain viewer. The
-    /// zoom scale is the realistic world-on-one-screen figure, not a
-    /// contrived one.
-    @Test func collidingCountryMarkersMergeIntoAGenericCluster() {
-        let world = 402.0 / 268_435_456.0 // screen points per map point, world framed
-        let items = MapClusterEngine.cluster(
-            [
-                pin("post-1", lat: 48.80, lng: 2.30, places: parisLadder),
-                pin("post-2", lat: 48.90, lng: 2.40, places: parisLadder),
-                pin("post-3", lat: 40.42, lng: -3.70, places: [MapMockPlaces.spain]),
-                pin("post-4", lat: 41.39, lng: 2.17,
-                    places: [MapMockPlaces.barcelona, MapMockPlaces.spain]),
-            ],
-            zoomScale: world, cellPoints: 64, viewportDiagonalKm: 9000
-        )
-        #expect(items.count == 1, "overlapping band markers must fuse")
-        #expect(items[0].isCluster)
-        #expect(items[0].place == nil, "a France+Spain group speaks for no single place")
-        #expect(!items[0].isHierarchyMarker)
-        #expect(items[0].representative.postID == PostID("post-1"),
-                "unhydrated corpus → the union's lowest id wears the face")
-        #expect(items[0].memberIDs.first == PostID("post-1"))
-        #expect(Set(items[0].memberIDs) == Set((1...4).map { PostID("post-\($0)") }))
+    /// Screen points per map point with the whole world on one screen.
+    private let world = 402.0 / 268_435_456.0
+
+    /// France (two Paris posts) and Spain (Madrid + Barcelona): two country
+    /// markers 8.4M map points apart vertically.
+    private func franceAndSpain(
+        franceLikes: Int64 = 0, spainLikes: Int64 = 0
+    ) -> [MapPin] {
+        [
+            pin("post-1", lat: 48.80, lng: 2.30, likes: franceLikes, places: parisLadder),
+            pin("post-2", lat: 48.90, lng: 2.40, places: parisLadder),
+            pin("post-3", lat: 40.42, lng: -3.70, likes: spainLikes, places: [MapMockPlaces.spain]),
+            pin("post-4", lat: 41.39, lng: 2.17,
+                places: [MapMockPlaces.barcelona, MapMockPlaces.spain]),
+        ]
     }
 
-    /// The same collision rule holds one band down: two cities whose markers
-    /// stack fuse into one generic cluster, and at a zoom where they fit
-    /// apart each keeps its own hierarchy marker
-    /// (`theCityBandRendersOneMarkerPerCity` is that separated half).
-    @Test func collidingCityMarkersMergeIntoAGenericCluster() {
+    /// The Chebyshev gap between two items' markers, in map points.
+    private func gap(_ a: MapClusterEngine.Item, _ b: MapClusterEngine.Item) -> Double {
+        let pa = MKMapPoint(CLLocationCoordinate2D(latitude: a.latitude, longitude: a.longitude))
+        let pb = MKMapPoint(CLLocationCoordinate2D(latitude: b.latitude, longitude: b.longitude))
+        return max(abs(pa.x - pb.x), abs(pa.y - pb.y))
+    }
+
+    /// The zoom scale at which a 64-point cell spans `gap / ratio` map
+    /// points — i.e. the two markers sit `ratio` cells apart.
+    private func zoomScale(placing gap: Double, cellsApart ratio: Double) -> Double {
+        64 / (gap / ratio)
+    }
+
+    /// Zoomed out far enough that two countries' markers would stack, the
+    /// band NEVER fuses them into a marker that speaks for no place: the
+    /// most trending country stays, whole, and the other is hidden.
+    @Test func collidingCountryMarkersKeepOnlyTheMostTrending() {
+        var occlusion = MapClusterEngine.Occlusion()
+        let items = MapClusterEngine.cluster(
+            franceAndSpain(franceLikes: 40, spainLikes: 250),
+            zoomScale: world, cellPoints: 64, viewportDiagonalKm: 9000, occlusion: &occlusion
+        )
+        #expect(items.count == 1)
+        #expect(items[0].place == MapMockPlaces.spain, "Spain's face is the more liked")
+        #expect(items[0].isHierarchyMarker)
+        #expect(Set(items[0].memberIDs) == [PostID("post-3"), PostID("post-4")],
+                "a country's marker holds its own posts, never a neighbour's")
+        #expect(occlusion.hiddenKeys == [france.id])
+        #expect(occlusion.hiddenItems.map(\.place) == [france])
+
+        // The other way round, France wins.
+        let flipped = MapClusterEngine.cluster(
+            franceAndSpain(franceLikes: 250, spainLikes: 40),
+            zoomScale: world, cellPoints: 64, viewportDiagonalKm: 9000
+        )
+        #expect(flipped.map(\.place) == [france])
+    }
+
+    /// An unhydrated corpus (every count 0) still decides — by the lowest
+    /// face id — and decides the same way every time.
+    @Test func aLikeTieAtTheBandFallsToTheLowestFace() {
+        for _ in 0..<5 {
+            let items = MapClusterEngine.cluster(
+                franceAndSpain(), zoomScale: world, cellPoints: 64, viewportDiagonalKm: 9000
+            )
+            #expect(items.map(\.place) == [france], "post-1 is France's face and the lowest id")
+        }
+    }
+
+    /// Open beats locked FIRST, trending second: a locked country, however
+    /// trending, never covers one the viewer can open — and open and locked
+    /// posts of one place are two markers, never one.
+    @Test func anOpenCountryBeatsAMoreTrendingLockedOne() {
+        let pins = franceAndSpain(franceLikes: 9_000, spainLikes: 1)
+        let franceIsLocked: (MapPin) -> Bool = { $0.places.contains { $0.id == "country:france" } }
+        var occlusion = MapClusterEngine.Occlusion()
+        let items = MapClusterEngine.cluster(
+            pins, zoomScale: world, cellPoints: 64, viewportDiagonalKm: 9000,
+            isOpen: { !franceIsLocked($0) }, occlusion: &occlusion
+        )
+        #expect(items.map(\.place) == [MapMockPlaces.spain])
+        #expect(occlusion.hiddenKeys == ["country:france#locked"])
+
+        // Apart on screen, the locked country is shown too — and on its own.
+        let apart = MapClusterEngine.cluster(
+            pins, zoomScale: 1, cellPoints: 64, viewportDiagonalKm: 9000,
+            isOpen: { !franceIsLocked($0) }
+        )
+        #expect(apart.count == 2)
+        for item in apart {
+            let lockedness = Set(item.memberIDs.map { id in franceIsLocked(pins.first { $0.postID == id }!) })
+            #expect(lockedness.count == 1, "\(item.place?.name ?? "?") mixes open and locked posts")
+        }
+    }
+
+    /// One place's open and locked posts (a locked country's offshore pin
+    /// reads as open) come out as two markers of the same place.
+    @Test func aPlacesOpenAndLockedPostsAreNeverOneMarker() {
         let pins = [
             pin("post-1", lat: 48.80, lng: 2.30, places: parisLadder),
             pin("post-2", lat: 48.90, lng: 2.40, places: parisLadder),
-            pin("post-3", lat: 48.70, lng: 2.20, places: versaillesLadder),
+            pin("post-3", lat: 43.30, lng: 5.40, places: [MapMockPlaces.marseille, france]),
+            pin("post-4", lat: 43.20, lng: 5.30, places: [MapMockPlaces.marseille, france]),
+        ]
+        let items = MapClusterEngine.cluster(
+            pins, zoomScale: 1, cellPoints: 64, viewportDiagonalKm: 9000,
+            isOpen: { $0.latitude > 45 }
+        )
+        #expect(items.count == 2)
+        #expect(items.allSatisfy { $0.place == france && $0.isHierarchyMarker })
+        #expect(Set(items.map { Set($0.memberIDs) })
+                == [[PostID("post-1"), PostID("post-2")], [PostID("post-3"), PostID("post-4")]])
+    }
+
+    /// Zooming in gives the hidden marker its room back — and a pinch parked
+    /// between "overlapping" and "comfortably apart" never toggles it: a
+    /// HIDDEN marker needs `reappearMargin` cells of clearance to return, a
+    /// SHOWN one stays until it truly overlaps.
+    @Test func theZoomBringsTheHiddenCountryBackWithoutToggling() {
+        let pins = franceAndSpain(franceLikes: 40, spainLikes: 250)
+        let apart = MapClusterEngine.cluster(pins, zoomScale: 1, cellPoints: 64, viewportDiagonalKm: 9000)
+        #expect(apart.count == 2)
+        let distance = gap(apart[0], apart[1])
+        func layout(_ cellsApart: Double, _ occlusion: inout MapClusterEngine.Occlusion) -> [String?] {
+            MapClusterEngine.cluster(
+                pins, zoomScale: zoomScale(placing: distance, cellsApart: cellsApart), cellPoints: 64,
+                viewportDiagonalKm: 9000, occlusion: &occlusion
+            ).map { $0.place?.id }.sorted { ($0 ?? "") < ($1 ?? "") }
+        }
+        let both: [String?] = [france.id, "country:spain"]
+        var occlusion = MapClusterEngine.Occlusion()
+
+        #expect(layout(0.8, &occlusion) == ["country:spain"], "overlapping: the trending one only")
+        // Between one cell and the margin: still hidden — it was hidden.
+        #expect(layout(1.1, &occlusion) == ["country:spain"])
+        #expect(layout(1.2, &occlusion) == ["country:spain"])
+        // Past the margin: back.
+        #expect(layout(1.3, &occlusion) == both)
+        // Zooming back out to the same in-between spans: still shown — it
+        // was shown, and it does not overlap.
+        #expect(layout(1.2, &occlusion) == both)
+        #expect(layout(1.1, &occlusion) == both)
+        #expect(layout(1.02, &occlusion) == both)
+        // Only a real overlap hides it again.
+        #expect(layout(0.95, &occlusion) == ["country:spain"])
+
+        // Stateless, the in-between span shows both: the hysteresis is the
+        // memory, not a wider cell.
+        var fresh = MapClusterEngine.Occlusion()
+        #expect(layout(1.1, &fresh) == both)
+    }
+
+    /// The margin must clear one snap step: a pinch parked on a snap boundary
+    /// flips the cell by exactly 2^0.25, and a pair hidden at the wider cell
+    /// must not come back at the narrower one.
+    @Test func theReappearMarginClearsOneSnapStep() {
+        #expect(MapClusterEngine.reappearMargin > exp2(0.25))
+        let pins = franceAndSpain(franceLikes: 40, spainLikes: 250)
+        let apart = MapClusterEngine.cluster(pins, zoomScale: 1, cellPoints: 64, viewportDiagonalKm: 9000)
+        let distance = gap(apart[0], apart[1])
+        // Two adjacent snapped scales whose cells bracket the gap: the
+        // markers overlap at the wide cell and clear the narrow one.
+        let wide = MapClusterEngine.snapZoom(64 / distance)
+        let narrow = wide * exp2(0.25)
+        #expect(64 / wide > distance && 64 / narrow <= distance)
+        var occlusion = MapClusterEngine.Occlusion()
+        for _ in 0..<4 {
+            for scale in [wide, narrow] {
+                let items = MapClusterEngine.cluster(
+                    pins, zoomScale: scale, cellPoints: 64, viewportDiagonalKm: 9000, occlusion: &occlusion
+                )
+                #expect(items.map(\.place?.id) == ["country:spain"], "toggled at \(scale)")
+            }
+        }
+    }
+
+    /// The same rule one band down: two cities whose markers stack keep only
+    /// the more trending one, and at a zoom where they fit apart each keeps
+    /// its own marker (`theCityBandRendersOneMarkerPerCity` is that
+    /// separated half).
+    @Test func collidingCityMarkersKeepOnlyTheMostTrending() {
+        let pins = [
+            pin("post-1", lat: 48.80, lng: 2.30, places: parisLadder),
+            pin("post-2", lat: 48.90, lng: 2.40, places: parisLadder),
+            pin("post-3", lat: 48.70, lng: 2.20, likes: 80, places: versaillesLadder),
             pin("post-4", lat: 48.72, lng: 2.50, places: versaillesLadder),
         ]
         let separated = MapClusterEngine.cluster(
@@ -429,14 +577,56 @@ struct MapSemanticClusterTests {
 
         // The two city centroids sit 0.14° of latitude apart ≈ 158k map
         // points (Mercator at 48.8°); cell = 64 / 0.00035 ≈ 183k → the
-        // markers overlap and must fold into one.
+        // markers overlap and the more trending city stays alone.
+        var occlusion = MapClusterEngine.Occlusion()
         let colliding = MapClusterEngine.cluster(
-            pins, zoomScale: 0.00035, cellPoints: 64, viewportDiagonalKm: cityDiagonal
+            pins, zoomScale: 0.00035, cellPoints: 64, viewportDiagonalKm: cityDiagonal,
+            occlusion: &occlusion
         )
         #expect(colliding.count == 1)
-        #expect(colliding[0].place == nil)
-        #expect(!colliding[0].isHierarchyMarker)
-        #expect(Set(colliding[0].memberIDs).count == 4)
+        #expect(colliding[0].place == versailles)
+        #expect(colliding[0].isHierarchyMarker)
+        #expect(Set(colliding[0].memberIDs) == [PostID("post-3"), PostID("post-4")])
+        #expect(occlusion.hiddenKeys == [paris.id])
+    }
+
+    /// Across the whole zoom range, a band never produces a marker that
+    /// speaks for no place, and what it shows never overlaps.
+    @Test func aBandNeverYieldsAPlacelessGroup() {
+        let pins = franceAndSpain(franceLikes: 5, spainLikes: 7) + [
+            pin("post-5", lat: 52.52, lng: 13.40, likes: 3,
+                places: [MapMockPlaces.berlin, MapMockPlaces.germany]),
+            pin("post-6", lat: 52.50, lng: 13.38, places: [MapMockPlaces.berlin, MapMockPlaces.germany]),
+            pin("post-7", lat: 41.90, lng: 12.50, likes: 11,
+                places: [MapMockPlaces.rome, MapMockPlaces.italy]),
+            pin("post-8", lat: 51.50, lng: -0.12,
+                places: [MapMockPlaces.london, MapMockPlaces.unitedKingdom]),
+            pin("post-9", lat: 51.52, lng: -0.10,
+                places: [MapMockPlaces.london, MapMockPlaces.unitedKingdom]),
+        ]
+        for diagonal in [cityDiagonal, franceFramedDiagonal, countryDiagonal, 9000] {
+            var occlusion = MapClusterEngine.Occlusion()
+            for step in 0..<40 {
+                let scale = world * exp2(Double(step) / 4)
+                let items = MapClusterEngine.cluster(
+                    pins, zoomScale: scale, cellPoints: 64, viewportDiagonalKm: diagonal,
+                    occlusion: &occlusion
+                )
+                for item in items {
+                    #expect(item.place != nil, "a placeless marker at \(diagonal) km, scale \(scale)")
+                    #expect(!item.isCluster || item.isHierarchyMarker)
+                }
+                for (i, a) in items.enumerated() {
+                    for b in items.dropFirst(i + 1) {
+                        #expect(gap(a, b) >= 64 / scale, "overlap at \(diagonal) km, scale \(scale)")
+                    }
+                }
+                // Nothing is lost from the books: shown + hidden = every post
+                // with a rung at the band.
+                let accounted = (items + occlusion.hiddenItems).flatMap(\.memberIDs)
+                #expect(Set(accounted).count == accounted.count, "a post is in two markers")
+            }
+        }
     }
 
     // MARK: - The annotation mirror

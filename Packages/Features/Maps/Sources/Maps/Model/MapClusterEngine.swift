@@ -75,6 +75,27 @@ enum MapClusterEngine {
         var key: PostID { representative.postID }
     }
 
+    /// What the band's occlusion pass carries from one layout to the next —
+    /// the caller keeps it (`MapsViewController`) and hands it back on every
+    /// reconcile. See `occlude`.
+    struct Occlusion: Equatable {
+        /// The band markers the last layout HID, by `BandEntry.key` — the
+        /// hysteresis input: a marker hidden last time needs `reappearMargin`
+        /// times the room to come back.
+        var hiddenKeys: Set<String> = []
+        /// The band markers the last layout hid, whole. Not drawn, but their
+        /// posts are still on the map's books: a hidden country is not an
+        /// EMPTY country, so it must not wear an empty country's flag disc.
+        var hiddenItems: [Item] = []
+    }
+
+    /// How much more room than a cell a HIDDEN band marker needs before it
+    /// comes back. Strictly above the snap step (`snapZoom`, 2^0.25 ≈ 1.19):
+    /// a pinch hovering on one step boundary flips the cell by exactly that
+    /// ratio, so any smaller margin would let a pair sitting between the two
+    /// cells hide and show on every crossing.
+    static let reappearMargin = 1.25
+
     /// Groups `pins` so that no two resulting markers overlap on screen — the
     /// contract MapKit's rectangle collision promises but cannot sustain.
     ///
@@ -119,7 +140,33 @@ enum MapClusterEngine {
 
     static func cluster(
         _ pins: [MapPin], zoomScale: Double, cellPoints: Double,
-        zoomLevel: Int32? = nil, viewportDiagonalKm: Double? = nil
+        zoomLevel: Int32? = nil, viewportDiagonalKm: Double? = nil,
+        isOpen: (MapPin) -> Bool = { _ in true }
+    ) -> [Item] {
+        var occlusion = Occlusion()
+        return cluster(
+            pins, zoomScale: zoomScale, cellPoints: cellPoints,
+            zoomLevel: zoomLevel, viewportDiagonalKm: viewportDiagonalKm,
+            isOpen: isOpen, occlusion: &occlusion
+        )
+    }
+
+    /// `cluster`, carrying the band's occlusion state across layouts — the
+    /// map's entry point. Stateless callers (tests, one-shot layouts) take
+    /// the overload above, which starts from nothing hidden.
+    ///
+    /// - Parameters:
+    ///   - isOpen: whether a pin's post may be opened by the viewer (its
+    ///     country is unlocked). Open and locked posts are NEVER grouped
+    ///     together — a marker is one tap: it opens everything it holds, or it
+    ///     offers a country — and at a band an open marker always wins a
+    ///     collision against a locked one.
+    ///   - occlusion: what the last layout hid; updated to what this one hides.
+    static func cluster(
+        _ pins: [MapPin], zoomScale: Double, cellPoints: Double,
+        zoomLevel: Int32? = nil, viewportDiagonalKm: Double? = nil,
+        isOpen: (MapPin) -> Bool = { _ in true },
+        occlusion: inout Occlusion
     ) -> [Item] {
         // SEMANTIC PRE-PASS (STRICT nested banding): the zoom selects ONE
         // active hierarchy depth (`MapHierarchyBanding.activeKind` —
@@ -149,7 +196,10 @@ enum MapClusterEngine {
         // Paris). A group of ONE renders as a lone pin — its level's only
         // content is still that level's content — but as a standalone item,
         // never through the proximity pool.
-        var maskedByPlace: [String: (place: MapPlace, members: [MapPin])] = [:]
+        // Keyed by place AND openness: a place's open and locked posts (a
+        // locked country's offshore pin reads as open) are two markers, never
+        // one — see `isOpen`.
+        var maskedByPlace: [String: (place: MapPlace, isOpen: Bool, members: [MapPin])] = [:]
         var unmasked: [MapPin] = []
         // Each level's characteristic H3 span, over the whole corpus (the
         // minimum where places of one kind differ) — the dynamic banding's
@@ -192,7 +242,9 @@ enum MapClusterEngine {
         if let activeKind, corpusIsHierarchical {
             for pin in pins {
                 if let place = pin.places.first(where: { $0.kind == activeKind }) {
-                    maskedByPlace[place.id, default: (place, [])].members.append(pin)
+                    let open = isOpen(pin)
+                    let key = open ? place.id : place.id + "#locked"
+                    maskedByPlace[key, default: (place, open, [])].members.append(pin)
                 }
                 // else: no rung at the active depth — hidden, whatever else
                 // the pin's ladder says (or doesn't).
@@ -200,13 +252,13 @@ enum MapClusterEngine {
         } else {
             unmasked = pins
         }
-        let semantic: [Item] = maskedByPlace
+        let semantic: [BandEntry] = maskedByPlace
             .filter { $0.value.members.count > 1 }
             .sorted { $0.key < $1.key } // deterministic output order
-            .map { _, group in
+            .map { key, group in
                 let ordered = group.members.sorted { $0.postID.rawValue < $1.postID.rawValue }
                 let face = representative(of: ordered)
-                return Item(
+                return BandEntry(key: key, isOpen: group.isOpen, item: Item(
                     representative: face,
                     memberIDs: [face.postID] + ordered.lazy
                         .map(\.postID)
@@ -220,27 +272,33 @@ enum MapClusterEngine {
                     // place is a city inside it.
                     place: group.place,
                     isHierarchyMarker: true
-                )
+                ))
             }
         // Groups of one render as standalone pins — OUTSIDE the proximity
         // pool, so a level's lone post can't be merged into an unladdered
         // neighbour's generic cluster and escape its band. (They still
-        // collide with the band's OWN markers below — same band, no escape.)
-        // ⚠️ SORTED, like `semantic` above and for its stated reason. This fed
-        // the order-dependent merge below straight from a dictionary's values,
-        // so a corpus that only gained or lost one pin re-partitioned the rest
-        // — markers moving on a map nothing had panned. It was the one input
-        // this function left to chance.
-        let lone = maskedByPlace.values.filter { $0.members.count == 1 }
-            .flatMap(\.members)
-            .sorted { $0.postID.rawValue < $1.postID.rawValue }
-            .map(Self.single)
+        // contend with the band's OWN markers below — same band, no escape.)
+        // ⚠️ SORTED, like `semantic` above and for its stated reason: the
+        // occlusion pass's tie-break and output order must be a function of
+        // the input alone, not of a dictionary's iteration order.
+        let lone: [BandEntry] = maskedByPlace.filter { $0.value.members.count == 1 }
+            .sorted { $0.value.members[0].postID.rawValue < $1.value.members[0].postID.rawValue }
+            .map { key, group in BandEntry(key: key, isOpen: group.isOpen, item: single(group.members[0])) }
 
         guard zoomScale > 0, cellPoints > 0 else {
-            return semantic + lone + unmasked.map(Self.single)
+            occlusion = Occlusion()
+            return (semantic + lone).map(\.item) + unmasked.map(Self.single)
         }
-        let result = collide(semantic + lone, zoomScale: zoomScale, cellPoints: cellPoints)
-            + proximityCluster(unmasked, zoomScale: zoomScale, cellPoints: cellPoints)
+        let band = occlude(
+            semantic + lone, zoomScale: zoomScale, cellPoints: cellPoints, occlusion: &occlusion
+        )
+        // The proximity pool (the local band, or a corpus with no ladder at
+        // all) keeps its own rules: open and locked posts are still grouped
+        // APART, and where their markers collide MapKit keeps the open one
+        // (`MapMarkerDress.lockedPriority`).
+        let result = band
+            + proximityCluster(unmasked.filter(isOpen), zoomScale: zoomScale, cellPoints: cellPoints)
+            + proximityCluster(unmasked.filter { !isOpen($0) }, zoomScale: zoomScale, cellPoints: cellPoints)
         #if DEBUG
         // `-maps-banding-log` second line: the engine's OUTPUT — what merged
         // into what. The banding decision alone can't explain a marker the
@@ -253,130 +311,86 @@ enum MapClusterEngine {
                         + String(format: "@(%.2f,%.2f)", item.latitude, item.longitude)
                 }
                 .sorted().joined(separator: " ")
+            let hidden = occlusion.hiddenKeys.sorted().joined(separator: " ")
             print("[banding] out: bandItems=\(semantic.count)+\(lone.count)lone"
-                + " cell=\(String(format: "%.0f", cellPoints / zoomScale))mp → \(described)")
+                + " cell=\(String(format: "%.0f", cellPoints / zoomScale))mp → \(described)"
+                + " hidden=[\(hidden)]")
         }
         #endif
         return result
     }
 
+    /// One band marker contending for its spot on screen: the item, the key
+    /// that identifies it across layouts (its place, and whether it is the
+    /// place's open or locked side), and whether the viewer may open it.
+    private struct BandEntry {
+        let key: String
+        let isOpen: Bool
+        let item: Item
+    }
+
     /// The band's own collision pass. The semantic pre-pass guarantees one
     /// marker per PLACE, but says nothing about where those markers land on
     /// screen: zoom out far enough and France's, Spain's and Germany's
-    /// markers stack on the same few points — breaking, from the inside, the
-    /// no-overlap contract this engine exists to sustain. So the active
-    /// band's items (groups AND lone pins — the two pools are mutually
-    /// exclusive with the proximity pool, so no band escape) run the same
-    /// grid + agglomerative merge the proximity pass runs, over ITEMS
-    /// instead of pins.
+    /// markers would stack on the same few points.
     ///
-    /// A merged group spanning places keeps NO place identity — `place`
-    /// falls to `nil`, the marker dresses neutral and its tap opens the
-    /// plain viewer: a gallery titled "France" must never open Spain's
-    /// posts. The face rule stays EXACT, not approximate: each item's face
-    /// is already its own group's most-liked/lowest-id member, so the winner
-    /// among the faces is the winner over the whole union.
-    private static func collide(
-        _ items: [Item], zoomScale: Double, cellPoints: Double
+    /// ⚠️ PLACES ARE NEVER MERGED. This pass used to fold colliding band
+    /// markers into one group that spoke for no place (`place == nil`): a
+    /// neutral marker in the middle of the country band, the one thing the
+    /// band exists to rule out (Arnaud, 2026-10-01: "at the country level I
+    /// should only see countries, at the city level only cities"). Instead a
+    /// band marker that would overlap a STRONGER one is HIDDEN until the zoom
+    /// gives it room — the way Apple's map labels give way.
+    ///
+    /// Strength, in order: an OPEN marker beats a locked one (what the viewer
+    /// can open is never covered by what they cannot); then the most
+    /// TRENDING — its face's like count, the face being the place's most liked
+    /// post; then the lowest face id, then the key, so the answer is a function
+    /// of the input alone. Greedy, strongest first: a marker hidden by a
+    /// stronger one hides nothing itself.
+    ///
+    /// Hysteresis: a marker the LAST layout hid needs `reappearMargin` times a
+    /// cell of clearance to come back, while a shown one stays until it truly
+    /// overlaps. Positions are map points (zoom-independent) and the cell is
+    /// snapped, so a pan never changes the answer; a pinch parked on a snap
+    /// boundary cannot toggle a pair either (see `reappearMargin`).
+    ///
+    /// Shown markers still keep the no-overlap contract — every pair is at
+    /// least a cell apart — so MapKit's own collision (open `.required`,
+    /// locked `MapMarkerDress.lockedPriority`) never has a band overlap left
+    /// to arbitrate, and cannot hide something this pass chose to show.
+    private static func occlude(
+        _ entries: [BandEntry], zoomScale: Double, cellPoints: Double, occlusion: inout Occlusion
     ) -> [Item] {
-        guard items.count > 1 else { return items }
         let cell = cellPoints / zoomScale
-
-        // Markers being folded together; the centroid is weighted by member
-        // count so the merged marker sits where its POSTS are, not at the
-        // midpoint of two marker positions.
-        struct Node {
-            var items: [Item]
-            var sumX: Double
-            var sumY: Double
-            var weight: Double
-            var x: Double { sumX / weight }
-            var y: Double { sumY / weight }
+        let ranked = entries.sorted { a, b in
+            if a.isOpen != b.isOpen { return a.isOpen }
+            let likesA = a.item.representative.likeCount, likesB = b.item.representative.likeCount
+            if likesA != likesB { return likesA > likesB }
+            let faceA = a.item.representative.postID.rawValue, faceB = b.item.representative.postID.rawValue
+            if faceA != faceB { return faceA < faceB }
+            return a.key < b.key
         }
-
-        struct GridKey: Hashable { let gx: Int; let gy: Int }
-        var buckets: [GridKey: Node] = [:]
-        for item in items {
+        var shown: [MKMapPoint] = []
+        var hiddenKeys = Set<String>()
+        for entry in ranked {
             let point = MKMapPoint(
-                CLLocationCoordinate2D(latitude: item.latitude, longitude: item.longitude)
+                CLLocationCoordinate2D(latitude: entry.item.latitude, longitude: entry.item.longitude)
             )
-            let weight = Double(item.memberIDs.count)
-            let key = GridKey(
-                gx: Int((point.x / cell).rounded(.down)),
-                gy: Int((point.y / cell).rounded(.down))
-            )
-            if buckets[key] != nil {
-                buckets[key]!.items.append(item)
-                buckets[key]!.sumX += point.x * weight
-                buckets[key]!.sumY += point.y * weight
-                buckets[key]!.weight += weight
+            // Chebyshev, as everywhere in this engine: the markers are squares.
+            let clearance = occlusion.hiddenKeys.contains(entry.key) ? cell * reappearMargin : cell
+            if shown.contains(where: { max(abs($0.x - point.x), abs($0.y - point.y)) < clearance }) {
+                hiddenKeys.insert(entry.key)
             } else {
-                buckets[key] = Node(
-                    items: [item], sumX: point.x * weight, sumY: point.y * weight, weight: weight
-                )
+                shown.append(point)
             }
         }
-
-        // Same Chebyshev fixed-point merge as the proximity pass — the
-        // markers are squares, so the collision test is the larger axis-gap.
-        // ⚠️ ORDER IS LOAD-BEARING HERE, not incidental. This is a
-        // centroid-updating single-linkage fixed point: `nodes[i]` absorbs
-        // `nodes[j]` and the centroid MOVES, so whether a third node still
-        // falls within a cell depends on which pair merged first. Taken from a
-        // dictionary's values it changed whenever the dictionary was mutated,
-        // which is every query — so returning to the map re-partitioned pins
-        // that had not moved. Keyed traversal makes the answer a function of
-        // the input alone.
-        var nodes = buckets.keys.sorted { ($0.gx, $0.gy) < ($1.gx, $1.gy) }
-            .map { buckets[$0]! }
-        var didMerge = true
-        while didMerge {
-            didMerge = false
-            outer: for i in 0..<nodes.count {
-                for j in (i + 1)..<nodes.count {
-                    let dx = abs(nodes[i].x - nodes[j].x)
-                    let dy = abs(nodes[i].y - nodes[j].y)
-                    if max(dx, dy) < cell {
-                        nodes[i].items.append(contentsOf: nodes[j].items)
-                        nodes[i].sumX += nodes[j].sumX
-                        nodes[i].sumY += nodes[j].sumY
-                        nodes[i].weight += nodes[j].weight
-                        nodes.remove(at: j)
-                        didMerge = true
-                        break outer
-                    }
-                }
-            }
-        }
-
-        return nodes.map { node in
-            if node.items.count == 1 { return node.items[0] }
-            // Faces ascending by id, which is what makes `representative`'s
-            // "first max wins" the lowest-id tie-break over the union too.
-            let faces = node.items.map(\.representative)
-                .sorted { $0.postID.rawValue < $1.postID.rawValue }
-            let face = representative(of: faces)
-            let center = MKMapPoint(x: node.x, y: node.y).coordinate
-            // Place survives only when EVERY folded marker already spoke for
-            // the same place — which one band cannot produce (one marker per
-            // place), so in practice a merge is generic. Kept as a rule
-            // rather than an assumption, so a future caller can't silently
-            // break "the gallery's title claims every member".
-            let place = node.items.dropFirst().reduce(node.items[0].place) { common, item in
-                common?.id == item.place?.id ? common : nil
-            }
-            return Item(
-                representative: face,
-                memberIDs: [face.postID] + node.items.lazy
-                    .flatMap(\.memberIDs)
-                    .filter { $0 != face.postID }
-                    .sorted { $0.rawValue < $1.rawValue },
-                latitude: center.latitude,
-                longitude: center.longitude,
-                place: place,
-                isHierarchyMarker: place != nil && node.items.allSatisfy(\.isHierarchyMarker)
-            )
-        }
+        occlusion = Occlusion(
+            hiddenKeys: hiddenKeys,
+            hiddenItems: entries.filter { hiddenKeys.contains($0.key) }.map(\.item)
+        )
+        // The input's own (deterministic) order, not the ranking's.
+        return entries.filter { !hiddenKeys.contains($0.key) }.map(\.item)
     }
 
     /// The screen-space passes (grid + agglomerative merge), unchanged from
