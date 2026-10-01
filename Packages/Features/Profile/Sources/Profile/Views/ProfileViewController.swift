@@ -894,6 +894,29 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
                 debugSweepStep(began: CACurrentMediaTime(), probe: HeroScrollFrameProbe(name: "profile", root: headerView))
             }
         }
+        // `-profile-stretch-sweep`: once the profile and its picture are in,
+        // pulls the page down past its top — the banner stretching — to
+        // `HeroStretchSweep.depth`, holds, lets go through the refresh a
+        // finger's release would start, and settles at rest while it lands
+        // (`HERO-SCROLL profile-stretch/<phase> …` on standard error, see
+        // `HeroScrollFrameProbe`).
+        if arguments.contains("-profile-stretch-sweep") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                QAWait.until("-profile-stretch-sweep", { [weak self] in
+                    guard let self else { return false }
+                    return viewModel.profile != nil && headerView.debugBannerHasPicture
+                }) { [weak self] in
+                    // The bake lands a beat after the picture.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                        guard let self else { return }
+                        debugStretchStep(
+                            began: CACurrentMediaTime(),
+                            probe: HeroScrollFrameProbe(name: "profile-stretch", root: headerView), phase: nil
+                        )
+                    }
+                }
+            }
+        }
         // `-profile-bar-tree`: the navigation bar's real subview tree. The own
         // profile reports a bar that is in a window, not hidden, at alpha 1, with
         // items in its arrays — and renders none of them. Only the tree can say
@@ -1151,6 +1174,23 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 60) { [weak self] in
             self?.debugSweepStep(began: began, probe: probe)
+        }
+    }
+
+    /// One frame of `-profile-stretch-sweep` (`HeroStretchSweep`). The
+    /// release goes through the pager's own release callback, past the
+    /// refresh threshold — the indicator spins and the profile reloads.
+    private func debugStretchStep(
+        began: CFTimeInterval, probe: HeroScrollFrameProbe, phase: HeroStretchSweep.Phase?
+    ) {
+        guard let (now, offset) = HeroStretchSweep.at(CACurrentMediaTime() - began) else { return probe.finish() }
+        if now != phase {
+            probe.beginPhase(now.rawValue)
+            if now == .release { galleryPager.onPullReleased?(HeroStretchSweep.depth) }
+        }
+        probe.frame { _ = galleryPager.debugSetVerticalOffset(offset) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 60) { [weak self] in
+            self?.debugStretchStep(began: began, probe: probe, phase: now)
         }
     }
 

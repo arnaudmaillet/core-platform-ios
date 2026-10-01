@@ -488,6 +488,29 @@ final class PlaceProfileViewController: UIViewController {
                 }
             }
         }
+        // `-place-stretch-sweep`: the profile's `-profile-stretch-sweep` —
+        // the page pulled past its top, the banner stretching, held, let go
+        // and settled (`HERO-SCROLL place-stretch/<phase> …`). No refresh:
+        // the place's pages refresh through their own control, which a
+        // scripted offset does not trip.
+        if arguments.contains("-place-stretch-sweep") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                QAWait.until("-place-stretch-sweep", { [weak self] in
+                    guard let self, self.hostedPages.indices.contains(self.activeIndex),
+                          let grid = self.hostedPages[self.activeIndex] as? ForYouGridPage
+                    else { return false }
+                    return !grid.posts.isEmpty && self.bannerView.image != nil
+                }) { [weak self] in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                        guard let self else { return }
+                        debugStretchStep(
+                            began: CACurrentMediaTime(),
+                            probe: HeroScrollFrameProbe(name: "place-stretch", root: headerHost), phase: nil
+                        )
+                    }
+                }
+            }
+        }
         // `-maps-place-open-tile <index>`: opens a post from whichever tab is
         // up, which is the gesture that decides where a dismissal has to come
         // BACK to. Runs after the tab drive so a run can ask for "open the
@@ -592,6 +615,18 @@ final class PlaceProfileViewController: UIViewController {
         probe.frame { debugScrollActivePage(to: CGFloat(240 * leg * leg * (3 - 2 * leg))) }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 60) { [weak self] in
             self?.debugSweepStep(began: began, probe: probe)
+        }
+    }
+
+    /// One frame of `-place-stretch-sweep` (`HeroStretchSweep`).
+    private func debugStretchStep(
+        began: CFTimeInterval, probe: HeroScrollFrameProbe, phase: HeroStretchSweep.Phase?
+    ) {
+        guard let (now, offset) = HeroStretchSweep.at(CACurrentMediaTime() - began) else { return probe.finish() }
+        if now != phase { probe.beginPhase(now.rawValue) }
+        probe.frame { debugScrollActivePage(to: offset) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 60) { [weak self] in
+            self?.debugStretchStep(began: began, probe: probe, phase: now)
         }
     }
 
@@ -1138,6 +1173,10 @@ final class PlaceProfileViewController: UIViewController {
     private var rankTone = HeroInk.defaultTone
     private var likesTone = HeroInk.defaultTone
     private var heroInkReadFor: [CGRect] = []
+    #if DEBUG
+    /// How many times the ground under the type was read.
+    private(set) var debugInkReadCount = 0
+    #endif
 
     /// The name's and the counters' ink and edge: the picture's ink (white on
     /// a dark picture, black on a light one) with a soft shadow of the
@@ -1154,11 +1193,22 @@ final class PlaceProfileViewController: UIViewController {
     /// picks each one's ink. Runs when the picture is re-baked and when the
     /// type moves; a change of ink on screen cross-dissolves.
     private func updateHeroInk(force: Bool = false) {
-        let blocks = [heroNameLabel, rankMetric, likesMetric].map { $0.convert($0.bounds, to: bannerBox) }
+        HeroBannerCost.measure(.ink) { readHeroInk(force: force) }
+    }
+
+    private func readHeroInk(force: Bool) {
+        // In the box's space AT REST, what the ground is read in: the type
+        // rides the box's foot, and in the box's own space a pull-down (the
+        // box stretching up) moved it down its ground and read the ground
+        // again every two points of the pull.
+        let blocks = [heroNameLabel, rankMetric, likesMetric].map(restingFrame(of:))
         let moved = blocks.count != heroInkReadFor.count
             || zip(blocks, heroInkReadFor).contains { abs($0.minY - $1.minY) > 2 || abs($0.height - $1.height) > 2 }
         guard force || moved, let nameGround = bannerView.groundPixels(behind: blocks[0]) else { return }
         heroInkReadFor = blocks
+        #if DEBUG
+        debugInkReadCount += 1
+        #endif
         let name = HeroInk.tone(forGround: nameGround, current: nameTone)
         var rank = rankTone
         if !rankMetric.isHidden, let ground = bannerView.groundPixels(behind: blocks[1]) {
@@ -1199,8 +1249,10 @@ final class PlaceProfileViewController: UIViewController {
     private func placeHeroFade() {
         guard let metricsBand else { return }
         bannerBox.layoutIfNeeded()
-        let name = heroNameLabel.frame
-        let foot = bannerBox.bounds.height
+        // In the box's space AT REST: a pull-down stretches the box above,
+        // and must not move the fade — see `HeroBannerPictureView`.
+        let name = restingFrame(of: heroNameLabel)
+        let foot = bannerBox.bounds.height - restingDrop
         guard name.height > 0, metricsBand.frame.height > 0, foot > name.minY else { return }
         // Shouldered, as a profile's poster: the name stands on the picture
         // where the blur is still nil, so the page's tone is already half
@@ -1209,6 +1261,25 @@ final class PlaceProfileViewController: UIViewController {
         bannerView.fade = fade
         bannerRamp.fade = fade
         updateHeroInk()
+    }
+
+    /// How far a pull-down has stretched the box above its resting top:
+    /// what it is taller than its resting height (`bannerHeight`, its foot
+    /// below the host's top, which is where its top rests).
+    ///
+    /// ⚠️ READ OFF THE BOX'S OWN BOUNDS, not its frame in the host: this
+    /// runs in the controller's layout pass, before the host has placed the
+    /// box, and the host-relative frame lagged the box's insides by a
+    /// frame's travel — on a quick release the fade wandered 8pt and the
+    /// blur was recomposed on every frame of it. The box's bounds and the
+    /// type inside it are laid out together (`bannerBox.layoutIfNeeded()`).
+    private var restingDrop: CGFloat {
+        max(0, bannerBox.bounds.height - (bannerHeightConstraint?.constant ?? bannerBox.bounds.height))
+    }
+
+    /// `view`'s frame in the box's resting space — the stretch taken off.
+    private func restingFrame(of view: UIView) -> CGRect {
+        view.convert(view.bounds, to: bannerBox).offsetBy(dx: 0, dy: -restingDrop)
     }
 
     /// Slides the image within its viewport so it lags the scroll.
@@ -1227,6 +1298,13 @@ final class PlaceProfileViewController: UIViewController {
         bannerView.pictureOutset = UIEdgeInsets(top: overshoot, left: 0, bottom: overshoot, right: 0)
         let clamped = min(max(travelled, 0), headerTravel)
         bannerView.pictureShift = clamped * Self.bannerParallaxFraction
+        // A pull-down carries the host down by the overscroll while the
+        // box's top holds at the view's: the box is stretched by exactly
+        // that, and the picture and its ramp only zoom (set before the
+        // layout pass the offset causes).
+        let stretch = max(0, -travelled)
+        bannerView.stretch = stretch
+        bannerRamp.stretch = stretch
     }
 
     /// What actually COVERS the hosted list right now, top and bottom.
@@ -2294,13 +2372,17 @@ extension PlaceProfileViewController {
     }
     /// The banner's fade, in the view's space.
     var debugBannerFade: HeroBannerFade.Geometry? {
-        bannerView.fade?.offset(by: debugBannerBoxFrame.minY)
+        bannerView.fade?.offset(by: headerHost.frame.minY)
     }
     /// The blur levels showing, in the view's space.
     var debugBannerBlurLevels: [(start: CGFloat, full: CGFloat)] {
-        let top = debugBannerBoxFrame.minY
+        let top = headerHost.frame.minY
         return bannerView.debugVisibleLevels.map { ($0.start + top, $0.full + top) }
     }
+    var debugBlurComposeCount: Int { bannerView.debugComposeCount }
+    var debugBlurBakeCount: Int { bannerView.debugBakeCount }
+    /// Where the sharp picture covers, in the view's space.
+    var debugBannerPictureCover: CGRect { bannerView.convert(bannerView.debugPictureCover, to: view) }
     var debugRampLocations: [CGFloat] { bannerRamp.debugLocations }
     var debugRampAlphas: [CGFloat] { bannerRamp.debugAlphas }
     var debugBlurBakeMilliseconds: Double { bannerView.debugLastBakeMilliseconds }
