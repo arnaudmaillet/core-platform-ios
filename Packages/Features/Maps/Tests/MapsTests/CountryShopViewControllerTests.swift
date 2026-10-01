@@ -163,16 +163,58 @@ struct CountryShopViewControllerTests {
         #expect(sheet.prefersGrabberVisible)
     }
 
-    /// The list is the whole sheet, and no effect is drawn under the bar.
-    @Test func theListIsFullBleedUnderBareChrome() {
+    /// The list is the whole sheet, and the rows passing under the bar soften
+    /// into the system's SOFT top edge effect — the progressive blur, not the
+    /// automatic frost a titled bar would pick.
+    @Test func theListIsFullBleedUnderTheSoftEdge() {
         let shop = makeShop()
         shop.view.frame = CGRect(x: 0, y: 0, width: 402, height: 800)
         shop.view.layoutIfNeeded()
         #expect(shop.collectionView.superview === shop.view)
         #expect(shop.collectionView.frame == shop.view.bounds)
-        #expect(shop.collectionView.topEdgeEffect.isHidden)
+        #expect(!shop.collectionView.topEdgeEffect.isHidden)
+        #expect(shop.collectionView.topEdgeEffect.style == .soft)
+        #expect(shop.contentScrollView(for: .top) === shop.collectionView)
         #expect(shop.navigationItem.searchController != nil)
         #expect(shop.navigationItem.preferredSearchBarPlacement == .stacked)
+    }
+
+    /// A PLAIN list: every row spans the sheet's full width (no inset-grouped
+    /// card around a section), its content on the standard margins, and the
+    /// headers scroll with their rows.
+    @Test func rowsSpanTheFullWidthOfAPlainList() throws {
+        #expect(CountryShopViewController.listAppearance == .plain)
+        let shop = makeShop()
+        shop.view.frame = CGRect(x: 0, y: 0, width: 402, height: 800)
+        shop.view.layoutIfNeeded()
+        let list = shop.collectionView
+        for code in ["FR", "US", "CN"] {
+            let path = try #require(shop.dataSource.indexPath(for: .country(code)))
+            let row = try #require(list.cellForItem(at: path) as? CountryShopRowCell)
+            #expect(row.frame.minX == 0, "\(code) starts inside a card")
+            #expect(row.frame.width == 402, "\(code) is narrower than the sheet")
+            // The text sits on the cell's own layout margins — the classic
+            // list inset, not flush with the edge.
+            let name = row.nameLabel.convert(row.nameLabel.bounds, to: list)
+            #expect(name.minX >= row.contentView.directionalLayoutMargins.leading)
+            #expect(name.minX > 16, "the name is not inset past the flag")
+            // No resting ground: the sheet's glass runs behind the row.
+            #expect(row.backgroundConfiguration?.backgroundColor == .clear)
+        }
+        let header = try #require(list.collectionViewLayout
+            .layoutAttributesForSupplementaryView(
+                ofKind: UICollectionView.elementKindSectionHeader, at: IndexPath(item: 0, section: 1)
+            ))
+        #expect(header.frame.minX == 0 && header.frame.width == 402)
+
+        // Scrolled well past the Unlocked section, its header has gone with
+        // its rows rather than pinning under the bar.
+        list.contentOffset.y = 400
+        list.layoutIfNeeded()
+        let scrolled = list.collectionViewLayout.layoutAttributesForSupplementaryView(
+            ofKind: UICollectionView.elementKindSectionHeader, at: IndexPath(item: 0, section: 1)
+        )
+        #expect((scrolled?.frame.minY ?? 0) < 400, "the Unlocked header pinned to the top")
     }
 
     /// A row's heart is an image view in its own red: the medium sheet is
