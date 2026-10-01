@@ -47,9 +47,10 @@ enum MapClusterEngine {
         let latitude: Double
         let longitude: Double
         /// The one place EVERY member belongs to, or `nil` for a mixed or
-        /// untagged group. Set on singles too (it is the pin's own tag), but
-        /// behaviour keys on `isSemanticCluster`: a lone pin is Case A
-        /// whatever it is tagged with.
+        /// untagged group. Set on singles too (the pin's own tag — or, for a
+        /// band's group of one, the band's place), but routing keys on
+        /// `isSemanticCluster`: a lone pin is Case A whatever it is tagged
+        /// with.
         let place: MapPlace?
         /// Whether this item was produced BY the semantic pre-pass — i.e. it
         /// is the active band's marker for its place. Only these wear the
@@ -58,6 +59,11 @@ enum MapClusterEngine {
         /// but dresses neutral, because below the city band everything on
         /// screen is ordinary local content.
         var isHierarchyMarker = false
+
+        /// The depth this marker speaks for — what its dress keys on
+        /// (`MapMarkerDress.resolve(kind:)`) — or nil below the bands. A
+        /// band's group of one has one too: it wears its place's dress.
+        var hierarchyKind: MapPlace.Kind? { isHierarchyMarker ? place?.kind : nil }
 
         var isCluster: Bool { memberIDs.count > 1 }
 
@@ -281,9 +287,22 @@ enum MapClusterEngine {
         // ⚠️ SORTED, like `semantic` above and for its stated reason: the
         // occlusion pass's tie-break and output order must be a function of
         // the input alone, not of a dictionary's iteration order.
+        //
+        // A group of one is still its place's marker: it speaks at the ACTIVE
+        // depth (France, not Paris) and is a hierarchy marker, so it wears the
+        // place's dress like any band cluster — at the country band only
+        // countries, at the city band only cities, even with one post in view.
+        // Its tap stays a single post's (`isSemanticCluster` needs a group).
         let lone: [BandEntry] = maskedByPlace.filter { $0.value.members.count == 1 }
             .sorted { $0.value.members[0].postID.rawValue < $1.value.members[0].postID.rawValue }
-            .map { key, group in BandEntry(key: key, isOpen: group.isOpen, item: single(group.members[0])) }
+            .map { key, group in
+                let pin = group.members[0]
+                return BandEntry(key: key, isOpen: group.isOpen, item: Item(
+                    representative: pin, memberIDs: [pin.postID],
+                    latitude: pin.latitude, longitude: pin.longitude,
+                    place: group.place, isHierarchyMarker: true
+                ))
+            }
 
         guard zoomScale > 0, cellPoints > 0 else {
             occlusion = Occlusion()

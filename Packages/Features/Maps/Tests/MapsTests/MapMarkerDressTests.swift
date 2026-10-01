@@ -237,6 +237,48 @@ struct MapMarkerDressTests {
         #expect(!view.card.dress.isLocked, "the dress is re-applied above the idempotence guard")
     }
 
+    /// A band's group of one — a country or city with a single post in view —
+    /// takes the SAME dress path as a band cluster: its place's flag border
+    /// and badge, locked when its country is, never the neutral ring. A local
+    /// lone pin stays neutral.
+    @Test func aBandsGroupOfOneWearsItsPlacesDress() {
+        let france = MapPlace(id: "country:france", name: "France", kind: .country)
+        let paris = MapPlace(id: "city:paris", name: "Paris", kind: .city)
+        let pins = [
+            MapPin(postID: PostID("p-1"), latitude: 48.85, longitude: 2.35, thumbnailURL: nil,
+                   kind: .text, places: [paris, france]),
+            MapPin(postID: PostID("p-2"), latitude: 40.42, longitude: -3.70, thumbnailURL: nil,
+                   kind: .text, places: [MapMockPlaces.spain]),
+            MapPin(postID: PostID("p-3"), latitude: 40.50, longitude: -3.60, thumbnailURL: nil,
+                   kind: .text, places: [MapMockPlaces.spain]),
+        ]
+        let items = MapClusterEngine.cluster(pins, zoomScale: 1, cellPoints: 64, viewportDiagonalKm: 2884.3)
+        guard let lone = items.first(where: { !$0.isCluster }) else {
+            Issue.record("France's single post must still be a marker")
+            return
+        }
+        let single = MapAnnotation(pin: lone.representative, hierarchyKind: lone.hierarchyKind)
+        let kind = MapsViewController.dressKind(of: single)
+        #expect(kind == .country)
+
+        for locked in [false, true] {
+            let view = MapAnnotationView(annotation: single, reuseIdentifier: nil)
+            view.configure(
+                with: single.pin, dress: .resolve(kind: kind, countryCode: "FR", isLocked: locked),
+                imagePipeline: pipeline()
+            )
+            #expect(view.card.dress.badge == .flag("FR"))
+            #expect(view.card.dress.borderFlag == "FR")
+            #expect(view.card.dress.isLocked == locked)
+            #expect(view.displayPriority == (locked ? MapMarkerDress.lockedPriority : .required))
+        }
+
+        // The same path, for a band cluster and for a local lone pin.
+        let cluster = MapComputedCluster(items.first { $0.isCluster }!)
+        #expect(MapsViewController.dressKind(of: cluster) == .country)
+        #expect(MapsViewController.dressKind(of: MapAnnotation(pin: pin("local"))) == nil)
+    }
+
     /// Recycled views take their dress off.
     @Test func reuseStripsTheDress() {
         let view = MapAnnotationView(annotation: nil, reuseIdentifier: nil)

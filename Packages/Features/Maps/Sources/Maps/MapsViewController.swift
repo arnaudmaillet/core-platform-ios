@@ -1169,10 +1169,22 @@ final class MapsViewController: UIViewController {
         guard let pin = cluster?.representative ?? (annotation as? MapAnnotation)?.pin else { return .neutral }
         let code = countryCode(of: pin)
         return MapMarkerDress.resolve(
-            kind: cluster.flatMap { $0.isHierarchyMarker ? $0.place?.kind : nil },
+            kind: Self.dressKind(of: annotation),
             countryCode: code,
             isLocked: !isInUnlockedCountry(pin)
         )
+    }
+
+    /// The hierarchy depth `annotation`'s dress speaks for, or nil for a
+    /// local marker. A band's group of one (a lone `MapAnnotation`) speaks
+    /// for its place exactly like a band cluster: at a band, every marker
+    /// wears a place's dress — at the country band only countries, at the
+    /// city band only cities.
+    static func dressKind(of annotation: any MKAnnotation) -> MapPlace.Kind? {
+        if let cluster = annotation as? MapComputedCluster {
+            return cluster.isHierarchyMarker ? cluster.place?.kind : nil
+        }
+        return (annotation as? MapAnnotation)?.hierarchyKind
     }
 
     /// What a tap on a marker does: open its posts, or — for a locked
@@ -2014,7 +2026,7 @@ final class MapsViewController: UIViewController {
                 update(reclaimed, to: item)
                 displayed[id] = reclaimed
             } else {
-                let annotation = MapAnnotation(pin: item.representative)
+                let annotation = MapAnnotation(pin: item.representative, hierarchyKind: item.hierarchyKind)
                 displayed[id] = annotation
                 toAdd.append(annotation)
             }
@@ -2321,6 +2333,7 @@ final class MapsViewController: UIViewController {
                 )
         } else if let single = annotation as? MapAnnotation {
             single.update(pin: item.representative)
+            single.hierarchyKind = item.hierarchyKind
             (mapView.view(for: single) as? MapAnnotationView)?
                 .configure(
                     with: item.representative, dress: dress(for: single), imagePipeline: imagePipeline,

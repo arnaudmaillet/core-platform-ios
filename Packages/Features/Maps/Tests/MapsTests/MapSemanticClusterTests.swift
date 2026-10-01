@@ -271,6 +271,34 @@ struct MapSemanticClusterTests {
         #expect(items.count == 1, "the city's lone post, and nothing else")
         #expect(!items[0].isCluster)
         #expect(items[0].memberIDs == [PostID("post-1")])
+        // Still the city's marker: it wears Paris's dress, never a neutral one.
+        #expect(items[0].isHierarchyMarker)
+        #expect(items[0].place == paris)
+        #expect(items[0].hierarchyKind == .city)
+        #expect(!items[0].isSemanticCluster, "its tap is still a single post's")
+    }
+
+    /// One band up, a country with a single post in view is a COUNTRY
+    /// marker — speaking for France, not for the city its post is in.
+    @Test func aCountrysGroupOfOneSpeaksForTheCountry() {
+        let items = MapClusterEngine.cluster(
+            [
+                pin("post-1", lat: 48.85, lng: 2.35, places: parisLadder),
+                pin("post-2", lat: 40.42, lng: -3.70, places: [MapMockPlaces.spain]),
+                pin("post-3", lat: 40.50, lng: -3.60, places: [MapMockPlaces.spain]),
+            ],
+            zoomScale: 1, cellPoints: 64, viewportDiagonalKm: countryDiagonal
+        )
+        let lone = items.first { !$0.isCluster }
+        #expect(lone?.memberIDs == [PostID("post-1")])
+        #expect(lone?.place == france)
+        #expect(lone?.hierarchyKind == .country)
+        // And below the bands a lone pin is ordinary local content again.
+        let local = MapClusterEngine.cluster(
+            [pin("post-1", places: parisLadder)],
+            zoomScale: 1, cellPoints: 64, viewportDiagonalKm: localDiagonal
+        )
+        #expect(local.first?.hierarchyKind == nil)
     }
 
     /// No banding input at all (geometry-only callers) means no semantic
