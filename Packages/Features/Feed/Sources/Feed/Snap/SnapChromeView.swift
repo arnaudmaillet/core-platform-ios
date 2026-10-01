@@ -100,12 +100,12 @@ final class SnapChromeView: UIView {
     /// never from the stream (see there for why the band's hidden state is
     /// the wrong authority for it).
     private let boostButton = SnapRailBoostButton()
-    /// `-snap-layout-v2` (experimental): the SHARE bubble, directly under the
+    /// `-snap-layout-v2` (experimental): the REPOST bubble, directly under the
     /// boost anchor and its size, beside the caption and the page strip — see
     /// `SnapActionColumn`. Joins the view only when the experiment is on (the
     /// classic chrome never carries it, not even hidden).
-    private lazy var shareButton = SnapRailShareButton()
-    /// Whether this chrome lays out the experimental action column (share
+    private lazy var repostButton = SnapRailRepostButton()
+    /// Whether this chrome lays out the experimental action column (repost
     /// bubble under the boost anchor, caption and strip narrowed beside it).
     /// The process's launch flag by default; a test flips it per instance.
     var usesActionColumn = false {
@@ -115,7 +115,7 @@ final class SnapChromeView: UIView {
         }
     }
     /// The caption's two trailing edges: the margin (classic), or one md short
-    /// of the share bubble (the action column). Exactly one is active.
+    /// of the repost bubble (the action column). Exactly one is active.
     private var captionTrailingClassic: NSLayoutConstraint?
     private var captionTrailingBesideColumn: NSLayoutConstraint?
     /// The rail's top edge as a cell-relative constant (see `buildLayout`).
@@ -153,12 +153,8 @@ final class SnapChromeView: UIView {
     /// claims taps only while shown).
     var interactionRoots: [UIView] {
         let roots: [UIView] = [shortcutRail, boostButton, commentEmptyState, subtitleView, commentTicker]
-        return usesActionColumn ? roots + [shareButton] : roots
+        return usesActionColumn ? roots + [repostButton] : roots
     }
-
-    /// The share bubble was tapped (`-snap-layout-v2`) — the cell attaches the
-    /// post identity, the screen presents the share sheet.
-    var onShareRequested: (() -> Void)?
 
     /// A comments surface was tapped (empty-state pill, subtitle zone, or
     /// ticker band — one fan-in, one path) — the cell forwards this as a
@@ -258,7 +254,7 @@ final class SnapChromeView: UIView {
             captionLabel.bottomAnchor.constraint(equalTo: parent.layoutMarginsGuide.bottomAnchor, constant: -Spacing.xl)
         }
         // Stored: the action column (`-snap-layout-v2`) swaps it for one that
-        // stops short of the share bubble (`applyActionColumn`).
+        // stops short of the repost bubble (`applyActionColumn`).
         let captionTrailing = captionLabel.trailingAnchor.constraint(
             equalTo: layoutMarginsGuide.trailingAnchor, constant: -Spacing.lg
         )
@@ -473,7 +469,7 @@ final class SnapChromeView: UIView {
     }
 
     /// Installs (once) and switches the experimental action column
-    /// (`SnapActionColumn`): the share bubble under the boost anchor, and the
+    /// (`SnapActionColumn`): the repost bubble under the boost anchor, and the
     /// caption — with the page strip, which shares its trailing edge — ending
     /// one md short of it.
     ///
@@ -482,27 +478,24 @@ final class SnapChromeView: UIView {
     /// the anchor, the band → caption seam — so it sits beside the caption's
     /// first line and the strip runs on under the caption alone.
     private func applyActionColumn() {
-        if usesActionColumn, shareButton.superview == nil {
-            shareButton.isHidden = true
-            shareButton.addAction(
-                UIAction { [weak self] _ in self?.onShareRequested?() }, for: .primaryActionTriggered
-            )
+        if usesActionColumn, repostButton.superview == nil {
+            repostButton.isHidden = true
             // Framed from outside, like the anchor: zero back-pressure from
             // its intrinsic size (see the anchor's height-authority note).
-            shareButton.setContentHuggingPriority(UILayoutPriority(1), for: .vertical)
-            shareButton.setContentHuggingPriority(UILayoutPriority(1), for: .horizontal)
-            shareButton.setContentCompressionResistancePriority(UILayoutPriority(1), for: .vertical)
-            shareButton.setContentCompressionResistancePriority(UILayoutPriority(1), for: .horizontal)
-            shareButton.constrain(in: self) { parent in
-                shareButton.trailingAnchor.constraint(
+            repostButton.setContentHuggingPriority(UILayoutPriority(1), for: .vertical)
+            repostButton.setContentHuggingPriority(UILayoutPriority(1), for: .horizontal)
+            repostButton.setContentCompressionResistancePriority(UILayoutPriority(1), for: .vertical)
+            repostButton.setContentCompressionResistancePriority(UILayoutPriority(1), for: .horizontal)
+            repostButton.constrain(in: self) { parent in
+                repostButton.trailingAnchor.constraint(
                     equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -SnapActionColumn.trailingInset
                 )
-                shareButton.widthAnchor.constraint(equalTo: commentTicker.heightAnchor)
-                shareButton.heightAnchor.constraint(equalTo: commentTicker.heightAnchor)
-                shareButton.topAnchor.constraint(equalTo: captionFloorGuide.topAnchor)
+                repostButton.widthAnchor.constraint(equalTo: commentTicker.heightAnchor)
+                repostButton.heightAnchor.constraint(equalTo: commentTicker.heightAnchor)
+                repostButton.topAnchor.constraint(equalTo: captionFloorGuide.topAnchor)
             }
             captionTrailingBesideColumn = captionLabel.trailingAnchor.constraint(
-                equalTo: shareButton.leadingAnchor, constant: -Spacing.md
+                equalTo: repostButton.leadingAnchor, constant: -Spacing.md
             )
         }
         if usesActionColumn {
@@ -512,16 +505,16 @@ final class SnapChromeView: UIView {
             captionTrailingBesideColumn?.isActive = false
             captionTrailingClassic?.isActive = true
         }
-        applyShareVisibility()
+        applyRepostVisibility()
         setNeedsLayout()
     }
 
-    /// The share bubble is MEDIA chrome, like the boost anchor above it: a text
-    /// page's engagement is its permanent layout, and its composer stands in
-    /// the column instead.
-    private func applyShareVisibility() {
-        guard shareButton.superview != nil else { return }
-        shareButton.isHidden = !(usesActionColumn && hasMedia)
+    /// The repost bubble is MEDIA chrome, like the boost anchor above it: a
+    /// text page's engagement is its permanent layout, and its composer stands
+    /// in the column instead.
+    private func applyRepostVisibility() {
+        guard repostButton.superview != nil else { return }
+        repostButton.isHidden = !(usesActionColumn && hasMedia)
     }
 
     /// The rail's reserved bottom strip is the glass square's height — a
@@ -623,7 +616,7 @@ final class SnapChromeView: UIView {
         // it needs no stream to appear and the flight replica — which never
         // receives one — draws the identical corner.
         boostButton.isHidden = !hasMedia
-        applyShareVisibility()
+        applyRepostVisibility()
         if !hasMedia {
             commentTicker.setComments([])
             subtitleView.setCues([])
@@ -965,7 +958,7 @@ final class SnapChromeView: UIView {
     /// The action column's two bubbles (`-snap-layout-v2`), for the spec that
     /// holds them still across the media and comments layouts.
     var debugBoostButton: UIButton { boostButton }
-    var debugShareButton: UIButton { shareButton }
+    var debugRepostButton: UIButton { repostButton }
     var debugCaptionFrame: CGRect { captionLabel.frame }
     var debugPageBar: SnapMediaPageBarView { mediaPageBar }
     var debugScrubPreview: SnapScrubPreviewView { scrubPreview }
@@ -1058,7 +1051,7 @@ final class SnapChromeView: UIView {
     /// a thumb landed on a clip's bar.
     private var scrubFadedViews: [UIView] {
         let views: [UIView] = [captionLabel, commentTicker, subtitleView, commentEmptyState, shortcutRail, boostButton]
-        return usesActionColumn ? views + [shareButton] : views
+        return usesActionColumn ? views + [repostButton] : views
     }
 
     /// What each faded view was worth before the scrub took it, so the fade
@@ -1240,12 +1233,11 @@ final class SnapChromeView: UIView {
         onCommentsTapped = nil
         onBoostRequested = nil
         onBoostUndoRequested = nil
-        onShareRequested = nil
         hasMedia = true
         commentTicker.reset()
         applyBandPresence()
         boostButton.isHidden = true
-        if shareButton.superview != nil { shareButton.isHidden = true }
+        if repostButton.superview != nil { repostButton.isHidden = true }
         boostButton.setSpentTotal(0)
         // Back to the unwired default (enabled, nothing undoable) — the
         // next configure pushes the real context.

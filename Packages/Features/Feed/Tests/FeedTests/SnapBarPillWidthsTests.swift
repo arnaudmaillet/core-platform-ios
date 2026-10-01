@@ -73,7 +73,7 @@ struct SnapBarPillWidthsTests {
         }
         #expect(author(440) == SnapBarPillWidths.authorCap, "a wide bar's pill stops at the cap")
         #expect(author(375) <= author(402))
-        #expect(author(402, wallet: Self.wallet) < author(402))
+        #expect(author(375, wallet: Self.wallet) < author(375))
         #expect(author(402, wallet: Self.wallet, sort: Self.sort) < author(402, wallet: Self.wallet))
         // Past a comfortable pill, the sort's word is what gives way.
         let tight = SnapBarPillWidths.resolve(
@@ -83,6 +83,18 @@ struct SnapBarPillWidthsTests {
         let roomy = SnapBarPillWidths.resolve(navBarWidth: 440, toolbarWidth: 440, walletWidth: nil, sort: Self.sort)
         #expect(roomy.sortShowsTitle)
         #expect(roomy.author >= SnapBarPillWidths.comfortableAuthor)
+    }
+
+    /// The author pill lost the post's age, and its width with it: one
+    /// narrower cap, while the audio capsule — whose lines did not change —
+    /// keeps the old one. On the iPhone 18 Pro with a "250" balance (71pt) the
+    /// pill is the cap, no longer the bar's 193pt of room.
+    @Test func theAuthorPillIsNarrowerThanTheAudioCapsuleCap() {
+        #expect(SnapBarPillWidths.authorCap < SnapBarPillWidths.attributionCap)
+        #expect(SnapBarPillWidths.authorCap >= SnapBarPillWidths.comfortableAuthor)
+        let pro = SnapBarPillWidths.resolve(navBarWidth: 402, toolbarWidth: 402, walletWidth: 71, sort: nil)
+        #expect(pro.author == SnapBarPillWidths.authorCap)
+        #expect(pro.author < 193)
     }
 
     /// Nothing pathological asks for a negative width.

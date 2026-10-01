@@ -82,6 +82,11 @@ public final class ConversationViewModel {
     /// writes — sending, marking read — goes through `resolveConversation()`
     /// rather than reading this, so none of them can act on a half-open thread.
     private var conversationID: ConversationID?
+
+    /// The conversation on screen, once there is one — nil for a draft until
+    /// it resolves. For inbox state keyed by conversation (its pin), which
+    /// waits for a real one rather than creating it.
+    public var currentConversationID: ConversationID? { conversationID }
     /// Single-flight find-or-create. Started when the screen loads and awaited
     /// again by the first send, so a viewer who types faster than the network
     /// waits exactly once and nobody creates two conversations.

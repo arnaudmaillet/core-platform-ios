@@ -72,10 +72,11 @@ final class SnapFeedViewController: UIViewController {
     /// fixed width (`applyBarPillWidths`). The engagement no longer touches the
     /// footer — see `configureToolbarItems` for why the trailing ✕ left it.
     private var defaultToolbarItems: [UIBarButtonItem] = []
-    /// `-snap-layout-v2` (experimental, `SnapActionColumn`): share stands as a
-    /// bubble under the boost anchor on every media page, and leaves ⋯. The
-    /// launch flag by default; a test flips it for this screen's own
-    /// decisions (the menu, the pages it dequeues).
+    /// `-snap-layout-v2` (experimental, `SnapActionColumn`): repost stands as a
+    /// bubble under the boost anchor on every media page, and share takes its
+    /// place in the toolbar's capsule — [share][bookmark] — and leaves ⋯. The
+    /// launch flag by default; a test flips it BEFORE the view loads for this
+    /// screen's own decisions (the toolbar, the menu, the pages it dequeues).
     var usesActionColumn = SnapActionColumn.isEnabled
     /// The nav bar's two trailing items, held so comment mode can add the
     /// sort selector beside the author pill and take it away again.
@@ -1421,10 +1422,9 @@ final class SnapFeedViewController: UIViewController {
                 cell.onRequestBoostUndo = { [weak self, weak cell] id in
                     self?.performBoostUndo(on: id, feedbackCell: cell)
                 }
-                // `-snap-layout-v2`: the share bubble under the anchor is the
-                // post's share — the sheet ⋯ opens without the experiment.
+                // `-snap-layout-v2`: the repost bubble under the anchor (share
+                // moved to the toolbar's capsule — `configureToolbarItems`).
                 cell.setUsesActionColumn(self.usesActionColumn)
-                cell.onRequestShare = { [weak self] id in self?.presentShareSheet(for: id) }
                 // The anchor's number face and wallet context: what this
                 // viewer has already put on this post (the ledger), what
                 // the balance can still afford, and whether any of it is
@@ -2068,7 +2068,19 @@ final class SnapFeedViewController: UIViewController {
         // save it, pass it on — and ⋯ holds what is folded away. A separator
         // between them says which is which; sharing a platter said they were
         // three of a kind.
-        let shareCluster = UIStackView(arrangedSubviews: [bookmarkButton, repost])
+        //
+        // `-snap-layout-v2` (`SnapActionColumn`): repost is a bubble on the
+        // page, under the like anchor, and SHARE takes its place in the
+        // capsule, first — [⇪ 🔖]. Share comes out of ⋯ for it.
+        let share = SnapNavControls.makeToolbarActionButton(systemName: "square.and.arrow.up")
+        share.accessibilityLabel = "Share"
+        share.addAction(UIAction { [weak self] _ in
+            guard let self, let model = self.activeModel else { return }
+            self.presentShareSheet(for: model.id)
+        }, for: .primaryActionTriggered)
+        let shareCluster = UIStackView(
+            arrangedSubviews: usesActionColumn ? [share, bookmarkButton] : [bookmarkButton, repost]
+        )
         shareCluster.axis = .horizontal
 
         let more = SnapNavControls.makeToolbarActionButton(systemName: "ellipsis")
@@ -4920,9 +4932,9 @@ final class SnapFeedViewController: UIViewController {
     /// report it. Report is destructive and last, which is the ordering the
     /// gallery card's own menu uses.
     ///
-    /// Under `-snap-layout-v2` Share is not here: it has its own bubble on the
-    /// page, under the boost anchor (`SnapActionColumn`), and a second door to
-    /// it in a menu would be the kind of duplicate this menu exists to avoid.
+    /// Under `-snap-layout-v2` Share is not here: it has its own button in the
+    /// toolbar's capsule (`configureToolbarItems`), and a second door to it in
+    /// a menu would be the kind of duplicate this menu exists to avoid.
     private func moreMenuActions(for id: PostID) -> [UIMenuElement] {
         var actions: [UIMenuElement] = []
         if !usesActionColumn {

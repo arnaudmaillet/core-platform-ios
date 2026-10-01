@@ -22,7 +22,7 @@ import UIKit
 @MainActor
 final class EmoteStripAccessory: ConversationThreadAccessory {
     /// The bar's glass bubbles' height on iOS 27 (iPhone 18 Pro): the strip's
-    /// capsule stands as tall as the bookmark/repost and ••• bubbles beside it.
+    /// capsule stands as tall as the ••• bubble beside it.
     static let bubbleHeight: CGFloat = 48
     /// ⚠️ **THE BAR INSETS A CUSTOM VIEW 5PT INSIDE ITS SLOT, SHARED BUBBLE
     /// HIDDEN OR NOT.** Measured on iOS 27 (iPhone 18 Pro): the item's glass

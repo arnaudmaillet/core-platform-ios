@@ -12,7 +12,9 @@ import UIKit
 /// composer is `CommentsInputBar` resting where the text page rests it, the
 /// header and footer frost are the same `ProgressiveFrostView` bands, and the
 /// footer is `SnapFooterToolbar` with the emote strip where a post shows its
-/// music. What a conversation adds is a chat's reading order: oldest at the
+/// music. What a conversation leaves out is what only a post has: the stake
+/// (there is nothing to like), and the footer's save and repost — the strip
+/// takes their room. What a conversation adds is a chat's reading order: oldest at the
 /// top, the newest at the bottom, day pills pinned over each day, and a list
 /// that follows new messages and the keyboard.
 ///
@@ -58,11 +60,12 @@ final class ConversationThreadViewController: UIViewController {
     private var composeTrailing: NSLayoutConstraint?
 
     /// **`-snap-layout-v2` (experimental, `SnapActionColumn`).** The post's
-    /// composer, so the post's geometry: at rest the stake and mic/send stand
-    /// where the snap feed's like and share bubbles stand (the column's lift
-    /// above the footer, its inset from the trailing edge), the mic a
-    /// waveform; keyboard up, the bar rides the keyboard as before. The launch
-    /// flag by default; a test flips it.
+    /// composer, so the post's geometry: at rest the rail slot stands where
+    /// the snap feed's repost bubble stands (the column's lift above the
+    /// footer, its inset from the trailing edge) and wears a PIN for this
+    /// conversation — the send arrow while there is text — and the voice note
+    /// is a waveform in the field; keyboard up, the bar rides the keyboard as
+    /// before. The launch flag by default; a test flips it.
     var usesActionColumn = SnapActionColumn.isEnabled {
         didSet {
             guard usesActionColumn != oldValue else { return }
@@ -70,10 +73,20 @@ final class ConversationThreadViewController: UIViewController {
         }
     }
 
+    /// The conversation's pin as the driver last reported it — nil while
+    /// there is nothing to pin (a draft).
+    private var isPinned: Bool?
+
     private func applyComposerColumn() {
         composeBar.usesActionColumn = usesActionColumn
-        composeRest?.constant = -SnapActionColumn.composerRestingGap(actionColumn: usesActionColumn)
+        composeBar.railFace = usesActionColumn ? .pin(isPinned: isPinned == true) : .voice
+        composeBar.isRailFaceEnabled = isPinned != nil
         composeTrailing?.constant = -SnapActionColumn.composerTrailingInset(actionColumn: usesActionColumn)
+    }
+
+    private func renderPinned(_ pinned: Bool?) {
+        isPinned = pinned
+        applyComposerColumn()
     }
     private let headerFrost = ProgressiveFrostView(
         maskColors: SnapCommentsLayout.headerFrostMaskColors,
@@ -346,9 +359,11 @@ final class ConversationThreadViewController: UIViewController {
         composeBar.onVoiceNote = { [weak self] in
             self?.presentNotice("Voice Messages", "Voice messages aren't available yet.")
         }
-        composeBar.onBoost = { [weak self] _ in
-            self?.presentNotice("Boost", "Boosting a conversation isn't available yet.")
-        }
+        // No stake: a conversation has nothing to like. The column keeps its
+        // slot where it was (the mic, or the pin under `-snap-layout-v2`).
+        composeBar.showsStake = false
+        // `-snap-layout-v2`: the slot's pin, the inbox's own (the driver's).
+        composeBar.onRailAction = { [weak self] in self?.driver.togglePinned() }
 
         composerBackdrop.setVeilOpacity(SnapCommentsLayout.frostVeilOpacity(hasMedia: false))
         composerBackdrop.translatesAutoresizingMaskIntoConstraints = false
@@ -358,13 +373,15 @@ final class ConversationThreadViewController: UIViewController {
         // The keyboard guide measured from the screen's edge, so the resting
         // constraint — the safe area, which the footer toolbar inflates — is
         // what holds the bar while the keyboard is down, and the inequality
-        // lifts it the moment the keyboard rises past it.
+        // lifts it the moment the keyboard rises past it. At rest the input
+        // row sits `glassGap` above the toolbar's glass, flag or no flag; the bar
+        // lifts its own column (`SnapActionColumn`).
         view.keyboardLayoutGuide.usesBottomSafeArea = false
         let ceiling = composeBar.bottomAnchor.constraint(
             lessThanOrEqualTo: view.keyboardLayoutGuide.topAnchor, constant: -Spacing.sm
         )
         let rest = composeBar.bottomAnchor.constraint(
-            equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -Spacing.sm
+            equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -SnapActionColumn.inputRestingGap
         )
         rest.priority = .defaultHigh
         let trailing = composeBar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -Spacing.lg)
@@ -378,7 +395,7 @@ final class ConversationThreadViewController: UIViewController {
             composerBackdrop.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             composerBackdrop.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             composerBackdrop.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            // From the INPUT ROW, as on the post: the stake bubble floats in
+            // From the INPUT ROW, as on the post: the lifted slot floats in
             // the band's ramp.
             composerBackdrop.topAnchor.constraint(
                 equalTo: composeBar.inputRowTopAnchor, constant: -SnapCommentsLayout.footerFrostLead
@@ -388,14 +405,12 @@ final class ConversationThreadViewController: UIViewController {
     }
 
     /// The post's footer, with the emote strip where the music would be —
-    /// stretched over every point the trailing bubbles leave.
+    /// stretched over every point ⋯ leaves: [emotes ………………][⋯]. A post's
+    /// save and repost have nothing to act on in a conversation, so the strip
+    /// takes their room too.
     private func configureToolbar() {
         guard let accessory else { return }
         accessory.onInsertText = { [weak self] text in self?.composeBar.insertIntoComposer(text) }
-        let save = SnapFooterToolbar.makeSaveButton()
-        save.addAction(UIAction { [weak self] _ in
-            self?.presentNotice("Save", "Saving conversations isn't available yet.")
-        }, for: .primaryActionTriggered)
         let more = SnapFooterToolbar.makeMoreButton(menu: UIMenu(children: [
             UIAction(title: "View Profile", image: UIImage(systemName: "person.crop.circle")) { [weak self] _ in
                 self?.driver.didTapIdentity()
@@ -404,8 +419,7 @@ final class ConversationThreadViewController: UIViewController {
         toolbarItems = SnapFooterToolbar.items(
             leading: accessory.view,
             leadingFills: true,
-            bookmark: save,
-            repost: SnapFooterToolbar.makeRepostButton(),
+            actions: [],
             more: more
         )
     }
@@ -470,6 +484,7 @@ final class ConversationThreadViewController: UIViewController {
         driver.onSendingChange = { [weak self] sending in self?.composeBar.isSending = sending }
         driver.onReplyStateChange = { [weak self] draft in self?.renderReply(draft) }
         driver.onActionNotice = { [weak self] title, message in self?.presentNotice(title, message) }
+        driver.onPinnedChange = { [weak self] pinned in self?.renderPinned(pinned) }
     }
 
     // MARK: - Render

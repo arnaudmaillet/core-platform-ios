@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import FeedInterface
 import MediaCore
 import Testing
@@ -17,17 +18,21 @@ struct ConversationThreadViewControllerTests {
         var onSendingChange: ((Bool) -> Void)?
         var onReplyStateChange: ((ConversationThreadReplyDraft?) -> Void)?
         var onActionNotice: ((String, String) -> Void)?
+        var onPinnedChange: ((Bool?) -> Void)?
 
         var initial: ConversationThreadPhase
         private(set) var sent: [String] = []
         private(set) var didLoad = false
         private(set) var replies: [String] = []
+        /// What the inbox would say about the pin; nil is a draft.
+        var pinned: Bool? = false
 
         init(initial: ConversationThreadPhase) { self.initial = initial }
 
         func viewDidLoad() {
             didLoad = true
             onPeerChange?(ConversationThreadPerson(id: ProfileID("them"), name: "Ava", avatarURL: nil))
+            onPinnedChange?(pinned)
             onPhaseChange?(initial)
         }
         func refresh() {}
@@ -37,6 +42,11 @@ struct ConversationThreadViewControllerTests {
         func forward(_ messageID: String) {}
         func delete(_ messageID: String) {}
         func didTapIdentity() {}
+        func togglePinned() {
+            guard let pinned else { return }
+            self.pinned = !pinned
+            onPinnedChange?(self.pinned)
+        }
     }
 
     private final class FakeAccessory: ConversationThreadAccessory {
@@ -164,15 +174,50 @@ struct ConversationThreadViewControllerTests {
         #expect(driver.replies == ["m1"])
     }
 
-    /// The conversation's trailing slot: the post's faces — a draft is
-    /// sendable with the keyboard down (a shared link or an emote lands in
-    /// the field to be sent), and an empty field wears the mic, keyboard up
-    /// or down.
+    /// A conversation has nothing to like: no stake bubble over the mic, flag
+    /// or no flag. The mic keeps its place — `sm` above the footer line — and
+    /// the field rests on the toolbar, a little lower.
+    @Test func theComposerHasNoStakeAndItsFieldRestsOnTheToolbar() throws {
+        let (screen, _, _, window) = makeScreen()
+        let composer = try SnapActionColumnLayoutTests.composerColumn(in: screen.view, space: window)
+        #expect(composer.stake == nil, "a like bubble over a conversation's mic")
+        #expect(SnapActionColumnLayoutTests.button(composer.bar, "Boost post")?.isHidden == true)
+        let footerLine = screen.view.convert(
+            CGPoint(x: 0, y: screen.view.bounds.height - screen.view.safeAreaInsets.bottom), to: window
+        ).y
+        #expect(abs(composer.rail.maxY - (footerLine - Spacing.sm)) < 0.5, "the mic moved: \(composer.rail)")
+        #expect(abs(composer.field.maxY - (footerLine + SnapActionColumn.toolbarGlassDrop - SnapActionColumn.glassGap)) < 0.5,
+                "the field ends at \(composer.field.maxY), not glassGap above the toolbar's glass")
+        #expect(composer.bar.debugRailButton.isHidden, "no pin without the flag")
+    }
+
+    /// ⚠️ THE GAP ON SCREEN, against the real toolbar this screen shows: the
+    /// field's bottom to the ⋯ bubble's glass top — read off the glass UIKit
+    /// drew (`SnapActionColumnLayoutTests.glassFrame`) — is `glassGap`, the
+    /// gap UIKit leaves between neighbouring bubbles of that bar.
+    @Test func theFieldStandsOneGlassGapAboveTheToolbar() async throws {
+        let (screen, _, _, window) = makeScreen()
+        screen.navigationController?.setToolbarHidden(false, animated: false)
+        let more = try #require(screen.toolbarItems?.last?.customView)
+        for _ in 0..<30 where more.window == nil || more.bounds.height == 0 {
+            screen.navigationController?.view.setNeedsLayout()
+            screen.navigationController?.view.layoutIfNeeded()
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try #require(more.window != nil, "the bar never hosted ⋯")
+        let composer = try SnapActionColumnLayoutTests.composerColumn(in: screen.view, space: window)
+        let glass = try #require(SnapActionColumnLayoutTests.glassFrame(of: more, in: window))
+        let gap = glass.minY - composer.field.maxY
+        #expect(abs(gap - SnapActionColumn.glassGap) < 0.5,
+                "iOS \(ProcessInfo.processInfo.operatingSystemVersion.majorVersion): the field stands \(gap)pt above the toolbar's glass (field \(composer.field.maxY), glass \(glass))")
+    }
+
     /// `-snap-layout-v2`: the thread shares the post's composer, so it shares
-    /// the post's action column — at rest the stake and the waveform stand
-    /// exactly where the snap feed's like and share bubbles stand under the
-    /// same footer (`SnapActionColumnLayoutTests` holds the post to it).
-    @Test func theActionColumnStandsWhereTheFeedsBubblesStand() throws {
+    /// the post's action column — at rest the rail slot stands exactly where
+    /// the snap feed's repost bubble stands under the same footer
+    /// (`SnapActionColumnLayoutTests` holds the post to it), wearing a PIN.
+    /// Nothing stands at the like bubble's place.
+    @Test func thePinStandsWhereTheFeedsRepostBubbleStands() throws {
         let (screen, _, _, window) = makeScreen()
         screen.usesActionColumn = true
         screen.view.layoutIfNeeded()
@@ -182,9 +227,55 @@ struct ConversationThreadViewControllerTests {
         ))
         let composer = try SnapActionColumnLayoutTests.composerColumn(in: screen.view, space: window)
 
-        #expect(composer.stake == media.like, "stake \(composer.stake) vs like \(media.like)")
-        #expect(composer.mic == media.share, "waveform \(composer.mic) vs share \(media.share)")
+        #expect(composer.stake == nil)
+        #expect(composer.rail == media.repost, "pin \(composer.rail) vs repost \(media.repost)")
+        #expect(composer.bar.debugRailSymbol == "pin")
+        #expect(!composer.bar.debugFieldVoiceButton.isHidden, "the waveform is in the field")
     }
+
+    /// The pin is the inbox's: a tap goes to the driver, and what the driver
+    /// reports — from here or from the inbox — is the glyph, filled when
+    /// pinned. While typing the bubble is send, and a tap sends.
+    @Test func thePinPinsThroughTheDriverAndTurnsIntoSendWhileTyping() throws {
+        let (screen, driver, _, _) = makeScreen()
+        screen.usesActionColumn = true
+        let bar = try #require(Self.firstView(CommentsInputBar.self, in: screen.view))
+        let rail = bar.debugRailButton
+        #expect(rail.accessibilityLabel == "Pin conversation")
+
+        rail.sendActions(for: .primaryActionTriggered)
+        #expect(driver.pinned == true)
+        #expect(bar.debugRailSymbol == "pin.fill")
+        #expect(rail.accessibilityLabel == "Unpin conversation")
+
+        bar.draftText = "On my way"
+        #expect(bar.debugRailSymbol == "arrow.up")
+        rail.sendActions(for: .primaryActionTriggered)
+        #expect(driver.sent == ["On my way"])
+        #expect(driver.pinned == true, "a send is not a pin")
+        #expect(bar.debugRailSymbol == "pin.fill")
+
+        // Unpinned from elsewhere (the inbox's menu): the glyph follows.
+        driver.onPinnedChange?(false)
+        #expect(bar.debugRailSymbol == "pin")
+    }
+
+    /// A draft conversation has nothing to pin yet: the pin is drawn, quiet.
+    @Test func aDraftConversationsPinWaitsForTheConversation() throws {
+        let (screen, driver, _, _) = makeScreen()
+        screen.usesActionColumn = true
+        driver.onPinnedChange?(nil)
+        let bar = try #require(Self.firstView(CommentsInputBar.self, in: screen.view))
+        #expect(bar.debugRailSymbol == "pin")
+        #expect(bar.debugRailButton.isEnabled == false)
+        bar.draftText = "Hi"
+        #expect(bar.debugRailButton.isEnabled, "send is never held back by the pin")
+    }
+
+    /// The conversation's trailing slot: the post's faces — a draft is
+    /// sendable with the keyboard down (a shared link or an emote lands in
+    /// the field to be sent), and an empty field wears the mic, keyboard up
+    /// or down.
 
     @Test func aDraftIsSendableWithTheKeyboardDown() throws {
         let bar = CommentsInputBar()
@@ -225,8 +316,10 @@ struct ConversationThreadViewControllerTests {
 
     /// The post's footer, with the emote strip where the music would be — its
     /// own capsule, not one inside the bar's bubble, which pads it and cuts its
-    /// content short of the visible ends.
-    @Test func theFooterIsThePostsWithTheAccessoryLeading() throws {
+    /// content short of the visible ends — and nothing else but ⋯: a post's
+    /// save and repost have nothing to act on here, and the strip takes their
+    /// room. [emotes ………………][⋯].
+    @Test func theFooterIsTheStripFillingUpToTheMenu() throws {
         let (screen, _, accessory, _) = makeScreen()
         let items = try #require(screen.toolbarItems)
         #expect(items.first?.customView === accessory.view)
@@ -235,7 +328,11 @@ struct ConversationThreadViewControllerTests {
             if let button = view as? UIButton { return [button.accessibilityLabel].compactMap { $0 } }
             return view.subviews.compactMap { ($0 as? UIButton)?.accessibilityLabel }
         }
-        #expect(labels == ["Save", "Repost", "More actions"])
+        #expect(labels == ["More actions"])
+        // [strip][fixed][⋯]: no flexible space to claim the strip's room.
+        #expect(items.count == 3)
+        #expect(items[1].customView == nil)
+        #expect(items.last?.customView is UIButton)
     }
 
     @Test func aPeekHasNoComposerNoFooterAndNoMenu() throws {

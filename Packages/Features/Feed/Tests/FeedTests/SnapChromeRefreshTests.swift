@@ -150,15 +150,17 @@ struct SnapChromeRefreshTests {
                 "same author id took the fast path and never drew the name")
     }
 
-    /// …while paging BETWEEN posts by one person still moves only the time,
-    /// which is what the fast path is for.
-    @Test func pagingWithinOneAuthorOnlyMovesTheTime() {
+    /// …while paging BETWEEN posts by one person takes the fast path — and
+    /// since the pill no longer shows the post's age (asked 2026-10-01), it
+    /// draws exactly what it drew: the name and the handle, no time.
+    @Test func pagingWithinOneAuthorChangesNothingOnThePill() {
         let capsule = SnapAuthorIdentityView()
         capsule.setAuthor(model(id: "p1", author: "Demo Viewer", meta: "@you · 75d"), pipeline: pipeline)
 
         capsule.setAuthor(model(id: "p2", author: "Demo Viewer", meta: "@you · 2h"), pipeline: pipeline)
 
-        #expect(labels(in: capsule).contains("@you · 2h"))
+        #expect(labels(in: capsule).contains("@you"))
         #expect(labels(in: capsule).contains("Demo Viewer"))
+        #expect(!labels(in: capsule).contains { $0.contains("2h") || $0.contains("75d") })
     }
 }

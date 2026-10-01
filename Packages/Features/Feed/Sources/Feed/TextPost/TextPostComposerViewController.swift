@@ -248,8 +248,7 @@ final class TextPostComposerViewController: UIViewController {
         more.isEnabled = false
         let footer = SnapFooterToolbar.items(
             leading: SoundPillView(),
-            bookmark: bookmarkButton,
-            repost: SnapFooterToolbar.makeRepostButton(),
+            actions: [bookmarkButton, SnapFooterToolbar.makeRepostButton()],
             more: more
         )
         footerSoundItem = footer.first
@@ -545,8 +544,7 @@ final class TextPostComposerViewController: UIViewController {
         ]))
         setToolbarItems(SnapFooterToolbar.items(
             leading: attribution,
-            bookmark: bookmarkButton,
-            repost: SnapFooterToolbar.makeRepostButton(),
+            actions: [bookmarkButton, SnapFooterToolbar.makeRepostButton()],
             more: more
         ), animated: true)
         fitTrailingRun()

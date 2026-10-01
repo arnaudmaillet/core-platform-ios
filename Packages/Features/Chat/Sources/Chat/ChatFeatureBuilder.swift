@@ -190,7 +190,9 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         let driver = ConversationThreadDriver(
             viewModel: viewModel,
             viewer: repository,
-            avatars: connections as? any PeerAvatarProviding
+            avatars: connections as? any PeerAvatarProviding,
+            // The thread's pin is the inbox's: a peek offers no pinning.
+            pins: mode == .full ? catalog : nil
         )
         return threadScreens().makeConversationThreadViewController(
             driver: driver,

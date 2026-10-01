@@ -194,13 +194,16 @@ final class PostDetailViewController: UIViewController {
     private var engagedBottomInset: CGFloat?
 
     /// **`-snap-layout-v2` (experimental, `SnapActionColumn`).** The engaged
-    /// composer stands its stake and mic/send ON the media layout's like and
-    /// share bubbles — same size, same screen coordinates — so opening and
-    /// closing the comments crossfades two bubbles that never move:
+    /// composer stands its stake and rail slot ON the media layout's like and
+    /// repost bubbles — same size, same screen coordinates — so opening and
+    /// closing the comments crossfades two bubbles that never move. The slot
+    /// wears REPOST (send while there is text); the waveform is in the field.
     ///
-    /// - AT REST the bar's bottom sits the column's lift above the footer line
-    ///   (not `sm`), and its trailing edge the column's inset from the screen's
-    ///   (not `lg`); the entrance is alpha only — no micro-translation.
+    /// - AT REST the bar's input row sits on the toolbar like every composer's
+    ///   (`SnapActionColumn.inputRestingGap`) and the bar lifts its column to
+    ///   the column's line; its trailing edge is the column's inset from the
+    ///   screen's (not `lg`); the entrance is alpha only — no
+    ///   micro-translation.
     /// - KEYBOARD UP the required ceiling wins, exactly as before: the bar rides
     ///   the keyboard's top, `sm` above it. The column is a resting position;
     ///   typing is not resting, and a bar held at the column's line would sit
@@ -733,6 +736,7 @@ final class PostDetailViewController: UIViewController {
         composeBar.defaultPlaceholder = nil
         composeBar.sendAccessibilityLabel = nil
         composeBar.visibilityMenu = nil
+        composeBar.railFace = .repost
         refreshBoostTotal()
         onPostPublished?(entry)
     }
@@ -758,6 +762,10 @@ final class PostDetailViewController: UIViewController {
 
     private func configureComposeBar() {
         composeBar.usesActionColumn = usesActionColumn
+        // `-snap-layout-v2`: a post's rail slot is its REPOST — drawn without
+        // an action, like the toolbar's (no client path publishes one yet). A
+        // draft is not a post: its slot keeps the voice note until it is.
+        composeBar.railFace = viewModel.isDraft ? .voice : .repost
         // The Liquid Glass composer (Private Messages' recipe): a floating
         // capsule field, no opaque bar, no separator — the glass carries
         // its own boundary against whatever is behind it.
@@ -1001,27 +1009,27 @@ final class PostDetailViewController: UIViewController {
         composerBackdrop.effect = UIBlurEffect(style: SnapCommentsLayout.frostStyle)
     }
 
-    /// Extra bottom room so resting content clears the composer band: the
-    /// input row's band (62), plus the stake row standing on it — the stake
+    /// Extra bottom room so resting content clears the composer: the bar's
+    /// resting top above the footer line (its rest gap and its height, the
+    /// lifted column and the stake on it included), plus the breath a resting
+    /// row keeps above it. The classic bar's comes to the input row's band
+    /// (62) plus the stake row standing on it (`stakeRowHeight`) — the stake
     /// bubble sits at the trailing edge, where a resting row's ♥ would be.
-    private static let classicFooterClearance: CGFloat = 62 + CommentsInputBar.stakeRowHeight
-
-    /// The clearance for the bar this screen draws: the action column's
-    /// (`-snap-layout-v2`) stands higher by its lift and is taller by its two
-    /// bubbles, and the clearance grows by both differences.
+    /// The action column's (`-snap-layout-v2`) stands higher and is taller,
+    /// and the clearance grows with it.
     private var engagedFooterClearance: CGFloat {
-        guard usesActionColumn else { return Self.classicFooterClearance }
-        return Self.classicFooterClearance
-            + (SnapActionColumn.restingLift - Spacing.sm)
-            + CommentsInputBar.restingHeight(for: .large, actionColumn: true)
-            - CommentsInputBar.restingHeight(for: .large)
+        composerRestingGap
+            + CommentsInputBar.restingHeight(for: .large, actionColumn: usesActionColumn)
+            + Self.composerTopBreath
     }
 
-    /// The composer's resting gap above the footer line — see
-    /// `usesActionColumn`.
-    private var composerRestingGap: CGFloat {
-        SnapActionColumn.composerRestingGap(actionColumn: usesActionColumn)
-    }
+    /// Between the resting composer's top and the content resting above it.
+    private static let composerTopBreath: CGFloat = 16
+
+    /// The composer's resting gap above the footer line: its input row `sm`
+    /// above the toolbar's glass, with or without the action column — the
+    /// bar lifts its own column (`SnapActionColumn`).
+    private var composerRestingGap: CGFloat { SnapActionColumn.inputRestingGap }
 
     /// Applies a change of `usesActionColumn` to a screen already built: the
     /// bar's faces and geometry, its trailing edge, and — when engaged — its
@@ -1120,9 +1128,9 @@ final class PostDetailViewController: UIViewController {
         let keyboard = composeBar.bottomAnchor.constraint(
             lessThanOrEqualTo: view.keyboardLayoutGuide.topAnchor, constant: -Spacing.sm
         )
-        // The rest line: `sm` above the footer — or, under `-snap-layout-v2`,
-        // the action column's lift, which stands the stake and mic/send on the
-        // media layout's like and share bubbles (`usesActionColumn`).
+        // The rest line: the input row `glassGap` above the toolbar's glass. The bar
+        // lifts its own column off that line — under `-snap-layout-v2` onto
+        // the media layout's like and repost bubbles (`usesActionColumn`).
         let rest = composeBar.bottomAnchor.constraint(
             equalTo: view.bottomAnchor, constant: -(max(0, bottomInset) + composerRestingGap)
         )

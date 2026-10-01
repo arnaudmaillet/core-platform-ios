@@ -25,12 +25,16 @@ import UIKit
 /// cannot say which action a glyph carries.
 @MainActor
 struct SnapToolbarCompositionTests {
-    private func feed(reporting: (any ContentReporting)? = StubReporter()) -> SnapFeedViewController {
+    private func feed(
+        reporting: (any ContentReporting)? = StubReporter(), actionColumn: Bool = false
+    ) -> SnapFeedViewController {
         let controller = SnapFeedViewController(
             viewModel: FeedViewModel(repository: EmptyProvider()),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             reporting: reporting
         )
+        // Before the view loads: the toolbar is built once, in `viewDidLoad`.
+        controller.usesActionColumn = actionColumn
         controller.loadViewIfNeeded()
         controller.view.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
         controller.seedProjection([
@@ -81,6 +85,14 @@ struct SnapToolbarCompositionTests {
     /// Share is GONE from the bar — not hidden, not disabled.
     @Test func theBarNoLongerCarriesShare() {
         #expect(labels(toolbarButtons(feed())).contains("Share") == false)
+    }
+
+    /// `-snap-layout-v2`: repost is a bubble on the page, under the like
+    /// anchor, and SHARE takes its place in the capsule — first: [⇪ 🔖] [⋯].
+    @Test func underTheActionColumnTheCapsuleIsShareThenSave() {
+        let buttons = toolbarButtons(feed(actionColumn: true))
+        #expect(labels(buttons) == ["Share", "Save", "More actions"],
+                "the trailing run is not [share, save, ⋯]: \(labels(buttons))")
     }
 
     /// The attribution keeps the leading end, with the dynamic space between:
