@@ -273,6 +273,77 @@ struct HeroBannerFadeTests {
         #expect(HeroScrollFrameProbe.Census(of: view.layer).offscreen == 0)
     }
 
+    // MARK: - A pull-down (`stretch`)
+
+    /// A banner stretched by a pull, frame after frame, only ZOOMS what it
+    /// drew at rest: nothing composed, nothing baked, the ground under the
+    /// type the same — and still the picture covers the whole stretched
+    /// view, its blur's top line where it was, nothing drawn offscreen.
+    @Test func aStretchZoomsWithoutRecomposingOrRebaking() throws {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        // Portrait: the fill is height-limited, the case a stretch rescaled
+        // (and re-baked past `rebakeTolerance`) before.
+        let stripes = UIGraphicsImageRenderer(size: CGSize(width: 60, height: 90), format: format).image { context in
+            UIColor.black.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 60, height: 90))
+            UIColor.white.setFill()
+            for y in stride(from: 0, to: 90, by: 6) { context.fill(CGRect(x: 0, y: y, width: 60, height: 3)) }
+        }
+        let rest = CGRect(x: 0, y: 0, width: 400, height: 300)
+        let view = HeroBannerPictureView(frame: rest)
+        view.pictureOutset.top = 80
+        view.image = stripes
+        let fade = HeroBannerFade.geometry(identityTop: 200, foot: 300)
+        view.fade = fade
+        view.layoutIfNeeded()
+        let composed = view.debugComposeCount
+        let baked = view.debugBakeCount
+        try #require(composed > 0 && baked > 0)
+        let levels = view.debugVisibleLevels.map(\.full)
+        let type = CGRect(x: 40, y: 200, width: 200, height: 30)
+        let ground = try #require(view.groundPixels(behind: type))
+        for pull in stride(from: CGFloat(4), through: 200, by: 4) {
+            // The view grows upward, as a banner pinned to the viewport's
+            // top does under a pull; its foot holds.
+            view.frame = CGRect(x: 0, y: -pull, width: 400, height: 300 + pull)
+            view.stretch = pull
+            view.layoutIfNeeded()
+            #expect(view.debugComposeCount == composed, "pull \(pull)")
+            #expect(view.debugBakeCount == baked, "pull \(pull)")
+            let cover = view.debugPictureCover
+            #expect(cover.minY <= 0.5, "pull \(pull): \(cover)")
+            #expect(cover.maxY >= view.bounds.height - 0.5, "pull \(pull): \(cover)")
+            #expect(cover.minX <= 0.5 && cover.maxX >= 399.5, "pull \(pull): \(cover)")
+        }
+        #expect(HeroScrollFrameProbe.Census(of: view.layer).offscreen == 0)
+        // At rest coordinates nothing moved: the levels, the ground.
+        #expect(view.debugVisibleLevels.map(\.full) == levels)
+        #expect(try #require(view.groundPixels(behind: type)) == ground)
+        // And back at rest, nothing is left zoomed — nor recomposed.
+        view.frame = rest
+        view.stretch = 0
+        view.layoutIfNeeded()
+        #expect(view.debugPictureCover.minY == -80)
+        #expect(view.debugComposeCount == composed)
+    }
+
+    /// The ramp under a pull: drawn from the picture's resting top down,
+    /// the same stops — only moved, never redrawn.
+    @Test func aStretchMovesTheRampWithoutRedrawingIt() {
+        let ramp = HeroBannerRampView(frame: CGRect(x: 0, y: 0, width: 400, height: 300))
+        ramp.fade = HeroBannerFade.geometry(identityTop: 200, foot: 300)
+        ramp.layoutIfNeeded()
+        let locations = ramp.debugLocations
+        let alphas = ramp.debugAlphas
+        ramp.frame = CGRect(x: 0, y: -120, width: 400, height: 420)
+        ramp.stretch = 120
+        ramp.layoutIfNeeded()
+        #expect(ramp.debugLocations == locations)
+        #expect(ramp.debugAlphas == alphas)
+        #expect(ramp.debugRampFrame == CGRect(x: 0, y: 120, width: 400, height: 300))
+    }
+
     // MARK: - The ink the ground picks (`HeroInk.tone`)
 
     private func ground(_ grey: Float, count: Int = 50) -> [SIMD3<Float>] {

@@ -184,15 +184,16 @@ final class ProfileBannerView: UIView {
     }
 
     /// The blurred picture's pixels behind `rect`, in this view's
-    /// coordinates (the picture is pinned edge to edge) — see
+    /// coordinates AT REST — the header's own, since the banner rests on the
+    /// header's top (the picture is pinned edge to edge) — see
     /// `HeroBannerPictureView.groundPixels(behind:)`.
     func groundPixels(behind rect: CGRect) -> [SIMD3<Float>]? {
         picture.groundPixels(behind: rect)
     }
 
     /// Where the picture blurs and where the page takes over, in this view's
-    /// own points from its top — set by the header from where the identity
-    /// block actually landed. See `HeroBannerFade`.
+    /// own points from its RESTING top (the header's) — set by the header
+    /// from where the identity block actually landed. See `HeroBannerFade`.
     func setFade(_ fade: HeroBannerFade.Geometry) {
         picture.fade = fade
         ramp.fade = fade
@@ -206,6 +207,11 @@ final class ProfileBannerView: UIView {
     var debugRampAlphas: [CGFloat] { ramp.debugAlphas }
     var debugLastBlurBakeMilliseconds: Double { picture.debugLastBakeMilliseconds }
     var debugLastBlurBakeBytes: Int { picture.debugLastBakeBytes }
+    var debugBlurComposeCount: Int { picture.debugComposeCount }
+    var debugBlurBakeCount: Int { picture.debugBakeCount }
+    /// Where the sharp picture covers, in this view's space.
+    var debugPictureCover: CGRect { picture.convert(picture.debugPictureCover, to: self) }
+    var debugRampFrame: CGRect { ramp.convert(ramp.debugRampFrame, to: self) }
     /// How far the picture has been carried down by the parallax.
     var debugPictureShift: CGFloat { picture.pictureShift }
     #endif
@@ -230,6 +236,13 @@ final class ProfileBannerView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        // A pull-down stretches the banner ABOVE the header's top, where it
+        // rests (`ProfileHeaderView.anchorBanner`): the picture and the ramp
+        // keep their resting layout and only zoom — see
+        // `HeroBannerPictureView`. Set here, before they lay out in this pass.
+        let stretch = max(0, -frame.minY)
+        picture.stretch = stretch
+        ramp.stretch = stretch
         // Sublayer frames don't follow Auto Layout; keep them in step without
         // the implicit CALayer animation smearing during rotation/resize.
         CATransaction.begin()

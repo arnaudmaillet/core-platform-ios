@@ -556,6 +556,20 @@ final class HeroBannerBlurRows: @unchecked Sendable {
 ///
 /// Fade it into the page with a `HeroBannerRampView` over it, in the same
 /// coordinates.
+///
+/// ⚠️ **A PULL-DOWN IS A ZOOM, NOT A NEW PICTURE.** A banner stretched by
+/// an overscroll grows taller at the top every frame of the gesture. Laid
+/// out at its new size, everything it shows changed: the picture's fill
+/// (and past `rebakeTolerance`, a bake and its cross-dissolve), the blur's
+/// composition, and — measured from a top that moves — the fade and the
+/// type's place on it, so the headers read the ground under their type and
+/// picked an ink again every two points of the pull. The pull ran at half
+/// the scroll's frame rate on a device, with ~80ms gaps (user, 1 October
+/// 2026). Told how far it is stretched (`stretch`), the view keeps all of
+/// it AT REST — the fade, the ground and `pictureFrame` are in its resting
+/// coordinates — and shows the stretch by zooming the picture and its blur,
+/// as one, about the top of the type's container: a transform on what is
+/// already drawn, nothing recomposed, re-baked or re-read.
 public final class HeroBannerPictureView: UIView {
     /// The picture. Setting the same instance again does nothing.
     public var image: UIImage? {
@@ -584,22 +598,43 @@ public final class HeroBannerPictureView: UIView {
             guard pictureShift != oldValue else { return }
             sharp.transform = CGAffineTransform(translationX: 0, y: pictureShift)
             composeBlur()
+            applyStretch()
         }
     }
 
-    /// The fade, in this view's coordinates. Nil shows the picture sharp.
+    /// How far the view's top stands above where it rests: a pull-down
+    /// stretching the banner, the view taller by this much at the top. The
+    /// picture, its blur and the fade stay as they are at rest and are
+    /// zoomed to cover the extra height (see the class's note).
+    public var stretch: CGFloat = 0 {
+        didSet { if stretch != oldValue { setNeedsLayout() } }
+    }
+
+    /// The fade, in this view's coordinates AT REST — measured from where
+    /// its top rests, `stretch` below its top while it is stretched. Nil
+    /// shows the picture sharp.
     public var fade: HeroBannerFade.Geometry? {
         didSet { if fade != oldValue { setNeedsLayout() } }
     }
 
-    /// Where the picture stands, slid by the parallax, in this view's space.
+    /// Where the picture stands, slid by the parallax, in this view's
+    /// coordinates at rest.
     public var pictureFrame: CGRect {
-        bounds.inset(by: UIEdgeInsets(
+        restBounds.inset(by: UIEdgeInsets(
             top: -pictureOutset.top, left: -pictureOutset.left,
             bottom: -pictureOutset.bottom, right: -pictureOutset.right
         )).offsetBy(dx: 0, dy: pictureShift)
     }
 
+    /// The view as it rests, in its resting coordinates: its bounds without
+    /// the stretch.
+    private var restBounds: CGRect {
+        CGRect(x: 0, y: 0, width: bounds.width, height: max(0, bounds.height - stretch))
+    }
+
+    /// The picture and its blur, laid out at rest — the view's resting
+    /// bounds, `stretch` below its top — and zoomed by a stretch.
+    private let stage = UIView()
     private let sharp = FillImageView()
     /// The blurred run-out over the sharp picture: one image, the levels
     /// blended row by row (`composeBlur`). A plain view — no mask, nothing
@@ -631,7 +666,8 @@ public final class HeroBannerPictureView: UIView {
     /// stands on (`groundPixels`); the ramp draws it.
     public var pageTone: UIColor = Surface.page
 
-    /// The ground behind `rect` (this view's coordinates) — the blurred
+    /// The ground behind `rect` (this view's coordinates at rest — a stretch
+    /// changes nothing under the type) — the blurred
     /// picture with the page's tone over it as the ramp lays it, with the
     /// picture AT REST: the parallax is not the picture's to decide an ink
     /// by. Nil until the levels are baked.
@@ -658,7 +694,7 @@ public final class HeroBannerPictureView: UIView {
             x: frame.midX - CGFloat(image.width) * scale / 2,
             y: frame.midY - CGFloat(image.height) * scale / 2
         )
-        let area = rect.intersection(bounds)
+        let area = rect.intersection(restBounds)
         guard !area.isNull, area.width > 0, area.height > 0 else { return nil }
         let pixelRect = CGRect(
             x: (area.minX - origin.x) / scale, y: (area.minY - origin.y) / scale,
@@ -703,13 +739,15 @@ public final class HeroBannerPictureView: UIView {
         super.init(frame: frame)
         isUserInteractionEnabled = false
         clipsToBounds = true
+        stage.isUserInteractionEnabled = false
+        addSubview(stage)
         sharp.contentMode = .scaleAspectFill
         sharp.clipsToBounds = true
-        addSubview(sharp)
+        stage.addSubview(sharp)
         blur.isUserInteractionEnabled = false
         blur.isHidden = true
         blur.layer.contentsGravity = .resize
-        addSubview(blur)
+        stage.addSubview(blur)
         // The page's tone is part of the ground (`groundPixels`): a flip of
         // the appearance is a new ground, to be read again like a new bake.
         registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: HeroBannerPictureView, _) in
@@ -730,6 +768,11 @@ public final class HeroBannerPictureView: UIView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         defer { CATransaction.commit() }
+        // The stage is the view at rest; a stretch only zooms it.
+        let resting = restBounds
+        stage.bounds = resting
+        stage.center = CGPoint(x: resting.midX, y: stretch + resting.midY)
+        applyStretch()
         // At rest; the parallax is a transform on top (see `pictureShift`).
         let rest = pictureFrame.offsetBy(dx: 0, dy: -pictureShift)
         place(sharp, at: rest)
@@ -741,11 +784,38 @@ public final class HeroBannerPictureView: UIView {
         #endif
     }
 
+    /// Zooms the stage — the picture and its blur as they are at rest — just
+    /// enough for the picture to reach the stretched view's top, about the
+    /// top of the type's container (`fade.blurStart`): the line where the
+    /// sharp picture meets its blur holds, the picture above it grows, as a
+    /// stretchy banner's does. Identity at rest.
+    ///
+    /// ⚠️ ABOUT THE CONTAINER'S TOP, NOT THE FOOT: zoomed about the foot,
+    /// the blur's climb grew up over the name with the pull — the type's
+    /// ground changing under a gesture that should only move the picture.
+    private func applyStretch() {
+        let height = restBounds.height
+        guard stretch > 0, height > 0 else {
+            if stage.transform != .identity { stage.transform = .identity }
+            return
+        }
+        let anchor = max(0, min(fade?.blurStart ?? height, height))
+        // How far above the anchor the picture reaches at rest; zoomed by
+        // `scale`, it must reach `stretch` further.
+        let reach = anchor - pictureFrame.minY
+        let scale = reach > 0 ? max(1, (anchor + stretch) / reach) : max(1, bounds.height / height)
+        let dy = anchor - height / 2
+        stage.transform = CGAffineTransform(translationX: 0, y: dy)
+            .scaledBy(x: scale, y: scale)
+            .translatedBy(x: 0, y: -dy)
+    }
+
     /// The levels' climb over the view, as the spans that can show — each
     /// fading in from where it starts — or none before a bake or a fade.
     private var shownSpans: [(start: CGFloat, full: CGFloat)] {
-        guard bake != nil, let fade, bounds.height > 0 else { return [] }
-        return HeroBannerFade.levelSpans(fade).filter { $0.start < bounds.height }
+        let height = restBounds.height
+        guard bake != nil, let fade, height > 0 else { return [] }
+        return HeroBannerFade.levelSpans(fade).filter { $0.start < height }
     }
 
     /// Blends the levels into the blur image for where the picture stands
@@ -764,7 +834,7 @@ public final class HeroBannerPictureView: UIView {
               image.size.width > 0, image.size.height > 0
         else { return hideBlur() }
         let top = max(0, first.start.rounded(.down))
-        let rows = Int((bounds.height - top).rounded(.up))
+        let rows = Int((restBounds.height - top).rounded(.up))
         // The picture as it stands — aspect-filled into its frame, slid by
         // the parallax — which the levels cover edge to edge.
         let frame = pictureFrame
@@ -865,19 +935,19 @@ public final class HeroBannerPictureView: UIView {
     private var material: (view: UIVisualEffectView, mask: CAGradientLayer)?
 
     private func layoutMaterialComparison() {
-        guard Self.comparesMaterial, let fade, bounds.height > 0 else { return }
+        guard Self.comparesMaterial, let fade, restBounds.height > 0 else { return }
         hideBlur()
         let material = self.material ?? {
             let view = UIVisualEffectView(effect: UIBlurEffect(style: .regular))
             let maskView = MaskView()
             view.mask = maskView
-            addSubview(view)
+            stage.addSubview(view)
             let made = (view, maskView.gradient)
             self.material = made
             return made
         }()
         let top = max(0, fade.blurStart.rounded(.down))
-        material.view.frame = CGRect(x: 0, y: top, width: bounds.width, height: bounds.height - top)
+        material.view.frame = CGRect(x: 0, y: top, width: bounds.width, height: restBounds.height - top)
         material.view.mask?.frame = material.view.bounds
         let height = material.view.bounds.height
         material.mask.colors = [UIColor.clear.cgColor, UIColor.black.cgColor]
@@ -1007,11 +1077,15 @@ public final class HeroBannerPictureView: UIView {
     /// must leave alone.
     public private(set) var debugComposeCount = 0
     public private(set) var debugBakeCount = 0
+    /// Where the sharp picture covers, in this view's current space — the
+    /// stretch's zoom included.
+    public var debugPictureCover: CGRect { sharp.convert(sharp.bounds, to: self) }
     /// The levels showing, and where each one fades in, in this view's
-    /// space — clamped to the view, as a mask's stops were.
+    /// space at rest — clamped to the view, as a mask's stops were.
     public var debugVisibleLevels: [(start: CGFloat, full: CGFloat)] {
         guard !blur.isHidden else { return [] }
-        func clamp(_ y: CGFloat) -> CGFloat { max(0, min(y, bounds.height)) }
+        let height = restBounds.height
+        func clamp(_ y: CGFloat) -> CGFloat { max(0, min(y, height)) }
         return shownSpans.map { (clamp($0.start), clamp(max($0.full, $0.start + 1))) }
     }
     #endif
@@ -1019,14 +1093,24 @@ public final class HeroBannerPictureView: UIView {
 
 /// The page's tone climbing a `HeroBannerPictureView` — the picture's fade
 /// into the page, `HeroBannerFade`'s ramp. Pin it over the picture in the
-/// same coordinates and hand it the same `fade` (and, if it is not the
-/// page's, the same tone as the picture's `pageTone`).
+/// same coordinates and hand it the same `fade` and `stretch` (and, if it is
+/// not the page's, the same tone as the picture's `pageTone`).
+///
+/// A stretch moves the gradient down with the picture's resting top and
+/// changes nothing else: the stops are the resting ones, redrawn only when
+/// the fade, the resting height or the tone changes — never per frame of a
+/// pull.
 public final class HeroBannerRampView: UIView {
-    override public class var layerClass: AnyClass { CAGradientLayer.self }
-
-    /// The fade, in this view's coordinates. Nil draws nothing.
+    /// The fade, in this view's coordinates at rest (see
+    /// `HeroBannerPictureView.fade`). Nil draws nothing.
     public var fade: HeroBannerFade.Geometry? {
         didSet { if fade != oldValue { setNeedsLayout() } }
+    }
+
+    /// How far the view's top stands above where it rests — the picture's
+    /// `stretch`. Above its resting top the ramp is clear.
+    public var stretch: CGFloat = 0 {
+        didSet { if stretch != oldValue { setNeedsLayout() } }
     }
 
     /// The tone the ramp lands on — the page the header sits on.
@@ -1034,9 +1118,15 @@ public final class HeroBannerRampView: UIView {
         didSet { setNeedsLayout() }
     }
 
+    /// The ramp, laid over the view as it rests.
+    private let gradient = CAGradientLayer()
+    /// What the gradient's stops were drawn for.
+    private var drawn: (fade: HeroBannerFade.Geometry, height: CGFloat, tone: CGColor)?
+
     override public init(frame: CGRect) {
         super.init(frame: frame)
         isUserInteractionEnabled = false
+        layer.addSublayer(gradient)
         // A CGColor does not follow the appearance; re-resolve on a flip.
         registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: HeroBannerRampView, _) in
             self.setNeedsLayout()
@@ -1046,31 +1136,35 @@ public final class HeroBannerRampView: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    private var gradient: CAGradientLayer? { layer as? CAGradientLayer }
-
     override public func layoutSubviews() {
         super.layoutSubviews()
         HeroBannerCost.measure(.ramp) { layoutRamp() }
     }
 
     private func layoutRamp() {
-        guard let gradient else { return }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         defer { CATransaction.commit() }
-        guard let fade, bounds.height > 0 else {
+        let height = max(0, bounds.height - stretch)
+        gradient.frame = CGRect(x: 0, y: stretch, width: bounds.width, height: height)
+        guard let fade, height > 0 else {
             gradient.colors = []
+            drawn = nil
             return
         }
-        let stops = HeroBannerFade.rampStops(height: bounds.height, geometry: fade)
         let tone = tone.resolvedColor(with: traitCollection)
+        if let drawn, drawn.fade == fade, drawn.height == height, drawn.tone == tone.cgColor { return }
+        let stops = HeroBannerFade.rampStops(height: height, geometry: fade)
         gradient.locations = stops.map { NSNumber(value: Double($0.0)) }
         gradient.colors = stops.map { tone.withAlphaComponent($0.1).cgColor }
+        drawn = (fade, height, tone.cgColor)
     }
 
     #if DEBUG
-    public var debugLocations: [CGFloat] { (gradient?.locations ?? []).map { CGFloat($0.doubleValue) } }
-    public var debugAlphas: [CGFloat] { (gradient?.colors as? [CGColor] ?? []).map { $0.alpha } }
+    public var debugLocations: [CGFloat] { (gradient.locations ?? []).map { CGFloat($0.doubleValue) } }
+    public var debugAlphas: [CGFloat] { (gradient.colors as? [CGColor] ?? []).map { $0.alpha } }
+    /// Where the ramp is drawn, in this view's current space.
+    public var debugRampFrame: CGRect { gradient.frame }
     #endif
 }
 

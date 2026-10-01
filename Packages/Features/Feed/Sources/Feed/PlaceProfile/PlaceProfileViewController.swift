@@ -1173,6 +1173,10 @@ final class PlaceProfileViewController: UIViewController {
     private var rankTone = HeroInk.defaultTone
     private var likesTone = HeroInk.defaultTone
     private var heroInkReadFor: [CGRect] = []
+    #if DEBUG
+    /// How many times the ground under the type was read.
+    private(set) var debugInkReadCount = 0
+    #endif
 
     /// The name's and the counters' ink and edge: the picture's ink (white on
     /// a dark picture, black on a light one) with a soft shadow of the
@@ -1193,11 +1197,18 @@ final class PlaceProfileViewController: UIViewController {
     }
 
     private func readHeroInk(force: Bool) {
-        let blocks = [heroNameLabel, rankMetric, likesMetric].map { $0.convert($0.bounds, to: bannerBox) }
+        // In the HOST's space — the box's at rest, what the ground is read
+        // in: the type rides the box's foot, and in the box's own space a
+        // pull-down (the box stretching up) moved it down its ground and read
+        // the ground again every two points of the pull.
+        let blocks = [heroNameLabel, rankMetric, likesMetric].map { $0.convert($0.bounds, to: headerHost) }
         let moved = blocks.count != heroInkReadFor.count
             || zip(blocks, heroInkReadFor).contains { abs($0.minY - $1.minY) > 2 || abs($0.height - $1.height) > 2 }
         guard force || moved, let nameGround = bannerView.groundPixels(behind: blocks[0]) else { return }
         heroInkReadFor = blocks
+        #if DEBUG
+        debugInkReadCount += 1
+        #endif
         let name = HeroInk.tone(forGround: nameGround, current: nameTone)
         var rank = rankTone
         if !rankMetric.isHidden, let ground = bannerView.groundPixels(behind: blocks[1]) {
@@ -1238,8 +1249,11 @@ final class PlaceProfileViewController: UIViewController {
     private func placeHeroFade() {
         guard let metricsBand else { return }
         bannerBox.layoutIfNeeded()
-        let name = heroNameLabel.frame
-        let foot = bannerBox.bounds.height
+        // In the host's space, which is the box's AT REST (its top rests on
+        // the host's): a pull-down stretches the box above, and must not move
+        // the fade — see `HeroBannerPictureView`.
+        let name = heroNameLabel.convert(heroNameLabel.bounds, to: headerHost)
+        let foot = bannerBox.frame.maxY
         guard name.height > 0, metricsBand.frame.height > 0, foot > name.minY else { return }
         // Shouldered, as a profile's poster: the name stands on the picture
         // where the blur is still nil, so the page's tone is already half
@@ -1266,6 +1280,13 @@ final class PlaceProfileViewController: UIViewController {
         bannerView.pictureOutset = UIEdgeInsets(top: overshoot, left: 0, bottom: overshoot, right: 0)
         let clamped = min(max(travelled, 0), headerTravel)
         bannerView.pictureShift = clamped * Self.bannerParallaxFraction
+        // A pull-down carries the host down by the overscroll while the
+        // box's top holds at the view's: the box is stretched by exactly
+        // that, and the picture and its ramp only zoom (set before the
+        // layout pass the offset causes).
+        let stretch = max(0, -travelled)
+        bannerView.stretch = stretch
+        bannerRamp.stretch = stretch
     }
 
     /// What actually COVERS the hosted list right now, top and bottom.
@@ -2333,13 +2354,17 @@ extension PlaceProfileViewController {
     }
     /// The banner's fade, in the view's space.
     var debugBannerFade: HeroBannerFade.Geometry? {
-        bannerView.fade?.offset(by: debugBannerBoxFrame.minY)
+        bannerView.fade?.offset(by: headerHost.frame.minY)
     }
     /// The blur levels showing, in the view's space.
     var debugBannerBlurLevels: [(start: CGFloat, full: CGFloat)] {
-        let top = debugBannerBoxFrame.minY
+        let top = headerHost.frame.minY
         return bannerView.debugVisibleLevels.map { ($0.start + top, $0.full + top) }
     }
+    var debugBlurComposeCount: Int { bannerView.debugComposeCount }
+    var debugBlurBakeCount: Int { bannerView.debugBakeCount }
+    /// Where the sharp picture covers, in the view's space.
+    var debugBannerPictureCover: CGRect { bannerView.convert(bannerView.debugPictureCover, to: view) }
     var debugRampLocations: [CGFloat] { bannerRamp.debugLocations }
     var debugRampAlphas: [CGFloat] { bannerRamp.debugAlphas }
     var debugBlurBakeMilliseconds: Double { bannerView.debugLastBakeMilliseconds }
