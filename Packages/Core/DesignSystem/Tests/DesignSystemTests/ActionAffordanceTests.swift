@@ -317,7 +317,10 @@ struct StakeShopTests {
             let control = UIButton()
             root.view.addSubview(control)
 
-            try #require(StakeShop.openAction(from: control))()
+            // Bound first: calling `#require`'s result in place crashed the
+            // type checker (Swift 6.4, ConstraintSystem assertion).
+            let open = try #require(StakeShop.openAction(from: control))
+            open()
 
             #expect(root.presentedViewController == nil)
         }
