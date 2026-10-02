@@ -12,13 +12,26 @@ import Foundation
 /// carrying its own coordinate and its own like count, so every city has a
 /// clear most-trending post and every country a clear face.
 ///
-/// Three groups, and the split is the point:
+/// Two tiers of countries:
+/// - **featured** (`featuredCountries`) — twelve countries with several
+///   posts across one or two cities each, so cities and countries cluster;
+/// - **one post** (`onePostCountries`) — ninety-four more, ONE post each in
+///   one city, so the world and continent framings carry a country marker
+///   wherever the map has room for one (product ask, 2 October 2026: "at
+///   least 100 countries with a post, at most one post each" — the data must
+///   not explode).
+///
+/// And three lock states, and the split is the point:
 /// - **unlocked by default** — the countries the mock account owns "as if it
 ///   had bought them" (`unlockedCountryCodes`), seeded into the account's
-///   `CountryUnlockStore` ONCE by the shell;
-/// - **locked WITH posts** — Mexico and South Korea, so the locked-country
-///   design has a country whose standing comes from real posts to sell;
-/// - everything else stays locked with no posts, as before.
+///   `CountryUnlockStore` ONCE per code by the shell — ten featured ones and
+///   eighteen one-post ones, a few on every continent, so every framing
+///   shows open markers beside locked ones and the open-beats-locked
+///   collision rule always has something to arbitrate;
+/// - **locked WITH posts** — Mexico, South Korea and most one-post
+///   countries, so the locked-country design shows across the whole map,
+///   each with a standing that comes from a real post;
+/// - everything else stays locked with no posts, and wears the empty disc.
 ///
 /// Media reuses the corpus's bundled clips and photographs (`syntheticVideo`,
 /// `photo` slots) — nothing new is bundled.
@@ -71,7 +84,13 @@ public enum MockWorldSeed {
 
     // MARK: - The countries
 
-    public static let countries: [Country] = [
+    /// Every seeded country, featured first: the placement walk numbers
+    /// posts in this order, so the featured posts keep their ids
+    /// (`post-world-00`…`48`) and the one-post countries follow.
+    public static let countries: [Country] = featuredCountries + onePostCountries
+
+    /// The countries with several posts, city by city.
+    public static let featuredCountries: [Country] = [
         Country(code: "ES", placeID: "country:spain", name: "Spain", unlockedByDefault: true, cities: [
             City(placeID: "city:barcelona", name: "Barcelona", latitude: 41.3874, longitude: 2.1686, posts: [
                 Post(kind: .video, caption: "Sunset from the bunkers, the whole city turning gold. 🌇", likes: 2_350, author: 0),
@@ -184,6 +203,235 @@ public enum MockWorldSeed {
             ])
         ])
     ]
+
+    /// The countries with ONE post, in one city — near the capital or the
+    /// best-known city, at a point well inside the country's border in
+    /// `CountryAtlas` (≥ 0.12° from any coast or frontier, so a simplified
+    /// outline can't put it at sea or next door: Lisbon, Stockholm,
+    /// Copenhagen and Reykjavik all fell off their coasts, hence Évora,
+    /// Uppsala, Herning and Thingvellir). Every like count is distinct,
+    /// from each other and from the featured posts, so wherever two
+    /// country markers collide the stronger one is decided by likes, never
+    /// by an id tie-break; 18 of the 94 are unlocked by default.
+    public static let onePostCountries: [Country] = [
+        // Europe
+        solo("PT", "Portugal", unlocked: true, in: "Évora", 38.5714, -7.9135,
+             Post(kind: .photo, caption: "Roman temple at dusk, storks on every chimney.", likes: 1_265, author: 1)),
+        solo("NL", "Netherlands", unlocked: true, in: "Amsterdam", 52.3676, 4.9041,
+             Post(kind: .video, caption: "Canal bikes at rush hour, a ballet nobody rehearsed. 🚲", likes: 1_845, author: 4)),
+        solo("BE", "Belgium", in: "Brussels", 50.8503, 4.3517,
+             Post(kind: .text(iconFace: false), caption: "Ranked the fries stands of the Grand-Place. Science.", likes: 415, author: 7)),
+        solo("CH", "Switzerland", unlocked: true, in: "Zurich", 47.3769, 8.5417,
+             Post(kind: .photo, caption: "Lake swim before work, the Alps watching. 🏔️", likes: 985, author: 2)),
+        solo("AT", "Austria", in: "Vienna", 48.2082, 16.3738,
+             Post(kind: .video, caption: "A string quartet in the U-Bahn, nobody blinked. 🎻", likes: 1_135, author: 5)),
+        solo("PL", "Poland", in: "Warsaw", 52.2297, 21.0122,
+             Post(kind: .text(iconFace: true), caption: "Pierogi count: lost track at twelve. :lol:", likes: 645, author: 0)),
+        solo("CZ", "Czechia", in: "Prague", 50.0755, 14.4378,
+             Post(kind: .photo, caption: "Charles Bridge at 6am, statues and fog only.", likes: 1_515, author: 3)),
+        solo("HU", "Hungary", in: "Budapest", 47.4979, 19.0402,
+             Post(kind: .video, caption: "Széchenyi baths steaming in the snow ♨️", likes: 875, author: 6)),
+        solo("GR", "Greece", unlocked: true, in: "Larissa", 39.6390, 22.4191,
+             Post(kind: .photo, caption: "Meteora monasteries on their pillars, a short drive away.", likes: 545, author: 1)),
+        solo("SE", "Sweden", unlocked: true, in: "Uppsala", 59.8586, 17.6389,
+             Post(kind: .text(iconFace: false), caption: "Fika is a meeting. Meetings are fika. Productive day.", likes: 235, author: 4)),
+        solo("NO", "Norway", in: "Oslo", 59.9139, 10.7522,
+             Post(kind: .photo, caption: "Walked on the opera house roof, straight into the fjord light.", likes: 1_095, author: 7)),
+        solo("DK", "Denmark", in: "Herning", 56.1393, 8.9738,
+             Post(kind: .text(iconFace: true), caption: "Wind so strong my bike went home without me. :weather:", likes: 165, author: 2)),
+        solo("FI", "Finland", in: "Tampere", 61.4978, 23.7610,
+             Post(kind: .video, caption: "Sauna, lake, sauna, lake. Repeat until enlightened. 🧖", likes: 705, author: 5)),
+        solo("IE", "Ireland", in: "Athlone", 53.4239, -7.9407,
+             Post(kind: .photo, caption: "Oldest pub in Ireland, allegedly. The pint agrees.", likes: 335, author: 0)),
+        solo("IS", "Iceland", in: "Thingvellir", 64.2559, -21.1299,
+             Post(kind: .video, caption: "Standing between two continental plates. Small, very small.", likes: 1_385, author: 3)),
+        solo("HR", "Croatia", in: "Zagreb", 45.8150, 15.9819,
+             Post(kind: .text(iconFace: false), caption: "Museum of Broken Relationships: cried twice, recommend.", likes: 185, author: 6)),
+        solo("RO", "Romania", in: "Bucharest", 44.4268, 26.1025,
+             Post(kind: .photo, caption: "The Palace of Parliament does not fit in any frame.", likes: 458, author: 1)),
+        solo("BG", "Bulgaria", in: "Sofia", 42.6977, 23.3219,
+             Post(kind: .text(iconFace: true), caption: "Banitsa for breakfast, banitsa for lunch. :blush:", likes: 275, author: 4)),
+        solo("RS", "Serbia", in: "Belgrade", 44.7866, 20.4489,
+             Post(kind: .video, caption: "Sunset where the Sava meets the Danube 🌅", likes: 615, author: 7)),
+        solo("UA", "Ukraine", in: "Kyiv", 50.4501, 30.5234,
+             Post(kind: .photo, caption: "Golden domes after the rain.", likes: 1_045, author: 2)),
+        solo("EE", "Estonia", in: "Tartu", 58.3780, 26.7290,
+             Post(kind: .text(iconFace: false), caption: "University town, every café is a library.", likes: 125, author: 5)),
+        solo("LT", "Lithuania", in: "Vilnius", 54.6872, 25.2797,
+             Post(kind: .photo, caption: "Užupis declared itself a republic. I got a passport stamp.", likes: 395, author: 0)),
+        // Asia
+        solo("CN", "China", in: "Beijing", 39.9042, 116.4074,
+             Post(kind: .video, caption: "Hutong morning, bikes and steam from every doorway.", likes: 1_965, author: 3)),
+        solo("IN", "India", unlocked: true, in: "New Delhi", 28.6139, 77.2090,
+             Post(kind: .photo, caption: "Chandni Chowk spice market, every colour and smell at once 🌶️", likes: 1_795, author: 6)),
+        solo("ID", "Indonesia", unlocked: true, in: "Bandung", -6.9175, 107.6191,
+             Post(kind: .video, caption: "Tea terraces above the clouds 🍵", likes: 945, author: 1)),
+        solo("PH", "Philippines", in: "Baguio", 16.4023, 120.5960,
+             Post(kind: .photo, caption: "Strawberry farm, pine air, jacket weather in the tropics.", likes: 485, author: 4)),
+        solo("VN", "Vietnam", unlocked: true, in: "Hanoi", 21.0278, 105.8342,
+             Post(kind: .text(iconFace: true), caption: "Crossed the street with confidence. Traffic parted. Legend. :lmao:", likes: 1_225, author: 7)),
+        solo("TH", "Thailand", unlocked: true, in: "Bangkok", 13.7563, 100.5018,
+             Post(kind: .video, caption: "Long-tail boat through the khlongs at golden hour 🛶", likes: 1_665, author: 2)),
+        solo("TR", "Turkey", in: "Ankara", 39.9334, 32.8597,
+             Post(kind: .photo, caption: "Simit and tea on the citadel walls.", likes: 585, author: 5)),
+        solo("IR", "Iran", in: "Tehran", 35.6892, 51.3890,
+             Post(kind: .photo, caption: "Tochal at sunrise, the whole city below the snow line.", likes: 825, author: 0)),
+        solo("SA", "Saudi Arabia", in: "Riyadh", 24.7136, 46.6753,
+             Post(kind: .video, caption: "Edge of the World cliffs, wind and nothing else.", likes: 355, author: 3)),
+        solo("AE", "United Arab Emirates", unlocked: true, in: "Liwa Oasis", 23.1333, 53.7833,
+             Post(kind: .video, caption: "Dunes taller than buildings, sunset on every ridge 🏜️", likes: 1_165, author: 6)),
+        solo("IL", "Israel", in: "Beersheba", 31.2518, 34.7913,
+             Post(kind: .text(iconFace: false), caption: "Desert sunrise from the old city, coffee with cardamom.", likes: 145, author: 1)),
+        solo("JO", "Jordan", in: "Amman", 31.9454, 35.9284,
+             Post(kind: .photo, caption: "Citadel view, the whole city in sandstone.", likes: 735, author: 4)),
+        solo("NP", "Nepal", in: "Kathmandu", 27.7172, 85.3240,
+             Post(kind: .video, caption: "Prayer flags snapping over Swayambhunath 🏔️", likes: 1_105, author: 7)),
+        solo("LK", "Sri Lanka", in: "Kandy", 7.2906, 80.6337,
+             Post(kind: .text(iconFace: true), caption: "The train to Ella left without me. Tea instead. :blush:", likes: 505, author: 2)),
+        solo("MY", "Malaysia", in: "Kuala Lumpur", 3.1390, 101.6869,
+             Post(kind: .photo, caption: "Batu Caves steps, 272 of them, every one painted.", likes: 895, author: 5)),
+        solo("KH", "Cambodia", in: "Phnom Penh", 11.5564, 104.9282,
+             Post(kind: .text(iconFace: false), caption: "Riverside sunset, a thousand scooters, one quiet bench.", likes: 215, author: 0)),
+        solo("MN", "Mongolia", in: "Ulaanbaatar", 47.8864, 106.9057,
+             Post(kind: .video, caption: "Steppe horses at full gallop 🐎", likes: 445, author: 3)),
+        solo("KZ", "Kazakhstan", in: "Almaty", 43.2220, 76.8512,
+             Post(kind: .photo, caption: "Big Almaty Lake, turquoise like it was edited.", likes: 375, author: 6)),
+        solo("UZ", "Uzbekistan", in: "Samarkand", 39.6542, 66.9597,
+             Post(kind: .photo, caption: "Registan tiles at noon, blue on blue on blue.", likes: 1_315, author: 1)),
+        solo("PK", "Pakistan", in: "Islamabad", 33.6844, 73.0479,
+             Post(kind: .text(iconFace: false), caption: "Margalla hills hike, monkeys stole a samosa.", likes: 265, author: 4)),
+        solo("BD", "Bangladesh", in: "Dhaka", 23.8103, 90.4125,
+             Post(kind: .video, caption: "Rickshaw art, every one a gallery on wheels.", likes: 315, author: 7)),
+        solo("TW", "Taiwan", in: "Taipei", 25.0330, 121.5654,
+             Post(kind: .text(iconFace: true), caption: "Night market plan: one of everything. Status: ongoing. :lol:", likes: 1_155, author: 2)),
+        solo("GE", "Georgia", in: "Tbilisi", 41.7151, 44.8271,
+             Post(kind: .photo, caption: "Sulfur baths and painted balconies.", likes: 565, author: 5)),
+        solo("LA", "Laos", in: "Luang Prabang", 19.8856, 102.1347,
+             Post(kind: .video, caption: "Alms giving at dawn, saffron robes in a line.", likes: 655, author: 0)),
+        solo("MM", "Myanmar", in: "Mandalay", 21.9588, 96.0891,
+             Post(kind: .photo, caption: "U Bein bridge at sunset, a thousand teak posts.", likes: 245, author: 3)),
+        solo("IQ", "Iraq", in: "Baghdad", 33.3152, 44.3661,
+             Post(kind: .text(iconFace: false), caption: "Mutanabbi Street on a Friday, books everywhere.", likes: 105, author: 6)),
+        solo("OM", "Oman", in: "Nizwa", 22.9333, 57.5333,
+             Post(kind: .photo, caption: "Friday goat market at the fort.", likes: 425, author: 1)),
+        solo("AM", "Armenia", in: "Yerevan", 40.1792, 44.4991,
+             Post(kind: .text(iconFace: true), caption: "Ararat in the window, every window. :blush:", likes: 285, author: 4)),
+        solo("AZ", "Azerbaijan", in: "Ganja", 40.6828, 46.3606,
+             Post(kind: .text(iconFace: false), caption: "Bottle house: built from 48,000 bottles. Counted none.", likes: 95, author: 7)),
+        // Africa
+        solo("EG", "Egypt", unlocked: true, in: "Cairo", 30.0444, 31.2357,
+             Post(kind: .video, caption: "Felucca on the Nile as the call to prayer rolls in 🌅", likes: 1_935, author: 2)),
+        solo("NG", "Nigeria", in: "Abuja", 9.0765, 7.3986,
+             Post(kind: .photo, caption: "Zuma Rock, bigger than the photos say.", likes: 665, author: 5)),
+        solo("KE", "Kenya", unlocked: true, in: "Nairobi", -1.2864, 36.8172,
+             Post(kind: .video, caption: "Giraffes against the skyline in Nairobi National Park 🦒", likes: 1_485, author: 0)),
+        solo("ET", "Ethiopia", in: "Addis Ababa", 9.0300, 38.7400,
+             Post(kind: .text(iconFace: true), caption: "Coffee ceremony round three. Sleep is cancelled. :lol:", likes: 535, author: 3)),
+        solo("ZA", "South Africa", unlocked: true, in: "Johannesburg", -26.2041, 28.0473,
+             Post(kind: .photo, caption: "Maboneng murals, a new one every corner.", likes: 1_085, author: 6)),
+        solo("TZ", "Tanzania", in: "Arusha", -3.3869, 36.6830,
+             Post(kind: .video, caption: "Kilimanjaro came out of the clouds for ten minutes.", likes: 1_245, author: 1)),
+        solo("GH", "Ghana", in: "Kumasi", 6.6885, -1.6244,
+             Post(kind: .photo, caption: "Kejetia market from above, a sea of umbrellas.", likes: 365, author: 4)),
+        solo("SN", "Senegal", in: "Thiès", 14.7910, -16.9359,
+             Post(kind: .text(iconFace: false), caption: "Tapestry workshop, the looms never stop.", likes: 135, author: 7)),
+        solo("DZ", "Algeria", in: "Constantine", 36.3650, 6.6147,
+             Post(kind: .photo, caption: "Bridges strung across the gorge, city of bridges indeed.", likes: 475, author: 2)),
+        solo("TN", "Tunisia", in: "Kairouan", 35.6781, 10.0963,
+             Post(kind: .text(iconFace: true), caption: "Makroudh tasting: nine shops, nine winners. :blush:", likes: 225, author: 5)),
+        solo("UG", "Uganda", in: "Kampala", 0.3476, 32.5825,
+             Post(kind: .video, caption: "Boda-boda ride through the evening rush.", likes: 305, author: 0)),
+        solo("RW", "Rwanda", in: "Kigali", -1.9441, 30.0619,
+             Post(kind: .photo, caption: "Thousand hills, all of them green.", likes: 515, author: 3)),
+        solo("CI", "Ivory Coast", in: "Yamoussoukro", 6.8276, -5.2893,
+             Post(kind: .video, caption: "The basilica dome against a storm sky.", likes: 405, author: 6)),
+        solo("CM", "Cameroon", in: "Yaoundé", 3.8480, 11.5021,
+             Post(kind: .text(iconFace: false), caption: "Ndolé recipe acquired. Family secret, do not ask.", likes: 175, author: 1)),
+        solo("AO", "Angola", in: "Huambo", -12.7761, 15.7392,
+             Post(kind: .photo, caption: "Highland mornings, red earth and mist.", likes: 155, author: 4)),
+        solo("MG", "Madagascar", in: "Antananarivo", -18.8792, 47.5079,
+             Post(kind: .video, caption: "Lemur on the guide's shoulder, posing like a pro 🐒", likes: 1_025, author: 7)),
+        solo("NA", "Namibia", in: "Windhoek", -22.5609, 17.0658,
+             Post(kind: .photo, caption: "Night sky outside the city, the Milky Way to the ground ✨", likes: 1_295, author: 2)),
+        solo("BW", "Botswana", in: "Maun", -19.9953, 23.4181,
+             Post(kind: .video, caption: "Mokoro through the Okavango, hippos keeping an eye.", likes: 1_455, author: 5)),
+        solo("ZM", "Zambia", in: "Lusaka", -15.3875, 28.3228,
+             Post(kind: .text(iconFace: false), caption: "Nshima lesson: technique is everything, I have none.", likes: 115, author: 0)),
+        solo("ZW", "Zimbabwe", in: "Harare", -17.8252, 31.0335,
+             Post(kind: .photo, caption: "Jacarandas in bloom, purple streets for a week 💜", likes: 255, author: 3)),
+        solo("MZ", "Mozambique", in: "Nampula", -15.1165, 39.2666,
+             Post(kind: .text(iconFace: true), caption: "Matapa for dinner, recipe in my head forever. :blush:", likes: 195, author: 6)),
+        solo("ML", "Mali", in: "Bamako", 12.6392, -8.0029,
+             Post(kind: .video, caption: "Kora music at a rooftop gig 🎶", likes: 345, author: 1)),
+        solo("SD", "Sudan", in: "Khartoum", 15.5007, 32.5599,
+             Post(kind: .photo, caption: "Where the Blue Nile meets the White, two colours side by side.", likes: 208, author: 4)),
+        solo("CD", "DR Congo", in: "Kisangani", 0.5153, 25.1910,
+             Post(kind: .video, caption: "Wagenia fishermen at the falls, baskets in the rapids.", likes: 295, author: 7)),
+        solo("LY", "Libya", in: "Sabha", 27.0377, 14.4283,
+             Post(kind: .photo, caption: "Ubari dunes and a lake in the middle of them.", likes: 85, author: 2)),
+        // Americas
+        solo("AR", "Argentina", unlocked: true, in: "Córdoba", -31.4201, -64.1888,
+             Post(kind: .photo, caption: "Sierras road trip, asado at every stop 🔥", likes: 1_195, author: 5)),
+        solo("CL", "Chile", unlocked: true, in: "Santiago", -33.4489, -70.6693,
+             Post(kind: .video, caption: "Andes over the city after the rain, snow to the edge.", likes: 1_375, author: 0)),
+        solo("PE", "Peru", unlocked: true, in: "Cusco", -13.5320, -71.9675,
+             Post(kind: .photo, caption: "Rainbow mountain at 5,000 m, breathless twice 🌈", likes: 1_895, author: 3)),
+        solo("CO", "Colombia", unlocked: true, in: "Bogotá", 4.7110, -74.0721,
+             Post(kind: .text(iconFace: true), caption: "Ajiaco at altitude: hug in a bowl. :blush:", likes: 1_015, author: 6)),
+        solo("VE", "Venezuela", in: "Caracas", 10.4806, -66.9036,
+             Post(kind: .photo, caption: "Ávila cable car into the clouds.", likes: 525, author: 1)),
+        solo("EC", "Ecuador", in: "Quito", -0.1807, -78.4678,
+             Post(kind: .video, caption: "Standing on the equator line, one foot per hemisphere.", likes: 685, author: 4)),
+        solo("BO", "Bolivia", in: "La Paz", -16.4897, -68.1193,
+             Post(kind: .video, caption: "Teleférico over La Paz, the city poured into a bowl.", likes: 1_175, author: 7)),
+        solo("PY", "Paraguay", in: "Coronel Oviedo", -25.4167, -56.4500,
+             Post(kind: .text(iconFace: false), caption: "Tereré in 34 degrees, the only correct choice.", likes: 75, author: 2)),
+        solo("UY", "Uruguay", in: "Tacuarembó", -31.7333, -55.9833,
+             Post(kind: .photo, caption: "Gaucho festival, horses and guitars all night.", likes: 142, author: 5)),
+        solo("CU", "Cuba", in: "Santa Clara", 22.4069, -79.9647,
+             Post(kind: .video, caption: "Vintage cars on the square, every one a different blue.", likes: 785, author: 0)),
+        solo("DO", "Dominican Republic", in: "Santiago de los Caballeros", 19.4517, -70.6970,
+             Post(kind: .text(iconFace: true), caption: "Merengue lesson one: hips do not lie, mine do. :lmao:", likes: 325, author: 3)),
+        solo("GT", "Guatemala", in: "Guatemala City", 14.6349, -90.5069,
+             Post(kind: .photo, caption: "Volcán de Fuego puffing over the valley 🌋", likes: 595, author: 6)),
+        solo("CR", "Costa Rica", in: "San José", 9.9281, -84.0907,
+             Post(kind: .video, caption: "Sloth crossing, traffic waited. Pura vida 🦥", likes: 1_065, author: 1)),
+        solo("HN", "Honduras", in: "Tegucigalpa", 14.0723, -87.1921,
+             Post(kind: .text(iconFace: false), caption: "Baleadas at midnight, the only rule.", likes: 65, author: 4)),
+        solo("NI", "Nicaragua", in: "Managua", 12.1150, -86.2362,
+             Post(kind: .photo, caption: "Masaya volcano glowing after dark.", likes: 238, author: 7)),
+        // Oceania
+        solo("NZ", "New Zealand", unlocked: true, in: "Hamilton", -37.7870, 175.2793,
+             Post(kind: .video, caption: "Hobbiton round doors, every garden perfect 🌿", likes: 1_575, author: 2)),
+        solo("PG", "Papua New Guinea", in: "Mount Hagen", -5.8580, 144.2310,
+             Post(kind: .photo, caption: "Highland sing-sing, feathers and face paint.", likes: 715, author: 5)),
+        solo("FJ", "Fiji", in: "Nadarivatu", -17.5667, 177.9667,
+             Post(kind: .text(iconFace: true), caption: "Kava ceremony: tongue numb, heart full. :blush:", likes: 385, author: 0))
+    ]
+
+    /// A country with ONE post, published in `city`. Place ids are the
+    /// names' slugs (`placeID(_:_:)`), as `MapMockPlaces` derives them.
+    private static func solo(
+        _ code: String, _ name: String, unlocked: Bool = false,
+        in city: String, _ latitude: Double, _ longitude: Double, _ post: Post
+    ) -> Country {
+        Country(
+            code: code, placeID: placeID("country", name), name: name, unlockedByDefault: unlocked,
+            cities: [City(
+                placeID: placeID("city", city), name: city,
+                latitude: latitude, longitude: longitude, posts: [post]
+            )]
+        )
+    }
+
+    /// "city:santiago-de-los-caballeros" from ("city", "Santiago de los
+    /// Caballeros"): lowercased, accents folded, words joined by dashes.
+    public static func placeID(_ kind: String, _ name: String) -> String {
+        let words = name.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+            .lowercased()
+            .split { !($0.isLetter || $0.isNumber) }
+        return kind + ":" + words.joined(separator: "-")
+    }
 
     /// The countries the mock account owns from the first launch, as if
     /// bought — France, the home country, is unlocked by rule and not here.
