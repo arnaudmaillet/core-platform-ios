@@ -217,13 +217,15 @@ enum SnapCommentsLayout {
     /// and declined for the same reason, plus the reply indent / thread
     /// seams / rail exclusion all fight a per-row capsule.)
     ///
-    /// At 0.65 a mid-tone photo lands near luminance 55 and a near-white
-    /// region near 89, about 6:1 against white body text — past 4.5:1 even on
-    /// the brightest media. It was 0.5 (a near-white region at about 3.9:1)
-    /// until 2026-09-28, when comments over bright posts read as too faint on
-    /// a device. Raising it buys contrast and costs visibility of the post,
-    /// which is the trade this constant exists to express.
-    static let backdropDimOpacity: CGFloat = 0.65
+    /// At 0.8 a white region lands at sRGB 51 and a mid-tone photo near 26:
+    /// white body text reads at about 12:1 over the brightest media, and a
+    /// dark photo still shows its shapes and motion. It was 0.5 (a
+    /// near-white region at about 3.9:1) until 2026-09-28, then 0.65 (about
+    /// 7:1, the post at 35% of its light) until 2026-10-02, when the
+    /// comments still did not stand out enough over the post. Raising it
+    /// buys contrast and costs visibility of the post, which is the trade
+    /// this constant exists to express; the post keeps a fifth of its light.
+    static let backdropDimOpacity: CGFloat = 0.8
 
     // MARK: The chrome's frost bands
     //

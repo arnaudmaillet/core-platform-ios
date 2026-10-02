@@ -1,3 +1,4 @@
+import Symbols
 import Testing
 import UIKit
 @testable import Feed
@@ -81,6 +82,123 @@ struct CommentsInputBarFieldTests {
             #expect(bar.debugFieldActionButton.configuration?.baseForegroundColor == .secondaryLabel)
         }
         #expect(CommentsInputBar.sendTint == .systemBlue)
+    }
+
+    // MARK: - The waveform ↔ send swap
+
+    /// The painted pixels of `image` drawn under `style`: (r, g, b) of every
+    /// pixel at least half opaque, un-premultiplied, 0…1.
+    private static func ink(of image: UIImage, _ style: UIUserInterfaceStyle) throws -> [(CGFloat, CGFloat, CGFloat)] {
+        let traits = UITraitCollection(traitsFrom: [
+            UITraitCollection(userInterfaceStyle: style), UITraitCollection(displayScale: 2),
+        ])
+        let format = UIGraphicsImageRendererFormat(for: traits)
+        format.opaque = false
+        var drawn: UIImage?
+        traits.performAsCurrent {
+            drawn = UIGraphicsImageRenderer(size: image.size, format: format).image { _ in
+                image.draw(at: .zero)
+            }
+        }
+        let cg = try #require(drawn?.cgImage)
+        let width = cg.width, height = cg.height
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        let space = try #require(CGColorSpace(name: CGColorSpace.sRGB))
+        try bytes.withUnsafeMutableBytes { buffer in
+            let context = try #require(CGContext(
+                data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8,
+                bytesPerRow: width * 4, space: space,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ))
+            context.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
+        }
+        var pixels: [(CGFloat, CGFloat, CGFloat)] = []
+        for index in stride(from: 0, to: bytes.count, by: 4) where bytes[index + 3] > 127 {
+            let alpha = CGFloat(bytes[index + 3])
+            pixels.append((CGFloat(bytes[index]) / alpha, CGFloat(bytes[index + 1]) / alpha,
+                           CGFloat(bytes[index + 2]) / alpha))
+        }
+        return pixels
+    }
+
+    private static func isBlue(_ pixel: (CGFloat, CGFloat, CGFloat)) -> Bool {
+        pixel.2 > 0.8 && pixel.2 - pixel.0 > 0.5
+    }
+
+    private static func isGrey(_ pixel: (CGFloat, CGFloat, CGFloat)) -> Bool {
+        abs(pixel.0 - pixel.2) < 0.1 && abs(pixel.1 - pixel.2) < 0.1
+    }
+
+    /// ⚠️ THE COLOUR IS IN THE GLYPH. The waveform is grey and the arrow blue
+    /// whatever the image view's tint says, so the replace can never show
+    /// one glyph in the other's colour: the tint was a channel of its own,
+    /// applied apart from the image, and the swap flashed the wrong ink.
+    /// The grey still follows the appearance (a conversation is light or
+    /// dark; a media post's composer is dark).
+    @Test func eachFaceCarriesItsOwnInk() throws {
+        let send = try #require(CommentsInputBar.fieldActionImage(sends: true))
+        let waveform = try #require(CommentsInputBar.fieldActionImage(sends: false))
+        for image in [send, waveform] {
+            #expect(image.renderingMode == .alwaysOriginal)
+            #expect(image.isSymbolImage, "a symbol, so the replace still runs")
+        }
+        var greys: [UIUserInterfaceStyle: CGFloat] = [:]
+        for style in [UIUserInterfaceStyle.light, .dark] {
+            let sendInk = try Self.ink(of: send, style)
+            try #require(!sendInk.isEmpty)
+            #expect(sendInk.allSatisfy(Self.isBlue), "\(style.rawValue): send drawn \(sendInk.prefix(3))")
+            let waveInk = try Self.ink(of: waveform, style)
+            try #require(!waveInk.isEmpty)
+            #expect(waveInk.allSatisfy(Self.isGrey), "\(style.rawValue): waveform drawn \(waveInk.prefix(3))")
+            greys[style] = waveInk.map(\.0).reduce(0, +) / CGFloat(waveInk.count)
+        }
+        #expect((greys[.dark] ?? 0) > (greys[.light] ?? 1) + 0.3,
+                "the waveform's grey resolves per appearance: \(greys)")
+    }
+
+    /// FAST: a down-then-up replace at 2.5× the system's speed (about 0.3 s at
+    /// 1×, about 0.13 s filmed at this one), on every face the button wears.
+    @Test func theSwapIsAFastReplace() throws {
+        let (bar, _, window) = hostedBar()
+        defer { window.isHidden = true }
+        #expect(CommentsInputBar.fieldActionTransitionSpeed >= 2)
+        for draft in ["", "Hello", ""] {
+            bar.draftText = draft
+            let transition = try #require(bar.debugFieldActionButton.configuration?.symbolContentTransition)
+            #expect(transition.options == .speed(CommentsInputBar.fieldActionTransitionSpeed))
+            let replace = try #require(transition.contentTransition as? ReplaceSymbolEffect)
+            #expect(replace == .replace.downUp)
+        }
+    }
+
+    /// Glyph and ink land in ONE update, at once: right after a keystroke the
+    /// drawn image view already shows the arrow in blue, and right after the
+    /// field empties the waveform in grey — no later layout pass (which a
+    /// line break runs inside the growth spring) owes either half.
+    @Test func glyphAndInkChangeInTheSameUpdate() throws {
+        let (bar, _, window) = hostedBar()
+        defer { window.isHidden = true }
+        let action = bar.debugFieldActionButton
+        func drawnInk() throws -> [(CGFloat, CGFloat, CGFloat)] {
+            let drawn = try #require(
+                Self.descendants(of: action).compactMap { $0 as? UIImageView }.first { $0.image != nil }
+            )
+            return try Self.ink(of: #require(drawn.image), bar.traitCollection.userInterfaceStyle)
+        }
+        #expect(try drawnInk().allSatisfy(Self.isGrey))
+        for draft in ["H", "Hello\nworld", "", "Hi"] {
+            bar.draftText = draft
+            let sends = !draft.isEmpty
+            #expect(bar.debugFieldActionSymbol
+                == (sends ? CommentsInputBar.sendSymbol : CommentsInputBar.waveformSymbol))
+            let ink = try drawnInk()
+            try #require(!ink.isEmpty)
+            #expect(ink.allSatisfy(sends ? Self.isBlue : Self.isGrey),
+                    "\(draft.debugDescription): drawn \(ink.prefix(3))")
+            // The spinner's ink agrees with the face.
+            let base = action.configuration?.baseForegroundColor
+            #expect(base == (sends ? CommentsInputBar.sendTint : CommentsInputBar.waveformTint))
+        }
     }
 
     // MARK: - Trailing glyphs
