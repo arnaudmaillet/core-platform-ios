@@ -193,6 +193,136 @@ struct MapMarkerDressTests {
         #expect(card.debugBadge.bounds.width == MapMarkerBadgeView.side, "its own size, not the card's")
     }
 
+    // MARK: - The border's width
+
+    /// Every bordered kind a place marker comes in: a square media card and a
+    /// text disc, as a country and as a city, open and locked.
+    static let borderedDresses: [(PinCardView.Face, MapMarkerDress)] = [
+        (.media, .resolve(kind: .country, countryCode: "FR", isLocked: false)),
+        (.media, .resolve(kind: .city, countryCode: "DE", isLocked: false)),
+        (.media, .resolve(kind: .country, countryCode: "MX", isLocked: true)),
+        (.text, .resolve(kind: .country, countryCode: "JP", isLocked: false)),
+        (.text, .resolve(kind: .city, countryCode: "FR", isLocked: false)),
+    ]
+
+    /// Asserts the flag border of `card` draws exactly where the neutral ring
+    /// of `neutral` does: same outer edge, same shape, same width — hairline
+    /// included, inside that width rather than beyond it.
+    private func expectSameFootprint(
+        _ card: PinCardView, as neutral: PinCardView, _ label: String,
+        sourceLocation: SourceLocation = #_sourceLocation
+    ) {
+        let border = card.debugFlagBorder
+        let ring = neutral.ringView
+        #expect(!border.isHidden && card.ringView.isHidden, "\(label): wears the flag border",
+                sourceLocation: sourceLocation)
+        #expect(border.debugFootprint == ring.layer.borderWidth,
+                "\(label): flag border \(border.debugFootprint)pt, neutral ring \(ring.layer.borderWidth)pt",
+                sourceLocation: sourceLocation)
+        // Both the hairline and the gradient are borders of views that fill
+        // the card, so their outer edge is the card's — the ring's.
+        let inCard = border.convert(border.bounds, to: card)
+        #expect(inCard == card.bounds, "\(label): \(inCard) vs \(card.bounds)", sourceLocation: sourceLocation)
+        #expect(border.debugHairline.frame == border.bounds && border.debugRingShape.frame == border.bounds,
+                "\(label): hairline \(border.debugHairline.frame) mask \(border.debugRingShape.frame) in \(border.bounds)",
+                sourceLocation: sourceLocation)
+        #expect(ring.frame == neutral.bounds, sourceLocation: sourceLocation)
+        for layer in [border.debugHairline.layer, border.debugRingShape.layer] {
+            #expect(layer.cornerRadius == card.ringView.layer.cornerRadius, "\(label): same shape",
+                    sourceLocation: sourceLocation)
+        }
+    }
+
+    /// The flag border is EXACTLY the neutral ring's width on every kind —
+    /// it was a point heavier (3pt, plus a 0.75pt hairline beyond it) and read
+    /// as a thick coloured frame.
+    @Test func theFlagBorderIsTheNeutralRingsWidth() {
+        #expect(MapFlagBorderView.lineWidth == PinCardView.ringWidth)
+        for (face, dress) in Self.borderedDresses {
+            let label = "\(face) \(String(describing: dress.badge))"
+            let neutral = card(face, dress: .neutral)
+            #expect(neutral.ringView.layer.borderWidth == PinCardView.ringWidth)
+            expectSameFootprint(card(face, dress: dress), as: neutral, label)
+        }
+    }
+
+    /// The hairline that edges a white or black band survives — inside the
+    /// width: the gradient gives up its innermost half point to it.
+    @Test func theHairlineFitsInsideTheWidth() {
+        let border = card(.media, dress: .resolve(kind: .country, countryCode: "JP", isLocked: false)).debugFlagBorder
+        let gradient = border.debugRingShape.layer.borderWidth
+        let hairline = border.debugHairline.layer.borderWidth
+        #expect(hairline == PinCardView.ringWidth, "the hairline spans the footprint, under the gradient")
+        #expect(gradient == MapFlagBorderView.gradientWidth)
+        #expect(gradient > 0 && gradient < hairline, "some of the width is left to the hairline")
+        #expect(abs((hairline - gradient) - MapFlagBorderView.hairlineReach) < 0.0001)
+        #expect(gradient >= PinCardView.ringWidth * 0.75, "the colours keep most of the width: \(gradient)")
+        // Light AND dark: the hairline shows on both maps.
+        for style in [UIUserInterfaceStyle.light, .dark] {
+            let color = MapFlagBorderView.hairlineColor.resolvedColor(with: UITraitCollection(userInterfaceStyle: style))
+            var alpha: CGFloat = 0
+            color.getWhite(nil, alpha: &alpha)
+            #expect(alpha > 0.1, "\(style.rawValue): \(color)")
+        }
+    }
+
+    /// The inside-corner badge follows the border's width: border + gap +
+    /// half the badge from each edge (2 + 2 + 10 = 14pt; it was 15 under the
+    /// 3pt border).
+    @Test func theInsideBadgeInsetFollowsTheWidth() {
+        for dress in [MapMarkerDress.resolve(kind: .country, countryCode: "FR", isLocked: false),
+                      .resolve(kind: .city, countryCode: "FR", isLocked: false),
+                      .resolve(kind: .country, countryCode: "MX", isLocked: true)] {
+            let card = card(.media, dress: dress)
+            let inset = PinCardView.ringWidth + MapMarkerBadgeView.insideGap + MapMarkerBadgeView.side / 2
+            #expect(inset == 14)
+            let center = card.debugBadge.center
+            #expect(abs(center.x - (card.bounds.maxX - inset)) < 0.01, "\(center) in \(card.bounds)")
+            #expect(abs(center.y - (card.bounds.maxY - inset)) < 0.01, "\(center) in \(card.bounds)")
+            // Clear of the BORDER by exactly the gap — the neutral ring's edge.
+            let gap = card.bounds.maxX - card.debugBadge.frame.maxX - card.debugFlagBorder.debugFootprint
+            #expect(abs(gap - MapMarkerBadgeView.insideGap) < 0.01, "gap \(gap)")
+        }
+    }
+
+    /// A flight card and a reveal stand-in are this card, dressed as the
+    /// marker (`MapPinZoomSource.makeZoomFlightCard`, `MapPinRevealSource
+    /// .marker`: the dress `unlocked`) and grown to a page or a window: the
+    /// border keeps the neutral ring's width at every size the card passes
+    /// through, so the chrome that takes off is the marker's.
+    @Test func flightAndRevealCardsWearTheSameWidth() {
+        for (face, dress) in Self.borderedDresses {
+            let label = "\(face) \(String(describing: dress.badge))"
+            // The hero's card: built bare, posed by the animator.
+            let flying = PinCardView()
+            flying.setFace(face)
+            flying.setDress(dress.unlocked)
+            let neutralFlying = PinCardView()
+            neutralFlying.setFace(face)
+            // The reveal's stand-in: built at the marker's size.
+            let standIn = card(face, dress: dress.unlocked)
+            let neutralStandIn = card(face, dress: .neutral)
+            let poses: [(CGRect, CGFloat)] = [
+                (CGRect(x: 0, y: 0, width: face.side, height: face.side), face.cornerRadius),
+                (CGRect(x: 0, y: 0, width: 200, height: 360), 24),
+                (CGRect(x: 0, y: 0, width: 402, height: 874), 55),
+            ]
+            for (frame, radius) in poses {
+                for (card, neutral) in [(flying, neutralFlying), (standIn, neutralStandIn)] {
+                    for view in [card, neutral] {
+                        view.frame = frame
+                        view.setCornerRadius(radius)
+                        view.layoutIfNeeded()
+                    }
+                    expectSameFootprint(card, as: neutral, "\(label) at \(frame.size)")
+                }
+            }
+            #expect(flying.zoomRestingChrome === flying.debugChromeView)
+            #expect(flying.debugFlagBorder.isDescendant(of: flying.debugChromeView),
+                    "the border leaves with the flight's resting chrome")
+        }
+    }
+
     /// An emote's badge hugs the MARK — on the arc of the disc its square
     /// inscribes, overlapping it like a text disc's — not the square's empty
     /// corner, where it sat apart from the face (Morocco, on the simulator).

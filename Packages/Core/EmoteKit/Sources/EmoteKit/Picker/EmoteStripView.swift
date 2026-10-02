@@ -14,25 +14,18 @@ import UIKit
 /// ## What is dressed
 ///
 /// Every tile the collection view is DISPLAYING asks for its art — house
-/// emote or emoji alike, unlike the picker, whose hundreds of visible tiles
-/// would bake for tens of seconds. A row shows about ten, so the cost is
-/// bounded the same way. A tile is configured when it is dequeued (prefetching
-/// is off, so that is the moment before it is shown) and gives its request and
-/// its `EmoteEngine.maxAnimatedEmotes` slot back the moment it stops being
-/// displayed. A tile flicked past inside `EmoteEngine.bakeDelay` costs
-/// nothing.
+/// emote or emoji alike, as in the emote panel; a row shows about ten, so
+/// the cost is bounded by the screen. A tile is configured when it is dequeued (prefetching
+/// is off, so that is the moment before it is shown) and gives its request,
+/// its art and its slot back the moment it stops being displayed. A tile
+/// flicked past inside `EmoteEngine.bakeDelay` costs nothing.
 ///
 /// ## What plays: only while the strip moves
 ///
-/// At rest nothing moves: every tile shows a still frame — its poster frame
-/// when it was dressed at rest (first appearance, a layout change). The
-/// displayed tiles play while the strip SCROLLS — from the drag's start to
-/// the end of its glide — and a tile scrolled in meanwhile plays from its
-/// first appearance. When the strip stops, each tile stops on the frame it is
-/// on (no jump back to the poster, no flash); the next scroll plays on from
-/// there. A still tile is a posed layer with no animation on it, so the
-/// strip at rest costs the render server nothing (`AnimatedIconView.pause`
-/// says why it is not a stopped layer clock).
+/// At rest every tile is still, on its poster frame; the displayed tiles play
+/// from a drag's start to the end of its glide, and each stops on the frame
+/// it reached. `EmoteScrollPlayback` is the rule, shared with the emote
+/// panel (`EmotePickerView`).
 ///
 /// ## Edge to edge, inside the capsule
 ///
@@ -71,11 +64,10 @@ public final class EmoteStripView: UIView {
     private let fadeMask = CAGradientLayer()
     let collectionView: UICollectionView
     private let layout = UICollectionViewFlowLayout()
-    /// From a drag's start to the end of its glide. See "What plays".
-    private(set) var isScrolling = false
-    /// While scrolling: ends it when a touch stopped the glide, which tells
-    /// the delegate nothing.
-    private var settleWatch: Task<Void, Never>?
+    /// See "What plays".
+    private let playback: EmoteScrollPlayback
+    /// From a drag's start to the end of its glide.
+    var isScrolling: Bool { playback.isScrolling }
 
     public init(
         engine: EmoteEngine = .shared,
@@ -90,6 +82,7 @@ public final class EmoteStripView: UIView {
         layout.minimumInteritemSpacing = 0
         layout.sectionInset = .zero
         collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
+        playback = EmoteScrollPlayback(collectionView: collectionView)
         super.init(frame: .zero)
 
         glass.cornerConfiguration = .capsule()
@@ -130,7 +123,7 @@ public final class EmoteStripView: UIView {
 
     override public func didMoveToWindow() {
         super.didMoveToWindow()
-        if window == nil { setScrolling(false) }
+        if window == nil { playback.stop() }
         guard window != nil, glass.effect == nil else { return }
         glass.effect = UIGlassEffect(style: .regular)
     }
@@ -176,31 +169,6 @@ public final class EmoteStripView: UIView {
         ]
         fadeMask.locations = [0, NSNumber(value: Double(edge)), NSNumber(value: Double(1 - edge)), 1]
         CATransaction.commit()
-    }
-
-    /// Plays or stills every displayed tile; see "What plays".
-    private func setScrolling(_ scrolling: Bool) {
-        guard scrolling != isScrolling else { return }
-        isScrolling = scrolling
-        for case let cell as EmoteTileCell in collectionView.visibleCells {
-            cell.tile.setPlaying(scrolling)
-        }
-        settleWatch?.cancel()
-        settleWatch = nil
-        guard scrolling else { return }
-        // ⚠️ A touch that stops a glide ends it without a delegate call:
-        // neither `scrollViewDidEndDecelerating` nor a drag's end arrives.
-        // A 4 Hz look for as long as the strip is scrolling catches it.
-        settleWatch = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(250))
-                guard !Task.isCancelled, let self else { return }
-                let grid = self.collectionView
-                if !grid.isTracking, !grid.isDragging, !grid.isDecelerating {
-                    self.setScrolling(false)
-                }
-            }
-        }
     }
 
     // MARK: - Test seams
@@ -255,18 +223,18 @@ extension EmoteStripView: UICollectionViewDataSource, UICollectionViewDelegate {
     }
 
     public func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
-        setScrolling(true)
+        playback.willBeginDragging()
     }
 
     public func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
-        if !decelerate { setScrolling(false) }
+        playback.didEndDragging(willDecelerate: decelerate)
     }
 
     public func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
-        setScrolling(false)
+        playback.didEndScrolling()
     }
 
     public func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
-        setScrolling(false)
+        playback.didEndScrolling()
     }
 }

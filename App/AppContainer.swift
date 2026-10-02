@@ -311,7 +311,8 @@ final class AppContainer {
             openFeedHero: { [unowned self] ids, presenter, origin in
                 self.feedFeature.presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)
             },
-            countries: countryAccess
+            countries: countryAccess,
+            stakePacks: stakePacks
         ).wrappedInSheet()
     }
 
@@ -485,6 +486,13 @@ final class AppContainer {
         )
     }()
 
+    /// The Shop's Boosts: the ×10 cartridge pack, over the ONE wallet. Mock
+    /// mode only, like the shop itself (no `countryAccess`, no shop door).
+    private(set) lazy var stakePacks: StakePackService? = {
+        guard environment == .mock else { return nil }
+        return StakePackService(wallet: walletStore)
+    }()
+
     private(set) lazy var mapsFeature: any MapsFeatureBuilding = MapsFeatureBuilder(
         repository: mapsRepository,
         favoritesRepository: mapsFavoritesRepository,
@@ -539,7 +547,8 @@ final class AppContainer {
         // failed.
         iconCatalog: Self.iconsUnavailable ? Self.unavailableIconCatalog : Self.mapIconCatalog,
         previewCatalog: Self.previewsUnavailable ? Self.unavailableIconCatalog : Self.mapPreviewCatalog,
-        countryAccess: countryAccess
+        countryAccess: countryAccess,
+        stakePacks: stakePacks
     )
 
     #if DEBUG

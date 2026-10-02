@@ -48,6 +48,7 @@ message Wallet {
   int32  daily_claim_cap                   = 9;  // server policy, returned so the client never hardcodes it
   int32  streak_days                       = 10; // consecutive UTC days with >= 1 claim
   google.protobuf.Timestamp last_claim_at  = 11;
+  int32  stake_shots                       = 12; // shots left in the ×10 cartridge pack (§3.3), 0 = none
 }
 
 message GetWalletResponse {
@@ -124,6 +125,7 @@ message BoostRequest {
   BoostTarget target     = 1;
   int32  amount          = 2;  // points to spend; server validates against allowed denominations
   string idempotency_key = 3;  // same contract as ClaimReward
+  bool   use_stake_shot  = 4;  // spend ONE shot of the ×10 pack (§3.3); `amount` is then the shot's
 }
 
 message BoostResponse {
@@ -141,16 +143,18 @@ enum BoostOutcome {
   RATE_LIMITED              = 4;  // per-user or per-target velocity limit (§4.5)
   INVALID_AMOUNT            = 5;  // not one of the allowed denominations
   TARGET_CAP_REACHED        = 6;  // this viewer's per-target allowance (§4.5) is full
+  NO_STAKE_SHOTS            = 7;  // `use_stake_shot` with no pack loaded; nothing changed
 }
 ```
 
 Notes:
 
-- **Allowed denominations are server policy.** v1: `{100}` plus free-form
-  amounts up to the per-target cap (the client's "Max" menu entry sends the
-  computed remainder, so the server must accept arbitrary `amount ≤ cap
-  remainder`, not just the listed denominations). A plain tap spends 10.
-  Echo the policy in `GetWalletResponse` if it ever needs to vary.
+- **Allowed amounts are server policy.** Since 2026-10-02 a plain stake
+  spends the **default amount, 1 point** (`WalletStore.Policy.
+  defaultStakeAmount`), and staking several points in ONE gesture is the ×10
+  cartridge pack's job (§3.3): the client no longer sends "Max" or 100. The
+  server should accept the default amount, and a shot (`use_stake_shot`).
+  Echo the default in `GetWalletResponse` if it ever needs to vary.
 - **Per-target cap, clamp semantics.** One viewer can put at most **250
   points** on one target, lifetime. A spend that would overshoot is CLAMPED
   to the remainder — `BoostResponse` then reports the actual debit (add
@@ -202,6 +206,36 @@ compensating credit; against a real service it needs one of:
   §3 "no refunds" stance stays true for everything outside the window.
 
 Either way the general rule stands: **no open-ended refunds** (§5).
+
+### 3.3 The ×10 cartridge pack (bought with gems)
+
+A pack of **10 shots**; one shot stakes **10 points** in one tap — the
+viewer's OWN points, under every rule above (balance, per-target cap). Gems
+buy the convenience (one tap instead of ten), never points: charter V5.3 §34
+(B ─X→ A) holds. Shots never expire; packs don't stack.
+
+```proto
+// wallet.v1
+message BuyStakePackRequest { string idempotency_key = 1; }
+message BuyStakePackResponse {
+  StakePackOutcome outcome = 1;
+  int64 gems_remaining     = 2;
+  int32 stake_shots        = 3;  // shots now loaded
+}
+enum StakePackOutcome {
+  STAKE_PACK_OUTCOME_UNSPECIFIED = 0;
+  BOUGHT                         = 1;
+  PACK_STILL_ACTIVE              = 2;  // shots left: nothing charged
+  INSUFFICIENT_GEMS              = 3;
+}
+```
+
+- A `Boost` with `use_stake_shot` consumes the shot only when it answers
+  `BOOSTED`; any refusal (balance, cap, rate limit) keeps it, atomically with
+  the points.
+- Pack size, points per shot and price (mock: 10 / 10 / **20 gems**) are
+  server policy; the client keeps them in `WalletStore.Policy.StakePack`.
+- A session undo (§3.2) refunds the points, not the shot.
 
 ## 4. Data models
 

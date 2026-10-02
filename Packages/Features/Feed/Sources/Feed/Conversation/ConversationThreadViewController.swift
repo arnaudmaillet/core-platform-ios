@@ -56,9 +56,10 @@ final class ConversationThreadViewController: UIViewController {
     /// The post's composer, so the post's geometry (`SnapActionColumn`): at
     /// rest the rail slot stands where the snap feed's repost bubble stands
     /// (the column's lift above the footer, its inset from the trailing edge)
-    /// and wears a PIN for this conversation — the send arrow while there is
-    /// text — and the voice note is a waveform in the field; keyboard up, the
-    /// bar rides the keyboard.
+    /// and wears a PIN for this conversation, whatever the field holds; the
+    /// voice note and the send arrow are in the field. Keyboard up, only the
+    /// input row rides the keyboard, widening into the pin's width — the pin
+    /// stays where it was.
     private let composeBar = CommentsInputBar()
 
     /// The conversation's pin as the driver last reported it — nil while
@@ -79,7 +80,6 @@ final class ConversationThreadViewController: UIViewController {
         maskLocations: SnapCommentsLayout.footerFrostMaskLocations
     )
     private var headerFrostHeight: NSLayoutConstraint?
-    private let refreshControl = UIRefreshControl()
     private let statusLabel = UILabel()
     private let peerPill = SnapAuthorIdentityView()
     private let walletBadge = WalletBadgeButton()
@@ -211,12 +211,13 @@ final class ConversationThreadViewController: UIViewController {
         // `prefersClearTopEdge`.
         collectionView.prefersClearTopEdge()
         collectionView.delegate = self
+        // No pull-to-refresh (asked 2026-10-02): a conversation is live — what
+        // arrives is pushed into it — and a loader at the top of the thread
+        // only competed with reading back through it.
         if mode == .preview {
             // The tail never sits flush on the platter's edge.
             collectionView.contentInset.bottom = Spacing.md
         } else {
-            refreshControl.addAction(UIAction { [weak self] _ in self?.driver.refresh() }, for: .valueChanged)
-            collectionView.refreshControl = refreshControl
             // A bare tap on the stream retires the keyboard, as on the post
             // — and so does a tap on a message's body (`retireKeyboardOr`),
             // whose own reply tap otherwise wins the touch.
@@ -329,9 +330,8 @@ final class ConversationThreadViewController: UIViewController {
     }
 
     /// The text page's composer, at the text page's resting place: just above
-    /// the footer when the keyboard is down, riding the keyboard when it is up.
+    /// the footer for good — only its input row rides the keyboard.
     private func configureComposer() {
-        composeBar.showsIdleUtilityFaces = true
         composeBar.defaultPlaceholder = "Message…"
         composeBar.draftText = prefill
         composeBar.onSend = { [weak self] text in self?.driver.send(text) }
@@ -354,36 +354,31 @@ final class ConversationThreadViewController: UIViewController {
         composeBar.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(composerBackdrop)
         view.addSubview(composeBar)
-        // The keyboard guide measured from the screen's edge, so the resting
-        // constraint — the safe area, which the footer toolbar inflates — is
-        // what holds the bar while the keyboard is down, and the inequality
-        // lifts it the moment the keyboard rises past it. At rest the input
-        // row sits `glassGap` above the toolbar's glass; the bar lifts its own
-        // column (`SnapActionColumn`).
+        // The BAR rests on the safe area, which the footer toolbar inflates,
+        // and never moves: at rest the input row sits `glassGap` above the
+        // toolbar's glass and the bar lifts its own column
+        // (`SnapActionColumn`). The keyboard guide, measured from the screen's
+        // edge, lifts the input row alone the moment the keyboard rises past
+        // it (`riseWithKeyboard`) — the pin stays on its station.
         view.keyboardLayoutGuide.usesBottomSafeArea = false
-        let ceiling = composeBar.bottomAnchor.constraint(
-            lessThanOrEqualTo: view.keyboardLayoutGuide.topAnchor, constant: -Spacing.sm
-        )
-        let rest = composeBar.bottomAnchor.constraint(
-            equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -SnapActionColumn.inputRestingGap
-        )
-        rest.priority = .defaultHigh
         NSLayoutConstraint.activate([
             composeBar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Spacing.lg),
             composeBar.trailingAnchor.constraint(
                 equalTo: view.trailingAnchor, constant: -SnapActionColumn.trailingInset
             ),
-            ceiling,
-            rest,
+            composeBar.bottomAnchor.constraint(
+                equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -SnapActionColumn.inputRestingGap
+            ),
             composerBackdrop.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             composerBackdrop.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             composerBackdrop.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             // From the INPUT ROW, as on the post: the lifted slot floats in
-            // the band's ramp.
+            // the band's ramp, and the band rides the keyboard with the row.
             composerBackdrop.topAnchor.constraint(
                 equalTo: composeBar.inputRowTopAnchor, constant: -SnapCommentsLayout.footerFrostLead
             ),
         ])
+        composeBar.riseWithKeyboard(of: view.keyboardLayoutGuide)
     }
 
     /// The post's footer, with the emote strip where the music would be —
@@ -473,7 +468,6 @@ final class ConversationThreadViewController: UIViewController {
 
     private func render(_ phase: ConversationThreadPhase) {
         self.phase = phase
-        refreshControl.endRefreshing()
         switch phase {
         case .loading:
             statusLabel.isHidden = true
@@ -739,7 +733,9 @@ final class ConversationThreadViewController: UIViewController {
     /// to the top of a short transcript.
     private func syncBottomClearance() {
         guard composeBar.bounds.height > 0 else { return }
-        let composerTop = composeBar.frame.minY
+        // The bar's top at rest, the risen input row's while the keyboard
+        // holds it above the bar (the pin stays down there, under it).
+        let composerTop = composeBar.occupiedMinY
         let inset = max(0, view.bounds.height - composerTop - view.safeAreaInsets.bottom) + Spacing.sm
         let delta = inset - collectionView.contentInset.bottom
         guard abs(delta) > 0.5 else { return }

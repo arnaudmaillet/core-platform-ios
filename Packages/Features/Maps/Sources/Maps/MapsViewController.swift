@@ -195,6 +195,8 @@ final class MapsViewController: UIViewController {
     /// the map. Nil: every country is open (the fleet, until the backend
     /// carries unlocks).
     private let countryAccess: (any CountryAccess)?
+    /// What the Shop's Boosts sells (the ×10 cartridge pack); nil sells none.
+    private let stakePacks: (any StakePackSelling)?
     /// The country each pin stands in, looked up once per post: the atlas
     /// test is point-in-polygon, and the reconcile runs on every settle.
     private var pinCountries: [PostID: String] = [:]
@@ -206,6 +208,9 @@ final class MapsViewController: UIViewController {
     private var offerCamera: MKMapCamera?
     /// Whether closing the offer flies the map back to `offerCamera`.
     private var offerReturns = true
+    /// The open offer's close has already flown the map back — a cancelled
+    /// close then frames the country again.
+    private var offerFlewBack = false
     /// The filter-pill carousel floating above the tab bar. The map's first
     /// bottom overlay: pinned to the safe area (the map itself is full-bleed
     /// and draws under the floating tab bar).
@@ -347,9 +352,11 @@ final class MapsViewController: UIViewController {
         prewarm: @escaping ([PostID]) async -> Void,
         openProfile: @escaping (ProfileID, ProfileIdentityStub?) -> Void,
         openConversation: @escaping (ProfileID) -> Void,
-        countryAccess: (any CountryAccess)? = nil
+        countryAccess: (any CountryAccess)? = nil,
+        stakePacks: (any StakePackSelling)? = nil
     ) {
         self.countryAccess = countryAccess
+        self.stakePacks = stakePacks
         self.viewModel = viewModel
         self.favoritesRepository = favoritesRepository
         self.pinService = pinService
@@ -983,7 +990,7 @@ final class MapsViewController: UIViewController {
     /// (`MapCountryShopHosting`). A row takes you to its country.
     func presentCountryShop() {
         guard let countryAccess, presentedViewController == nil else { return }
-        let shop = CountryShopViewController.sheet(access: countryAccess) { [weak self] code in
+        let shop = CountryShopViewController.sheet(access: countryAccess, stakePacks: stakePacks) { [weak self] code in
             self?.dismiss(animated: true) { self?.showCountry(code) }
         }
         present(shop, animated: true)
@@ -1092,42 +1099,79 @@ final class MapsViewController: UIViewController {
         let sheet = CountryUnlockSheetViewController(country: country, access: countryAccess)
         // The country being sold stands ABOVE the sheet, not under it.
         sheet.loadViewIfNeeded()
-        frame(country, bottomInset: sheet.contentHeight + view.safeAreaInsets.bottom)
+        frame(country, bottomInset: offerBottomInset(sheet))
+        sheet.onClosing = { [weak self] in self?.offerClosing(country) }
+        sheet.onCloseCancelled = { [weak self, weak sheet] in
+            guard let sheet else { return }
+            self?.offerCloseCancelled(country, sheet: sheet)
+        }
         sheet.onDismissed = { [weak self] in self?.offerDidClose(country) }
         offerSheet = sheet
         present(sheet, animated: true)
     }
 
+    /// The band left above an offer's sheet, where its country is framed.
+    private func offerBottomInset(_ sheet: CountryUnlockSheetViewController) -> CGFloat {
+        sheet.contentHeight + view.safeAreaInsets.bottom
+    }
+
     /// Closes the open offer. `returning`: whether the map flies back to the
     /// camera it had before the offer.
     private func closeOffer(returning: Bool) {
-        guard let offerSheet else { return }
+        // Already on its way down (and the map already on its way back): a
+        // tap or a pan now is the user's, not a second close.
+        guard let offerSheet, !offerSheet.isBeingDismissed else { return }
         offerReturns = returning
+        #if DEBUG
+        OfferLog.note("close requested returning=\(returning)")
+        #endif
         offerSheet.dismiss(animated: true)
     }
 
-    /// The offer is gone — closed by the user, by a tap or a pan on the map,
-    /// or by an unlock.
+    /// The offer is closing — by a tap or a pan on the map, a swipe on its
+    /// sheet, or an unlock — and the sheet has only just started down
+    /// (`OfferCloseFlight`): what the map does runs alongside it.
     ///
-    /// - Unlocked: the map stays on the country, whose posts are the reward,
-    ///   and the lift fades once they have had a moment on screen.
+    /// - Unlocked: nothing yet. The map stays on the country, whose posts are
+    ///   the reward (`offerDidClose`).
     /// - Otherwise the country lowers, and the map flies back to where it was
     ///   (unless the user moved it away from the offer themselves).
+    private func offerClosing(_ country: CountryAtlas.Country) {
+        guard !(countryAccess?.isUnlocked(country.code) ?? false) else { return }
+        countryLayer.select(nil)
+        #if DEBUG
+        OfferLog.note("closing: flying back=\(offerReturns && offerCamera != nil)")
+        #endif
+        guard offerReturns, let offerCamera else { return }
+        offerFlewBack = true
+        mapView.setCamera(offerCamera, animated: true)
+    }
+
+    /// A close went out and the sheet came back up (`OfferCloseFlight`):
+    /// the country lifts again, framed above it if the map had left.
+    private func offerCloseCancelled(_ country: CountryAtlas.Country, sheet: CountryUnlockSheetViewController) {
+        #if DEBUG
+        OfferLog.note("close cancelled: reframing=\(offerFlewBack)")
+        #endif
+        countryLayer.select(country.code)
+        if offerFlewBack { frame(country, bottomInset: offerBottomInset(sheet)) }
+        offerFlewBack = false
+        offerReturns = true
+    }
+
+    /// The offer is gone. Whatever the map does about it began at
+    /// `offerClosing`; an unlocked country's lift fades once its posts have
+    /// had a moment on screen.
     private func offerDidClose(_ country: CountryAtlas.Country) {
-        let camera = offerCamera
-        let returning = offerReturns
         offerSheet = nil
         offerCamera = nil
         offerReturns = true
-        if countryAccess?.isUnlocked(country.code) ?? false {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
-                guard self?.countryLayer.selectedCode == country.code else { return }
-                self?.countryLayer.select(nil)
-            }
-            return
+        offerFlewBack = false
+        guard countryAccess?.isUnlocked(country.code) ?? false else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+            guard self?.countryLayer.selectedCode == country.code else { return }
+            self?.countryLayer.select(nil)
         }
-        countryLayer.select(nil)
-        if returning, let camera { mapView.setCamera(camera, animated: true) }
     }
 
     @objc private func countryAccessChanged() {
@@ -2637,6 +2681,9 @@ extension MapsViewController: MKMapViewDelegate {
     func mapView(_ mapView: MKMapView, regionWillChangeAnimated animated: Bool) {
         // A zoom/pan started: hold annotation mutations until it settles.
         isRegionTransitioning = true
+        #if DEBUG
+        OfferLog.note("region will change")
+        #endif
     }
 
     func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {

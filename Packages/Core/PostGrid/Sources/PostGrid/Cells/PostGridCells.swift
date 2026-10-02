@@ -1,3 +1,4 @@
+import CoreStorage
 import DesignSystem
 import EmoteKit
 import MediaCore
@@ -1467,7 +1468,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     }
 
     /// The amount a plain tap on the like chip stakes. Set with `onStake`.
-    public var stakeTapAmount = 10
+    public var stakeTapAmount = WalletStore.Policy.defaultStakeAmount
 
     /// The menu a held like chip raises (`StakeMenu`), built when raised.
     public var stakeMenu: (() -> UIMenu?)? {
@@ -1482,7 +1483,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// 301 while the post page it opens — and the flight card between them —
     /// said 271, because the feed shows the viewer's stake on its own anchor
     /// (the rail's red count) rather than inside the likes. The card follows
-    /// the feed instead: the receipt is the red heart and a "+10" rising off
+    /// the feed instead: the receipt is the red heart and a "+N" rising off
     /// the chip, the rail's own receipt.
     public func setViewerStake(_ total: Int) {
         guard total != viewerStake else { return }
@@ -1566,7 +1567,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
             guard let self else { return }
             onStake?(stakeTapAmount)
         } : nil)
-        closingLikesPill.accessibilityLabel = stakes ? "Like, stakes \(stakeTapAmount) points" : nil
+        closingLikesPill.accessibilityLabel = stakes ? "Like, stakes \(StakeMenu.points(stakeTapAmount))" : nil
         applyReactionCount()
         // A count-less post's heart may have just appeared at the line's end,
         // and the end hangs by what is there.
