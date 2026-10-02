@@ -89,9 +89,13 @@ struct CarouselTravelTests {
         #expect(view.yieldsRightwardDrag(velocity: CGPoint(x: 820, y: 0)))
     }
 
+    /// ⚠️ PAGE TWO, not page one: on a card, page one is whole beside page
+    /// zero at the start of the strip, and naming it moves nothing — there is
+    /// still nothing to the left to scroll back to, and the drag passes
+    /// through. Page two is cropped there, so naming it moves the strip.
     @Test func theSameDragIsKeptOnceThereIsAPhotographToGoBackTo() {
         let view = carousel(pages: 4)
-        view.setPage(1, animated: false)
+        view.setPage(2, animated: false)
 
         #expect(view.yieldsRightwardDrag(velocity: CGPoint(x: 820, y: 0)) == false)
     }
@@ -234,7 +238,8 @@ struct RowMediaTravelTests {
         #expect(cell.mediaHasTravel(towardsPageDelta: -1) == false)
         #expect(cell.mediaHasTravel(towardsPageDelta: 1))
 
-        cell.debugScrollCarousel(toPage: 1, animated: false)
+        // The last page, cropped at the start, so the strip has to move to it.
+        cell.debugScrollCarousel(toPage: 2, animated: false)
 
         #expect(cell.mediaHasTravel(towardsPageDelta: -1))
     }

@@ -379,6 +379,19 @@ public struct SnapFeedHeroOrigin {
     /// it happened to be, and the card landed beside it. Filmed on For You's
     /// Friends and Following rows.
     public let willStageDismissal: () -> Void
+    /// The page of a COLLECTION the source is showing — the destination opens
+    /// the post on it (`SnapFeedViewController.openMediaPage`). `nil`: the
+    /// first page, or a source with no pages to speak of.
+    ///
+    /// ⚠️ A card's carousel shows several items at once and opens on the one
+    /// TAPPED, which is routinely not the first: without this the flight left
+    /// from item two and the page arrived on item one, wearing item two's
+    /// live clip.
+    public let mediaPage: Int?
+    /// The traffic the other way, live: the open post's carousel moved, so
+    /// the source follows it and the close lands on the page the viewer is
+    /// looking at. `nil`: the source does not follow.
+    public let followMediaPage: ((PostID, Int) -> Void)?
 
     public init(
         post: GalleryPost,
@@ -400,7 +413,9 @@ public struct SnapFeedHeroOrigin {
         adoptLandingLiveMedia: ((UIView) -> Void)? = nil,
         landingMediaIsReady: (() -> Bool)? = nil,
         restingOverlay: (() -> UIView?)? = nil,
-        willStageDismissal: @escaping () -> Void = {}
+        willStageDismissal: @escaping () -> Void = {},
+        mediaPage: Int? = nil,
+        followMediaPage: ((PostID, Int) -> Void)? = nil
     ) {
         self.post = post
         self.stream = stream
@@ -422,5 +437,7 @@ public struct SnapFeedHeroOrigin {
         self.landingMediaIsReady = landingMediaIsReady
         self.restingOverlay = restingOverlay
         self.willStageDismissal = willStageDismissal
+        self.mediaPage = mediaPage
+        self.followMediaPage = followMediaPage
     }
 }
