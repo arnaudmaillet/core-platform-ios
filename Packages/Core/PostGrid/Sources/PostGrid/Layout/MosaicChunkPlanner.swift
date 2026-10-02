@@ -97,14 +97,13 @@ public struct MosaicChunk: Sendable, Equatable {
 // MARK: - Segments
 
 /// One stretch of the Discover list: a run of full-width cards, a chunk of
-/// mosaic, or (experimental) a block of half-width cards side by side. The
+/// mosaic, or a block of half-width cards side by side. The
 /// list is these, in order, and nothing else.
 public enum DiscoverSegment: Sendable, Equatable {
     case rows([GalleryPost])
     /// The chunk and its posts, one per block, in the chunk's reading order.
     case chunk(MosaicChunk, [GalleryPost])
-    /// EXPERIMENTAL (`MosaicChunkPlanner.pairsVerticalMedia`): vertical media
-    /// drawn as half-width cards, two to a row — an even count within
+    /// Vertical media (`VerticalMediaPairing`) drawn as half-width cards, two to a row — an even count within
     /// `VerticalMediaPairing.blockSizes`, in reading order (left, right, then
     /// the next row).
     case pairs([GalleryPost])
@@ -148,10 +147,9 @@ public enum DiscoverSegment: Sendable, Equatable {
     }
 }
 
-// MARK: - Vertical media, paired (experimental)
+// MARK: - Vertical media, paired
 
-/// EXPERIMENTAL, behind `-foryou-paired-vertical`: which posts Discover draws
-/// as HALF-WIDTH cards, two side by side, instead of one full-width card.
+/// Which posts Discover draws as HALF-WIDTH cards, two side by side, instead of one full-width card.
 ///
 /// **The threshold is the card's own crop: taller than 4:5.** A full-width
 /// card draws its preview at the post's aspect clamped to
@@ -161,7 +159,7 @@ public enum DiscoverSegment: Sendable, Equatable {
 /// Those are the posts a half-width card serves better: a Following-style
 /// card (all picture, its words over the foot) at half the width, 3:4, beside
 /// another one, in about a third of the height. 4:5 itself and everything
-/// wider stays a full card, exactly as today.
+/// wider stays a full card.
 public enum VerticalMediaPairing {
     /// Width over height: single-media posts NARROWER than this are paired. 4:5, with a 1%
     /// tolerance so a 1080x1352 re-encode of a 4:5 post stays a 4:5 post.
@@ -212,10 +210,11 @@ public enum DiscoverSegmentsChange: Equatable, Sendable {
 /// a card and as a tile, and the cards stay in the order the corpus ranked them
 /// — they only skip the media a chunk has already shown.
 ///
-/// **Experimental: paired vertical media** (`pairsVerticalMedia`, off by
-/// default). A run of cards meeting a vertical post lays it out with its
-/// vertical neighbours as one block of half-width cards in pairs — a block
-/// takes one of the run's places, as a card does. See `pairBlock`.
+/// **Paired vertical media** (the `-foryou-paired-vertical` experiment,
+/// validated 2 October 2026 and unconditional since). A run of cards meeting
+/// a vertical post lays it out with its vertical neighbours as one block of half-width cards in pairs — a block
+/// takes one of the run's places, as a card does, and a chunk leaves
+/// vertical media to the runs (`chunksLeavePairableMedia`). See `pairBlock`.
 ///
 /// **Deterministic, seeded by position.** The gap before a chunk and the
 /// chunk's height and tiling are drawn from SplitMix64 seeded by the chunk's
@@ -263,18 +262,16 @@ public struct MosaicChunkPlanner: Sendable {
 
     public var engine: ChaoticSliceEngine
 
-    /// EXPERIMENTAL (`-foryou-paired-vertical`): vertical media met in a run
-    /// of cards is laid out as a block of half-width cards in pairs
-    /// (`DiscoverSegment.pairs`) rather than one full-width card each. Off,
-    /// the list is exactly what it always was. See `pairBlock` for the rule.
-    public var pairsVerticalMedia: Bool
-
-    /// QA only (`-foryou-paired-demo`, with `pairsVerticalMedia`): a chunk
-    /// does not take posts a block could pair, so the blocks show up. The
-    /// mock corpus otherwise feeds most single verticals to the chunks (one
-    /// block of two in its first ~40 posts), which is too few to judge the
-    /// layout by. Same finality rules, so a landing still only extends.
-    public var chunksLeavePairableMedia = false
+    /// A chunk does not take posts a block could pair — vertical media is
+    /// left to the runs, where it pairs. ON BY DEFAULT since pairing became
+    /// unconditional (2 October 2026): with chunks taking every medium in
+    /// their reach, the mock list showed ONE block of two in its first 97
+    /// posts — pairs too rare to be a layout at all. Leaving the verticals
+    /// alone, the same list shows eleven blocks in 87 posts, and still six
+    /// chunks (smaller ones: they fill from the other media). Off is the old
+    /// rule (QA: `-foryou-chunks-take-verticals`). Same finality rules either
+    /// way, so a landing still only extends.
+    public var chunksLeavePairableMedia = true
 
     /// Tilings already generated. The planner re-runs on every delivery over
     /// the whole corpus; the engine's search is the only part that costs.
@@ -285,9 +282,8 @@ public struct MosaicChunkPlanner: Sendable {
         let rows: Int
     }
 
-    public init(engine: ChaoticSliceEngine = .standard, pairsVerticalMedia: Bool = false) {
+    public init(engine: ChaoticSliceEngine = .standard) {
         self.engine = engine
-        self.pairsVerticalMedia = pairsVerticalMedia
     }
 
     /// Whether a post can be a tile: anything with a picture. A text post has
@@ -371,12 +367,12 @@ public struct MosaicChunkPlanner: Sendable {
         }
 
         stretches: while true {
-            // The run of cards before chunk `ordinal`. With pairing on, a block
-            // of paired cards takes ONE of the run's places, as a card does.
+            // The run of cards before chunk `ordinal`. A block of paired cards
+            // takes ONE of the run's places, as a card does.
             let gap = Self.gap(beforeChunk: ordinal)
             var entries = 0
             while entries < gap, let index = nextUnplaced() {
-                if pairsVerticalMedia, VerticalMediaPairing.isEligible(corpus[index]) {
+                if VerticalMediaPairing.isEligible(corpus[index]) {
                     switch Self.pairBlock(at: index, in: corpus, placed: placed, isComplete: isComplete) {
                     case .undecided:
                         // The next page may change the block: nothing after it
@@ -388,7 +384,7 @@ public struct MosaicChunkPlanner: Sendable {
                         entries += 1
                         continue
                     case .alone:
-                        break // no partner anywhere near: a full card, as today
+                        break // no partner anywhere near: a full card
                     }
                 }
                 placed[index] = true
@@ -405,7 +401,7 @@ public struct MosaicChunkPlanner: Sendable {
             while index < corpus.count, scanned < Self.lookahead {
                 if !placed[index] {
                     scanned += 1
-                    let leftForPairs = chunksLeavePairableMedia && pairsVerticalMedia
+                    let leftForPairs = chunksLeavePairableMedia
                         && VerticalMediaPairing.isEligible(corpus[index])
                     if Self.isTileEligible(corpus[index]), !leftForPairs { media.append(index) }
                 }
@@ -447,7 +443,7 @@ public struct MosaicChunkPlanner: Sendable {
     enum PairDecision: Equatable {
         /// These corpus indices, in reading order, are one block.
         case block([Int])
-        /// No partner within reach: the post is a full-width card, as today.
+        /// No partner within reach: the post is a full-width card.
         case alone
         /// The loaded corpus cannot decide yet; hold everything from here on.
         case undecided
@@ -468,11 +464,11 @@ public struct MosaicChunkPlanner: Sendable {
     ///    way). The pulled post closes the block, bottom right.
     /// 4. No vertical within reach: an odd run of three or five drops its
     ///    LAST post, which comes up next as a run of one, finds no partner
-    ///    either (same scan), and is a full-width card — as today, and the
-    ///    only way a vertical post is ever drawn full width with pairing on.
+    ///    either (same scan), and is a full-width card — the only way a
+    ///    vertical post is ever drawn full width.
     ///
     /// Why pull a partner rather than show the odd one full width straight
-    /// away: the point of the experiment is that a vertical post is not a
+    /// away: the point of pairing is that a vertical post is not a
     /// full-width card, and in a corpus where a third of the media is vertical
     /// a partner is almost always within reach — full width is the exception.
     ///

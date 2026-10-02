@@ -11,6 +11,11 @@ struct MosaicChunkPlannerTests {
 
     /// A corpus with the feed's usual mix: every third post is text, the rest
     /// photos and clips. Ids are the corpus position, so order is readable.
+    ///
+    /// ⚠️ The tall posts are 4:5, the tallest a full card shows whole — NOT
+    /// 9:16. Anything taller pairs (`VerticalMediaPairing`), and these tests
+    /// pin the CHUNKS' rules on runs of plain cards; pairing has its own
+    /// suite (`PairedVerticalMediaPlannerTests`).
     private func corpus(_ count: Int, textEvery: Int = 3) -> [GalleryPost] {
         (0..<count).map { index in
             let kind: GalleryPost.Kind = index % textEvery == textEvery - 1
@@ -22,7 +27,7 @@ struct MosaicChunkPlannerTests {
                 isRepost: false,
                 thumbnailURL: kind == .text ? nil : URL(string: "https://example.com/\(index).jpg"),
                 videoURL: kind == .video ? URL(string: "https://example.com/\(index).mp4") : nil,
-                aspectRatio: index % 4 == 0 ? 0.5625 : 1.5,
+                aspectRatio: index % 4 == 0 ? 0.8 : 1.5,
                 caption: "post \(index)",
                 publishedAtMS: Int64(1_000 - index)
             )

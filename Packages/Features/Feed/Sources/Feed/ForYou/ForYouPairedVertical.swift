@@ -1,39 +1,26 @@
 import Foundation
 
-/// EXPERIMENT (2026-10-02): For You's Discover list draws VERTICAL media —
-/// posts taller than 4:5 (`VerticalMediaPairing.isEligible`) — as half-width
-/// cards two side by side, in blocks of two to six, instead of one full-width
-/// card each. A paired card is the Following row's card
-/// (`ForYouFollowingCardCell`: the picture, the author and two lines over its
-/// foot, no actions) at half the list's width, 3:4 (product call, 2026-10-02,
-/// after a first build drew the list's own card shrunk). Collections never
-/// pair. Where the pairs go is the planner's (`MosaicChunkPlanner.pairBlock`).
+/// For You's Discover list draws VERTICAL media — posts taller than 4:5
+/// (`VerticalMediaPairing.isEligible`) — as half-width cards two side by side,
+/// in blocks of two to six, instead of one full-width card each. A paired card
+/// is the Following row's card (`ForYouFollowingCardCell`: the picture, the
+/// author and two lines over its foot) at half the list's width, 3:4.
+/// Collections never pair. Where the pairs go is the planner's
+/// (`MosaicChunkPlanner.pairBlock`).
 ///
-/// Off by default: without the launch argument the list is exactly today's.
+/// Began as the `-foryou-paired-vertical` experiment (#367) and was validated
+/// on 2 October 2026: it is unconditional now, and the launch argument is gone.
+/// What is left here is QA.
 enum ForYouPairedVertical {
-    /// The launch argument that turns the experiment on.
-    static let launchArgument = "-foryou-paired-vertical"
-
-    /// Whether `arguments` ask for the experiment. Release builds never do.
-    static func isEnabled(arguments: [String]) -> Bool {
+    /// QA, DEBUG only: `-foryou-chunks-take-verticals` puts back the rule
+    /// chunks had before pairing was the default — a chunk takes every medium
+    /// in its reach, vertical or not — to compare the two lists. The default
+    /// leaves vertical media to the pairs
+    /// (`MosaicChunkPlanner.chunksLeavePairableMedia`, which says why); the
+    /// old `-foryou-paired-demo` asked for what is now the default.
+    static var chunksTakeVerticals: Bool {
         #if DEBUG
-        arguments.contains(launchArgument)
-        #else
-        false
-        #endif
-    }
-
-    /// Whether this process asked for it — what For You builds its page with.
-    static var isEnabled: Bool {
-        isEnabled(arguments: ProcessInfo.processInfo.arguments)
-    }
-
-    /// QA, DEBUG only: `-foryou-paired-demo` (with the flag above) keeps the
-    /// chunks off pairable posts so blocks are frequent enough to judge on
-    /// the mock corpus — see `MosaicChunkPlanner.chunksLeavePairableMedia`.
-    static var isDemo: Bool {
-        #if DEBUG
-        isEnabled && ProcessInfo.processInfo.arguments.contains("-foryou-paired-demo")
+        ProcessInfo.processInfo.arguments.contains("-foryou-chunks-take-verticals")
         #else
         false
         #endif

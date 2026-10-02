@@ -154,7 +154,8 @@ final class ExternalHeroZoomSource: ZoomTransitionSource {
             style: origin.style == .tile ? .tile : .listMedia,
             cornerRadius: origin.cornerRadius,
             cornerCurve: origin.cornerCurve,
-            drawsPost: !drawsFace
+            drawsPost: !drawsFace,
+            viewerStake: origin.viewerStake()
         )
         flyingCard = card
         // On the OPENING the far end is the page's picture only when the

@@ -52,11 +52,16 @@ public final class PostGridTileStandInView: UIView, RevealStandInShaping {
     /// `cornerRadius` is the page's, not the cell default: the two grids that
     /// share `PostGridTileCell` space their tiles differently, and gap and
     /// curve are one decision (see `ChaoticSliceLayout.harmonisedGutter`).
+    ///
+    /// `viewerStake`: on a surface whose tiles STAKE, what the viewer has
+    /// staked on `post` — the heart is red once there is any, as on the tile
+    /// it lands on (`PostGridTileCell.showStakeAsScenery`). Nil: a readout.
     public init(
         post: GalleryPost,
         size: CGSize,
         cornerRadius: CGFloat = PostGridTileCell.mosaicCornerRadius,
-        imagePipeline: ImagePipeline
+        imagePipeline: ImagePipeline,
+        viewerStake: Int? = nil
     ) {
         tile = PostGridTileCell(frame: CGRect(origin: .zero, size: size))
         super.init(frame: CGRect(origin: .zero, size: size))
@@ -67,6 +72,7 @@ public final class PostGridTileStandInView: UIView, RevealStandInShaping {
 
         tile.cornerRadius = cornerRadius
         tile.configure(with: post, imagePipeline: imagePipeline)
+        if let viewerStake { tile.showStakeAsScenery(viewerStake: viewerStake) }
         tile.layoutIfNeeded()
 
         clipsToBounds = true

@@ -122,7 +122,7 @@ public final class PostMetricLabel: UIView {
 
     /// Re-inks the glyph — the like chip's heart fills in the points' red once
     /// the viewer has a stake on the post.
-    func setGlyph(systemName: String, color: UIColor) {
+    public func setGlyph(systemName: String, color: UIColor) {
         icon.image = UIImage(systemName: systemName)
         icon.tintColor = color
     }

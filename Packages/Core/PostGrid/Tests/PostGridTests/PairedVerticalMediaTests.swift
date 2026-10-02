@@ -6,10 +6,11 @@ import Testing
 import UIKit
 @testable import PostGrid
 
-/// EXPERIMENTAL (`-foryou-paired-vertical`): Discover's vertical media as
-/// half-width cards in pairs. The planner's rules — the threshold, blocks of
-/// 2 to 6, even, consecutive, the odd one's partner, append stability, and
-/// flag off = exactly today's list.
+/// Discover's vertical media as half-width cards in pairs (the
+/// `-foryou-paired-vertical` experiment, unconditional since 2 October 2026).
+/// The planner's rules — the threshold, blocks of 2 to 6, even, consecutive,
+/// the odd one's partner, append stability, and a corpus with no vertical
+/// media planned exactly as before pairing existed.
 struct PairedVerticalMediaPlannerTests {
     // MARK: - Fixtures
 
@@ -72,7 +73,7 @@ struct PairedVerticalMediaPlannerTests {
     private func ids(_ posts: [GalleryPost]) -> [String] { posts.map(\.id.rawValue) }
 
     private func paired(_ posts: [GalleryPost]) -> [DiscoverSegment] {
-        var planner = MosaicChunkPlanner(pairsVerticalMedia: true)
+        var planner = MosaicChunkPlanner()
         return planner.segments(for: posts, isComplete: true)
     }
 
@@ -124,23 +125,26 @@ struct PairedVerticalMediaPlannerTests {
         }
     }
 
-    // MARK: - Flag off
+    // MARK: - No vertical media
 
-    /// Flag off, the list is EXACTLY today's — pinned against a copy of the
-    /// planner as it was before pairing existed, over corpora full of
-    /// vertical media, so a regression in the shared loop cannot hide.
-    @Test func flagOffIsTodaysList() {
+    /// With nothing to pair, the list is EXACTLY the one the planner drew
+    /// before pairing existed — pinned against a frozen copy of that loop, so
+    /// a regression in the shared loop cannot hide behind the pairs.
+    @Test func aCorpusWithoutVerticalMediaIsPlannedAsBeforePairing() {
         for seed in [1, 2, 3, 4, 5] as [UInt64] {
             for count in [5, 40, 211] {
-                let posts = mixed(count, seed: seed)
+                // The same mix, every vertical turned landscape.
+                let posts = mixed(count, seed: seed).map { post in
+                    VerticalMediaPairing.isEligible(post)
+                        ? self.post(Int(post.id.rawValue.dropFirst())!, kind: post.kind, aspect: 1.5)
+                        : post
+                }
                 for complete in [false, true] {
-                    var off = MosaicChunkPlanner()
-                    var explicit = MosaicChunkPlanner(pairsVerticalMedia: false)
+                    var planner = MosaicChunkPlanner()
                     var legacy = MosaicChunkPlanner()
                     let expected = Self.legacySegments(posts, isComplete: complete, planner: &legacy)
-                    let planned = off.segments(for: posts, isComplete: complete)
+                    let planned = planner.segments(for: posts, isComplete: complete)
                     #expect(planned == expected, "seed \(seed) count \(count) complete \(complete)")
-                    #expect(explicit.segments(for: posts, isComplete: complete) == expected)
                     #expect(!planned.contains(where: { $0.isPairs }))
                 }
             }
@@ -219,7 +223,7 @@ struct PairedVerticalMediaPlannerTests {
     }
 
     /// Three in a row and nothing to pair the third with: a block of two,
-    /// and the third is a full-width card, as today.
+    /// and the third is a full-width card.
     @Test func anOddLeftoverWithNoPartnerIsAFullCard() {
         let segments = paired(spelled("VVV" + String(repeating: "T", count: 40)))
         #expect(ids(segments[0].posts) == ["p0", "p1"])
@@ -259,7 +263,7 @@ struct PairedVerticalMediaPlannerTests {
         for seed in [1, 2, 3] as [UInt64] {
             let posts = mixed(200, seed: seed)
             for pageSize in [3, 7, 20, 33] {
-                var planner = MosaicChunkPlanner(pairsVerticalMedia: true)
+                var planner = MosaicChunkPlanner()
                 var shown: [DiscoverSegment] = []
                 var loaded = 0
                 while loaded < posts.count {
@@ -276,27 +280,34 @@ struct PairedVerticalMediaPlannerTests {
         }
     }
 
-    /// The QA demo (`chunksLeavePairableMedia`): chunks hold no pairable post,
-    /// more blocks form, and a landing still only extends the list.
-    @Test func theQADemoKeepsChunksOffPairablePostsAndStaysStable() {
+    /// Chunks leave pairable posts to the runs BY DEFAULT: no chunk holds
+    /// one, more blocks form than when chunks take every medium (the old
+    /// rule, still a switch), and a landing still only extends — both ways.
+    @Test func chunksLeaveVerticalsToPairsByDefaultAndStayStable() {
         let posts = mixed(200, seed: 4)
-        var demo = MosaicChunkPlanner(pairsVerticalMedia: true)
-        demo.chunksLeavePairableMedia = true
-        let planned = demo.segments(for: posts, isComplete: true)
+        #expect(MosaicChunkPlanner().chunksLeavePairableMedia)
+        let planned = paired(posts)
         for case .chunk(_, let tiles) in planned {
             #expect(!tiles.contains(where: { VerticalMediaPairing.isEligible($0) }))
         }
-        #expect(planned.filter { $0.isPairs }.count >= paired(posts).filter { $0.isPairs }.count)
-        var walker = MosaicChunkPlanner(pairsVerticalMedia: true)
-        walker.chunksLeavePairableMedia = true
-        var shown: [DiscoverSegment] = []
-        for loaded in stride(from: 7, through: 200, by: 7) + [200] {
-            let next = walker.segments(for: Array(posts[..<loaded]), isComplete: loaded == 200)
-            #expect(shown.isEmpty || MosaicChunkPlanner.change(from: shown, to: next) != .incompatible,
-                    "loaded \(loaded)")
-            shown = next
+        var greedy = MosaicChunkPlanner()
+        greedy.chunksLeavePairableMedia = false
+        let old = greedy.segments(for: posts, isComplete: true)
+        #expect(old.contains { $0.chunk != nil && $0.posts.contains(where: VerticalMediaPairing.isEligible) },
+                "the old rule lets chunks take verticals")
+        #expect(planned.filter(\.isPairs).count > old.filter(\.isPairs).count)
+        for leaves in [true, false] {
+            var walker = MosaicChunkPlanner()
+            walker.chunksLeavePairableMedia = leaves
+            var shown: [DiscoverSegment] = []
+            for loaded in stride(from: 7, through: 200, by: 7) + [200] {
+                let next = walker.segments(for: Array(posts[..<loaded]), isComplete: loaded == 200)
+                #expect(shown.isEmpty || MosaicChunkPlanner.change(from: shown, to: next) != .incompatible,
+                        "leaves \(leaves) loaded \(loaded)")
+                shown = next
+            }
+            #expect(shown == (leaves ? planned : old))
         }
-        #expect(shown == planned)
     }
 
     /// An undecided block holds back at most its run and the partner search:
@@ -306,13 +317,13 @@ struct PairedVerticalMediaPlannerTests {
     @Test func anUndecidedBlockHoldsBackOnlyTheTail() {
         let posts = mixed(300, seed: 9)
         for loaded in stride(from: 4, through: 300, by: 11) {
-            var planner = MosaicChunkPlanner(pairsVerticalMedia: true)
+            var planner = MosaicChunkPlanner()
             let shown = planner.segments(for: Array(posts[..<loaded]), isComplete: false)
                 .reduce(0) { $0 + $1.posts.count }
             #expect(loaded - shown < MosaicChunkPlanner.lookahead + VerticalMediaPairing.blockSizes.upperBound,
                     "loaded \(loaded), shown \(shown)")
         }
-        var planner = MosaicChunkPlanner(pairsVerticalMedia: true)
+        var planner = MosaicChunkPlanner()
         #expect(planner.segments(for: spelled("VVV"), isComplete: false).isEmpty)
         #expect(planner.segments(for: spelled("VT"), isComplete: false).isEmpty)
         #expect(planner.segments(for: spelled("VVV"), isComplete: true).first?.isPairs == true)
@@ -334,8 +345,9 @@ struct PairedVerticalMediaPlannerTests {
     // MARK: - Today's planner, frozen
 
     /// The planner's loop exactly as it was before pairing (develop @ #363),
-    /// built from the same public pieces, so `flagOffIsTodaysList` compares
-    /// against behaviour rather than against itself.
+    /// built from the same public pieces, so
+    /// `aCorpusWithoutVerticalMediaIsPlannedAsBeforePairing` compares against
+    /// behaviour rather than against itself.
     private static func legacySegments(
         _ corpus: [GalleryPost], isComplete: Bool, planner: inout MosaicChunkPlanner
     ) -> [DiscoverSegment] {

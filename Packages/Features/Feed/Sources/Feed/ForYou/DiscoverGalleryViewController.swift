@@ -72,13 +72,20 @@ final class DiscoverGalleryViewController: UIViewController {
     /// number, because this is For You's mosaic.
     private static let seedWindow = 40
 
+    /// - Parameter staking: what the tiles' likes stake with, when they have
+    ///   one (`stakesOnTiles`, `-foryou-card-likes`) — For You's own, so the
+    ///   gallery and the list behind it are one surface and one undo window.
     init(
         imagePipeline: ImagePipeline,
         videoPlayback: VideoPlaybackController?,
         header: PushedScreenHeader,
+        staking: PostCardStaking? = nil,
+        stakesOnTiles: Bool = false,
         openPost: ((UIViewController, SnapFeedHeroOrigin, [PostID]) -> Void)?
     ) {
         page = ForYouGridPage(imagePipeline: imagePipeline, style: .grid, videoPlayback: videoPlayback)
+        page.staking = staking
+        page.stakesOnCompactCards = stakesOnTiles
         self.header = header
         self.openPost = openPost
         super.init(nibName: nil, bundle: nil)
@@ -225,6 +232,8 @@ final class DiscoverGalleryViewController: UIViewController {
                     if !committed { page?.clearRevealConcealment() }
                 }
             ),
+            // A staking tile's heart flies red once the viewer has staked.
+            viewerStake: { [weak page] in page?.compactCardStake(for: tapped.id) ?? 0 },
             // Pinned since the tap; the close measures a mosaic holding still.
             willStageDismissal: { [weak page] in page?.pinForPushedClose() }
         )
