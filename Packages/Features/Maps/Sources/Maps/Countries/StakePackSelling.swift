@@ -1,6 +1,6 @@
 import Foundation
 
-/// The ×10 cartridge pack as the Shop sells it, at one instant.
+/// The ×100 cartridge pack as the Shop sells it, at one instant.
 ///
 /// A pack of SHOTS: each stakes `pointsPerShot` of the viewer's OWN points in
 /// one tap, where a plain stake commits the default amount. Gems buy the
@@ -33,7 +33,7 @@ public enum StakePackPurchase: Equatable, Sendable {
     case insufficientGems(needed: Int, have: Int)
 }
 
-/// The Shop's Boosts section: the ×10 cartridge pack, and buying it with gems.
+/// The Shop's Boosts section: the ×100 cartridge pack, and buying it with gems.
 ///
 /// Answered by the shell over the wallet (`WalletStore.buyStakePack`), like
 /// `CountryAccess` over the unlocks — the Maps feature never sees the store.

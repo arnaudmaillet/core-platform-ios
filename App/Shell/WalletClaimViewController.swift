@@ -76,7 +76,7 @@ final class WalletClaimViewController: UIViewController {
     /// The account's countries — what the Shop sells. Nil hides the Shop item
     /// (the fleet, until the backend carries unlocks).
     private let countries: (any CountryAccess)?
-    /// The Shop's Boosts — the ×10 cartridge pack. Nil sells none.
+    /// The Shop's Boosts — the ×100 cartridge pack. Nil sells none.
     private let stakePacks: (any StakePackSelling)?
 
     private nonisolated enum Section: Hashable { case summary, active, settled }

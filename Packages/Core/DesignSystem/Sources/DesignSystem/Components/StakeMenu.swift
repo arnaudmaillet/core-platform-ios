@@ -22,7 +22,7 @@ public enum StakeMenu {
         /// What a plain tap spends — the default amount, and the menu's only
         /// plain amount.
         public var tapAmount: Int
-        /// Shots left in the viewer's ×10 cartridge pack; 0 = no pack.
+        /// Shots left in the viewer's ×100 cartridge pack; 0 = no pack.
         public var shotsLeft: Int
         /// What ONE shot stakes.
         public var shotAmount: Int
@@ -52,7 +52,9 @@ public enum StakeMenu {
 
         /// Whether a shot can fire its WHOLE amount: a loaded pack, the
         /// points, and room for all of them on this post. A shot the cap
-        /// would clamp is not offered — a pack's shot is worth its number.
+        /// would clamp is not offered — a pack's shot is worth its number,
+        /// and the wallet refuses one that does not fit whole the same way
+        /// (`WalletBoostOutcome.shotDoesNotFit`).
         public var canShoot: Bool {
             shotsLeft > 0 && balance >= shotAmount && remaining >= shotAmount
         }
@@ -60,23 +62,28 @@ public enum StakeMenu {
 
     public nonisolated static let title = "Stake on this post"
 
-    /// The menu, top to bottom: the ×10 SHOT (loaded: "×10 — N left"; no
-    /// pack: drawn disabled, pointing to the Shop), the default amount, and
-    /// Undo while the surface holds a spend to take back.
+    /// The menu, top to bottom: the ×100 SHOT (loaded: "×100 — N left"; no
+    /// pack: "Get ×100 cartridges in the Shop", which OPENS the Shop on its
+    /// Boosts through `openShop`), the default amount, and Undo while the
+    /// surface holds a spend to take back.
     ///
     /// ⚠️ **NO MULTI-POINT AMOUNT IS FREE.** Staking several points in one
-    /// gesture is what the shop's ×10 cartridge pack sells (2026-10-02): the
+    /// gesture is what the shop's ×100 cartridge pack sells (2026-10-02): the
     /// menu used to offer Max and 100 to everyone, and now offers only the
     /// default amount unless a pack is loaded. Unavailable entries are drawn
     /// DISABLED rather than left out, with a subtitle saying why, so the menu
-    /// always says what exists and how to get it.
+    /// always says what exists and how to get it. The one exception is the
+    /// empty pack's row: it is the way TO the pack, so with an `openShop` it
+    /// is enabled and opens the Shop (2026-10-02) — without one (no shop
+    /// sells packs: the fleet, a test host) it stays a disabled signpost.
     public static func elements(
         for state: State,
         stake: @escaping @MainActor (Int) -> Void,
         shoot: @escaping @MainActor () -> Void,
-        undo: (@MainActor () -> Void)?
+        undo: (@MainActor () -> Void)?,
+        openShop: (@MainActor () -> Void)? = nil
     ) -> [UIMenuElement] {
-        var actions: [UIMenuElement] = [shotAction(for: state, shoot: shoot)]
+        var actions: [UIMenuElement] = [shotAction(for: state, shoot: shoot, openShop: openShop)]
 
         let tap = UIAction(
             title: points(state.tapAmount),
@@ -95,23 +102,30 @@ public enum StakeMenu {
         return actions
     }
 
-    /// The pack's name, after what one shot stakes: "×10". The shop's row
+    /// The pack's name, after what one shot stakes: "×100". The shop's row
     /// and the menu's entry both read it.
     public nonisolated static func shotName(_ shotAmount: Int) -> String { "×\(shotAmount)" }
 
     /// The shot glyph — the menu's entry and the shop's row.
     public nonisolated static let shotGlyph = "bolt.fill"
 
-    /// "×10 — 7 left" with a pack; "×10", disabled, without one.
-    private static func shotAction(for state: State, shoot: @escaping @MainActor () -> Void) -> UIAction {
+    /// "×100 — 2 left" with a pack. Without one, "×100 · Get ×100 cartridges
+    /// in the Shop": the Shop's door when there is one, disabled when not.
+    private static func shotAction(
+        for state: State, shoot: @escaping @MainActor () -> Void, openShop: (@MainActor () -> Void)?
+    ) -> UIAction {
         let name = shotName(state.shotAmount)
+        guard state.shotsLeft > 0 else {
+            let action = UIAction(title: name, image: UIImage(systemName: shotGlyph)) { _ in openShop?() }
+            action.subtitle = shopSubtitle(state.shotAmount)
+            if openShop == nil { action.attributes = .disabled }
+            return action
+        }
         let action = UIAction(
-            title: state.shotsLeft > 0 ? "\(name) — \(state.shotsLeft) left" : name,
+            title: "\(name) — \(state.shotsLeft) left",
             image: UIImage(systemName: shotGlyph)
         ) { _ in shoot() }
-        if state.shotsLeft == 0 {
-            action.subtitle = "Get \(name) cartridges in the Shop"
-        } else if state.remaining < state.shotAmount {
+        if state.remaining < state.shotAmount {
             action.subtitle = state.remaining == 0
                 ? "This post holds all it can take"
                 : "Only \(points(state.remaining)) more fit on this post"
@@ -124,7 +138,12 @@ public enum StakeMenu {
         return action
     }
 
-    /// "1 point", "10 points".
+    /// "Get ×100 cartridges in the Shop" — the empty pack's row.
+    public nonisolated static func shopSubtitle(_ shotAmount: Int) -> String {
+        "Get \(shotName(shotAmount)) cartridges in the Shop"
+    }
+
+    /// "1 point", "100 points".
     public nonisolated static func points(_ amount: Int) -> String {
         amount == 1 ? "1 point" : "\(amount) points"
     }
@@ -134,8 +153,12 @@ public enum StakeMenu {
         for state: State,
         stake: @escaping @MainActor (Int) -> Void,
         shoot: @escaping @MainActor () -> Void,
-        undo: (@MainActor () -> Void)?
+        undo: (@MainActor () -> Void)?,
+        openShop: (@MainActor () -> Void)? = nil
     ) -> UIMenu {
-        UIMenu(title: title, children: elements(for: state, stake: stake, shoot: shoot, undo: undo))
+        UIMenu(
+            title: title,
+            children: elements(for: state, stake: stake, shoot: shoot, undo: undo, openShop: openShop)
+        )
     }
 }

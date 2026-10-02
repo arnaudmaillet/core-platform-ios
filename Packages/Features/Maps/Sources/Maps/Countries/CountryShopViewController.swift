@@ -11,8 +11,8 @@ import UIKit
 ///  │ (◆ 100)        Shop             (✕)  │
 ///  │ 🔍 Search countries                  │
 ///  │ Boosts                               │
-///  │ (⚡) ×10 cartridges            [◆ 20] │  ← or "Active — 7 left"
-///  │      10 shots · 10 points a tap      │
+///  │ (⚡) ×100 cartridges           [◆ 50] │  ← or "Active — 2 left"
+///  │      3 shots · 100 points a tap      │
 ///  │ Your map        3 of 237 countries   │  ← scrolls with the list
 ///  │ ▓▓▓░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  │
 ///  │ Unlocked 3                           │
@@ -25,11 +25,12 @@ import UIKit
 /// ```
 ///
 /// # Boosts, then the map
-/// With a `StakePackSelling`, the list opens on **Boosts**: the ×10 cartridge
-/// pack — shots that each stake 10 of the viewer's own points in one tap,
+/// With a `StakePackSelling`, the list opens on **Boosts**: the ×100 cartridge
+/// pack — shots that each stake 100 of the viewer's own points in one tap,
 /// bought with gems. First, because it is one row the collapsed sheet always
 /// shows (under 237 countries it would be out of reach), and because the
-/// stake menu's disabled "×10" sends the viewer HERE to find it. Packs don't
+/// stake menu's "Get ×100 cartridges in the Shop" OPENS the Shop here
+/// (`Focus.boosts`: the row flashes once the sheet is up). Packs don't
 /// stack: while one has shots, the row says "Active — N left" in place of a
 /// price. A price raises a one-line confirmation menu (the pack is bought on
 /// the spot, there is no offer screen to show). A search is a search of
@@ -72,9 +73,21 @@ public final class CountryShopViewController: UIViewController {
     /// Shows a country on the map. Nil hides the "show" half of a row's tap.
     public var onShowCountry: ((String) -> Void)?
 
+    /// What the Shop was opened FOR, beyond browsing.
+    public enum Focus: Sendable {
+        /// The cartridge pack: the stake menu's empty-pack row opens the Shop
+        /// on it. Boosts already lead the list; the row flashes once the
+        /// sheet is up, so the eye lands on it.
+        case boosts
+    }
+    /// Nil: opened to browse (the Explore header, the points sheet).
+    public private(set) var focus: Focus?
+    /// The focus is shown once, on the first appearance.
+    private var hasShownFocus = false
+
     enum Section: Hashable { case boosts, progress, unlocked, locked }
     enum Item: Hashable {
-        /// The ×10 cartridge pack, Boosts' one row.
+        /// The ×100 cartridge pack, Boosts' one row.
         case stakePack
         /// "Your map · N of 237", the first item of the list.
         case progress
@@ -112,9 +125,11 @@ public final class CountryShopViewController: UIViewController {
     /// and drags to full height (see the type's note).
     public static func sheet(
         access: any CountryAccess, stakePacks: (any StakePackSelling)? = nil,
+        focus: Focus? = nil,
         onShowCountry: ((String) -> Void)? = nil
     ) -> UIViewController {
         let shop = CountryShopViewController(access: access, stakePacks: stakePacks)
+        shop.focus = focus
         shop.onShowCountry = onShowCountry
         let navigation = UINavigationController(rootViewController: shop)
         navigation.modalPresentationStyle = .pageSheet
@@ -204,6 +219,25 @@ public final class CountryShopViewController: UIViewController {
         }
         installBalance()
         apply(animated: false)
+    }
+
+    override public func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        guard !hasShownFocus, focus == .boosts else { return }
+        hasShownFocus = true
+        flashStakePack()
+    }
+
+    /// Flashes the pack's row — Boosts lead the list, so it is already in
+    /// view: selected without animation (the press wash), then let go with
+    /// one — the system's way of saying "here" (Settings does the same for a
+    /// deep link).
+    func flashStakePack() {
+        guard let path = dataSource.indexPath(for: .stakePack) else { return }
+        collectionView.selectItem(at: path, animated: false, scrollPosition: [])
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            self?.collectionView.deselectItem(at: path, animated: true)
+        }
     }
 
     // MARK: - Content
@@ -732,7 +766,7 @@ final class CountryShopProgressCell: UICollectionViewListCell {
     }
 }
 
-/// Boosts' one row: the pack's badge, "×10 cartridges", and what it holds
+/// Boosts' one row: the pack's badge, "×100 cartridges", and what it holds
 /// under it; the trailing price / "Active — N left" is the cell's accessory.
 /// Shaped like a country's row (34pt leading visual, name over details) so
 /// the two sections read as one list.
@@ -741,7 +775,7 @@ final class StakePackRowCell: UICollectionViewListCell {
     let titleLabel = UILabel()
     let detailLabel = UILabel()
 
-    /// "×10 cartridges".
+    /// "×100 cartridges".
     static func title(_ offer: StakePackOffer) -> String {
         "\(StakeMenu.shotName(offer.pointsPerShot)) cartridges"
     }
@@ -793,8 +827,12 @@ final class StakePackRowCell: UICollectionViewListCell {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     /// No resting ground, as a country's row: the sheet's own runs behind.
+    /// Never pressed (the pack is bought through its price), but SELECTED
+    /// by the Shop's Boosts focus, which draws the list's wash to flash it.
     override func updateConfiguration(using state: UICellConfigurationState) {
-        backgroundConfiguration = .clear()
+        var background = UIBackgroundConfiguration.clear()
+        background.backgroundColor = state.isSelected ? .systemFill : .clear
+        backgroundConfiguration = background
     }
 
     func configure(_ offer: StakePackOffer) {

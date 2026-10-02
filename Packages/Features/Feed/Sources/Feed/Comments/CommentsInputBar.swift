@@ -53,7 +53,7 @@ final class CommentsInputBar: UIView {
     var onSend: ((String) -> Void)?
     /// Fired by the boost (star) button with what to spend — the tap's
     /// default amount, or a pick from the long-press menu (the default, or
-    /// one ×10 shot). The spend itself is the host's affair (it owns the post
+    /// one ×100 shot). The spend itself is the host's affair (it owns the post
     /// identity and the wallet); the refusal comes back through
     /// `playBoostDenied`.
     var onBoost: ((WalletStakeSpend) -> Void)?
@@ -1109,7 +1109,7 @@ final class CommentsInputBar: UIView {
     /// historical always-enabled affordance.
     private var boostBalance = Int.max
     private var boostUndoableAmount = 0
-    /// Shots left in the viewer's ×10 cartridge pack — the menu's loaded face.
+    /// Shots left in the viewer's ×100 cartridge pack — the menu's loaded face.
     private var boostStakeShots = 0
 
     /// The affordability + undo state, pushed on configure and on every
@@ -1150,7 +1150,10 @@ final class CommentsInputBar: UIView {
             ),
             stake: { [weak self] amount in self?.onBoost?(.points(amount)) },
             shoot: { [weak self] in self?.onBoost?(.shot) },
-            undo: { [weak self] in self?.onBoostUndo?() }
+            undo: { [weak self] in self?.onBoostUndo?() },
+            // The empty pack's row opens the Shop, found up the bar's
+            // responder chain (`StakeShopOpening`).
+            openShop: StakeShop.openAction(from: self)
         )
     }
 

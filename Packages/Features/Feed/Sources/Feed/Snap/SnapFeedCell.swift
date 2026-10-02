@@ -466,7 +466,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// more entry points later). Carries the represented post.
     var onRequestComments: ((PostID) -> Void)?
     /// The rail's boost anchor asked to spend on the represented post (an
-    /// amount, or one ×10 shot). The owning VC answers through the wallet and
+    /// amount, or one ×100 shot). The owning VC answers through the wallet and
     /// calls back `playBoostConfirmation` / `playBoostDenied` — the cell
     /// holds no balance opinion of its own.
     var onRequestBoost: ((PostID, WalletStakeSpend) -> Void)?

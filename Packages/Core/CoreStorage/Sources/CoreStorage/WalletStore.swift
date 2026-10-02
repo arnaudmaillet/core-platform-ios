@@ -23,7 +23,7 @@ public struct WalletSnapshot: Equatable, Sendable {
     /// Gems (the charter's currency B) earned by stakes that have settled —
     /// earned-only, so it is the sum of their rewards and nothing else.
     public let gems: Int
-    /// Shots left in the viewer's ×10 cartridge pack (`Policy.StakePack`);
+    /// Shots left in the viewer's ×100 cartridge pack (`Policy.StakePack`);
     /// 0 when no pack is active.
     public let stakeShots: Int
 }
@@ -95,17 +95,17 @@ public enum WalletGemSpend: Equatable, Sendable {
 }
 
 /// What one stake asks the wallet for: a plain amount of points (a tap's
-/// default), or one SHOT of the ×10 cartridge pack — `Policy.StakePack.
+/// default), or one SHOT of the ×100 cartridge pack — `Policy.StakePack.
 /// pointsPerShot` points in one gesture, and one shot off the pack.
 ///
 /// Either way the points are the viewer's own: a shot is a CONVENIENCE bought
-/// with gems (one tap instead of ten), never points (charter V5.3 §34, B ─X→ A).
+/// with gems (one tap instead of a hundred), never points (charter V5.3 §34, B ─X→ A).
 public enum WalletStakeSpend: Equatable, Sendable {
     case points(Int)
     case shot
 }
 
-/// What buying a ×10 cartridge pack did.
+/// What buying a ×100 cartridge pack did.
 public enum WalletStakePackPurchase: Equatable, Sendable {
     /// The gems left, and the pack's shots now loaded.
     case bought(shots: Int, remainingGems: Int)
@@ -128,6 +128,12 @@ public enum WalletBoostOutcome: Equatable, Sendable {
     case targetCapReached(targetTotal: Int)
     /// A shot was asked for with no pack loaded; nothing changed.
     case noShotsLeft
+    /// A shot was asked for on a post with room for only `room` more of the
+    /// viewer's points — fewer than a shot's whole amount. A shot is never
+    /// clamped (it always means `Policy.StakePack.pointsPerShot`), so it is
+    /// refused and kept; nothing changed. The menu's "Only N points more fit
+    /// on this post".
+    case shotDoesNotFit(room: Int)
 }
 
 /// The viewer's point wallet and boost ledger.
@@ -168,28 +174,35 @@ public final class WalletStore: @unchecked Sendable {
         /// chip, and the long-press menu's only plain amount. The ONE place
         /// the default lives (1 point, the user's call on 2026-10-02 — it was
         /// 10, with a Max / 100 menu, until staking several points in one
-        /// gesture became the ×10 cartridge pack's job).
+        /// gesture became the cartridge pack's job — `StakePack`).
         public static let defaultStakeAmount = 1
-        /// The ×10 cartridge pack, the shop's boost: a pack of SHOTS, each
+        /// The ×100 cartridge pack, the shop's boost: a pack of SHOTS, each
         /// staking `pointsPerShot` of the viewer's OWN points in one tap.
         /// Bought with gems; shots never expire; packs don't stack (a new one
-        /// only once the current one is empty).
+        /// only once the current one is empty). The ONE place its numbers
+        /// live: the menus, the shop and the tests all read them here.
         ///
-        /// The price, against the mock economy's gem earn rate: a settled
-        /// stake earns gems about 55% of the time, 15–49% of the points
-        /// staked (`mockOutcome`) — roughly 18 gems back per 100 points
-        /// staked. A pack moves exactly 100 points (10 × 10), so 20 gems
-        /// prices it near what its own stakes would earn back: an average
-        /// curator about breaks even, a good one comes out ahead, and it
-        /// sits between the cheapest country (15) and the next tier (30), the
-        /// only other thing gems buy. `seededGems` (100) buys five.
+        /// The price, against the mock economy's gem earn rate (the rationale
+        /// the ×10 pack was priced on, 2026-10-02): a settled stake earns gems
+        /// about 55% of the time, 15–49% of the points staked
+        /// (`mockOutcome`) — roughly 18 gems back per 100 points staked, so
+        /// about 18 per shot. Priced near what its own stakes earn back, ten
+        /// ×100 shots would cost ~180 gems: more than the seeded 100, and
+        /// six times a mid-tier country. So the pack is SMALLER, not dearer
+        /// per point: 3 shots move 300 points (~53 gems back) for 50 gems —
+        /// an average curator about breaks even, a good one comes out ahead,
+        /// it costs what a top-10 country costs (`CountryStanding.price`:
+        /// 15 / 30 / 50), and `seededGems` (100) buys two. Three shots also
+        /// fit the points a viewer actually holds: the seeded 250 fires two,
+        /// a day's claims (`dailyClaimCap`, 200) the third. A post holds two
+        /// shots at most (`perTargetBoostCap`, 250).
         public enum StakePack {
             /// Shots in one pack.
-            public static let shots = 10
-            /// Points ONE shot stakes — named for its number ("×10").
-            public static let pointsPerShot = 10
+            public static let shots = 3
+            /// Points ONE shot stakes — named for its number ("×100").
+            public static let pointsPerShot = 100
             /// What a pack costs, in gems.
-            public static let price = 20
+            public static let price = 50
         }
         /// The most of THIS viewer's points one post (or comment) can hold
         /// — spends past it are clamped to the remainder, and a full target
@@ -243,7 +256,7 @@ public final class WalletStore: @unchecked Sendable {
         /// spent. Gems EARNED stay derived from the settled stakes.
         static let gemsGranted = "wallet.gemsGranted"
         static let gemsSpent = "wallet.gemsSpent"
-        /// Shots left in the ×10 cartridge pack.
+        /// Shots left in the ×100 cartridge pack.
         static let stakeShots = "wallet.stakeShots"
     }
 
@@ -309,7 +322,7 @@ public final class WalletStore: @unchecked Sendable {
             defaults.set(0, forKey: Key.gemsSpent)
             defaults.set(gems - stakesLocked(at: now()).reduce(0) { $0 + $1.gems }, forKey: Key.gemsGranted)
         }
-        // `-wallet-stake-shots N`: a ×10 cartridge pack with N shots left
+        // `-wallet-stake-shots N`: a ×100 cartridge pack with N shots left
         // (0 empties it) — the menu's loaded face without a trip to the shop.
         if let index = arguments.firstIndex(of: "-wallet-stake-shots"),
            index + 1 < arguments.count, let shots = Int(arguments[index + 1]) {
@@ -349,7 +362,7 @@ public final class WalletStore: @unchecked Sendable {
         lock.withLock { snapshotLocked(at: now()) }
     }
 
-    /// Shots left in the ×10 cartridge pack; 0 when none is active.
+    /// Shots left in the ×100 cartridge pack; 0 when none is active.
     public var stakeShots: Int {
         lock.withLock { defaults.integer(forKey: Key.stakeShots) }
     }
@@ -435,12 +448,15 @@ public final class WalletStore: @unchecked Sendable {
         stake(.points(amount), on: targetID)
     }
 
-    /// One stake gesture: a plain amount, or one shot of the ×10 cartridge
-    /// pack. A shot stakes `Policy.StakePack.pointsPerShot` of the viewer's
-    /// own points under the same rules as any spend (the cap clamps, the
-    /// balance must cover it), and the shot is consumed ONLY when the stake
-    /// lands — a refused one (balance, full post) keeps it. Atomic: the
-    /// points and the shot move under one lock, or neither does.
+    /// One stake gesture: a plain amount, or one shot of the ×100 cartridge
+    /// pack. A shot stakes EXACTLY `Policy.StakePack.pointsPerShot` of the
+    /// viewer's own points, or nothing: where a plain amount is clamped to
+    /// the cap's remainder, a shot that would not fit whole is refused
+    /// (`shotDoesNotFit`, or `targetCapReached` on a full post) — the same
+    /// verdicts, in the same order, as the menu (`StakeMenu.State.canShoot`):
+    /// room first, then the balance. The shot is consumed ONLY when the stake
+    /// lands; a refused one keeps it. Atomic: the points and the shot move
+    /// under one lock, or neither does.
     @discardableResult
     public func stake(_ spend: WalletStakeSpend, on targetID: String) -> WalletBoostOutcome {
         let outcome: WalletBoostOutcome = lock.withLock {
@@ -451,6 +467,10 @@ public final class WalletStore: @unchecked Sendable {
             case .shot:
                 let shots = defaults.integer(forKey: Key.stakeShots)
                 guard shots > 0 else { return .noShotsLeft }
+                let held = boostTotalsLocked()[targetID] ?? 0
+                let room = Policy.perTargetBoostCap - held
+                guard room > 0 else { return .targetCapReached(targetTotal: held) }
+                guard room >= Policy.StakePack.pointsPerShot else { return .shotDoesNotFit(room: room) }
                 let outcome = boostLocked(targetID: targetID, amount: Policy.StakePack.pointsPerShot)
                 if case .boosted = outcome {
                     defaults.set(shots - 1, forKey: Key.stakeShots)
@@ -462,7 +482,7 @@ public final class WalletStore: @unchecked Sendable {
         return outcome
     }
 
-    /// Buys a ×10 cartridge pack with gems: `Policy.StakePack.shots` shots
+    /// Buys a ×100 cartridge pack with gems: `Policy.StakePack.shots` shots
     /// for `Policy.StakePack.price` gems, all or nothing. Refused while the
     /// current pack still has shots — packs don't stack.
     @discardableResult
