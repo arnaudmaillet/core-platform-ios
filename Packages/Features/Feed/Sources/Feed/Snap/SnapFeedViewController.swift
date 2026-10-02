@@ -72,12 +72,6 @@ final class SnapFeedViewController: UIViewController {
     /// fixed width (`applyBarPillWidths`). The engagement no longer touches the
     /// footer — see `configureToolbarItems` for why the trailing ✕ left it.
     private var defaultToolbarItems: [UIBarButtonItem] = []
-    /// `-snap-layout-v2` (experimental, `SnapActionColumn`): repost stands as a
-    /// bubble under the boost anchor on every media page, and share takes its
-    /// place in the toolbar's capsule — [share][bookmark] — and leaves ⋯. The
-    /// launch flag by default; a test flips it BEFORE the view loads for this
-    /// screen's own decisions (the toolbar, the menu, the pages it dequeues).
-    var usesActionColumn = SnapActionColumn.isEnabled
     /// The nav bar's two trailing items, held so comment mode can add the
     /// sort selector beside the author pill and take it away again.
     private var authorItem = UIBarButtonItem()
@@ -1422,9 +1416,6 @@ final class SnapFeedViewController: UIViewController {
                 cell.onRequestBoostUndo = { [weak self, weak cell] id in
                     self?.performBoostUndo(on: id, feedbackCell: cell)
                 }
-                // `-snap-layout-v2`: the repost bubble under the anchor (share
-                // moved to the toolbar's capsule — `configureToolbarItems`).
-                cell.setUsesActionColumn(self.usesActionColumn)
                 // The anchor's number face and wallet context: what this
                 // viewer has already put on this post (the ledger), what
                 // the balance can still afford, and whether any of it is
@@ -2036,22 +2027,21 @@ final class SnapFeedViewController: UIViewController {
             self.toggleBookmark(for: model.id)
         }, for: .primaryActionTriggered)
 
-        // ⚠️ REPOST HAS NO ACTION YET, and it is drawn anyway — the same
-        // posture the gallery card's band takes for the same glyph, and for the
-        // same reason: `CreatePost` carries `parent_id` on the wire and
+        // REPOST IS NOT HERE: it is a bubble on the page, under the like
+        // anchor (`SnapActionColumn`, `SnapRailRepostButton`), so it holds the
+        // same screen coordinates as the comments composer's rail slot. ⚠️ It
+        // has no action yet, and is drawn anyway — the same posture the
+        // gallery card's band takes for the same glyph, and for the same
+        // reason: `CreatePost` carries `parent_id` on the wire and
         // `GalleryPost.isRepost` already reads it (the profile's
         // Posts/Reposts split), but `PostComposer` takes no parent, so there is
         // no client path that publishes one. What it needs is a mutation, not a
-        // handler. Pressing it does nothing today, here as there.
-        let repost = SnapNavControls.makeToolbarActionButton(systemName: PostActionSymbol.repost)
-        repost.accessibilityLabel = "Repost"
+        // handler. Pressing it does nothing today.
+        //
+        // SHARE took its place in the capsule, first — [⇪ 🔖] — and left ⋯
+        // for it (`moreMenuActions`).
 
-        // SHARE LEFT THE BAR. It is in the ⋯ menu now, beside the other things
-        // you can do TO a post rather than the two you can do WITH it: save it,
-        // and pass it on. Three glyphs of equal weight said the three were
-        // equally common, and share is not.
-
-        // TWO bubbles: [🔖 ⇄] and [⋯], held apart by a fixed space — iOS 26
+        // TWO bubbles: [⇪ 🔖] and [⋯], held apart by a fixed space — iOS 26
         // groups ADJACENT bar items into one shared platter, so a spacer is
         // the only way to make two.
         //
@@ -2068,19 +2058,13 @@ final class SnapFeedViewController: UIViewController {
         // save it, pass it on — and ⋯ holds what is folded away. A separator
         // between them says which is which; sharing a platter said they were
         // three of a kind.
-        //
-        // `-snap-layout-v2` (`SnapActionColumn`): repost is a bubble on the
-        // page, under the like anchor, and SHARE takes its place in the
-        // capsule, first — [⇪ 🔖]. Share comes out of ⋯ for it.
         let share = SnapNavControls.makeToolbarActionButton(systemName: "square.and.arrow.up")
         share.accessibilityLabel = "Share"
         share.addAction(UIAction { [weak self] _ in
             guard let self, let model = self.activeModel else { return }
             self.presentShareSheet(for: model.id)
         }, for: .primaryActionTriggered)
-        let shareCluster = UIStackView(
-            arrangedSubviews: usesActionColumn ? [share, bookmarkButton] : [bookmarkButton, repost]
-        )
+        let shareCluster = UIStackView(arrangedSubviews: [share, bookmarkButton])
         shareCluster.axis = .horizontal
 
         let more = SnapNavControls.makeToolbarActionButton(systemName: "ellipsis")
@@ -2098,7 +2082,7 @@ final class SnapFeedViewController: UIViewController {
 
         // ONE item set, for every state:
         //
-        //   [♫ attribution] … [🔖 ⇄] [⋯]
+        //   [♫ attribution] … [⇪ 🔖] [⋯]
         //
         // The toolbar is now STATE-INVARIANT. It used to carry three sets
         // whose only difference was the trailing slot — a red ✕ while a
@@ -4928,20 +4912,15 @@ final class SnapFeedViewController: UIViewController {
     /// menu of things you can reach anyway is a menu nobody reads, and it
     /// crowded out the things that have nowhere else to live.
     ///
-    /// So it is the three that do: pass the post on, ask for less like it, and
-    /// report it. Report is destructive and last, which is the ordering the
-    /// gallery card's own menu uses.
+    /// So it is the two that do: ask for less like it, and report it. Report
+    /// is destructive and last, which is the ordering the gallery card's own
+    /// menu uses.
     ///
-    /// Under `-snap-layout-v2` Share is not here: it has its own button in the
-    /// toolbar's capsule (`configureToolbarItems`), and a second door to it in
-    /// a menu would be the kind of duplicate this menu exists to avoid.
+    /// Share is not here: it has its own button in the toolbar's capsule
+    /// (`configureToolbarItems`), and a second door to it in a menu would be
+    /// the kind of duplicate this menu exists to avoid.
     private func moreMenuActions(for id: PostID) -> [UIMenuElement] {
         var actions: [UIMenuElement] = []
-        if !usesActionColumn {
-            actions.append(UIAction(title: "Share", image: UIImage(systemName: "square.and.arrow.up")) { [weak self] _ in
-                self?.presentShareSheet(for: id)
-            })
-        }
         actions.append(UIAction(title: "Not interested", image: UIImage(systemName: "hand.thumbsdown")) { [weak self] _ in
             self?.markNotInterested(id)
         })

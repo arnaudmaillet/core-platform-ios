@@ -1,3 +1,4 @@
+import MediaCore
 import UIKit
 
 // MARK: - Flag border
@@ -61,7 +62,7 @@ final class MapFlagBorderView: UIView {
     /// A dark hairline on the light map, a light one on the dark map: a white
     /// band (Japan, France's middle) never melts into light tiles, nor a black
     /// one (Germany) into dark ones.
-    private static let hairlineColor = UIColor { traits in
+    static let hairlineColor = UIColor { traits in
         traits.userInterfaceStyle == .dark
             ? UIColor(white: 1, alpha: 0.3)
             : UIColor(white: 0, alpha: 0.22)
@@ -136,8 +137,9 @@ final class MapFlagBorderView: UIView {
 
 // MARK: - Corner badge
 
-/// The small disc riding a marker's bottom-right corner, half over its edge
-/// like an app icon's badge: the country's flag, a city's glyph, or a lock.
+/// The small disc in a marker's bottom-right corner — inside a square card,
+/// half over the edge of a disc like an app icon's badge (`center`): the
+/// country's round flag, a city's glyph, or a lock.
 ///
 /// Opaque, with its own small shadow on an explicit path — legible over any
 /// face and any map, and cheap under a field of animating markers.
@@ -165,6 +167,8 @@ final class MapMarkerBadgeView: UIView {
         disc.clipsToBounds = true
         addSubview(disc)
         imageView.contentMode = .scaleAspectFit
+        // The flag is rendered for the 40pt disc and drawn here at half that.
+        imageView.layer.minificationFilter = .trilinear
         disc.addSubview(imageView)
         applyRim()
         registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: Self, _) in
@@ -182,6 +186,11 @@ final class MapMarkerBadgeView: UIView {
         disc.layer.borderColor = UIColor.systemBackground.resolvedColor(with: traitCollection).cgColor
     }
 
+    #if DEBUG
+    var debugImage: UIImage? { imageView.image }
+    var debugImageFrame: CGRect { imageView.frame }
+    #endif
+
     /// The glyph's ink on a city or lock badge, and the disc it sits on.
     private static let glyphGround = UIColor(white: 0.16, alpha: 1)
 
@@ -191,12 +200,17 @@ final class MapMarkerBadgeView: UIView {
         isHidden = badge == nil
         switch badge {
         case .flag(let code):
+            let entry = FlagPalette.entry(for: code)
             disc.backgroundColor = .systemBackground
-            imageView.image = FlagPalette.image(for: code)
+            imageView.image = entry.image
             imageView.tintColor = nil
-            // The flag fills the disc's width inside the rim: an emoji flag is
-            // wider than tall, so it sits as a band across the middle.
-            imageView.frame = bounds.insetBy(dx: Self.rimWidth + 1.5, dy: Self.rimWidth + 1.5)
+            // The round flag IS the disc: edge to edge, the rim drawn over its
+            // edge (a layer's border composites above its sublayers). An
+            // emoji fallback is wider than tall, so it sits as a band across
+            // the middle, inside the rim.
+            imageView.frame = entry.isRound
+                ? bounds
+                : bounds.insetBy(dx: Self.rimWidth + 1.5, dy: Self.rimWidth + 1.5)
         case .city, .lock:
             disc.backgroundColor = Self.glyphGround
             let name = badge == .city ? "building.2.fill" : "lock.fill"
@@ -214,14 +228,107 @@ final class MapMarkerBadgeView: UIView {
         imageView.contentMode = .scaleAspectFit
     }
 
-    /// Where the badge's centre sits for a card of `size` and corner
-    /// `radius`: ON the corner's arc, at 45°, so it overlaps the edge the same
-    /// way on a rounded square, a disc, or a bare icon's square.
-    nonisolated static func center(in size: CGSize, cornerRadius radius: CGFloat) -> CGPoint {
+    /// How far a badge seated INSIDE a card stands clear of the card's border
+    /// (the flag border, the heavier of the two).
+    nonisolated static let insideGap: CGFloat = 2
+
+    /// Where the badge's centre sits for a card of `size` and corner `radius`.
+    ///
+    /// ```
+    ///   inside: true             inside: false
+    ///   ╭────────╮                ╭────╮
+    ///   │        │               │      │
+    ///   │     (●)│                ╰────(●)   on the arc, at 45°
+    ///   ╰────────╯
+    /// ```
+    ///
+    /// `inside` — a SQUARE card (a media marker's rounded rectangle): in the
+    /// bottom-right corner, within the card, clear of its border by
+    /// `insideGap`. Hanging off the corner of a square, the badge read as
+    /// stuck onto the picture's frame; inside, it is part of the card, and
+    /// nothing of it overhangs a window the card becomes.
+    ///
+    /// Otherwise ON the corner's arc, at 45°, overlapping the edge — a disc
+    /// (a text marker, an empty country), which has no corner to sit in. An
+    /// icon's badge hugs its mark instead (`PinCardView.iconBadgeCenter`).
+    nonisolated static func center(in size: CGSize, cornerRadius radius: CGFloat, inside: Bool) -> CGPoint {
+        if inside {
+            // The badge is wider than the corner's inner curve (its radius
+            // `side / 2` ≥ the card's radius less the border), so standing
+            // clear of both straight edges keeps it clear of the curve too.
+            let inset = MapFlagBorderView.lineWidth + insideGap + side / 2
+            return CGPoint(x: size.width - inset, y: size.height - inset)
+        }
         // The 45° point of the arc, measured in from the bounding corner. A
         // square corner (an icon) would put the badge's centre on the very
         // corner of a mark that rarely reaches it, so it comes in a little.
         let inset = max(3, radius * (1 - 1 / 2.squareRoot()))
         return CGPoint(x: size.width - inset, y: size.height - inset)
+    }
+}
+
+// MARK: - Icon mark bounds
+
+/// Where an icon's MARK sits in its square: the opaque bounds of its first
+/// frame, in unit coordinates — what an emote's badge hugs
+/// (`PinCardView.positionBadge`).
+///
+/// ⚠️ AN ICON'S SQUARE IS NOT ITS MARK. The baked cells carry the art with a
+/// margin of their own — Morocco's pastel petal covers 44% of its cell's
+/// side — so a badge seated by the square sat a quarter of the marker away
+/// from anything drawn, and read as a second marker.
+///
+/// Read once per picture (a 136 px alpha scan, well under a millisecond) and
+/// remembered for as long as the catalogue keeps that picture.
+@MainActor
+enum MapIconMarkBounds {
+    /// The whole square — an art whose mark could not be read.
+    static let full = CGRect(x: 0, y: 0, width: 1, height: 1)
+
+    private static let cache = NSMapTable<UIImage, NSValue>(keyOptions: .weakMemory, valueOptions: .strongMemory)
+
+    static func unitBounds(of art: AnimatedIconArt) -> CGRect {
+        let key: UIImage
+        switch art {
+        case .decomposed(let still): key = still.mark
+        case .sheet(let sheet): key = sheet.sheet
+        }
+        if let cached = cache.object(forKey: key) { return cached.cgRectValue }
+        let bounds = art.firstFrame().flatMap(opaqueUnitBounds) ?? full
+        cache.setObject(NSValue(cgRect: bounds), forKey: key)
+        return bounds
+    }
+
+    /// The rectangle of pixels more than faintly drawn, over the image's
+    /// size; nil when nothing is.
+    private static func opaqueUnitBounds(of image: UIImage) -> CGRect? {
+        guard let cgImage = image.cgImage else { return nil }
+        let (width, height) = (cgImage.width, cgImage.height)
+        guard width > 0, height > 0 else { return nil }
+        var alpha = [UInt8](repeating: 0, count: width * height)
+        let drawn = alpha.withUnsafeMutableBytes { buffer -> Bool in
+            guard let context = CGContext(
+                data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8,
+                bytesPerRow: width, space: CGColorSpaceCreateDeviceGray(),
+                bitmapInfo: CGImageAlphaInfo.alphaOnly.rawValue
+            ) else { return false }
+            context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        guard drawn else { return nil }
+        var minX = width, minY = height, maxX = -1, maxY = -1
+        for y in 0..<height {
+            for x in 0..<width where alpha[y * width + x] > 40 {
+                minX = min(minX, x); maxX = max(maxX, x)
+                minY = min(minY, y); maxY = max(maxY, y)
+            }
+        }
+        guard maxX >= minX, maxY >= minY else { return nil }
+        // The buffer's rows run top-down, as the image's do.
+        return CGRect(
+            x: CGFloat(minX) / CGFloat(width), y: CGFloat(minY) / CGFloat(height),
+            width: CGFloat(maxX - minX + 1) / CGFloat(width),
+            height: CGFloat(maxY - minY + 1) / CGFloat(height)
+        )
     }
 }

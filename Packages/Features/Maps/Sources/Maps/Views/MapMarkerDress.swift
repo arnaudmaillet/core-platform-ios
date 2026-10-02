@@ -6,7 +6,7 @@ import UIKit
 /// viewer may open it, as opposed to the post it shows.
 ///
 /// ```
-///   country   flag-gradient border   flag badge 🇫🇷
+///   country   flag-gradient border   round flag badge
 ///   city      flag-gradient border   city badge  (its COUNTRY's flag colours)
 ///   generic   neutral ring           no badge
 ///   locked    any of the above, its face darkened under a lock
@@ -22,7 +22,7 @@ import UIKit
 struct MapMarkerDress: Equatable {
     /// The corner badge.
     enum Badge: Equatable {
-        /// The country's emoji flag (ISO 3166-1 alpha-2).
+        /// The country's round flag (ISO 3166-1 alpha-2) — `FlagPalette`.
         case flag(String)
         /// A city: an urban glyph — its country is said by the border.
         case city

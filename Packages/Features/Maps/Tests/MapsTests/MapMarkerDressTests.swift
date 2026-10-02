@@ -124,10 +124,41 @@ struct MapMarkerDressTests {
         #expect(card.debugBadge.badge == .flag("FR"))
     }
 
-    /// The badge overlaps the corner — half outside the card — so the card must
-    /// not clip it, while the pictures stay clipped to the card's shape.
-    @Test func theBadgeOverlapsTheCornerOutsideTheClip() {
+    /// The badge is the country's ROUND flag, edge to edge in its disc — not
+    /// the emoji sitting as a band inside it.
+    @Test func theFlagBadgeIsTheRoundFlag() throws {
         let card = card(.media, dress: .resolve(kind: .country, countryCode: "FR", isLocked: false))
+        let round = try #require(FlagPalette.roundFlag(for: "FR"))
+        let shown = try #require(card.debugBadge.debugImage)
+        #expect(shown.pngData() == round.pngData(), "the catalog's round flag, not the emoji")
+        #expect(card.debugBadge.debugImageFrame == card.debugBadge.bounds, "the flag fills the badge's disc")
+    }
+
+    /// On a SQUARE card (a media marker) the badge sits INSIDE the
+    /// bottom-right corner, clear of the border — nothing of it outside the
+    /// card.
+    @Test func onASquareCardTheBadgeSitsInsideTheCorner() {
+        for dress in [MapMarkerDress.resolve(kind: .country, countryCode: "FR", isLocked: false),
+                      .resolve(kind: .city, countryCode: "FR", isLocked: false),
+                      .resolve(kind: .country, countryCode: "MX", isLocked: true)] {
+            let card = card(.media, dress: dress)
+            let badge = card.debugBadge.frame
+            let clear = MapFlagBorderView.lineWidth + MapMarkerBadgeView.insideGap
+            #expect(card.bounds.insetBy(dx: clear - 0.01, dy: clear - 0.01).contains(badge),
+                    "\(String(describing: dress.badge)): \(badge) in \(card.bounds)")
+            // In the bottom-right corner: past the middle both ways.
+            #expect(badge.minX > card.bounds.midX && badge.minY > card.bounds.midY)
+            #expect(abs(badge.maxX - (card.bounds.maxX - clear)) < 0.01)
+            #expect(abs(badge.maxY - (card.bounds.maxY - clear)) < 0.01)
+            #expect(!card.revealStandInOverhangsWindow, "nothing overhangs a window it becomes")
+        }
+    }
+
+    /// A DISC (a text marker) has no corner to sit in: the badge overlaps its
+    /// edge — half outside the card — so the card must not clip it, while the
+    /// pictures stay clipped to the card's shape.
+    @Test func onADiscTheBadgeOverlapsTheEdgeOutsideTheClip() {
+        let card = card(.text, dress: .resolve(kind: .country, countryCode: "FR", isLocked: false))
         let badge = card.debugBadge.frame
         #expect(badge.maxX > card.bounds.maxX && badge.maxY > card.bounds.maxY)
         #expect(badge.minX < card.bounds.maxX && badge.minY < card.bounds.maxY)
@@ -135,6 +166,7 @@ struct MapMarkerDressTests {
         #expect(card.debugContentView.clipsToBounds)
         #expect(card.debugContentView.layer.cornerRadius == card.layer.cornerRadius)
         #expect(!card.debugChromeView.clipsToBounds)
+        #expect(card.revealStandInOverhangsWindow, "a window must not clip the overhang off")
     }
 
     /// The badge and the flag border are the flight's resting chrome, so they
@@ -161,6 +193,60 @@ struct MapMarkerDressTests {
         #expect(card.debugBadge.bounds.width == MapMarkerBadgeView.side, "its own size, not the card's")
     }
 
+    /// An emote's badge hugs the MARK — on the arc of the disc its square
+    /// inscribes, overlapping it like a text disc's — not the square's empty
+    /// corner, where it sat apart from the face (Morocco, on the simulator).
+    @Test func anEmotesBadgeHugsTheMark() {
+        let card = card(.icon, dress: .resolve(kind: .country, countryCode: "MA", isLocked: false))
+        card.setIcon((emote(), 0))
+        let side = PinCardView.Face.icon.side
+        let arc = side / 2 * (1 + 1 / 2.squareRoot())
+        #expect(abs(card.debugBadge.center.x - arc) < 0.5 && abs(card.debugBadge.center.y - arc) < 0.5,
+                "badge centre \(card.debugBadge.center), arc point \(arc)")
+        let text = self.card(.text, dress: .resolve(kind: .country, countryCode: "MA", isLocked: false))
+        #expect(abs(card.debugBadge.center.x - text.debugBadge.center.x) < 0.5,
+                "the same seat as a text marker's disc of the same side")
+        #expect(card.revealStandInOverhangsWindow)
+    }
+
+    /// A mark drawn SMALL inside its cell (Morocco's petal covers 44% of its
+    /// side) pulls the badge in with it: the badge overlaps the mark's own
+    /// bottom-right, not the empty corner of the square.
+    @Test func anEmotesBadgeFollowsAMarkSmallerThanItsCell() {
+        let cell = CGSize(width: 100, height: 100)
+        let image = UIGraphicsImageRenderer(size: cell).image { context in
+            UIColor.systemPink.setFill()
+            context.fill(CGRect(x: 30, y: 30, width: 40, height: 40))
+        }
+        let art = AnimatedIconArt.sheet(AnimatedIconSheet(sheet: image, frameCount: 1, columns: 1, frameDuration: 0.1))
+        #expect(MapIconMarkBounds.unitBounds(of: art).insetBy(dx: -0.02, dy: -0.02)
+            .contains(CGRect(x: 0.3, y: 0.3, width: 0.4, height: 0.4)))
+        let card = card(.icon, dress: .resolve(kind: .country, countryCode: "MA", isLocked: false))
+        card.setIcon((art, 0))
+        let side = PinCardView.Face.icon.side
+        let mark = CGRect(x: 0.3 * side, y: 0.3 * side, width: 0.4 * side, height: 0.4 * side)
+        let expected = mark.maxX - mark.width / 2 * (1 - 1 / 2.squareRoot())
+        #expect(abs(card.debugBadge.center.x - expected) < 1.0 && abs(card.debugBadge.center.y - expected) < 1.0,
+                "badge centre \(card.debugBadge.center), expected \(expected)")
+        #expect(card.debugBadge.frame.intersects(mark), "it touches the mark")
+        #expect(card.debugBadge.frame.maxX < side, "and no longer reaches the square's corner")
+    }
+
+    /// An OPEN emote is drawn at full strength: no dimming, no veil, no lock —
+    /// including one whose country was just unlocked.
+    @Test func anOpenEmoteIsNotWashedOut() {
+        let card = card(.icon, dress: .resolve(kind: .country, countryCode: "MA", isLocked: true))
+        card.setIcon((emote(), 0))
+        card.setDress(.resolve(kind: .country, countryCode: "MA", isLocked: false))
+        #expect(card.debugIconFaceAlpha == 1)
+        #expect(card.debugLockVeil.isHidden && card.debugLockGlyph.isHidden)
+        #expect(card.alpha == 1)
+        let fresh = self.card(.icon, dress: .resolve(kind: .country, countryCode: "MA", isLocked: false))
+        fresh.setIcon((emote(), 0))
+        #expect(fresh.debugIconFaceAlpha == 1)
+        #expect(fresh.debugLockVeil.isHidden && fresh.debugLockGlyph.isHidden)
+    }
+
     // MARK: - Locked
 
     @Test func aLockedMediaCardIsDarkenedUnderALock() {
@@ -180,6 +266,25 @@ struct MapMarkerDressTests {
         #expect(!card.debugLockGlyph.isHidden)
         #expect(card.debugIconFaceAlpha < 1)
         #expect(card.debugFlagBorder.isHidden)
+    }
+
+    /// On a locked SQUARE card the lock leans up and left, clear of the badge
+    /// inside the corner; on a disc (badge outside) it stays centred.
+    @Test func theLockClearsAnInsideBadge() {
+        let card = card(.media, dress: .resolve(kind: .country, countryCode: "MX", isLocked: true))
+        let lock = card.debugLockGlyph.center
+        let badge = card.debugBadge.center
+        #expect(lock.x < card.bounds.midX && lock.y < card.bounds.midY, "lock \(lock)")
+        // The lock symbol's body reaches ~5pt right of and ~7pt below its
+        // centre at 15pt: that point must sit outside the badge's disc.
+        let corner = CGPoint(x: lock.x + 5.5, y: lock.y + 7)
+        let gap = hypot(badge.x - corner.x, badge.y - corner.y) - MapMarkerBadgeView.side / 2
+        #expect(gap > 2, "gap \(gap)")
+        let disc = self.card(.text, dress: .resolve(kind: .country, countryCode: "MX", isLocked: true))
+        #expect(disc.debugLockGlyph.center == CGPoint(x: disc.bounds.midX, y: disc.bounds.midY))
+        let open = self.card(.media, dress: .resolve(kind: nil, countryCode: "MX", isLocked: true))
+        #expect(open.debugLockGlyph.center == CGPoint(x: open.bounds.midX, y: open.bounds.midY),
+                "no badge, nothing to clear")
     }
 
     @Test func unlockingTakesTheLockOff() {
@@ -237,6 +342,48 @@ struct MapMarkerDressTests {
         #expect(!view.card.dress.isLocked, "the dress is re-applied above the idempotence guard")
     }
 
+    /// A band's group of one — a country or city with a single post in view —
+    /// takes the SAME dress path as a band cluster: its place's flag border
+    /// and badge, locked when its country is, never the neutral ring. A local
+    /// lone pin stays neutral.
+    @Test func aBandsGroupOfOneWearsItsPlacesDress() {
+        let france = MapPlace(id: "country:france", name: "France", kind: .country)
+        let paris = MapPlace(id: "city:paris", name: "Paris", kind: .city)
+        let pins = [
+            MapPin(postID: PostID("p-1"), latitude: 48.85, longitude: 2.35, thumbnailURL: nil,
+                   kind: .text, places: [paris, france]),
+            MapPin(postID: PostID("p-2"), latitude: 40.42, longitude: -3.70, thumbnailURL: nil,
+                   kind: .text, places: [MapMockPlaces.spain]),
+            MapPin(postID: PostID("p-3"), latitude: 40.50, longitude: -3.60, thumbnailURL: nil,
+                   kind: .text, places: [MapMockPlaces.spain]),
+        ]
+        let items = MapClusterEngine.cluster(pins, zoomScale: 1, cellPoints: 64, viewportDiagonalKm: 2884.3)
+        guard let lone = items.first(where: { !$0.isCluster }) else {
+            Issue.record("France's single post must still be a marker")
+            return
+        }
+        let single = MapAnnotation(pin: lone.representative, hierarchyKind: lone.hierarchyKind)
+        let kind = MapsViewController.dressKind(of: single)
+        #expect(kind == .country)
+
+        for locked in [false, true] {
+            let view = MapAnnotationView(annotation: single, reuseIdentifier: nil)
+            view.configure(
+                with: single.pin, dress: .resolve(kind: kind, countryCode: "FR", isLocked: locked),
+                imagePipeline: pipeline()
+            )
+            #expect(view.card.dress.badge == .flag("FR"))
+            #expect(view.card.dress.borderFlag == "FR")
+            #expect(view.card.dress.isLocked == locked)
+            #expect(view.displayPriority == (locked ? MapMarkerDress.lockedPriority : .required))
+        }
+
+        // The same path, for a band cluster and for a local lone pin.
+        let cluster = MapComputedCluster(items.first { $0.isCluster }!)
+        #expect(MapsViewController.dressKind(of: cluster) == .country)
+        #expect(MapsViewController.dressKind(of: MapAnnotation(pin: pin("local"))) == nil)
+    }
+
     /// Recycled views take their dress off.
     @Test func reuseStripsTheDress() {
         let view = MapAnnotationView(annotation: nil, reuseIdentifier: nil)
@@ -250,7 +397,8 @@ struct MapMarkerDressTests {
     }
 }
 
-/// The flag colours, read off the emoji itself.
+/// The flag colours, read off the round flag itself (the emoji for a code the
+/// catalog lacks).
 @MainActor
 struct FlagPaletteTests {
     private func hsb(_ color: UIColor) -> (h: CGFloat, s: CGFloat, b: CGFloat) {
@@ -269,6 +417,7 @@ struct FlagPaletteTests {
         #expect(entry.colors.count >= 2, "\(code) gave \(entry.colors.count)")
         #expect(entry.colors.count <= 3)
         #expect(entry.image != nil)
+        #expect(entry.isRound, "read off the round flag, not the emoji")
     }
 
     /// France reads as it flies: blue, white, red, left to right.
@@ -304,12 +453,40 @@ struct FlagPaletteTests {
     }
 
     /// Every country the atlas draws gets a border of at least two colours
-    /// and a picture for its badge.
-    @Test func everyCountryHasAPalette() {
+    /// and its ROUND flag from the catalog — no atlas country falls back to
+    /// the emoji (`Scripts/import-circle-flags.py` imports exactly the atlas).
+    @Test func everyCountryHasARoundFlagAndAPalette() {
+        #expect(CountryAtlas.shared.countries.count == 237)
         for country in CountryAtlas.shared.countries {
             let entry = FlagPalette.entry(for: country.code)
             #expect(entry.colors.count >= 2, "\(country.code)")
             #expect(entry.image != nil, "\(country.code)")
+            #expect(entry.isRound, "\(country.code) has no round flag in Flags.xcassets")
+            if let image = entry.image {
+                #expect(image.size == CGSize(width: 40, height: 40), "\(country.code): rendered for the 40pt disc")
+            }
         }
+    }
+
+    /// A code the catalog has no round flag for (Bonaire is not in the
+    /// atlas) still wears its flag: the emoji, drawn and trimmed, with its
+    /// colours read off it.
+    @Test func aCodeWithoutARoundFlagFallsBackToTheEmoji() {
+        #expect(FlagPalette.roundFlag(for: "BQ") == nil)
+        let entry = FlagPalette.entry(for: "BQ")
+        #expect(!entry.isRound)
+        #expect(entry.image != nil)
+        #expect(entry.colors.count >= 2)
+    }
+
+    /// The round flags are flat artwork: France's white is the flag's own
+    /// near-white, not an emoji's shaded grey, and its bands run in order.
+    @Test func roundFlagColoursAreTheArtworks() throws {
+        let entry = FlagPalette.entry(for: "FR")
+        #expect(entry.isRound)
+        try #require(entry.colors.count == 3)
+        var white: CGFloat = 0
+        entry.colors[1].getWhite(&white, alpha: nil)
+        #expect(white > 0.9, "white \(white)")
     }
 }

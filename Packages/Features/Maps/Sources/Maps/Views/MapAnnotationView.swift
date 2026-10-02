@@ -410,9 +410,10 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing
         playBadge.isHidden = true
     }
 
-    /// See `MapClusterAnnotationView.applyDress`. A lone pin speaks for no
-    /// place, so all it can wear beyond the neutral ring is the lock — and a
-    /// locked pin's play badge would promise a video it will not open.
+    /// See `MapClusterAnnotationView.applyDress`. A local lone pin speaks for
+    /// no place, so all it wears beyond the neutral ring is the lock; a band's
+    /// group of one wears its place's dress (`MapAnnotation.hierarchyKind`).
+    /// A locked pin's play badge would promise a video it will not open.
     private func applyDress(_ dress: MapMarkerDress) {
         card.setDress(dress)
         displayPriority = dress.isLocked ? MapMarkerDress.lockedPriority : .required

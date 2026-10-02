@@ -270,6 +270,10 @@ final class MapsViewController: UIViewController {
     /// keeps this synthetic id for its whole life on the map instead
     /// (see `reconcileClusters` / `MapClusterTracker`).
     private var clusterMarkerSeq = 0
+    /// Which band markers the last layout hid behind a stronger neighbour —
+    /// the engine's hysteresis memory, handed back on every reconcile (see
+    /// `MapClusterEngine.Occlusion`).
+    private var bandOcclusion = MapClusterEngine.Occlusion()
 
     /// Debounce so a continuous pan fires one query on settle, not per frame.
     private var pendingQuery: DispatchWorkItem?
@@ -1165,10 +1169,22 @@ final class MapsViewController: UIViewController {
         guard let pin = cluster?.representative ?? (annotation as? MapAnnotation)?.pin else { return .neutral }
         let code = countryCode(of: pin)
         return MapMarkerDress.resolve(
-            kind: cluster.flatMap { $0.isHierarchyMarker ? $0.place?.kind : nil },
+            kind: Self.dressKind(of: annotation),
             countryCode: code,
             isLocked: !isInUnlockedCountry(pin)
         )
+    }
+
+    /// The hierarchy depth `annotation`'s dress speaks for, or nil for a
+    /// local marker. A band's group of one (a lone `MapAnnotation`) speaks
+    /// for its place exactly like a band cluster: at a band, every marker
+    /// wears a place's dress — at the country band only countries, at the
+    /// city band only cities.
+    static func dressKind(of annotation: any MKAnnotation) -> MapPlace.Kind? {
+        if let cluster = annotation as? MapComputedCluster {
+            return cluster.isHierarchyMarker ? cluster.place?.kind : nil
+        }
+        return (annotation as? MapAnnotation)?.hierarchyKind
     }
 
     /// What a tap on a marker does: open its posts, or — for a locked
@@ -1956,23 +1972,25 @@ final class MapsViewController: UIViewController {
         let unclustered = false
         #endif
 
-        // ⚠️ SORTED, because the merge downstream is order-dependent (see
-        // `collide`). A dictionary's values re-order whenever it is mutated, and
+        // ⚠️ SORTED, because the proximity merge downstream is order-dependent
+        // (see `proximityCluster`). A dictionary's values re-order whenever it is mutated, and
         // every return to this screen re-queries — so the markers moved on a map
         // nobody had panned.
         let ordered = pins.values.sorted { $0.postID.rawValue < $1.postID.rawValue }
-        // ⚠️ OPEN AND LOCKED POSTS ARE LAID OUT APART, and never merged.
+        // ⚠️ OPEN AND LOCKED POSTS ARE NEVER GROUPED TOGETHER.
         //
         // A locked country's posts are on the map — its markers wear its
         // busiest posts, darkened under a lock — but a marker is ONE tap: it
         // opens every post it holds, or it offers a country. A group mixing
-        // the two would either open locked posts or lock open ones. So each
-        // side runs the engine alone; where their markers collide, MapKit
-        // keeps the open one (`MapMarkerDress.lockedPriority`).
-        let open = ordered.filter(isInUnlockedCountry)
-        let locked = countryAccess == nil ? [] : ordered.filter { !isInUnlockedCountry($0) }
-        let items = layOut(open, unclustered: unclustered) + layOut(locked, unclustered: unclustered)
-        reportCountriesWithMarkers(items)
+        // the two would either open locked posts or lock open ones. The engine
+        // groups each side apart (`isOpen`); at a hierarchy band it also
+        // decides their collisions — the open marker stays, the locked one is
+        // hidden — and below the bands MapKit does (`MapMarkerDress
+        // .lockedPriority`).
+        let items = layOut(ordered, unclustered: unclustered)
+        // A country whose marker is HIDDEN behind a stronger neighbour still
+        // has posts: it is not an empty country, so it wears no flag disc.
+        reportCountriesWithMarkers(items + bandOcclusion.hiddenItems)
         reconcile(items)
     }
 
@@ -2008,7 +2026,7 @@ final class MapsViewController: UIViewController {
                 update(reclaimed, to: item)
                 displayed[id] = reclaimed
             } else {
-                let annotation = MapAnnotation(pin: item.representative)
+                let annotation = MapAnnotation(pin: item.representative, hierarchyKind: item.hierarchyKind)
                 displayed[id] = annotation
                 toAdd.append(annotation)
             }
@@ -2084,11 +2102,13 @@ final class MapsViewController: UIViewController {
         refreshVideoPlayback()
     }
 
-    /// One side's layout — open posts or locked ones (see `reconcileClusters`).
+    /// The engine's layout of `ordered` (see `reconcileClusters`).
     /// Singles go through the SAME reconciliation, so what
     /// `-maps-no-clustering` measures is the real marker lifecycle and not a
     /// parallel code path that happens to look similar.
     private func layOut(_ ordered: [MapPin], unclustered: Bool) -> [MapClusterEngine.Item] {
+        // Nothing goes through the band: nothing is hidden behind anything.
+        if ordered.isEmpty || unclustered { bandOcclusion = MapClusterEngine.Occlusion() }
         guard !ordered.isEmpty else { return [] }
         return unclustered
             ? ordered.map {
@@ -2110,7 +2130,9 @@ final class MapsViewController: UIViewController {
                 zoomLevel: MapViewport.zoomLevel(
                     forLongitudeSpan: mapView.region.span.longitudeDelta
                 ),
-                viewportDiagonalKm: currentViewportDiagonalKm
+                viewportDiagonalKm: currentViewportDiagonalKm,
+                isOpen: { self.isInUnlockedCountry($0) },
+                occlusion: &bandOcclusion
             )
     }
 
@@ -2311,6 +2333,7 @@ final class MapsViewController: UIViewController {
                 )
         } else if let single = annotation as? MapAnnotation {
             single.update(pin: item.representative)
+            single.hierarchyKind = item.hierarchyKind
             (mapView.view(for: single) as? MapAnnotationView)?
                 .configure(
                     with: item.representative, dress: dress(for: single), imagePipeline: imagePipeline,

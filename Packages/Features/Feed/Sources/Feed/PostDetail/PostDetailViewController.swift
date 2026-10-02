@@ -185,38 +185,21 @@ final class PostDetailViewController: UIViewController {
     private var mediaAspectConstraint: NSLayoutConstraint?
     private var composeBottomDefault: NSLayoutConstraint?
     private var composeBottomEngaged: [NSLayoutConstraint] = []
-    /// The composer's trailing edge — the column's inset under
-    /// `-snap-layout-v2`, the classic `lg` otherwise.
-    private var composeTrailing: NSLayoutConstraint?
-    /// The engaged rest constraint and the inset it was built from, kept so a
-    /// change of geometry (`usesActionColumn`) re-rests the bar in place.
-    private weak var composeRestEngaged: NSLayoutConstraint?
-    private var engagedBottomInset: CGFloat?
-
-    /// **`-snap-layout-v2` (experimental, `SnapActionColumn`).** The engaged
-    /// composer stands its stake and rail slot ON the media layout's like and
-    /// repost bubbles — same size, same screen coordinates — so opening and
-    /// closing the comments crossfades two bubbles that never move. The slot
-    /// wears REPOST (send while there is text); the waveform is in the field.
+    /// **The action column (`SnapActionColumn`).** The engaged composer
+    /// stands its stake and rail slot ON the media layout's like and repost
+    /// bubbles — same size, same screen coordinates — so opening and closing
+    /// the comments crossfades two bubbles that never move. The slot wears
+    /// REPOST (send while there is text); the waveform is in the field.
     ///
     /// - AT REST the bar's input row sits on the toolbar like every composer's
     ///   (`SnapActionColumn.inputRestingGap`) and the bar lifts its column to
     ///   the column's line; its trailing edge is the column's inset from the
     ///   screen's (not `lg`); the entrance is alpha only — no
     ///   micro-translation.
-    /// - KEYBOARD UP the required ceiling wins, exactly as before: the bar rides
-    ///   the keyboard's top, `sm` above it. The column is a resting position;
-    ///   typing is not resting, and a bar held at the column's line would sit
-    ///   under the keyboard.
-    ///
-    /// The launch flag by default; a host or a test sets it before the engaged
-    /// insets (a later change re-rests the bar in place).
-    var usesActionColumn = SnapActionColumn.isEnabled {
-        didSet {
-            guard usesActionColumn != oldValue else { return }
-            applyComposerColumn()
-        }
-    }
+    /// - KEYBOARD UP the required ceiling wins: the bar rides the keyboard's
+    ///   top, `sm` above it. The column is a resting position; typing is not
+    ///   resting, and a bar held at the column's line would sit under the
+    ///   keyboard.
     private var scrollBottomDefault: NSLayoutConstraint?
     private var scrollBottomEngaged: NSLayoutConstraint?
     /// The engaged footer's frost: rows gliding behind the composer stay
@@ -718,7 +701,7 @@ final class PostDetailViewController: UIViewController {
     ///   left at zero it would be a bare blur that snaps to the text veil the
     ///   moment the post is published.
     /// - Send is reachable with the keyboard down — the idle faces without a
-    ///   pager. A text page parks a draft behind the mic until the keyboard
+    ///   pager. A text page parks a draft behind the waveform until the keyboard
     ///   rises, which here would park the post itself.
     /// - It says what it does: it publishes.
     private func configureDraft() {
@@ -761,10 +744,9 @@ final class PostDetailViewController: UIViewController {
     }
 
     private func configureComposeBar() {
-        composeBar.usesActionColumn = usesActionColumn
-        // `-snap-layout-v2`: a post's rail slot is its REPOST — drawn without
-        // an action, like the toolbar's (no client path publishes one yet). A
-        // draft is not a post: its slot keeps the voice note until it is.
+        // A post's rail slot is its REPOST — drawn without an action, like the
+        // media layout's bubble (no client path publishes one yet). A draft
+        // is not a post: its slot keeps the voice note until it is.
         composeBar.railFace = viewModel.isDraft ? .voice : .repost
         // The Liquid Glass composer (Private Messages' recipe): a floating
         // capsule field, no opaque bar, no separator — the glass carries
@@ -854,14 +836,13 @@ final class PostDetailViewController: UIViewController {
             equalTo: view.keyboardLayoutGuide.topAnchor, constant: -Spacing.sm
         )
         composeBottomDefault = bottom
-        let trailing = composeBar.trailingAnchor.constraint(
-            equalTo: view.trailingAnchor,
-            constant: -SnapActionColumn.composerTrailingInset(actionColumn: usesActionColumn)
-        )
-        composeTrailing = trailing
         NSLayoutConstraint.activate([
             composeBar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Spacing.lg),
-            trailing,
+            // The column's inset from the screen's edge, so the column stands
+            // on the media layout's bubbles.
+            composeBar.trailingAnchor.constraint(
+                equalTo: view.trailingAnchor, constant: -SnapActionColumn.trailingInset
+            ),
             bottom,
             composerBackdrop.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             composerBackdrop.trailingAnchor.constraint(equalTo: view.trailingAnchor),
@@ -935,18 +916,12 @@ final class PostDetailViewController: UIViewController {
     }
 
     /// The composer's entrance state for the engaged footer handoff:
-    /// offstage = invisible with a slight downward offset, so the unified
-    /// spring doesn't just ghost it in — it physically slides into place
-    /// (alpha + micro-translation together are what keep the crossfade
-    /// against the fading native bar from reading as a double-exposure).
+    /// offstage = invisible. ALPHA ONLY: the column's bubbles stand on the
+    /// media layout's like and repost bubbles (`SnapActionColumn`), and a
+    /// slide would move them — the two layouts crossfade in place.
     /// Set offstage BEFORE the spring; animate to onstage INSIDE it.
     func setComposerEntranceState(offstage: Bool) {
         composeBar.alpha = offstage ? 0 : 1
-        // The action column's bubbles stand on the media layout's: a slide
-        // would move them, so its entrance is the alpha alone.
-        composeBar.transform = offstage && !usesActionColumn
-            ? CGAffineTransform(translationX: 0, y: SnapCommentsLayout.composerEntranceOffset)
-            : .identity
         // The footer band rides the same seam — this already runs inside the
         // master spring both ways, and `effect` is the one animatable path
         // for a material. Window-guarded (headless CI never pays for a real
@@ -1012,37 +987,21 @@ final class PostDetailViewController: UIViewController {
     /// Extra bottom room so resting content clears the composer: the bar's
     /// resting top above the footer line (its rest gap and its height, the
     /// lifted column and the stake on it included), plus the breath a resting
-    /// row keeps above it. The classic bar's comes to the input row's band
-    /// (62) plus the stake row standing on it (`stakeRowHeight`) — the stake
-    /// bubble sits at the trailing edge, where a resting row's ♥ would be.
-    /// The action column's (`-snap-layout-v2`) stands higher and is taller,
-    /// and the clearance grows with it.
+    /// row keeps above it — the column's two bubbles sit at the trailing
+    /// edge, where a resting row's ♥ would be.
     private var engagedFooterClearance: CGFloat {
         composerRestingGap
-            + CommentsInputBar.restingHeight(for: .large, actionColumn: usesActionColumn)
+            + CommentsInputBar.restingHeight(for: .large)
             + Self.composerTopBreath
     }
 
     /// Between the resting composer's top and the content resting above it.
     private static let composerTopBreath: CGFloat = 16
 
-    /// The composer's resting gap above the footer line: its input row `sm`
-    /// above the toolbar's glass, with or without the action column — the
-    /// bar lifts its own column (`SnapActionColumn`).
+    /// The composer's resting gap above the footer line: its input row
+    /// `glassGap` above the toolbar's glass — the bar lifts its own column
+    /// (`SnapActionColumn`).
     private var composerRestingGap: CGFloat { SnapActionColumn.inputRestingGap }
-
-    /// Applies a change of `usesActionColumn` to a screen already built: the
-    /// bar's faces and geometry, its trailing edge, and — when engaged — its
-    /// rest line and the stream's clearance under it.
-    private func applyComposerColumn() {
-        composeBar.usesActionColumn = usesActionColumn
-        composeTrailing?.constant = -SnapActionColumn.composerTrailingInset(actionColumn: usesActionColumn)
-        if let bottomInset = engagedBottomInset {
-            composeRestEngaged?.constant = -(bottomInset + composerRestingGap)
-            collectionView.contentInset.bottom = bottomInset + engagedFooterClearance
-            engagedStreamInsets?.bottom = bottomInset + engagedFooterClearance
-        }
-    }
 
     /// Freezes the comment stream for the length of a gesture that owns the
     /// screen — a dismissal swipe.
@@ -1104,7 +1063,6 @@ final class PostDetailViewController: UIViewController {
             top: max(0, top),
             bottom: max(0, bottomInset) + engagedFooterClearance
         )
-        engagedBottomInset = max(0, bottomInset)
         composerBackdrop.isHidden = false
         // Z-ORDER, load-bearing: the scroll view is added AFTER the compose
         // bar at build time (harmless while it ended at the bar's top), so
@@ -1129,13 +1087,12 @@ final class PostDetailViewController: UIViewController {
             lessThanOrEqualTo: view.keyboardLayoutGuide.topAnchor, constant: -Spacing.sm
         )
         // The rest line: the input row `glassGap` above the toolbar's glass. The bar
-        // lifts its own column off that line — under `-snap-layout-v2` onto
-        // the media layout's like and repost bubbles (`usesActionColumn`).
+        // lifts its own column off that line, onto the media layout's like
+        // and repost bubbles (`SnapActionColumn`).
         let rest = composeBar.bottomAnchor.constraint(
             equalTo: view.bottomAnchor, constant: -(max(0, bottomInset) + composerRestingGap)
         )
         rest.priority = .defaultHigh
-        composeRestEngaged = rest
         composeBottomEngaged = [keyboard, rest]
         composerKeyboardCeiling = keyboard
         keyboard.isActive = composerTracksKeyboard
@@ -2003,7 +1960,7 @@ final class PostDetailViewController: UIViewController {
             composerBottom = min(composerBottom, view.bounds.height - covered - Spacing.sm)
         }
         let composerHeight = CommentsInputBar.restingHeight(
-            for: traitCollection.preferredContentSizeCategory, actionColumn: usesActionColumn
+            for: traitCollection.preferredContentSizeCategory
         )
         return StreamSpace(rowTop: rowTop, top: top, bottom: composerBottom - composerHeight)
     }
@@ -2090,7 +2047,7 @@ final class PostDetailViewController: UIViewController {
         // line (accessibility sizes: the field reaches ~80pt).
         let rowTop = engaged.top + streamSectionTopInset + caption
         let restingBottomInset = engaged.bottom - engagedFooterClearance
-        let composerHeight = CommentsInputBar.restingHeight(for: contentSizeCategory, actionColumn: usesActionColumn)
+        let composerHeight = CommentsInputBar.restingHeight(for: contentSizeCategory)
         let blockClearsComposer = rowTop + block + composerRestingGap + composerHeight + restingBottomInset
         return ceil(max(rowHoldsBlock, blockClearsComposer))
     }

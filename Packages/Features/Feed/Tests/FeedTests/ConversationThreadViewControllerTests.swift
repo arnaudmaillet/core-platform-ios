@@ -174,21 +174,19 @@ struct ConversationThreadViewControllerTests {
         #expect(driver.replies == ["m1"])
     }
 
-    /// A conversation has nothing to like: no stake bubble over the mic, flag
-    /// or no flag. The mic keeps its place — `sm` above the footer line — and
-    /// the field rests on the toolbar, a little lower.
+    /// A conversation has nothing to like: no stake bubble over the pin. The
+    /// field rests on the toolbar, `glassGap` above its glass.
     @Test func theComposerHasNoStakeAndItsFieldRestsOnTheToolbar() throws {
         let (screen, _, _, window) = makeScreen()
         let composer = try SnapActionColumnLayoutTests.composerColumn(in: screen.view, space: window)
-        #expect(composer.stake == nil, "a like bubble over a conversation's mic")
+        #expect(composer.stake == nil, "a like bubble over a conversation's pin")
         #expect(SnapActionColumnLayoutTests.button(composer.bar, "Boost post")?.isHidden == true)
         let footerLine = screen.view.convert(
             CGPoint(x: 0, y: screen.view.bounds.height - screen.view.safeAreaInsets.bottom), to: window
         ).y
-        #expect(abs(composer.rail.maxY - (footerLine - Spacing.sm)) < 0.5, "the mic moved: \(composer.rail)")
         #expect(abs(composer.field.maxY - (footerLine + SnapActionColumn.toolbarGlassDrop - SnapActionColumn.glassGap)) < 0.5,
                 "the field ends at \(composer.field.maxY), not glassGap above the toolbar's glass")
-        #expect(composer.bar.debugRailButton.isHidden, "no pin without the flag")
+        #expect(!composer.bar.debugRailButton.isHidden, "the slot is the pin")
     }
 
     /// ⚠️ THE GAP ON SCREEN, against the real toolbar this screen shows: the
@@ -212,14 +210,13 @@ struct ConversationThreadViewControllerTests {
                 "iOS \(ProcessInfo.processInfo.operatingSystemVersion.majorVersion): the field stands \(gap)pt above the toolbar's glass (field \(composer.field.maxY), glass \(glass))")
     }
 
-    /// `-snap-layout-v2`: the thread shares the post's composer, so it shares
-    /// the post's action column — at rest the rail slot stands exactly where
+    /// The thread shares the post's composer, so it shares the post's action
+    /// column — at rest the rail slot stands exactly where
     /// the snap feed's repost bubble stands under the same footer
     /// (`SnapActionColumnLayoutTests` holds the post to it), wearing a PIN.
     /// Nothing stands at the like bubble's place.
     @Test func thePinStandsWhereTheFeedsRepostBubbleStands() throws {
         let (screen, _, _, window) = makeScreen()
-        screen.usesActionColumn = true
         screen.view.layoutIfNeeded()
         let media = SnapActionColumnLayoutTests.mediaColumn(insets: UIEdgeInsets(
             top: screen.view.safeAreaInsets.top, left: 0,
@@ -238,7 +235,6 @@ struct ConversationThreadViewControllerTests {
     /// pinned. While typing the bubble is send, and a tap sends.
     @Test func thePinPinsThroughTheDriverAndTurnsIntoSendWhileTyping() throws {
         let (screen, driver, _, _) = makeScreen()
-        screen.usesActionColumn = true
         let bar = try #require(Self.firstView(CommentsInputBar.self, in: screen.view))
         let rail = bar.debugRailButton
         #expect(rail.accessibilityLabel == "Pin conversation")
@@ -263,7 +259,6 @@ struct ConversationThreadViewControllerTests {
     /// A draft conversation has nothing to pin yet: the pin is drawn, quiet.
     @Test func aDraftConversationsPinWaitsForTheConversation() throws {
         let (screen, driver, _, _) = makeScreen()
-        screen.usesActionColumn = true
         driver.onPinnedChange?(nil)
         let bar = try #require(Self.firstView(CommentsInputBar.self, in: screen.view))
         #expect(bar.debugRailSymbol == "pin")
@@ -272,10 +267,10 @@ struct ConversationThreadViewControllerTests {
         #expect(bar.debugRailButton.isEnabled, "send is never held back by the pin")
     }
 
-    /// The conversation's trailing slot: the post's faces — a draft is
+    /// A bar with idle faces and no rail face (the draft post's): a draft is
     /// sendable with the keyboard down (a shared link or an emote lands in
-    /// the field to be sent), and an empty field wears the mic, keyboard up
-    /// or down.
+    /// the field to be sent), and an empty field wears the waveform, keyboard
+    /// up or down.
 
     @Test func aDraftIsSendableWithTheKeyboardDown() throws {
         let bar = CommentsInputBar()
@@ -285,7 +280,7 @@ struct ConversationThreadViewControllerTests {
         }
         let send = try #require(button("Send comment"))
 
-        // Empty, keyboard down: the mic, as on the post.
+        // Empty, keyboard down: the waveform.
         #expect(button("Record voice comment") != nil)
         #expect(send.alpha == 0)
 
@@ -299,7 +294,7 @@ struct ConversationThreadViewControllerTests {
         bar.setKeyboardOpen(true)
         #expect(send.alpha == 1)
 
-        // Emptied with the keyboard up: the mic — no dismiss-keyboard face.
+        // Emptied with the keyboard up: the waveform — no dismiss-keyboard face.
         bar.draftText = ""
         #expect(button("Record voice comment")?.alpha == 1)
         #expect(button("Dismiss keyboard") == nil)
