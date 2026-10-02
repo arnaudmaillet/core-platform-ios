@@ -227,13 +227,57 @@ struct ConversationThreadViewControllerTests {
         #expect(composer.stake == nil)
         #expect(composer.rail == media.repost, "pin \(composer.rail) vs repost \(media.repost)")
         #expect(composer.bar.debugRailSymbol == "pin")
-        #expect(!composer.bar.debugFieldVoiceButton.isHidden, "the waveform is in the field")
+        #expect(!composer.bar.debugFieldActionButton.isHidden, "the waveform is in the field")
+    }
+
+    /// ⚠️ KEYBOARD UP, THE PIN STAYS (asked 2026-10-02). Only the input row
+    /// rides the keyboard — `sm` over it, widened into the pin's width — and
+    /// the pin keeps the feed's repost coordinates, under the keyboard. The
+    /// stream clears the risen row, not the resting bar.
+    @Test func theKeyboardLiftsTheInputRowAndLeavesThePin() throws {
+        let (screen, _, _, window) = makeScreen()
+        let rest = try SnapActionColumnLayoutTests.composerColumn(in: screen.view, space: window)
+        let stream = try #require(Self.firstView(UICollectionView.self, in: screen.view))
+        let restInset = stream.contentInset.bottom
+        // No keyboard: the guide's top well below the bar. (Not the window's
+        // bottom: the package test host shows no toolbar, so its footer line
+        // is the window's edge and the resting row stands only 2pt above it —
+        // closer than the ceiling's `sm`.)
+        let keyboard = SnapActionColumnLayoutTests.fakeKeyboard(
+            in: screen.view, for: rest.bar, top: screen.view.bounds.height + 100
+        )
+        screen.view.layoutIfNeeded()
+        let settled = try SnapActionColumnLayoutTests.composerColumn(in: screen.view, space: window)
+        #expect(settled.field == rest.field, "no keyboard moved the field: \(settled.field) vs \(rest.field)")
+
+        let keyboardTop = screen.view.bounds.height - 336
+        keyboard.constant = keyboardTop
+        screen.view.setNeedsLayout()
+        screen.view.layoutIfNeeded()
+        let up = try SnapActionColumnLayoutTests.composerColumn(in: screen.view, space: window)
+        #expect(up.rail == rest.rail, "the pin moved: \(up.rail) vs \(rest.rail)")
+        #expect(up.bar.debugRailSymbol == "pin")
+        let keyboardTopInWindow = screen.view.convert(CGPoint(x: 0, y: keyboardTop), to: window).y
+        #expect(abs(up.field.maxY - (keyboardTopInWindow - Spacing.sm)) < 0.5)
+        #expect(abs(up.field.maxX - up.rail.maxX) < 0.5, "the risen field does not take the pin's width")
+        #expect(stream.contentInset.bottom > restInset + 200,
+                "the stream clears the resting bar (\(stream.contentInset.bottom)), not the risen row")
+    }
+
+    /// A conversation is live: no pull-to-refresh, no loader over the thread.
+    @Test func theThreadHasNoPullToRefresh() throws {
+        let (screen, _, _, _) = makeScreen()
+        let stream = try #require(Self.firstView(UICollectionView.self, in: screen.view))
+        #expect(stream.refreshControl == nil)
+        #expect(Self.firstView(UIRefreshControl.self, in: screen.view) == nil)
+        let (preview, _, _, _) = makeScreen(mode: .preview)
+        #expect(Self.firstView(UIRefreshControl.self, in: preview.view) == nil)
     }
 
     /// The pin is the inbox's: a tap goes to the driver, and what the driver
     /// reports — from here or from the inbox — is the glyph, filled when
-    /// pinned. While typing the bubble is send, and a tap sends.
-    @Test func thePinPinsThroughTheDriverAndTurnsIntoSendWhileTyping() throws {
+    /// pinned. Typing never turns it into send: the send is in the field.
+    @Test func thePinPinsThroughTheDriverAndNeverTurnsIntoSend() throws {
         let (screen, driver, _, _) = makeScreen()
         let bar = try #require(Self.firstView(CommentsInputBar.self, in: screen.view))
         let rail = bar.debugRailButton
@@ -245,8 +289,8 @@ struct ConversationThreadViewControllerTests {
         #expect(rail.accessibilityLabel == "Unpin conversation")
 
         bar.draftText = "On my way"
-        #expect(bar.debugRailSymbol == "arrow.up")
-        rail.sendActions(for: .primaryActionTriggered)
+        #expect(bar.debugRailSymbol == "pin.fill", "the pin turned into \(bar.debugRailSymbol ?? "-")")
+        bar.debugFieldActionButton.sendActions(for: .primaryActionTriggered)
         #expect(driver.sent == ["On my way"])
         #expect(driver.pinned == true, "a send is not a pin")
         #expect(bar.debugRailSymbol == "pin.fill")
@@ -256,7 +300,8 @@ struct ConversationThreadViewControllerTests {
         #expect(bar.debugRailSymbol == "pin")
     }
 
-    /// A draft conversation has nothing to pin yet: the pin is drawn, quiet.
+    /// A draft conversation has nothing to pin yet: the pin is drawn, quiet —
+    /// and stays so over a draft, whose send is the field's.
     @Test func aDraftConversationsPinWaitsForTheConversation() throws {
         let (screen, driver, _, _) = makeScreen()
         driver.onPinnedChange?(nil)
@@ -264,41 +309,39 @@ struct ConversationThreadViewControllerTests {
         #expect(bar.debugRailSymbol == "pin")
         #expect(bar.debugRailButton.isEnabled == false)
         bar.draftText = "Hi"
-        #expect(bar.debugRailButton.isEnabled, "send is never held back by the pin")
+        #expect(bar.debugRailButton.isEnabled == false)
+        #expect(bar.debugFieldActionButton.isEnabled, "send is never held back by the pin")
     }
 
-    /// A bar with idle faces and no rail face (the draft post's): a draft is
-    /// sendable with the keyboard down (a shared link or an emote lands in
-    /// the field to be sent), and an empty field wears the waveform, keyboard
-    /// up or down.
-
+    /// A draft is sendable with the keyboard down (a shared link or an emote
+    /// lands in the field to be sent), and an empty field wears the waveform,
+    /// keyboard up or down.
     @Test func aDraftIsSendableWithTheKeyboardDown() throws {
-        let bar = CommentsInputBar()
-        bar.showsIdleUtilityFaces = true
-        func button(_ label: String) -> UIButton? {
-            bar.subviews.compactMap { $0 as? UIButton }.first { $0.accessibilityLabel == label }
-        }
-        let send = try #require(button("Send comment"))
+        let (screen, driver, _, _) = makeScreen()
+        let bar = try #require(Self.firstView(CommentsInputBar.self, in: screen.view))
+        let action = bar.debugFieldActionButton
 
         // Empty, keyboard down: the waveform.
-        #expect(button("Record voice comment") != nil)
-        #expect(send.alpha == 0)
+        #expect(bar.debugFieldActionSymbol == CommentsInputBar.waveformSymbol)
 
         // A draft with the keyboard down: SEND.
         bar.draftText = "https://example.test/p/1"
-        #expect(send.alpha == 1)
-        #expect(send.isEnabled)
-        #expect(send.isUserInteractionEnabled)
+        #expect(bar.debugFieldActionSymbol == CommentsInputBar.sendSymbol)
+        #expect(action.isEnabled)
 
         // Keyboard up over the draft: still send.
         bar.setKeyboardOpen(true)
-        #expect(send.alpha == 1)
+        #expect(bar.debugFieldActionSymbol == CommentsInputBar.sendSymbol)
 
         // Emptied with the keyboard up: the waveform — no dismiss-keyboard face.
         bar.draftText = ""
-        #expect(button("Record voice comment")?.alpha == 1)
-        #expect(button("Dismiss keyboard") == nil)
-        #expect(send.alpha == 0)
+        #expect(bar.debugFieldActionSymbol == CommentsInputBar.waveformSymbol)
+        #expect(bar.subviews.compactMap { $0 as? UIButton }.allSatisfy { $0.accessibilityLabel != "Dismiss keyboard" })
+
+        bar.draftText = "Sent with the keyboard down"
+        bar.setKeyboardOpen(false)
+        action.sendActions(for: .primaryActionTriggered)
+        #expect(driver.sent == ["Sent with the keyboard down"])
     }
 
     @Test func anEmoteGoesIntoTheDraftAndIsNotSent() throws {

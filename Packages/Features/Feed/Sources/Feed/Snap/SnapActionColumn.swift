@@ -8,8 +8,8 @@ import UIKit
 /// ```
 ///   media layout                         comments layout
 ///   ~~~~ band ~~~~~~~~~~~~~~ [♥]          ———————————————————— [♥]
-///   caption…                 [⇄]          ———————————————————— [⇄ / ↑]
-///   ━━━ progress ━━━                      [◉][field…        ☺ 〰]
+///   caption…                 [⇄]          ———————————————————— [⇄]
+///   ━━━ progress ━━━                      [◉][field…      ☺ 〰/↑]
 ///   [♫ attribution]  …  [⇪ 🔖] [⋯]        [♫ attribution]  …  [⇪ 🔖] [⋯]
 /// ```
 ///
@@ -18,22 +18,24 @@ import UIKit
 ///   and the page strip (which give up that width). The toolbar's capsule is
 ///   [share][bookmark]: share took repost's place there, and left the ⋯.
 /// - Comments layout: the composer's stake bubble stands on the like anchor's
-///   frame, and its trailing rail slot on the repost bubble's — a REPOST face
-///   that turns into the SEND arrow while there is text (a symbol replace, one
-///   bubble). Same size, same place: switching layouts is an alpha crossfade
-///   between two bubbles that never move. The voice note is a waveform INSIDE
-///   the field, beside the emote button.
+///   frame, and its trailing rail slot on the repost bubble's — a REPOST face,
+///   whatever the field holds. Same size, same place: switching layouts is an
+///   alpha crossfade between two bubbles that never move. The voice note is a
+///   waveform INSIDE the field, beside the emote button, and it becomes the
+///   SEND arrow while there is text (a symbol replace).
 /// - The Messages thread: no stake (a conversation has nothing to like), and
-///   the rail slot is a PIN for the conversation, turning into send the same
-///   way.
+///   the rail slot is a PIN for the conversation.
+/// - KEYBOARD UP the column still does not move (asked 2026-10-02): only the
+///   composer's input row rides the keyboard, widening into the column's
+///   width as it rises clear of it (`CommentsInputBar.riseWithKeyboard(of:)`);
+///   the bubbles stay on these coordinates, under the keyboard.
 ///
 /// Began as an experiment behind a DEBUG flag (#340, #344); validated
 /// 2026-10-01 and made the only layout — the classic one is gone.
 ///
 /// ⚠️ ONE SET OF NUMBERS, two layouts that never see each other. The media
 /// layout is constraints inside `SnapChromeView` (band → caption floor →
-/// margins), the composer is constraints inside its host (keyboard guide,
-/// screen bottom). They agree because both read their geometry from here, and
+/// margins), the composer is constraints inside its host (screen bottom). They agree because both read their geometry from here, and
 /// `SnapActionColumnLayoutTests` measures both in window coordinates and
 /// asserts the frames are EQUAL — if either side's anchoring changes, that
 /// test is what says the column moved.
