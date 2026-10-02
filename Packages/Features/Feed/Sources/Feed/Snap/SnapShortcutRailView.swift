@@ -80,8 +80,14 @@ import UIKit
 /// live cell and its flight replica can never disagree. (A user-scrolled
 /// wheel snaps back to rest in the replica.)
 final class SnapShortcutRailView: UIScrollView {
-    /// The feed's bubble invariant (nav/toolbar circles are 36pt).
-    static let iconDiameter: CGFloat = 36
+    /// A shortcut's side: 28pt (asked 2026-10-02: smaller). It was the
+    /// feed's 36pt bar-bubble invariant while each shortcut wore a bubble;
+    /// bare art at that size outweighed the like bubble under it. At 28 the
+    /// column reads as a quiet trail of reactions over the action column's
+    /// glass, centred on it. One constant for the live rail and its flight
+    /// replica (both are `SnapShortcutRailView`s, laid out by
+    /// `rebuildGeometry`).
+    static let iconDiameter: CGFloat = 28
     static let iconSpacing: CGFloat = Spacing.md
     /// How many bubbles the resting window shows.
     static let restingIconCount = 3

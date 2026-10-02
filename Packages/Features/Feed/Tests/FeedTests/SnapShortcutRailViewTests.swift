@@ -101,13 +101,40 @@ struct SnapShortcutRailViewTests {
         #expect(icons.count == 9)
         #expect(icons.allSatisfy { $0.configuration?.image == nil }, "no symbol")
         #expect(icons.allSatisfy { $0.subviews.contains { $0 is EmoteTileView } })
-        // The emote is exactly the shortcut's 36pt box, not grown past it.
+        // The emote is exactly the shortcut's box, not grown past it.
         for icon in icons {
             let tile = icon.subviews.compactMap { $0 as? EmoteTileView }.first
             #expect(tile?.frame == icon.bounds)
             #expect(icon.bounds.size == CGSize(width: SnapShortcutRailView.iconDiameter,
                                                height: SnapShortcutRailView.iconDiameter))
         }
+    }
+
+    /// ⚠️ 28pt SHORTCUTS (asked 2026-10-02: smaller than the 36pt bar bubble
+    /// they were), every one of them, and the flight replica — another rail
+    /// built from the same post — lays them out on exactly the same frames.
+    @Test func shortcutsAre28ptAndTheReplicaMatches() {
+        #expect(SnapShortcutRailView.iconDiameter == 28)
+        #expect(SnapShortcutRailView.step == 28 + SnapShortcutRailView.iconSpacing)
+        let id = PostID("p-rail")
+        func rail() -> SnapShortcutRailView {
+            let rail = SnapShortcutRailView(frame: CGRect(x: 0, y: 0, width: 44, height: Self.railHeight))
+            rail.setEmotes(SnapShortcutRailView.payload(for: id))
+            rail.layoutIfNeeded()
+            return rail
+        }
+        let live = rail()
+        let replica = rail()
+        let liveIcons = live.subviews.compactMap { $0 as? UIButton }
+        #expect(liveIcons.count == SnapShortcutRailView.reactionIDs.count)
+        for icon in liveIcons {
+            #expect(icon.bounds.size == CGSize(width: 28, height: 28))
+            // Centred on the rail's width (the like bubble's), as before.
+            #expect(abs(icon.center.x - live.bounds.midX) < 0.5)
+        }
+        #expect(liveIcons.map(\.frame) == replica.subviews.compactMap { $0 as? UIButton }.map(\.frame))
+        #expect(live.contentInset == replica.contentInset)
+        #expect(live.contentOffset == replica.contentOffset)
     }
 
     /// No bubble: nothing is painted behind an emote.
@@ -428,8 +455,10 @@ struct SnapShortcutRailViewTests {
 
     @Test func topExitInterpolationIsPureOnTheDetentGrid() {
         // A rail whose headroom IS grid-aligned (the chrome's invariant):
-        // 132 resting + 16 fade + 288 headroom (= 6 detents) = 436.
-        let rail = SnapShortcutRailView(frame: CGRect(x: 0, y: 0, width: 44, height: 436))
+        // the resting window + the fade + 6 detents of headroom.
+        let height = SnapShortcutRailView.restingWindowHeight + SnapShortcutRailView.edgeFadeLength
+            + 6 * SnapShortcutRailView.step
+        let rail = SnapShortcutRailView(frame: CGRect(x: 0, y: 0, width: 44, height: height))
         rail.setEmotes(Self.emotes(9))
         rail.layoutIfNeeded()
         let icons = rail.subviews.compactMap { $0 as? UIButton }.sorted { $0.center.y < $1.center.y }

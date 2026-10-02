@@ -89,6 +89,20 @@ struct PostDetailStreamShapeTests {
         return nil
     }
 
+    /// The post's send arrow is the conversation's blue — ONE tint for every
+    /// composer (`CommentsInputBar.sendTint`; the thread's twin is
+    /// `ConversationThreadViewControllerTests.theSendArrowIsThePostsBlue`).
+    @Test func theSendArrowIsTheComposersOneBlue() async throws {
+        let (controller, _, _) = try await makeStream(Self.spreadAcrossDays)
+        let bar = try #require(Self.firstView(CommentsInputBar.self, in: controller.view))
+        bar.draftText = "Nice one"
+        let color = bar.debugFieldActionButton.configuration?.baseForegroundColor
+        for style in [UIUserInterfaceStyle.light, .dark] {
+            let traits = UITraitCollection(userInterfaceStyle: style)
+            #expect(color?.resolvedColor(with: traits) == CommentsInputBar.sendTint.resolvedColor(with: traits))
+        }
+    }
+
     @Test func commentsFromSeveralDaysShareTheOneSection() async throws {
         let (_, stream, _) = try await makeStream(Self.spreadAcrossDays)
         #expect(stream.numberOfSections == 1)

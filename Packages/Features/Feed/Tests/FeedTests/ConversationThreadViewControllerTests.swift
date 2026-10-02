@@ -113,14 +113,96 @@ struct ConversationThreadViewControllerTests {
         #expect(stream.cellForItem(at: IndexPath(item: 0, section: 0)) is ThreadRowCell)
     }
 
-    /// ⚠️ Under the header frost the system's own edge effect would still draw
-    /// — a fade on iOS 26, a hard band with a hairline cutting a message in half
-    /// on iOS 27 (measured). It is hidden: the frost is the only material here.
-    /// See `prefersClearTopEdge`.
+    /// ⚠️ The system's own edge effect would draw under the nav bar — a fade
+    /// on iOS 26, a hard band with a hairline cutting a message in half on
+    /// iOS 27 (measured). It is hidden: the window's status-bar band is the
+    /// only material up there. See `prefersClearTopEdge`.
     @Test func theStreamRunsUnderTheHeaderWithNoSystemEffect() throws {
         let (screen, _, _, _) = makeScreen()
         let stream = try #require(Self.firstView(UICollectionView.self, in: screen.view))
         #expect(stream.topEdgeEffect.isHidden)
+    }
+
+    /// ⚠️ NO FROSTED TOP (asked 2026-10-02). The thread drew its own 132pt
+    /// frost band under the window's status-bar blur — a blur over a blur.
+    /// The only band left on the screen is the composer's footer, below the
+    /// middle; a peek has none at all at the top either.
+    @Test func theThreadHasNoFrostedTop() throws {
+        for mode in [ConversationThreadMode.full, .preview] {
+            let (screen, _, _, _) = makeScreen(mode: mode)
+            screen.view.layoutIfNeeded()
+            // The bands, not the day pills' chips (blur too, pinned up there
+            // by design).
+            let bands = Self.descendants(of: screen.view).filter { $0 is ProgressiveFrostView }
+            for band in bands {
+                let frame = band.convert(band.bounds, to: screen.view)
+                #expect(frame.minY > screen.view.bounds.midY,
+                        "\(mode): a \(type(of: band)) at the top \(frame)")
+            }
+            #expect(bands.count == (mode == .full ? 1 : 0), "\(mode): \(bands.map { type(of: $0) })")
+        }
+    }
+
+    /// The send arrow is the post's blue (`CommentsInputBar.sendTint`), not
+    /// the conversation's inherited tint.
+    @Test func theSendArrowIsThePostsBlue() throws {
+        let (screen, _, _, _) = makeScreen()
+        let bar = try #require(Self.firstView(CommentsInputBar.self, in: screen.view))
+        bar.draftText = "On my way"
+        let color = bar.debugFieldActionButton.configuration?.baseForegroundColor
+        for style in [UIUserInterfaceStyle.light, .dark] {
+            let traits = UITraitCollection(userInterfaceStyle: style)
+            #expect(color?.resolvedColor(with: traits) == CommentsInputBar.sendTint.resolvedColor(with: traits))
+        }
+    }
+
+    /// ⚠️ A LINE BREAK MOVES THE THREAD IN ONE ANIMATION. The field grows, the
+    /// bar with it, the footer band riding the input row and the stream's
+    /// clearance and offset (`syncBottomClearance`) all land in the same
+    /// spring — and on the way back down. The pin never moves.
+    @Test func aLineBreakMovesTheStreamInTheFieldsAnimation() throws {
+        let long = (0..<60).map { index in
+            Self.message("m\(index)", daysBack: 0, minutes: Double(index), mine: index.isMultiple(of: 3))
+        }
+        let (screen, _, _, window) = makeScreen(phase: .content(long))
+        // ON SCREEN: off a window the field takes its height at once (there
+        // is nothing to watch), and the navigation controller installs the
+        // screen's view in the window on its own layout pass.
+        window.layoutIfNeeded()
+        let stream = try #require(Self.firstView(UICollectionView.self, in: screen.view))
+        let bar = try #require(Self.firstView(CommentsInputBar.self, in: screen.view))
+        try #require(bar.window === window, "guard: the composer is not on screen")
+        let band = try #require(Self.descendants(of: screen.view).first { $0 is ProgressiveFrostView })
+        let pin = bar.debugRailButton.convert(bar.debugRailButton.bounds, to: window)
+        Self.removeAllAnimations(in: window)
+        let inset = stream.contentInset.bottom
+
+        bar.draftText = "One\nTwo\nThree\nFour"
+        #expect(stream.contentInset.bottom > inset + 20, "guard: the grown bar moved the clearance")
+        #expect(Self.isAnimated(bar.debugField), "the field jumped")
+        #expect(Self.isAnimated(stream), "the stream jumped while the field grew")
+        #expect(Self.isAnimated(band), "the footer band jumped while the field grew")
+        let pinNow = bar.debugRailButton.convert(bar.debugRailButton.bounds, to: window)
+        #expect(abs(pinNow.minY - pin.minY) < 0.5, "the pin moved: \(pinNow) vs \(pin)")
+
+        Self.removeAllAnimations(in: window)
+        bar.draftText = ""
+        #expect(abs(stream.contentInset.bottom - inset) < 0.5)
+        #expect(Self.isAnimated(bar.debugField), "the field snapped back")
+        #expect(Self.isAnimated(stream), "the stream snapped back")
+    }
+
+    private static func descendants(of view: UIView) -> [UIView] {
+        view.subviews + view.subviews.flatMap { descendants(of: $0) }
+    }
+
+    private static func removeAllAnimations(in view: UIView) {
+        view.layer.removeAllAnimations()
+        for subview in view.subviews { removeAllAnimations(in: subview) }
+    }
+
+    private static func isAnimated(_ view: UIView) -> Bool {
+        !(view.layer.animationKeys() ?? []).isEmpty
     }
 
     /// ⚠️ **ON THE TAIL IN THE SAME TURN, NOT ONE TURN LATER.** Estimated row
