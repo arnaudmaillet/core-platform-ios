@@ -22,19 +22,58 @@ struct MockWorldSeedTests {
 
     // MARK: - Who owns what
 
-    /// Ten countries owned as if bought; Mexico and South Korea stay locked
-    /// WITH posts, for the locked-country design.
-    @Test func theSeedOwnsTenCountriesAndLocksTwoWithPosts() {
-        #expect(MockWorldSeed.unlockedCountryCodes
+    /// Ten featured countries owned as if bought, Mexico and South Korea
+    /// locked WITH posts; of the one-post additions, a few owned, most
+    /// locked — the locked-country design across the whole map.
+    @Test func theSeedOwnsTenFeaturedCountriesAndLocksMostAdditions() {
+        let featured = MockWorldSeed.featuredCountries
+        #expect(Set(featured.filter(\.unlockedByDefault).map(\.code))
                 == ["ES", "IT", "GB", "DE", "US", "JP", "BR", "MA", "AU", "CA"])
-        #expect(MockWorldSeed.lockedCountryCodes == ["MX", "KR"])
+        #expect(Set(featured.filter { !$0.unlockedByDefault }.map(\.code)) == ["MX", "KR"])
+        let added = MockWorldSeed.onePostCountries
+        #expect(added.filter(\.unlockedByDefault).count == 18)
+        #expect(added.filter { !$0.unlockedByDefault }.count == added.count - 18)
         #expect(!MockWorldSeed.unlockedCountryCodes.contains("FR"), "home is unlocked by rule, not by the seed")
-        for country in MockWorldSeed.countries {
+        for country in featured {
             #expect(!country.cities.isEmpty && country.cities.allSatisfy { $0.posts.count >= 2 },
                     "\(country.name): a city of one post would never be a cluster")
+        }
+        for country in MockWorldSeed.countries {
             // The atlas knows every code — the shop and the border shading
             // key on it.
             #expect(CountryAtlas.shared.country(code: country.code) != nil, "\(country.code)")
+        }
+    }
+
+    /// Every one-post country's post stands INSIDE its border — not offshore
+    /// and claimed by reach, not next to a frontier a simplified outline
+    /// could move — at least 0.12° (~13 km) from the outline.
+    @Test func everyAdditionStandsClearlyInsideItsCountry() {
+        let added = Set(MockWorldSeed.onePostCountries.map(\.code))
+        let placements = MockWorldSeed.placements.filter { added.contains($0.countryCode) }
+        #expect(placements.count == added.count)
+        for placement in placements {
+            let point = CLLocationCoordinate2D(latitude: placement.latitude, longitude: placement.longitude)
+            #expect(CountryAtlas.shared.country(containing: point)?.code == placement.countryCode,
+                    "\(placement.postID) is not inside \(placement.countryCode)")
+            let margin = CountryAtlas.shared.country(code: placement.countryCode)?.distance(to: point, within: 1)
+            #expect((margin ?? .infinity) >= 0.12, "\(placement.postID) is \(margin ?? 0)° from the border")
+        }
+    }
+
+    /// The Maps catalog holds exactly the seed's one-post places — same
+    /// codes, ids, names and centers (this target can't import the mocks).
+    @Test func theCatalogMirrorsEveryAddition() {
+        let catalog = Dictionary(uniqueKeysWithValues: MapMockPlaces.onePostPlaces.map { ($0.code, $0) })
+        #expect(catalog.count == MockWorldSeed.onePostCountries.count)
+        for country in MockWorldSeed.onePostCountries {
+            let city = country.cities[0]
+            let entry = catalog[country.code]
+            #expect(entry?.country.id == country.placeID && entry?.country.name == country.name, "\(country.code)")
+            #expect(entry?.country.kind == .country)
+            #expect(entry?.city.id == city.placeID && entry?.city.name == city.name, "\(city.name)")
+            #expect(entry?.city.kind == .city)
+            #expect(entry?.center.lat == city.latitude && entry?.center.lng == city.longitude, "\(city.name)")
         }
     }
 
@@ -130,27 +169,42 @@ struct MockWorldSeedTests {
         }
     }
 
-    /// The world framed (the user's screenshot, 2026-10-01): every marker on
-    /// screen is a COUNTRY's — never a neutral group fusing two of them. A
-    /// country whose marker would overlap a stronger one is hidden, and the
-    /// stronger one is always the open one first, the more trending second.
-    @Test func theWorldFramedShowsOnlyCountriesAndTheStrongerOneOfEachCollision() async throws {
+    /// Whether the mock account may open `pin` on a first launch: its
+    /// country is home, or seeded unlocked.
+    private func isOpenOnFirstLaunch(_ pin: MapPin) -> Bool {
+        let owner = CountryAtlas.shared.country(
+            owning: CLLocationCoordinate2D(latitude: pin.latitude, longitude: pin.longitude)
+        )
+        return !MockWorldSeed.lockedCountryCodes.contains(owner?.code ?? "")
+    }
+
+    /// The map's framings at the country band, as a 402pt-wide screen sees
+    /// them: the world, and the continents the product checks by eye.
+    /// `degrees` is the framing's longitude span; the diagonal stays above
+    /// the measured Europe-framed one, so the country band is up.
+    static let framings: [(name: String, degrees: Double, diagonalKm: Double)] = [
+        ("world", 360, 20_000), ("americas", 140, 14_000), ("asia", 110, 10_000),
+        ("africa", 80, 9_000), ("europe", 45, 4_500)
+    ]
+
+    /// Every framing (the world one is the user's screenshot, 2026-10-01):
+    /// every marker on screen is a COUNTRY's — never a neutral group fusing
+    /// two of them — and no two overlap. A country whose marker would
+    /// overlap a stronger one is hidden, and the stronger one is always the
+    /// open one first, the more trending second.
+    @Test(arguments: framings.map(\.name))
+    func everyFramingShowsOnlyCountriesAndTheStrongerOneOfEachCollision(_ name: String) async throws {
+        let framing = try #require(Self.framings.first { $0.name == name })
         let pins = try await worldPins(around: MockWorldSeed.countries.flatMap(\.cities))
-        let locked = Set(MockWorldSeed.lockedCountryCodes)
-        func isOpen(_ pin: MapPin) -> Bool {
-            let owner = CountryAtlas.shared.country(
-                owning: CLLocationCoordinate2D(latitude: pin.latitude, longitude: pin.longitude)
-            )
-            return !locked.contains(owner?.code ?? "")
-        }
-        let world = 402.0 / 268_435_456.0
-        let cell = 64 / world
+        let isOpen = isOpenOnFirstLaunch
+        let zoom = 402.0 / (268_435_456.0 * framing.degrees / 360)
+        let cell = 64 / zoom
         var occlusion = MapClusterEngine.Occlusion()
         let shown = MapClusterEngine.cluster(
-            pins, zoomScale: world, cellPoints: 64, viewportDiagonalKm: 20_000,
+            pins, zoomScale: zoom, cellPoints: 64, viewportDiagonalKm: framing.diagonalKm,
             isOpen: isOpen, occlusion: &occlusion
         )
-        #expect(!occlusion.hiddenItems.isEmpty, "the world framing must collide somewhere")
+        #expect(!occlusion.hiddenItems.isEmpty, "the \(name) framing must collide somewhere")
         for item in shown {
             #expect(item.isHierarchyMarker && item.place?.kind == .country,
                     "\(item.place?.id ?? "a placeless group") is not a country marker")
@@ -176,6 +230,79 @@ struct MockWorldSeedTests {
                     ? open(blocker)
                     : blocker.representative.likeCount >= hidden.representative.likeCount
             }, "\(hidden.place?.id ?? "?") is hidden behind a weaker marker")
+        }
+        // Readable: no two shown markers overlap.
+        for (index, a) in shown.enumerated() {
+            for b in shown[(index + 1)...] {
+                let (p, q) = (point(a), point(b))
+                #expect(max(abs(p.x - q.x), abs(p.y - q.y)) >= cell,
+                        "\(a.place?.id ?? "?") overlaps \(b.place?.id ?? "?")")
+            }
+        }
+    }
+
+    /// Which country shows where two collide is a function of the pins, not
+    /// of the order they arrive in: the same framing over the same pins,
+    /// shuffled, shows and hides the same markers wearing the same faces.
+    @Test func collisionsAreDeterministic() async throws {
+        let pins = try await worldPins(around: MockWorldSeed.countries.flatMap(\.cities))
+        let zoom = 402.0 / 268_435_456.0
+        func layout(_ pins: [MapPin]) -> (shown: [String], hidden: Set<String>) {
+            var occlusion = MapClusterEngine.Occlusion()
+            let shown = MapClusterEngine.cluster(
+                pins, zoomScale: zoom, cellPoints: 64, viewportDiagonalKm: 20_000,
+                isOpen: isOpenOnFirstLaunch, occlusion: &occlusion
+            )
+            return (shown.map { "\($0.place?.id ?? "?")=\($0.representative.postID.rawValue)" }.sorted(),
+                    occlusion.hiddenKeys)
+        }
+        let reference = layout(pins)
+        var generator = SystemRandomNumberGenerator()
+        for _ in 0..<5 {
+            let other = layout(pins.shuffled(using: &generator))
+            #expect(other.shown == reference.shown)
+            #expect(other.hidden == reference.hidden)
+        }
+        // And the ranking never falls to the id tie-break between two
+        // countries: no two seeded country faces hold the same likes.
+        let faces = MockWorldSeed.countries.map { country in
+            country.cities.flatMap(\.posts).map(\.likes).max() ?? 0
+        }
+        #expect(Set(faces).count == faces.count)
+    }
+
+    /// The world framing's ONE query brings every world post — the geo
+    /// mock's per-response cap must not cut the dataset's tail, where the
+    /// world sits — and each seeded country holds exactly its seeded posts:
+    /// a one-post country exactly one post of any kind, corpus included.
+    @Test func theWorldFramingReceivesEveryCountrysPosts() async throws {
+        let backend = MockBackend(seedsMapHierarchy: true)
+        let client = backend.makeRPCClient()
+        let repository = GeoDiscoveryRepository(
+            geoClient: GeoDiscovery_V1_GeoDiscoveryServiceClient(client: client),
+            counterClient: Counter_V1_CounterServiceClient(client: client)
+        )
+        let result = try await repository.queryTile(.make(
+            centerLat: 0, centerLng: 0, latitudeSpan: 170, longitudeSpan: 360
+        ))
+        let world = result.pins.filter { $0.postID.rawValue.hasPrefix(MockWorldSeed.postIDPrefix) }
+        #expect(Set(world.map(\.postID.rawValue)) == Set(MockWorldSeed.placements.map(\.postID)))
+
+        var perCountry: [String: (world: Int, all: Int)] = [:]
+        for pin in result.pins {
+            let point = CLLocationCoordinate2D(latitude: pin.latitude, longitude: pin.longitude)
+            guard let code = CountryAtlas.shared.country(owning: point)?.code else { continue }
+            let isWorld = pin.postID.rawValue.hasPrefix(MockWorldSeed.postIDPrefix)
+            perCountry[code, default: (0, 0)].world += isWorld ? 1 : 0
+            perCountry[code, default: (0, 0)].all += 1
+        }
+        let withPosts = MockWorldSeed.countries.filter { (perCountry[$0.code]?.world ?? 0) > 0 }
+        #expect(withPosts.count >= 100)
+        for country in MockWorldSeed.featuredCountries {
+            #expect(perCountry[country.code]?.world == country.cities.flatMap(\.posts).count, "\(country.name)")
+        }
+        for country in MockWorldSeed.onePostCountries {
+            #expect(perCountry[country.code]?.all == 1, "\(country.name)")
         }
     }
 }

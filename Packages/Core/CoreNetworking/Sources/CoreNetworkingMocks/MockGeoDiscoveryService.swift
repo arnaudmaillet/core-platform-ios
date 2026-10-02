@@ -44,7 +44,14 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
     /// number here would silently hide the tail of a corpus enlarged via
     /// `-mock-post-count` (the prefix is dataset-ordered, so everything past
     /// it would simply never reach the map).
-    private static let topK = 200
+    ///
+    /// ⚠️ 400, not 200, since the world seed carries a post in over a
+    /// hundred countries (`MockWorldSeed`): the world framing's viewport holds
+    /// the whole corpus (~280 posts), the response is cut in dataset order,
+    /// and the world sits at the dataset's TAIL — at 200 the cut fell inside
+    /// the world, and most one-post countries never reached the world map (a
+    /// country whose posts never arrive is a country with no marker).
+    private static let topK = 400
 
     public init(dataset: MockSocialDataset, spreadsHierarchy: Bool = false) {
         self.dataset = dataset

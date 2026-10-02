@@ -175,7 +175,7 @@ public final class MockCommentService: @unchecked Sendable {
         let authors = dataset.authors
         guard authors.count >= 5 else { return [:] }
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
-        let offset = Int(postID.suffix(4)) ?? 0
+        let offset = Self.idOffset(postID)
         func reply(_ parent: String, _ position: Int, _ body: String, ageMs: Int64) -> Comment_V1_CommentView {
             var view = makeComment(
                 id: "\(parent)-r\(position)",
@@ -219,7 +219,7 @@ public final class MockCommentService: @unchecked Sendable {
 
         let raw: [Comment_V1_CommentView]
         if Self.reactionOnlySparsePostIDs.contains(postID) {
-            let offset = Int(postID.suffix(4)) ?? 0
+            let offset = Self.idOffset(postID)
             raw = Self.reactionOnlySparseBank.indices.map { position in
                 makeComment(
                     id: "\(postID)-react-\(position)",
@@ -232,7 +232,7 @@ public final class MockCommentService: @unchecked Sendable {
         } else if Self.denselySeededPostIDs.contains(postID) {
             // Rotate the bank by the post's index so each dense post gets a
             // different (but stable) slice, authors cycling the whole cast.
-            let offset = Int(postID.suffix(4)) ?? 0
+            let offset = Self.idOffset(postID)
             let bank = Self.denseCommentBank
             let reactions = (0..<18).map { position in
                 makeComment(
@@ -258,7 +258,7 @@ public final class MockCommentService: @unchecked Sendable {
             }
             raw = reactions + subtitles
         } else {
-            let pair = Self.sparsePairs[(Int(postID.suffix(4)) ?? 0) % Self.sparsePairs.count]
+            let pair = Self.sparsePairs[Self.idOffset(postID) % Self.sparsePairs.count]
             raw = [
                 makeComment(id: "\(postID)-c0", postID: postID, author: authors[1].profileID, body: pair.0, ageMs: 20 * 60_000),
                 makeComment(id: "\(postID)-c1", postID: postID, author: authors[2].profileID, body: pair.1, ageMs: 5 * 60_000)
@@ -269,6 +269,14 @@ public final class MockCommentService: @unchecked Sendable {
             view.createdAtMs = nowMs - view.createdAtMs
             return view
         }
+    }
+
+    /// The number a post id ends with — "post-0012" → 12, "post-world-102"
+    /// → 102 — what rotates each post's slice of the banks. Never negative:
+    /// `Int(postID.suffix(4))` read the world seed's "post-world-102" as -102
+    /// and indexed the banks out of range (a crash on opening the post).
+    static func idOffset(_ postID: String) -> Int {
+        Int(String(postID.suffix(4).reversed().prefix { $0.isNumber }.reversed())) ?? 0
     }
 
     private func makeComment(id: String, postID: String, author: String, body: String, ageMs: Int64) -> Comment_V1_CommentView {

@@ -1,6 +1,8 @@
-import CoreNetworkingMocks
+import CoreContracts
+@testable import CoreNetworkingMocks
 import Foundation
 import Testing
+@testable import CoreNetworking
 
 /// The world seed joins the corpus without moving it: appended at the tail,
 /// dated older than everything, authored by authors who already have
@@ -49,10 +51,10 @@ struct MockWorldSeedDatasetTests {
         #expect(worldPosts.allSatisfy { $0.location != nil && $0.seededLikes != nil })
     }
 
-    /// Each city's trending post leads it clearly — no tie at the top — and
-    /// the geo mock puts every world post where the seed says.
+    /// Each featured city's trending post leads it clearly — no tie at the
+    /// top — and the geo mock puts every world post where the seed says.
     @Test func everyCityHasOneTrendingPostAndItsPlace() {
-        for city in MockWorldSeed.countries.flatMap(\.cities) {
+        for city in MockWorldSeed.featuredCountries.flatMap(\.cities) {
             let likes = city.posts.map(\.likes).sorted(by: >)
             #expect(likes.count >= 2 && likes[0] > likes[1], "\(city.name) has no clear trending post")
         }
@@ -75,6 +77,95 @@ struct MockWorldSeedDatasetTests {
             } else {
                 #expect(icons[placement.postID] == nil)
             }
+        }
+    }
+
+    // MARK: - A hundred countries
+
+    /// The twelve featured countries exactly as #348 seeded them — same
+    /// order, same post counts, same ids, same unlocks — whatever was added
+    /// after them.
+    @Test func theFeaturedSeedIsUnchanged() {
+        let featured = MockWorldSeed.featuredCountries
+        #expect(featured.map(\.code) == ["ES", "IT", "GB", "DE", "US", "JP", "BR", "MA", "AU", "CA", "MX", "KR"])
+        #expect(featured.map { $0.cities.flatMap(\.posts).count } == [7, 6, 4, 3, 7, 6, 3, 3, 3, 3, 3, 3])
+        #expect(Set(featured.filter(\.unlockedByDefault).map(\.code))
+                == ["ES", "IT", "GB", "DE", "US", "JP", "BR", "MA", "AU", "CA"])
+        let featuredCodes = Set(featured.map(\.code))
+        let featuredIDs = MockWorldSeed.placements.filter { featuredCodes.contains($0.countryCode) }.map(\.postID)
+        #expect(featuredIDs == (0..<51).map { String(format: "post-world-%02d", $0) })
+    }
+
+    /// Over a hundred countries carry posts, each code once; every addition
+    /// carries exactly ONE post, in one city, and the dataset holds exactly
+    /// the seeded posts per country.
+    @Test func overAHundredCountriesHavePostsAndEachAdditionExactlyOne() {
+        let codes = MockWorldSeed.countries.map(\.code)
+        #expect(codes.count >= 100)
+        #expect(Set(codes).count == codes.count, "a country seeded twice")
+        #expect(!codes.contains("FR"), "home is the corpus's, not the seed's")
+        for country in MockWorldSeed.onePostCountries {
+            #expect(country.cities.count == 1 && country.cities[0].posts.count == 1, "\(country.name)")
+        }
+        let placeIDs = MockWorldSeed.countries.flatMap { [$0.placeID] + $0.cities.map(\.placeID) }
+        #expect(Set(placeIDs).count == placeIDs.count, "two places share an id")
+        #expect(MockWorldSeed.placeID("city", "Santiago de los Caballeros") == "city:santiago-de-los-caballeros")
+        #expect(MockWorldSeed.placeID("city", "Bogotá") == "city:bogota")
+
+        let countryOf = Dictionary(uniqueKeysWithValues: MockWorldSeed.placements.map { ($0.postID, $0.countryCode) })
+        var perCountry: [String: Int] = [:]
+        for post in worldPosts { perCountry[countryOf[post.postID] ?? "?", default: 0] += 1 }
+        for country in MockWorldSeed.countries {
+            #expect(perCountry[country.code] == country.cities.flatMap(\.posts).count, "\(country.name)")
+        }
+        #expect(perCountry["?"] == nil)
+    }
+
+    /// The additions vary their kinds like the featured posts do, and every
+    /// one of their like counts is its own — so where two country markers
+    /// collide, likes decide which shows, never an id tie-break.
+    @Test func theAdditionsVaryTheirKindsAndNeverTieOnLikes() {
+        let posts = MockWorldSeed.onePostCountries.flatMap { $0.cities.flatMap(\.posts) }
+        #expect(posts.contains { $0.kind == .video })
+        #expect(posts.contains { $0.kind == .photo })
+        #expect(posts.contains { $0.kind == .text(iconFace: true) })
+        #expect(posts.contains { $0.kind == .text(iconFace: false) })
+        let likes = posts.map(\.likes)
+        #expect(Set(likes).count == likes.count)
+        let featuredLikes = Set(MockWorldSeed.featuredCountries.flatMap { $0.cities.flatMap(\.posts) }.map(\.likes))
+        #expect(featuredLikes.isDisjoint(with: likes))
+        #expect(Set(posts.map(\.author)) == Set(0..<8), "authors prof-0…7, all of them")
+    }
+
+    /// A few additions are owned from the first launch, most stay locked;
+    /// the featured unlocks are untouched, so the seed only GROWS
+    /// (`CountryUnlockStore.seedUnlocks` grants an existing install the new
+    /// codes only, once).
+    @Test func mostAdditionsStayLockedAndTheUnlocksOnlyGrow() {
+        let added = MockWorldSeed.onePostCountries
+        let unlocked = Set(added.filter(\.unlockedByDefault).map(\.code))
+        #expect(unlocked.count == 18)
+        #expect(added.count - unlocked.count > 3 * unlocked.count, "most additions are locked")
+        let featuredUnlocks: Set<String> = ["ES", "IT", "GB", "DE", "US", "JP", "BR", "MA", "AU", "CA"]
+        #expect(MockWorldSeed.unlockedCountryCodes == featuredUnlocks.union(unlocked))
+        #expect(MockWorldSeed.lockedCountryCodes.isSuperset(of: ["MX", "KR"]))
+    }
+
+    /// Every world post opens with its comments — the ids past
+    /// `post-world-99` once read as a NEGATIVE bank offset ("-102") and
+    /// crashed the comment seed when the feed opened them.
+    @Test func everyWorldPostListsItsComments() async throws {
+        #expect(MockCommentService.idOffset("post-world-102") == 102)
+        #expect(MockCommentService.idOffset("post-0012") == 12)
+        let bff = MockBFF()
+        MockCommentService(dataset: world).register(on: bff)
+        let client = ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: bff)
+        let comments = Comment_V1_CommentServiceClient(client: client)
+        for placement in MockWorldSeed.placements {
+            var request = Comment_V1_ListTopLevelRequest()
+            request.postID = placement.postID
+            let listed = try await comments.listTopLevel(request: request, headers: [:]).result.get().comments
+            #expect(listed.count == 2, "\(placement.postID)")
         }
     }
 }
