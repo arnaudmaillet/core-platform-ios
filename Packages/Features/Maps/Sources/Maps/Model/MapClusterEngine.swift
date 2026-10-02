@@ -49,8 +49,8 @@ enum MapClusterEngine {
         /// The one place EVERY member belongs to, or `nil` for a mixed or
         /// untagged group. Set on singles too (the pin's own tag — or, for a
         /// band's group of one, the band's place), but routing keys on
-        /// `isSemanticCluster`: a lone pin is Case A whatever it is tagged
-        /// with.
+        /// `hierarchyPlace`: an ordinary lone pin is Case A whatever it is
+        /// tagged with, a band's group of one is its place's marker.
         let place: MapPlace?
         /// Whether this item was produced BY the semantic pre-pass — i.e. it
         /// is the active band's marker for its place. Only these wear the
@@ -63,7 +63,15 @@ enum MapClusterEngine {
         /// The depth this marker speaks for — what its dress keys on
         /// (`MapMarkerDress.resolve(kind:)`) — or nil below the bands. A
         /// band's group of one has one too: it wears its place's dress.
-        var hierarchyKind: MapPlace.Kind? { isHierarchyMarker ? place?.kind : nil }
+        var hierarchyKind: MapPlace.Kind? { hierarchyPlace?.kind }
+
+        /// The city or country this marker IS — what its tap opens as a place
+        /// page beneath the feed — or nil below the bands. A band's group of
+        /// ONE has one too: a country with a single post in view is still that
+        /// country's marker, and it routes exactly like a band cluster
+        /// (product call, 2 October 2026 — the mock world's one-post countries
+        /// dismissed onto the map while Paris dismissed onto its page).
+        var hierarchyPlace: MapPlace? { isHierarchyMarker ? place : nil }
 
         var isCluster: Bool { memberIDs.count > 1 }
 
@@ -292,7 +300,8 @@ enum MapClusterEngine {
         // depth (France, not Paris) and is a hierarchy marker, so it wears the
         // place's dress like any band cluster — at the country band only
         // countries, at the city band only cities, even with one post in view.
-        // Its tap stays a single post's (`isSemanticCluster` needs a group).
+        // And it ROUTES like one (`hierarchyPlace`): its feed has one post,
+        // and a vertical dismissal lands on the place page all the same.
         let lone: [BandEntry] = maskedByPlace.filter { $0.value.members.count == 1 }
             .sorted { $0.value.members[0].postID.rawValue < $1.value.members[0].postID.rawValue }
             .map { key, group in
@@ -575,6 +584,9 @@ final class MapComputedCluster: NSObject, MKAnnotation {
     /// `MapClusterEngine.Item.isHierarchyMarker`) — what the hierarchy ring
     /// colors key on.
     private(set) var isHierarchyMarker = false
+
+    /// See `MapClusterEngine.Item.hierarchyPlace`.
+    var hierarchyPlace: MapPlace? { isHierarchyMarker ? place : nil }
 
     init(_ item: MapClusterEngine.Item) {
         self.representative = item.representative
