@@ -210,7 +210,10 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         self.router = router
         self.reporting = reporting
         self.socialGraph = socialGraph
-        page = ForYouGridPage(imagePipeline: imagePipeline, style: .discover, videoPlayback: videoPlayback)
+        page = ForYouGridPage(
+            imagePipeline: imagePipeline, style: .discover, videoPlayback: videoPlayback,
+            pairsVerticalMedia: ForYouPairedVertical.isEnabled
+        )
         rails = ForYouRailsView(imagePipeline: imagePipeline, videoPlayback: videoPlayback)
         staking = wallet.map(PostCardStaking.init)
         super.init(nibName: nil, bundle: nil)
@@ -850,7 +853,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
                 // the marker and the place page already do.
                 pageFit: .covering,
                 // The tile's own corner and floor; a row keeps the card's.
-                cornerRadius: landsOnTile ? page.tileCornerRadius : nil,
+                cornerRadius: landsOnTile ? page.tileCornerRadius(for: postID) : nil,
                 fill: landsOnTile
                     ? landingPost.map(PostGridTileCell.fillColor(for:)) ?? PostGridListRowCell.cardFillColor
                     : PostGridListRowCell.cardFillColor,
@@ -2682,6 +2685,37 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
                     print("[qa] -foryou-open-card \(index): \(rails.cards[index].id.rawValue)")
                     scheduleDemoCloseIfRequested()
                     _ = rails.debugTapCard(at: index)
+                }
+            }
+        }
+        // `-foryou-open-paired K [delay]` (with `-foryou-paired-vertical`):
+        // opens the K-th half-width card of Discover, counted across blocks,
+        // once it is on screen with its cover — the hero out of a paired card,
+        // and with `-foryou-demo-close` the close back onto it.
+        if let (raw, delay) = value(after: "-foryou-open-paired"), let ordinal = Int(raw) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self else { return }
+                let pairedIndex: () -> Int? = { [weak self] in
+                    guard let page = self?.page else { return nil }
+                    let paired = page.posts.indices.filter { page.drawsAsPairedCard(page.posts[$0].id) }
+                    return paired.indices.contains(ordinal) ? paired[ordinal] : nil
+                }
+                QAWait.until("-foryou-open-paired \(ordinal)", { [weak self] in
+                    guard let self, isAtRest(), let index = pairedIndex() else { return false }
+                    let id = page.posts[index].id
+                    if !page.isPostVisible(id) {
+                        page.revealPost(id, clearing: UIEdgeInsets(
+                            top: view.safeAreaInsets.top, left: 0, bottom: floatingBarCover, right: 0
+                        ))
+                        return false
+                    }
+                    return page.heroAppearance(for: id)?.cover != nil
+                }) { [weak self] in
+                    guard let self, let index = pairedIndex() else { return }
+                    print("[qa] -foryou-open-paired \(ordinal): flat index \(index)"
+                        + " id=\(page.posts[index].id.rawValue) aspect=\(page.posts[index].aspectRatio)")
+                    scheduleDemoCloseIfRequested()
+                    if !page.debugSelectItem(at: index) { openFeed(at: index) }
                 }
             }
         }
