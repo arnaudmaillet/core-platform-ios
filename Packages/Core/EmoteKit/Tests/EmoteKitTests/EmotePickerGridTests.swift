@@ -119,7 +119,9 @@ struct EmotePickerGridTests {
         let cells = grid.indexPathsForVisibleItems.compactMap { grid.cellForItem(at: $0) as? EmoteTileCell }
         try #require(!cells.isEmpty)
         for cell in cells {
-            #expect(cell.backgroundColor == .clear)
+            // The background configuration owns the cell's colour (and
+            // clears `backgroundColor` to nil): either way, nothing painted.
+            #expect(cell.backgroundColor == nil || cell.backgroundColor == .clear)
             #expect(cell.contentView.backgroundColor == .clear)
             #expect(cell.backgroundConfiguration?.backgroundColor == .clear)
             #expect(cell.backgroundView == nil && cell.selectedBackgroundView == nil)

@@ -1,8 +1,9 @@
 import MediaCore
 import UIKit
 
-/// One emote in the panel, the strip or the suggestion row: its glyph at
-/// once, its animated art over it when there is one.
+/// One emote in the panel, the strip, the suggestion row or the feed's
+/// shortcut rail: its glyph at once, its animated art over it when there is
+/// one.
 ///
 /// ## What is dressed, and what it costs
 ///
@@ -34,7 +35,7 @@ import UIKit
 /// shape, on whatever hosts it (the panel's keyboard material, the strip's
 /// glass). The press is the cell's (`EmoteTileCell.isHighlighted`).
 @MainActor
-final class EmoteTileView: UIView {
+public final class EmoteTileView: UIView {
     /// The sheet side tiles ask for: the text bucket, so a sheet baked for a
     /// caption serves the picker too, and the reverse.
     static let pixelSide = 64
@@ -43,16 +44,16 @@ final class EmoteTileView: UIView {
     let player = AnimatedIconView(frame: .zero)
     private var request: EmoteRequest?
     private var holdsSlot = false
-    private(set) var emote: Emote?
+    public private(set) var emote: Emote?
     private weak var engine: EmoteEngine?
     private var prefersAnimation = false
 
     /// Whether art is showing over the glyph.
-    private(set) var isShowingArt = false
+    public private(set) var isShowingArt = false
     /// Whether the art on show has frames to play (a loop, motion allowed).
     private var artMoves = false
     /// Whether the owner wants the art moving. See "Playing or still".
-    private(set) var isPlaying = true
+    public private(set) var isPlaying = true
 
     /// Poster frames by the art's own image (by identity, held weakly):
     /// worked out once per art, forgotten with it, and never answered for
@@ -62,9 +63,9 @@ final class EmoteTileView: UIView {
     )
 
     /// Whether the art on show is moving right now.
-    var isAnimating: Bool { isShowingArt && player.isAnimating && !player.isPaused }
+    public var isAnimating: Bool { isShowingArt && player.isAnimating && !player.isPaused }
 
-    override init(frame: CGRect) {
+    override public init(frame: CGRect) {
         super.init(frame: frame)
         isUserInteractionEnabled = false
         backgroundColor = .clear
@@ -77,9 +78,9 @@ final class EmoteTileView: UIView {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    override func layoutSubviews() {
+    override public func layoutSubviews() {
         super.layoutSubviews()
         let side = min(bounds.width, bounds.height)
         let square = CGRect(x: (bounds.width - side) / 2, y: (bounds.height - side) / 2, width: side, height: side)
@@ -93,7 +94,7 @@ final class EmoteTileView: UIView {
 
     /// Shows `emote`, dressing its art if the rules above allow — still, on
     /// its poster frame, unless `playing`.
-    func configure(_ emote: Emote, engine: EmoteEngine, prefersAnimation: Bool, playing: Bool = true) {
+    public func configure(_ emote: Emote, engine: EmoteEngine, prefersAnimation: Bool, playing: Bool = true) {
         reset()
         self.emote = emote
         self.engine = engine
@@ -131,7 +132,7 @@ final class EmoteTileView: UIView {
 
     /// Starts or stops the art where it is: stopping holds the frame
     /// on show, starting plays on from it.
-    func setPlaying(_ playing: Bool) {
+    public func setPlaying(_ playing: Bool) {
         guard playing != isPlaying else { return }
         isPlaying = playing
         if playing { play() } else { hold() }
@@ -189,12 +190,12 @@ final class EmoteTileView: UIView {
     /// `reset()`, and forgets the emote too, so a window re-attach does not
     /// ask again — for a cell the collection view stopped displaying but
     /// keeps, hidden, in its hierarchy.
-    func clear() {
+    public func clear() {
         reset()
         emote = nil
     }
 
-    override func didMoveToWindow() {
+    override public func didMoveToWindow() {
         super.didMoveToWindow()
         if window == nil {
             // Off screen holds nothing — no slot, no request, and no art: a

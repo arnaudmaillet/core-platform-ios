@@ -1,7 +1,8 @@
 import UIKit
 
-/// Plays a grid of emote tiles only while it moves under a finger — the
-/// strip's and the panel's one rule, kept here so the two cannot drift.
+/// Plays a scroll view's emote tiles only while it moves under a finger —
+/// one rule for the strip, the panel and the feed's shortcut rail, kept here
+/// so they cannot drift.
 ///
 /// ## The rule
 ///
@@ -18,35 +19,45 @@ import UIKit
 /// ## Adopting it
 ///
 /// The owner forwards its scroll view's drag and deceleration callbacks,
-/// configures each dequeued tile with `playing: isScrolling`, and calls
-/// `stop()` when it leaves the window.
+/// dresses each tile it brings on screen with `playing: isScrolling`, and
+/// calls `stop()` when it leaves the window.
 @MainActor
-final class EmoteScrollPlayback {
-    private weak var collectionView: UICollectionView?
+public final class EmoteScrollPlayback {
+    private weak var scrollView: UIScrollView?
+    /// The tiles on screen right now: the ones a start or a stop reaches.
+    private let displayedTiles: @MainActor () -> [EmoteTileView]
     /// From a drag's start to the end of its glide.
-    private(set) var isScrolling = false
+    public private(set) var isScrolling = false
     /// While scrolling: ends it when a touch stopped the glide, which tells
     /// the delegate nothing.
     private var settleWatch: Task<Void, Never>?
 
-    init(collectionView: UICollectionView) {
-        self.collectionView = collectionView
+    public init(scrollView: UIScrollView, displayedTiles: @escaping @MainActor () -> [EmoteTileView]) {
+        self.scrollView = scrollView
+        self.displayedTiles = displayedTiles
     }
 
-    func willBeginDragging() {
+    /// For a grid of `EmoteTileCell`s: its visible cells' tiles.
+    convenience init(collectionView: UICollectionView) {
+        self.init(scrollView: collectionView) { [weak collectionView] in
+            (collectionView?.visibleCells ?? []).compactMap { ($0 as? EmoteTileCell)?.tile }
+        }
+    }
+
+    public func willBeginDragging() {
         setScrolling(true)
     }
 
-    func didEndDragging(willDecelerate decelerate: Bool) {
+    public func didEndDragging(willDecelerate decelerate: Bool) {
         if !decelerate { setScrolling(false) }
     }
 
     /// The glide ended, or a scroll animation set in code did.
-    func didEndScrolling() {
+    public func didEndScrolling() {
         setScrolling(false)
     }
 
-    func stop() {
+    public func stop() {
         setScrolling(false)
     }
 
@@ -54,8 +65,8 @@ final class EmoteScrollPlayback {
     private func setScrolling(_ scrolling: Bool) {
         guard scrolling != isScrolling else { return }
         isScrolling = scrolling
-        for case let cell as EmoteTileCell in collectionView?.visibleCells ?? [] {
-            cell.tile.setPlaying(scrolling)
+        for tile in displayedTiles() {
+            tile.setPlaying(scrolling)
         }
         settleWatch?.cancel()
         settleWatch = nil
@@ -67,7 +78,7 @@ final class EmoteScrollPlayback {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(250))
                 guard !Task.isCancelled, let self else { return }
-                guard let grid = self.collectionView else {
+                guard let grid = self.scrollView else {
                     self.setScrolling(false)
                     return
                 }

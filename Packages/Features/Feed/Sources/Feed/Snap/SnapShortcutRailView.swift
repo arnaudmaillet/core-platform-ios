@@ -1,13 +1,27 @@
 import CoreModels
 import CoreStorage
 import DesignSystem
+import EmoteKit
 import UIKit
 
 /// The vertical shortcut wheel: a right-edge rail of quick-react shortcuts,
-/// spanning from the comment ticker's top edge up to the navigation bar. The
-/// payload is temporary — randomized SF Symbol bubbles standing in for the
-/// user's favorite react-GIFs — but the geometry and interaction contract are
-/// the real feature: icons only, no text or counts.
+/// spanning from the comment ticker's top edge up to the navigation bar:
+/// icons only, no text or counts.
+///
+/// # Our animated emotes, bare
+/// Each shortcut is one of EmoteKit's own animated emotes (`EmoteTileView`)
+/// — the map's GIF emotes, the LMAO sticker and the Noto reactions — drawn
+/// on NOTHING: the art's own alpha is the icon, over the video, with no
+/// bubble behind it. A shortcut is dressed only while it is inside the
+/// visible window and lets its art go when it leaves it, so a wheel holds a
+/// few sheets, never the whole payload's.
+///
+/// # Plays only while it moves
+/// At rest every shortcut is still, on its poster frame. The shown ones play
+/// from a drag's start to the end of its glide and stop on the frame they
+/// reached — EmoteKit's `EmoteScrollPlayback`, the rule the Messages emote
+/// strip and the emote panel follow. A still shortcut is a posed layer: a
+/// feed of resting wheels costs the render server nothing.
 ///
 /// # Wheel
 /// A plain vertical `UIScrollView`, not a collection view: the payload is a
@@ -61,10 +75,10 @@ import UIKit
 /// # Flight replica
 /// Populated from `configure` (static content, like the caption), so the
 /// transition's inert replica shows the same rail. The payload is therefore
-/// seeded per post id — "randomized" across posts, but deterministic within
-/// a launch — so the live cell and its flight replica can never disagree.
-/// (A user-scrolled wheel snaps back to rest in the replica; acceptable while
-/// the payload is placeholder.)
+/// seeded per post id — shuffled across posts, but deterministic within a
+/// launch — and a still shortcut rests on its art's poster frame, so the
+/// live cell and its flight replica can never disagree. (A user-scrolled
+/// wheel snaps back to rest in the replica.)
 final class SnapShortcutRailView: UIScrollView {
     /// The feed's bubble invariant (nav/toolbar circles are 36pt).
     static let iconDiameter: CGFloat = 36
@@ -100,7 +114,18 @@ final class SnapShortcutRailView: UIScrollView {
         }
     }
 
+    /// One button per shortcut, each hosting its emote's tile.
     private var icons: [UIButton] = []
+    private var tiles: [EmoteTileView] = []
+    private(set) var emotes: [Emote] = []
+    /// Which tiles are dressed: the ones inside the visible window.
+    private var dressed: [Bool] = []
+    /// Where the art comes from; a test hands in a warm engine.
+    var engine: EmoteEngine = .shared
+    /// See "# Plays only while it moves".
+    private lazy var playback = EmoteScrollPlayback(scrollView: self) { [weak self] in
+        self?.displayedTiles ?? []
+    }
     private var lastLaidOutSize: CGSize = .zero
     private var needsContentRebuild = false
     /// Fresh payloads park at rest; mere size churn must NOT — geometry
@@ -165,8 +190,12 @@ final class SnapShortcutRailView: UIScrollView {
         // the reactive lock below.
         guard window != nil else {
             setAncestorScrollingSuspended(false)
+            playback.stop()
+            updateDressing()
             return
         }
+        // On screen: dress what the window shows.
+        setNeedsLayout()
         // The system's scroll-edge effects manage `layer.mask` themselves
         // and silently evict the custom edge-fade gradient (the feed's
         // collection view disables its own for the same reason). Hidden on
@@ -241,12 +270,17 @@ final class SnapShortcutRailView: UIScrollView {
     /// Replaces the wheel's shortcuts. Empty (text-only post, or a reset
     /// cell awaiting configure) hides the rail entirely — the same
     /// empty-hides-the-surface doctrine as the ticker and subtitle zone.
-    /// Always returns the wheel to its resting window.
-    func setSymbols(_ names: [String]) {
+    /// Always returns the wheel to its resting window, still.
+    func setEmotes(_ emotes: [Emote]) {
+        playback.stop()
+        for tile in tiles { tile.clear() }
         for icon in icons { icon.removeFromSuperview() }
-        icons = names.map(Self.makeIconBubble)
+        self.emotes = emotes
+        tiles = emotes.map { _ in EmoteTileView() }
+        icons = zip(emotes, tiles).map(Self.makeIcon)
+        dressed = Array(repeating: false, count: emotes.count)
         for icon in icons { addSubview(icon) }
-        isHidden = names.isEmpty
+        isHidden = emotes.isEmpty
         needsContentRebuild = true
         needsRestReset = true
         setNeedsLayout()
@@ -256,7 +290,7 @@ final class SnapShortcutRailView: UIScrollView {
     /// a mid-gesture recycle would otherwise strand.
     func reset() {
         setAncestorScrollingSuspended(false)
-        setSymbols([])
+        setEmotes([])
     }
 
     override func layoutSubviews() {
@@ -311,12 +345,56 @@ final class SnapShortcutRailView: UIScrollView {
             let scale = Self.exitScaleFloor + (1 - Self.exitScaleFloor) * t
             icon.transform = t >= 1 ? .identity : CGAffineTransform(scaleX: scale, y: scale)
         }
+        updateDressing()
     }
+
+    /// The window a shortcut can be seen in: the rail's bounds above the
+    /// reserved strip (masked out under the boost button).
+    private var visibleWindow: CGRect {
+        var window = bounds
+        window.size.height -= min(bottomReservedInset, window.height)
+        return window
+    }
+
+    /// Dresses the shortcuts entering the visible window — playing if the
+    /// wheel is moving, still on the poster otherwise — and lets the art of
+    /// those that left it go. Off a window nothing is dressed: a configured
+    /// chrome that never shows (a unit test, a cell laid out off screen)
+    /// starts no bake.
+    private func updateDressing() {
+        let window = self.window == nil ? .null : visibleWindow
+        for index in tiles.indices {
+            let icon = icons[index]
+            // Center, not frame: the frame is the exit transform's box.
+            let rect = CGRect(
+                x: icon.center.x - Self.iconDiameter / 2, y: icon.center.y - Self.iconDiameter / 2,
+                width: Self.iconDiameter, height: Self.iconDiameter
+            )
+            let shown = icon.alpha > 0 && rect.intersects(window)
+            guard shown != dressed[index] else { continue }
+            dressed[index] = shown
+            if shown {
+                tiles[index].configure(
+                    emotes[index], engine: engine, prefersAnimation: true, playing: playback.isScrolling
+                )
+            } else {
+                tiles[index].clear()
+            }
+        }
+    }
+
+    /// The dressed tiles, top to bottom.
+    var displayedTiles: [EmoteTileView] {
+        tiles.indices.filter { dressed[$0] }.map { tiles[$0] }
+    }
+
+    /// Whether the wheel is between a drag's start and the end of its glide.
+    var isScrolling: Bool { playback.isScrolling }
 
     private func rebuildGeometry() {
         // A size tick mid-life (safe-area churn, rotation) must not stomp
         // the wheel: carry the reveal progress across the rebuild. Only a
-        // fresh payload (`setSymbols`) parks back at rest.
+        // fresh payload (`setEmotes`) parks back at rest.
         let previousProgress = contentOffset.y + contentInset.top
 
         let diameter = Self.iconDiameter
@@ -362,43 +440,50 @@ final class SnapShortcutRailView: UIScrollView {
         return min(max(snapped, restOffset), max(maxOffset, restOffset))
     }
 
-    // MARK: - Placeholder payload
+    // MARK: - Payload
 
-    /// Temporary stand-ins for the react-GIF shortcuts. Seeded by post id
-    /// (the ticker builder's RNG + hash, reused): randomized across posts,
-    /// but the live cell and its flight replica always draw the same wheel.
-    static func placeholderPayload(for id: PostID) -> [String] {
+    /// The shortcuts for one post: the reaction pool, shuffled by post id
+    /// (the ticker builder's RNG + hash, reused) — different across posts,
+    /// and the same for the live cell and its flight replica.
+    static func payload(for id: PostID, catalog: EmoteCatalog = .shared) -> [Emote] {
         var generator = SplitMix64(seed: CommentTickerBuilder.fnv1a(id.rawValue))
-        return symbolPool.shuffled(using: &generator)
+        return reactionPool(in: catalog).shuffled(using: &generator)
     }
 
-    /// Reaction-shaped symbols only — the wheel reads as "react", not "menu".
-    /// 19 deep so the wheel always has plenty to discover past the resting
-    /// window.
-    static let symbolPool = [
-        "heart.fill", "flame.fill", "hands.clap.fill", "face.smiling.fill",
-        "bolt.fill", "star.fill", "party.popper.fill", "hand.thumbsup.fill",
-        "sparkles",
-        "hand.wave.fill", "hand.raised.fill", "eyes", "crown.fill",
-        "trophy.fill", "medal.fill", "balloon.fill", "birthday.cake.fill",
-        "music.note", "moon.stars.fill",
+    /// Reaction-shaped emotes only — the wheel reads as "react", not "menu":
+    /// the house reactions (the map's two GIF emotes and the LMAO sticker),
+    /// then the Noto counterparts of the SF Symbols that held these slots
+    /// while the payload was a placeholder. 19 deep, so the wheel always has
+    /// plenty to discover past the resting window.
+    static let reactionIDs = [
+        "lol", "blush", "lmao",
+        "noto:2764_fe0f", "noto:1f525", "noto:1f44f", "noto:1f60a", "noto:26a1",
+        "noto:2b50", "noto:1f389", "noto:1f44d", "noto:2728", "noto:1f44b",
+        "noto:1f440", "noto:1f451", "noto:1f3c6", "noto:1f388", "noto:1f382",
+        "noto:1f602",
     ]
 
-    /// One shortcut bubble: the subtitle pill's flat translucent black (a
-    /// direct composite — nine backdrop blurs on a scrolling surface would
-    /// not survive device triage), the toolbar's symbol metrics. A `UIButton`
-    /// so the cell's tap arbitration sees a `UIControl`; tap behavior itself
-    /// arrives with the real GIF payload.
-    private static func makeIconBubble(systemName: String) -> UIButton {
-        var config = UIButton.Configuration.plain()
-        config.image = UIImage(systemName: systemName)?
-            .withConfiguration(UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold))
-        config.baseForegroundColor = .white
-        config.contentInsets = .zero
-        let button = UIButton(configuration: config)
-        button.layer.backgroundColor = UIColor.black.withAlphaComponent(0.45).cgColor
-        button.layer.cornerRadius = iconDiameter / 2
-        button.layer.cornerCurve = .continuous
+    /// `reactionIDs` resolved in `catalog`; an id it does not ship is left out.
+    static func reactionPool(in catalog: EmoteCatalog = .shared) -> [Emote] {
+        reactionIDs.compactMap { catalog.emote(id: $0) }
+    }
+
+    /// One shortcut: a `UIButton` (so the cell's tap arbitration sees a
+    /// `UIControl`) holding the emote's tile edge to edge, with NOTHING
+    /// behind it — no bubble, no backdrop. Tap behavior arrives with the
+    /// react feature itself.
+    private static func makeIcon(emote: Emote, tile: EmoteTileView) -> UIButton {
+        let button = UIButton(configuration: .plain())
+        button.backgroundColor = .clear
+        button.accessibilityLabel = emote.name
+        // ⚠️ The button at its final size BEFORE the tile goes in: an
+        // autoresizing tile added to a zero-sized button grows by the
+        // button's whole size when the rail frames it (36pt became 72pt).
+        let side = CGRect(x: 0, y: 0, width: iconDiameter, height: iconDiameter)
+        button.frame = side
+        tile.frame = side
+        tile.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        button.addSubview(tile)
         return button
     }
 
@@ -581,17 +666,25 @@ extension SnapShortcutRailView: UIScrollViewDelegate {
     // first), so the pager stays frozen across catch-and-throw scrubbing.
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
         setAncestorScrollingSuspended(true)
+        playback.willBeginDragging()
     }
 
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
         if !decelerate { setAncestorScrollingSuspended(false) }
+        playback.didEndDragging(willDecelerate: decelerate)
     }
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
         // A finger catching the deceleration can deliver this end callback
-        // AFTER its willBeginDragging — never thaw under a live touch.
+        // AFTER its willBeginDragging — never thaw (or still the wheel)
+        // under a live touch.
         guard !isTracking, !isDragging else { return }
         setAncestorScrollingSuspended(false)
+        playback.didEndScrolling()
+    }
+
+    func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
+        playback.didEndScrolling()
     }
 
     // MARK: Detent snapping (in-range only)
