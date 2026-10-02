@@ -86,7 +86,7 @@ public enum MockWorldSeed {
 
     /// Every seeded country, featured first: the placement walk numbers
     /// posts in this order, so the featured posts keep their ids
-    /// (`post-world-00`…`48`) and the one-post countries follow.
+    /// (`post-world-00`…`50`) and the one-post countries follow.
     public static let countries: [Country] = featuredCountries + onePostCountries
 
     /// The countries with several posts, city by city.

@@ -1,6 +1,8 @@
-import CoreNetworkingMocks
+import CoreContracts
+@testable import CoreNetworkingMocks
 import Foundation
 import Testing
+@testable import CoreNetworking
 
 /// The world seed joins the corpus without moving it: appended at the tail,
 /// dated older than everything, authored by authors who already have
@@ -91,7 +93,7 @@ struct MockWorldSeedDatasetTests {
                 == ["ES", "IT", "GB", "DE", "US", "JP", "BR", "MA", "AU", "CA"])
         let featuredCodes = Set(featured.map(\.code))
         let featuredIDs = MockWorldSeed.placements.filter { featuredCodes.contains($0.countryCode) }.map(\.postID)
-        #expect(featuredIDs == (0..<49).map { String(format: "post-world-%02d", $0) })
+        #expect(featuredIDs == (0..<51).map { String(format: "post-world-%02d", $0) })
     }
 
     /// Over a hundred countries carry posts, each code once; every addition
@@ -147,5 +149,23 @@ struct MockWorldSeedDatasetTests {
         let featuredUnlocks: Set<String> = ["ES", "IT", "GB", "DE", "US", "JP", "BR", "MA", "AU", "CA"]
         #expect(MockWorldSeed.unlockedCountryCodes == featuredUnlocks.union(unlocked))
         #expect(MockWorldSeed.lockedCountryCodes.isSuperset(of: ["MX", "KR"]))
+    }
+
+    /// Every world post opens with its comments — the ids past
+    /// `post-world-99` once read as a NEGATIVE bank offset ("-102") and
+    /// crashed the comment seed when the feed opened them.
+    @Test func everyWorldPostListsItsComments() async throws {
+        #expect(MockCommentService.idOffset("post-world-102") == 102)
+        #expect(MockCommentService.idOffset("post-0012") == 12)
+        let bff = MockBFF()
+        MockCommentService(dataset: world).register(on: bff)
+        let client = ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: bff)
+        let comments = Comment_V1_CommentServiceClient(client: client)
+        for placement in MockWorldSeed.placements {
+            var request = Comment_V1_ListTopLevelRequest()
+            request.postID = placement.postID
+            let listed = try await comments.listTopLevel(request: request, headers: [:]).result.get().comments
+            #expect(listed.count == 2, "\(placement.postID)")
+        }
     }
 }
