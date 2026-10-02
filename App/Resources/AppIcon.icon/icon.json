@@ -1,51 +1,128 @@
 {
-  "fill": {
-    "solid": "srgb:1.00000,1.00000,1.00000,1.00000"
+  "fill" : {
+    "automatic-gradient" : "display-p3:0.28201,0.38111,0.95724,1.00000"
   },
-  "groups": [
+  "groups" : [
     {
-      "layers": [
+      "layers" : [
         {
-          "glass": true,
-          "image-name": "posts.svg",
-          "name": "posts",
-          "opacity": 0.75,
-          "fill": {
-            "solid": "srgb:1.00000,1.00000,1.00000,1.00000"
+          "fill-specializations" : [
+            {
+              "value" : {
+                "linear-gradient" : [
+                  "extended-gray:1.00000,1.00000",
+                  "display-p3:0.67924,0.36883,0.83811,1.00000"
+                ]
+              }
+            },
+            {
+              "appearance" : "dark",
+              "value" : {
+                "linear-gradient" : [
+                  "extended-gray:1.00000,1.00000",
+                  "display-p3:0.67924,0.36883,0.83811,1.00000"
+                ]
+              }
+            },
+            {
+              "appearance" : "tinted",
+              "value" : {
+                "linear-gradient" : [
+                  "extended-gray:1.00000,1.00000",
+                  "display-p3:0.67924,0.36883,0.83811,1.00000"
+                ]
+              }
+            }
+          ],
+          "glass" : true,
+          "image-name" : "wand 4.svg",
+          "name" : "wand 4",
+          "position" : {
+            "scale" : 1.28,
+            "translation-in-points" : [
+              81.65710476963858,
+              -91
+            ]
           }
         }
       ],
-      "blur-material": 0.6,
-      "lighting": "individual",
-      "specular": true,
-      "shadow": {
-        "kind": "neutral",
-        "opacity": 0.35
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
       },
-      "translucency": {
-        "enabled": true,
-        "value": 0.6
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.3
       }
     },
     {
-      "layers": [
+      "layers" : [
         {
-          "glass": false,
-          "image-name": "globe.svg",
-          "name": "globe"
+          "fill" : {
+            "linear-gradient" : [
+              "extended-gray:1.00000,1.00000",
+              "display-p3:0.74364,0.40095,0.91904,1.00000"
+            ]
+          },
+          "image-name" : "bubble-large 2.svg",
+          "name" : "bubble-large 2",
+          "position" : {
+            "scale" : 1.46,
+            "translation-in-points" : [
+              121.94143833556245,
+              242.82433328391227
+            ]
+          }
+        },
+        {
+          "fill" : {
+            "linear-gradient" : [
+              "extended-gray:1.00000,1.00000",
+              "display-p3:0.74364,0.40095,0.91904,1.00000"
+            ]
+          },
+          "image-name" : "bubble-medium 2.svg",
+          "name" : "bubble-medium 2",
+          "position" : {
+            "scale" : 1.25,
+            "translation-in-points" : [
+              -174.86,
+              65
+            ]
+          }
+        },
+        {
+          "fill" : {
+            "linear-gradient" : [
+              "display-p3:0.74364,0.40095,0.91904,1.00000",
+              "display-p3:0.28201,0.38111,0.95724,1.00000"
+            ]
+          },
+          "image-name" : "bubble-small 2.svg",
+          "name" : "bubble-small 2",
+          "position" : {
+            "scale" : 1,
+            "translation-in-points" : [
+              -81.36000000000001,
+              134
+            ]
+          }
         }
       ],
-      "shadow": {
-        "kind": "none",
-        "opacity": 0.5
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
       },
-      "translucency": {
-        "enabled": false,
-        "value": 0.5
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.3
       }
     }
   ],
-  "supported-platforms": {
-    "squares": "shared"
+  "supported-platforms" : {
+    "circles" : [
+      "watchOS"
+    ],
+    "squares" : "shared"
   }
 }
