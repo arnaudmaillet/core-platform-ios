@@ -685,14 +685,56 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
     /// current page (`PostGridListRowCell.currentMediaPage`) to open on it and
     /// flies the current page's rect (`currentPageRect`). Opening on "the
     /// current one" while the viewer pressed its neighbour would fly the wrong
-    /// picture. An item the box crops is brought fully in at once — the rest
-    /// a swipe would give it — so the flight departs from a whole picture
-    /// rather than from a rect half outside the box.
+    /// picture. An item the box crops first slides whole into the box — the
+    /// rest a swipe would give it (`tapBringInDuration`) — so the flight
+    /// departs from a whole picture rather than from a rect half outside it.
     @objc private func handleTap(_ recognizer: UITapGestureRecognizer) {
+        guard !isBringingIn else { return }
         if style == .card, let index = page(at: recognizer.location(in: scrollView)) {
+            layoutIfNeeded()
+            let target = offset(revealing: index)
+            if abs(target - scrollView.contentOffset.x) > RowEdgeSnap.slack, Self.tapBringInDuration > 0 {
+                bringIn(index, to: target)
+                return
+            }
             focus(on: index, animated: false)
         }
         onTapped?()
+    }
+
+    /// How long a cropped item takes to come whole before its post opens.
+    ///
+    /// ⚠️ SHORT AND ANIMATED, not a jump: snapped in place, the rest of the
+    /// strip teleported by most of an item in the frame the flight took off,
+    /// under a screen still visible around the flight. A tenth and a half is
+    /// long enough to read as the strip sliding and short enough not to read
+    /// as a wait — filmed against the jump on the simulator (2026-10-02), and
+    /// the slide is the one that does not look like a glitch.
+    static let tapBringInDuration: TimeInterval = 0.15
+
+    /// True while a tapped item slides in, so a second tap cannot open the
+    /// post twice.
+    private var isBringingIn = false
+
+    /// Slides a tapped cropped item whole into the box, then opens the post —
+    /// the flight departs from where the item ARRIVED.
+    private func bringIn(_ index: Int, to target: CGFloat) {
+        isBringingIn = true
+        focusFollowsOffset = false
+        setCurrentPage(index)
+        UIView.animate(
+            withDuration: Self.tapBringInDuration, delay: 0,
+            options: [.curveEaseOut, .allowUserInteraction]
+        ) {
+            self.scrollView.contentOffset.x = target
+        } completion: { [weak self] _ in
+            guard let self else { return }
+            self.isBringingIn = false
+            // The model value is already the target; reconciled once, so
+            // marks and loads answer for where the strip came to rest.
+            self.scrollViewDidScroll(self.scrollView)
+            self.onTapped?()
+        }
     }
 
     /// The item under a point of the scroll view's content, the gutter

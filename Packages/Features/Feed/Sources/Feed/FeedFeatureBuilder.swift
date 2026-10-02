@@ -265,6 +265,13 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // which is why this was only ever noticed on the plain push below.
         (destination as? SnapFeedViewController)
             .map { $0.seedProjection(GalleryPostProjection.seedModels(from: origin.stream)) }
+        // The collection's page the source is showing, and the source
+        // following the post's carousel back — the same pair For You's own
+        // list hands its feed (`ForYouViewController.openFeed`).
+        if let feed = destination as? SnapFeedViewController {
+            if let page = origin.mediaPage { feed.openMediaPage(page, for: origin.post.id) }
+            if let follow = origin.followMediaPage { feed.onMediaPageChanged = follow }
+        }
         // ⚠️ OPENED BY ITS COMMENT COUNT — the thread comes up with the page.
         //
         // Handed over as a page instruction rather than acted on at the tap, so
