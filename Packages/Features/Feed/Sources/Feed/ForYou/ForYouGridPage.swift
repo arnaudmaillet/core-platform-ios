@@ -70,6 +70,21 @@ final class ForYouGridPage: UIView {
     /// (a host with no wallet, a test). Shared by every row this page draws.
     var staking: PostCardStaking?
 
+    /// Whether the COMPACT cards stake too — the mosaic's tiles (a chunk's,
+    /// the gallery's) and the paired half-width cards — with a heart in their
+    /// bottom-right corner (`ForYouCardLikes`, `-foryou-card-likes`). Off,
+    /// they carry no like and a tile's count is a readout, as on every other
+    /// grid. Through `staking`, so nothing without a wallet.
+    var stakesOnCompactCards = false
+
+    /// What the viewer has staked on `postID` when its card is a compact
+    /// card that stakes — what a copy of that card (a flight's, a close's
+    /// stand-in) draws its heart from. Nil when the card carries no like.
+    func compactCardStake(for postID: PostID) -> Int? {
+        guard stakesOnCompactCards, drawsAsTile(postID), let staking else { return nil }
+        return staking.viewerStake(on: postID)
+    }
+
     /// The posts whose cards are ON SCREEN and worth warming — their first page
     /// of comments, and anything else a host wants ready before a tap.
     ///
@@ -257,8 +272,8 @@ final class ForYouGridPage: UIView {
     private var segmentStarts: [Int] = []
     /// The posts Discover draws as mosaic tiles rather than as cards.
     private var tilePostIDs: Set<PostID> = []
-    /// The posts Discover draws as HALF-WIDTH cards in pairs — experimental,
-    /// empty unless the page was built with `pairsVerticalMedia`.
+    /// The posts Discover draws as HALF-WIDTH cards in pairs
+    /// (`ForYouPairedVertical`).
     private var pairedPostIDs: Set<PostID> = []
     /// Keeps the chunk tilings it has generated, for the page's whole life.
     private var chunkPlanner = MosaicChunkPlanner()
@@ -279,7 +294,7 @@ final class ForYouGridPage: UIView {
     /// rectangle that is its media — rather than as a card of which the media
     /// is one part. Per page on the grid and the list, per post on Discover.
     ///
-    /// ⚠️ A PAIRED card answers yes too (experimental, `pairedPostIDs`): it is
+    /// ⚠️ A PAIRED card answers yes too (`pairedPostIDs`): it is
     /// a Following card — all picture, edge to edge, its words over it — so
     /// every question this answers (it autoplays like a brick, it hides whole
     /// for a flight, a landing leaves no hole in it, a close lands as its
@@ -329,7 +344,10 @@ final class ForYouGridPage: UIView {
     func restingOverlay(for postID: PostID) -> UIView? {
         guard drawsAsPairedCard(postID), let post = post(for: postID) else { return nil }
         let size = cell(for: postID)?.bounds.size ?? slotSize(of: postID)
-        return ForYouFollowingCardCell.makeOverlay(for: post, restingSize: size, imagePipeline: imagePipeline)
+        return ForYouFollowingCardCell.makeOverlay(
+            for: post, restingSize: size, imagePipeline: imagePipeline,
+            stake: compactCardStake(for: postID)
+        )
     }
 
     /// Adopts a planned list: the stretches, their starts, the flat order and
@@ -640,18 +658,10 @@ final class ForYouGridPage: UIView {
         max(800, collectionView.bounds.height * 1.5)
     }
 
-    /// - Parameter pairsVerticalMedia: Discover only, EXPERIMENTAL
-    ///   (`ForYouPairedVertical`): vertical media in a run of cards becomes
-    ///   blocks of half-width cards in pairs. Off, the page is exactly what it
-    ///   always was.
-    init(
-        imagePipeline: ImagePipeline, style: Style, videoPlayback: VideoPlaybackController? = nil,
-        pairsVerticalMedia: Bool = false
-    ) {
+    init(imagePipeline: ImagePipeline, style: Style, videoPlayback: VideoPlaybackController? = nil) {
         self.imagePipeline = imagePipeline
         videoPool = videoPlayback
-        chunkPlanner.pairsVerticalMedia = pairsVerticalMedia && style == .discover
-        chunkPlanner.chunksLeavePairableMedia = ForYouPairedVertical.isDemo
+        chunkPlanner.chunksLeavePairableMedia = !ForYouPairedVertical.chunksTakeVerticals
         #if DEBUG
         CarouselPlaybackAudit.capturePoolTrace()
         #endif
@@ -1509,6 +1519,9 @@ final class ForYouGridPage: UIView {
     /// Whether the page still carries the stock control.
     var debugHasRefreshControl: Bool { collectionView.refreshControl != nil }
 
+    /// The realized cell drawing `postID`, if any.
+    func debugCell(for postID: PostID) -> UICollectionViewCell? { cell(for: postID) }
+
     func debugSelectItem(at index: Int) -> Bool {
         guard posts.indices.contains(index) else { return false }
         collectionView(collectionView, didSelectItemAt: indexPath(for: index))
@@ -2165,7 +2178,11 @@ final class ForYouGridPage: UIView {
             let cover = (cell(for: occupantID) as? ForYouFollowingCardCell)?.renderedCover
                 ?? post.thumbnailURL.flatMap { imagePipeline.cachedImage(for: $0) }
             return ForYouFollowingCardCell.makeStandIn(
-                for: post, cover: cover, size: size, imagePipeline: imagePipeline
+                for: post, cover: cover, size: size, imagePipeline: imagePipeline,
+                // The slot's heart, as the card in it draws it.
+                stake: compactCardStake(for: occupantID).map { _ in
+                    staking?.viewerStake(on: post.id) ?? 0
+                }
             )
         }
         return PostGridTileStandInView(
@@ -2174,7 +2191,10 @@ final class ForYouGridPage: UIView {
             // The PAGE's rounding, not the cell default: this grid's gutter and
             // curve are one decision — see `tileCornerRadius`.
             cornerRadius: tileCornerRadius,
-            imagePipeline: imagePipeline
+            imagePipeline: imagePipeline,
+            viewerStake: compactCardStake(for: occupantID).map { _ in
+                staking?.viewerStake(on: post.id) ?? 0
+            }
         )
     }
 
@@ -3164,7 +3184,7 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
     private enum CellShape {
         case card
         case tile
-        /// Discover's paired vertical media (experimental): a Following card.
+        /// Discover's paired vertical media: a Following card.
         case pairedCard
     }
 
@@ -3277,14 +3297,16 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
             : (drawsAsTile(post.id) ? .tile : .card)
         switch shape {
         case .pairedCard:
-            // EXPERIMENTAL (`-foryou-paired-vertical`): the Following row's
-            // card, at half the list's width — the picture, the author and two
-            // lines over its foot, no actions. Played and concealed like a
-            // tile (`drawsAsTile`); no long-press stake (it has no chip).
+            // The Following row's card, at half the list's width — the
+            // picture, the author and two lines over its foot. Played and
+            // concealed like a tile (`drawsAsTile`).
             let cell = collectionView.dequeueReusableCell(
                 withReuseIdentifier: ForYouFollowingCardCell.reuseID, for: indexPath
             ) as! ForYouFollowingCardCell
             cell.configure(with: post, imagePipeline: imagePipeline)
+            // Its one action, when the compact cards stake: the heart closing
+            // the author line (`ForYouCardLikes`).
+            if stakesOnCompactCards { staking?.bind(cell, to: post.id) }
             // Autoplay is gated on the cover, as for a tile.
             cell.onCoverLoaded = { [weak self] in self?.updateAutoplay() }
             cell.isHidden = isFlying
@@ -3399,6 +3421,9 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
             ) as! PostGridTileCell
             cell.cornerRadius = tileCornerRadius
             cell.configure(with: post, imagePipeline: imagePipeline)
+            // The count becomes the like, in place, when the compact cards
+            // stake (`ForYouCardLikes`).
+            if stakesOnCompactCards { staking?.bind(cell, to: post.id) }
             // Autoplay is gated on the cover, so the arrival of a cover is a
             // reason to re-run the gate. Without this a tile whose cover lands
             // while the grid is stationary fails the gate once and is never

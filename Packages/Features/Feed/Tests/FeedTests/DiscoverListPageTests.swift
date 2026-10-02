@@ -293,7 +293,7 @@ struct DiscoverListPageTests {
     }
 
     private func pairedPage(_ posts: [GalleryPost]) -> ForYouGridPage {
-        let page = ForYouGridPage(imagePipeline: pipeline(), style: .discover, pairsVerticalMedia: true)
+        let page = ForYouGridPage(imagePipeline: pipeline(), style: .discover)
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 6000)
         page.setCorpusComplete(true)
         page.render(.content(posts))
@@ -301,20 +301,19 @@ struct DiscoverListPageTests {
         return page
     }
 
-    /// Flag OFF, the same vertical-rich corpus is exactly today's list: no
-    /// block anywhere, every vertical a full card or a tile — the planner's
-    /// default plan, kind by kind.
-    @Test func flagOffKeepsTodaysKinds() {
+    /// Pairing is unconditional (no launch argument since 2 October 2026):
+    /// a plain Discover page of the vertical-rich corpus has blocks, and it
+    /// is the planner's own plan.
+    @Test func pairingIsOnByDefault() {
         let posts = verticalCorpus(60)
         let page = page(posts)
         var planner = MosaicChunkPlanner()
-        let expected = planner.segments(for: posts, isComplete: true)
-        #expect(page.segments == expected)
-        #expect(!page.segments.contains(where: { $0.isPairs }))
-        #expect(page.posts.allSatisfy { !page.drawsAsPairedCard($0.id) })
+        #expect(page.segments == planner.segments(for: posts, isComplete: true))
+        #expect(page.segments.contains(where: { $0.isPairs }))
+        #expect(page.posts.contains { page.drawsAsPairedCard($0.id) })
     }
 
-    /// Flag ON: the page is the pairing planner's list, and a block is a
+    /// The page is the pairing planner's list, and a block is a
     /// section of FOLLOWING cards laid out two to a row — half the list's
     /// width each at the Following card's 3:4, the gutter between, one top
     /// per row, the pair's outer edges on the cards' margins. Cards elsewhere
@@ -322,7 +321,7 @@ struct DiscoverListPageTests {
     @Test func pairedBlocksAreFollowingCardsTwoPerRow() throws {
         let posts = verticalCorpus(60)
         let page = pairedPage(posts)
-        var planner = MosaicChunkPlanner(pairsVerticalMedia: true)
+        var planner = MosaicChunkPlanner()
         #expect(page.segments == planner.segments(for: posts, isComplete: true))
         let view = collectionView(of: page)
         view.layoutIfNeeded()
@@ -388,7 +387,7 @@ struct DiscoverListPageTests {
     /// Landings stay inserts with blocks in the list.
     @Test func pairedPagesLandAsInserts() {
         let posts = verticalCorpus(90)
-        let page = ForYouGridPage(imagePipeline: pipeline(), style: .discover, pairsVerticalMedia: true)
+        let page = ForYouGridPage(imagePipeline: pipeline(), style: .discover)
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 3000)
         page.setCorpusComplete(false)
         page.render(.content(Array(posts[..<25])))

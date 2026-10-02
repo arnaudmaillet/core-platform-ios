@@ -367,6 +367,11 @@ public struct SnapFeedHeroOrigin {
     /// end and the flight fades it as the card grows, the way a brick's
     /// counters leave. `nil`: the card is the picture alone.
     public let restingOverlay: (() -> UIView?)?
+    /// For a brick whose count is a STAKE, what the viewer has staked on the
+    /// post: the card's heart is the points' red once there is any, as on the
+    /// brick. Read when the card is built — open and close alike. 0: the
+    /// readout's white heart.
+    public let viewerStake: () -> Int
     /// Last chance to move before a CLOSE measures where it lands — the hero's
     /// twin of `TextRevealOrigin.willStageDismissal`, called as the flight
     /// home is staged and before `frame` is asked for it.
@@ -413,6 +418,7 @@ public struct SnapFeedHeroOrigin {
         adoptLandingLiveMedia: ((UIView) -> Void)? = nil,
         landingMediaIsReady: (() -> Bool)? = nil,
         restingOverlay: (() -> UIView?)? = nil,
+        viewerStake: @escaping () -> Int = { 0 },
         willStageDismissal: @escaping () -> Void = {},
         mediaPage: Int? = nil,
         followMediaPage: ((PostID, Int) -> Void)? = nil
@@ -436,6 +442,7 @@ public struct SnapFeedHeroOrigin {
         self.adoptLandingLiveMedia = adoptLandingLiveMedia
         self.landingMediaIsReady = landingMediaIsReady
         self.restingOverlay = restingOverlay
+        self.viewerStake = viewerStake
         self.willStageDismissal = willStageDismissal
         self.mediaPage = mediaPage
         self.followMediaPage = followMediaPage

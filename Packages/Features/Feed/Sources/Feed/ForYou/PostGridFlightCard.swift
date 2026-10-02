@@ -1,4 +1,5 @@
 import CoreNavigation
+import DesignSystem
 import MediaPlayback
 import PostGrid
 import UIKit
@@ -157,13 +158,18 @@ final class PostGridFlightCard: UIView {
     /// - Parameter cornerCurve: the source's own curve, for a source that
     ///   supplies its own `cornerRadius` and is NOT a disc — nil keeps the
     ///   rule below (the style's squircle, or a circle for a disc).
+    /// - Parameter viewerStake: on a brick that STAKES
+    ///   (`PostGridTileCell.onStake`), what the viewer has staked on the
+    ///   post — the count's heart is the points' red once there is any, as on
+    ///   the brick. 0 draws the readout's white heart.
     init(
         post: GalleryPost,
         cover: UIImage?,
         style: Style,
         cornerRadius: CGFloat? = nil,
         cornerCurve: CALayerCornerCurve? = nil,
-        drawsPost: Bool = true
+        drawsPost: Bool = true,
+        viewerStake: Int = 0
     ) {
         self.style = style
         self.drawsPost = drawsPost
@@ -277,6 +283,7 @@ final class PostGridFlightCard: UIView {
         // furniture for another in the frame the card was removed.
         guard style.showsCounters else { return }
         likes.set(post.reactionCount)
+        if viewerStake > 0 { likes.setGlyph(systemName: PointsSymbol.glyph, color: PointsSymbol.tint) }
         likes.constrain(in: restingChromeView) { parent in
             likes.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -8)
             likes.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -7)

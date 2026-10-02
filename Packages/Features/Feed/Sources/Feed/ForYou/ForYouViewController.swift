@@ -210,14 +210,17 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         self.router = router
         self.reporting = reporting
         self.socialGraph = socialGraph
-        page = ForYouGridPage(
-            imagePipeline: imagePipeline, style: .discover, videoPlayback: videoPlayback,
-            pairsVerticalMedia: ForYouPairedVertical.isEnabled
-        )
+        page = ForYouGridPage(imagePipeline: imagePipeline, style: .discover, videoPlayback: videoPlayback)
         rails = ForYouRailsView(imagePipeline: imagePipeline, videoPlayback: videoPlayback)
         staking = wallet.map(PostCardStaking.init)
         super.init(nibName: nil, bundle: nil)
         page.staking = staking
+        // The compact cards' likes (`ForYouCardLikes`): the list's paired
+        // cards and chunk tiles, the Following row's text cards — and the
+        // gallery's tiles, handed the same flag at its push.
+        page.stakesOnCompactCards = ForYouCardLikes.isEnabled
+        rails.staking = staking
+        rails.stakesOnTextCards = ForYouCardLikes.isEnabled
         // NOT hidesBottomBarWhenPushed: this is a tab root, and the bar is how
         // the viewer leaves it.
     }
@@ -1114,7 +1117,9 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         else { return }
         let gallery = DiscoverGalleryViewController(
             imagePipeline: imagePipeline, videoPlayback: videoPlayback,
-            header: makePushedHeader(), openPost: openPostHero
+            header: makePushedHeader(),
+            staking: staking, stakesOnTiles: ForYouCardLikes.isEnabled,
+            openPost: openPostHero
         )
         gallery.onNearEnd = { [weak self] in self?.viewModel.loadNextPageIfNeeded() }
         gallery.onRefresh = { [weak self] in self?.viewModel.refresh() }
@@ -2688,7 +2693,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
                 }
             }
         }
-        // `-foryou-open-paired K [delay]` (with `-foryou-paired-vertical`):
+        // `-foryou-open-paired K [delay]`:
         // opens the K-th half-width card of Discover, counted across blocks,
         // once it is on screen with its cover — the hero out of a paired card,
         // and with `-foryou-demo-close` the close back onto it.

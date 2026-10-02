@@ -98,7 +98,7 @@ public enum DiscoverListLayout {
     /// `chunk(section)` answers the chunk a section holds, or nil for a run of
     /// cards (and for any section the model does not know — a skeleton, a
     /// reload in flight — which is laid out as cards). `isPairs(section)` says
-    /// a section is a block of paired half-width cards (experimental — see
+    /// a section is a block of paired half-width cards (see
     /// `DiscoverSegment.pairs`).
     public static func layout(
         chunk: @escaping @MainActor (Int) -> MosaicChunk?,
