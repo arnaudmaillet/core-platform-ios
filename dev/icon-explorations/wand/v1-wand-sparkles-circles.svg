@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Magic wand, after the composition of SF Symbol "wand.and.sparkles.inverse":
+       the wand bent along an arc (solid tip, hollow handle) and the sparkles as perfect circles. -->
+  <path fill="#000000" fill-rule="evenodd" d="M355.13 329.20 A1081.00 1081.00 0 0 1 830.00 786.81 A32.0 32.0 0 0 1 773.65 817.15 A1017.00 1017.00 0 0 0 326.89 386.63 A32.0 32.0 0 0 1 355.13 329.20 Z M516.70 446.92 A1065.00 1065.00 0 0 1 815.91 794.40 A16.0 16.0 0 0 1 787.73 809.57 A1033.00 1033.00 0 0 0 497.51 472.53 Z"/>
+  <circle cx="631" cy="300" r="64" fill="#000000"/>
+  <circle cx="256" cy="597" r="50" fill="#000000"/>
+  <circle cx="368" cy="728" r="34" fill="#000000"/>
+</svg>
