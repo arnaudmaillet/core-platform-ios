@@ -478,10 +478,12 @@ final class AppContainer {
         guard environment == .mock else { return nil }
         let unlocks = CountryUnlockStore()
         // The mock account owns the world seed's countries from the first
-        // launch, as if it had bought them (`MockWorldSeed`; Mexico and
-        // South Korea stay locked WITH posts, for the locked design). Seeded
-        // ONCE per code into the same store a purchase writes, so a later
-        // unlock or relock of the account's own survives every relaunch.
+        // launch, as if it had bought them (`MockWorldSeed`; Mexico, South
+        // Korea and most one-post countries stay locked WITH posts, for the
+        // locked design). Seeded ONCE per code into the same store a purchase
+        // writes, so a later unlock or relock of the account's own survives
+        // every relaunch — and an install seeded before the seed grew gets
+        // only the new codes.
         // `-countries-no-seed` skips it (with `-countries-reset`: home only).
         if !ProcessInfo.processInfo.arguments.contains("-countries-no-seed") {
             unlocks.seedUnlocks(MockWorldSeed.unlockedCountryCodes, for: MockAuthService.accountID)

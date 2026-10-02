@@ -122,6 +122,9 @@ public final class MapsViewModel {
         queryTask = Task { [weak self] in
             guard let self else { return }
             let result: TileResult
+            #if DEBUG
+            let started = ContinuousClock.now
+            #endif
             do {
                 result = try await self.repository.queryTile(viewport, filter: filter)
             } catch {
@@ -129,10 +132,30 @@ public final class MapsViewModel {
                 return
             }
             guard !Task.isCancelled else { return }
+            #if DEBUG
+            let answered = ContinuousClock.now
+            #endif
             // Stand-in place tags on the mock corpus, until the wire can
             // carry them (BACKEND_GAPS §18) — identity unless the
             // composition root injected the decoration.
             var pins = self.decorate(result.pins)
+            #if DEBUG
+            // `-maps-query-log`: what one tile query costs — the round trip
+            // (the mock's whole-corpus walk included) and the place
+            // decoration, on the main actor — against how many pins came back.
+            // To stderr: unbuffered, so a detached `--stderr` sink is live.
+            if ProcessInfo.processInfo.arguments.contains("-maps-query-log") {
+                let ms = { (duration: Duration) in
+                    Double(duration.components.attoseconds) / 1e15 + Double(duration.components.seconds) * 1000
+                }
+                let line = String(
+                    format: "[query] pins=%d rpc_ms=%.2f decorate_ms=%.2f lng_span=%.1f\n",
+                    result.pins.count, ms(answered - started), ms(ContinuousClock.now - answered),
+                    viewport.neLng - viewport.swLng
+                )
+                FileHandle.standardError.write(Data(line.utf8))
+            }
+            #endif
             // The Favorites refinement, applied to the RESPONSE: only posts
             // whose place ladder holds a followed place. Client-side because
             // the followed set lives on the device (`MapPlaceFollowStore`) —

@@ -461,16 +461,8 @@ final class MapsViewController: UIViewController {
         // sim can't inject a continent's worth of panning). Example:
         // `-maps-set-region 41.39,2.17,0.09` opens on Barcelona at the city
         // band.
-        let arguments = ProcessInfo.processInfo.arguments
-        if let position = arguments.firstIndex(of: "-maps-set-region"),
-           position + 1 < arguments.count {
-            let parts = arguments[position + 1].split(separator: ",").compactMap { Double($0) }
-            if parts.count == 3 {
-                mapView.setRegion(MKCoordinateRegion(
-                    center: CLLocationCoordinate2D(latitude: parts[0], longitude: parts[1]),
-                    span: MKCoordinateSpan(latitudeDelta: parts[2], longitudeDelta: parts[2])
-                ), animated: false)
-            }
+        if let region = Self.debugSetRegion {
+            mapView.setRegion(region, animated: false)
         }
         // `-maps-camera-distance <metres>`: pull the camera back to that
         // distance above the current centre — how the widest zoom is reached
@@ -2749,6 +2741,21 @@ extension MapsViewController: MKMapViewDelegate {
     /// present and leaving the map booted into a filtered state nobody asked
     /// for. Scanning the arguments makes the hooks strictly opt-in per launch,
     /// so the resting default is unfiltered by construction.
+    /// `-maps-set-region <lat>,<lng>,<spanDegrees>`, parsed — nil without it.
+    /// Read raw rather than through `debugArgumentValue`: a southern or
+    /// western framing starts with a minus sign ("-33.4,151.2,40").
+    static var debugSetRegion: MKCoordinateRegion? {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let position = arguments.firstIndex(of: "-maps-set-region"),
+              position + 1 < arguments.count else { return nil }
+        let parts = arguments[position + 1].split(separator: ",").compactMap { Double($0) }
+        guard parts.count == 3 else { return nil }
+        return MKCoordinateRegion(
+            center: CLLocationCoordinate2D(latitude: parts[0], longitude: parts[1]),
+            span: MKCoordinateSpan(latitudeDelta: parts[2], longitudeDelta: parts[2])
+        )
+    }
+
     static func debugArgumentValue(_ flag: String) -> String? {
         let arguments = ProcessInfo.processInfo.arguments
         guard let index = arguments.firstIndex(of: flag), index + 1 < arguments.count else {
@@ -3782,7 +3789,9 @@ extension MapsViewController {
     /// question only this driver can answer.
     fileprivate func installNavigationDrag() {
         guard ProcessInfo.processInfo.arguments.contains("-maps-nav-drag") else { return }
-        let home = Self.defaultRegion
+        // Around `-maps-set-region`'s framing when one is given: panning a
+        // continent of country markers is not the workload panning Paris is.
+        let home = Self.debugSetRegion ?? Self.defaultRegion
         var step = 0
         // 60 Hz stepping: one region change per display frame, which is the
         // upper bound of what a finger can generate.

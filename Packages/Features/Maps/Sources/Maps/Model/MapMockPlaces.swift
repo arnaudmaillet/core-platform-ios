@@ -171,7 +171,9 @@ enum MapMockPlaces {
         if within(pin, of: (41.8933, 12.4829), radius: 0.15) { return [rome, italy] }
         if within(pin, of: (51.5074, -0.1278), radius: 0.15) { return [london, unitedKingdom] }
         // The world seed's cities (`MockWorldSeed`) BEFORE any country box:
-        // most specific wins, and Milan sits inside the Italy box below.
+        // most specific wins, and Milan sits inside the Italy box below — as
+        // do Zagreb, and Évora, Brussels, Zurich, Prague and Athlone inside
+        // the Spain, France, Germany and UK boxes.
         for circle in worldCities where within(pin, of: circle.center, radius: 0.15) {
             return [circle.city, circle.country]
         }
@@ -198,8 +200,10 @@ enum MapMockPlaces {
         // country's real BORDER rather than a box — the Americas' rectangles
         // would overlap (Montreal sits inside any box that holds New York's
         // latitude), and the border is what the map unlocks by anyway
-        // (`CountryAtlas`). Only these few countries are tested, each behind
-        // its bounds check, so the cost is a handful of comparisons.
+        // (`CountryAtlas`). About a hundred countries, each behind its bounds
+        // check, so a pin pays a few full border tests at most. (A European
+        // one-post country's countryside falls in the boxes above first —
+        // no seeded post stands there, every one is in its city's circle.)
         let coordinate = CLLocationCoordinate2D(latitude: pin.latitude, longitude: pin.longitude)
         for entry in worldCountries
         where CountryAtlas.shared.country(code: entry.code)?.contains(coordinate) == true {
@@ -306,14 +310,148 @@ enum MapMockPlaces {
         ((45.5019, -73.5674), montreal, canada),
         ((19.4326, -99.1332), mexicoCity, mexico),
         ((37.5665, 126.9780), seoul, southKorea)
-    ]
+    ] + onePostPlaces.map { (center: $0.center, city: $0.city, country: $0.country) }
 
     /// The world seed's countries outside the European boxes, by the ISO
     /// code `CountryAtlas` keys their border with.
     static let worldCountries: [(code: String, place: MapPlace)] = [
         ("US", unitedStates), ("CA", canada), ("MX", mexico), ("BR", brazil),
         ("MA", morocco), ("JP", japan), ("KR", southKorea), ("AU", australia)
+    ] + onePostPlaces.map { (code: $0.code, place: $0.country) }
+
+    /// The world seed's ONE-POST countries (`MockWorldSeed.onePostCountries`):
+    /// each a city and a country of its own, so the post rolls up like any
+    /// other — the city's marker at the city band, the country's at the
+    /// country band. (A country-only ladder would vanish at the city band:
+    /// the band hides a pin with no rung at the active depth.) Places are
+    /// built from this table, ids slugged from the names exactly as the seed
+    /// slugs them (`MockWorldSeed.placeID`); centers mirror the seed's cities
+    /// verbatim — the mock-parity contract, pinned post by post by
+    /// `MockWorldSeedTests`. Ranks continue the fictional ones above.
+    static let onePostPlaces: [(code: String, center: (lat: Double, lng: Double), city: MapPlace, country: MapPlace)] =
+        onePostTable.enumerated().map { index, row in
+            let city = MapPlace(
+                id: placeID("city", row.city), name: row.city, kind: .city,
+                h3Index: H3CellGeometry.makeIndex(resolution: 5, baseCell: index % 122), rank: 20 + index
+            )
+            let country = MapPlace(
+                id: placeID("country", row.country), name: row.country, kind: .country,
+                h3Index: H3CellGeometry.makeIndex(resolution: 1, baseCell: index % 122), rank: 14 + index
+            )
+            return (code: row.code, center: (lat: row.lat, lng: row.lng), city: city, country: country)
+        }
+
+    private static let onePostTable: [(code: String, country: String, city: String, lat: Double, lng: Double)] = [
+        // Europe
+        ("PT", "Portugal", "Évora", 38.5714, -7.9135),
+        ("NL", "Netherlands", "Amsterdam", 52.3676, 4.9041),
+        ("BE", "Belgium", "Brussels", 50.8503, 4.3517),
+        ("CH", "Switzerland", "Zurich", 47.3769, 8.5417),
+        ("AT", "Austria", "Vienna", 48.2082, 16.3738),
+        ("PL", "Poland", "Warsaw", 52.2297, 21.0122),
+        ("CZ", "Czechia", "Prague", 50.0755, 14.4378),
+        ("HU", "Hungary", "Budapest", 47.4979, 19.0402),
+        ("GR", "Greece", "Larissa", 39.6390, 22.4191),
+        ("SE", "Sweden", "Uppsala", 59.8586, 17.6389),
+        ("NO", "Norway", "Oslo", 59.9139, 10.7522),
+        ("DK", "Denmark", "Herning", 56.1393, 8.9738),
+        ("FI", "Finland", "Tampere", 61.4978, 23.7610),
+        ("IE", "Ireland", "Athlone", 53.4239, -7.9407),
+        ("IS", "Iceland", "Thingvellir", 64.2559, -21.1299),
+        ("HR", "Croatia", "Zagreb", 45.8150, 15.9819),
+        ("RO", "Romania", "Bucharest", 44.4268, 26.1025),
+        ("BG", "Bulgaria", "Sofia", 42.6977, 23.3219),
+        ("RS", "Serbia", "Belgrade", 44.7866, 20.4489),
+        ("UA", "Ukraine", "Kyiv", 50.4501, 30.5234),
+        ("EE", "Estonia", "Tartu", 58.3780, 26.7290),
+        ("LT", "Lithuania", "Vilnius", 54.6872, 25.2797),
+        // Asia
+        ("CN", "China", "Beijing", 39.9042, 116.4074),
+        ("IN", "India", "New Delhi", 28.6139, 77.2090),
+        ("ID", "Indonesia", "Bandung", -6.9175, 107.6191),
+        ("PH", "Philippines", "Baguio", 16.4023, 120.5960),
+        ("VN", "Vietnam", "Hanoi", 21.0278, 105.8342),
+        ("TH", "Thailand", "Bangkok", 13.7563, 100.5018),
+        ("TR", "Turkey", "Ankara", 39.9334, 32.8597),
+        ("IR", "Iran", "Tehran", 35.6892, 51.3890),
+        ("SA", "Saudi Arabia", "Riyadh", 24.7136, 46.6753),
+        ("AE", "United Arab Emirates", "Liwa Oasis", 23.1333, 53.7833),
+        ("IL", "Israel", "Beersheba", 31.2518, 34.7913),
+        ("JO", "Jordan", "Amman", 31.9454, 35.9284),
+        ("NP", "Nepal", "Kathmandu", 27.7172, 85.3240),
+        ("LK", "Sri Lanka", "Kandy", 7.2906, 80.6337),
+        ("MY", "Malaysia", "Kuala Lumpur", 3.1390, 101.6869),
+        ("KH", "Cambodia", "Phnom Penh", 11.5564, 104.9282),
+        ("MN", "Mongolia", "Ulaanbaatar", 47.8864, 106.9057),
+        ("KZ", "Kazakhstan", "Almaty", 43.2220, 76.8512),
+        ("UZ", "Uzbekistan", "Samarkand", 39.6542, 66.9597),
+        ("PK", "Pakistan", "Islamabad", 33.6844, 73.0479),
+        ("BD", "Bangladesh", "Dhaka", 23.8103, 90.4125),
+        ("TW", "Taiwan", "Taipei", 25.0330, 121.5654),
+        ("GE", "Georgia", "Tbilisi", 41.7151, 44.8271),
+        ("LA", "Laos", "Luang Prabang", 19.8856, 102.1347),
+        ("MM", "Myanmar", "Mandalay", 21.9588, 96.0891),
+        ("IQ", "Iraq", "Baghdad", 33.3152, 44.3661),
+        ("OM", "Oman", "Nizwa", 22.9333, 57.5333),
+        ("AM", "Armenia", "Yerevan", 40.1792, 44.4991),
+        ("AZ", "Azerbaijan", "Ganja", 40.6828, 46.3606),
+        // Africa
+        ("EG", "Egypt", "Cairo", 30.0444, 31.2357),
+        ("NG", "Nigeria", "Abuja", 9.0765, 7.3986),
+        ("KE", "Kenya", "Nairobi", -1.2864, 36.8172),
+        ("ET", "Ethiopia", "Addis Ababa", 9.0300, 38.7400),
+        ("ZA", "South Africa", "Johannesburg", -26.2041, 28.0473),
+        ("TZ", "Tanzania", "Arusha", -3.3869, 36.6830),
+        ("GH", "Ghana", "Kumasi", 6.6885, -1.6244),
+        ("SN", "Senegal", "Thiès", 14.7910, -16.9359),
+        ("DZ", "Algeria", "Constantine", 36.3650, 6.6147),
+        ("TN", "Tunisia", "Kairouan", 35.6781, 10.0963),
+        ("UG", "Uganda", "Kampala", 0.3476, 32.5825),
+        ("RW", "Rwanda", "Kigali", -1.9441, 30.0619),
+        ("CI", "Ivory Coast", "Yamoussoukro", 6.8276, -5.2893),
+        ("CM", "Cameroon", "Yaoundé", 3.8480, 11.5021),
+        ("AO", "Angola", "Huambo", -12.7761, 15.7392),
+        ("MG", "Madagascar", "Antananarivo", -18.8792, 47.5079),
+        ("NA", "Namibia", "Windhoek", -22.5609, 17.0658),
+        ("BW", "Botswana", "Maun", -19.9953, 23.4181),
+        ("ZM", "Zambia", "Lusaka", -15.3875, 28.3228),
+        ("ZW", "Zimbabwe", "Harare", -17.8252, 31.0335),
+        ("MZ", "Mozambique", "Nampula", -15.1165, 39.2666),
+        ("ML", "Mali", "Bamako", 12.6392, -8.0029),
+        ("SD", "Sudan", "Khartoum", 15.5007, 32.5599),
+        ("CD", "DR Congo", "Kisangani", 0.5153, 25.1910),
+        ("LY", "Libya", "Sabha", 27.0377, 14.4283),
+        // Americas
+        ("AR", "Argentina", "Córdoba", -31.4201, -64.1888),
+        ("CL", "Chile", "Santiago", -33.4489, -70.6693),
+        ("PE", "Peru", "Cusco", -13.5320, -71.9675),
+        ("CO", "Colombia", "Bogotá", 4.7110, -74.0721),
+        ("VE", "Venezuela", "Caracas", 10.4806, -66.9036),
+        ("EC", "Ecuador", "Quito", -0.1807, -78.4678),
+        ("BO", "Bolivia", "La Paz", -16.4897, -68.1193),
+        ("PY", "Paraguay", "Coronel Oviedo", -25.4167, -56.4500),
+        ("UY", "Uruguay", "Tacuarembó", -31.7333, -55.9833),
+        ("CU", "Cuba", "Santa Clara", 22.4069, -79.9647),
+        ("DO", "Dominican Republic", "Santiago de los Caballeros", 19.4517, -70.6970),
+        ("GT", "Guatemala", "Guatemala City", 14.6349, -90.5069),
+        ("CR", "Costa Rica", "San José", 9.9281, -84.0907),
+        ("HN", "Honduras", "Tegucigalpa", 14.0723, -87.1921),
+        ("NI", "Nicaragua", "Managua", 12.1150, -86.2362),
+        // Oceania
+        ("NZ", "New Zealand", "Hamilton", -37.7870, 175.2793),
+        ("PG", "Papua New Guinea", "Mount Hagen", -5.8580, 144.2310),
+        ("FJ", "Fiji", "Nadarivatu", -17.5667, 177.9667)
     ]
+
+    /// "city:santiago-de-los-caballeros" — `MockWorldSeed.placeID`'s twin
+    /// (this target can't import the mocks): lowercased, accents folded,
+    /// words joined by dashes.
+    private static func placeID(_ kind: String, _ name: String) -> String {
+        let words = name.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+            .lowercased()
+            .split { !($0.isLetter || $0.isNumber) }
+        return kind + ":" + words.joined(separator: "-")
+    }
 
     private static func within(
         _ pin: MapPin, of anchor: (lat: Double, lng: Double), radius: Double
