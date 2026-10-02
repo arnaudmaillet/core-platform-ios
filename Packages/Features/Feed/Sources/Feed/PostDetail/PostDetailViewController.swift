@@ -791,7 +791,7 @@ final class PostDetailViewController: UIViewController {
                 // its number face, then the "+N" float rises off it.
                 self.composeBar.setBoostTotal(targetTotal)
                 self.composeBar.playBoostConfirmation(amount: spent)
-            case .insufficientBalance, .targetCapReached, .noShotsLeft:
+            case .insufficientBalance, .targetCapReached, .noShotsLeft, .shotDoesNotFit:
                 UINotificationFeedbackGenerator().notificationOccurred(.error)
                 self.composeBar.playBoostDenied()
             }

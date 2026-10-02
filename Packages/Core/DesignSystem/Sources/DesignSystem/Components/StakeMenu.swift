@@ -52,7 +52,9 @@ public enum StakeMenu {
 
         /// Whether a shot can fire its WHOLE amount: a loaded pack, the
         /// points, and room for all of them on this post. A shot the cap
-        /// would clamp is not offered — a pack's shot is worth its number.
+        /// would clamp is not offered — a pack's shot is worth its number,
+        /// and the wallet refuses one that does not fit whole the same way
+        /// (`WalletBoostOutcome.shotDoesNotFit`).
         public var canShoot: Bool {
             shotsLeft > 0 && balance >= shotAmount && remaining >= shotAmount
         }

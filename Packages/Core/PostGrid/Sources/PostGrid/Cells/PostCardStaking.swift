@@ -114,7 +114,7 @@ public final class PostCardStaking {
                 cell.setViewerStake(targetTotal)
                 cell.playStakeConfirmation(amount: spent)
             }
-        case .insufficientBalance, .targetCapReached, .noShotsLeft:
+        case .insufficientBalance, .targetCapReached, .noShotsLeft, .shotDoesNotFit:
             UINotificationFeedbackGenerator().notificationOccurred(.error)
             if isBound(cell, to: key) { cell.playStakeDenied() }
         }

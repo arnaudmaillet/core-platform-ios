@@ -144,6 +144,7 @@ enum BoostOutcome {
   INVALID_AMOUNT            = 5;  // not one of the allowed denominations
   TARGET_CAP_REACHED        = 6;  // this viewer's per-target allowance (§4.5) is full
   NO_STAKE_SHOTS            = 7;  // `use_stake_shot` with no pack loaded; nothing changed
+  SHOT_DOES_NOT_FIT         = 8;  // `use_stake_shot` on a target with room for less than a whole shot (§3.3); nothing changed
 }
 ```
 
@@ -234,6 +235,11 @@ enum StakePackOutcome {
 - A `Boost` with `use_stake_shot` consumes the shot only when it answers
   `BOOSTED`; any refusal (balance, cap, rate limit) keeps it, atomically with
   the points.
+- **A shot is never clamped.** Unlike a plain amount (clamped to the
+  per-target cap's remainder, §3), a shot always moves its whole 100 points
+  or nothing: a target with room for fewer answers `SHOT_DOES_NOT_FIT` (a
+  full one `TARGET_CAP_REACHED`), checked before the balance. The client's
+  store and menu refuse it the same way.
 - Pack size, points per shot and price (mock: 3 / 100 / **50 gems**) are
   server policy; the client keeps them in `WalletStore.Policy.StakePack`.
 - **The mock's price rationale**, for whoever sets the real one: a settled

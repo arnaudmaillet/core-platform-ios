@@ -128,6 +128,12 @@ public enum WalletBoostOutcome: Equatable, Sendable {
     case targetCapReached(targetTotal: Int)
     /// A shot was asked for with no pack loaded; nothing changed.
     case noShotsLeft
+    /// A shot was asked for on a post with room for only `room` more of the
+    /// viewer's points — fewer than a shot's whole amount. A shot is never
+    /// clamped (it always means `Policy.StakePack.pointsPerShot`), so it is
+    /// refused and kept; nothing changed. The menu's "Only N points more fit
+    /// on this post".
+    case shotDoesNotFit(room: Int)
 }
 
 /// The viewer's point wallet and boost ledger.
@@ -443,11 +449,14 @@ public final class WalletStore: @unchecked Sendable {
     }
 
     /// One stake gesture: a plain amount, or one shot of the ×100 cartridge
-    /// pack. A shot stakes `Policy.StakePack.pointsPerShot` of the viewer's
-    /// own points under the same rules as any spend (the cap clamps, the
-    /// balance must cover it), and the shot is consumed ONLY when the stake
-    /// lands — a refused one (balance, full post) keeps it. Atomic: the
-    /// points and the shot move under one lock, or neither does.
+    /// pack. A shot stakes EXACTLY `Policy.StakePack.pointsPerShot` of the
+    /// viewer's own points, or nothing: where a plain amount is clamped to
+    /// the cap's remainder, a shot that would not fit whole is refused
+    /// (`shotDoesNotFit`, or `targetCapReached` on a full post) — the same
+    /// verdicts, in the same order, as the menu (`StakeMenu.State.canShoot`):
+    /// room first, then the balance. The shot is consumed ONLY when the stake
+    /// lands; a refused one keeps it. Atomic: the points and the shot move
+    /// under one lock, or neither does.
     @discardableResult
     public func stake(_ spend: WalletStakeSpend, on targetID: String) -> WalletBoostOutcome {
         let outcome: WalletBoostOutcome = lock.withLock {
@@ -458,6 +467,10 @@ public final class WalletStore: @unchecked Sendable {
             case .shot:
                 let shots = defaults.integer(forKey: Key.stakeShots)
                 guard shots > 0 else { return .noShotsLeft }
+                let held = boostTotalsLocked()[targetID] ?? 0
+                let room = Policy.perTargetBoostCap - held
+                guard room > 0 else { return .targetCapReached(targetTotal: held) }
+                guard room >= Policy.StakePack.pointsPerShot else { return .shotDoesNotFit(room: room) }
                 let outcome = boostLocked(targetID: targetID, amount: Policy.StakePack.pointsPerShot)
                 if case .boosted = outcome {
                     defaults.set(shots - 1, forKey: Key.stakeShots)

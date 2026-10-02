@@ -2512,7 +2512,8 @@ final class SnapFeedViewController: UIViewController {
     /// store is always wired in the app itself.
     private func performBoost(on id: PostID, spend: WalletStakeSpend, feedbackCell: SnapFeedCell?) {
         guard let wallet else { return }
-        switch wallet.stake(spend, on: id.rawValue) {
+        let outcome = wallet.stake(spend, on: id.rawValue)
+        switch outcome {
         case .boosted(_, let targetTotal, let spent):
             // `spent`, never the request: a near-cap boost is CLAMPED to
             // the remainder, and the tally/float must say what actually
@@ -2550,11 +2551,17 @@ final class SnapFeedViewController: UIViewController {
                 print("[wallet] boost CAP post=\(id.rawValue) targetTotal=\(targetTotal)")
             }
             #endif
-        case .noShotsLeft:
-            // The menu offers a shot only with a pack loaded; a stale menu
-            // (the pack emptied on another surface) lands here.
+        case .noShotsLeft, .shotDoesNotFit:
+            // The menu offers a shot only with a pack loaded and room on the
+            // post for all of it; a stale menu (the pack emptied, the post
+            // filled on another surface) or `-wallet-demo-shot` lands here.
             UINotificationFeedbackGenerator().notificationOccurred(.error)
             feedbackCell?.playBoostDenied()
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-wallet-log") {
+                print("[wallet] shot REFUSED post=\(id.rawValue) outcome=\(outcome) shots=\(wallet.stakeShots)")
+            }
+            #endif
         }
     }
 
