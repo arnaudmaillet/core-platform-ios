@@ -4,6 +4,7 @@ import UIKit
 @testable import EmoteKit
 
 /// The paper around a map icon goes; white inside its outline stays.
+@Suite(.sharesMainThread)
 struct EmoteIconMatteTests {
     /// Two 40 px frames on white paper: a black ring with a white centre.
     private func paperSheet() -> AnimatedIconSheet {

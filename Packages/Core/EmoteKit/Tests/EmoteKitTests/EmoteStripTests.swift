@@ -9,7 +9,7 @@ import UIKit
 /// while the strip scrolls, and a scroll view that runs the capsule's whole
 /// width.
 @MainActor
-@Suite(.serialized)
+@Suite(.serialized, .sharesMainThread)
 struct EmoteStripTests {
     private static let size = CGSize(width: 300, height: 48)
 

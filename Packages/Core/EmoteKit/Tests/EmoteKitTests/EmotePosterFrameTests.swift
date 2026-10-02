@@ -6,7 +6,7 @@ import UIKit
 
 /// The frame a still emote shows is never a blank opening frame.
 @MainActor
-@Suite(.serialized)
+@Suite(.serialized, .sharesMainThread)
 struct EmotePosterFrameTests {
     @Test func aFullFirstFrameIsThePoster() {
         #expect(EmoteStripTests.sheetArt(frames: 6, step: 0.1).posterFrame() == 0)

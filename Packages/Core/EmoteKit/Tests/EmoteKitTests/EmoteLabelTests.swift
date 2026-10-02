@@ -7,7 +7,7 @@ import UIKit
 /// The label: where emotes are placed, when the glyph under them is erased,
 /// and what is never done (off screen, truncated, Reduce Motion, over budget).
 @MainActor
-@Suite(.serialized)
+@Suite(.serialized, .sharesMainThread)
 struct EmoteLabelTests {
     private let font = UIFont.systemFont(ofSize: 17)
 
