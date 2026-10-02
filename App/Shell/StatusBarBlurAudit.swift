@@ -1,0 +1,216 @@
+import DesignSystem
+import UIKit
+
+#if DEBUG
+
+/// `-status-bar-blur-audit` — whether the window's status-band blur
+/// (`StatusBarBlurView`) is THERE, every frame, and what else blurs the band.
+///
+/// Every frame (cheap facts only), printed on change:
+///
+///     [sbb] +5310ms top=ForYouViewController moving band=on front=Y h=62 style=light own=1 offscreen=0 ax=hidden touch=off
+///
+/// `band=on` = installed and not hidden; `front=Y` = no window sibling draws
+/// over it (`zPosition`); `h` = the height its edge effect covers; `own` = the
+/// filtered backdrop layers inside the band (1 in light, 2 in dark);
+/// `offscreen` = its `HeroScrollFrameProbe.Census` count; `ax` / `touch` =
+/// whether VoiceOver or a touch could ever land on it. A frame with
+/// `band=off` or `front=N` while a transition runs is the flash the window
+/// install exists to prevent.
+///
+/// And whenever the top screen changes, once it has landed, every backdrop
+/// layer in the window that reaches into the status band — the band's own,
+/// and any blur under it (a list that kept its edge effect, a sheet's
+/// material) — and the scene's visible windows:
+///
+///     [sbb] stack top=NotificationsViewController backdrops=3 windows=[UIWindow@0]
+///     [sbb]   StatusBarBlurView>ScrollEdgeEffectView y=0 h=62 blur
+///
+/// Filter names are read by key-value coding (`name`; `blur` is the
+/// variable blur): DEBUG only. The owner is the innermost view drawing the
+/// layer; `StatusBarBlurView>` marks the band's own.
+///
+/// `-status-bar-blur-audit-deep` adds every edge effect view reaching into
+/// the band with its whole layer tree and filter inputs — what told on iOS 27
+/// (2026-10-02) that the band in the window is the Map's variant (one
+/// `variableBlur`, radius 2, 62pt; plus a half-opacity radius-16 gaussian in
+/// dark) under a titled bar too.
+@MainActor
+final class StatusBarBlurAudit {
+    private static var shared: StatusBarBlurAudit?
+
+    static func installIfRequested(in window: UIWindow) {
+        guard ProcessInfo.processInfo.arguments.contains("-status-bar-blur-audit"), shared == nil else { return }
+        shared = StatusBarBlurAudit(window: window)
+    }
+
+    private let window: UIWindow
+    private let start = CACurrentMediaTime()
+    private var link: CADisplayLink?
+    private var lastFrame = ""
+    private var lastStack = ""
+
+    private init(window: UIWindow) {
+        self.window = window
+        let link = CADisplayLink(target: Proxy(self), selector: #selector(Proxy.tick))
+        link.add(to: .main, forMode: .common)
+        self.link = link
+        Self.log("[sbb] START")
+    }
+
+    private final class Proxy: NSObject {
+        weak var owner: StatusBarBlurAudit?
+        init(_ owner: StatusBarBlurAudit) { self.owner = owner }
+        @objc func tick() { MainActor.assumeIsolated { owner?.sample() } }
+    }
+
+    /// Unbuffered: `print` from an app that never exits reads empty from a
+    /// file sink (`sim-log-capture-traps`).
+    private static func log(_ line: String) {
+        FileHandle.standardError.write(Data((line + "\n").utf8))
+    }
+
+    private func sample() {
+        let (top, moving) = topScreen()
+        var line = "top=\(top) \(moving ? "moving" : "rest")"
+        if let band = StatusBarBlurView.installed(in: window) {
+            let front = window.subviews.allSatisfy { $0 === band || $0.layer.zPosition < band.layer.zPosition }
+            // Filtered ones only: the effect also parks an unfiltered
+            // capture layer.
+            let backdrops = Self.backdrops(in: band.layer, window: window).filter { !$0.filters.isEmpty }
+            let height = backdrops.map(\.frame.maxY).max() ?? 0
+            let style = band.traitCollection.userInterfaceStyle == .dark ? "dark" : "light"
+            let census = HeroScrollFrameProbe.Census(of: band.layer)
+            line += " band=\(band.isHidden ? "off" : "on") front=\(front ? "Y" : "N") h=\(Int(height.rounded()))"
+                + " style=\(style) own=\(backdrops.count) offscreen=\(census.offscreen)"
+                + " ax=\(band.accessibilityElementsHidden && !band.isAccessibilityElement ? "hidden" : "EXPOSED")"
+                + " touch=\(band.isUserInteractionEnabled ? "ON" : "off")"
+        } else {
+            line += " band=none"
+        }
+        if line != lastFrame {
+            lastFrame = line
+            Self.log("[sbb] +\(Int((CACurrentMediaTime() - start) * 1000))ms \(line)")
+        }
+        // The whole-window walk only once the stack has landed on a new top.
+        guard !moving, top != lastStack else { return }
+        lastStack = top
+        let all = Self.backdrops(in: window.layer, window: window).filter { $0.frame.minY < window.safeAreaInsets.top }
+        // The scene's other windows (keyboard, context menus): the band is
+        // only ever in this one.
+        let windows = (window.windowScene?.windows ?? [])
+            .filter { !$0.isHidden }
+            .map { "\(type(of: $0))@\(Int($0.windowLevel.rawValue))" }
+            .joined(separator: ",")
+        Self.log("[sbb] stack top=\(top) backdrops=\(all.count) windows=[\(windows)]")
+        for backdrop in all {
+            Self.log("[sbb]   \(backdrop.owner) y=\(Int(backdrop.frame.minY)) h=\(Int(backdrop.frame.height)) \(backdrop.filters)")
+        }
+        if ProcessInfo.processInfo.arguments.contains("-status-bar-blur-audit-deep") {
+            Self.dumpEdgeEffects(in: window)
+        }
+    }
+
+    /// `-status-bar-blur-audit-deep`: every scroll edge effect view in the
+    /// window reaching into the band — hidden or not — with its whole layer
+    /// tree: class, frame, opacity, mask, filters with their inputs. What
+    /// tells one variant of the effect from another.
+    private static func dumpEdgeEffects(in window: UIWindow) {
+        func layerTree(_ layer: CALayer, depth: Int) {
+            let frame = layer.convert(layer.bounds, to: window.layer)
+            let filters = (layer.filters ?? []).map { filter -> String in
+                let object = filter as AnyObject
+                var text = "\(filter)"
+                for key in ["inputRadius", "inputNormalizeEdges", "inputMaskImage"] {
+                    if object.responds(to: NSSelectorFromString("valueForKey:")),
+                       let value = object.value(forKey: key) {
+                        text += " \(key)=\(String(describing: value).prefix(60))"
+                    }
+                }
+                return text
+            }.joined(separator: " | ")
+            let pad = String(repeating: "  ", count: depth)
+            log("[sbb-deep] \(pad)\(type(of: layer)) y=\(Int(frame.minY)) h=\(Int(frame.height)) w=\(Int(frame.width))"
+                + " op=\(layer.opacity) hidden=\(layer.isHidden) mask=\(layer.mask.map { "\(type(of: $0))" } ?? "-")"
+                + " bg=\(layer.backgroundColor.map { "\($0)" } ?? "-") comp=\(layer.compositingFilter.map { "\($0)" } ?? "-")"
+                + (filters.isEmpty ? "" : " filters=[\(filters)]"))
+            layer.sublayers?.forEach { layerTree($0, depth: depth + 1) }
+        }
+        func visit(_ view: UIView) {
+            if String(describing: type(of: view)).contains("EdgeEffect") {
+                let frame = view.convert(view.bounds, to: window)
+                log("[sbb-deep] found \(type(of: view)) frame=\(frame) hidden=\(view.isHidden) alpha=\(view.alpha) super=\(view.superview.map { "\(type(of: $0))" } ?? "-")")
+                if frame.minY < window.safeAreaInsets.top {
+                    var chain: [String] = []
+                    var ancestor = view.superview
+                    while let current = ancestor, chain.count < 4 {
+                        chain.append(String(describing: type(of: current)))
+                        ancestor = current.superview
+                    }
+                    log("[sbb-deep] \(type(of: view)) in \(chain.joined(separator: "<")) hidden=\(view.isHidden) alpha=\(view.alpha)"
+                        + " style=\(view.traitCollection.userInterfaceStyle.rawValue)")
+                    layerTree(view.layer, depth: 1)
+                    return
+                }
+            }
+            view.subviews.forEach(visit)
+        }
+        visit(window)
+    }
+
+    /// The screen on top — the frontmost presentation, through containers —
+    /// and whether a transition is under way.
+    private func topScreen() -> (String, Bool) {
+        var controller = window.rootViewController
+        var moving = false
+        while let current = controller {
+            if current.transitionCoordinator != nil { moving = true }
+            if let presented = current.presentedViewController, !presented.isBeingDismissed {
+                controller = presented
+            } else if let nav = current as? UINavigationController {
+                guard let next = nav.topViewController else { break }
+                controller = next
+            } else if let tabs = current as? UITabBarController {
+                guard let next = tabs.selectedViewController else { break }
+                controller = next
+            } else if let child = current.children.last(where: { $0.viewIfLoaded?.window != nil }),
+                      current.presentedViewController == nil {
+                controller = child
+            } else {
+                break
+            }
+        }
+        return (controller.map { String(describing: type(of: $0)) } ?? "?", moving)
+    }
+
+    private struct Backdrop {
+        var owner: String
+        var frame: CGRect
+        var filters: String
+    }
+
+    /// Every visible backdrop layer under `root`, framed in the window.
+    private static func backdrops(in root: CALayer, window: UIWindow) -> [Backdrop] {
+        var found: [Backdrop] = []
+        let bandLayer = StatusBarBlurView.installed(in: window)?.layer
+        func visit(_ layer: CALayer, owner: String, inBand: Bool) {
+            guard !layer.isHidden, layer.opacity > 0 else { return }
+            let inBand = inBand || layer === bandLayer
+            let owner = (layer.delegate as? UIView).map { String(describing: type(of: $0)) } ?? owner
+            if String(describing: type(of: layer)).contains("Backdrop") {
+                let filters = (layer.filters ?? []).map { filter -> String in
+                    let object = filter as AnyObject
+                    guard object.responds(to: NSSelectorFromString("name")) else { return "?" }
+                    return (object.value(forKey: "name") as? String) ?? "?"
+                }.joined(separator: "+")
+                let label = inBand ? "StatusBarBlurView>" + owner : owner
+                found.append(Backdrop(owner: label, frame: layer.convert(layer.bounds, to: window.layer), filters: filters))
+            }
+            layer.sublayers?.forEach { visit($0, owner: owner, inBand: inBand) }
+        }
+        visit(root, owner: "?", inBand: false)
+        return found
+    }
+}
+
+#endif

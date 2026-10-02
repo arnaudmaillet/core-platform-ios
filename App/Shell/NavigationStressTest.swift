@@ -1,6 +1,7 @@
 #if DEBUG
 import CoreModels
 import CoreNavigation
+import DesignSystem
 import UIKit
 
 /// Drives deep, cyclical navigation and audits what it leaves behind.
@@ -300,7 +301,9 @@ final class NavigationStressTest {
         // that flagged the shell's own host on every cycle. What matters is
         // whether a window subview CONTAINS the shell; one that does not is a
         // container some transition left behind.
-        for extra in window.subviews where !tabBarController.view.isDescendant(of: extra) {
+        // The status-band blur lives there for good (`StatusBarBlurView`).
+        for extra in window.subviews
+        where !tabBarController.view.isDescendant(of: extra) && !(extra is StatusBarBlurView) {
             report.problems.append("leftover window subview \(type(of: extra)) frame=\(extra.frame)")
         }
         return report
