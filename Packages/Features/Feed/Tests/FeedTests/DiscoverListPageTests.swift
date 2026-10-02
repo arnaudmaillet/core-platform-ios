@@ -275,6 +275,136 @@ struct DiscoverListPageTests {
         #expect(page.adoptPost(tile.id, intoSlotOf: mediaCard.id) == false)
     }
 
+    // MARK: - Paired vertical media (experimental)
+
+    /// The usual mix with every other media post vertical (9:16).
+    private func verticalCorpus(_ count: Int) -> [GalleryPost] {
+        corpus(count).enumerated().map { index, post in
+            guard post.kind != .text else { return post }
+            return GalleryPost(
+                id: post.id, kind: post.kind, isRepost: false,
+                thumbnailURL: post.thumbnailURL,
+                aspectRatio: index % 2 == 0 ? 9.0 / 16.0 : 1.5,
+                caption: post.caption, publishedAtMS: post.publishedAtMS,
+                authorID: ProfileID("a\(index)"), authorName: "Author \(index)", authorHandle: "author\(index)",
+                reactionCount: 1_200, commentCount: 34
+            )
+        }
+    }
+
+    private func pairedPage(_ posts: [GalleryPost]) -> ForYouGridPage {
+        let page = ForYouGridPage(imagePipeline: pipeline(), style: .discover, pairsVerticalMedia: true)
+        page.frame = CGRect(x: 0, y: 0, width: 393, height: 6000)
+        page.setCorpusComplete(true)
+        page.render(.content(posts))
+        page.layoutIfNeeded()
+        return page
+    }
+
+    /// Flag OFF, the same vertical-rich corpus is exactly today's list: no
+    /// block anywhere, every vertical a full card or a tile — the planner's
+    /// default plan, kind by kind.
+    @Test func flagOffKeepsTodaysKinds() {
+        let posts = verticalCorpus(60)
+        let page = page(posts)
+        var planner = MosaicChunkPlanner()
+        let expected = planner.segments(for: posts, isComplete: true)
+        #expect(page.segments == expected)
+        #expect(!page.segments.contains(where: { $0.isPairs }))
+        #expect(page.posts.allSatisfy { !page.drawsAsPairedCard($0.id) })
+    }
+
+    /// Flag ON: the page is the pairing planner's list, and a block is a
+    /// section of FOLLOWING cards laid out two to a row — half the list's
+    /// width each at the Following card's 3:4, the gutter between, one top
+    /// per row, the pair's outer edges on the cards' margins. Cards elsewhere
+    /// stay the list's cards.
+    @Test func pairedBlocksAreFollowingCardsTwoPerRow() throws {
+        let posts = verticalCorpus(60)
+        let page = pairedPage(posts)
+        var planner = MosaicChunkPlanner(pairsVerticalMedia: true)
+        #expect(page.segments == planner.segments(for: posts, isComplete: true))
+        let view = collectionView(of: page)
+        view.layoutIfNeeded()
+        let section = try #require(page.segments.firstIndex(where: { $0.isPairs }), "no block to measure")
+        let count = view.numberOfItems(inSection: section)
+        #expect(count.isMultiple(of: 2) && (2...6).contains(count))
+        let frames = (0..<count).compactMap {
+            view.layoutAttributesForItem(at: IndexPath(item: $0, section: section))?.frame
+        }
+        let margin = PostGridListLayout.sideMargin
+        let size = DiscoverListLayout.pairCardSize(containerWidth: 393)
+        for row in stride(from: 0, to: frames.count, by: 2) {
+            let left = frames[row]
+            let right = frames[row + 1]
+            #expect(abs(left.minX - margin) < 0.5, "left card on the margin: \(left)")
+            #expect(abs(right.maxX - (393 - margin)) < 0.5, "right card on the margin: \(right)")
+            #expect(abs(right.minX - left.maxX - DiscoverListLayout.pairGutter) < 0.5)
+            for frame in [left, right] {
+                #expect(abs(frame.width - size.width) < 0.5 && abs(frame.height - size.height) < 0.5,
+                        "\(frame) is not \(size)")
+            }
+            #expect(abs(left.minY - right.minY) < 0.5, "a pair is one row: \(left) | \(right)")
+        }
+        #expect(view.cellForItem(at: IndexPath(item: 0, section: section)) is ForYouFollowingCardCell)
+        let full = try #require(page.segments.firstIndex { !$0.isPairs && $0.chunk == nil })
+        #expect(view.cellForItem(at: IndexPath(item: 0, section: full)) is PostGridListRowCell)
+    }
+
+    /// The paired card IS the Following card at half width: the same 3:4.
+    @Test func thePairedCardIsTheFollowingCardsShape() {
+        #expect(DiscoverListLayout.pairCardHeightRatio == ForYouRailsView.Metrics.cardAspect)
+    }
+
+    /// The hero asks a paired card what it asks a tile — the card is its
+    /// picture, edge to edge — and wears the Following row's style: a list
+    /// media flight on the card's own corner, its words as resting furniture,
+    /// and a close from a words page lands as the Following card itself, at
+    /// the slot's size and corner.
+    @Test func aPairedCardAnswersTheHeroLikeAFollowingCard() throws {
+        let page = pairedPage(verticalCorpus(60))
+        collectionView(of: page).layoutIfNeeded()
+        let members = try #require(page.segments.first(where: { $0.isPairs })?.posts)
+        let paired = try #require(members.first)
+        let fullCard = try #require(page.posts.first { !page.drawsAsTile($0.id) && $0.kind != .text })
+        #expect(page.drawsAsPairedCard(paired.id))
+        #expect(page.drawsAsTile(paired.id), "plays, hides and lands like a tile")
+        #expect(page.canLandHero(on: paired))
+        #expect(page.landingConcealsMedia(for: paired.id) == false)
+        #expect(page.heroAppearance(for: paired.id)?.style == .listMedia)
+        let hero = try #require(page.hero(for: paired.id, in: page))
+        let slot = try #require(page.rowFrame(for: paired.id, in: page))
+        #expect(hero.frame == slot, "the flight leaves from the whole card")
+        #expect(page.tileCornerRadius(for: paired.id) == ForYouFollowingCardCell.cornerRadius)
+        #expect(page.restingOverlay(for: paired.id) is ForYouCardCaptionOverlay)
+        #expect(page.restingOverlay(for: fullCard.id) == nil, "a list card has no overlay to wear")
+        let standIn = try #require(page.makeDismissStandIn(for: paired.id))
+        #expect(!(standIn is PostGridTileStandInView) && !(standIn is RevealDismissCardView),
+                "landed as \(type(of: standIn))")
+        #expect(abs(standIn.bounds.width - slot.width) < 0.5 && abs(standIn.bounds.height - slot.height) < 0.5)
+        #expect(standIn.layer.cornerRadius == ForYouFollowingCardCell.cornerRadius)
+    }
+
+    /// Landings stay inserts with blocks in the list.
+    @Test func pairedPagesLandAsInserts() {
+        let posts = verticalCorpus(90)
+        let page = ForYouGridPage(imagePipeline: pipeline(), style: .discover, pairsVerticalMedia: true)
+        page.frame = CGRect(x: 0, y: 0, width: 393, height: 3000)
+        page.setCorpusComplete(false)
+        page.render(.content(Array(posts[..<25])))
+        page.layoutIfNeeded()
+        let view = collectionView(of: page)
+        for (loaded, complete) in [(50, false), (75, false), (90, true)] {
+            page.setCorpusComplete(complete)
+            page.render(.content(Array(posts[..<loaded])))
+            page.layoutIfNeeded()
+            #expect(view.numberOfSections == page.segments.count)
+            #expect((0..<view.numberOfSections).reduce(0) { $0 + view.numberOfItems(inSection: $1) }
+                    == page.posts.count)
+        }
+        #expect(page.posts.count == posts.count)
+    }
+
     /// ⚠️ The regression: a chunk's MEDIA tile, paged onto a text post and
     /// closed, landed through a window holding a whole post CARD — author,
     /// caption, actions — squeezed into the tile's rect. The close lands as

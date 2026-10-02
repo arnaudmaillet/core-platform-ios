@@ -96,23 +96,43 @@ public struct MosaicChunk: Sendable, Equatable {
 
 // MARK: - Segments
 
-/// One stretch of the Discover list: a run of full-width cards, or a chunk of
-/// mosaic. The list is these, in order, and nothing else.
+/// One stretch of the Discover list: a run of full-width cards, a chunk of
+/// mosaic, or (experimental) a block of half-width cards side by side. The
+/// list is these, in order, and nothing else.
 public enum DiscoverSegment: Sendable, Equatable {
     case rows([GalleryPost])
     /// The chunk and its posts, one per block, in the chunk's reading order.
     case chunk(MosaicChunk, [GalleryPost])
+    /// EXPERIMENTAL (`MosaicChunkPlanner.pairsVerticalMedia`): vertical media
+    /// drawn as half-width cards, two to a row — an even count within
+    /// `VerticalMediaPairing.blockSizes`, in reading order (left, right, then
+    /// the next row).
+    case pairs([GalleryPost])
 
     public var posts: [GalleryPost] {
         switch self {
         case .rows(let posts): posts
         case .chunk(_, let posts): posts
+        case .pairs(let posts): posts
         }
     }
 
     public var chunk: MosaicChunk? {
         if case .chunk(let chunk, _) = self { return chunk }
         return nil
+    }
+
+    /// Whether this stretch is a block of paired half-width cards.
+    public var isPairs: Bool {
+        if case .pairs = self { return true }
+        return false
+    }
+
+    /// Whether this stretch is a run of full-width cards — the only kind that
+    /// may still grow once shown (see `MosaicChunkPlanner.change`).
+    fileprivate var isRun: Bool {
+        if case .rows = self { return true }
+        return false
     }
 
     /// The STRUCTURE only — which posts, in which shape. What an update is
@@ -123,7 +143,46 @@ public enum DiscoverSegment: Sendable, Equatable {
         case .rows(let posts): ["rows"] + posts.map(\.id.rawValue)
         case .chunk(let chunk, let posts):
             ["chunk \(chunk.ordinal)/\(chunk.rows)"] + posts.map(\.id.rawValue)
+        case .pairs(let posts): ["pairs"] + posts.map(\.id.rawValue)
         }
+    }
+}
+
+// MARK: - Vertical media, paired (experimental)
+
+/// EXPERIMENTAL, behind `-foryou-paired-vertical`: which posts Discover draws
+/// as HALF-WIDTH cards, two side by side, instead of one full-width card.
+///
+/// **The threshold is the card's own crop: taller than 4:5.** A full-width
+/// card draws its preview at the post's aspect clamped to
+/// `PostGridListRowCell.tallestMediaAspect` (4:5), so a 4:5 post is shown
+/// whole and anything taller is CROPPED into a 4:5 box that still takes about
+/// two thirds of the screen — one post per screen, and not even all of it.
+/// Those are the posts a half-width card serves better: a Following-style
+/// card (all picture, its words over the foot) at half the width, 3:4, beside
+/// another one, in about a third of the height. 4:5 itself and everything
+/// wider stays a full card, exactly as today.
+public enum VerticalMediaPairing {
+    /// Width over height: single-media posts NARROWER than this are paired. 4:5, with a 1%
+    /// tolerance so a 1080x1352 re-encode of a 4:5 post stays a 4:5 post.
+    public static let tallestFullWidthAspect: Double = 4.0 / 5.0
+    static let tolerance = 0.01
+
+    /// How many posts a block holds: one to three rows of two.
+    public static let blockSizes: ClosedRange<Int> = 2...6
+
+    /// Whether `post` is drawn half-width: a SINGLE photo or clip taller than
+    /// 4:5. Text has no preview, and an unmeasured post reads as square (1.0)
+    /// — fail-closed, it stays a full card.
+    ///
+    /// ⚠️ A COLLECTION NEVER PAIRS, whatever its first page's shape (product
+    /// call, 2026-10-02, watching the first build): a carousel at half width
+    /// is a strip of pages with a peek and dots squeezed into a narrow card.
+    /// It stays the full-width card it is today — and, being ineligible, it
+    /// ends a run of verticals exactly as a landscape post does.
+    public static func isEligible(_ post: GalleryPost) -> Bool {
+        guard post.kind != .text, !post.isCollection, post.aspectRatio > 0 else { return false }
+        return post.aspectRatio < tallestFullWidthAspect * (1 - tolerance)
     }
 }
 
@@ -152,6 +211,11 @@ public enum DiscoverSegmentsChange: Equatable, Sendable {
 /// further down. Every post is placed exactly once, so nothing is shown both as
 /// a card and as a tile, and the cards stay in the order the corpus ranked them
 /// — they only skip the media a chunk has already shown.
+///
+/// **Experimental: paired vertical media** (`pairsVerticalMedia`, off by
+/// default). A run of cards meeting a vertical post lays it out with its
+/// vertical neighbours as one block of half-width cards in pairs — a block
+/// takes one of the run's places, as a card does. See `pairBlock`.
 ///
 /// **Deterministic, seeded by position.** The gap before a chunk and the
 /// chunk's height and tiling are drawn from SplitMix64 seeded by the chunk's
@@ -199,6 +263,19 @@ public struct MosaicChunkPlanner: Sendable {
 
     public var engine: ChaoticSliceEngine
 
+    /// EXPERIMENTAL (`-foryou-paired-vertical`): vertical media met in a run
+    /// of cards is laid out as a block of half-width cards in pairs
+    /// (`DiscoverSegment.pairs`) rather than one full-width card each. Off,
+    /// the list is exactly what it always was. See `pairBlock` for the rule.
+    public var pairsVerticalMedia: Bool
+
+    /// QA only (`-foryou-paired-demo`, with `pairsVerticalMedia`): a chunk
+    /// does not take posts a block could pair, so the blocks show up. The
+    /// mock corpus otherwise feeds most single verticals to the chunks (one
+    /// block of two in its first ~40 posts), which is too few to judge the
+    /// layout by. Same finality rules, so a landing still only extends.
+    public var chunksLeavePairableMedia = false
+
     /// Tilings already generated. The planner re-runs on every delivery over
     /// the whole corpus; the engine's search is the only part that costs.
     private var tilings: [TilingKey: MosaicChunk] = [:]
@@ -208,8 +285,9 @@ public struct MosaicChunkPlanner: Sendable {
         let rows: Int
     }
 
-    public init(engine: ChaoticSliceEngine = .standard) {
+    public init(engine: ChaoticSliceEngine = .standard, pairsVerticalMedia: Bool = false) {
         self.engine = engine
+        self.pairsVerticalMedia = pairsVerticalMedia
     }
 
     /// Whether a post can be a tile: anything with a picture. A text post has
@@ -281,24 +359,44 @@ public struct MosaicChunkPlanner: Sendable {
             return cursor < corpus.count ? cursor : nil
         }
 
-        while true {
-            // The run of cards before chunk `ordinal`.
-            let gap = Self.gap(beforeChunk: ordinal)
-            var run: [GalleryPost] = []
-            while run.count < gap, let index = nextUnplaced() {
-                placed[index] = true
-                run.append(corpus[index])
+        /// One more card at the foot of the list. A skipped chunk leaves two
+        /// runs back to back (and a block of pairs interrupts one): cards that
+        /// touch are one run.
+        func appendCard(_ post: GalleryPost) {
+            if case .rows(let previous)? = segments.last {
+                segments[segments.count - 1] = .rows(previous + [post])
+            } else {
+                segments.append(.rows([post]))
             }
-            if !run.isEmpty {
-                // A skipped chunk leaves two runs back to back: they are one run.
-                if case .rows(let previous)? = segments.last {
-                    segments[segments.count - 1] = .rows(previous + run)
-                } else {
-                    segments.append(.rows(run))
+        }
+
+        stretches: while true {
+            // The run of cards before chunk `ordinal`. With pairing on, a block
+            // of paired cards takes ONE of the run's places, as a card does.
+            let gap = Self.gap(beforeChunk: ordinal)
+            var entries = 0
+            while entries < gap, let index = nextUnplaced() {
+                if pairsVerticalMedia, VerticalMediaPairing.isEligible(corpus[index]) {
+                    switch Self.pairBlock(at: index, in: corpus, placed: placed, isComplete: isComplete) {
+                    case .undecided:
+                        // The next page may change the block: nothing after it
+                        // may be shown until it knows — the chunks' own rule.
+                        break stretches
+                    case .block(let members):
+                        members.forEach { placed[$0] = true }
+                        segments.append(.pairs(members.map { corpus[$0] }))
+                        entries += 1
+                        continue
+                    case .alone:
+                        break // no partner anywhere near: a full card, as today
+                    }
                 }
+                placed[index] = true
+                appendCard(corpus[index])
+                entries += 1
             }
             // Short: the corpus ran out mid-run, and the next page extends it.
-            guard run.count == gap else { break }
+            guard entries == gap else { break }
 
             // The chunk: its media, from the unplaced posts ahead.
             var media: [Int] = []
@@ -307,7 +405,9 @@ public struct MosaicChunkPlanner: Sendable {
             while index < corpus.count, scanned < Self.lookahead {
                 if !placed[index] {
                     scanned += 1
-                    if Self.isTileEligible(corpus[index]) { media.append(index) }
+                    let leftForPairs = chunksLeavePairableMedia && pairsVerticalMedia
+                        && VerticalMediaPairing.isEligible(corpus[index])
+                    if Self.isTileEligible(corpus[index]), !leftForPairs { media.append(index) }
                 }
                 index += 1
             }
@@ -343,6 +443,79 @@ public struct MosaicChunkPlanner: Sendable {
         return segments
     }
 
+    /// What `pairBlock` decided for the vertical post at the head of a run.
+    enum PairDecision: Equatable {
+        /// These corpus indices, in reading order, are one block.
+        case block([Int])
+        /// No partner within reach: the post is a full-width card, as today.
+        case alone
+        /// The loaded corpus cannot decide yet; hold everything from here on.
+        case undecided
+    }
+
+    /// The block that the vertical post at `start` (the first unplaced post)
+    /// opens.
+    ///
+    /// **The rule.**
+    /// 1. The block is the run of CONSECUTIVE vertical posts from `start` —
+    ///    consecutive among the unplaced posts, in corpus order — capped at
+    ///    `blockSizes.upperBound` (three rows of two). A seventh vertical in a
+    ///    row opens the next block.
+    /// 2. An EVEN run is the block.
+    /// 3. An ODD run pulls the next vertical post forward to complete its last
+    ///    pair — the first one within `lookahead` unplaced posts after the run,
+    ///    the chunks' reach and their move (they pull media forward the same
+    ///    way). The pulled post closes the block, bottom right.
+    /// 4. No vertical within reach: an odd run of three or five drops its
+    ///    LAST post, which comes up next as a run of one, finds no partner
+    ///    either (same scan), and is a full-width card — as today, and the
+    ///    only way a vertical post is ever drawn full width with pairing on.
+    ///
+    /// Why pull a partner rather than show the odd one full width straight
+    /// away: the point of the experiment is that a vertical post is not a
+    /// full-width card, and in a corpus where a third of the media is vertical
+    /// a partner is almost always within reach — full width is the exception.
+    ///
+    /// **Append-stable, like a chunk.** Every outcome is FINAL when returned:
+    /// a run is known to have ended only when a non-vertical post follows it
+    /// in the loaded corpus, it reached the cap, or the corpus is complete; a
+    /// partner search fails only once `lookahead` posts were scanned or the
+    /// corpus is complete. Otherwise `.undecided`, and the planner shows
+    /// nothing after it — so a page landing can never re-cut a block on screen.
+    static func pairBlock(
+        at start: Int, in corpus: [GalleryPost], placed: [Bool], isComplete: Bool
+    ) -> PairDecision {
+        let cap = VerticalMediaPairing.blockSizes.upperBound
+        var members = [start]
+        var index = start + 1
+        var runEnded = false
+        while members.count < cap, index < corpus.count {
+            if placed[index] {
+                index += 1
+            } else if VerticalMediaPairing.isEligible(corpus[index]) {
+                members.append(index)
+                index += 1
+            } else {
+                runEnded = true
+                break
+            }
+        }
+        guard members.count == cap || runEnded || isComplete else { return .undecided }
+        if members.count.isMultiple(of: 2) { return .block(members) }
+        // Odd: the next vertical within reach completes the last pair.
+        var scanned = 0
+        var probe = index
+        while probe < corpus.count, scanned < lookahead {
+            if !placed[probe] {
+                scanned += 1
+                if VerticalMediaPairing.isEligible(corpus[probe]) { return .block(members + [probe]) }
+            }
+            probe += 1
+        }
+        guard scanned >= lookahead || isComplete else { return .undecided }
+        return members.count == 1 ? .alone : .block(Array(members.dropLast()))
+    }
+
     /// How `new` relates to `old` — see `DiscoverSegmentsChange`.
     public static func change(
         from old: [DiscoverSegment], to new: [DiscoverSegment]
@@ -354,11 +527,12 @@ public struct MosaicChunkPlanner: Sendable {
               Array(newShapes[..<last]) == Array(oldShapes[..<last])
         else { return .incompatible }
         // The old last section may only have GROWN, and only if it is a run of
-        // cards: a chunk is placed complete and never changes.
+        // cards: a chunk — and a block of pairs — is placed complete and
+        // never changes.
         let before = oldShapes[last]
         let after = newShapes[last]
         guard after.count >= before.count, Array(after.prefix(before.count)) == before,
-              after.count == before.count || old[last].chunk == nil
+              after.count == before.count || old[last].isRun
         else { return .incompatible }
         // Shapes carry a leading tag, hence the minus one for item counts.
         return .extended(

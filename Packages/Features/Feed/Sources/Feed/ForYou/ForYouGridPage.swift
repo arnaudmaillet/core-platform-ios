@@ -257,6 +257,9 @@ final class ForYouGridPage: UIView {
     private var segmentStarts: [Int] = []
     /// The posts Discover draws as mosaic tiles rather than as cards.
     private var tilePostIDs: Set<PostID> = []
+    /// The posts Discover draws as HALF-WIDTH cards in pairs — experimental,
+    /// empty unless the page was built with `pairsVerticalMedia`.
+    private var pairedPostIDs: Set<PostID> = []
     /// Keeps the chunk tilings it has generated, for the page's whole life.
     private var chunkPlanner = MosaicChunkPlanner()
     /// Whether the corpus behind this page is ALL of it — no further page is
@@ -275,11 +278,19 @@ final class ForYouGridPage: UIView {
     /// Whether `postID` is drawn as a mosaic TILE on this page — a whole
     /// rectangle that is its media — rather than as a card of which the media
     /// is one part. Per page on the grid and the list, per post on Discover.
+    ///
+    /// ⚠️ A PAIRED card answers yes too (experimental, `pairedPostIDs`): it is
+    /// a Following card — all picture, edge to edge, its words over it — so
+    /// every question this answers (it autoplays like a brick, it hides whole
+    /// for a flight, a landing leaves no hole in it, a close lands as its
+    /// twin) has the tile's answer. What differs is its shape and furniture:
+    /// `tileCornerRadius(for:)`, `heroAppearance`, `restingOverlay(for:)`,
+    /// `makeTileStandIn`.
     func drawsAsTile(_ postID: PostID) -> Bool {
         switch style {
         case .grid: true
         case .list: false
-        case .discover: tilePostIDs.contains(postID)
+        case .discover: tilePostIDs.contains(postID) || pairedPostIDs.contains(postID)
         }
     }
 
@@ -290,6 +301,37 @@ final class ForYouGridPage: UIView {
         return segments[section].chunk
     }
 
+    /// Whether `section` is a block of paired half-width cards. Asked by the
+    /// layout, like `chunk(inSection:)`.
+    func isPairs(inSection section: Int) -> Bool {
+        guard style == .discover, !showsSkeleton, segments.indices.contains(section) else { return false }
+        return segments[section].isPairs
+    }
+
+    /// Whether `postID` is drawn as a half-width card of a pair — a Following
+    /// card (`ForYouFollowingCardCell`), here and on the stand-in a close
+    /// lands as.
+    func drawsAsPairedCard(_ postID: PostID) -> Bool {
+        pairedPostIDs.contains(postID)
+    }
+
+    /// The corner a post's tile-shaped cell takes: the Following card's for a
+    /// paired card, the page's tile rounding otherwise. What a window closing
+    /// onto it lands at, so the curve never steps in the last frame.
+    func tileCornerRadius(for postID: PostID) -> CGFloat {
+        drawsAsPairedCard(postID) ? ForYouFollowingCardCell.cornerRadius : tileCornerRadius
+    }
+
+    /// A paired card's words, for the flight to wear as resting furniture
+    /// that fades as the card grows into the page — the Following row's own
+    /// arrangement (`ForYouRowOrigins.card`). Wrapped at the card's size, and
+    /// only posed after (`ForYouCardCaptionOverlay`). Nil for anything else.
+    func restingOverlay(for postID: PostID) -> UIView? {
+        guard drawsAsPairedCard(postID), let post = post(for: postID) else { return nil }
+        let size = cell(for: postID)?.bounds.size ?? slotSize(of: postID)
+        return ForYouFollowingCardCell.makeOverlay(for: post, restingSize: size, imagePipeline: imagePipeline)
+    }
+
     /// Adopts a planned list: the stretches, their starts, the flat order and
     /// which posts are tiles — derived from one value so they cannot disagree.
     private func adoptSegments(_ planned: [DiscoverSegment]) {
@@ -297,15 +339,39 @@ final class ForYouGridPage: UIView {
         var starts: [Int] = []
         var flat: [GalleryPost] = []
         var tiles: Set<PostID> = []
+        var paired: Set<PostID> = []
         for segment in planned {
             starts.append(flat.count)
             flat += segment.posts
             if segment.chunk != nil { tiles.formUnion(segment.posts.map(\.id)) }
+            if segment.isPairs { paired.formUnion(segment.posts.map(\.id)) }
         }
         segmentStarts = starts
         posts = flat
         tilePostIDs = tiles
+        pairedPostIDs = paired
+        #if DEBUG
+        logSegmentsIfAsked()
+        #endif
     }
+
+    #if DEBUG
+    /// `-foryou-segments-log`: the Discover list's stretches as planned, one
+    /// line per adoption — `rows(3) chunk(7) pairs(4) …`, with the flat index
+    /// each starts at (what `-foryou-open N` takes).
+    private func logSegmentsIfAsked() {
+        guard ProcessInfo.processInfo.arguments.contains("-foryou-segments-log") else { return }
+        let parts = zip(segments, segmentStarts).map { segment, start -> String in
+            let kind = switch segment {
+            case .rows: "rows"
+            case .chunk: "chunk"
+            case .pairs: "pairs"
+            }
+            return "\(kind)(\(segment.posts.count))@\(start)"
+        }
+        print("[foryou-segments] \(parts.joined(separator: " "))")
+    }
+    #endif
 
     /// Where a flat index into `posts` lives in the sectioned list.
     private func indexPath(for index: Int) -> IndexPath {
@@ -574,9 +640,18 @@ final class ForYouGridPage: UIView {
         max(800, collectionView.bounds.height * 1.5)
     }
 
-    init(imagePipeline: ImagePipeline, style: Style, videoPlayback: VideoPlaybackController? = nil) {
+    /// - Parameter pairsVerticalMedia: Discover only, EXPERIMENTAL
+    ///   (`ForYouPairedVertical`): vertical media in a run of cards becomes
+    ///   blocks of half-width cards in pairs. Off, the page is exactly what it
+    ///   always was.
+    init(
+        imagePipeline: ImagePipeline, style: Style, videoPlayback: VideoPlaybackController? = nil,
+        pairsVerticalMedia: Bool = false
+    ) {
         self.imagePipeline = imagePipeline
         videoPool = videoPlayback
+        chunkPlanner.pairsVerticalMedia = pairsVerticalMedia && style == .discover
+        chunkPlanner.chunksLeavePairableMedia = ForYouPairedVertical.isDemo
         #if DEBUG
         CarouselPlaybackAudit.capturePoolTrace()
         #endif
@@ -597,10 +672,16 @@ final class ForYouGridPage: UIView {
                 headerHost.page?.hasHeader(inSection: index) ?? false
             })
         case .discover:
-            // Same box, other question: which sections are chunks.
-            DiscoverListLayout.layout(chunk: { [headerHost] section in
-                headerHost.page?.chunk(inSection: section)
-            })
+            // Same box, other questions: which sections are chunks, and which
+            // are blocks of paired cards.
+            DiscoverListLayout.layout(
+                chunk: { [headerHost] section in
+                    headerHost.page?.chunk(inSection: section)
+                },
+                isPairs: { [headerHost] section in
+                    headerHost.page?.isPairs(inSection: section) ?? false
+                }
+            )
         }
         collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
         super.init(frame: .zero)
@@ -622,6 +703,9 @@ final class ForYouGridPage: UIView {
         collectionView.prefersClearTopEdge()
         collectionView.register(PostGridTileCell.self, forCellWithReuseIdentifier: PostGridTileCell.reuseID)
         collectionView.register(PostGridListRowCell.self, forCellWithReuseIdentifier: PostGridListRowCell.reuseID)
+        collectionView.register(
+            ForYouFollowingCardCell.self, forCellWithReuseIdentifier: ForYouFollowingCardCell.reuseID
+        )
         collectionView.register(
             PostGridSkeletonTileCell.self, forCellWithReuseIdentifier: PostGridSkeletonTileCell.reuseID
         )
@@ -1781,6 +1865,8 @@ final class ForYouGridPage: UIView {
         // media is one part, so fly that part. A TEXT row has no media and no
         // hero — see `heroAppearance`.
         case let tile as PostGridTileCell: tile.bounds
+        // A paired (Following) card is its picture, edge to edge, too.
+        case let card as ForYouFollowingCardCell: card.bounds
         case let row as PostGridListRowCell: row.mediaHeroRect ?? .zero
         default: .zero
         }
@@ -1882,6 +1968,10 @@ final class ForYouGridPage: UIView {
         switch cell(for: postID) {
         case let tile as PostGridTileCell:
             (cover: tile.renderedCover, style: .tile)
+        // A paired card flies as the Following row's cards do: a list
+        // media flight, on the card's own corner (`ForYouRowOrigins.card`).
+        case let card as ForYouFollowingCardCell:
+            (cover: card.renderedCover, style: .listMedia)
         case let row as PostGridListRowCell:
             // A TEXT row answers nil, and that is the whole of its transition
             // policy: no hero, so `openFeed` pushes it natively.
@@ -2068,6 +2158,16 @@ final class ForYouGridPage: UIView {
         guard let size = cell(for: occupantID)?.bounds.size ?? laidOut,
               size.width > 0, size.height > 0
         else { return nil }
+        // A paired slot is a Following card: its twin is that card as it
+        // rests — the picture the cell is showing and the words over it — the
+        // Following row's own stand-in (`ForYouRowOrigins.cardReveal`).
+        if drawsAsPairedCard(occupantID) {
+            let cover = (cell(for: occupantID) as? ForYouFollowingCardCell)?.renderedCover
+                ?? post.thumbnailURL.flatMap { imagePipeline.cachedImage(for: $0) }
+            return ForYouFollowingCardCell.makeStandIn(
+                for: post, cover: cover, size: size, imagePipeline: imagePipeline
+            )
+        }
         return PostGridTileStandInView(
             post: post,
             size: size,
@@ -2123,7 +2223,7 @@ final class ForYouGridPage: UIView {
             makePresentStandIn: { [weak self] in self?.makeTileStandIn(for: post) },
             alignsPageToSource: false,
             pageFit: .covering,
-            cornerRadius: tileCornerRadius,
+            cornerRadius: tileCornerRadius(for: anchor),
             fill: PostGridTileCell.fillColor(for: post),
             setConcealed: { [weak self] concealed in
                 self?.setRevealConcealed(concealed, for: anchor)
@@ -3064,6 +3164,8 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
     private enum CellShape {
         case card
         case tile
+        /// Discover's paired vertical media (experimental): a Following card.
+        case pairedCard
     }
 
     func numberOfSections(in collectionView: UICollectionView) -> Int {
@@ -3170,7 +3272,23 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         // Either flight hides it, and neither knows about the other.
         let isFlying = post.id == heroHiddenPostID || post.id == revealConcealedPostID
         // Asked per post, because Discover draws both — see `drawsAsTile`.
-        switch drawsAsTile(post.id) ? CellShape.tile : .card {
+        let shape: CellShape = drawsAsPairedCard(post.id)
+            ? .pairedCard
+            : (drawsAsTile(post.id) ? .tile : .card)
+        switch shape {
+        case .pairedCard:
+            // EXPERIMENTAL (`-foryou-paired-vertical`): the Following row's
+            // card, at half the list's width — the picture, the author and two
+            // lines over its foot, no actions. Played and concealed like a
+            // tile (`drawsAsTile`); no long-press stake (it has no chip).
+            let cell = collectionView.dequeueReusableCell(
+                withReuseIdentifier: ForYouFollowingCardCell.reuseID, for: indexPath
+            ) as! ForYouFollowingCardCell
+            cell.configure(with: post, imagePipeline: imagePipeline)
+            // Autoplay is gated on the cover, as for a tile.
+            cell.onCoverLoaded = { [weak self] in self?.updateAutoplay() }
+            cell.isHidden = isFlying
+            return cell
         case .card:
             let cell = collectionView.dequeueReusableCell(
                 withReuseIdentifier: PostGridListRowCell.reuseID, for: indexPath
