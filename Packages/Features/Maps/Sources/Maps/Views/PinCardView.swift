@@ -27,8 +27,11 @@ final class PinCardView: UIView {
     /// card is a circle instead — see `Face.cornerRadius`, which reads this and
     /// so must be able to from outside the main actor.
     nonisolated static let cornerRadius: CGFloat = 12
-    // `nonisolated` like `cornerRadius` above: a UIView subclass's statics are
-    // `@MainActor` by inference, and this one is read off the main actor too.
+    /// Every marker border's width: the neutral ring's, and the flag border's
+    /// too (`MapFlagBorderView.lineWidth`), which only changes the colours.
+    ///
+    /// `nonisolated` like `cornerRadius` above: a UIView subclass's statics are
+    /// `@MainActor` by inference, and this one is read off the main actor too.
     nonisolated static let ringWidth: CGFloat = 2
 
     /// The glyph a text-only post's marker shows in place of a cover. Product
@@ -975,8 +978,8 @@ final class PinCardView: UIView {
 
     /// How far the lock leans up and left of the centre: only on a square
     /// card whose badge sits inside the corner, where the 20pt badge
-    /// (centred 15pt in) reached the bottom-right of the centred lock —
-    /// filmed on Mexico's marker. 3pt clears it by about 4pt and keeps the
+    /// (centred 14pt in) reached the bottom-right of the centred lock —
+    /// filmed on Mexico's marker. 3pt clears it by about 5pt and keeps the
     /// lock reading as centred.
     private var lockGlyphOffset: CGFloat {
         badgeSitsInside && dress.badge != nil ? -3 : 0

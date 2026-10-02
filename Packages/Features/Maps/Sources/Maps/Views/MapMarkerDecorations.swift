@@ -19,11 +19,24 @@ import UIKit
 /// the flight's first frame. The radius is written by the card's
 /// `setCornerRadius`, which the flight also calls inside its blocks.
 final class MapFlagBorderView: UIView {
-    /// The flag border is a point heavier than the neutral ring, like the
-    /// hierarchy rings it replaces: a place reads at a glance.
-    nonisolated static let lineWidth: CGFloat = 3
-    /// How far the hairline reaches inside the ring's inner edge.
-    private static let hairlineReach: CGFloat = 0.75
+    /// EXACTLY the neutral ring's width (`PinCardView.ringWidth`), hairline
+    /// included: a place marker is told apart by its colours, never by a
+    /// heavier frame. It was a point heavier (3pt, after the hierarchy rings
+    /// it replaced) and read as a thick coloured frame around the picture.
+    ///
+    /// ```
+    ///   outer edge                      inner edge
+    ///   |<------ gradient 1.5 ------>|<- 0.5 ->|   = ringWidth (2)
+    ///                                 hairline
+    /// ```
+    nonisolated static let lineWidth: CGFloat = PinCardView.ringWidth
+    /// The innermost part of `lineWidth` given to the hairline rather than to
+    /// the gradient — inside the footprint, never beyond it. A device pixel
+    /// and a half on @3x: enough to edge a white or black band, and the
+    /// colours keep three quarters of the width.
+    nonisolated static let hairlineReach: CGFloat = 0.5
+    /// The coloured part of the border: the gradient's mask.
+    nonisolated static let gradientWidth: CGFloat = lineWidth - hairlineReach
 
     private let hairline = UIView()
     private let ring = GradientView()
@@ -43,10 +56,13 @@ final class MapFlagBorderView: UIView {
             view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
             addSubview(view)
         }
-        hairline.layer.borderWidth = Self.lineWidth + Self.hairlineReach
+        // The hairline spans the whole footprint UNDER the opaque gradient,
+        // so only its inner `hairlineReach` shows: the border's outer edge is
+        // the neutral ring's, to the point.
+        hairline.layer.borderWidth = Self.lineWidth
         ringShape.backgroundColor = .clear
         ringShape.layer.borderColor = UIColor.black.cgColor
-        ringShape.layer.borderWidth = Self.lineWidth
+        ringShape.layer.borderWidth = Self.gradientWidth
         ringShape.frame = bounds
         ring.mask = ringShape
         ring.onBoundsChange = { [weak self] bounds in self?.ringShape.frame = bounds }
@@ -118,6 +134,10 @@ final class MapFlagBorderView: UIView {
     var debugGradientColors: [CGColor] { (ring.gradient.colors as? [CGColor]) ?? [] }
     var debugGradientIsVertical: Bool { ring.gradient.startPoint.x == 0.5 }
     var debugRingShape: UIView { ringShape }
+    var debugHairline: UIView { hairline }
+    /// How far in from the card's edge the border draws anything — the
+    /// hairline under the gradient, or the gradient, whichever reaches further.
+    var debugFootprint: CGFloat { max(hairline.layer.borderWidth, ringShape.layer.borderWidth) }
     #endif
 
     /// A view backed by its gradient, reporting its bounds the moment they
@@ -229,7 +249,7 @@ final class MapMarkerBadgeView: UIView {
     }
 
     /// How far a badge seated INSIDE a card stands clear of the card's border
-    /// (the flag border, the heavier of the two).
+    /// (neutral or flag: both are `PinCardView.ringWidth` wide).
     nonisolated static let insideGap: CGFloat = 2
 
     /// Where the badge's centre sits for a card of `size` and corner `radius`.
