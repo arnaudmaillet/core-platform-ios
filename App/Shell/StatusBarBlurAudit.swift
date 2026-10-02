@@ -12,21 +12,29 @@ import UIKit
 ///
 /// `band=on` = installed and not hidden; `front=Y` = no window sibling draws
 /// over it (`zPosition`); `h` = the height its edge effect covers; `own` = the
-/// backdrop layers inside the band (1 in light, 2 in dark); `offscreen` = its
-/// `HeroScrollFrameProbe.Census` count. A frame with `band=off` or `front=N`
-/// while a transition runs is the flash the window install exists to prevent.
+/// filtered backdrop layers inside the band (1 in light, 2 in dark);
+/// `offscreen` = its `HeroScrollFrameProbe.Census` count; `ax` / `touch` =
+/// whether VoiceOver or a touch could ever land on it. A frame with
+/// `band=off` or `front=N` while a transition runs is the flash the window
+/// install exists to prevent.
 ///
 /// And whenever the top screen changes, once it has landed, every backdrop
 /// layer in the window that reaches into the status band — the band's own,
-/// and any blur under it (MapKit's, a list that kept its edge effect):
+/// and any blur under it (a list that kept its edge effect, a sheet's
+/// material) — and the scene's visible windows:
 ///
-///     [sbb] stack top=MapsViewController backdrops=3
-///     [sbb]   StatusBarBlurView>_UIScrollEdgeEffectView y=0 h=62 variableBlur
-///     [sbb]   _MKMapContentView y=0 h=62 variableBlur
+///     [sbb] stack top=NotificationsViewController backdrops=3 windows=[UIWindow@0]
+///     [sbb]   StatusBarBlurView>ScrollEdgeEffectView y=0 h=62 blur
 ///
-/// Private filter names are read by key-value coding (`name`): DEBUG only.
-/// The owner is the innermost view drawing the layer; `StatusBarBlurView>`
-/// marks the band's own.
+/// Filter names are read by key-value coding (`name`; `blur` is the
+/// variable blur): DEBUG only. The owner is the innermost view drawing the
+/// layer; `StatusBarBlurView>` marks the band's own.
+///
+/// `-status-bar-blur-audit-deep` adds every edge effect view reaching into
+/// the band with its whole layer tree and filter inputs — what told on iOS 27
+/// (2026-10-02) that the band in the window is the Map's variant (one
+/// `variableBlur`, radius 2, 62pt; plus a half-opacity radius-16 gaussian in
+/// dark) under a titled bar too.
 @MainActor
 final class StatusBarBlurAudit {
     private static var shared: StatusBarBlurAudit?
@@ -67,7 +75,9 @@ final class StatusBarBlurAudit {
         var line = "top=\(top) \(moving ? "moving" : "rest")"
         if let band = StatusBarBlurView.installed(in: window) {
             let front = window.subviews.allSatisfy { $0 === band || $0.layer.zPosition < band.layer.zPosition }
-            let backdrops = Self.backdrops(in: band.layer, window: window)
+            // Filtered ones only: the effect also parks an unfiltered
+            // capture layer.
+            let backdrops = Self.backdrops(in: band.layer, window: window).filter { !$0.filters.isEmpty }
             let height = backdrops.map(\.frame.maxY).max() ?? 0
             let style = band.traitCollection.userInterfaceStyle == .dark ? "dark" : "light"
             let census = HeroScrollFrameProbe.Census(of: band.layer)
@@ -96,6 +106,56 @@ final class StatusBarBlurAudit {
         for backdrop in all {
             Self.log("[sbb]   \(backdrop.owner) y=\(Int(backdrop.frame.minY)) h=\(Int(backdrop.frame.height)) \(backdrop.filters)")
         }
+        if ProcessInfo.processInfo.arguments.contains("-status-bar-blur-audit-deep") {
+            Self.dumpEdgeEffects(in: window)
+        }
+    }
+
+    /// `-status-bar-blur-audit-deep`: every scroll edge effect view in the
+    /// window reaching into the band — hidden or not — with its whole layer
+    /// tree: class, frame, opacity, mask, filters with their inputs. What
+    /// tells one variant of the effect from another.
+    private static func dumpEdgeEffects(in window: UIWindow) {
+        func layerTree(_ layer: CALayer, depth: Int) {
+            let frame = layer.convert(layer.bounds, to: window.layer)
+            let filters = (layer.filters ?? []).map { filter -> String in
+                let object = filter as AnyObject
+                var text = "\(filter)"
+                for key in ["inputRadius", "inputNormalizeEdges", "inputMaskImage"] {
+                    if object.responds(to: NSSelectorFromString("valueForKey:")),
+                       let value = object.value(forKey: key) {
+                        text += " \(key)=\(String(describing: value).prefix(60))"
+                    }
+                }
+                return text
+            }.joined(separator: " | ")
+            let pad = String(repeating: "  ", count: depth)
+            log("[sbb-deep] \(pad)\(type(of: layer)) y=\(Int(frame.minY)) h=\(Int(frame.height)) w=\(Int(frame.width))"
+                + " op=\(layer.opacity) hidden=\(layer.isHidden) mask=\(layer.mask.map { "\(type(of: $0))" } ?? "-")"
+                + " bg=\(layer.backgroundColor.map { "\($0)" } ?? "-") comp=\(layer.compositingFilter.map { "\($0)" } ?? "-")"
+                + (filters.isEmpty ? "" : " filters=[\(filters)]"))
+            layer.sublayers?.forEach { layerTree($0, depth: depth + 1) }
+        }
+        func visit(_ view: UIView) {
+            if String(describing: type(of: view)).contains("EdgeEffect") {
+                let frame = view.convert(view.bounds, to: window)
+                log("[sbb-deep] found \(type(of: view)) frame=\(frame) hidden=\(view.isHidden) alpha=\(view.alpha) super=\(view.superview.map { "\(type(of: $0))" } ?? "-")")
+                if frame.minY < window.safeAreaInsets.top {
+                    var chain: [String] = []
+                    var ancestor = view.superview
+                    while let current = ancestor, chain.count < 4 {
+                        chain.append(String(describing: type(of: current)))
+                        ancestor = current.superview
+                    }
+                    log("[sbb-deep] \(type(of: view)) in \(chain.joined(separator: "<")) hidden=\(view.isHidden) alpha=\(view.alpha)"
+                        + " style=\(view.traitCollection.userInterfaceStyle.rawValue)")
+                    layerTree(view.layer, depth: 1)
+                    return
+                }
+            }
+            view.subviews.forEach(visit)
+        }
+        visit(window)
     }
 
     /// The screen on top — the frontmost presentation, through containers —

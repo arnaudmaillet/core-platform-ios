@@ -48,15 +48,18 @@ import UIKit
 ///   only removing the title, or leaving the navigation controller's
 ///   hierarchy altogether, gave the Map's. A window subview is outside every
 ///   navigation controller, so titled screens get the Map's band too.
-/// - **Sheets.** A sheet's top sits below the status band, so the band lies
-///   over what the sheet leaves visible behind the clock — the presenting
-///   screen, dimmed — just as it did before the sheet came up. It never
-///   blurs a sheet's own content: the camera is a full-height sheet, its
-///   preview starts under the grabber.
-/// - **Blur over blur** where something under the band draws an edge effect of
-///   its own: the Map (MapKit's, the same effect) and the notifications
-///   drawer (its soft edge). Kept on purpose: one more backdrop over 62pt,
-///   and no rule about which screen is on top to get wrong mid-transition.
+/// - **Sheets.** A large sheet's top sits at the foot of the status band (62pt
+///   on an iPhone 18 Pro, iOS 27), so the band lies over what the sheet
+///   leaves visible behind the clock — the presenting screen — just as it
+///   did before the sheet came up, and never over a sheet's own content or
+///   grabber. The camera is such a sheet: its preview is never blurred.
+/// - **Blur over blur** where something under the band draws an effect of its
+///   own: the notifications drawer (its soft edge, once scrolled) and the
+///   Messages thread (a frosted top of its own). Kept on purpose: one more
+///   backdrop over 62pt, and no rule about which screen is on top to get
+///   wrong mid-transition. (The Map: dumped on iOS 27 with the band in the
+///   window, no edge effect of MapKit's reached the band — the band is the
+///   only blur there.)
 ///
 /// ## Light and dark
 ///
@@ -85,7 +88,14 @@ import UIKit
 /// every list here would draw if it did not hide its own — made once per
 /// window instead of once per screen. On the iOS 27 simulator (#337),
 /// dragging For You for 12s: 720 frames, every one 16.67ms, with and without
-/// it (main-thread pacing; render-server cost is a device question).
+/// it (main-thread pacing; render-server cost is a device question). In the
+/// window (`-status-bar-blur-audit`, 2026-10-02): the same filters as before
+/// — one `variableBlur` backdrop, 402x62, plus the half-opacity gaussian in
+/// dark — no layer forcing an offscreen pass (`HeroScrollFrameProbe.Census`
+/// 0), and nothing of it in a screen's presentation turn any more.
+///
+/// Verify with `-status-bar-blur-audit` (every frame: there, frontmost,
+/// style, accessibility, touch) and `-status-bar-blur-audit-deep` (filters).
 public final class StatusBarBlurView: UIView {
 
     /// Adds the band to `window`, over everything the app draws in it; a no-op
