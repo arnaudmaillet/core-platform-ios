@@ -5,11 +5,14 @@ import UIKit
 @testable import PostGrid
 
 /// One gesture moves one page, and the dots stay small until touched.
+///
+/// The full-screen carousel's rule, page by page. A card's strip moves one
+/// ITEM per gesture by the rows' edge rule instead — `CardCarouselStripTests`.
 @MainActor
 struct CarouselPagingLimitTests {
     private func carousel(pages count: Int) -> MediaCarouselView {
         let view = MediaCarouselView(
-            style: .card, frame: CGRect(x: 0, y: 0, width: 358, height: 240)
+            style: .page, frame: CGRect(x: 0, y: 0, width: 358, height: 240)
         )
         view.configure(
             with: (0..<count).map {

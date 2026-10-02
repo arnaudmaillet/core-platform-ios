@@ -272,7 +272,12 @@ final class ForYouPostListViewController: UIViewController {
             textReveal: textRowReveal(for: tapped),
             // Already pinned since the tap; pinned again in case a cancelled
             // window close handed it back meanwhile.
-            willStageDismissal: { [weak page] in page?.pinForPushedClose() }
+            willStageDismissal: { [weak page] in page?.pinForPushedClose() },
+            // The carousel's page the row is on — the TAPPED item, which on a
+            // card's strip is often not the first — and the row following the
+            // post's carousel back, so the close lands on the page left open.
+            mediaPage: page.currentMediaPage(atIndex: index),
+            followMediaPage: { [weak page] id, mediaPage in page?.setMediaPage(mediaPage, for: id) }
         )
         page.openHoldingStill(from: self) { openPost(self, origin, stream.map(\.id)) }
     }
