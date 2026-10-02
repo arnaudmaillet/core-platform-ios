@@ -6,6 +6,24 @@ import UIKit
 /// It is an `inputView`, so the system slides it in and out exactly where the
 /// keyboard was, and a composer pinned to the keyboard follows it for free.
 ///
+/// ## Our emotes, not the system's
+///
+/// Every tile is the emote's OWN art — the house stickers, the map's GIF
+/// emotes and the Noto animations alike — never the system emoji glyph it
+/// stands in for (that shows only until the art lands). Recent, then the
+/// house emotes, then Noto's sections: together exactly `EmoteCatalog.all`,
+/// each section in catalogue order. As in the conversation strip
+/// (`EmoteStripView`), every DISPLAYED tile asks for its art and gives it
+/// back when it is scrolled off, so the panel holds one screen of sheets; a
+/// sheet is baked once per install and read from disk after that.
+///
+/// ## What plays: only while the grid moves
+///
+/// At rest every tile is still, on its poster frame. The displayed tiles play
+/// from a drag's start to the end of its glide and stop on the frame they
+/// reached — the strip's rule, shared (`EmoteScrollPlayback`). A jump from
+/// the section bar is not a scroll and plays nothing.
+///
 /// ⚠️ **NO SEARCH FIELD IN THE PANEL.** A text field inside an `inputView`
 /// cannot be typed into: focusing it takes the first responder away from the
 /// composer, which takes its input view — the panel, and the field with it —
@@ -37,6 +55,10 @@ public final class EmotePickerView: UIInputView {
     private var matchedScreenWidth: CGFloat = 0
     private(set) var sections: [EmoteComposing.Section] = []
     let collectionView: UICollectionView
+    /// See "What plays".
+    private let playback: EmoteScrollPlayback
+    /// From a drag's start to the end of its glide.
+    var isScrolling: Bool { playback.isScrolling }
     /// The section bar's glass, FLOATING over the grid: the grid is the
     /// panel's whole height and scrolls under it, the way the app's other
     /// bars float over their content. Glass, never an opaque slab. The
@@ -58,6 +80,7 @@ public final class EmotePickerView: UIInputView {
             screenSize: CGSize(width: 402, height: 874), bottomInset: 34
         )
         collectionView = UICollectionView(frame: .zero, collectionViewLayout: Self.makeLayout())
+        playback = EmoteScrollPlayback(collectionView: collectionView)
         super.init(
             frame: CGRect(x: 0, y: 0, width: 0, height: panelHeight),
             inputViewStyle: .keyboard
@@ -77,6 +100,9 @@ public final class EmotePickerView: UIInputView {
         collectionView.dataSource = self
         collectionView.delegate = self
         collectionView.showsVerticalScrollIndicator = false
+        // Off: a prefetched cell is dequeued but not shown, and would start a
+        // bake for a tile nobody sees.
+        collectionView.isPrefetchingEnabled = false
         // The insets are the bar's, stated in `layoutSubviews`; the safe
         // area's bottom is under the bar already.
         collectionView.contentInsetAdjustmentBehavior = .never
@@ -148,6 +174,7 @@ public final class EmotePickerView: UIInputView {
 
     override public func didMoveToWindow() {
         super.didMoveToWindow()
+        if window == nil { playback.stop() }
         guard window != nil, sectionBarGlass.effect == nil else { return }
         sectionBarGlass.effect = UIGlassEffect(style: .regular)
     }
@@ -259,6 +286,12 @@ public final class EmotePickerView: UIInputView {
     // MARK: - Test seams
 
     var sectionTitles: [String] { sections.map(\.title) }
+    /// The tiles the grid is showing, in reading order.
+    var displayedTiles: [EmoteTileView] {
+        collectionView.indexPathsForVisibleItems.sorted().compactMap {
+            (collectionView.cellForItem(at: $0) as? EmoteTileCell)?.tile
+        }
+    }
     func select(_ indexPath: IndexPath) {
         collectionView(collectionView, didSelectItemAt: indexPath)
     }
@@ -277,14 +310,21 @@ extension EmotePickerView: UICollectionViewDataSource, UICollectionViewDelegate 
         _ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath
     ) -> UICollectionViewCell {
         let cell = collectionView.dequeueReusableCell(withReuseIdentifier: EmoteTileCell.reuseID, for: indexPath)
-        let section = sections[indexPath.section]
         (cell as? EmoteTileCell)?.configure(
-            section.emotes[indexPath.item], engine: engine,
-            // Recent and the house emotes animate; the rest play only what is
-            // already resident (see `EmoteTileView`).
-            prefersAnimation: section.id == "recent" || section.id == EmoteSection.house.rawValue
+            sections[indexPath.section].emotes[indexPath.item], engine: engine,
+            prefersAnimation: true, playing: playback.isScrolling
         )
         return cell
+    }
+
+    /// Off-screen holds nothing: the request, the art and the slot go back
+    /// at once, not at the cell's next reuse.
+    public func collectionView(
+        _ collectionView: UICollectionView,
+        didEndDisplaying cell: UICollectionViewCell,
+        forItemAt indexPath: IndexPath
+    ) {
+        (cell as? EmoteTileCell)?.tile.clear()
     }
 
     public func collectionView(
@@ -298,6 +338,7 @@ extension EmotePickerView: UICollectionViewDataSource, UICollectionViewDelegate 
     }
 
     public func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        collectionView.deselectItem(at: indexPath, animated: false)
         guard indexPath.section < sections.count, indexPath.item < sections[indexPath.section].emotes.count else { return }
         UIDevice.current.playInputClick()
         onSelect?(sections[indexPath.section].emotes[indexPath.item])
@@ -308,6 +349,22 @@ extension EmotePickerView: UICollectionViewDataSource, UICollectionViewDelegate 
         if let indexPath = collectionView.indexPathForItem(at: probe) {
             highlightSection(indexPath.section)
         }
+    }
+
+    public func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        playback.willBeginDragging()
+    }
+
+    public func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        playback.didEndDragging(willDecelerate: decelerate)
+    }
+
+    public func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        playback.didEndScrolling()
+    }
+
+    public func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
+        playback.didEndScrolling()
     }
 }
 

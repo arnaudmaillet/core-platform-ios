@@ -54,6 +54,14 @@ public final class EmoteEngine {
     /// a hundred of them.
     public var maxAnimatedEmotes = 48
 
+    /// How many picker and strip TILES (`EmoteTileView`) may play at once —
+    /// their own budget, apart from the labels'. A tile plays only while its
+    /// grid moves under a finger, so what it costs is bounded by one screen of
+    /// tiles (about 60 in the panel) for as long as the finger moves it: the
+    /// whole visible grid plays, and a label never waits on a picker, nor a
+    /// picker on a busy comment list behind it. A still tile holds nothing.
+    public var maxPlayingTiles = 96
+
     /// How long a bake waits before starting, so a request cancelled within it
     /// (a page swiped past) never loads or draws anything.
     var bakeDelay = Duration.milliseconds(150)
@@ -83,6 +91,7 @@ public final class EmoteEngine {
     private var pending: [String: Pending] = [:]
     private var nextToken = 0
     private(set) var animatedCount = 0
+    private(set) var playingTileCount = 0
     private let waitingForPlayback = NSHashTable<AnyObject>.weakObjects()
 
     /// - Parameter memoryBudgetMB: a BYTE budget for resident sheets — a 64 px
@@ -278,6 +287,18 @@ public final class EmoteEngine {
         let waiters = waitingForPlayback.allObjects.compactMap { $0 as? EmotePlaybackWaiting }
         waitingForPlayback.removeAllObjects()
         waiters.forEach { $0.emotePlaybackSlotFreed() }
+    }
+
+    /// Takes one of the `maxPlayingTiles` slots; false when they are all
+    /// taken. A tile does not queue: it plays from its next start.
+    func acquireTileSlot() -> Bool {
+        guard playingTileCount < maxPlayingTiles else { return false }
+        playingTileCount += 1
+        return true
+    }
+
+    func releaseTileSlot() {
+        playingTileCount = max(0, playingTileCount - 1)
     }
 
     // MARK: - Bundled sources
