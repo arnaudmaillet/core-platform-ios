@@ -1,0 +1,58 @@
+{
+  "fill": {
+    "solid": "srgb:1.00000,1.00000,1.00000,1.00000"
+  },
+  "groups": [
+    {
+      "layers": [
+        {
+          "glass": true,
+          "image-name": "post-small.svg",
+          "name": "post-small",
+          "fill": {
+            "solid": "srgb:1.00000,0.30980,0.84706,1.00000"
+          }
+        },
+        {
+          "glass": true,
+          "image-name": "posts-main.svg",
+          "name": "posts-main",
+          "fill": {
+            "solid": "srgb:0.18431,0.35686,1.00000,1.00000"
+          }
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.4
+      }
+    },
+    {
+      "layers": [
+        {
+          "glass": false,
+          "image-name": "horizon.svg",
+          "name": "horizon",
+          "fill": {
+            "solid": "srgb:0.18431,0.35686,1.00000,1.00000"
+          }
+        }
+      ],
+      "shadow": {
+        "kind": "none",
+        "opacity": 0.5
+      },
+      "translucency": {
+        "enabled": false,
+        "value": 0.5
+      }
+    }
+  ],
+  "supported-platforms": {
+    "squares": "shared"
+  }
+}
