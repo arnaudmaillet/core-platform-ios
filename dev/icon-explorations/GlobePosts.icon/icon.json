@@ -1,0 +1,12 @@
+{
+  "fill" : { "automatic-gradient" : "srgb:0.15686,0.67843,0.61961,1.00000" },
+  "groups" : [
+    { "layers" : [ { "glass" : true, "image-name" : "posts.svg", "name" : "posts" } ],
+      "shadow" : { "kind" : "neutral", "opacity" : 0.5 },
+      "translucency" : { "enabled" : true, "value" : 0.4 } },
+    { "layers" : [ { "glass" : false, "image-name" : "horizon.svg", "name" : "horizon", "opacity" : 0.6 } ],
+      "shadow" : { "kind" : "none", "opacity" : 0.5 },
+      "translucency" : { "enabled" : false, "value" : 0.5 } }
+  ],
+  "supported-platforms" : { "squares" : "shared" }
+}
