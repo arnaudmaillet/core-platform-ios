@@ -312,8 +312,9 @@ struct TextPostComposePageTests {
         let empty = try #require(Self.all(EmptyStateView.self, in: panel).first)
         let stack = try #require(Self.all(UIStackView.self, in: empty).first)
         let block = stack.convert(stack.bounds, to: panel)
-        // The composer rides the keyboard: a gap and its own height above it.
-        let composerTop = height - covered - Spacing.sm - CommentsInputBar.restingHeight(for: .large)
+        // The composer's input row rides the keyboard: a gap and the row's own
+        // height above it (the column stays at rest, under the keys).
+        let composerTop = height - covered - Spacing.sm - CommentsInputBar.restingInputRowHeight(for: .large)
         #expect(block.maxY <= composerTop + 0.5, "the invitation clears the lifted composer: \(block) vs \(composerTop)")
         // …and is centred in what is left, not merely above it.
         let visibleTop = stream.convert(stream.bounds, to: panel).minY + stream.contentInset.top

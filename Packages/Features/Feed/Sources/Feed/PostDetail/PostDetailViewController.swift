@@ -189,18 +189,22 @@ final class PostDetailViewController: UIViewController {
     /// stands its stake and rail slot ON the media layout's like and repost
     /// bubbles — same size, same screen coordinates — so opening and closing
     /// the comments crossfades two bubbles that never move. The slot wears
-    /// REPOST (send while there is text); the waveform is in the field.
+    /// REPOST, and never anything else; the waveform and the send arrow are
+    /// in the field.
     ///
     /// - AT REST the bar's input row sits on the toolbar like every composer's
     ///   (`SnapActionColumn.inputRestingGap`) and the bar lifts its column to
     ///   the column's line; its trailing edge is the column's inset from the
     ///   screen's (not `lg`); the entrance is alpha only — no
     ///   micro-translation.
-    /// - KEYBOARD UP the required ceiling wins: the bar rides the keyboard's
-    ///   top, `sm` above it. The column is a resting position; typing is not
-    ///   resting, and a bar held at the column's line would sit under the
-    ///   keyboard.
-    private var scrollBottomDefault: NSLayoutConstraint?
+    /// - KEYBOARD UP the bar does NOT move: only its input row rides the
+    ///   keyboard's top, `sm` above it, widening into the column's width as it
+    ///   rises (`CommentsInputBar.riseWithKeyboard(of:)`). The column's bubbles
+    ///   hold the media layout's coordinates under the keyboard (asked
+    ///   2026-10-02).
+    /// The stream's bottom when not engaged: the composer's top, or the risen
+    /// input row's — whichever is higher (`configureViews`).
+    private var scrollBottomDefault: [NSLayoutConstraint] = []
     private var scrollBottomEngaged: NSLayoutConstraint?
     /// The engaged footer's frost: rows gliding behind the composer stay
     /// visible but dissolve into a LIGHT blur, so the bar reads over them
@@ -517,18 +521,26 @@ final class PostDetailViewController: UIViewController {
         }
         configureStreamDataSource()
         configureComposeBar()
-        // Scroll view fills above the compose bar, which tracks the keyboard.
-        // The default bottom stops at the compose bar; the engaged context
-        // swaps it for a full-bleed bottom (stored constraint) so the
-        // stream glides BEHIND the footer.
-        let scrollBottom = collectionView.bottomAnchor.constraint(equalTo: composeBar.topAnchor)
-        scrollBottomDefault = scrollBottom
-        collectionView.constrain(in: view) { parent in
-            collectionView.topAnchor.constraint(equalTo: parent.topAnchor)
-            collectionView.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
-            collectionView.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
-            scrollBottom
-        }
+        // Scroll view fills above the compose bar. The default bottom stops
+        // at the bar's top at rest, and at its input row's top while the
+        // keyboard lifts the row above the bar (the bar itself never moves):
+        // the higher of the two, pulled down to the bar by a low-priority
+        // reach. The engaged context swaps all three for a full-bleed bottom
+        // so the stream glides BEHIND the footer.
+        let reach = collectionView.bottomAnchor.constraint(equalTo: composeBar.topAnchor)
+        reach.priority = .defaultLow
+        scrollBottomDefault = [
+            collectionView.bottomAnchor.constraint(lessThanOrEqualTo: composeBar.topAnchor),
+            collectionView.bottomAnchor.constraint(lessThanOrEqualTo: composeBar.inputRowTopAnchor),
+            reach,
+        ]
+        collectionView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(collectionView)
+        NSLayoutConstraint.activate([
+            collectionView.topAnchor.constraint(equalTo: view.topAnchor),
+            collectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            collectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+        ] + scrollBottomDefault)
 
         // Author row: avatar + name/handle, tappable → profile.
         avatarView.backgroundColor = .tertiarySystemFill
@@ -699,21 +711,17 @@ final class PostDetailViewController: UIViewController {
     ///   from a loaded post's format (`configure`), and a draft has no post:
     ///   left at zero it would be a bare blur that snaps to the text veil the
     ///   moment the post is published.
-    /// - Send is reachable with the keyboard down — the idle faces without a
-    ///   pager. A text page parks a draft behind the waveform until the keyboard
-    ///   rises, which here would park the post itself.
     /// - It says what it does: it publishes.
     private func configureDraft() {
         composerBackdrop.setVeilOpacity(SnapCommentsLayout.frostVeilOpacity(hasMedia: false))
-        composeBar.showsIdleUtilityFaces = true
         composeBar.defaultPlaceholder = "Write your post…"
         composeBar.sendAccessibilityLabel = "Publish post"
     }
 
     /// The draft is a post now: the composer goes back to being a post's —
-    /// "Comment as …", a send that comments, and the boost in the slot the
-    /// visibility held (a published post's audience is settled). Its idle
-    /// faces stay: the page it lives on has no pager to lend it the feed's.
+    /// "Comment as …", a send that comments, the boost in the slot the
+    /// visibility held (a published post's audience is settled), and the
+    /// repost in the rail slot.
     private func becomePublished(_ entry: FeedEntry) {
         composeBar.defaultPlaceholder = nil
         composeBar.sendAccessibilityLabel = nil
@@ -745,8 +753,8 @@ final class PostDetailViewController: UIViewController {
     private func configureComposeBar() {
         // A post's rail slot is its REPOST — drawn without an action, like the
         // media layout's bubble (no client path publishes one yet). A draft
-        // is not a post: its slot keeps the voice note until it is.
-        composeBar.railFace = viewModel.isDraft ? .voice : .repost
+        // is not a post: its slot stays empty until it is.
+        composeBar.railFace = viewModel.isDraft ? .empty : .repost
         // The Liquid Glass composer (Private Messages' recipe): a floating
         // capsule field, no opaque bar, no separator — the glass carries
         // its own boundary against whatever is behind it.
@@ -827,12 +835,12 @@ final class PostDetailViewController: UIViewController {
         view.addSubview(composerBackdrop)
         view.addSubview(composeBar)
         composeBar.translatesAutoresizingMaskIntoConstraints = false
-        // Tracks the keyboard; sits at the safe-area bottom when dismissed.
-        // Stored: the engaged context replaces it (`setEngagedInsets`) —
-        // there the composer must occupy the NATIVE FOOTER'S band, which
-        // the safe area deliberately still contains.
+        // Sits at the safe-area bottom for good; only its input row rides the
+        // keyboard (`riseWithKeyboard`). Stored: the engaged context replaces
+        // it (`setEngagedInsets`) — there the composer must occupy the NATIVE
+        // FOOTER'S band, which the safe area deliberately still contains.
         let bottom = composeBar.bottomAnchor.constraint(
-            equalTo: view.keyboardLayoutGuide.topAnchor, constant: -Spacing.sm
+            equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -Spacing.sm
         )
         composeBottomDefault = bottom
         NSLayoutConstraint.activate([
@@ -856,6 +864,7 @@ final class PostDetailViewController: UIViewController {
                 equalTo: composeBar.inputRowTopAnchor, constant: -SnapCommentsLayout.footerFrostLead
             ),
         ])
+        composeBar.riseWithKeyboard(of: view.keyboardLayoutGuide)
     }
 
     /// Shapes the scrolling content for the snap feed's engaged layout:
@@ -1049,7 +1058,7 @@ final class PostDetailViewController: UIViewController {
         // compose bar's top to the view's bottom, with a bottom inset so
         // resting content still clears the footer band. The frost keeps
         // the bar legible over the moving rows.
-        scrollBottomDefault?.isActive = false
+        NSLayoutConstraint.deactivate(scrollBottomDefault)
         if scrollBottomEngaged == nil {
             scrollBottomEngaged = collectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         }
@@ -1077,28 +1086,24 @@ final class PostDetailViewController: UIViewController {
         // safe area must never move — that's the zero-churn contract), so
         // the resting position anchors to the WINDOW's home-indicator
         // inset (`bottomInset`, toolbar-independent) instead of the safe
-        // area. The keyboard keeps priority through the inequality: when
-        // it rises, the required constraint lifts the bar above it.
+        // area. The keyboard never moves the BAR: its input row rides the
+        // guide on its own (`riseWithKeyboard`), measured from the screen's
+        // edge too.
         view.keyboardLayoutGuide.usesBottomSafeArea = false
         composeBottomDefault?.isActive = false
         NSLayoutConstraint.deactivate(composeBottomEngaged)
-        let keyboard = composeBar.bottomAnchor.constraint(
-            lessThanOrEqualTo: view.keyboardLayoutGuide.topAnchor, constant: -Spacing.sm
-        )
         // The rest line: the input row `glassGap` above the toolbar's glass. The bar
         // lifts its own column off that line, onto the media layout's like
         // and repost bubbles (`SnapActionColumn`).
         let rest = composeBar.bottomAnchor.constraint(
             equalTo: view.bottomAnchor, constant: -(max(0, bottomInset) + composerRestingGap)
         )
-        rest.priority = .defaultHigh
-        composeBottomEngaged = [keyboard, rest]
-        composerKeyboardCeiling = keyboard
-        keyboard.isActive = composerTracksKeyboard
+        composeBottomEngaged = [rest]
         rest.isActive = true
     }
 
-    /// Whether the composer is allowed to be lifted by the KEYBOARD.
+    /// Whether the composer's input row is allowed to be lifted by the
+    /// KEYBOARD (`CommentsInputBar.tracksKeyboard`).
     ///
     /// ⚠️ THE CEILING IS ANCHORED TO THE SCREEN, and a page that is only
     /// partly on it hangs below. `keyboardLayoutGuide` is a window-space guide:
@@ -1114,11 +1119,10 @@ final class PostDetailViewController: UIViewController {
     /// is arriving, on when that page becomes the one being read.
     func setComposerTracksKeyboard(_ tracks: Bool) {
         composerTracksKeyboard = tracks
-        composerKeyboardCeiling?.isActive = tracks
+        composeBar.tracksKeyboard = tracks
     }
 
     private var composerTracksKeyboard = true
-    private weak var composerKeyboardCeiling: NSLayoutConstraint?
 
     // MARK: - Render
 
@@ -1940,28 +1944,29 @@ final class PostDetailViewController: UIViewController {
     /// top, WHEREVER THE COMPOSER IS. Nil outside the engaged context.
     ///
     /// The composer is where `setEngagedInsets` puts it: above the footer
-    /// band at rest, lifted to the keyboard's top while it is up. Its RESTING
-    /// height, a function of the text size, never its laid-out one — a bar
-    /// laid out after the first fit would change this answer on a later apply,
-    /// and a changed answer is a block that jumps.
+    /// band at rest, its input row lifted to the keyboard's top while it is
+    /// up (the column stays below, under the keyboard). Its RESTING heights, a
+    /// function of the text size, never its laid-out ones — a bar laid out
+    /// after the first fit would change this answer on a later apply, and a
+    /// changed answer is a block that jumps.
     private func streamSpace(captionHeight: CGFloat) -> StreamSpace? {
         guard let engaged = engagedStreamInsets, view.bounds.height > 0 else { return nil }
         let rowTop = engaged.top + streamSectionTopInset + captionHeight
         let top = captionHeight > 0 ? rowTop : engaged.top - SnapCommentsLayout.streamTopBreath
         let restingBottomInset = engaged.bottom - engagedFooterClearance
-        var composerBottom = view.bounds.height - restingBottomInset - composerRestingGap
+        let category = traitCollection.preferredContentSizeCategory
+        let composerBottom = view.bounds.height - restingBottomInset - composerRestingGap
+        var composerTop = composerBottom - CommentsInputBar.restingHeight(for: category)
         // ⚠️ CONVERTED HERE, NEVER STORED CONVERTED. The sheet grows to its
         // large height FOR the keyboard, which moves this view under a frame
         // that has not moved: a top converted when the notification arrived
         // was 300pt out by the time the page was fitted, and the invitation
         // was pinned to the top of a row squeezed to nothing.
         if composerTracksKeyboard, let covered = keyboardHeightFromBottom {
-            composerBottom = min(composerBottom, view.bounds.height - covered - Spacing.sm)
+            let risenRowBottom = view.bounds.height - covered - Spacing.sm
+            composerTop = min(composerTop, risenRowBottom - CommentsInputBar.restingInputRowHeight(for: category))
         }
-        let composerHeight = CommentsInputBar.restingHeight(
-            for: traitCollection.preferredContentSizeCategory
-        )
-        return StreamSpace(rowTop: rowTop, top: top, bottom: composerBottom - composerHeight)
+        return StreamSpace(rowTop: rowTop, top: top, bottom: composerTop)
     }
 
     /// How much of the screen's bottom the keyboard covers while it is up,
@@ -2284,8 +2289,16 @@ extension PostDetailViewController: UICollectionViewDelegate {
         // drives nothing. Arming continuously (which the overshoot alone
         // would do) made every read that reached the top start dissolving
         // the screen.
-        isPullDismissArmed = overshoot(of: scrollView) >= 0
-            && scrollView.contentOffset.y <= -scrollView.contentInset.top + 0.5
+        //
+        // And never while the KEYBOARD is up (asked 2026-10-02): a downward
+        // drag then means "put the keyboard away" — the list's interactive
+        // dismissal — and must never close the layout under a half-typed
+        // comment. Decided at the drag's start, so a drag that carried the
+        // keyboard down stays a keyboard drag to its end.
+        isPullDismissArmed = Self.armsPullDismiss(
+            atTop: scrollView.contentOffset.y <= -scrollView.contentInset.top + 0.5,
+            keyboardOpen: composeBar.isKeyboardOpen
+        )
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
@@ -2321,6 +2334,12 @@ extension PostDetailViewController: UICollectionViewDelegate {
         guard isPullDismissArmed, !isCommittingPullDismiss else { return }
         isPullDismissArmed = false
         onPullDismissDrive?(.changed, 0, 0)
+    }
+
+    /// Whether a drag starting now may drive the pull-down close: from the
+    /// list's top, with the keyboard down. Pure, for tests.
+    static func armsPullDismiss(atTop: Bool, keyboardOpen: Bool) -> Bool {
+        atTop && !keyboardOpen
     }
 
     /// How far past its resting top the list has been pulled, in points.

@@ -6,37 +6,45 @@ import UIKit
 
 /// The comments composer — and, since the conversation became the text post's
 /// screen, the MESSAGES composer too — in the app's native Liquid Glass
-/// grammar: a floating glass capsule field that grows with its text, and a
-/// round prominent-glass send button sharing its bottom baseline. (It began as
-/// a replica of the chat's own input bar, which is gone: this is the one
-/// composer now.) It owns no keyboard logic — the host pins its bottom to
-/// `view.keyboardLayoutGuide.topAnchor`.
+/// grammar: a floating glass capsule field that grows with its text, with the
+/// voice note and the send arrow INSIDE it. (It began as a replica of the
+/// chat's own input bar, which is gone: this is the one composer now.)
 ///
 /// AN INPUT ROW AND A TRAILING COLUMN, one view:
 ///
 ///     ——————————————————————[stake]
-///     ——————————————————————[repost/pin/send]
-///     [avatar][field   ☺ 〰]  ↑ columnLift
+///     ——————————————————————[repost/pin]
+///     [avatar][field   ☺ 〰/↑]  ↑ columnLift
 ///
-/// The INPUT ROW — avatar and field — is the bar's bottom edge: a host rests
-/// the bar `SnapActionColumn.inputRestingGap` above its footer line, which is
-/// `SnapActionColumn.glassGap` above the toolbar's glass (asked 2026-10-01:
-/// the field sat too far above the toolbar). The trailing COLUMN — the rail
-/// slot and the stake (boost) bubble over it — is the ACTION COLUMN's two
-/// bubbles (`SnapActionColumn`): both the comment band's height, one md apart,
-/// standing exactly on the media layout's like and repost bubbles. It stands
-/// `columnLift` off the bar's bottom, so it is a little higher than the field
-/// (accepted). The stake holds its station over the slot, and a growing field
-/// rises BESIDE it. Everything is INSIDE the bar's bounds, so the bar's height
-/// (and `restingHeight(for:)`) include it and every host's clearance follows;
-/// the empty run left of the column is NOT part of the bar for touches
-/// (`point(inside:with:)`), so the stream behind it keeps its taps.
+/// The INPUT ROW — avatar and field — is the bar's bottom edge at rest: a host
+/// rests the bar `SnapActionColumn.inputRestingGap` above its footer line,
+/// which is `SnapActionColumn.glassGap` above the toolbar's glass (asked
+/// 2026-10-01: the field sat too far above the toolbar). The trailing COLUMN —
+/// the rail slot and the stake (boost) bubble over it — is the ACTION COLUMN's
+/// two bubbles (`SnapActionColumn`): both the comment band's height, one md
+/// apart, standing exactly on the media layout's like and repost bubbles. It
+/// stands `columnLift` off the bar's bottom, so it is a little higher than the
+/// field (accepted). The stake holds its station over the slot, and a growing
+/// field rises BESIDE it. Everything is INSIDE the bar's bounds at rest, so
+/// the bar's height (and `restingHeight(for:)`) include it and every host's
+/// clearance follows; the empty run left of the column is NOT part of the bar
+/// for touches (`point(inside:with:)`), so the stream behind it keeps its taps.
 ///
-/// With a `railFace` the slot is ONE glass button wearing the host's action —
-/// REPOST on a post, PIN in a conversation — that turns into the SEND arrow
-/// while there is text (a symbol replace), and the voice note is a waveform
-/// INSIDE the field, beside the emote button. Without one (`.voice`, a draft
-/// post) the slot is the waveform/send crossfade.
+/// **THE KEYBOARD MOVES THE INPUT ROW, NEVER THE COLUMN** (asked 2026-10-02).
+/// The host pins the BAR at its resting place for good and hands it the
+/// keyboard's guide (`riseWithKeyboard(of:)`): only the avatar and the field
+/// ride the keyboard's top, above the bar's own bounds, and the column's
+/// bubbles stay on the media layout's coordinates (the keyboard covers them).
+/// As the row rises clear of the column it WIDENS into the column's width —
+/// a function of how far it has risen (`riseProgress(lift:clearance:)`), read
+/// off the solved layout on every pass, so it follows the keyboard's own
+/// animation and an interactive dismissal frame by frame.
+///
+/// The slot wears the host's action — REPOST on a post, PIN in a conversation,
+/// nothing on a post that does not exist yet (`railFace`) — and nothing else:
+/// typing never changes it. The field's trailing button is the voice note's
+/// WAVEFORM over an empty field and the SEND arrow over a draft (a symbol
+/// replace), beside the emote button.
 ///
 /// `showsStake = false` (a conversation: there is nothing to like) leaves the
 /// column the slot alone.
@@ -52,14 +60,9 @@ final class CommentsInputBar: UIView {
     /// Fired by the boost menu's Undo entry — the host refunds the session
     /// spend (it owns the tally and the wallet; the bar only shows the door).
     var onBoostUndo: (() -> Void)?
-    /// Fired by the WAVEFORM (the idle trailing slot, or inside the field
-    /// beside the emote button under a rail face): the voice-note seam. Unwired for now — an honest affordance whose capture flow does
-    /// not exist yet.
-    ///
-    /// The slot used to hold a ✕ that collapsed the engagement. The exit
-    /// moved to the toolbar, which is where the layout's other mode controls
-    /// live, and the bar got the affordance a message composer actually
-    /// wants in that position.
+    /// Fired by the WAVEFORM inside the field, beside the emote button: the
+    /// voice-note seam. Unwired for now — an honest affordance whose capture
+    /// flow does not exist yet.
     var onVoiceNote: (() -> Void)?
     /// One phase of an interactive vertical page-swipe born on the bar.
     enum PageSwipePhase { case began, changed, ended }
@@ -72,27 +75,21 @@ final class CommentsInputBar: UIView {
     /// passthrough starts the pager's own pan here) — so the bar detects it
     /// and the host drives `contentOffset` directly. `translation`/
     /// `velocity` are the pan's vertical components; up (negative) pages to
-    /// the next post. Wiring this ENABLES the drive AND marks a feed
-    /// engagement (so the idle slot wears the waveform); hosts that leave
-    /// it nil (the pushed comments screen) have no page-swipe and keep a
-    /// permanent send.
-    var onPageSwipe: ((PageSwipePhase, _ translation: CGFloat, _ velocity: CGFloat) -> Void)? {
-        didSet { updateTrailingButtons(animated: false) }
-    }
+    /// the next post. Hosts that leave it nil (the pushed comments screen,
+    /// the conversation) have no page-swipe.
+    var onPageSwipe: ((PageSwipePhase, _ translation: CGFloat, _ velocity: CGFloat) -> Void)?
 
-    /// Disables sending while a comment is in flight (spinner in the button).
+    /// Disables sending while a comment is in flight (spinner in the field's
+    /// send arrow).
     var isSending = false {
-        didSet {
-            sendButton.configuration?.showsActivityIndicator = isSending
-            updateTrailingButtons(animated: false)
-        }
+        didSet { updateFieldAction() }
     }
 
-    /// What the rail slot wears at rest — see `railFace`.
+    /// What the rail slot wears — see `railFace`.
     enum RailFace: Equatable {
-        /// The voice note in the slot: a waveform crossfading with send (a
-        /// draft post, which has nothing to repost yet).
-        case voice
+        /// No bubble in the slot: a draft post, which has nothing to repost
+        /// yet. The slot keeps its station (the stake's stands on it).
+        case empty
         /// The post's repost — drawn without an action today, like the
         /// toolbar's (`onRailAction` is the host's to wire).
         case repost
@@ -100,24 +97,24 @@ final class CommentsInputBar: UIView {
         case pin(isPinned: Bool)
     }
 
-    /// The slot's resting face. Anything but `.voice` makes the slot one
-    /// glass button that wears this face over an empty field and the send
-    /// arrow over a draft, and puts the waveform inside the field.
-    var railFace: RailFace = .voice {
+    /// The slot's face: ONE glass button wearing the host's action. It is the
+    /// action and only the action — a draft never turns it into send (asked
+    /// 2026-10-02: the send arrow lives in the field, and the column's bubbles
+    /// never change meaning under the thumb).
+    var railFace: RailFace = .empty {
         didSet {
             guard railFace != oldValue else { return }
-            applyRailMode()
+            applyRailFace()
         }
     }
 
     /// Whether the rail face can act — a conversation that does not exist
     /// yet has nothing to pin. Send is never held back by it.
     var isRailFaceEnabled = true {
-        didSet { updateTrailingButtons(animated: false) }
+        didSet { applyRailFace() }
     }
 
-    /// The rail face was tapped over an empty field (repost, pin). A tap over
-    /// a draft sends instead.
+    /// The rail face was tapped (repost, pin), whatever the field holds.
     var onRailAction: (() -> Void)?
 
     /// Whether the column carries the stake bubble. A conversation's does not:
@@ -143,23 +140,46 @@ final class CommentsInputBar: UIView {
     /// The column is two bubbles and their gap (one without the stake), and
     /// the field grows beside the stake rather than under it.
     static func restingHeight(for category: UIContentSizeCategory, showsStake: Bool = true) -> CGFloat {
-        let field: CGFloat
-        if let cached = restingFieldHeights[category] {
-            field = cached
-        } else {
-            let probe = UITextView()
-            probe.font = .preferredFont(
-                forTextStyle: .body,
-                compatibleWith: UITraitCollection(preferredContentSizeCategory: category)
-            )
-            probe.textContainerInset = UIEdgeInsets(top: Spacing.sm, left: Spacing.sm, bottom: Spacing.sm, right: Spacing.sm)
-            let fitting = probe.sizeThatFits(CGSize(width: 320, height: CGFloat.greatestFiniteMagnitude)).height
-            field = max(ceil(fitting), Metrics.controlSize)
-            restingFieldHeights[category] = field
-        }
         let bubble = SnapActionColumn.bubbleSize
         let column = SnapActionColumn.columnLift + bubble + (showsStake ? bubble + SnapActionColumn.gap : 0)
-        return max(column, field)
+        return max(column, restingInputRowHeight(for: category))
+    }
+
+    /// The INPUT ROW's height at rest in `category`: one empty line of the
+    /// field, never less than its floor. What a host clears above a keyboard,
+    /// where the row rides alone — the column stays at rest, under it.
+    static func restingInputRowHeight(for category: UIContentSizeCategory) -> CGFloat {
+        if let cached = restingFieldHeights[category] { return cached }
+        let probe = UITextView()
+        probe.font = .preferredFont(
+            forTextStyle: .body,
+            compatibleWith: UITraitCollection(preferredContentSizeCategory: category)
+        )
+        probe.textContainerInset = UIEdgeInsets(top: Spacing.sm, left: Spacing.sm, bottom: Spacing.sm, right: Spacing.sm)
+        let fitting = probe.sizeThatFits(CGSize(width: 320, height: CGFloat.greatestFiniteMagnitude)).height
+        let field = max(ceil(fitting), Metrics.controlSize)
+        restingFieldHeights[category] = field
+        return field
+    }
+
+    /// How far the input row has risen with the keyboard, 0…1: its LIFT over
+    /// the distance it takes to clear the column (`clearance`, from the row's
+    /// resting bottom to the column's top). The field's width follows it —
+    /// rest width at 0, the column's width taken at 1 — so the row widens
+    /// exactly as it leaves the bubbles beside it behind, whatever the
+    /// keyboard's height, and an interactive dismissal walks it back. Pure,
+    /// for tests.
+    static func riseProgress(lift: CGFloat, clearance: CGFloat) -> CGFloat {
+        guard lift > 0 else { return 0 }
+        guard clearance > 0 else { return 1 }
+        return min(1, lift / clearance)
+    }
+
+    /// The field's trailing edge from the bar's at `progress`: the column's
+    /// width and the gap before it at rest (0), nothing at 1. Pure, for tests.
+    @MainActor static func fieldTrailingInset(progress: CGFloat) -> CGFloat {
+        let rest = SnapActionColumn.bubbleSize + Spacing.sm
+        return rest * (1 - min(max(progress, 0), 1))
     }
 
     private static var restingFieldHeights: [UIContentSizeCategory: CGFloat] = [:]
@@ -211,29 +231,26 @@ final class CommentsInputBar: UIView {
     /// The boost's slot, on a post that does not exist yet: who will see it.
     /// See `visibilityMenu`.
     private let visibilityButton = UIButton(configuration: .glass())
-    private let sendButton = UIButton(configuration: .prominentGlass())
-    /// The trailing slot's idle face without a rail face (send's overlay
-    /// partner): the voice note's WAVEFORM, keyboard up or down. Send takes
-    /// the slot while there is text to send (or a submission in flight).
-    ///
-    /// It used to morph into a dismiss-keyboard chevron while the keyboard
-    /// was up over an empty field. A tap on the stream retires the keyboard
-    /// (the hosts' stream tap), so the chevron only duplicated it — at the
-    /// cost of the slot changing meaning under the thumb.
-    private let utilityButton = UIButton(configuration: .glass())
-    /// With a `railFace`: the slot as ONE button — the
-    /// host's action (repost, pin) over an empty field, send over a draft —
-    /// swapping its glyph with a symbol replace instead of crossfading two
-    /// buttons. Send and the slot's waveform stand down while it shows.
+    /// The slot: ONE glass button wearing the host's action (`railFace`) —
+    /// repost, pin, or hidden on a draft. It is the column's lower bubble and
+    /// the station the stake stands on, so it is laid out even while hidden.
     private let railButton = UIButton(configuration: .glass())
-    /// The voice note's door when the rail slot wears the host's action: a
-    /// waveform INSIDE the field, beside the emote button.
-    private let fieldVoiceButton = UIButton(configuration: .plain())
+    /// The field's trailing button, after the emote button: the voice note's
+    /// WAVEFORM over an empty field, the SEND arrow over a draft (or while one
+    /// is in flight) — one button, its glyph swapped with a symbol replace,
+    /// keyboard up or down. A draft is sendable with the keyboard down: a
+    /// shared link or an emote lands in the field precisely to be sent.
+    ///
+    /// Send used to take the RAIL slot (repost/pin → send while typing), and
+    /// before that a glass button of its own beside the field. Both are gone
+    /// (asked 2026-10-02): the column never changes meaning under the thumb,
+    /// and the send arrow sits where the eye already is, in the field.
+    private let fieldActionButton = UIButton(configuration: .plain())
     /// Whether the keyboard is up, driven by the keyboardWillShow/Hide
     /// notifications (the engaged bar is the screen's only text input, so
-    /// the global signal is unambiguous). It gates the page-swipe drive and
-    /// the idle-dismiss seam — no longer the trailing face. Internal setter
-    /// for tests: both are unit-tested without driving a real keyboard.
+    /// the global signal is unambiguous). It gates the page-swipe drive, the
+    /// hosts' pull-to-close and the idle-dismiss seam — never a face. Internal
+    /// setter for tests: all of them are unit-tested without a real keyboard.
     private(set) var isKeyboardOpen = false
     /// Removes the keyboard observers on release — a nonisolated deinit
     /// cannot touch main-actor state, so the tokens live in a bag whose
@@ -242,14 +259,29 @@ final class CommentsInputBar: UIView {
     private var fieldHeight: NSLayoutConstraint!
     /// The stake's claim on the bar's top — off while `showsStake` is false.
     private var stakeStationConstraints: [NSLayoutConstraint] = []
-    /// The emote toggle's trailing edge: the field's end, or the waveform's
-    /// leading edge while the waveform is in the field.
-    private var emoteAtFieldEnd: NSLayoutConstraint!
-    private var fieldVoiceConstraints: [NSLayoutConstraint] = []
+    /// Where the input row RESTS: the bar's bottom, the field's height. The
+    /// bar's height is measured from it, never from the field itself, so a
+    /// field lifted by the keyboard leaves the bar — and the column — exactly
+    /// where they were.
+    private let restingInputRow = UILayoutGuide()
+    /// The field's edge inside the column's width: `fieldTrailingInset`, set
+    /// from the rise on every layout pass.
+    private var fieldTrailing: NSLayoutConstraint!
+    /// The field's bottom held `Spacing.sm` over the keyboard's top — the
+    /// host's guide (`riseWithKeyboard(of:)`), active while `tracksKeyboard`.
+    private var keyboardCeiling: NSLayoutConstraint?
 
     /// The column's glyphs: the like anchor's size, so the crossfade between
     /// the two layouts reads as ONE bubble.
     private static let glyphConfiguration = UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
+
+    /// The field button's two faces. Send is the filled arrow in a disc —
+    /// iMessage's own, at home inside a field — in the tint; the waveform is
+    /// the field's quiet ink, like the emote button beside it.
+    static let waveformSymbol = "waveform"
+    static let sendSymbol = "arrow.up.circle.fill"
+    private static let waveformConfiguration = UIImage.SymbolConfiguration(weight: .semibold)
+    private static let sendConfiguration = UIImage.SymbolConfiguration(pointSize: 24, weight: .semibold)
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -264,47 +296,38 @@ final class CommentsInputBar: UIView {
         // short of it, and the toggle holds the last line's station as the
         // field grows (bottom-anchored, like the round controls around it).
         let emoteToggle = emotes.toggleButton
-        // The `:query` strip floats above the WHOLE bar, not the field: over
-        // the field it would lie across the stake bubble.
+        // The `:query` strip floats above the WHOLE bar at rest, not the
+        // field: over the field it would lie across the stake bubble. Over a
+        // risen field it follows the field (`applyRise`).
         emotes.suggestionAnchor = self
         emoteToggle.tintColor = .secondaryLabel
         textView.translatesAutoresizingMaskIntoConstraints = false
         emoteToggle.translatesAutoresizingMaskIntoConstraints = false
         field.contentView.addSubview(textView)
         field.contentView.addSubview(emoteToggle)
-        emoteAtFieldEnd = emoteToggle.trailingAnchor.constraint(
-            equalTo: field.contentView.trailingAnchor, constant: -Spacing.xs
-        )
+        // The field's own button: after the emote button, at the field's end
+        // — the voice note's place in iMessage's own field, and its send's.
+        var action = UIButton.Configuration.plain()
+        action.contentInsets = .zero
+        action.symbolContentTransition = UISymbolContentTransition(.replace)
+        fieldActionButton.configuration = action
+        fieldActionButton.addAction(UIAction { [weak self] _ in self?.fieldActionTapped() }, for: .primaryActionTriggered)
+        fieldActionButton.translatesAutoresizingMaskIntoConstraints = false
+        field.contentView.addSubview(fieldActionButton)
         NSLayoutConstraint.activate([
             textView.leadingAnchor.constraint(equalTo: field.contentView.leadingAnchor),
             textView.topAnchor.constraint(equalTo: field.contentView.topAnchor),
             textView.bottomAnchor.constraint(equalTo: field.contentView.bottomAnchor),
             textView.trailingAnchor.constraint(equalTo: emoteToggle.leadingAnchor),
-            emoteAtFieldEnd,
+            emoteToggle.trailingAnchor.constraint(equalTo: fieldActionButton.leadingAnchor),
             emoteToggle.bottomAnchor.constraint(equalTo: field.contentView.bottomAnchor),
             emoteToggle.widthAnchor.constraint(equalToConstant: Metrics.emoteToggleWidth),
             emoteToggle.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
+            fieldActionButton.trailingAnchor.constraint(equalTo: field.contentView.trailingAnchor, constant: -Spacing.xs),
+            fieldActionButton.bottomAnchor.constraint(equalTo: field.contentView.bottomAnchor),
+            fieldActionButton.widthAnchor.constraint(equalToConstant: Metrics.emoteToggleWidth),
+            fieldActionButton.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
         ])
-        // The waveform, when the rail slot wears the host's action: after the
-        // emote button, at the field's end — the voice note's place in
-        // iMessage's own field. Joins the field only then (`applyRailMode`).
-        fieldVoiceButton.configuration?.image = UIImage(
-            systemName: "waveform", withConfiguration: UIImage.SymbolConfiguration(weight: .semibold)
-        )
-        fieldVoiceButton.configuration?.contentInsets = .zero
-        fieldVoiceButton.tintColor = .secondaryLabel
-        fieldVoiceButton.accessibilityLabel = "Record voice comment"
-        fieldVoiceButton.addAction(UIAction { [weak self] _ in self?.utilityTapped() }, for: .primaryActionTriggered)
-        fieldVoiceButton.translatesAutoresizingMaskIntoConstraints = false
-        fieldVoiceButton.isHidden = true
-        field.contentView.addSubview(fieldVoiceButton)
-        fieldVoiceConstraints = [
-            emoteToggle.trailingAnchor.constraint(equalTo: fieldVoiceButton.leadingAnchor),
-            fieldVoiceButton.trailingAnchor.constraint(equalTo: field.contentView.trailingAnchor, constant: -Spacing.xs),
-            fieldVoiceButton.bottomAnchor.constraint(equalTo: field.contentView.bottomAnchor),
-            fieldVoiceButton.widthAnchor.constraint(equalToConstant: Metrics.emoteToggleWidth),
-            fieldVoiceButton.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
-        ]
 
         placeholderLabel.text = "Add a comment…"
         placeholderLabel.font = textView.font
@@ -359,26 +382,11 @@ final class CommentsInputBar: UIView {
         visibilityButton.showsMenuAsPrimaryAction = true
         visibilityButton.isHidden = true
 
-        sendButton.configuration?.image = UIImage(
-            systemName: "arrow.up",
-            withConfiguration: UIImage.SymbolConfiguration(weight: .semibold)
-        )
-        sendButton.configuration?.cornerStyle = .capsule
-        sendButton.accessibilityLabel = "Send comment"
-        sendButton.addAction(UIAction { [weak self] _ in self?.sendTapped() }, for: .primaryActionTriggered)
-
-        utilityButton.configuration?.image = UIImage(
-            systemName: "waveform", withConfiguration: Self.glyphConfiguration
-        )
-        utilityButton.configuration?.cornerStyle = .capsule
-        utilityButton.accessibilityLabel = "Record voice comment"
-        utilityButton.addAction(UIAction { [weak self] _ in self?.utilityTapped() }, for: .primaryActionTriggered)
-
-        // ONE glyph, swapped in place: repost/pin ↔ send is a symbol REPLACE on
-        // the button's own image, so the bubble never blinks or moves.
+        // ONE glyph, swapped in place: pin ↔ pinned is a symbol REPLACE on the
+        // button's own image, so the bubble never blinks or moves.
         railButton.configuration?.cornerStyle = .capsule
         railButton.configuration?.symbolContentTransition = UISymbolContentTransition(.replace)
-        railButton.addAction(UIAction { [weak self] _ in self?.railTapped() }, for: .primaryActionTriggered)
+        railButton.addAction(UIAction { [weak self] _ in self?.onRailAction?() }, for: .primaryActionTriggered)
         railButton.isHidden = true
 
         // The keyboard axis: the page-swipe gate and the idle-dismiss seam.
@@ -424,59 +432,59 @@ final class CommentsInputBar: UIView {
 
         addSubview(avatarBubble)
         addSubview(field)
-        addSubview(sendButton)
-        addSubview(utilityButton)
         addSubview(railButton)
         addSubview(boostButton)
         addSubview(visibilityButton)
+        addLayoutGuide(restingInputRow)
         avatarBubble.translatesAutoresizingMaskIntoConstraints = false
         boostButton.translatesAutoresizingMaskIntoConstraints = false
         visibilityButton.translatesAutoresizingMaskIntoConstraints = false
         field.translatesAutoresizingMaskIntoConstraints = false
-        sendButton.translatesAutoresizingMaskIntoConstraints = false
-        utilityButton.translatesAutoresizingMaskIntoConstraints = false
         railButton.translatesAutoresizingMaskIntoConstraints = false
         fieldHeight = field.heightAnchor.constraint(equalToConstant: Metrics.controlSize)
         // The INPUT row, leading to trailing: the viewer's AVATAR, then the
-        // field, which owns all the flexible width and ends `sm` short of the
-        // trailing COLUMN. The row is the bar's bottom edge — the host rests
-        // that edge on the toolbar — and the field grows upward from it.
+        // field, which owns all the flexible width and, at rest, ends `sm`
+        // short of the trailing COLUMN (`fieldTrailing`, which the rise
+        // widens). The row RESTS on the bar's bottom edge — the host rests
+        // that edge on the toolbar — and the field grows upward from it; the
+        // keyboard's ceiling (`riseWithKeyboard(of:)`) outranks the rest and
+        // lifts the row clear of the bar.
         //
-        // The column: the slot (waveform and send OVERLAY it and crossfade;
-        // or the rail button wears it alone) stands `columnLift` off the bar's
-        // bottom, on the media layout's repost bubble; the stake bubble stands
-        // one `gap` over it, on the like anchor. Both are the comment band's
-        // height (`SnapActionColumn.bubbleSize`) — read once, here, like the
-        // band reads its own at init. The stake holds its station over the
-        // slot: a growing field rises beside it, not under it. The avatar
-        // opens the row (a composer says who is speaking before it offers
-        // anything else); it is silent and never moves.
+        // The column: the slot (the rail button) stands `columnLift` off the
+        // bar's bottom, on the media layout's repost bubble; the stake bubble
+        // stands one `gap` over it, on the like anchor. Both are the comment
+        // band's height (`SnapActionColumn.bubbleSize`) — read once, here,
+        // like the band reads its own at init. The stake holds its station
+        // over the slot: a growing field rises beside it, not under it. The
+        // avatar opens the row (a composer says who is speaking before it
+        // offers anything else); it is silent and rides with the field.
         let bubble = SnapActionColumn.bubbleSize
+        fieldTrailing = field.trailingAnchor.constraint(
+            equalTo: trailingAnchor, constant: -Self.fieldTrailingInset(progress: 0)
+        )
+        let fieldAtRest = field.bottomAnchor.constraint(equalTo: restingInputRow.bottomAnchor)
+        fieldAtRest.priority = .defaultHigh
         NSLayoutConstraint.activate([
             fieldHeight,
+            restingInputRow.leadingAnchor.constraint(equalTo: field.leadingAnchor),
+            restingInputRow.trailingAnchor.constraint(equalTo: trailingAnchor),
+            restingInputRow.bottomAnchor.constraint(equalTo: bottomAnchor),
+            restingInputRow.heightAnchor.constraint(equalTo: field.heightAnchor),
+            restingInputRow.topAnchor.constraint(greaterThanOrEqualTo: topAnchor),
             avatarBubble.leadingAnchor.constraint(equalTo: leadingAnchor),
             avatarBubble.bottomAnchor.constraint(equalTo: field.bottomAnchor),
             avatarBubble.widthAnchor.constraint(equalToConstant: Metrics.controlSize),
             avatarBubble.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
             field.leadingAnchor.constraint(equalTo: avatarBubble.trailingAnchor, constant: Spacing.sm),
-            field.bottomAnchor.constraint(equalTo: bottomAnchor),
-            field.topAnchor.constraint(greaterThanOrEqualTo: topAnchor),
-            sendButton.leadingAnchor.constraint(equalTo: field.trailingAnchor, constant: Spacing.sm),
-            sendButton.trailingAnchor.constraint(equalTo: trailingAnchor),
-            sendButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -SnapActionColumn.columnLift),
-            sendButton.widthAnchor.constraint(equalToConstant: bubble),
-            sendButton.heightAnchor.constraint(equalToConstant: bubble),
-            sendButton.topAnchor.constraint(greaterThanOrEqualTo: topAnchor),
-            utilityButton.centerXAnchor.constraint(equalTo: sendButton.centerXAnchor),
-            utilityButton.centerYAnchor.constraint(equalTo: sendButton.centerYAnchor),
-            utilityButton.widthAnchor.constraint(equalTo: sendButton.widthAnchor),
-            utilityButton.heightAnchor.constraint(equalTo: sendButton.heightAnchor),
-            railButton.centerXAnchor.constraint(equalTo: sendButton.centerXAnchor),
-            railButton.centerYAnchor.constraint(equalTo: sendButton.centerYAnchor),
-            railButton.widthAnchor.constraint(equalTo: sendButton.widthAnchor),
-            railButton.heightAnchor.constraint(equalTo: sendButton.heightAnchor),
+            fieldAtRest,
+            fieldTrailing,
+            railButton.trailingAnchor.constraint(equalTo: trailingAnchor),
+            railButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -SnapActionColumn.columnLift),
+            railButton.widthAnchor.constraint(equalToConstant: bubble),
+            railButton.heightAnchor.constraint(equalToConstant: bubble),
+            railButton.topAnchor.constraint(greaterThanOrEqualTo: topAnchor),
             boostButton.trailingAnchor.constraint(equalTo: trailingAnchor),
-            boostButton.bottomAnchor.constraint(equalTo: sendButton.topAnchor, constant: -SnapActionColumn.gap),
+            boostButton.bottomAnchor.constraint(equalTo: railButton.topAnchor, constant: -SnapActionColumn.gap),
             boostButton.widthAnchor.constraint(equalToConstant: bubble),
             boostButton.heightAnchor.constraint(equalToConstant: bubble),
             // The boost's own station: the two never show at once.
@@ -485,16 +493,18 @@ final class CommentsInputBar: UIView {
             visibilityButton.widthAnchor.constraint(equalTo: boostButton.widthAnchor),
             visibilityButton.heightAnchor.constraint(equalTo: boostButton.heightAnchor),
         ])
-        // The bar's TOP is the highest of what it holds: required floors
-        // above, and hugs at DISTINCT priorities (equal ones would leave the
-        // solver a choice it could make differently pass to pass) — the
-        // stake's first (`stakeStationConstraints`), then the field's, then
-        // the slot's.
-        let fieldHug = field.topAnchor.constraint(equalTo: topAnchor)
-        fieldHug.priority = UILayoutPriority(250)
-        let slotHug = sendButton.topAnchor.constraint(equalTo: topAnchor)
+        // The bar's TOP is the highest of what it holds AT REST: required
+        // floors above, and hugs at DISTINCT priorities (equal ones would
+        // leave the solver a choice it could make differently pass to pass) —
+        // the stake's first (`stakeStationConstraints`), then the resting
+        // input row's, then the slot's. The row's, not the field's: a field
+        // the keyboard lifts must not drag the bar's top — or the column on
+        // it — along.
+        let rowHug = restingInputRow.topAnchor.constraint(equalTo: topAnchor)
+        rowHug.priority = UILayoutPriority(250)
+        let slotHug = railButton.topAnchor.constraint(equalTo: topAnchor)
         slotHug.priority = UILayoutPriority(249)
-        NSLayoutConstraint.activate([fieldHug, slotHug])
+        NSLayoutConstraint.activate([rowHug, slotHug])
         let stakeHug = boostButton.topAnchor.constraint(equalTo: topAnchor)
         stakeHug.priority = UILayoutPriority(251)
         stakeStationConstraints = [
@@ -507,7 +517,8 @@ final class CommentsInputBar: UIView {
         // "monogram is the rendered state" rule the comment rows follow,
         // applied to the frame before anyone has told us who you are.
         avatarView.setMonogram(Self.monogram(nil))
-        updateTrailingButtons(animated: false)
+        applyRailFace()
+        updateFieldAction()
         updateFieldHeight()
 
         // Vertical-intent pan for the swipe exit (the rail's begin rule:
@@ -533,10 +544,16 @@ final class CommentsInputBar: UIView {
     /// run to the column's left. That run is inside the bar's bounds only
     /// because the column is; the stream glides behind it, and a tap or a drag
     /// there belongs to the rows it shows.
+    ///
+    /// The input row is the bar's WHEREVER it is: risen with the keyboard it
+    /// stands above the bar's own bounds, and its touches are still the bar's.
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        if point.y >= field.frame.minY, point.y <= field.frame.maxY,
+           point.x >= bounds.minX, point.x <= bounds.maxX {
+            return true
+        }
         guard super.point(inside: point, with: event) else { return false }
-        if point.y >= field.frame.minY { return true }
-        if sendButton.frame.contains(point) { return true }
+        if !railButton.isHidden, railButton.frame.contains(point) { return true }
         guard showsStake else { return false }
         let station = visibilityMenu == nil ? boostButton : visibilityButton
         return station.frame.contains(point)
@@ -555,28 +572,86 @@ final class CommentsInputBar: UIView {
         setNeedsLayout()
     }
 
-    /// Whether the slot is the one rail button (`railFace`).
-    private var usesRailButton: Bool { railFace != .voice }
+    // MARK: - The keyboard
 
-    /// Puts the voice note where the slot's mode wants it — in the slot, or in
-    /// the field beside the emote button — and refreshes the slot.
-    private func applyRailMode() {
-        let inField = usesRailButton
-        if inField {
-            emoteAtFieldEnd.isActive = false
-            NSLayoutConstraint.activate(fieldVoiceConstraints)
-        } else {
-            NSLayoutConstraint.deactivate(fieldVoiceConstraints)
-            emoteAtFieldEnd.isActive = true
-        }
-        fieldVoiceButton.isHidden = !inField
-        updateTrailingButtons(animated: false)
+    /// Hands the bar the keyboard its INPUT ROW rises with: the host's
+    /// `keyboardLayoutGuide` — its root view's, measured from the screen's
+    /// edge (`usesBottomSafeArea = false` on the engaged surfaces), so its top
+    /// is the screen's bottom while no keyboard is up. The field's bottom is
+    /// held `sm` over the guide's top (required) and rests on the bar's
+    /// bottom otherwise; the BAR stays where the host put it, and so does the
+    /// column on it.
+    ///
+    /// The guide's owner must be an ancestor of the bar.
+    func riseWithKeyboard(of guide: UILayoutGuide) {
+        keyboardCeiling?.isActive = false
+        let ceiling = field.bottomAnchor.constraint(lessThanOrEqualTo: guide.topAnchor, constant: -Spacing.sm)
+        keyboardCeiling = ceiling
+        ceiling.isActive = tracksKeyboard
         setNeedsLayout()
     }
 
-    /// The input row's top — the field's top edge, which rises as it grows.
-    /// For a host whose chrome belongs to the input row rather than to the
-    /// whole bar (the footer band, whose ramp the stake bubble floats in).
+    /// Whether the input row may rise with the keyboard at all.
+    ///
+    /// ⚠️ THE GUIDE IS ANCHORED TO THE SCREEN. With no keyboard up its top is
+    /// the screen's bottom, and the ceiling is required — so a bar whose page
+    /// is only partly on screen (a page scrolling in) would have its field
+    /// pinned at the screen's edge instead of travelling with the page. The
+    /// host grants it to the page a viewer can type on (see
+    /// `PostDetailViewController.setComposerTracksKeyboard`).
+    var tracksKeyboard = true {
+        didSet {
+            guard tracksKeyboard != oldValue else { return }
+            keyboardCeiling?.isActive = tracksKeyboard
+            setNeedsLayout()
+        }
+    }
+
+    /// How far the input row has risen clear of the column, 0…1 — see
+    /// `riseProgress(lift:clearance:)`. Read off the last layout pass.
+    private(set) var riseProgress: CGFloat = 0
+
+    /// The top of what the bar shows, in its superview's coordinates: the
+    /// bar's own top at rest, the risen field's while the keyboard holds the
+    /// row above the bar. For a host clearing its stream above the composer.
+    /// Lays the bar out first: the field is the bar's subview, laid out after
+    /// a host's `viewDidLayoutSubviews` asks.
+    var occupiedMinY: CGFloat {
+        layoutIfNeeded()
+        return frame.minY + min(0, field.frame.minY)
+    }
+
+    /// Reads the input row's lift off the solved layout — the keyboard's
+    /// ceiling has already placed the field — and widens the field by it.
+    /// Returns whether the width moved, so the caller lays out again in the
+    /// SAME pass: a keyboard animating in lays out once, inside its own
+    /// animation, and the width has to land in that block to ride the
+    /// keyboard's curve rather than snap after it.
+    private func applyRise() -> Bool {
+        let rest = restingInputRow.layoutFrame.maxY
+        let lift = max(0, rest - field.frame.maxY)
+        let columnTop = showsStake ? boostButton.frame.minY : railButton.frame.minY
+        let progress = Self.riseProgress(lift: lift, clearance: rest - columnTop)
+        #if DEBUG
+        if Self.logsRise, abs(progress - riseProgress) > 0.0001 {
+            FileHandle.standardError.write(Data(String(
+                format: "[composer-rise] %.3f lift=%.1f progress=%.3f\n", CACurrentMediaTime(), lift, progress
+            ).utf8))
+        }
+        #endif
+        riseProgress = progress
+        // The `:query` strip over the field once nothing stands beside it.
+        emotes.suggestionAnchor = progress > 0 ? field : self
+        let inset = Self.fieldTrailingInset(progress: progress)
+        guard abs(fieldTrailing.constant + inset) > 0.01 else { return false }
+        fieldTrailing.constant = -inset
+        return true
+    }
+
+    /// The input row's top — the field's top edge, which rises as it grows
+    /// and with the keyboard. For a host whose chrome belongs to the input
+    /// row rather than to the whole bar (the footer band, whose ramp the
+    /// stake bubble floats in, and which rides the keyboard with the row).
     var inputRowTopAnchor: NSLayoutYAxisAnchor { field.topAnchor }
 
     /// Whether the field holds the keyboard. A row tap on the stream then
@@ -639,6 +714,7 @@ final class CommentsInputBar: UIView {
         #if DEBUG
         runEmoteKeyboardQAIfAsked()
         runComposerDraftQAIfAsked()
+        runComposerKeyboardQAIfAsked()
         #endif
         if field.effect == nil {
             field.effect = UIGlassEffect()
@@ -655,6 +731,9 @@ final class CommentsInputBar: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        // The keyboard has placed the field by now; its width follows, in
+        // this same pass (see `applyRise`).
+        if applyRise() { super.layoutSubviews() }
         updateFieldHeight()
     }
 
@@ -663,6 +742,9 @@ final class CommentsInputBar: UIView {
         guard !text.isEmpty, !isSending else { return }
         textView.text = ""
         textViewDidChange(textView)
+        #if DEBUG
+        if Self.logsRise { debugLogKeyboardStep("sent \"\(text)\"") }
+        #endif
         onSend?(text)
     }
 
@@ -678,27 +760,16 @@ final class CommentsInputBar: UIView {
         }
     }
 
-    /// The idle face — the waveform over an empty field — outside a feed
-    /// engagement too. The conversation screen is the text page's bar without
-    /// a pager behind it; everywhere else this stays false and the rule is
-    /// exactly the page-swipe marker it always was.
-    var showsIdleUtilityFaces = false {
-        didSet { updateTrailingButtons(animated: false) }
-    }
-
     /// The prompt when nobody is being replied to, overriding the comment
     /// wording ("Comment as …") — a conversation's field says "Message…".
     var defaultPlaceholder: String? {
         didSet { applyPlaceholder() }
     }
 
-    /// The send button's spoken name. Nil is "Send comment"; the Text Post
+    /// The send arrow's spoken name. Nil is "Send comment"; the Text Post
     /// page's first send publishes the post, and says so.
     var sendAccessibilityLabel: String? {
-        didSet {
-            sendButton.accessibilityLabel = sendAccessibilityLabel ?? "Send comment"
-            updateTrailingButtons(animated: false)
-        }
+        didSet { updateFieldAction() }
     }
 
     /// The stake row's other face. A boost needs a post to land on; a post
@@ -736,20 +807,18 @@ final class CommentsInputBar: UIView {
         textViewDidChange(textView)
     }
 
-    /// The waveform's tap (in the slot or in the field): the voice-note seam,
-    /// keyboard up or down.
-    private func utilityTapped() {
-        onVoiceNote?()
+    /// Whether the field holds something to send.
+    private var hasDraft: Bool {
+        !textView.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// The rail button's tap: send over a draft (or nothing while one is in
-    /// flight), the host's action over an empty field.
-    private func railTapped() {
-        let hasText = !textView.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        if hasText || isSending {
+    /// The field button's tap: send over a draft (nothing while one is in
+    /// flight), the voice-note seam over an empty field — keyboard up or down.
+    private func fieldActionTapped() {
+        if hasDraft {
             sendTapped()
-        } else {
-            onRailAction?()
+        } else if !isSending {
+            onVoiceNote?()
         }
     }
 
@@ -858,10 +927,11 @@ final class CommentsInputBar: UIView {
 
     /// `-composer-draft <text>` (DEBUG): puts `<text>` in the draft ~2 s after
     /// the bar is SHOWN (on screen, every ancestor opaque — an engagement's
-    /// bar waits offstage at alpha 0), then empties it ~6 s later: the slot's
-    /// two faces (send over a draft, the rest face over an empty field)
-    /// without a keyboard, which the simulator does not show. Prints
-    /// `[composer-draft] <epoch s> <step>` with the slot's face at each step.
+    /// bar waits offstage at alpha 0), then empties it ~6 s later: the field
+    /// button's two faces (send over a draft, the waveform over an empty
+    /// field) and the rail's one, without a keyboard, which the simulator does
+    /// not show. Prints `[composer-draft] <epoch s> <step>` with the faces at
+    /// each step.
     private func runComposerDraftQAIfAsked() {
         let arguments = ProcessInfo.processInfo.arguments
         guard !ranComposerDraftQA, let index = arguments.firstIndex(of: "-composer-draft"),
@@ -870,24 +940,15 @@ final class CommentsInputBar: UIView {
         let text = arguments[index + 1]
         let report: @MainActor (String) -> Void = { [weak self] step in
             guard let self else { return }
-            let face = self.usesRailButton
-                ? "rail=\(self.railFaceSymbol ?? "-") label=\(self.railButton.accessibilityLabel ?? "-")"
-                : "send.alpha=\(self.sendButton.alpha) voice.alpha=\(self.utilityButton.alpha)"
+            let face = "rail=\(self.debugRailSymbol ?? "-") field=\(self.fieldActionSymbol ?? "-")"
+                + " label=\(self.fieldActionButton.accessibilityLabel ?? "-")"
             let frame = self.window.map { self.convert(self.bounds, to: $0) } ?? .zero
             // stderr: unbuffered, so a detached `--stderr=` sink is live.
             FileHandle.standardError.write(Data(
                 "[composer-draft] \(Int(Date().timeIntervalSince1970)) \(step) draft=\"\(self.draftText)\" \(face) frame=\(frame)\n".utf8
             ))
         }
-        // SHOWN means on screen: every ancestor visible and opaque (a panel
-        // is mounted on pages that are not the one showing), and the bar
-        // inside the window's bounds.
-        QAWait.until("-composer-draft", timeout: 30, { [weak self] in
-            guard let self, let window = self.window, self.bounds.height > 0 else { return false }
-            let ancestorsShown = sequence(first: self as UIView, next: \.superview)
-                .allSatisfy { !$0.isHidden && $0.alpha > 0.99 }
-            return ancestorsShown && window.bounds.contains(self.convert(self.bounds, to: window))
-        }) {
+        QAWait.until("-composer-draft", timeout: 30, { [weak self] in self?.debugIsShown == true }) {
             report("shown")
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
                 self?.draftText = text
@@ -896,6 +957,74 @@ final class CommentsInputBar: UIView {
             DispatchQueue.main.asyncAfter(deadline: .now() + 8.0) { [weak self] in
                 self?.draftText = ""
                 report("cleared")
+            }
+        }
+    }
+
+    /// SHOWN means on screen: every ancestor visible and opaque (a panel is
+    /// mounted on pages that are not the one showing), and the bar inside the
+    /// window's bounds.
+    private var debugIsShown: Bool {
+        guard let window, bounds.height > 0 else { return false }
+        let ancestorsShown = sequence(first: self as UIView, next: \.superview)
+            .allSatisfy { !$0.isHidden && $0.alpha > 0.99 }
+        return ancestorsShown && window.bounds.contains(convert(bounds, to: window))
+    }
+
+    private var ranComposerKeyboardQA = false
+    /// Read once: `applyRise` runs on every layout pass.
+    private static let logsRise = ProcessInfo.processInfo.arguments.contains("-composer-keyboard-qa")
+
+    /// One `[composer-kbd]` line: the rise, and the field's and the column's
+    /// window frames. stderr: unbuffered, so a detached `--stderr=` sink is
+    /// live.
+    private func debugLogKeyboardStep(_ step: String) {
+        guard let window else { return }
+        func rect(_ view: UIView) -> String {
+            let r = view.convert(view.bounds, to: window)
+            return String(format: "(%.1f %.1f %.1f %.1f)", r.minX, r.minY, r.width, r.height)
+        }
+        let line = String(
+            format: "[composer-kbd] %.3f %@ rise=%.3f field=%@ rail=%@ stake=%@ bar=%@ face=%@ rail.face=%@\n",
+            CACurrentMediaTime(), step, riseProgress, rect(field), rect(railButton),
+            rect(boostButton), rect(self), fieldActionSymbol ?? "-", debugRailSymbol ?? "-"
+        )
+        FileHandle.standardError.write(Data(line.utf8))
+    }
+
+    /// `-composer-keyboard-qa` (DEBUG): focuses the field ~1.5 s after the bar
+    /// is SHOWN, types a draft 3 s later and empties it 6 s after that (time
+    /// for a real tap on send, which logs `sent`), the
+    /// keyboard up throughout, and leaves the keyboard up for a manual
+    /// (interactive) dismissal. Logs `[composer-kbd]` at each step and on
+    /// every keyboard notification, and `[composer-rise]` whenever a layout
+    /// pass moves the rise — so a keyboard animating in or a finger dragging
+    /// it down prints the walk, frame by frame.
+    private func runComposerKeyboardQAIfAsked() {
+        guard !ranComposerKeyboardQA, Self.logsRise else { return }
+        ranComposerKeyboardQA = true
+        let center = NotificationCenter.default
+        for name in [UIResponder.keyboardWillShowNotification, UIResponder.keyboardDidShowNotification,
+                     UIResponder.keyboardWillHideNotification, UIResponder.keyboardDidHideNotification] {
+            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+                let end = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue ?? .zero
+                let step = "\(note.name.rawValue.replacingOccurrences(of: "UIKeyboard", with: "")) end.minY=\(end.minY)"
+                MainActor.assumeIsolated { self?.debugLogKeyboardStep(step) }
+            }
+        }
+        QAWait.until("-composer-keyboard-qa", timeout: 30, { [weak self] in self?.debugIsShown == true }) { [weak self] in
+            self?.debugLogKeyboardStep("shown")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                self?.focusComposer()
+                self?.debugLogKeyboardStep("focused")
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4.5) { [weak self] in
+                self?.draftText = "Typed with the keyboard up"
+                self?.debugLogKeyboardStep("typed")
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 10.5) { [weak self] in
+                self?.draftText = ""
+                self?.debugLogKeyboardStep("cleared")
             }
         }
     }
@@ -1113,79 +1242,60 @@ final class CommentsInputBar: UIView {
         boostButton.layer.add(shake, forKey: "boost.denied")
     }
 
-    /// The trailing slot's two faces without a rail face:
-    ///   has text (or a send in flight) → send
+    /// The field button's two faces:
+    ///   has text (or a send in flight) → ↑ send
     ///   empty                          → 〰 waveform (voice note)
     /// The keyboard plays no part. The waveform stays up while nothing is
     /// typed, and a draft is sendable with the keyboard down: a shared link or
     /// an emote lands in the field precisely to be sent, and a voice note over
     /// a draft turned the one action there into a "not available" notice.
-    /// The waveform belongs to a FEED ENGAGEMENT, or to a bar that asks for it
-    /// (`showsIdleUtilityFaces` — the conversation, the draft post); the
-    /// pushed comments screen does neither and keeps a permanent send.
-    /// Swapped as a short alpha crossfade, never a pop.
-    ///
-    /// With a rail face the slot is the ONE rail button
-    /// instead: the host's face over an empty field, the send arrow over a
-    /// draft — a symbol replace on its glyph, no crossfade.
-    private func updateTrailingButtons(animated: Bool) {
-        let hasText = !textView.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        sendButton.isEnabled = hasText && !isSending
-        railButton.isHidden = !usesRailButton
-        sendButton.isHidden = usesRailButton
-        utilityButton.isHidden = usesRailButton
-        if usesRailButton {
-            applyRailFace(sends: hasText || isSending, canSend: hasText && !isSending)
-            return
+    /// Every write goes through the button's configuration, whose
+    /// `symbolContentTransition` replaces the old glyph with the new one.
+    private func updateFieldAction() {
+        let sends = hasDraft || isSending
+        let symbol = sends ? Self.sendSymbol : Self.waveformSymbol
+        if fieldActionSymbol != symbol {
+            fieldActionSymbol = symbol
+            fieldActionButton.configuration?.image = UIImage(
+                systemName: symbol,
+                withConfiguration: sends ? Self.sendConfiguration : Self.waveformConfiguration
+            )
+            fieldActionButton.configuration?.baseForegroundColor = sends ? .tintColor : .secondaryLabel
         }
-        // The page-swipe drive is the engagement's marker — BOTH media and
-        // text posts wire it. The conversation asks for the face explicitly;
-        // the pushed comments SCREEN does neither and keeps its permanent
-        // send.
-        let isFeedEngagement = onPageSwipe != nil || showsIdleUtilityFaces
-        let showsSend = isSending || !isFeedEngagement || hasText
-        let apply = {
-            self.sendButton.alpha = showsSend ? 1 : 0
-            self.utilityButton.alpha = showsSend ? 0 : 1
+        if fieldActionButton.configuration?.showsActivityIndicator != isSending {
+            fieldActionButton.configuration?.showsActivityIndicator = isSending
         }
-        sendButton.isUserInteractionEnabled = showsSend
-        utilityButton.isUserInteractionEnabled = !showsSend
-
-        if animated {
-            UIView.animate(withDuration: 0.15, animations: apply)
-        } else {
-            apply()
-        }
+        fieldActionButton.accessibilityLabel = sends
+            ? sendAccessibilityLabel ?? "Send comment"
+            : "Record voice comment"
+        fieldActionButton.isEnabled = !isSending
     }
 
-    /// The rail button's face. Every write goes through the button's
-    /// configuration, whose `symbolContentTransition` replaces the old glyph
-    /// with the new one.
-    private func applyRailFace(sends: Bool, canSend: Bool) {
-        let symbol: String
-        let label: String
-        if sends {
-            symbol = "arrow.up"
-            label = sendAccessibilityLabel ?? "Send comment"
-        } else {
-            switch railFace {
-            case .voice, .repost:
-                symbol = PostActionSymbol.repost
-                label = "Repost"
-            case .pin(let isPinned):
-                symbol = isPinned ? "pin.fill" : "pin"
-                label = isPinned ? "Unpin conversation" : "Pin conversation"
-            }
+    /// The symbol the field button wears, so an unchanged face is not
+    /// re-applied (a re-applied image would replay the replace).
+    private var fieldActionSymbol: String?
+
+    /// The rail button's face: the host's action, never anything the draft
+    /// says. Hidden on a draft post (`.empty`), whose slot holds no bubble.
+    private func applyRailFace() {
+        let symbol: String?
+        switch railFace {
+        case .empty:
+            symbol = nil
+            railButton.accessibilityLabel = nil
+        case .repost:
+            symbol = PostActionSymbol.repost
+            railButton.accessibilityLabel = "Repost"
+        case .pin(let isPinned):
+            symbol = isPinned ? "pin.fill" : "pin"
+            railButton.accessibilityLabel = isPinned ? "Unpin conversation" : "Pin conversation"
         }
-        if railFaceSymbol != symbol {
-            railFaceSymbol = symbol
+        railButton.isHidden = symbol == nil
+        if let symbol, railFaceSymbol != symbol {
             railButton.configuration?.image = UIImage(systemName: symbol, withConfiguration: Self.glyphConfiguration)
         }
-        if railButton.configuration?.showsActivityIndicator != isSending {
-            railButton.configuration?.showsActivityIndicator = isSending
-        }
-        railButton.accessibilityLabel = label
-        railButton.isEnabled = sends ? canSend : isRailFaceEnabled
+        railFaceSymbol = symbol
+        railButton.isEnabled = isRailFaceEnabled
     }
 
     /// The symbol the rail button wears, so an unchanged face is not
@@ -1195,10 +1305,14 @@ final class CommentsInputBar: UIView {
     #if DEBUG
     /// The rail button, for the specs that read its face and tap it.
     var debugRailButton: UIButton { railButton }
-    /// The waveform inside the field.
-    var debugFieldVoiceButton: UIButton { fieldVoiceButton }
+    /// The waveform / send button inside the field.
+    var debugFieldActionButton: UIButton { fieldActionButton }
     /// The symbol the rail button wears.
     var debugRailSymbol: String? { railButton.isHidden ? nil : railFaceSymbol }
+    /// The symbol the field button wears.
+    var debugFieldActionSymbol: String? { fieldActionSymbol }
+    /// The field, for the specs that measure it.
+    var debugField: UIView { field }
     #endif
 
     /// Grows the field with its content up to `maxLines`, then hands the
@@ -1222,7 +1336,7 @@ final class CommentsInputBar: UIView {
 extension CommentsInputBar: UITextViewDelegate {
     func textViewDidChange(_ textView: UITextView) {
         placeholderLabel.isHidden = textView.hasText
-        updateTrailingButtons(animated: true)
+        updateFieldAction()
         updateFieldHeight()
         onTextChange?(textView.text ?? "")
     }
