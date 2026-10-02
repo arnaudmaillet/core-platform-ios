@@ -91,24 +91,31 @@ struct MediaCarouselGeometryTests {
         return view
     }
 
-    /// The peek IS the affordance: a page is narrower than the box, so the next
-    /// one is always partly on screen. Without it nothing on the card says there
-    /// is more than one photograph.
-    @Test func aPageIsNarrowerThanTheBoxByThePeek() throws {
-        let view = carousel(pages: 3)
-        let first = try #require(view.currentPageRect(in: view))
+    /// A card shows a STRIP: two whole items and a third cropped by the box's
+    /// right edge — the crop is what says there is more. It replaced a page
+    /// nearly the box's width with a capsule sliver of the next (2026-10-02).
+    @Test func aCardShowsTwoWholeItemsAndAThirdCropped() throws {
+        let view = carousel(pages: 4)
+        let width = MediaCarouselView.cardPageWidth(forBoxWidth: 348, pageCount: 4)
+        let first = view.pageViews[0].frame
+        let second = view.pageViews[1].frame
+        let third = view.pageViews[2].frame
 
-        #expect(abs(first.width - (view.bounds.width - MediaCarouselView.peek)) < 0.5)
         #expect(abs(first.minX) < 0.5)
+        #expect(first.width == width)
+        #expect(second.maxX < view.bounds.width)
+        #expect(third.minX < view.bounds.width && third.maxX > view.bounds.width)
+        // The cropped one shows about three tenths of itself.
+        let shown = (view.bounds.width - third.minX) / width
+        #expect(abs(shown - 0.3) < 0.05)
     }
 
     /// ⚠️ The LAST page lands flush against the trailing edge, which is why the
     /// content is not `pages × stride`.
     ///
     /// Sized the naive way, the scroll ends with a strip of empty box after the
-    /// final photograph — a peek of nothing, which reads as a broken layout
-    /// rather than as an end. At the last page it is the PREVIOUS one that
-    /// peeks, on the left.
+    /// final photograph — which reads as a broken layout rather than as an
+    /// end. At the last page it is the ones before it that show, on the left.
     @Test func theLastPageLandsFlush() throws {
         let view = carousel(pages: 4)
         view.debugScroll(toPage: 3, animated: false)
@@ -117,32 +124,6 @@ struct MediaCarouselGeometryTests {
 
         #expect(abs(last.maxX - view.bounds.width) < 0.5)
         #expect(view.currentPage == 3)
-    }
-
-    /// ⚠️ The sliver is a VERTICAL CAPSULE, and the arithmetic that makes it one
-    /// is the reason `neighbourWidth` is derived rather than picked.
-    ///
-    /// Its left corners come from the page (radius `mediaCornerRadius`); its
-    /// right corners come from the BOX clipping it, at the same radius. A strip
-    /// of exactly `2 × radius` therefore has no straight edge anywhere — four
-    /// quarter-circles meeting — which is a capsule. One point off in either
-    /// direction and it is a slab with soft corners.
-    @Test func theNeighbourShowsAsAVerticalCapsule() throws {
-        let view = carousel(pages: 3)
-        let first = try #require(view.currentPageRect(in: view))
-        let neighbourLeadingEdge = first.maxX + MediaCarouselView.gap
-        let visible = view.bounds.width - neighbourLeadingEdge
-
-        #expect(abs(visible - MediaCarouselView.neighbourWidth) < 0.5)
-        #expect(abs(visible - PostGridListRowCell.mediaCornerRadius * 2) < 0.5)
-    }
-
-    /// ⚠️ The gutter falls INSIDE the peek, and getting that backwards is what
-    /// the first version did: with `peek` measured to the page's own edge, the
-    /// gap ate into the sliver and what showed was `peek - gap`.
-    @Test func thePeekCarriesTheGutterAsWellAsTheSliver() {
-        #expect(MediaCarouselView.peek
-            == MediaCarouselView.neighbourWidth + MediaCarouselView.gap)
     }
 
     /// Asking for a page that is not there is false, not a silent no-op — the

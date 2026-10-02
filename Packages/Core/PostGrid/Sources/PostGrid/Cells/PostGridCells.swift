@@ -149,9 +149,9 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     public var mediaHeroRect: CGRect? {
         guard !mediaView.isHidden else { return nil }
         layoutIfNeeded()
-        // A collection departs from the PAGE, not the box. The box is wider by
-        // the carousel's peek and holds a slice of a second photograph, so a
-        // flight that took it would carry two images and land one.
+        // A collection departs from the PAGE, not the box. The box also holds
+        // the carousel's other items, whole or cropped, so a flight that took
+        // it would carry several images and land one.
         if let carousel, !carousel.isHidden,
            let page = carousel.currentPageRect(in: self) {
             return page
@@ -177,8 +177,8 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     public var videoMediaRect: CGRect {
         // ⚠️ THE PAGE, not the box, once a collection is showing.
         //
-        // The box is wider than a page by `peek` and holds a slice of a
-        // different attachment. Measuring it asks "is the viewer looking at
+        // The box is wider than a page and holds other items of the strip,
+        // each a different attachment. Measuring it asks "is the viewer looking at
         // this preview" where the question is "at this video" — and on a mixed
         // carousel those differ by a whole page.
         if showsCarousel, let page = carousel?.currentPageRect(in: self) { return page }
@@ -659,6 +659,12 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     }
 
     private func resolveMediaHeight(atWidth width: CGFloat) {
+        if mediaPageCount > 1 {
+            mediaHeight.constant = Self.collectionMediaHeight(
+                forCardWidth: width, pageCount: mediaPageCount
+            )
+            return
+        }
         mediaHeight.constant = Self.mediaHeight(
             forCardWidth: width, aspectRatio: mediaAspectRatio
         )
@@ -1398,6 +1404,21 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         return (min(max(natural, shortest), tallest)).rounded()
     }
 
+    /// How tall the preview is for a COLLECTION of `pageCount` in a card of a
+    /// given width: one item of the carousel's strip
+    /// (`MediaCarouselView.cardHeight`), whatever the post's own shape.
+    ///
+    /// ⚠️ NOT `mediaHeight(forCardWidth:aspectRatio:)`. A collection's box
+    /// holds a strip of 3:4 items, two and a bit across, so its height is an
+    /// item's — about half what the post's shape across the whole box gave
+    /// (2026-10-02, asked for: collections were the tallest cards on the
+    /// screen).
+    public static func collectionMediaHeight(forCardWidth cardWidth: CGFloat, pageCount: Int) -> CGFloat {
+        MediaCarouselView.cardHeight(
+            forBoxWidth: cardWidth - contentInset * 2, pageCount: pageCount
+        )
+    }
+
     /// How many lines of caption a card previews before it offers the rest.
     ///
     /// A card is a PREVIEW and the post is where the text is read, so the cap
@@ -1774,6 +1795,9 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// The aspect the current post declares, kept because the height depends on
     /// a width this cell does not know until it is measured.
     private var mediaAspectRatio: Double = 1
+    /// How many pages the current post's media has — more than one, and the
+    /// height is the carousel's (`collectionMediaHeight`), not the aspect's.
+    private var mediaPageCount = 1
 
     private var metaFollowsCaption: NSLayoutConstraint!
     /// Active for media rows only: the closing row hangs off the preview.
@@ -2305,6 +2329,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         captionLabel.attributedText = Self.plain(post.caption, font: captionLabel.font)
         let hasMedia = post.kind != .text
         mediaAspectRatio = post.aspectRatio
+        mediaPageCount = post.isCollection ? post.pages.count : 1
         // Provisional, on whatever width this cell currently carries — the
         // authoritative pass is `preferredLayoutAttributesFitting`. Set here so
         // a cell that is never measured (a stand-in, a preview) is not left
@@ -2357,9 +2382,9 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         syncClosingLine()
         if post.isCollection {
             // The box behind the pages is the CARD, not the placeholder fill a
-            // single-media row uses: with a gutter between pages and a sliver of
-            // the next one at the edge, that fill is on screen at rest and has
-            // to be the surface the pages are lying on.
+            // single-media row uses: with a gutter between items and one cropped
+            // at the edge, that fill is on screen at rest and has to be the
+            // surface the pages are lying on.
             mediaView.backgroundColor = Self.cardFillColor
             let carousel = makeCarouselIfNeeded()
             carousel.isHidden = false

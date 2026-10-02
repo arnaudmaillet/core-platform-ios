@@ -6,26 +6,37 @@ import UIKit
 /// The pages of a collection post, scrolled horizontally inside a row's
 /// preview.
 ///
-/// ## The peek is the affordance
+/// ## A card shows a strip, not a page
 ///
-/// A page is narrower than the box by `peek`, so the next one is always partly
-/// on screen. That sliver is the whole reason the layout is not plain paging:
-/// nothing else on a card says "there is more here", and a dots indicator says
-/// it only after the viewer has already looked at the bottom edge. The
-/// interrupted image says it where the eye already is.
+/// On a card the pages are a STRIP of portrait items, several on screen at
+/// once — two whole and a third cropped by the box's edge, the way For You's
+/// Following row shows its cards (2026-10-02, asked for: "shorter, more
+/// items visible"). The crop is the affordance now: nothing else on a card
+/// says "there is more here", and an item cut by the edge says it where the
+/// eye already is. The strip is also what keeps a collection's card short:
+/// its height is an item's (3:4), not the post's own shape across the whole
+/// box. It REPLACES the earlier rule — one page nearly the box's width with
+/// a `2 × radius` sliver of the next showing as a vertical pill — which made
+/// every collection the tallest card on the screen.
 ///
-/// The last page is the exception and has to be: it lands flush against the
-/// box's trailing edge, so what peeks there is the PREVIOUS page on the left.
-/// Anything else leaves a strip of empty box at the end of the scroll, which
-/// reads as a broken layout rather than as an end.
+/// The strip rests on an ITEM'S EDGE, the gesture picking the edge
+/// (`RowEdgeSnap`, the rows' rule): forward lands an item flush with the
+/// box's right edge, back one flush with its left; the start is the first
+/// item flush left and the end the last flush right, so the scroll never
+/// ends on a strip of empty box.
+///
+/// The "current page" — the one that plays, that a hero flies, that the dots
+/// show — is the most visible item, and among equally visible ones the one
+/// the offset's progress through the run points at (`focusPage(atOffset:)`),
+/// so the first rest is the first page and the last rest the last page. A tap or a
+/// host's `setPage` names it outright.
 ///
 /// ## Not `isPagingEnabled`
 ///
 /// UIKit's paging steps by the scroll view's own width, which is the box — so
-/// every stop would be off by `peek` and accumulate. The stride is the page
-/// plus its gap, and the snap is done in `scrollViewWillEndDragging` against
-/// that stride, with `decelerationRate = .fast` so a flick still feels like
-/// paging rather than like a free scroll.
+/// every stop would be off by whatever of a neighbour shows. The snap is done
+/// in `scrollViewWillEndDragging`, with `decelerationRate = .fast` so a flick
+/// still feels decided rather than like a free scroll.
 ///
 /// ## Frames, not constraints
 ///
@@ -44,38 +55,61 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
     ///
     /// What genuinely differs is the frame the pages live in:
     ///
-    /// * **`.card`** — pages narrower than the box, so the next one peeks. The
-    ///   peek is the affordance there: nothing else on a card says the post has
-    ///   more than one photograph.
-    /// * **`.page`** — full-bleed, edge to edge, no peek and no gutter. A peek
-    ///   would run a stripe of another photograph down the side of a screen that
-    ///   IS the photograph, and the indicator over the comment band already says
-    ///   what the peek was there to say.
+    /// * **`.card`** — a strip of portrait items, several on screen, the one
+    ///   cut by the box's edge saying there is more (see the type note).
+    /// * **`.page`** — full-bleed, edge to edge, one page at a time, no gutter.
+    ///   A neighbour would run a stripe of another photograph down the side of
+    ///   a screen that IS the photograph, and the indicator over the comment
+    ///   band already says the post has more.
     public enum Style: Equatable, Sendable {
         case card
         case page
     }
 
-    /// The gutter between two pages, showing the card's own fill — which is
-    /// what keeps the peeking sliver from reading as part of the current photo.
+    /// The gutter between two items of a card's strip, showing the card's own
+    /// fill — which is what keeps two pictures from reading as one.
     public static let gap: CGFloat = 6
 
-    /// How much of the neighbour is on screen at rest, and it is DERIVED rather
-    /// than chosen: twice the page's corner radius.
-    ///
-    /// At that width the sliver's rounding exactly consumes it. A page is
-    /// rounded at `mediaCornerRadius`, so a visible strip of `2 × radius` has no
-    /// straight top or bottom edge at all — the two quarter-circles meet, and
-    /// what shows is the leading half of a vertical capsule rather than a slab
-    /// with slightly soft corners. One point narrower and the curve is cut
-    /// mid-arc; one point wider and a flat segment appears between the ends.
-    public static var neighbourWidth: CGFloat { PostGridListRowCell.mediaCornerRadius * 2 }
+    /// Items per box width on a card: two whole and a third cropped by the
+    /// box's right edge — the Following row's count (`ForYouRailsView
+    /// .Metrics.cardsPerWidth`), so the two strips on For You read as one
+    /// family.
+    public static let cardPagesPerBox: CGFloat = 2.3
 
-    /// How far the next page's leading edge sits inside the box. The gutter
-    /// falls INSIDE this, which is the arithmetic that was wrong first time:
-    /// with `peek` measured to the page's edge, the gap ate into the sliver and
-    /// what showed was `peek - gap`.
-    public static var peek: CGFloat { neighbourWidth + gap }
+    /// An item's height over its width on a card: 3:4 portrait, the Following
+    /// row's card shape. Every item of a strip shares it — a strip of mixed
+    /// heights has no single box to live in — and each picture FILLS its item.
+    public static let cardPageAspect: CGFloat = 4.0 / 3.0
+
+    /// How many items a card's box shows at rest for a collection of
+    /// `pageCount`: `cardPagesPerBox`, or exactly all of them when there are
+    /// fewer — two pages share the box half and half rather than leaving a
+    /// third of it empty after the second.
+    public static func cardPagesVisible(pageCount: Int) -> CGFloat {
+        min(cardPagesPerBox, CGFloat(max(pageCount, 1)))
+    }
+
+    /// The width of one item of a card's strip in a box `boxWidth` wide.
+    ///
+    /// The whole items and the gaps after them, then the fraction of one more:
+    /// `2 × w + 2 × gap + 0.3 × w = box`. With exactly as many items as fit,
+    /// there is no gap after the last. Whole points, so every item's edges —
+    /// and every offset a snap computes from them — fall on the pixel grid.
+    public static func cardPageWidth(forBoxWidth boxWidth: CGFloat, pageCount: Int) -> CGFloat {
+        let visible = cardPagesVisible(pageCount: pageCount)
+        let whole = visible.rounded(.down)
+        let gaps = visible == whole ? whole - 1 : whole
+        return max(1, ((boxWidth - gaps * gap) / visible).rounded(.down))
+    }
+
+    /// How tall a card's box is for a collection of `pageCount` in a box
+    /// `boxWidth` wide: one item's height. A pure function of the two, like
+    /// `PostGridListRowCell.mediaHeight(forCardWidth:aspectRatio:)`, so the
+    /// row's height never waits on a picture.
+    public static func cardHeight(forBoxWidth boxWidth: CGFloat, pageCount: Int) -> CGFloat {
+        guard boxWidth > 0 else { return 0 }
+        return (cardPageWidth(forBoxWidth: boxWidth, pageCount: pageCount) * cardPageAspect).rounded()
+    }
 
     /// A page was tapped.
     ///
@@ -155,8 +189,25 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
         scrollView.isScrollEnabled = enabled
     }
 
+    /// Whether the carousel can still travel `delta` pages — see the note
+    /// above `setScrollEnabled`, which is this method's.
+    ///
+    /// ⚠️ ON A CARD, FROM THE OFFSET — clamped to the run, which keeps the
+    /// rubber-band answer above. Several items are on screen there and the
+    /// current one may be any of them (a tap names it), so "is there a page
+    /// past the current one" is not "can the strip move": a strip at its start
+    /// with its second item current has nowhere to go back to, and a drag
+    /// claimed for it would only rubber-band.
     public func hasTravel(towardsPageDelta delta: Int) -> Bool {
         guard delta != 0 else { return pageViews.count > 1 }
+        if style == .card {
+            guard pageViews.count > 1 else { return false }
+            let range = offsetRange
+            let offset = RowEdgeSnap.clamp(scrollView.contentOffset.x, to: range)
+            return delta < 0
+                ? offset > range.lowerBound + RowEdgeSnap.slack
+                : offset < range.upperBound - RowEdgeSnap.slack
+        }
         return pageViews.indices.contains(currentPage + delta)
     }
 
@@ -445,8 +496,8 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
     }
 
     /// The current page's rect in a given view's space. The flight departs from
-    /// the PAGE, not the box: the box is wider by `peek` and holds a slice of a
-    /// different photo, so flying it would carry two images.
+    /// the PAGE, not the box: the box holds other items of the strip, so
+    /// flying it would carry several images.
     public func currentPageRect(in view: UIView) -> CGRect? {
         guard pageViews.indices.contains(currentPage) else { return nil }
         return pageViews[currentPage].convert(pageViews[currentPage].bounds, to: view)
@@ -473,7 +524,8 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
         scrollView.carousel = self
         scrollView.showsHorizontalScrollIndicator = false
         scrollView.alwaysBounceHorizontal = true
-        // See the type note: paging by the box's width would be off by `peek`.
+        // See the type note: paging by the box's width would be off by
+        // whatever of a neighbour shows.
         scrollView.isPagingEnabled = false
         scrollView.decelerationRate = .fast
         scrollView.delegate = self
@@ -493,7 +545,7 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
         // order to do nothing at all. That is how the post screen's
         // tap-to-pause came to work on a single clip and never on a gallery:
         // same cell, same recognizer, silently prevented by this one.
-        let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
+        let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
         tap.cancelsTouchesInView = false
         tap.delegate = self
         tapRecognizer = tap
@@ -507,9 +559,9 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
         switch style {
         case .card:
             // The card's own fill, so the gutter between two pages and the
-            // ground the peeking sliver rests on are the CARD, not a darker
-            // well. It is what makes the pages read as pills lying on the card
-            // rather than as frames cut into a panel.
+            // ground the strip rests on are the CARD, not a darker well. It is
+            // what makes the items read as pictures lying on the card rather
+            // than as frames cut into a panel.
             backgroundColor = PostGridListRowCell.cardFillColor
         case .page:
             // Nothing shows between full-bleed pages, and whatever the page's
@@ -567,6 +619,8 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
         }
         pageViews.indices.forEach(applyFraming(onPage:))
         currentPage = 0
+        focusFollowsOffset = true
+        cardDrag = nil
         scrollView.setContentOffset(.zero, animated: false)
         setNeedsLayout()
         layoutIfNeeded()
@@ -582,13 +636,22 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
     /// stream arrived seconds late and the post read as half-built. Reported as
     /// "a huge delay before the post is fully operational".
     ///
-    /// One neighbour each side, not two: the peek already shows part of the next
-    /// page, so it must be loaded before it is looked at, and beyond that a page
-    /// cannot be reached without a drag that gives the fetch its own time.
+    /// One neighbour each side, not two: the edge already shows part of the
+    /// next page, so it must be loaded before it is looked at, and beyond that
+    /// a page cannot be reached without a drag that gives the fetch its own
+    /// time.
+    ///
+    /// ⚠️ ON A CARD, EVERY ITEM IN THE BOX AND ONE EACH SIDE OF IT. Several
+    /// items are on screen there, and the current one need not be the first
+    /// of them — a window around it alone left the cropped item at the edge
+    /// an empty fill.
     private func loadPagesAroundCurrent() {
         guard let imagePipeline else { return }
-        let window = (currentPage - 1)...(currentPage + 1)
-        for index in window where pages.indices.contains(index) {
+        var window = Set((currentPage - 1)...(currentPage + 1))
+        if style == .card, let shown = pagesInBox() {
+            window.formUnion((shown.lowerBound - 1)...(shown.upperBound + 1))
+        }
+        for index in window.sorted() where pages.indices.contains(index) {
             guard !loadedPages.contains(index), let url = pages[index].thumbnailURL else { continue }
             loadedPages.insert(index)
             if let cached = imagePipeline.cachedImage(for: url) {
@@ -616,8 +679,33 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
         }
     }
 
-    @objc private func handleTap() {
+    /// ⚠️ ON A CARD, THE TAPPED ITEM BECOMES THE CURRENT ONE FIRST.
+    ///
+    /// Several items are on screen, and whatever opens the post reads the
+    /// current page (`PostGridListRowCell.currentMediaPage`) to open on it and
+    /// flies the current page's rect (`currentPageRect`). Opening on "the
+    /// current one" while the viewer pressed its neighbour would fly the wrong
+    /// picture. An item the box crops is brought fully in at once — the rest
+    /// a swipe would give it — so the flight departs from a whole picture
+    /// rather than from a rect half outside the box.
+    @objc private func handleTap(_ recognizer: UITapGestureRecognizer) {
+        if style == .card, let index = page(at: recognizer.location(in: scrollView)) {
+            focus(on: index, animated: false)
+        }
         onTapped?()
+    }
+
+    /// The item under a point of the scroll view's content, the gutter
+    /// counting for the nearer item — nil when there are no items.
+    func page(at point: CGPoint) -> Int? {
+        guard !pageViews.isEmpty else { return nil }
+        return pageViews.indices.min { lhs, rhs in
+            distance(from: point.x, to: pageViews[lhs].frame) < distance(from: point.x, to: pageViews[rhs].frame)
+        }
+    }
+
+    private func distance(from x: CGFloat, to frame: CGRect) -> CGFloat {
+        x < frame.minX ? frame.minX - x : (x > frame.maxX ? x - frame.maxX : 0)
     }
 
     /// Whether the tap has anybody to report to — the whole of its right to
@@ -652,7 +740,7 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
     /// for its preview, one level further in. A flight from a collection carries
     /// the current PAGE (`currentPageRect`, `renderedCover`), so the current page
     /// is what has to disappear. Concealing the whole carousel took the
-    /// neighbour's peek with it, and the strip came back in a single frame at the
+    /// neighbours with it, and the strip came back in a single frame at the
     /// landing — the same pop the row's own note describes, in miniature.
     ///
     /// Alpha, not `isHidden`: `currentPageRect` is the rect the DISMISSAL flies
@@ -682,11 +770,28 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
 
     /// The stride between two page origins: the page plus its gutter.
     private var stride: CGFloat { pageWidth + gutter }
-    private var pageWidth: CGFloat { max(bounds.width - trailingPeek, 1) }
+    /// A card's item (`cardPageWidth`), or the whole box on a page.
+    private var pageWidth: CGFloat {
+        switch style {
+        case .card: Self.cardPageWidth(forBoxWidth: bounds.width, pageCount: pageViews.count)
+        case .page: max(bounds.width, 1)
+        }
+    }
     /// Zero on a page: full-bleed media has no neighbour to show and no ground
     /// to show it on.
-    private var trailingPeek: CGFloat { style == .card ? Self.peek : 0 }
     private var gutter: CGFloat { style == .card ? Self.gap : 0 }
+
+    /// Every offset the strip can rest at: from the first item flush left to
+    /// the last one flush right.
+    private var offsetRange: ClosedRange<CGFloat> {
+        0...max(scrollView.contentSize.width - bounds.width, 0)
+    }
+
+    /// Each item's horizontal extent in content space, in page order — what
+    /// the snap's anchors are read from.
+    private var itemExtents: [ClosedRange<CGFloat>] {
+        pageViews.map { $0.frame.minX...$0.frame.maxX }
+    }
 
     override public func layoutSubviews() {
         super.layoutSubviews()
@@ -698,9 +803,8 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
             )
         }
         // The last page ends flush with the box, so the content is the stride
-        // of all but the last plus one full PAGE — not one full box. The
-        // difference is the strip of emptiness that would otherwise sit after
-        // the final photo.
+        // of all but the last plus one full PAGE — never a trailing gutter or
+        // a box's worth of emptiness after the final photo.
         let content = CGFloat(pageViews.count - 1) * stride + pageWidth
         scrollView.contentSize = CGSize(width: content, height: bounds.height)
     }
@@ -710,18 +814,95 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
     /// pages rather than in arithmetic it would have to duplicate.
     func debugOffset(forPage index: Int) -> CGFloat { offset(forPage: index) }
 
+    /// A `.page` carousel's resting offset for `index`: its page's origin,
+    /// clamped so the last one lands flush. A card has no single answer — see
+    /// `offset(revealing:)`.
     private func offset(forPage index: Int) -> CGFloat {
-        let maximum = max(scrollView.contentSize.width - bounds.width, 0)
-        return min(CGFloat(index) * stride, maximum)
+        min(CGFloat(index) * stride, offsetRange.upperBound)
+    }
+
+    /// The nearest offset at which item `index` of a card's strip is WHOLE in
+    /// the box: the current one when it already is, else the rest that brings
+    /// it in from the side it is cut on — its trailing edge on the right edge
+    /// when it lies right, its leading edge on the left when it lies left.
+    /// The same two rests a swipe gives (`RowEdgeSnap`), so a strip moved by
+    /// a host or a tap stands where a finger could have left it.
+    func offset(revealing index: Int) -> CGFloat {
+        let current = RowEdgeSnap.clamp(scrollView.contentOffset.x, to: offsetRange)
+        guard pageViews.indices.contains(index) else { return current }
+        let frame = pageViews[index].frame
+        if frame.minX < current - RowEdgeSnap.slack {
+            return RowEdgeSnap.clamp(frame.minX, to: offsetRange)
+        }
+        if frame.maxX > current + bounds.width + RowEdgeSnap.slack {
+            return RowEdgeSnap.clamp(frame.maxX - bounds.width, to: offsetRange)
+        }
+        return current
     }
 
     /// The box's position in pages, fractionally — clamped to the run, because
     /// a rubber-banded overscroll is not a page and a strip drawn from it would
     /// stretch off its own end.
+    ///
+    /// On a card, the offset's PROGRESS through the run spread over the pages:
+    /// zero at the first rest, the last page at the last — a strip ends with
+    /// several items on screen, and a stride-based position would never reach
+    /// the end of the run.
     public var scrollPosition: CGFloat {
         guard stride > 0, pageViews.count > 1 else { return 0 }
+        if style == .card { return progress(atOffset: scrollView.contentOffset.x) }
         let raw = scrollView.contentOffset.x / stride
         return min(max(raw, 0), CGFloat(pageViews.count - 1))
+    }
+
+    /// `scrollPosition` for a card at a given offset.
+    private func progress(atOffset offset: CGFloat) -> CGFloat {
+        let range = offsetRange
+        guard pageViews.count > 1, range.upperBound > 0 else { return 0 }
+        let clamped = RowEdgeSnap.clamp(offset, to: range)
+        return clamped / range.upperBound * CGFloat(pageViews.count - 1)
+    }
+
+    /// The card's current page at a given offset: the MOST VISIBLE item, and
+    /// among items equally visible (at rest, every whole one) the one nearest
+    /// the offset's progress through the run.
+    ///
+    /// Both halves are needed. Most-visible alone cannot tell two whole items
+    /// apart, and picking the first of them would make the last page
+    /// unreachable — at the end of the run the last two are both whole. The
+    /// progress alone can name an item already half out of the box mid-run,
+    /// which would play, and fly, a cropped picture.
+    ///
+    /// Clamped to the run, so a rubber-band answers for the end it is pulling.
+    func focusPage(atOffset offset: CGFloat) -> Int {
+        guard pageViews.count > 1 else { return 0 }
+        let clamped = RowEdgeSnap.clamp(offset, to: offsetRange)
+        let box = clamped...(clamped + bounds.width)
+        let shown: [CGFloat] = pageViews.map { view in
+            let frame = view.frame
+            guard frame.width > 0 else { return 0 }
+            let overlap = min(frame.maxX, box.upperBound) - max(frame.minX, box.lowerBound)
+            return max(overlap, 0) / frame.width
+        }
+        let best = shown.max() ?? 0
+        let progress = progress(atOffset: clamped)
+        // A hundredth of an item of tolerance: "whole" is whole within a
+        // fraction of a point, whatever the rounding of the item's width.
+        return shown.indices
+            .filter { shown[$0] >= best - 0.01 }
+            .min { abs(CGFloat($0) - progress) < abs(CGFloat($1) - progress) } ?? 0
+    }
+
+    /// The items a card's box shows any part of, at the current offset.
+    private func pagesInBox() -> ClosedRange<Int>? {
+        let offset = scrollView.contentOffset.x
+        let box = offset...(offset + bounds.width)
+        let shown = pageViews.indices.filter { index in
+            let frame = pageViews[index].frame
+            return frame.maxX > box.lowerBound && frame.minX < box.upperBound
+        }
+        guard let first = shown.first, let last = shown.last else { return nil }
+        return first...last
     }
 
     private func page(nearest offset: CGFloat) -> Int {
@@ -750,8 +931,24 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
     /// further in: momentum decides how fast a page arrives, never how many.
     private var dragAnchorPage: Int?
 
+    /// A card's drag in progress: where it began and which way it last moved
+    /// — what its release is read by (`RowEdgeSnap.steppedTarget`).
+    private var cardDrag: RowEdgeDragTracker?
+
+    /// Whether a card's current page follows the offset. True while the
+    /// viewer moves the strip; false once a tap or a host has NAMED the page
+    /// (`focus(on:animated:)`), so a strip that stays still keeps the page it
+    /// was given rather than re-deciding it on the next layout tick — and an
+    /// animated move to a named page does not wander through the pages it
+    /// passes.
+    private var focusFollowsOffset = true
+
     public func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
         dragAnchorPage = page(nearest: scrollView.contentOffset.x)
+        if style == .card {
+            cardDrag = RowEdgeDragTracker(offset: scrollView.contentOffset.x)
+            focusFollowsOffset = true
+        }
     }
 
     public func scrollViewWillEndDragging(
@@ -759,6 +956,10 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
         withVelocity velocity: CGPoint,
         targetContentOffset: UnsafeMutablePointer<CGPoint>
     ) {
+        if style == .card {
+            snapCard(scrollView, velocity: velocity.x, targetContentOffset: targetContentOffset)
+            return
+        }
         // Snap from the PROJECTED offset, not the current one: a flick that has
         // barely moved the content still means "next page", and reading the
         // live offset here would answer "stay".
@@ -804,15 +1005,88 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
         #endif
     }
 
+    /// A card's strip comes to rest on an item's edge, the side picked by the
+    /// gesture's direction, ONE ITEM PER GESTURE — `RowEdgeSnap.steppedTarget`.
+    ///
+    /// ⚠️ A RELEASE WITH NO SPEED IS ANIMATED BY HAND, as the rows do. Handed
+    /// a new target with a zero velocity, UIScrollView jumps to it rather than
+    /// gliding, so a slow drag lifted from a standstill would teleport the
+    /// strip. There the strip is told to stay where it is and is then
+    /// animated to the snap.
+    private func snapCard(
+        _ scrollView: UIScrollView, velocity: CGFloat,
+        targetContentOffset: UnsafeMutablePointer<CGPoint>
+    ) {
+        let live = scrollView.contentOffset.x
+        let drag = cardDrag
+        cardDrag = nil
+        let direction = RowEdgeSnap.direction(velocity: velocity, lastMovement: drag?.lastMovement)
+        let target = RowEdgeSnap.steppedTarget(
+            live: live,
+            start: drag?.start ?? live,
+            direction: direction,
+            items: itemExtents,
+            viewport: bounds.width,
+            margin: 0,
+            offsets: offsetRange
+        )
+        #if DEBUG
+        if CarouselPlaybackAudit.isEnabled {
+            CarouselPlaybackAudit.trace(
+                String(format: "card snap start=%.1f live=%.1f -> %.1f v=%.2f",
+                       drag?.start ?? live, live, target, velocity)
+            )
+        }
+        #endif
+        guard abs(velocity) < RowEdgeSnap.flickVelocity, offsetRange.contains(live),
+              scrollView === self.scrollView else {
+            // Moving — or pulled past an end, where UIKit's own spring back is
+            // the motion wanted: the deceleration is bent onto the snap.
+            targetContentOffset.pointee.x = target
+            return
+        }
+        targetContentOffset.pointee.x = live
+        guard target != live else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !self.scrollView.isTracking else { return }
+            self.scrollView.setContentOffset(CGPoint(x: target, y: 0), animated: true)
+        }
+    }
+
+    /// Names a card's current page and brings it whole into the box —
+    /// `offset(revealing:)`, which leaves a strip that already shows it whole
+    /// exactly where it is.
+    private func focus(on index: Int, animated: Bool) {
+        guard pageViews.indices.contains(index) else { return }
+        layoutIfNeeded()
+        focusFollowsOffset = false
+        let target = offset(revealing: index)
+        if abs(target - scrollView.contentOffset.x) > RowEdgeSnap.slack {
+            scrollView.setContentOffset(CGPoint(x: target, y: 0), animated: animated)
+        }
+        if !animated { scrollViewDidScroll(scrollView) }
+        setCurrentPage(index)
+    }
+
     /// Moves to a page. Returns false when there is no such page — the answer a
     /// caller must not mistake for success.
     ///
     /// Public because the page indicator drives it: the dots are a CONTROL, not
     /// a readout, and a control that reported a page it could not reach would be
     /// worse than no control at all.
+    ///
+    /// On a card the page is NAMED rather than scrolled to: it becomes the
+    /// current one, and the strip moves only as far as it takes to show it
+    /// whole — not at all when it already is. A post opened on the second of
+    /// two whole items, and closed on it, comes home to the strip exactly as
+    /// it was left.
     @discardableResult
     public func setPage(_ index: Int, animated: Bool = true) -> Bool {
         guard pageViews.indices.contains(index) else { return false }
+        if style == .card {
+            focus(on: index, animated: animated)
+            return true
+        }
         layoutIfNeeded()
         scrollView.setContentOffset(CGPoint(x: offset(forPage: index), y: 0), animated: animated)
         // A non-animated move reports itself rather than relying on the delegate
@@ -834,24 +1108,63 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
     /// Scrolls to an arbitrary offset — the fractional positions a real drag
     /// passes through and `setPage` cannot express, which is where "has this
     /// page left the box yet" is actually decided.
+    ///
+    /// A card's page follows it, as it would under a finger.
     func debugScroll(toOffsetX x: CGFloat) {
+        focusFollowsOffset = true
         scrollView.contentOffset.x = x
         scrollViewDidScroll(scrollView)
     }
+
+    /// Presses the card's item `index` the way a tap would, minus the touch.
+    func debugTap(onPage index: Int) {
+        guard pageViews.indices.contains(index) else { return }
+        if style == .card { focus(on: index, animated: false) }
+        onTapped?()
+    }
+
+    /// Every rest a card's strip can snap to — leading anchors, then trailing
+    /// ones — so a test can name a rest without redoing the arithmetic.
+    func debugAnchors() -> (leading: [CGFloat], trailing: [CGFloat]) {
+        (
+            RowEdgeSnap.leadingAnchors(items: itemExtents, margin: 0, offsets: offsetRange),
+            RowEdgeSnap.trailingAnchors(
+                items: itemExtents, viewport: bounds.width, margin: 0, offsets: offsetRange
+            )
+        )
+    }
+
+    /// The live offset, for a spec asserting where a move left the strip.
+    var debugContentOffsetX: CGFloat { scrollView.contentOffset.x }
     #endif
 
     public func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        if style == .card, scrollView.isDragging {
+            cardDrag?.track(scrollView.contentOffset.x)
+        }
         // Before the page-change guard below: a mark's page can leave the box
         // without the RESOLVED page changing again (the drag that carries it
         // out is the same one that already changed it).
         retirePausedMarksOffScreen()
         onScrollPosition?(scrollPosition)
-        let resolved = page(nearest: scrollView.contentOffset.x)
-        guard resolved != currentPage else { return }
-        currentPage = resolved
+        if style == .card {
+            // Items come into the box without the current page changing: the
+            // one arriving at the edge must be fetched as it arrives.
+            loadPagesAroundCurrent()
+            guard focusFollowsOffset else { return }
+            setCurrentPage(focusPage(atOffset: scrollView.contentOffset.x))
+            return
+        }
+        setCurrentPage(page(nearest: scrollView.contentOffset.x))
+    }
+
+    /// Makes `page` the current one, and tells everyone who acts on it.
+    private func setCurrentPage(_ page: Int) {
+        guard page != currentPage else { return }
+        currentPage = page
         applyPageConcealment()
         loadPagesAroundCurrent()
-        onPageChanged?(resolved)
+        onPageChanged?(page)
     }
 }
 
