@@ -10,12 +10,13 @@ import UIKit
 /// radius, border, or crop rules left to drift apart.
 ///
 /// Layer order (bottom → top): arrival cover image, DEPARTURE cover image,
-/// live video surface, text face, icon face, lock veil — all inside
+/// live video surface, text face, icon face, lock veil and lock — all inside
 /// `contentView`, which clips and rounds — then the CHROME: the border ring
 /// (neutral, or the flag gradient of `MapFlagBorderView`) and the corner
-/// badge. The chrome sits OUTSIDE the clip, because on a text disc or an icon
-/// the badge overlaps the edge like an app icon's badge (a media card's sits
-/// inside its corner); the card's own layer is unclipped
+/// badge, which is therefore always drawn over the lock. The chrome sits
+/// OUTSIDE the clip, because on a text disc or an icon the badge overlaps the
+/// edge like an app icon's badge (a media card's sits inside its corner); the
+/// card's own layer is unclipped
 /// and only draws the rounded ground. The ring draws the pin's border above
 /// whichever media surface is showing, so a live-previewing pin keeps its ring
 /// too. During a flight the
@@ -296,6 +297,8 @@ final class PinCardView: UIView {
 
         // Above every face: a locked marker is its face, darkened, under a
         // lock. Never on a card that flies — a locked marker does not open.
+        // Still the CONTENT, so still under the chrome: the corner badge is
+        // drawn over the lock wherever the two meet.
         lockVeil.backgroundColor = UIColor.black.withAlphaComponent(0.45)
         lockVeil.frame = bounds
         lockVeil.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -411,8 +414,6 @@ final class PinCardView: UIView {
         flagBorder.setFlag(dress.borderFlag)
         badgeView.setBadge(dress.badge)
         positionBadge()
-        // The lock leans away from an inside badge (`lockGlyphOffset`).
-        layoutIconFace()
         applyFaceVisibility()
         applyBlend()
     }
@@ -970,19 +971,26 @@ final class PinCardView: UIView {
         let side = min(Face.icon.side, min(bounds.width, bounds.height))
         iconFaceView.bounds = CGRect(x: 0, y: 0, width: side, height: side)
         iconFaceView.center = CGPoint(x: bounds.midX, y: bounds.midY)
-        lockGlyph.bounds = CGRect(x: 0, y: 0, width: 24, height: 24)
-        lockGlyph.center = CGPoint(
-            x: iconFaceView.center.x + lockGlyphOffset, y: iconFaceView.center.y + lockGlyphOffset
-        )
+        layoutLockGlyph()
     }
 
-    /// How far the lock leans up and left of the centre: only on a square
-    /// card whose badge sits inside the corner, where the 20pt badge
-    /// (centred 14pt in) reached the bottom-right of the centred lock —
-    /// filmed on Mexico's marker. 3pt clears it by about 5pt and keeps the
-    /// lock reading as centred.
-    private var lockGlyphOffset: CGFloat {
-        badgeSitsInside && dress.badge != nil ? -3 : 0
+    /// The lock sits at the exact centre of the card's content rect, on every
+    /// face, whatever the corner holds.
+    ///
+    /// ⚠️ IT NEVER LEANS AWAY FROM THE BADGE. It used to, by 3pt up and left on
+    /// a square card whose badge sits inside the corner (#356), so the two
+    /// would not touch — and a lock off-centre in its square read as a layout
+    /// mistake. The layering settles it instead: the lock is part of the FACE
+    /// (inside `contentView`, under the chrome), the badge is FURNITURE (in
+    /// `chromeView`, above it), so where the two meet the badge simply covers
+    /// the lock's corner.
+    ///
+    /// The symbol's image is centred on its ink (measured off the rendered
+    /// card: `MapMarkerDressTests.theLocksPixelsAreCentredInTheSquare`), so
+    /// centring the view is centring the padlock.
+    private func layoutLockGlyph() {
+        lockGlyph.bounds = CGRect(origin: .zero, size: lockGlyph.image?.size ?? .zero)
+        lockGlyph.center = CGPoint(x: bounds.midX, y: bounds.midY)
     }
 
     /// Every border takes the same shape: the neutral ring and the flag one

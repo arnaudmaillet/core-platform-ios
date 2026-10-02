@@ -589,8 +589,10 @@ public struct MockSocialDataset: Sendable {
     ///   diff would ever be stable and no QA recipe could pin a marker's
     ///   appearance.
     ///
-    /// `catalogue` is the baked catalogue's ids in manifest order, so the
-    /// caller decides how many distinct icons the map can show.
+    /// `catalogue` is the icon ids a face is handed out from, in order, so the
+    /// caller decides which icons — and how many distinct ones — the map can
+    /// show (the app hands in emote faces, never the baked catalogue's
+    /// geometric placeholders: see `EmoteKit.EmoteMapIcons`).
     public func animatedIconIDsByPostID(catalogue: [String]) -> [String: String] {
         guard !catalogue.isEmpty else { return [:] }
         return posts.reduce(into: [:]) { result, post in

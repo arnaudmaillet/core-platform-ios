@@ -530,9 +530,9 @@ final class AppContainer {
         // animated icon, and the wire has no `icon_id` to give it
         // (`dev/issues/BACKEND_ANIMATED_PIN_ICONS.md`, proposed field 12). The
         // mock knows which posts are text-only; on the fleet this is empty and
-        // the marker keeps the author's face.
-        mockAnimatedIcons: environment == .mock
-            ? Self.mockAnimatedIcons(in: mockBackend, catalogue: Self.mapIconCatalog) : [:],
+        // the marker keeps the author's face. The icon is an EMOTE — the one the
+        // caption carries — resolved by `mapIcons` (see `EmoteMapIcons`).
+        mockAnimatedIcons: environment == .mock ? Self.mockAnimatedIcons(in: mockBackend) : [:],
         // Baked previews of a media post's own footage — the decode-free
         // alternative to a player, and the ONLY animated media the map can show
         // without a network: the sheets are in the app bundle, so unlike live
@@ -549,15 +549,15 @@ final class AppContainer {
         // itself costs +1.6 ms of frame mean against animating nothing at all.
         mockPreviewSheets: environment == .mock
             ? Self.mockPreviewSheets(in: mockBackend, catalogue: Self.mapPreviewCatalog) : [:],
-        // ⚠️ The ids above always come from the REAL catalogue, even when the
-        // one handed to the map cannot honour them. That is the whole point of
+        // ⚠️ The ids above are always handed out, even when the provider
+        // handed to the map cannot honour them. That is the whole point of
         // `-map-icons-unavailable`: seeding from an empty catalogue would give
         // no pin an icon id at all, so no marker would wear `.icon` and the
         // fallback would never run — the flag would prove the opposite of what
         // it claims. Here the pins carry ids and the catalogue answers nothing,
         // which is exactly a fleet build, an evicted asset, or a decode that
         // failed.
-        iconCatalog: Self.iconsUnavailable ? Self.unavailableIconCatalog : Self.mapIconCatalog,
+        iconCatalog: Self.mapIconProvider,
         previewCatalog: Self.previewsUnavailable ? Self.unavailableIconCatalog : Self.mapPreviewCatalog,
         countryAccess: countryAccess,
         stakePacks: stakePacks
@@ -577,7 +577,12 @@ final class AppContainer {
     /// and every async resolve throws — the real failure path, not a stub.
     private static let unavailableIconCatalog =
         AnimatedIconCatalog(manifest: "mapicons-deliberately-absent")
+    /// `-maps-baked-icons`: text posts wear the baked catalogue's icons, the
+    /// decomposed placeholders included — see `mockAnimatedIcons`.
+    static let wearsBakedIcons =
+        ProcessInfo.processInfo.arguments.contains("-maps-baked-icons")
     #else
+    static let wearsBakedIcons = false
     static let iconsUnavailable = false
     static let previewsUnavailable = false
     private static let unavailableIconCatalog: AnimatedIconCatalog? = nil
@@ -622,13 +627,40 @@ final class AppContainer {
         EmoteEngine.shared.iconCatalog = mapIconCatalog
     }
 
-    /// Which mock post wears which icon. Text-only posts, half of them.
-    private static func mockAnimatedIcons(
-        in backend: MockBackend, catalogue: AnimatedIconCatalog
-    ) -> [PostID: String] {
-        backend.dataset.animatedIconIDsByPostID(catalogue: catalogue.ids)
+    /// What the map's markers wear as icon faces: emotes, through EmoteKit,
+    /// over the baked catalogue — see `EmoteMapIcons`.
+    private static let mapIcons = EmoteMapIcons(catalogue: mapIconCatalog)
+
+    /// `mapIcons`, or under `-map-icons-unavailable` a catalogue that resolves
+    /// nothing.
+    private static var mapIconProvider: (any AnimatedIconProviding)? {
+        if iconsUnavailable { return unavailableIconCatalog }
+        return mapIcons
+    }
+
+    /// Which mock post wears which icon face. The dataset decides WHICH text
+    /// posts wear one; each wears the emote its caption carries, or a face
+    /// handed out in turn — never one of the catalogue's geometric
+    /// placeholders, which read as an empty disc (`EmoteMapIcons`).
+    ///
+    /// `-maps-baked-icons` (DEBUG) hands out the baked catalogue's own ids
+    /// instead, in manifest order as before — the ONLY way the map shows its
+    /// decomposed still+track icons now that no face is one, kept for the
+    /// playback and cost instruments (`-map-icon-hud`, `-icon-bench`) that
+    /// measure that path. Their discs and squircles are the empty markers.
+    private static func mockAnimatedIcons(in backend: MockBackend) -> [PostID: String] {
+        if wearsBakedIcons {
+            return backend.dataset.animatedIconIDsByPostID(catalogue: mapIconCatalog.ids)
+                .reduce(into: [:]) { result, entry in result[PostID(entry.key)] = entry.value }
+        }
+        let captions = Dictionary(
+            backend.dataset.posts.map { ($0.postID, $0.caption) }, uniquingKeysWith: { first, _ in first }
+        )
+        return backend.dataset.animatedIconIDsByPostID(catalogue: EmoteMapIcons.defaultFaceIDs)
             .reduce(into: [:]) { result, entry in
-                result[PostID(entry.key)] = entry.value
+                result[PostID(entry.key)] = captions[entry.key].flatMap {
+                    EmoteMapIcons.faceID(forCaption: $0)
+                } ?? entry.value
             }
     }
 

@@ -398,23 +398,70 @@ struct MapMarkerDressTests {
         #expect(card.debugFlagBorder.isHidden)
     }
 
-    /// On a locked SQUARE card the lock leans up and left, clear of the badge
-    /// inside the corner; on a disc (badge outside) it stays centred.
-    @Test func theLockClearsAnInsideBadge() {
+    /// The lock sits at the exact centre of the card — on a square card
+    /// with its badge inside the corner too (#356 nudged it 3pt up and left
+    /// there, which read as off-centre) — whatever the corner holds.
+    @Test(arguments: [PinCardView.Face.media, .text])
+    func theLockIsCentred(face: PinCardView.Face) {
+        for kind: MapPlace.Kind? in [.country, .city, nil] {
+            let card = card(face, dress: .resolve(kind: kind, countryCode: "MX", isLocked: true))
+            card.layoutIfNeeded()
+            let lock = card.debugLockGlyph.center
+            #expect(lock == CGPoint(x: card.bounds.midX, y: card.bounds.midY),
+                    "\(face) \(String(describing: kind)): lock at \(lock) in \(card.bounds)")
+        }
+    }
+
+    /// Measured rather than trusted: the lock's DRAWN pixels are centred in
+    /// the card's content rect. Only the content view is rendered — the badge
+    /// is chrome, drawn above it (the next test).
+    @Test func theLocksPixelsAreCentredInTheSquare() throws {
+        let card = card(.media, dress: .resolve(kind: .country, countryCode: "AT", isLocked: true))
+        card.layoutIfNeeded()
+        let content = card.debugContentView
+        let scale: CGFloat = 3
+        let width = Int(content.bounds.width * scale), height = Int(content.bounds.height * scale)
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        let drawn = pixels.withUnsafeMutableBytes { buffer -> Bool in
+            guard let context = CGContext(
+                data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8,
+                bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else { return false }
+            // `render(in:)` draws in UIKit's orientation: origin top-left.
+            context.translateBy(x: 0, y: CGFloat(height))
+            context.scaleBy(x: scale, y: -scale)
+            content.layer.render(in: context)
+            return true
+        }
+        try #require(drawn)
+        // The lock is the only near-white ink on a darkened, empty card.
+        var minX = width, minY = height, maxX = -1, maxY = -1
+        for y in 0..<height {
+            for x in 0..<width {
+                let i = (y * width + x) * 4
+                guard pixels[i] > 200, pixels[i + 1] > 200, pixels[i + 2] > 200 else { continue }
+                minX = min(minX, x); maxX = max(maxX, x); minY = min(minY, y); maxY = max(maxY, y)
+            }
+        }
+        try #require(maxX >= minX, "no lock drawn")
+        let centre = CGPoint(x: CGFloat(minX + maxX + 1) / 2 / scale, y: CGFloat(minY + maxY + 1) / 2 / scale)
+        print("[lock] ink x \(minX)...\(maxX) y \(minY)...\(maxY) px @3x, centre \(centre) in \(content.bounds)")
+        #expect(abs(centre.x - content.bounds.midX) <= 0.5, "x \(centre.x)")
+        #expect(abs(centre.y - content.bounds.midY) <= 0.5, "y \(centre.y)")
+    }
+
+    /// The lock is the FACE and the badge FURNITURE: the lock lives in the
+    /// clipped content, the badge in the chrome drawn over it — so where the
+    /// two meet, the badge is on top.
+    @Test func theBadgeIsDrawnOverTheLock() {
         let card = card(.media, dress: .resolve(kind: .country, countryCode: "MX", isLocked: true))
-        let lock = card.debugLockGlyph.center
-        let badge = card.debugBadge.center
-        #expect(lock.x < card.bounds.midX && lock.y < card.bounds.midY, "lock \(lock)")
-        // The lock symbol's body reaches ~5pt right of and ~7pt below its
-        // centre at 15pt: that point must sit outside the badge's disc.
-        let corner = CGPoint(x: lock.x + 5.5, y: lock.y + 7)
-        let gap = hypot(badge.x - corner.x, badge.y - corner.y) - MapMarkerBadgeView.side / 2
-        #expect(gap > 2, "gap \(gap)")
-        let disc = self.card(.text, dress: .resolve(kind: .country, countryCode: "MX", isLocked: true))
-        #expect(disc.debugLockGlyph.center == CGPoint(x: disc.bounds.midX, y: disc.bounds.midY))
-        let open = self.card(.media, dress: .resolve(kind: nil, countryCode: "MX", isLocked: true))
-        #expect(open.debugLockGlyph.center == CGPoint(x: open.bounds.midX, y: open.bounds.midY),
-                "no badge, nothing to clear")
+        let content = card.debugContentView, chrome = card.debugChromeView
+        #expect(card.debugLockGlyph.superview === content && card.debugLockVeil.superview === content)
+        #expect(card.debugBadge.superview === chrome)
+        let order = card.subviews
+        #expect((order.firstIndex(of: content) ?? .max) < (order.firstIndex(of: chrome) ?? -1))
+        #expect(!card.debugBadge.isHidden && !card.debugLockGlyph.isHidden)
     }
 
     @Test func unlockingTakesTheLockOff() {
@@ -524,6 +571,120 @@ struct MapMarkerDressTests {
         view.prepareForReuse()
         #expect(view.card.dress == .neutral)
         #expect(view.card.debugLockVeil.isHidden)
+    }
+
+    // MARK: - No play glyph
+
+    /// The symbol images a view actually SHOWS — an image view whose image is
+    /// an SF Symbol, with no hidden view between it and `root`.
+    private func visibleSymbols(in root: UIView) -> [UIImageView] {
+        var found: [UIImageView] = []
+        func walk(_ view: UIView) {
+            guard !view.isHidden, view.alpha > 0 else { return }
+            if let imageView = view as? UIImageView, imageView.image?.isSymbolImage == true {
+                found.append(imageView)
+            }
+            view.subviews.forEach(walk)
+        }
+        walk(root)
+        return found
+    }
+
+    /// A media marker shows its picture and its place, never a play glyph in
+    /// its corner — video or photo, placed or not. The corner is the badge's.
+    @Test(arguments: [MapPin.Kind.video, .photo])
+    func aMediaMarkerWearsNoPlayGlyph(kind: MapPin.Kind) {
+        for dress in [MapMarkerDress.neutral, .resolve(kind: .country, countryCode: "FR", isLocked: false)] {
+            let view = MapAnnotationView(annotation: nil, reuseIdentifier: nil)
+            view.configure(with: pin("m-\(kind)", kind: kind), dress: dress, imagePipeline: pipeline())
+            #expect(view.subviews == [view.card], "the card is all a pin draws")
+            #expect(visibleSymbols(in: view).isEmpty,
+                    "\(kind) \(dress): \(visibleSymbols(in: view).map(\.image))")
+        }
+    }
+}
+
+/// An emote face reaches its marker through whatever `AnimatedIconProviding`
+/// the map is given — the app hands it emotes (`EmoteKit.EmoteMapIcons`), and a
+/// band marker at world zoom wears the art exactly as a local one does.
+@MainActor
+struct MapEmoteFaceTests {
+    /// Answers from a table, synchronously or after a hop.
+    @MainActor
+    final class StubIcons: AnimatedIconProviding {
+        var art: [String: AnimatedIconArt] = [:]
+        var warm = true
+        private(set) var asked: [String] = []
+
+        func cached(_ id: String) -> AnimatedIconArt? { warm ? art[id] : nil }
+
+        func art(for id: String) async throws -> AnimatedIconArt {
+            asked.append(id)
+            await Task.yield()
+            guard let found = art[id] else { throw URLError(.fileDoesNotExist) }
+            return found
+        }
+    }
+
+    private func face() -> AnimatedIconArt {
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image { context in
+            UIColor.systemYellow.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
+            UIColor.black.setFill()
+            context.fill(CGRect(x: 1, y: 1, width: 1, height: 1))
+        }
+        return .sheet(AnimatedIconSheet(sheet: image, frameCount: 1, columns: 1, frameDuration: 0.1))
+    }
+
+    private func emotePin() -> MapPin {
+        MapPin(
+            postID: PostID("post-world-56"), latitude: 52.2297, longitude: 21.0122, thumbnailURL: nil,
+            kind: .text, places: [MapPlace(id: "country:poland", name: "Poland", kind: .country)],
+            animatedIconID: "lol"
+        )
+    }
+
+    private func pipeline() -> ImagePipeline { ImagePipeline(fetcher: PlaceholderImageFetcher()) }
+
+    /// Poland's country marker, in hand: the face is drawn from the first
+    /// frame, the text disc never shows, and the flag badge stays.
+    @Test func aCountryMarkerWearsItsEmoteFromTheFirstFrame() {
+        let icons = StubIcons()
+        icons.art["lol"] = face()
+        let view = MapAnnotationView(annotation: nil, reuseIdentifier: nil)
+        view.configure(
+            with: emotePin(), dress: .resolve(kind: .country, countryCode: "PL", isLocked: false),
+            imagePipeline: pipeline(), iconCatalog: icons
+        )
+        #expect(view.debugFaceName == "icon")
+        #expect(!view.card.debugTextFaceIsVisible, "no disc under a face that has its art")
+        #expect(view.card.debugIconFaceIsVisible)
+        #expect(view.card.dress.badge == .flag("PL"))
+    }
+
+    /// Resolved later: the disc stands in until the face lands, then goes.
+    @Test func aColdFaceLandsAndTheDiscGoes() async {
+        let icons = StubIcons()
+        icons.art["lol"] = face()
+        icons.warm = false
+        let place = MapPlace(id: "country:poland", name: "Poland", kind: .country)
+        let item = MapClusterEngine.Item(
+            representative: emotePin(), memberIDs: [PostID("post-world-56"), PostID("post-world-57")],
+            latitude: 52.2297, longitude: 21.0122, place: place, isHierarchyMarker: true
+        )
+        let cluster = MapComputedCluster(item)
+        let view = MapClusterAnnotationView(annotation: cluster, reuseIdentifier: nil)
+        view.configure(
+            with: cluster, dress: .resolve(kind: .country, countryCode: "PL", isLocked: false),
+            imagePipeline: pipeline(), iconCatalog: icons
+        )
+        #expect(view.debugFaceName == "icon-BARE")
+        for _ in 0..<100 where view.debugFaceName != "icon" {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(icons.asked == ["lol"])
+        #expect(view.debugFaceName == "icon")
+        #expect(!view.card.debugTextFaceIsVisible)
     }
 }
 
