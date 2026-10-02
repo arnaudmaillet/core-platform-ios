@@ -230,6 +230,92 @@ struct CountryShopViewControllerTests {
         #expect(row.nameLabel.attributedText?.containsAttachments(in: NSRange(location: 0, length: 6)) == false)
     }
 
+    // MARK: - Boosts
+
+    /// A ×10 pack seller over a plain count, mirroring the wallet's rules.
+    private final class FakePacks: StakePackSelling {
+        let access: FakeAccess
+        var shotsLeft = 0
+        init(access: FakeAccess) { self.access = access }
+
+        var offer: StakePackOffer {
+            StakePackOffer(shotsPerPack: 10, pointsPerShot: 10, price: 20, shotsLeft: shotsLeft)
+        }
+
+        func buyPack() -> StakePackPurchase {
+            guard shotsLeft == 0 else { return .packStillActive(shotsLeft: shotsLeft) }
+            guard access.gems >= 20 else { return .insufficientGems(needed: 20, have: access.gems) }
+            access.gems -= 20
+            shotsLeft = 10
+            NotificationCenter.default.post(name: .stakePackDidChange, object: self)
+            return .bought(shots: 10, remainingGems: access.gems)
+        }
+    }
+
+    private func packRow(_ shop: CountryShopViewController) throws -> StakePackRowCell {
+        shop.view.frame = CGRect(x: 0, y: 0, width: 402, height: 800)
+        shop.view.layoutIfNeeded()
+        let path = try #require(shop.dataSource.indexPath(for: .stakePack))
+        return try #require(shop.collectionView.cellForItem(at: path) as? StakePackRowCell)
+    }
+
+    /// With a seller, Boosts leads the list — one row the collapsed sheet
+    /// always shows — and the map's sections follow as before.
+    @Test func boostsLeadTheListWithTheCartridgePack() throws {
+        let access = FakeAccess()
+        let shop = CountryShopViewController(access: access, stakePacks: FakePacks(access: access))
+        shop.loadViewIfNeeded()
+        let snapshot = shop.dataSource.snapshot()
+        #expect(snapshot.sectionIdentifiers == [.boosts, .progress, .unlocked, .locked])
+        #expect(snapshot.itemIdentifiers(inSection: .boosts) == [.stakePack])
+        #expect(header(shop, .boosts) == "Boosts")
+
+        let row = try packRow(shop)
+        #expect(row.titleLabel.text == "×10 cartridges")
+        #expect(row.detailLabel.text == "10 shots · 10 points a tap")
+        #expect(row.accessibilityValue == "20 gems")
+    }
+
+    /// Without one — the fleet — there is no Boosts section at all.
+    @Test func noSellerNoBoosts() {
+        let shop = makeShop()
+        #expect(shop.dataSource.snapshot().sectionIdentifiers.contains(.boosts) == false)
+    }
+
+    /// Buying spends the gems and turns the price into "Active — 10 left";
+    /// while it lasts, a second pack is refused (packs don't stack).
+    @Test func buyingThePackShowsItActiveAndRefusesAnother() throws {
+        let access = FakeAccess()
+        let packs = FakePacks(access: access)
+        let shop = CountryShopViewController(access: access, stakePacks: packs)
+        shop.loadViewIfNeeded()
+
+        #expect(shop.buyStakePack() == .bought(shots: 10, remainingGems: 20))
+        #expect(access.gems == 20)
+        let row = try packRow(shop)
+        #expect(row.accessibilityValue == "Active — 10 left")
+        #expect(CountryShopViewController.activeText(packs.offer) == "Active — 10 left")
+
+        #expect(shop.buyStakePack() == .packStillActive(shotsLeft: 10))
+        #expect(access.gems == 20)
+
+        // Spent down (in the feed), the price comes back.
+        packs.shotsLeft = 0
+        NotificationCenter.default.post(name: .stakePackDidChange, object: packs)
+        #expect(try packRow(shop).accessibilityValue == "20 gems")
+    }
+
+    /// Boosts is not a country: a search hides it, clearing it brings it back.
+    @Test func aSearchHidesBoosts() {
+        let access = FakeAccess()
+        let shop = CountryShopViewController(access: access, stakePacks: FakePacks(access: access))
+        shop.loadViewIfNeeded()
+        search(shop, "an")
+        #expect(shop.dataSource.snapshot().sectionIdentifiers.first == .progress)
+        search(shop, "")
+        #expect(shop.dataSource.snapshot().sectionIdentifiers.first == .boosts)
+    }
+
     /// The Explore header's door: an existing, unrestricted symbol.
     @Test func theShopDoorIsAStorefront() {
         #expect(CountryShopEntry.symbolName == "storefront")

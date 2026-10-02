@@ -23,6 +23,9 @@ public struct WalletSnapshot: Equatable, Sendable {
     /// Gems (the charter's currency B) earned by stakes that have settled —
     /// earned-only, so it is the sum of their rewards and nothing else.
     public let gems: Int
+    /// Shots left in the viewer's ×10 cartridge pack (`Policy.StakePack`);
+    /// 0 when no pack is active.
+    public let stakeShots: Int
 }
 
 /// A stake of points (the charter's currency A) on a post or comment, and
@@ -85,14 +88,34 @@ public enum WalletClaimOutcome: Equatable, Sendable {
     case dailyCapReached
 }
 
-/// What a boost spend did (the backend spec's `BoostOutcome`, minus the
-/// server-only cases a local ledger cannot produce).
 /// What a gems spend did.
 public enum WalletGemSpend: Equatable, Sendable {
     case spent(remaining: Int)
     case insufficient(gems: Int)
 }
 
+/// What one stake asks the wallet for: a plain amount of points (a tap's
+/// default), or one SHOT of the ×10 cartridge pack — `Policy.StakePack.
+/// pointsPerShot` points in one gesture, and one shot off the pack.
+///
+/// Either way the points are the viewer's own: a shot is a CONVENIENCE bought
+/// with gems (one tap instead of ten), never points (charter V5.3 §34, B ─X→ A).
+public enum WalletStakeSpend: Equatable, Sendable {
+    case points(Int)
+    case shot
+}
+
+/// What buying a ×10 cartridge pack did.
+public enum WalletStakePackPurchase: Equatable, Sendable {
+    /// The gems left, and the pack's shots now loaded.
+    case bought(shots: Int, remainingGems: Int)
+    /// Packs don't stack: the current one still has shots, nothing changed.
+    case packStillActive(shotsLeft: Int)
+    case insufficientGems(needed: Int, have: Int)
+}
+
+/// What a boost spend did (the backend spec's `BoostOutcome`, minus the
+/// server-only cases a local ledger cannot produce).
 public enum WalletBoostOutcome: Equatable, Sendable {
     /// `spent` is what actually left the wallet — a request that would
     /// overshoot the per-target cap is CLAMPED to the cap's remainder, and
@@ -103,6 +126,8 @@ public enum WalletBoostOutcome: Equatable, Sendable {
     /// The target already holds the viewer's whole allowance
     /// (`Policy.perTargetBoostCap`); nothing changed.
     case targetCapReached(targetTotal: Int)
+    /// A shot was asked for with no pack loaded; nothing changed.
+    case noShotsLeft
 }
 
 /// The viewer's point wallet and boost ledger.
@@ -126,8 +151,7 @@ public enum WalletBoostOutcome: Equatable, Sendable {
 public final class WalletStore: @unchecked Sendable {
 
     /// The reward economics, in one place. These are the client-side stand-ins
-    /// for values the real service will echo on `GetWallet` — surfaces read
-    /// them through `WalletSnapshot` / `boostDenominations`, never directly.
+    /// for values the real service will echo on `GetWallet`.
     public enum Policy {
         /// A claim unlocks every hour.
         public static let claimInterval: TimeInterval = 60 * 60
@@ -139,11 +163,34 @@ public final class WalletStore: @unchecked Sendable {
         public static func multiplier(forStreak streak: Int) -> Double {
             min(2.0, 1.0 + 0.1 * Double(max(0, streak - 1)))
         }
-        /// A plain tap on a boost button spends this.
-        public static let tapBoostAmount = 10
-        /// The long-press picker's fixed options (the picker also offers
-        /// "Max", computed live from the cap's remainder and the balance).
-        public static let boostDenominations = [100]
+        /// What ONE stake gesture commits by default — a tap on the feed
+        /// rail's stake button, on the comments composer's, on a card's like
+        /// chip, and the long-press menu's only plain amount. The ONE place
+        /// the default lives (1 point, the user's call on 2026-10-02 — it was
+        /// 10, with a Max / 100 menu, until staking several points in one
+        /// gesture became the ×10 cartridge pack's job).
+        public static let defaultStakeAmount = 1
+        /// The ×10 cartridge pack, the shop's boost: a pack of SHOTS, each
+        /// staking `pointsPerShot` of the viewer's OWN points in one tap.
+        /// Bought with gems; shots never expire; packs don't stack (a new one
+        /// only once the current one is empty).
+        ///
+        /// The price, against the mock economy's gem earn rate: a settled
+        /// stake earns gems about 55% of the time, 15–49% of the points
+        /// staked (`mockOutcome`) — roughly 18 gems back per 100 points
+        /// staked. A pack moves exactly 100 points (10 × 10), so 20 gems
+        /// prices it near what its own stakes would earn back: an average
+        /// curator about breaks even, a good one comes out ahead, and it
+        /// sits between the cheapest country (15) and the next tier (30), the
+        /// only other thing gems buy. `seededGems` (100) buys five.
+        public enum StakePack {
+            /// Shots in one pack.
+            public static let shots = 10
+            /// Points ONE shot stakes — named for its number ("×10").
+            public static let pointsPerShot = 10
+            /// What a pack costs, in gems.
+            public static let price = 20
+        }
         /// The most of THIS viewer's points one post (or comment) can hold
         /// — spends past it are clamped to the remainder, and a full target
         /// refuses outright.
@@ -196,6 +243,8 @@ public final class WalletStore: @unchecked Sendable {
         /// spent. Gems EARNED stay derived from the settled stakes.
         static let gemsGranted = "wallet.gemsGranted"
         static let gemsSpent = "wallet.gemsSpent"
+        /// Shots left in the ×10 cartridge pack.
+        static let stakeShots = "wallet.stakeShots"
     }
 
     /// Fired after every balance-affecting change, on whatever thread made
@@ -225,7 +274,8 @@ public final class WalletStore: @unchecked Sendable {
         if arguments.contains("-wallet-reset") {
             for key in [Key.balance, Key.lifetimeEarned, Key.lifetimeSpent, Key.lastClaimAt,
                         Key.claimedToday, Key.claimedTodayDay, Key.streakDays, Key.boostTotals,
-                        Key.stakedAt, Key.seeded, Key.demoStakesSeeded, Key.gemsGranted, Key.gemsSpent] {
+                        Key.stakedAt, Key.seeded, Key.demoStakesSeeded, Key.gemsGranted, Key.gemsSpent,
+                        Key.stakeShots] {
                 defaults.removeObject(forKey: key)
             }
         }
@@ -259,6 +309,12 @@ public final class WalletStore: @unchecked Sendable {
             defaults.set(0, forKey: Key.gemsSpent)
             defaults.set(gems - stakesLocked(at: now()).reduce(0) { $0 + $1.gems }, forKey: Key.gemsGranted)
         }
+        // `-wallet-stake-shots N`: a ×10 cartridge pack with N shots left
+        // (0 empties it) — the menu's loaded face without a trip to the shop.
+        if let index = arguments.firstIndex(of: "-wallet-stake-shots"),
+           index + 1 < arguments.count, let shots = Int(arguments[index + 1]) {
+            defaults.set(max(0, shots), forKey: Key.stakeShots)
+        }
         #endif
         // The seeded gems, once — also for an install that predates them.
         if defaults.object(forKey: Key.gemsGranted) == nil {
@@ -291,6 +347,11 @@ public final class WalletStore: @unchecked Sendable {
     /// payout, and the streak the UI should show.
     public func snapshot() -> WalletSnapshot {
         lock.withLock { snapshotLocked(at: now()) }
+    }
+
+    /// Shots left in the ×10 cartridge pack; 0 when none is active.
+    public var stakeShots: Int {
+        lock.withLock { defaults.integer(forKey: Key.stakeShots) }
     }
 
     /// Total points ever boosted into one post or comment, this device.
@@ -371,35 +432,81 @@ public final class WalletStore: @unchecked Sendable {
     /// no refunds.
     @discardableResult
     public func boost(targetID: String, amount: Int) -> WalletBoostOutcome {
-        precondition(amount > 0, "a boost spends something")
+        stake(.points(amount), on: targetID)
+    }
+
+    /// One stake gesture: a plain amount, or one shot of the ×10 cartridge
+    /// pack. A shot stakes `Policy.StakePack.pointsPerShot` of the viewer's
+    /// own points under the same rules as any spend (the cap clamps, the
+    /// balance must cover it), and the shot is consumed ONLY when the stake
+    /// lands — a refused one (balance, full post) keeps it. Atomic: the
+    /// points and the shot move under one lock, or neither does.
+    @discardableResult
+    public func stake(_ spend: WalletStakeSpend, on targetID: String) -> WalletBoostOutcome {
         let outcome: WalletBoostOutcome = lock.withLock {
-            var totals = boostTotalsLocked()
-            let held = totals[targetID] ?? 0
-            let remaining = Policy.perTargetBoostCap - held
-            guard remaining > 0 else { return .targetCapReached(targetTotal: held) }
-            // The cap clamps BEFORE the balance is asked: a viewer 5 short
-            // of the cap taps 10 and spends 5 — a partial fill, not a
-            // refusal.
-            let spend = min(amount, remaining)
-            let balance = defaults.integer(forKey: Key.balance)
-            guard balance >= spend else { return .insufficientBalance(balance: balance) }
-            let newBalance = balance - spend
-            defaults.set(newBalance, forKey: Key.balance)
-            defaults.set(defaults.integer(forKey: Key.lifetimeSpent) + spend, forKey: Key.lifetimeSpent)
-            let targetTotal = held + spend
-            totals[targetID] = targetTotal
-            defaults.set(totals, forKey: Key.boostTotals)
-            // The stake's clock starts with its FIRST points; adding to it
-            // does not restart it.
-            var dates = defaults.dictionary(forKey: Key.stakedAt) as? [String: Double] ?? [:]
-            if dates[targetID] == nil {
-                dates[targetID] = now().timeIntervalSince1970
-                defaults.set(dates, forKey: Key.stakedAt)
+            switch spend {
+            case .points(let amount):
+                precondition(amount > 0, "a boost spends something")
+                return boostLocked(targetID: targetID, amount: amount)
+            case .shot:
+                let shots = defaults.integer(forKey: Key.stakeShots)
+                guard shots > 0 else { return .noShotsLeft }
+                let outcome = boostLocked(targetID: targetID, amount: Policy.StakePack.pointsPerShot)
+                if case .boosted = outcome {
+                    defaults.set(shots - 1, forKey: Key.stakeShots)
+                }
+                return outcome
             }
-            return .boosted(newBalance: newBalance, targetTotal: targetTotal, spent: spend)
         }
         if case .boosted = outcome { postDidChange() }
         return outcome
+    }
+
+    /// Buys a ×10 cartridge pack with gems: `Policy.StakePack.shots` shots
+    /// for `Policy.StakePack.price` gems, all or nothing. Refused while the
+    /// current pack still has shots — packs don't stack.
+    @discardableResult
+    public func buyStakePack() -> WalletStakePackPurchase {
+        let outcome: WalletStakePackPurchase = lock.withLock {
+            let shots = defaults.integer(forKey: Key.stakeShots)
+            guard shots == 0 else { return .packStillActive(shotsLeft: shots) }
+            let gems = gemsLocked(at: now())
+            let price = Policy.StakePack.price
+            guard gems >= price else { return .insufficientGems(needed: price, have: gems) }
+            defaults.set(defaults.integer(forKey: Key.gemsSpent) + price, forKey: Key.gemsSpent)
+            defaults.set(Policy.StakePack.shots, forKey: Key.stakeShots)
+            return .bought(shots: Policy.StakePack.shots, remainingGems: gems - price)
+        }
+        if case .bought = outcome { postDidChange() }
+        return outcome
+    }
+
+    /// `boost`'s arithmetic, lock held.
+    private func boostLocked(targetID: String, amount: Int) -> WalletBoostOutcome {
+        var totals = boostTotalsLocked()
+        let held = totals[targetID] ?? 0
+        let remaining = Policy.perTargetBoostCap - held
+        guard remaining > 0 else { return .targetCapReached(targetTotal: held) }
+        // The cap clamps BEFORE the balance is asked: a viewer 5 short
+        // of the cap taps 10 and spends 5 — a partial fill, not a
+        // refusal.
+        let spend = min(amount, remaining)
+        let balance = defaults.integer(forKey: Key.balance)
+        guard balance >= spend else { return .insufficientBalance(balance: balance) }
+        let newBalance = balance - spend
+        defaults.set(newBalance, forKey: Key.balance)
+        defaults.set(defaults.integer(forKey: Key.lifetimeSpent) + spend, forKey: Key.lifetimeSpent)
+        let targetTotal = held + spend
+        totals[targetID] = targetTotal
+        defaults.set(totals, forKey: Key.boostTotals)
+        // The stake's clock starts with its FIRST points; adding to it
+        // does not restart it.
+        var dates = defaults.dictionary(forKey: Key.stakedAt) as? [String: Double] ?? [:]
+        if dates[targetID] == nil {
+            dates[targetID] = now().timeIntervalSince1970
+            defaults.set(dates, forKey: Key.stakedAt)
+        }
+        return .boosted(newBalance: newBalance, targetTotal: targetTotal, spent: spend)
     }
 
     /// Takes back part of a target's boost — the SESSION UNDO's storage
@@ -474,7 +581,8 @@ public final class WalletStore: @unchecked Sendable {
             claimedToday: claimedToday,
             dailyClaimCap: Policy.dailyClaimCap,
             streakDays: displayStreakLocked(today: today),
-            gems: gemsLocked(at: moment)
+            gems: gemsLocked(at: moment),
+            stakeShots: defaults.integer(forKey: Key.stakeShots)
         )
     }
 

@@ -644,7 +644,9 @@ final class PostDetailViewController: UIViewController {
     /// it will build on its next long-press both derive from it.
     private func refreshComposeBarBoostState() {
         guard let wallet else { return }
-        composeBar.setBoostContext(balance: wallet.balance, undoableAmount: sessionBoostAmount)
+        composeBar.setBoostContext(
+            balance: wallet.balance, undoableAmount: sessionBoostAmount, stakeShots: wallet.stakeShots
+        )
     }
 
     /// The boost button's opening face: this viewer's spend on this post so
@@ -768,14 +770,14 @@ final class PostDetailViewController: UIViewController {
         // bar — the snap rail's exact contract, on the comments surface.
         // Debit-first, so the animation never promises a state the balance
         // doesn't have. Nil wallet (an unwired host) leaves the tap inert.
-        composeBar.onBoost = { [weak self] amount in
+        composeBar.onBoost = { [weak self] spend in
             guard let self, let wallet = self.wallet else { return }
             // A DRAFT is not a post yet, and a boost has nothing to land on —
             // said, rather than spent against an id that does not exist.
             guard let postID = self.viewModel.postID else {
                 return self.presentNotice("Boost", "You can boost your post once it's published.")
             }
-            switch wallet.boost(targetID: postID.rawValue, amount: amount) {
+            switch wallet.stake(spend, on: postID.rawValue) {
             case .boosted(_, let targetTotal, let spent):
                 // `spent`, never the request — a near-cap boost is clamped.
                 self.sessionBoostAmount += spent
@@ -784,7 +786,7 @@ final class PostDetailViewController: UIViewController {
                 // its number face, then the "+N" float rises off it.
                 self.composeBar.setBoostTotal(targetTotal)
                 self.composeBar.playBoostConfirmation(amount: spent)
-            case .insufficientBalance, .targetCapReached:
+            case .insufficientBalance, .targetCapReached, .noShotsLeft:
                 UINotificationFeedbackGenerator().notificationOccurred(.error)
                 self.composeBar.playBoostDenied()
             }

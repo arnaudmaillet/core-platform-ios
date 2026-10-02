@@ -1016,8 +1016,9 @@ final class SnapFeedViewController: UIViewController {
         // real spend path (wallet debit → haptic → "+N" float) shortly after
         // settle — the rail anchor opens it on tap, which the sim can't
         // deliver. Pair with `-wallet-log` for the ledger line and
-        // `-wallet-balance 0` for the denied shake.
-        if arguments.contains("-wallet-demo-boost") {
+        // `-wallet-balance 0` for the denied shake. `-wallet-demo-shot` fires
+        // one ×10 shot instead (pair with `-wallet-stake-shots N`).
+        if arguments.contains("-wallet-demo-boost") || arguments.contains("-wallet-demo-shot") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
                 guard let self else { return }
                 let index = self.lifecycle.activeIndex ?? 0
@@ -1028,11 +1029,12 @@ final class SnapFeedViewController: UIViewController {
                    let chosen = Int(arguments[flagIndex + 1]) {
                     amount = chosen
                 } else {
-                    amount = WalletStore.Policy.tapBoostAmount
+                    amount = WalletStore.Policy.defaultStakeAmount
                 }
                 let cell = self.collectionView.visibleCells
                     .compactMap { $0 as? SnapFeedCell }.first
-                self.performBoost(on: self.orderedIDs[index], amount: amount, feedbackCell: cell)
+                let spend: WalletStakeSpend = arguments.contains("-wallet-demo-shot") ? .shot : .points(amount)
+                self.performBoost(on: self.orderedIDs[index], spend: spend, feedbackCell: cell)
             }
         }
         // `-wallet-demo-undo`: takes back the active post's session boosts
@@ -1410,8 +1412,8 @@ final class SnapFeedViewController: UIViewController {
                 cell.onRequestCommentsClose = { [weak self] in self?.dismissComments() }
                 // The boost spend: wallet verdict here (the cell holds no
                 // balance), theatre back on the cell that asked.
-                cell.onRequestBoost = { [weak self, weak cell] id, amount in
-                    self?.performBoost(on: id, amount: amount, feedbackCell: cell)
+                cell.onRequestBoost = { [weak self, weak cell] id, spend in
+                    self?.performBoost(on: id, spend: spend, feedbackCell: cell)
                 }
                 cell.onRequestBoostUndo = { [weak self, weak cell] id in
                     self?.performBoostUndo(on: id, feedbackCell: cell)
@@ -1425,7 +1427,8 @@ final class SnapFeedViewController: UIViewController {
                     cell.setBoostTotal(wallet.boostTotal(forTarget: id.rawValue))
                     cell.setBoostContext(
                         balance: wallet.balance,
-                        undoable: self.sessionBoostID == id ? self.sessionBoostAmount : 0
+                        undoable: self.sessionBoostID == id ? self.sessionBoostAmount : 0,
+                        stakeShots: wallet.stakeShots
                     )
                 }
                 cell.onRequestCommentsPageDrive = { [weak self] phase, translation, velocity in
@@ -2510,9 +2513,9 @@ final class SnapFeedViewController: UIViewController {
     /// constructed inline, the codebase's idiom — visuals on the cell that
     /// asked. A nil wallet (unwired host) drops the tap silently; the mock
     /// store is always wired in the app itself.
-    private func performBoost(on id: PostID, amount: Int, feedbackCell: SnapFeedCell?) {
+    private func performBoost(on id: PostID, spend: WalletStakeSpend, feedbackCell: SnapFeedCell?) {
         guard let wallet else { return }
-        switch wallet.boost(targetID: id.rawValue, amount: amount) {
+        switch wallet.stake(spend, on: id.rawValue) {
         case .boosted(_, let targetTotal, let spent):
             // `spent`, never the request: a near-cap boost is CLAMPED to
             // the remainder, and the tally/float must say what actually
@@ -2531,7 +2534,7 @@ final class SnapFeedViewController: UIViewController {
             refreshVisibleBoostControls()
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-wallet-log") {
-                print("[wallet] boosted post=\(id.rawValue) requested=\(amount) spent=\(spent) targetTotal=\(targetTotal) balance=\(wallet.balance)")
+                print("[wallet] boosted post=\(id.rawValue) requested=\(spend) spent=\(spent) targetTotal=\(targetTotal) balance=\(wallet.balance) shots=\(wallet.stakeShots)")
             }
             #endif
         case .insufficientBalance(let balance):
@@ -2539,7 +2542,7 @@ final class SnapFeedViewController: UIViewController {
             feedbackCell?.playBoostDenied()
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-wallet-log") {
-                print("[wallet] boost DENIED post=\(id.rawValue) amount=\(amount) balance=\(balance)")
+                print("[wallet] boost DENIED post=\(id.rawValue) spend=\(spend) balance=\(balance) shots=\(wallet.stakeShots)")
             }
             #endif
         case .targetCapReached(let targetTotal):
@@ -2550,6 +2553,11 @@ final class SnapFeedViewController: UIViewController {
                 print("[wallet] boost CAP post=\(id.rawValue) targetTotal=\(targetTotal)")
             }
             #endif
+        case .noShotsLeft:
+            // The menu offers a shot only with a pack loaded; a stale menu
+            // (the pack emptied on another surface) lands here.
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
+            feedbackCell?.playBoostDenied()
         }
     }
 
@@ -2607,13 +2615,15 @@ final class SnapFeedViewController: UIViewController {
     private func refreshVisibleBoostControls() {
         guard let wallet else { return }
         let balance = wallet.balance
+        let shots = wallet.stakeShots
         for indexPath in collectionView.indexPathsForVisibleItems {
             guard orderedIDs.indices.contains(indexPath.item),
                   let cell = collectionView.cellForItem(at: indexPath) as? SnapFeedCell else { continue }
             let id = orderedIDs[indexPath.item]
             cell.setBoostContext(
                 balance: balance,
-                undoable: sessionBoostID == id ? sessionBoostAmount : 0
+                undoable: sessionBoostID == id ? sessionBoostAmount : 0,
+                stakeShots: shots
             )
         }
     }

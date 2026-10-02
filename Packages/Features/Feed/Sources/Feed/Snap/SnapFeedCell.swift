@@ -1,5 +1,6 @@
 import MediaCore
 import CoreModels
+import CoreStorage
 import CoreNavigation
 import DesignSystem
 import MediaPlayback
@@ -464,11 +465,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// The user asked for the comments surface (the empty-state pill today;
     /// more entry points later). Carries the represented post.
     var onRequestComments: ((PostID) -> Void)?
-    /// The rail's boost anchor asked to spend `amount` points on the
-    /// represented post. The owning VC answers through the wallet and calls
-    /// back `playBoostConfirmation` / `playBoostDenied` — the cell holds no
-    /// balance opinion of its own.
-    var onRequestBoost: ((PostID, _ amount: Int) -> Void)?
+    /// The rail's boost anchor asked to spend on the represented post (an
+    /// amount, or one ×10 shot). The owning VC answers through the wallet and
+    /// calls back `playBoostConfirmation` / `playBoostDenied` — the cell
+    /// holds no balance opinion of its own.
+    var onRequestBoost: ((PostID, WalletStakeSpend) -> Void)?
     /// The anchor's menu asked to take back this post's session spend —
     /// the VC owns the tally and the refund.
     var onRequestBoostUndo: ((PostID) -> Void)?
@@ -484,8 +485,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     func setBoostTotal(_ total: Int) { chrome.setBoostTotal(total) }
     /// The anchor's wallet context (affordability + undoable tally) —
     /// pushed at configure and on every wallet change.
-    func setBoostContext(balance: Int, undoable: Int) {
-        chrome.setBoostContext(balance: balance, undoable: undoable)
+    func setBoostContext(balance: Int, undoable: Int, stakeShots: Int = 0) {
+        chrome.setBoostContext(balance: balance, undoable: undoable, stakeShots: stakeShots)
     }
     /// While engaged, a tap on the strip (the docked media / the page
     /// background) asks to expand back — the owning VC dismisses the panel.
@@ -1545,9 +1546,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             guard let self, let id = self.representedID, !self.isCommentsEngaged else { return }
             self.onRequestComments?(id)
         }
-        chrome.onBoostRequested = { [weak self] amount in
+        chrome.onBoostRequested = { [weak self] spend in
             guard let self, let id = self.representedID else { return }
-            self.onRequestBoost?(id, amount)
+            self.onRequestBoost?(id, spend)
         }
         chrome.onBoostUndoRequested = { [weak self] in
             guard let self, let id = self.representedID else { return }

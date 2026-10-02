@@ -43,11 +43,12 @@ import UIKit
 final class CommentsInputBar: UIView {
     /// Fired with trimmed, non-empty text; the field clears itself first.
     var onSend: ((String) -> Void)?
-    /// Fired by the boost (star) button with the point amount to spend —
-    /// the tap default, or a denomination from the long-press menu. The spend
-    /// itself is the host's affair (it owns the post identity and the
-    /// wallet); the refusal comes back through `playBoostDenied`.
-    var onBoost: ((Int) -> Void)?
+    /// Fired by the boost (star) button with what to spend — the tap's
+    /// default amount, or a pick from the long-press menu (the default, or
+    /// one ×10 shot). The spend itself is the host's affair (it owns the post
+    /// identity and the wallet); the refusal comes back through
+    /// `playBoostDenied`.
+    var onBoost: ((WalletStakeSpend) -> Void)?
     /// Fired by the boost menu's Undo entry — the host refunds the session
     /// spend (it owns the tally and the wallet; the bar only shows the door).
     var onBoostUndo: (() -> Void)?
@@ -334,7 +335,7 @@ final class CommentsInputBar: UIView {
         boostButton.configuration?.cornerStyle = .capsule
         boostButton.accessibilityLabel = "Boost post"
         boostButton.addAction(
-            UIAction { [weak self] _ in self?.onBoost?(WalletStore.Policy.tapBoostAmount) },
+            UIAction { [weak self] _ in self?.onBoost?(.points(WalletStore.Policy.defaultStakeAmount)) },
             for: .primaryActionTriggered
         )
         // DEFERRED and uncached, like the rail anchor's: built at present
@@ -979,15 +980,18 @@ final class CommentsInputBar: UIView {
     /// historical always-enabled affordance.
     private var boostBalance = Int.max
     private var boostUndoableAmount = 0
+    /// Shots left in the viewer's ×10 cartridge pack — the menu's loaded face.
+    private var boostStakeShots = 0
 
     /// The affordability + undo state, pushed on configure and on every
     /// wallet change. Disables the button only when it has NOTHING to
     /// offer — tap unaffordable AND nothing to undo — because a disabled
     /// `UIButton` delivers no long-press either, and the menu is the
     /// undo's only door.
-    func setBoostContext(balance: Int, undoableAmount: Int) {
+    func setBoostContext(balance: Int, undoableAmount: Int, stakeShots: Int = 0) {
         boostBalance = balance
         boostUndoableAmount = undoableAmount
+        boostStakeShots = stakeShots
         refreshBoostEnabled()
     }
 
@@ -995,7 +999,7 @@ final class CommentsInputBar: UIView {
         let remaining = max(0, WalletStore.Policy.perTargetBoostCap - boostSpentTotal)
         // A tap near the cap costs only the remainder (the store clamps),
         // so affordability is judged against that, not the flat tap price.
-        let tapCost = min(WalletStore.Policy.tapBoostAmount, remaining)
+        let tapCost = min(WalletStore.Policy.defaultStakeAmount, remaining)
         boostButton.isEnabled = boostUndoableAmount > 0 || (remaining > 0 && boostBalance >= tapCost)
     }
 
@@ -1011,10 +1015,12 @@ final class CommentsInputBar: UIView {
                 stakedOnTarget: boostSpentTotal,
                 undoable: boostUndoableAmount,
                 perTargetCap: WalletStore.Policy.perTargetBoostCap,
-                denominations: WalletStore.Policy.boostDenominations,
-                tapAmount: WalletStore.Policy.tapBoostAmount
+                tapAmount: WalletStore.Policy.defaultStakeAmount,
+                shotsLeft: boostStakeShots,
+                shotAmount: WalletStore.Policy.StakePack.pointsPerShot
             ),
-            stake: { [weak self] amount in self?.onBoost?(amount) },
+            stake: { [weak self] amount in self?.onBoost?(.points(amount)) },
+            shoot: { [weak self] in self?.onBoost?(.shot) },
             undo: { [weak self] in self?.onBoostUndo?() }
         )
     }
