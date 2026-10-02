@@ -35,7 +35,7 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerD
     /// because a text cluster's URL and face cannot tell two groups apart.
     private var representedAvatar: URL?
     private var representedIcon: String?
-    private var iconCatalog: AnimatedIconCatalog?
+    private var iconCatalog: (any AnimatedIconProviding)?
     private var previewCatalog: AnimatedIconCatalog?
     private var representedPreview: String?
     private var previewTask: Task<Void, Never>?
@@ -131,7 +131,7 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerD
     /// owns the image pipeline.
     func configure(
         with cluster: MapComputedCluster, dress: MapMarkerDress = .neutral, imagePipeline: ImagePipeline,
-        iconCatalog: AnimatedIconCatalog? = nil, previewCatalog: AnimatedIconCatalog? = nil
+        iconCatalog: (any AnimatedIconProviding)? = nil, previewCatalog: AnimatedIconCatalog? = nil
     ) {
         self.iconCatalog = iconCatalog
         self.previewCatalog = previewCatalog

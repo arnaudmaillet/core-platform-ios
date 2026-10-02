@@ -152,8 +152,7 @@ public actor GeoDiscoveryRepository: GeoDiscoveryProviding {
     /// remove. It resolves exactly when field 5 ships.
     ///
     /// Photo-vs-video stays stubbed for the same reason — in production every
-    /// media pin reads as `.photo` and the play badge / live-preview autoplay
-    /// stay dark. When the field ships and the contracts are regenerated,
+    /// media pin reads as `.photo` and live-preview autoplay stays dark. When the field ships and the contracts are regenerated,
     /// replace the media branch with `pin.mediaKind == .video ? .video : .photo`
     /// (and add the `.video` case to `media.v1.MediaKind`).
     ///

@@ -40,7 +40,7 @@ final class MapsViewController: UIViewController {
     /// pipeline's `countLimit = 300` would never evict), and they must not go
     /// through `decodeDownsampled` at all — that call never returns on HEIC
     /// under concurrent load in the iOS 26 simulator.
-    private let iconCatalog: AnimatedIconCatalog?
+    private let iconCatalog: (any AnimatedIconProviding)?
     /// Baked previews of a MEDIA post's own footage — the decode-session-free
     /// alternative to attaching a player. Separate catalogue from the icons'
     /// because the two have different cell sizes and very different byte costs
@@ -333,7 +333,7 @@ final class MapsViewController: UIViewController {
         favoritesRepository: any MapFavoritesProviding,
         pinService: MapProfilePinService,
         imagePipeline: ImagePipeline,
-        iconCatalog: AnimatedIconCatalog? = nil,
+        iconCatalog: (any AnimatedIconProviding)? = nil,
         previewCatalog: AnimatedIconCatalog? = nil,
         videoPlayback: VideoPlaybackController,
         makeSnapFeed: @escaping ([PostID]) -> UIViewController,
@@ -3953,7 +3953,7 @@ extension MapsViewController {
         }
         guard ProcessInfo.processInfo.arguments.contains("-map-icon-hud") else { return }
         let hud = MapIconDebugHUD(
-            mapView: mapView, catalog: iconCatalog, previews: previewCatalog, pool: videoPool
+            mapView: mapView, catalog: iconCatalog as? AnimatedIconCatalog, previews: previewCatalog, pool: videoPool
         )
         hud.translatesAutoresizingMaskIntoConstraints = false
         hud.onPolicyChange = { [weak self] in

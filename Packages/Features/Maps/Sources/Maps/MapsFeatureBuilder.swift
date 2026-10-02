@@ -75,7 +75,7 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
         mockAnimatedIcons: [PostID: String] = [:],
         /// Baked preview sheets, keyed by post id — MEDIA posts only.
         mockPreviewSheets: [PostID: String] = [:],
-        iconCatalog: AnimatedIconCatalog? = nil,
+        iconCatalog: (any AnimatedIconProviding)? = nil,
         previewCatalog: AnimatedIconCatalog? = nil,
         /// Which countries the account has unlocked — see `CountryAccess`.
         /// Nil opens every country and sells none.
@@ -171,7 +171,7 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
     /// What the view model runs over every tile response — the place
     /// decoration in DEBUG mock mode, identity everywhere else.
     private let placeDecoration: ([MapPin]) -> [MapPin]
-    private let iconCatalog: AnimatedIconCatalog?
+    private let iconCatalog: (any AnimatedIconProviding)?
     private let previewCatalog: AnimatedIconCatalog?
 
     public func makeMapViewController() -> UIViewController {

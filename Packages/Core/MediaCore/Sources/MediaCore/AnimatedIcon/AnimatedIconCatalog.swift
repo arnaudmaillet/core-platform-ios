@@ -9,7 +9,7 @@ import UIKit
 /// and this type is the seam that will not change when the URL arrives — only
 /// `loadAsset` will.
 @MainActor
-public final class AnimatedIconCatalog: NSObject {
+public final class AnimatedIconCatalog: NSObject, AnimatedIconProviding {
 
     /// One manifest entry. Mirrors `IconBaker`'s output field for field: this is
     /// a contract between a build step and a client, and the day the two drift
