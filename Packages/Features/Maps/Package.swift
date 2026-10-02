@@ -32,8 +32,14 @@ let package = Package(
                 "MediaPlayback"
             ],
             // The world's borders (`CountryAtlas`), imported from Natural
-            // Earth by `Scripts/import-country-borders.py`.
-            resources: [.copy("Resources/countries.json")]
+            // Earth by `Scripts/import-country-borders.py`; the round flags
+            // (`FlagPalette`), imported from circle-flags (MIT) by
+            // `Scripts/import-circle-flags.py`, and their licence.
+            resources: [
+                .copy("Resources/countries.json"),
+                .process("Resources/Flags/Flags.xcassets"),
+                .copy("Resources/Flags/LICENSE")
+            ]
         ),
         .testTarget(
             name: "MapsTests",

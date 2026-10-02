@@ -70,6 +70,19 @@ public protocol CountryAccess: AnyObject {
     /// Every country's standing, busiest first — the shop's list.
     func standings() -> [CountryStanding]
     func unlock(_ code: String) -> CountryUnlockOutcome
+    /// Whether anything at all has been posted in `code` — not whether the
+    /// map's current query brought any of it. A country with posts never
+    /// wears the empty country's disc (`CountryLayer.wantsFlag`), even where
+    /// none of its posts is on the map right now.
+    ///
+    /// ⚠️ Declared HERE, in the protocol body, so a conformer's own answer is
+    /// dispatched through the existential (the default below is not).
+    func hasPosts(in code: String) -> Bool
+}
+
+public extension CountryAccess {
+    /// The standing's post count — the backend's own.
+    func hasPosts(in code: String) -> Bool { (standing(of: code)?.posts ?? 0) > 0 }
 }
 
 public extension Notification.Name {

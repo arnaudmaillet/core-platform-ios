@@ -1,27 +1,36 @@
 import UIKit
 
-/// A country's flag as the map wears it: the emoji drawn as a picture (the
+/// A country's flag as the map wears it: the ROUND flag as a picture (the
 /// corner badge, the empty country's disc), and the colours a marker's border
 /// is painted with.
 ///
-/// ⚠️ **THE COLOURS COME FROM THE EMOJI ITSELF, NOT FROM A TABLE.** A table of
-/// 237 flags is 237 chances to be wrong and goes stale with every new country;
-/// the emoji is what the badge right next to the border draws, so reading the
-/// colours off it is what makes the two agree by construction. The flag is
-/// rendered small, its interior sampled (the emoji's rounded corners and
-/// gloss stay out), quantised, and the 2–3 dominant colours kept in the order
-/// they run across the flag — left to right for France, top to bottom for
-/// Germany — so the border reads as the flag does.
+/// The picture comes from `Resources/Flags/Flags.xcassets` — circle-flags
+/// (MIT, `Resources/Flags/LICENSE`), pre-rendered to PNG at the disc's size by
+/// `Scripts/import-circle-flags.py`, so no SVG is ever rasterised at run time.
+/// Every `CountryAtlas` country has one. A code the catalog lacks (a post's
+/// country outside the atlas) falls back to its EMOJI, drawn and trimmed;
+/// `Entry.isRound` tells a view which of the two it holds.
 ///
-/// Rendered once per country and cached for the life of the process.
+/// ⚠️ **THE COLOURS COME FROM THE PICTURE ITSELF, NOT FROM A TABLE.** A table
+/// of 237 flags is 237 chances to be wrong and goes stale with every new
+/// country; the picture is what the badge right next to the border draws, so
+/// reading the colours off it is what makes the two agree by construction. Its
+/// interior is sampled (the round flag's anti-aliased rim, or the emoji's
+/// rounded corners and gloss, stay out), quantised, and the 2–3 dominant
+/// colours kept in the order they run across the flag — left to right for
+/// France, top to bottom for Germany — so the border reads as the flag does.
+/// The round flags are flat artwork, so their colours are the flag's own, not
+/// an emoji's shaded ones.
+///
+/// Loaded once per country and cached for the life of the process.
 ///
 /// ⚠️ **WARMED OFF THE MAIN THREAD.** One flag is a few hundred microseconds,
 /// but the world zoom realises a disc for every country without posts at
-/// once, and two hundred renders in one turn is a hitch the viewer sees.
+/// once, and two hundred loads in one turn is a hitch the viewer sees.
 /// `CountryLayer` warms every country on a background queue as soon as the
 /// atlas is decoded (`warm`), so the map only ever reads the cache. Thread-safe
-/// for that reason: UIKit's image renderer and string drawing are, and the
-/// cache sits behind a lock.
+/// for that reason: `UIImage(named:in:compatibleWith:)`, UIKit's image renderer
+/// and string drawing are, and the cache sits behind a lock.
 enum FlagPalette {
     /// The colours a border wears, ordered along `axis`, and the flag picture.
     struct Entry: @unchecked Sendable {
@@ -29,9 +38,13 @@ enum FlagPalette {
         /// The direction the colours run across the flag — the border's
         /// gradient runs the same way.
         let axis: Axis
-        /// The emoji, drawn and trimmed to its glyph (nil when it would not
-        /// draw — never for a real ISO code).
+        /// The round flag, or the emoji drawn and trimmed to its glyph (nil
+        /// when neither exists — never for a real ISO code).
         let image: UIImage?
+        /// Whether `image` is the ROUND flag — a disc edge to edge, laid out to
+        /// fill a circle — rather than the rectangular emoji, which sits inside
+        /// one.
+        let isRound: Bool
     }
 
     enum Axis: Equatable {
@@ -81,12 +94,12 @@ enum FlagPalette {
     static var renderCount: Int { cache.renderCount }
     #endif
 
-    /// The palette for `code` (ISO 3166-1 alpha-2), rendered on first ask.
+    /// The palette for `code` (ISO 3166-1 alpha-2), loaded on first ask.
     static func entry(for code: String) -> Entry {
         cache.entry(for: code.uppercased(), render: render)
     }
 
-    /// Renders every flag in `codes` that is not cached yet. Call it off the
+    /// Loads every flag in `codes` that is not cached yet. Call it off the
     /// main thread.
     static func warm(_ codes: [String]) {
         for code in codes { _ = entry(for: code) }
@@ -94,6 +107,12 @@ enum FlagPalette {
 
     static func colors(for code: String) -> [UIColor] { entry(for: code).colors }
     static func image(for code: String) -> UIImage? { entry(for: code).image }
+
+    /// The round flag of `code` in the asset catalog, or nil. Thread-safe;
+    /// nil traits pick the main screen's scale.
+    static func roundFlag(for code: String) -> UIImage? {
+        UIImage(named: code.uppercased(), in: .module, compatibleWith: nil)
+    }
 
     /// The regional-indicator flag ("🇫🇷").
     static func emoji(for code: String) -> String {
@@ -103,13 +122,30 @@ enum FlagPalette {
 
     // MARK: - Rendering
 
-    /// The glyph's raster size. Big enough that the interior sample is a few
-    /// thousand pixels and the badge picture stays sharp at 3x, small enough to
-    /// cost nothing.
+    private static func render(_ code: String) -> Entry {
+        guard let flag = roundFlag(for: code), let cgImage = flag.cgImage, let pixels = Pixels(cgImage) else {
+            return renderEmoji(code)
+        }
+        // Inside the circle, short of its anti-aliased rim.
+        let frame = CGRect(x: 0, y: 0, width: pixels.width, height: pixels.height)
+        let reach = Double(min(pixels.width, pixels.height)) / 2 * 0.9
+        let (cx, cy) = (Double(frame.midX), Double(frame.midY))
+        let (colors, axis) = dominantColors(in: pixels, glyph: frame, sampling: frame) { x, y in
+            let (dx, dy) = (Double(x) + 0.5 - cx, Double(y) + 0.5 - cy)
+            return dx * dx + dy * dy <= reach * reach
+        }
+        return Entry(colors: fallback(colors), axis: axis, image: flag, isRound: true)
+    }
+
+    /// The emoji fallback's raster size. Big enough that the interior sample
+    /// is a few thousand pixels and the badge picture stays sharp at 3x, small
+    /// enough to cost nothing.
     private static let glyphPointSize: CGFloat = 48
     private static let scale: CGFloat = 2
 
-    private static func render(_ code: String) -> Entry {
+    /// The emoji flag, drawn and trimmed to its glyph — for a code the catalog
+    /// has no round flag for.
+    private static func renderEmoji(_ code: String) -> Entry {
         let text = emoji(for: code) as NSString
         let attributes: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: glyphPointSize)]
         let size = text.size(withAttributes: attributes)
@@ -120,16 +156,19 @@ enum FlagPalette {
             text.draw(at: .zero, withAttributes: attributes)
         }
         guard let cgImage = raster.cgImage, let pixels = Pixels(cgImage) else {
-            return Entry(colors: fallback([]), axis: .horizontal, image: nil)
+            return Entry(colors: fallback([]), axis: .horizontal, image: nil, isRound: false)
         }
         guard let glyph = pixels.opaqueBounds() else {
-            return Entry(colors: fallback([]), axis: .horizontal, image: nil)
+            return Entry(colors: fallback([]), axis: .horizontal, image: nil, isRound: false)
         }
         let image = cgImage.cropping(to: glyph).map {
             UIImage(cgImage: $0, scale: scale, orientation: .up)
         }
-        let (colors, axis) = dominantColors(in: pixels, glyph: glyph)
-        return Entry(colors: fallback(colors), axis: axis, image: image)
+        // The interior only: the emoji's rounded corners and its rim of
+        // shading are not the flag's colours.
+        let interior = glyph.insetBy(dx: glyph.width * 0.12, dy: glyph.height * 0.14)
+        let (colors, axis) = dominantColors(in: pixels, glyph: glyph, sampling: interior) { _, _ in true }
+        return Entry(colors: fallback(colors), axis: axis, image: image, isRound: false)
     }
 
     /// At least two colours, always: a border of one colour is a plain ring
@@ -151,21 +190,24 @@ enum FlagPalette {
     ///
     /// Quantised to 3 bits per channel, then merged greedily: a bin within
     /// `mergeDistance` of a colour already kept is the same colour under the
-    /// emoji's shading, and a colour under `minimumShare` of the interior is a
-    /// detail (a star, a crest), not a band.
-    private static func dominantColors(in pixels: Pixels, glyph: CGRect) -> ([UIColor], Axis) {
+    /// emoji's shading (or an edge's anti-aliasing), and a colour under
+    /// `minimumShare` of the interior is a detail (a star, a crest), not a
+    /// band.
+    ///
+    /// Only the pixels of `sampling` that `includes` admits are read (the
+    /// round flag's disc); positions are measured against `glyph`.
+    private static func dominantColors(
+        in pixels: Pixels, glyph: CGRect, sampling: CGRect, includes: (Int, Int) -> Bool
+    ) -> ([UIColor], Axis) {
         struct Bin {
             var count = 0
             var r = 0, g = 0, b = 0
             var x = 0, y = 0
         }
-        // The interior only: the emoji's rounded corners and its rim of
-        // shading are not the flag's colours.
-        let inset = glyph.insetBy(dx: glyph.width * 0.12, dy: glyph.height * 0.14)
         var bins: [Int: Bin] = [:]
         var sampled = 0
-        for y in Int(inset.minY)..<Int(inset.maxY) {
-            for x in Int(inset.minX)..<Int(inset.maxX) {
+        for y in Int(sampling.minY)..<Int(sampling.maxY) {
+            for x in Int(sampling.minX)..<Int(sampling.maxX) where includes(x, y) {
                 let (r, g, b, a) = pixels.rgba(x: x, y: y)
                 guard a > 250 else { continue }
                 let key = (r >> 5) << 6 | (g >> 5) << 3 | (b >> 5)
