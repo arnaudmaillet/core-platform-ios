@@ -8,7 +8,7 @@ import UIKit
 ///
 /// Every frame (cheap facts only), printed on change:
 ///
-///     [sbb] +5310ms top=ForYouViewController moving band=on front=Y h=62 style=light own=1 offscreen=0
+///     [sbb] +5310ms top=ForYouViewController moving band=on front=Y h=62 style=light own=1 offscreen=0 ax=hidden touch=off
 ///
 /// `band=on` = installed and not hidden; `front=Y` = no window sibling draws
 /// over it (`zPosition`); `h` = the height its edge effect covers; `own` = the
@@ -73,6 +73,8 @@ final class StatusBarBlurAudit {
             let census = HeroScrollFrameProbe.Census(of: band.layer)
             line += " band=\(band.isHidden ? "off" : "on") front=\(front ? "Y" : "N") h=\(Int(height.rounded()))"
                 + " style=\(style) own=\(backdrops.count) offscreen=\(census.offscreen)"
+                + " ax=\(band.accessibilityElementsHidden && !band.isAccessibilityElement ? "hidden" : "EXPOSED")"
+                + " touch=\(band.isUserInteractionEnabled ? "ON" : "off")"
         } else {
             line += " band=none"
         }
@@ -84,7 +86,13 @@ final class StatusBarBlurAudit {
         guard !moving, top != lastStack else { return }
         lastStack = top
         let all = Self.backdrops(in: window.layer, window: window).filter { $0.frame.minY < window.safeAreaInsets.top }
-        Self.log("[sbb] stack top=\(top) backdrops=\(all.count)")
+        // The scene's other windows (keyboard, context menus): the band is
+        // only ever in this one.
+        let windows = (window.windowScene?.windows ?? [])
+            .filter { !$0.isHidden }
+            .map { "\(type(of: $0))@\(Int($0.windowLevel.rawValue))" }
+            .joined(separator: ",")
+        Self.log("[sbb] stack top=\(top) backdrops=\(all.count) windows=[\(windows)]")
         for backdrop in all {
             Self.log("[sbb]   \(backdrop.owner) y=\(Int(backdrop.frame.minY)) h=\(Int(backdrop.frame.height)) \(backdrop.filters)")
         }
