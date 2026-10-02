@@ -492,7 +492,7 @@ struct MapMarkerDressTests {
             Issue.record("France's single post must still be a marker")
             return
         }
-        let single = MapAnnotation(pin: lone.representative, hierarchyKind: lone.hierarchyKind)
+        let single = MapAnnotation(pin: lone.representative, hierarchyPlace: lone.hierarchyPlace)
         let kind = MapsViewController.dressKind(of: single)
         #expect(kind == .country)
 

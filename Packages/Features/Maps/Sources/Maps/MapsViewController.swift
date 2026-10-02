@@ -1217,10 +1217,25 @@ final class MapsViewController: UIViewController {
     /// wears a place's dress — at the country band only countries, at the
     /// city band only cities.
     static func dressKind(of annotation: any MKAnnotation) -> MapPlace.Kind? {
-        if let cluster = annotation as? MapComputedCluster {
-            return cluster.isHierarchyMarker ? cluster.place?.kind : nil
+        hierarchyPlace(of: annotation)?.kind
+    }
+
+    /// The city or country `annotation`'s marker IS, or nil for a local one —
+    /// the ONE answer both presentations (`openAnnotation`'s reveal and
+    /// `presentSnapFeed`'s hero) and the dress ask, so "does this marker have
+    /// a place page" and "does it wear a place's dress" can never disagree.
+    ///
+    /// ⚠️ A BAND'S GROUP OF ONE COUNTS. Both routes used to ask
+    /// `annotation as? MapComputedCluster` alone, so a country or city with a
+    /// single post in view — dressed as its place, the mock world's ninety-four
+    /// one-post countries among them — opened as a plain pin, and its vertical
+    /// dismissal landed on the map where Paris's lands on its page.
+    static func hierarchyPlace(of annotation: any MKAnnotation) -> MapPlace? {
+        switch annotation {
+        case let cluster as MapComputedCluster: cluster.hierarchyPlace
+        case let single as MapAnnotation: single.hierarchyPlace
+        default: nil
         }
-        return (annotation as? MapAnnotation)?.hierarchyKind
     }
 
     /// What a tap on a marker does: open its posts, or — for a locked
@@ -2062,7 +2077,7 @@ final class MapsViewController: UIViewController {
                 update(reclaimed, to: item)
                 displayed[id] = reclaimed
             } else {
-                let annotation = MapAnnotation(pin: item.representative, hierarchyKind: item.hierarchyKind)
+                let annotation = Self.makeAnnotation(for: item)
                 displayed[id] = annotation
                 toAdd.append(annotation)
             }
@@ -2106,7 +2121,7 @@ final class MapsViewController: UIViewController {
             } else {
                 clusterMarkerSeq += 1
                 let key = "c:\(clusterMarkerSeq)"
-                let annotation = MapComputedCluster(item)
+                let annotation = Self.makeAnnotation(for: item)
                 displayed[key] = annotation
                 toAdd.append(annotation)
                 target.insert(key)
@@ -2173,6 +2188,16 @@ final class MapsViewController: UIViewController {
     }
 
     private static func singleIdentity(_ postID: PostID) -> String { "p:" + postID.rawValue }
+
+    /// The marker a FRESH engine item becomes — a group's cluster, or a lone
+    /// pin carrying its band's place when it is one (`hierarchyPlace`).
+    /// Static so the tests build markers the way the map does, and route them
+    /// through the same `hierarchyPlace(of:)` a tap asks.
+    static func makeAnnotation(for item: MapClusterEngine.Item) -> any MKAnnotation {
+        item.isCluster
+            ? MapComputedCluster(item)
+            : MapAnnotation(pin: item.representative, hierarchyPlace: item.hierarchyPlace)
+    }
 
     /// Splits a batch of realized views into the ones that are ARRIVING and the
     /// ones that are merely being drawn again.
@@ -2369,7 +2394,7 @@ final class MapsViewController: UIViewController {
                 )
         } else if let single = annotation as? MapAnnotation {
             single.update(pin: item.representative)
-            single.hierarchyKind = item.hierarchyKind
+            single.hierarchyPlace = item.hierarchyPlace
             (mapView.view(for: single) as? MapAnnotationView)?
                 .configure(
                     with: item.representative, dress: dress(for: single), imagePipeline: imagePipeline,
@@ -2809,6 +2834,26 @@ extension MapsViewController: MKMapViewDelegate {
             }
             return
         }
+        // `-maps-open-place-id <placeID>` ("country:kenya", "city:barcelona"):
+        // taps the marker that IS that place, cluster or band single alike —
+        // the place-page route of one named city or country, where the
+        // cluster openers pick by size and never reach a one-post country.
+        // Pair with `-maps-set-region` to frame the band it shows at.
+        if let wanted = Self.debugArgumentValue("-maps-open-place-id") {
+            guard !didDebugOpenPin,
+                  views.contains(where: {
+                      $0.annotation.flatMap(Self.hierarchyPlace(of:))?.id == wanted
+                  })
+            else { return }
+            didDebugOpenPin = true
+            debugSelectMarker("-maps-open-place-id \(wanted)", { annotations in
+                annotations.first { Self.hierarchyPlace(of: $0)?.id == wanted }
+            }, then: { tapped in
+                print("[maps] place tap → \(wanted) posts=\(Self.postIDs(of: tapped).count)"
+                    + " cluster=\(tapped is MapComputedCluster)")
+            })
+            return
+        }
         let wantsText = arguments.contains("-maps-open-first-text-pin")
         guard !didDebugOpenPin,
               wantsText || arguments.contains("-maps-open-first-pin") else { return }
@@ -3039,10 +3084,9 @@ extension MapsViewController: MKMapViewDelegate {
             // criterion as the hero path — `isHierarchyMarker` — so the two
             // presentations answer "is this marker a city or a country?"
             // alike, and an ordinary proximity cluster (leaf-shared or not)
-            // gets the plain feed on both.
-            let hierarchyPlace = (annotation as? MapComputedCluster).flatMap {
-                $0.isHierarchyMarker ? $0.place : nil
-            }
+            // gets the plain feed on both. A band's group of one is its
+            // place's marker too (`hierarchyPlace(of:)`).
+            let hierarchyPlace = Self.hierarchyPlace(of: annotation)
             let placePage: ((UIViewController) -> UIViewController)? = hierarchyPlace.map { place in
                 let mapReturn = makeMapReturnSource(for: annotation)
                 let markerClose = makeMarkerClose(for: annotation)
@@ -3300,11 +3344,11 @@ extension MapsViewController: MKMapViewDelegate {
         // so the vertical flight driver below stays armed only to decline.
         // ORDINARY clusters
         // — proximity groups, even ones whose members happen to share a leaf
-        // place — and single pins skip all of this: only a city or a country
-        // has a place page (product call, 2026-08-31).
+        // place — and local single pins skip all of this: only a city or a
+        // country has a place page (product call, 2026-08-31). A band's group
+        // of ONE is a city or a country, and gets it (`hierarchyPlace(of:)`).
         var gallery: UIViewController?
-        if let cluster = annotation as? MapComputedCluster,
-           cluster.isHierarchyMarker, let place = cluster.place {
+        if let place = Self.hierarchyPlace(of: annotation) {
             let built = makeClusterGallery(
                 postIDs, place, feedVC, makeMapReturnSource(for: annotation),
                 makeMarkerClose(for: annotation)

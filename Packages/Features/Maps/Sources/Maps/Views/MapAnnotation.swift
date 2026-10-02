@@ -12,15 +12,24 @@ final class MapAnnotation: NSObject, MKAnnotation {
 
     private(set) var pin: MapPin
 
-    /// The hierarchy depth this lone pin speaks for when it is a band's
-    /// group of one (`MapClusterEngine.Item.hierarchyKind`) — so it wears its
-    /// country's or city's dress, like a band cluster — or nil for an
-    /// ordinary local pin. Set by the map's reconcile on every layout.
-    var hierarchyKind: MapPlace.Kind?
+    /// The city or country this lone pin speaks for when it is a band's
+    /// group of one (`MapClusterEngine.Item.hierarchyPlace`) — so it wears
+    /// its place's dress AND opens its place page, like a band cluster — or
+    /// nil for an ordinary local pin. Set by the map's reconcile on every
+    /// layout.
+    ///
+    /// ⚠️ THE PLACE, NOT ONLY ITS KIND. This used to carry the kind alone,
+    /// which was enough to dress the marker and not enough to route it: the
+    /// tap had no place to build a page for, so a one-post country opened as
+    /// a plain single and its vertical dismissal landed on the MAP.
+    var hierarchyPlace: MapPlace?
 
-    init(pin: MapPin, hierarchyKind: MapPlace.Kind? = nil) {
+    /// The depth this pin's dress speaks for — see `hierarchyPlace`.
+    var hierarchyKind: MapPlace.Kind? { hierarchyPlace?.kind }
+
+    init(pin: MapPin, hierarchyPlace: MapPlace? = nil) {
         self.pin = pin
-        self.hierarchyKind = hierarchyKind
+        self.hierarchyPlace = hierarchyPlace
         self.coordinate = CLLocationCoordinate2D(latitude: pin.latitude, longitude: pin.longitude)
         super.init()
     }
