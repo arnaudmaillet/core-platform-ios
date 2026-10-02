@@ -16,8 +16,17 @@ import Testing
 ///
 /// So every suite here SHARES the main thread (`.sharesMainThread`) and runs
 /// beside the others exactly as before, and a suite that measures it takes it
-/// EXCLUSIVELY (`.measuresMainThread`) and runs alone. A measurer waiting for
-/// its turn holds back new sharers, so it cannot starve.
+/// EXCLUSIVELY (`.measuresMainThread`) and runs alone.
+///
+/// ⚠️ **THE SHARERS ARE NEVER HELD BACK FOR A WAITING MEASURER.** The first
+/// version preferred the measurer: queued behind `EmoteEngineTests`, it held
+/// back every suite that had not taken the lock yet, and `EmoteEngineTests`
+/// ran with the main thread otherwise idle, as it never had: 753 s where the
+/// run before took 43 s, a 17-minute lane (PR #354, runs 36934327151 and
+/// 36939385616 — one sample, but not one worth a second). Now a measurer only
+/// waits for the sharers to be done. Every suite starts together, so it runs
+/// once they have all finished — or first, if it gets there before any of
+/// them, holding them back for its few seconds.
 ///
 /// ⚠️ **A NEW SUITE IN THIS TARGET MUST CARRY `.sharesMainThread`** — one
 /// without it can run in the middle of a measurement. Like `.serialized`, it is
@@ -40,7 +49,7 @@ extension Trait where Self == MainThreadAccess {
     static var measuresMainThread: Self { Self(exclusive: true) }
 }
 
-/// A readers-writer async lock that prefers the writer.
+/// A readers-writer async lock that prefers the readers (see above).
 actor MainThreadLock {
     static let shared = MainThreadLock()
 
@@ -61,7 +70,7 @@ actor MainThreadLock {
     // slip in between its resumption and its first step.
 
     private func acquireShared() async {
-        if measuring || !waitingToMeasure.isEmpty {
+        if measuring {
             await withCheckedContinuation { waitingToShare.append($0) }
         } else {
             sharers += 1
