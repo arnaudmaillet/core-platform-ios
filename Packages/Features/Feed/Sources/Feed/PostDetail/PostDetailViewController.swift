@@ -360,9 +360,6 @@ final class PostDetailViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        // ⚠️ NO `StatusBarBlurView` here: under a bar with a TITLE, UIKit
-        // resolves its edge effect to the whole-header frost (156pt, tinted),
-        // not the Map's status-band blur — see `StatusBarBlurView`.
         title = mode == .commentsOnly ? "Comments" : "Post"
         view.backgroundColor = .systemBackground
         configureViews()

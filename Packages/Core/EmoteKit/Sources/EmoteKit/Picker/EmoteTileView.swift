@@ -1,37 +1,41 @@
 import MediaCore
 import UIKit
 
-/// One emote in the picker or the suggestion strip: its glyph at once, its
-/// animation over it when there is one to play.
+/// One emote in the panel, the strip, the suggestion row or the feed's
+/// shortcut rail: its glyph at once, its animated art over it when there is
+/// one.
 ///
-/// ## What animates, and why not everything
+/// ## What is dressed, and what it costs
 ///
 /// A bake costs up to a few seconds of background drawing and about a
-/// megabyte, so a picker that baked every visible cell would spend tens of
-/// seconds and tens of megabytes the moment it opened. A tile therefore plays:
-///
-/// - art already resident — free, whatever the section;
-/// - the house emotes and the recents — bounded (a dozen house emotes, at
-///   most `EmoteRecents.limit` recents), and what a person reaches for;
-/// - everything else stays on its system glyph, which is the emoji itself.
-///
-/// (`EmoteStripView` is the exception that asks for everything: one row,
-/// about ten tiles displayed at a time.)
-///
-/// Every animating tile holds one of `EmoteEngine.maxAnimatedEmotes` slots,
-/// and gives it back when it is reused or leaves the window. Under Reduce
-/// Motion an emoji stays its glyph and a house emote shows its first frame.
+/// megabyte, once per install (the sheet is kept on disk). A tile asks for
+/// its art when its owner says it `prefersAnimation`; otherwise it shows art
+/// already resident, and its system glyph until then. The panel and the strip
+/// ask for every tile they DISPLAY and take it back the moment a tile stops
+/// being displayed (`clear()`), so what they hold is one screen of tiles; a
+/// tile flicked past inside `EmoteEngine.bakeDelay` costs nothing.
 ///
 /// ## Playing or still
 ///
 /// A tile plays unless its owner says otherwise (`setPlaying`). A still tile
-/// keeps its art and its slot and holds one frame (`AnimatedIconView.pause`):
-/// dressed still, it
-/// shows the art's poster frame (`AnimatedIconArt.posterFrame`, never a
-/// blank opening frame); stopped mid-loop, it holds the frame it is on, and
-/// plays on from there when told to.
+/// keeps its art and holds one frame (`AnimatedIconView.pause`): dressed
+/// still, it shows the art's poster frame (`AnimatedIconArt.posterFrame`,
+/// never a blank opening frame); stopped mid-loop, it holds the frame it is
+/// on, and plays on from there when told to.
+///
+/// Only a PLAYING tile holds one of `EmoteEngine.maxPlayingTiles` slots: a
+/// still tile is a posed layer with no animation on it, which costs the
+/// render server nothing. A tile denied a slot stays still until its next
+/// start. Under Reduce Motion an emoji stays its glyph and a house emote
+/// shows its first frame.
+///
+/// ## Nothing behind the emote
+///
+/// The tile and its cell paint no background: the art's own alpha is its
+/// shape, on whatever hosts it (the panel's keyboard material, the strip's
+/// glass). The press is the cell's (`EmoteTileCell.isHighlighted`).
 @MainActor
-final class EmoteTileView: UIView {
+public final class EmoteTileView: UIView {
     /// The sheet side tiles ask for: the text bucket, so a sheet baked for a
     /// caption serves the picker too, and the reverse.
     static let pixelSide = 64
@@ -40,14 +44,16 @@ final class EmoteTileView: UIView {
     let player = AnimatedIconView(frame: .zero)
     private var request: EmoteRequest?
     private var holdsSlot = false
-    private(set) var emote: Emote?
+    public private(set) var emote: Emote?
     private weak var engine: EmoteEngine?
     private var prefersAnimation = false
 
     /// Whether art is showing over the glyph.
-    private(set) var isShowingArt = false
-    /// Whether the art may move. See "Playing or still".
-    private(set) var isPlaying = true
+    public private(set) var isShowingArt = false
+    /// Whether the art on show has frames to play (a loop, motion allowed).
+    private var artMoves = false
+    /// Whether the owner wants the art moving. See "Playing or still".
+    public private(set) var isPlaying = true
 
     /// Poster frames by the art's own image (by identity, held weakly):
     /// worked out once per art, forgotten with it, and never answered for
@@ -57,22 +63,24 @@ final class EmoteTileView: UIView {
     )
 
     /// Whether the art on show is moving right now.
-    var isAnimating: Bool { isShowingArt && player.isAnimating && !player.isPaused }
+    public var isAnimating: Bool { isShowingArt && player.isAnimating && !player.isPaused }
 
-    override init(frame: CGRect) {
+    override public init(frame: CGRect) {
         super.init(frame: frame)
         isUserInteractionEnabled = false
+        backgroundColor = .clear
         glyphLabel.textAlignment = .center
         glyphLabel.adjustsFontSizeToFitWidth = false
+        glyphLabel.backgroundColor = .clear
         addSubview(glyphLabel)
         player.isHidden = true
         addSubview(player)
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    override func layoutSubviews() {
+    override public func layoutSubviews() {
         super.layoutSubviews()
         let side = min(bounds.width, bounds.height)
         let square = CGRect(x: (bounds.width - side) / 2, y: (bounds.height - side) / 2, width: side, height: side)
@@ -84,9 +92,9 @@ final class EmoteTileView: UIView {
         player.frame = square
     }
 
-    /// Shows `emote`, animating it if the rules above allow — still, on its
-    /// poster frame, unless `playing`.
-    func configure(_ emote: Emote, engine: EmoteEngine, prefersAnimation: Bool, playing: Bool = true) {
+    /// Shows `emote`, dressing its art if the rules above allow — still, on
+    /// its poster frame, unless `playing`.
+    public func configure(_ emote: Emote, engine: EmoteEngine, prefersAnimation: Bool, playing: Bool = true) {
         reset()
         self.emote = emote
         self.engine = engine
@@ -111,25 +119,45 @@ final class EmoteTileView: UIView {
         }
     }
 
+    /// Dresses the art still on its poster frame, and plays it from there if
+    /// the owner wants it moving.
     private func present(_ art: AnimatedIconArt, motion: EmoteEngine.Motion) {
-        guard let engine else { return }
-        if motion == .loop, art.frameCount > 1 {
-            guard engine.acquirePlaybackSlot(waiter: self) else { return }
-            holdsSlot = true
-        }
-        player.setArt(art, phase: posterFrame(of: art), paused: !isPlaying)
+        player.setArt(art, phase: posterFrame(of: art), paused: true)
         player.isHidden = false
         glyphLabel.isHidden = true
         isShowingArt = true
+        artMoves = motion == .loop && art.frameCount > 1
+        if isPlaying { play() }
     }
 
     /// Starts or stops the art where it is: stopping holds the frame
     /// on show, starting plays on from it.
-    func setPlaying(_ playing: Bool) {
+    public func setPlaying(_ playing: Bool) {
         guard playing != isPlaying else { return }
         isPlaying = playing
-        guard isShowingArt else { return }
-        if playing { player.resume() } else { player.pause() }
+        if playing { play() } else { hold() }
+    }
+
+    /// Plays on from the frame on show, if a slot is free.
+    private func play() {
+        guard isShowingArt, artMoves, let engine else { return }
+        if !holdsSlot {
+            guard engine.acquireTileSlot() else { return }
+            holdsSlot = true
+        }
+        player.resume()
+    }
+
+    /// Holds the frame on show, and gives the slot back.
+    private func hold() {
+        if isShowingArt { player.pause() }
+        releaseSlot()
+    }
+
+    private func releaseSlot() {
+        guard holdsSlot else { return }
+        holdsSlot = false
+        engine?.releaseTileSlot()
     }
 
     /// The frame a still dressing shows. A loop's own first frame unless that
@@ -155,24 +183,24 @@ final class EmoteTileView: UIView {
         player.isHidden = true
         glyphLabel.isHidden = false
         isShowingArt = false
-        if holdsSlot {
-            holdsSlot = false
-            engine?.releasePlaybackSlot()
-        }
+        artMoves = false
+        releaseSlot()
     }
 
     /// `reset()`, and forgets the emote too, so a window re-attach does not
     /// ask again — for a cell the collection view stopped displaying but
     /// keeps, hidden, in its hierarchy.
-    func clear() {
+    public func clear() {
         reset()
         emote = nil
     }
 
-    override func didMoveToWindow() {
+    override public func didMoveToWindow() {
         super.didMoveToWindow()
         if window == nil {
-            if holdsSlot || request != nil { reset() }
+            // Off screen holds nothing — no slot, no request, and no art: a
+            // panel taken down keeps its cells, and a screen of sheets with them.
+            if isShowingArt || request != nil { reset() }
         } else if let emote, let engine, !isShowingArt, request == nil {
             // Back on screen (the picker came back up): ask again.
             configure(emote, engine: engine, prefersAnimation: prefersAnimation, playing: isPlaying)
@@ -180,29 +208,54 @@ final class EmoteTileView: UIView {
     }
 }
 
-extension EmoteTileView: EmotePlaybackWaiting {
-    func emotePlaybackSlotFreed() {
-        // A tile does not queue for a slot: the next reuse asks again.
-    }
-}
-
 /// A collection cell around one tile.
+///
+/// ⚠️ **NO BACKGROUND, NOT EVEN A DEFAULT ONE.** The cell, its content view
+/// and its background configuration are all clear, so the emote sits on the
+/// host's own material. The press plate is a SHAPE LAYER (a translucent
+/// system fill resolved per trait) shown only while highlighted — glass
+/// repaints a view's `backgroundColor` its own way (the strip lives in glass).
 @MainActor
 final class EmoteTileCell: UICollectionViewCell {
     static let reuseID = "EmoteTileCell"
     let tile = EmoteTileView()
+    /// The press: behind the tile, rounded, invisible at rest.
+    let pressPlate = CAShapeLayer()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
+        backgroundColor = .clear
+        backgroundConfiguration = .clear()
+        contentView.backgroundColor = .clear
+        pressPlate.opacity = 0
+        contentView.layer.addSublayer(pressPlate)
         tile.frame = contentView.bounds.insetBy(dx: 4, dy: 4)
         tile.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         contentView.addSubview(tile)
         isAccessibilityElement = true
         accessibilityTraits = .button
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (cell: EmoteTileCell, _) in
+            cell.resolvePlateColor()
+        }
+        resolvePlateColor()
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let plate = CGRect(origin: .zero, size: contentView.bounds.size).insetBy(dx: 1, dy: 1)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        pressPlate.frame = contentView.bounds
+        pressPlate.path = UIBezierPath(roundedRect: plate, cornerRadius: min(12, plate.width / 4)).cgPath
+        CATransaction.commit()
+    }
+
+    private func resolvePlateColor() {
+        pressPlate.fillColor = UIColor.tertiarySystemFill.resolvedColor(with: traitCollection).cgColor
+    }
 
     override func prepareForReuse() {
         super.prepareForReuse()
@@ -211,6 +264,8 @@ final class EmoteTileCell: UICollectionViewCell {
 
     override var isHighlighted: Bool {
         didSet {
+            guard isHighlighted != oldValue else { return }
+            pressPlate.opacity = isHighlighted ? 1 : 0
             UIView.animate(withDuration: 0.12, delay: 0, options: [.allowUserInteraction, .beginFromCurrentState]) {
                 self.tile.transform = self.isHighlighted ? CGAffineTransform(scaleX: 0.85, y: 0.85) : .identity
             }

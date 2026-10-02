@@ -494,9 +494,6 @@ final class SnapFeedViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        // The blur behind the status bar, the Map's own (UIKit's edge
-        // effect) — see `StatusBarBlurView`.
-        StatusBarBlurView.install(in: view)
         title = "Timeline"
         // The stored value, not a literal: `setEmptyGround` may legitimately
         // arrive BEFORE this runs — the map route loads this view while it
@@ -4796,6 +4793,9 @@ final class SnapFeedViewController: UIViewController {
     /// wrong. See `toolbarGlassHost` for where the style goes instead.
     private func applyChromeTheme(hasMedia: Bool) {
         let style = SnapChromeTheme.style(hasMedia: hasMedia)
+        // In one frame, not dissolved like the bars: the variants differ by
+        // one half-opacity layer over 62pt.
+        statusBarBlur?.lendStyle(style, from: self)
         guard let nav = navigationController else {
             overrideUserInterfaceStyle = style
             return
@@ -4888,6 +4888,14 @@ final class SnapFeedViewController: UIViewController {
         navigationController?.navigationBar.overrideUserInterfaceStyle = .unspecified
         navigationController?.toolbar.overrideUserInterfaceStyle = .unspecified
         overrideUserInterfaceStyle = .unspecified
+        statusBarBlur?.returnStyle(from: self)
+    }
+
+    /// The window's status-band blur, which wears the settled page's style
+    /// while the feed covers it — the dark variant over a photograph, as when
+    /// the band lived in this screen's view. See `StatusBarBlurView`.
+    private var statusBarBlur: StatusBarBlurView? {
+        StatusBarBlurView.installed(in: viewIfLoaded?.window ?? navigationController?.viewIfLoaded?.window)
     }
 
     /// The settled page's model — what the toolbar's share/more act on.
