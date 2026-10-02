@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import DesignSystem
 import EmoteKit
 import MediaCore
@@ -82,7 +83,7 @@ final class SnapChromeView: UIView {
     private let commentEmptyState = SnapCommentEmptyStateView()
 
     /// The vertical shortcut wheel on the trailing edge: quick-react
-    /// shortcuts (placeholder symbols today, favorite GIFs later), spanning
+    /// shortcuts (our animated emotes, still until the wheel moves), spanning
     /// the ticker's top up to the nav bar. Static content like the caption —
     /// populated from `configure` with a per-post deterministic payload, so
     /// the flight replica draws the identical wheel.
@@ -146,12 +147,12 @@ final class SnapChromeView: UIView {
     /// comments-engagement request with its post identity attached.
     var onCommentsTapped: (() -> Void)?
 
-    /// The rail's boost anchor asked to spend `amount` points on this post
-    /// (tap = the default denomination, long-press menu = a chosen one).
+    /// The rail's boost anchor asked to spend on this post (tap = the
+    /// default amount, long-press menu = the default or one ×10 shot).
     /// The cell forwards it with the post identity attached; whether the
     /// wallet can afford it is the OWNER's answer, which comes back through
     /// `playBoostConfirmation` / `playBoostDenied`.
-    var onBoostRequested: ((Int) -> Void)?
+    var onBoostRequested: ((WalletStakeSpend) -> Void)?
     /// The anchor's menu asked to take back the session's spend on this
     /// post. Same fan-out as the spend: cell attaches the identity, the
     /// owner does the refund and answers with `playBoostRefund`.
@@ -361,7 +362,7 @@ final class SnapChromeView: UIView {
         // is gone. Constrained off ticker + margins, exactly the bounds
         // the old backdrop occupied.
         boostButton.isHidden = true
-        boostButton.onBoost = { [weak self] amount in self?.onBoostRequested?(amount) }
+        boostButton.onBoost = { [weak self] spend in self?.onBoostRequested?(spend) }
         boostButton.onUndo = { [weak self] in self?.onBoostUndoRequested?() }
         // The anchor is fully framed from outside (band edges + margins);
         // its intrinsic content size must exert ZERO back-pressure on the
@@ -573,7 +574,7 @@ final class SnapChromeView: UIView {
         // engagement's fade to swallow it also kills the flash it used to
         // make in the frames before that engagement mounts.
         //
-        // Owned by `configure` (static chrome, like the rail's symbols), so
+        // Owned by `configure` (static chrome, like the rail's emotes), so
         // it needs no stream to appear and the flight replica — which never
         // receives one — draws the identical corner.
         boostButton.isHidden = !hasMedia
@@ -598,7 +599,7 @@ final class SnapChromeView: UIView {
         // column. Static chrome, so it loads here (not via
         // `updateCommentStreams`) and the flight replica shows it too; the
         // seeded payload keeps both instances identical.
-        shortcutRail.setSymbols(SnapShortcutRailView.placeholderPayload(for: model.id))
+        shortcutRail.setEmotes(SnapShortcutRailView.payload(for: model.id))
     }
 
     /// The raw caption, kept so Dynamic Type changes can re-resolve the
@@ -1226,8 +1227,8 @@ final class SnapChromeView: UIView {
     /// The anchor's wallet context: what the balance can still afford and
     /// how much of this post's spend is session-undoable — the enable state
     /// and the menu's live contents both derive from it.
-    func setBoostContext(balance: Int, undoable: Int) {
-        boostButton.setWalletContext(balance: balance, undoableAmount: undoable)
+    func setBoostContext(balance: Int, undoable: Int, stakeShots: Int = 0) {
+        boostButton.setWalletContext(balance: balance, undoableAmount: undoable, stakeShots: stakeShots)
     }
 
     /// The spend's visible receipt: a gold "+N" born on the boost anchor

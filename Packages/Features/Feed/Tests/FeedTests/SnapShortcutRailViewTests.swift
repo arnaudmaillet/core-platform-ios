@@ -1,5 +1,6 @@
 import CoreModels
 import DesignSystem
+import EmoteKit
 import PostGrid
 import Testing
 import UIKit
@@ -7,19 +8,24 @@ import UIKit
 
 /// The shortcut wheel's geometry contract: a full-height rail whose resting
 /// window shows exactly three bubbles docked at the bottom, with the rest
-/// scroll-discoverable, detent-snapped releases, and a per-post deterministic
-/// placeholder payload (the flight-replica identity requirement).
+/// scroll-discoverable, detent-snapped releases, a per-post deterministic
+/// payload of our own animated emotes (the flight-replica identity
+/// requirement), drawn on no bubble and playing only while the wheel moves.
 @MainActor
 struct SnapShortcutRailViewTests {
     /// A rail frame comfortably taller than the resting window, as on device
     /// (ticker top → nav bar bottom).
     private static let railHeight: CGFloat = 520
 
+    private static func emotes(_ count: Int) -> [Emote] {
+        Array(SnapShortcutRailView.reactionPool().prefix(count))
+    }
+
     private func makeRail(symbolCount: Int = 9) -> SnapShortcutRailView {
         let rail = SnapShortcutRailView(
             frame: CGRect(x: 0, y: 0, width: 44, height: Self.railHeight)
         )
-        rail.setSymbols(Array(SnapShortcutRailView.symbolPool.prefix(symbolCount)))
+        rail.setEmotes(Self.emotes(symbolCount))
         rail.layoutIfNeeded()
         return rail
     }
@@ -56,7 +62,7 @@ struct SnapShortcutRailViewTests {
         rail.layoutIfNeeded()
         #expect(rail.contentOffset.y == -rail.contentInset.top + 2 * SnapShortcutRailView.step)
         // A fresh payload, by contrast, parks back at rest.
-        rail.setSymbols(Array(SnapShortcutRailView.symbolPool.prefix(9)))
+        rail.setEmotes(Self.emotes(9))
         rail.layoutIfNeeded()
         #expect(rail.contentOffset.y == -rail.contentInset.top)
     }
@@ -76,11 +82,86 @@ struct SnapShortcutRailViewTests {
         #expect(rail.alwaysBounceVertical)
     }
 
-    @Test func placeholderPayloadOutnumbersTheRestingWindow() {
+    @Test func payloadOutnumbersTheRestingWindow() {
         // The wheel ships more shortcuts than the resting window shows —
         // otherwise there is nothing to discover and the rail reads dead.
-        #expect(SnapShortcutRailView.symbolPool.count >= 8)
-        #expect(SnapShortcutRailView.symbolPool.count > SnapShortcutRailView.restingIconCount)
+        let pool = SnapShortcutRailView.reactionPool()
+        #expect(pool.count >= 9)
+        #expect(pool.count > SnapShortcutRailView.restingIconCount)
+    }
+
+    /// The shortcuts are OUR animated emotes — every id resolves in the
+    /// catalogue, the map's GIF emotes among them — not SF Symbols.
+    @Test func payloadIsOurAnimatedReactions() {
+        let pool = SnapShortcutRailView.reactionPool()
+        #expect(pool.map(\.id) == SnapShortcutRailView.reactionIDs, "every reaction ships in the catalogue")
+        for gif in ["lol", "blush"] { #expect(pool.contains { $0.id == gif }, "the \(gif) GIF emote") }
+        let rail = makeRail()
+        let icons = rail.subviews.compactMap { $0 as? UIButton }
+        #expect(icons.count == 9)
+        #expect(icons.allSatisfy { $0.configuration?.image == nil }, "no symbol")
+        #expect(icons.allSatisfy { $0.subviews.contains { $0 is EmoteTileView } })
+        // The emote is exactly the shortcut's 36pt box, not grown past it.
+        for icon in icons {
+            let tile = icon.subviews.compactMap { $0 as? EmoteTileView }.first
+            #expect(tile?.frame == icon.bounds)
+            #expect(icon.bounds.size == CGSize(width: SnapShortcutRailView.iconDiameter,
+                                               height: SnapShortcutRailView.iconDiameter))
+        }
+    }
+
+    /// No bubble: nothing is painted behind an emote.
+    @Test func shortcutsHaveNoBackground() {
+        let rail = makeRail()
+        for icon in rail.subviews.compactMap({ $0 as? UIButton }) {
+            #expect(icon.layer.backgroundColor == nil || icon.layer.backgroundColor?.alpha == 0)
+            #expect(icon.backgroundColor == nil || icon.backgroundColor == .clear)
+            #expect((icon.configuration?.background.backgroundColor ?? .clear).cgColor.alpha == 0)
+            #expect(icon.configuration?.background.visualEffect == nil)
+            let tile = icon.subviews.compactMap { $0 as? EmoteTileView }.first
+            #expect(tile?.backgroundColor == .clear)
+        }
+    }
+
+    /// On screen, only the shortcuts inside the window are dressed — still at
+    /// rest; they play from a drag's start to the end of its glide, and a
+    /// stop stills them again. Off screen, nothing is dressed.
+    @Test func shownShortcutsPlayOnlyWhileTheWheelScrolls() throws {
+        let rail = makeRail()
+        #expect(rail.displayedTiles.isEmpty, "off a window, nothing asks for art")
+
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 200, height: Self.railHeight))
+        window.isHidden = false
+        window.addSubview(rail)
+        defer {
+            rail.reset()
+            rail.removeFromSuperview()
+            window.isHidden = true
+        }
+        rail.layoutIfNeeded()
+        let resting = rail.displayedTiles
+        try #require(!resting.isEmpty)
+        #expect(resting.count <= SnapShortcutRailView.restingIconCount + 1,
+                "\(resting.count): the resting window (and the one dissolving below it), not the payload")
+        #expect(resting.allSatisfy { $0.emote != nil && !$0.isPlaying }, "at rest, still")
+
+        rail.scrollViewWillBeginDragging(rail)
+        #expect(rail.isScrolling)
+        #expect(rail.displayedTiles.allSatisfy { $0.isPlaying }, "the drag starts every shown shortcut")
+        // Revealing the column brings the rest in, playing.
+        rail.contentOffset = CGPoint(x: 0, y: rail.contentSize.height - rail.bounds.height + rail.contentInset.bottom)
+        rail.layoutIfNeeded()
+        #expect(rail.displayedTiles.count > resting.count)
+        #expect(rail.displayedTiles.allSatisfy { $0.isPlaying })
+
+        rail.scrollViewDidEndDragging(rail, willDecelerate: true)
+        #expect(rail.displayedTiles.allSatisfy { $0.isPlaying }, "the glide still plays")
+        rail.scrollViewDidEndDecelerating(rail)
+        #expect(!rail.isScrolling)
+        #expect(rail.displayedTiles.allSatisfy { !$0.isPlaying }, "stopped, nothing plays")
+
+        rail.removeFromSuperview()
+        #expect(rail.displayedTiles.isEmpty, "taken off screen, the art goes")
     }
 
     @Test func emptyPayloadHidesTheRail() {
@@ -208,15 +289,15 @@ struct SnapShortcutRailViewTests {
         #expect(SnapFeedCollectionView.claimsTouches(caption) == false)
     }
 
-    @Test func placeholderPayloadIsDeterministicPerPost() {
+    @Test func payloadIsDeterministicPerPost() {
         let id = PostID("0198c5f2-1111-7000-8000-000000000001")
         // Same post → same wheel (the live cell and its flight replica must
         // never disagree).
-        #expect(SnapShortcutRailView.placeholderPayload(for: id)
-            == SnapShortcutRailView.placeholderPayload(for: id))
+        #expect(SnapShortcutRailView.payload(for: id).map(\.id)
+            == SnapShortcutRailView.payload(for: id).map(\.id))
         // Full pool, no duplicates — it's a shuffle, not a sample.
-        let payload = SnapShortcutRailView.placeholderPayload(for: id)
-        #expect(Set(payload).count == SnapShortcutRailView.symbolPool.count)
+        let payload = SnapShortcutRailView.payload(for: id)
+        #expect(Set(payload.map(\.id)).count == SnapShortcutRailView.reactionPool().count)
     }
 
     /// The chrome-level contract this feature is really about: the rail owns
@@ -349,7 +430,7 @@ struct SnapShortcutRailViewTests {
         // A rail whose headroom IS grid-aligned (the chrome's invariant):
         // 132 resting + 16 fade + 288 headroom (= 6 detents) = 436.
         let rail = SnapShortcutRailView(frame: CGRect(x: 0, y: 0, width: 44, height: 436))
-        rail.setSymbols(Array(SnapShortcutRailView.symbolPool.prefix(9)))
+        rail.setEmotes(Self.emotes(9))
         rail.layoutIfNeeded()
         let icons = rail.subviews.compactMap { $0 as? UIButton }.sorted { $0.center.y < $1.center.y }
 

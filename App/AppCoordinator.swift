@@ -45,8 +45,15 @@ final class AppCoordinator: Coordinator {
         #endif
         window.rootViewController = LaunchViewController()
         window.makeKeyAndVisible()
+        // The blur behind the status bar, on every screen and through every
+        // transition: one band in the window, over everything the app draws —
+        // see `StatusBarBlurView`. Root swaps replace the root's view only.
+        StatusBarBlurView.install(in: window)
         #if DEBUG
         FirstLayoutTrace.selfTestIfRequested(in: window)
+        // `-status-bar-blur-audit`: the band, every frame, and every blur
+        // under it per screen.
+        StatusBarBlurAudit.installIfRequested(in: window)
         #endif
 
         #if DEBUG

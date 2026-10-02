@@ -195,6 +195,8 @@ final class MapsViewController: UIViewController {
     /// the map. Nil: every country is open (the fleet, until the backend
     /// carries unlocks).
     private let countryAccess: (any CountryAccess)?
+    /// What the Shop's Boosts sells (the ×10 cartridge pack); nil sells none.
+    private let stakePacks: (any StakePackSelling)?
     /// The country each pin stands in, looked up once per post: the atlas
     /// test is point-in-polygon, and the reconcile runs on every settle.
     private var pinCountries: [PostID: String] = [:]
@@ -350,9 +352,11 @@ final class MapsViewController: UIViewController {
         prewarm: @escaping ([PostID]) async -> Void,
         openProfile: @escaping (ProfileID, ProfileIdentityStub?) -> Void,
         openConversation: @escaping (ProfileID) -> Void,
-        countryAccess: (any CountryAccess)? = nil
+        countryAccess: (any CountryAccess)? = nil,
+        stakePacks: (any StakePackSelling)? = nil
     ) {
         self.countryAccess = countryAccess
+        self.stakePacks = stakePacks
         self.viewModel = viewModel
         self.favoritesRepository = favoritesRepository
         self.pinService = pinService
@@ -986,7 +990,7 @@ final class MapsViewController: UIViewController {
     /// (`MapCountryShopHosting`). A row takes you to its country.
     func presentCountryShop() {
         guard let countryAccess, presentedViewController == nil else { return }
-        let shop = CountryShopViewController.sheet(access: countryAccess) { [weak self] code in
+        let shop = CountryShopViewController.sheet(access: countryAccess, stakePacks: stakePacks) { [weak self] code in
             self?.dismiss(animated: true) { self?.showCountry(code) }
         }
         present(shop, animated: true)

@@ -10,6 +10,9 @@ import UIKit
 ///  │               ▔▔                     │
 ///  │ (◆ 100)        Shop             (✕)  │
 ///  │ 🔍 Search countries                  │
+///  │ Boosts                               │
+///  │ (⚡) ×10 cartridges            [◆ 20] │  ← or "Active — 7 left"
+///  │      10 shots · 10 points a tap      │
 ///  │ Your map        3 of 237 countries   │  ← scrolls with the list
 ///  │ ▓▓▓░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  │
 ///  │ Unlocked 3                           │
@@ -21,8 +24,19 @@ import UIKit
 ///  └──────────────────────────────────────┘
 /// ```
 ///
+/// # Boosts, then the map
+/// With a `StakePackSelling`, the list opens on **Boosts**: the ×10 cartridge
+/// pack — shots that each stake 10 of the viewer's own points in one tap,
+/// bought with gems. First, because it is one row the collapsed sheet always
+/// shows (under 237 countries it would be out of reach), and because the
+/// stake menu's disabled "×10" sends the viewer HERE to find it. Packs don't
+/// stack: while one has shots, the row says "Active — N left" in place of a
+/// price. A price raises a one-line confirmation menu (the pack is bought on
+/// the spot, there is no offer screen to show). A search is a search of
+/// countries, so it hides Boosts.
+///
 /// # One list, two sections
-/// The progress block leads the collection — it is an ITEM, so it scrolls
+/// The progress block leads the countries — it is an ITEM, so it scrolls
 /// away with the rows rather than standing over them. Then **Unlocked** (the
 /// home country first, then by rank) and **Locked** (by rank), each header
 /// the app's one section title carrying its count (`SectionTitleView`). Search filters both sections at once; a section left
@@ -58,8 +72,10 @@ public final class CountryShopViewController: UIViewController {
     /// Shows a country on the map. Nil hides the "show" half of a row's tap.
     public var onShowCountry: ((String) -> Void)?
 
-    enum Section: Hashable { case progress, unlocked, locked }
+    enum Section: Hashable { case boosts, progress, unlocked, locked }
     enum Item: Hashable {
+        /// The ×10 cartridge pack, Boosts' one row.
+        case stakePack
         /// "Your map · N of 237", the first item of the list.
         case progress
         case country(String)
@@ -71,14 +87,19 @@ public final class CountryShopViewController: UIViewController {
     static let closeItemIdentifier = "shop.close"
 
     private let access: any CountryAccess
+    /// What Boosts sells; nil shows no Boosts section.
+    private let stakePacks: (any StakePackSelling)?
     private let atlas: CountryAtlas
     private(set) lazy var collectionView = UICollectionView(frame: .zero, collectionViewLayout: makeLayout())
     private(set) var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
     private var query = ""
     private var flags: [String: UIImage] = [:]
 
-    public init(access: any CountryAccess, atlas: CountryAtlas = .shared) {
+    public init(
+        access: any CountryAccess, stakePacks: (any StakePackSelling)? = nil, atlas: CountryAtlas = .shared
+    ) {
         self.access = access
+        self.stakePacks = stakePacks
         self.atlas = atlas
         super.init(nibName: nil, bundle: nil)
         title = CountryShopEntry.title
@@ -90,9 +111,10 @@ public final class CountryShopViewController: UIViewController {
     /// The shop in its own navigation stack, as a sheet that opens collapsed
     /// and drags to full height (see the type's note).
     public static func sheet(
-        access: any CountryAccess, onShowCountry: ((String) -> Void)? = nil
+        access: any CountryAccess, stakePacks: (any StakePackSelling)? = nil,
+        onShowCountry: ((String) -> Void)? = nil
     ) -> UIViewController {
-        let shop = CountryShopViewController(access: access)
+        let shop = CountryShopViewController(access: access, stakePacks: stakePacks)
         shop.onShowCountry = onShowCountry
         let navigation = UINavigationController(rootViewController: shop)
         navigation.modalPresentationStyle = .pageSheet
@@ -156,8 +178,13 @@ public final class CountryShopViewController: UIViewController {
         let countryRegistration = UICollectionView.CellRegistration<CountryShopRowCell, String> {
             [weak self] cell, _, code in self?.configure(cell, code: code)
         }
+        let packRegistration = UICollectionView.CellRegistration<StakePackRowCell, Item> {
+            [weak self] cell, _, _ in self?.configure(cell)
+        }
         dataSource = UICollectionViewDiffableDataSource(collectionView: collectionView) { view, path, item in
             switch item {
+            case .stakePack:
+                view.dequeueConfiguredReusableCell(using: packRegistration, for: path, item: item)
             case .progress:
                 view.dequeueConfiguredReusableCell(using: progressRegistration, for: path, item: item)
             case .country(let code):
@@ -172,9 +199,9 @@ public final class CountryShopViewController: UIViewController {
         dataSource.supplementaryViewProvider = { view, kind, path in
             view.dequeueConfiguredReusableSupplementary(using: headerRegistration, for: path)
         }
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(accessChanged), name: .countryAccessDidChange, object: nil
-        )
+        for name in [Notification.Name.countryAccessDidChange, .stakePackDidChange] {
+            NotificationCenter.default.addObserver(self, selector: #selector(accessChanged), name: name, object: nil)
+        }
         installBalance()
         apply(animated: false)
     }
@@ -208,6 +235,10 @@ public final class CountryShopViewController: UIViewController {
     private func apply(animated: Bool) {
         let rows = rows()
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
+        if showsBoosts {
+            snapshot.appendSections([.boosts])
+            snapshot.appendItems([.stakePack], toSection: .boosts)
+        }
         snapshot.appendSections([.progress])
         snapshot.appendItems([.progress], toSection: .progress)
         if !rows.unlocked.isEmpty {
@@ -246,6 +277,11 @@ public final class CountryShopViewController: UIViewController {
         }
     }
 
+    /// Boosts shows with a seller, and outside a search (a search of countries).
+    var showsBoosts: Bool {
+        stakePacks != nil && query.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
     private func updateEmptyState(isEmpty: Bool) {
         // Only a search can empty the list: the home country is always unlocked.
         contentUnavailableConfiguration = isEmpty && !query.isEmpty ? UIContentUnavailableConfiguration.search() : nil
@@ -265,6 +301,7 @@ public final class CountryShopViewController: UIViewController {
         let title: String
         switch section {
         case .progress: return nil
+        case .boosts: return SectionTitleView.Content(title: "Boosts")
         case .unlocked: title = "Unlocked"
         case .locked: title = "Locked"
         }
@@ -319,6 +356,16 @@ public final class CountryShopViewController: UIViewController {
     /// "◆ 50": blue in reach, grey out of it — tapping either opens the offer,
     /// which says how many gems are missing.
     private func priceButton(for country: CountryAtlas.Country, price: Int) -> UIView {
+        let host = priceButton(price: price, accessibilityLabel: "Unlock \(country.name) for \(price) gems")
+        (host.subviews.first as? UIButton)?.addAction(
+            UIAction { [weak self] _ in self?.offer(country) }, for: .primaryActionTriggered
+        )
+        return host
+    }
+
+    /// A price capsule in the host that receives its taps (see below). With a
+    /// `menu`, the tap raises it.
+    private func priceButton(price: Int, accessibilityLabel: String, menu: UIMenu? = nil) -> UIView {
         var configuration = UIButton.Configuration.tinted()
         configuration.cornerStyle = .capsule
         configuration.image = UIImage(systemName: "diamond.fill")?
@@ -333,8 +380,11 @@ public final class CountryShopViewController: UIViewController {
         }
         let button = UIButton(configuration: configuration)
         button.tintColor = access.gems >= price ? .systemBlue : .systemGray
-        button.accessibilityLabel = "Unlock \(country.name) for \(price) gems"
-        button.addAction(UIAction { [weak self] _ in self?.offer(country) }, for: .primaryActionTriggered)
+        button.accessibilityLabel = accessibilityLabel
+        if let menu {
+            button.menu = menu
+            button.showsMenuAsPrimaryAction = true
+        }
         // A bare button as a list accessory never gets its taps (the cell's
         // selection eats them): a sized host is what receives them.
         let host = UIView()
@@ -344,6 +394,73 @@ public final class CountryShopViewController: UIViewController {
         host.frame = CGRect(origin: .zero, size: size)
         button.pin(to: host)
         return host
+    }
+
+    // MARK: - Boosts
+
+    /// The pack's row: what it is, then its price — or, while a pack is
+    /// loaded, "Active — N left" in place of one (packs don't stack).
+    private func configure(_ cell: StakePackRowCell) {
+        guard let stakePacks else { return }
+        let offer = stakePacks.offer
+        cell.configure(offer)
+        let trailing: UIView
+        if offer.isActive {
+            let label = UILabel()
+            label.font = .preferredFont(forTextStyle: .subheadline)
+            label.textColor = .secondaryLabel
+            label.text = Self.activeText(offer)
+            trailing = label
+        } else {
+            trailing = packPriceButton(offer)
+        }
+        trailing.sizeToFit()
+        cell.accessories = [.customView(configuration: .init(
+            customView: trailing, placement: .trailing(), reservedLayoutWidth: .actual
+        ))]
+        cell.accessibilityLabel = "\(StakePackRowCell.title(offer)), \(StakePackRowCell.detail(offer))"
+        cell.accessibilityValue = offer.isActive ? Self.activeText(offer) : "\(offer.price) gems"
+    }
+
+    /// "Active — 7 left".
+    static func activeText(_ offer: StakePackOffer) -> String { "Active — \(offer.shotsLeft) left" }
+
+    /// "◆ 20", as a country's price — and in the same colours: blue in reach,
+    /// grey out of it. The tap raises a one-line confirmation: the pack is
+    /// bought on the spot, so the gems never go on a stray touch.
+    private func packPriceButton(_ offer: StakePackOffer) -> UIView {
+        let gems = access.gems
+        let buy = UIAction(
+            title: "Buy for \(offer.price) gems",
+            image: GemSymbol.glyphImage()
+        ) { [weak self] _ in self?.buyStakePack() }
+        if gems < offer.price {
+            buy.attributes = .disabled
+            buy.subtitle = "\(offer.price - gems) more gems needed"
+        }
+        let menu = UIMenu(
+            title: "\(StakePackRowCell.title(offer)) — \(StakePackRowCell.detail(offer))", children: [buy]
+        )
+        return priceButton(
+            price: offer.price,
+            accessibilityLabel: "Buy \(StakePackRowCell.title(offer)) for \(offer.price) gems",
+            menu: menu
+        )
+    }
+
+    /// Buys the pack. Internal for tests — the confirmation menu cannot be
+    /// raised in one.
+    @discardableResult
+    func buyStakePack() -> StakePackPurchase? {
+        guard let stakePacks else { return nil }
+        let outcome = stakePacks.buyPack()
+        switch outcome {
+        case .bought:
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+        case .packStillActive, .insufficientGems:
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
+        }
+        return outcome
     }
 
     private func flag(for country: CountryAtlas.Country) -> UIImage {
@@ -440,9 +557,10 @@ public final class CountryShopViewController: UIViewController {
                 header.pinToVisibleBounds = false
             }
             if section == .progress {
-                // The block sits on the page, just under the search field; the
-                // first header's own top padding is the gap below it.
-                layout.contentInsets.top = Spacing.xs
+                // The block sits on the page, just under the search field (or
+                // a section's breath under Boosts); the first header's own
+                // top padding is the gap below it.
+                layout.contentInsets.top = self?.showsBoosts == true ? Spacing.lg : Spacing.xs
                 layout.contentInsets.bottom = 0
             }
             return layout
@@ -466,6 +584,7 @@ extension CountryShopViewController: UICollectionViewDelegate {
     }
 
     public func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
+        // The pack's row is bought through its price, not by a tap on the row.
         guard case .country(let code) = dataSource.itemIdentifier(for: indexPath) else { return false }
         return onShowCountry != nil || !access.isUnlocked(code)
     }
@@ -610,5 +729,76 @@ final class CountryShopProgressCell: UICollectionViewListCell {
         countLabel.text = "\(owned) of \(total) countries"
         progressView.setProgress(total == 0 ? 0 : Float(owned) / Float(total), animated: animated)
         accessibilityLabel = "Your map, \(owned) of \(total) countries unlocked"
+    }
+}
+
+/// Boosts' one row: the pack's badge, "×10 cartridges", and what it holds
+/// under it; the trailing price / "Active — N left" is the cell's accessory.
+/// Shaped like a country's row (34pt leading visual, name over details) so
+/// the two sections read as one list.
+final class StakePackRowCell: UICollectionViewListCell {
+    private let badge = UIImageView()
+    let titleLabel = UILabel()
+    let detailLabel = UILabel()
+
+    /// "×10 cartridges".
+    static func title(_ offer: StakePackOffer) -> String {
+        "\(StakeMenu.shotName(offer.pointsPerShot)) cartridges"
+    }
+
+    /// "10 shots · 10 points a tap" — the pack's whole promise.
+    static func detail(_ offer: StakePackOffer) -> String {
+        "\(offer.shotsPerPack) shots · \(StakeMenu.points(offer.pointsPerShot)) a tap"
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        // The points' red disc with a white bolt — the shot is a STAKE of
+        // points, so it wears their colour (`PointsSymbol`), not the gems'.
+        badge.image = UIImage(systemName: StakeMenu.shotGlyph)?
+            .applyingSymbolConfiguration(.init(pointSize: 15, weight: .bold))?
+            .withTintColor(.white, renderingMode: .alwaysOriginal)
+        badge.contentMode = .center
+        badge.backgroundColor = PointsSymbol.tint
+        badge.layer.cornerRadius = 17
+        badge.layer.cornerCurve = .circular
+        titleLabel.font = .preferredFont(forTextStyle: .body)
+        titleLabel.adjustsFontForContentSizeCategory = true
+        detailLabel.font = .preferredFont(forTextStyle: .footnote)
+        detailLabel.adjustsFontForContentSizeCategory = true
+        detailLabel.textColor = .secondaryLabel
+
+        let column = UIStackView(arrangedSubviews: [titleLabel, detailLabel])
+        column.axis = .vertical
+        column.alignment = .leading
+        column.spacing = 3
+        let row = UIStackView(arrangedSubviews: [badge, column])
+        row.alignment = .center
+        row.spacing = Spacing.lg
+        row.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(row)
+        NSLayoutConstraint.activate([
+            badge.widthAnchor.constraint(equalToConstant: 34),
+            badge.heightAnchor.constraint(equalToConstant: 34),
+            row.topAnchor.constraint(equalTo: contentView.layoutMarginsGuide.topAnchor),
+            row.leadingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.leadingAnchor),
+            row.trailingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.trailingAnchor),
+            row.bottomAnchor.constraint(equalTo: contentView.layoutMarginsGuide.bottomAnchor),
+            separatorLayoutGuide.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+        ])
+        isAccessibilityElement = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// No resting ground, as a country's row: the sheet's own runs behind.
+    override func updateConfiguration(using state: UICellConfigurationState) {
+        backgroundConfiguration = .clear()
+    }
+
+    func configure(_ offer: StakePackOffer) {
+        titleLabel.text = Self.title(offer)
+        detailLabel.text = Self.detail(offer)
     }
 }

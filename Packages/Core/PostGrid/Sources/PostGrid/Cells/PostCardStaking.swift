@@ -45,10 +45,10 @@ public final class PostCardStaking {
     public func bind(_ cell: PostGridListRowCell, to postID: PostID) {
         let key = postID.rawValue
         cells.setObject(key as NSString, forKey: cell)
-        cell.stakeTapAmount = WalletStore.Policy.tapBoostAmount
+        cell.stakeTapAmount = WalletStore.Policy.defaultStakeAmount
         cell.onStake = { [weak self, weak cell] amount in
             guard let self, let cell else { return }
-            stake(amount, on: key, cell: cell)
+            stake(.points(amount), on: key, cell: cell)
         }
         cell.stakeMenu = { [weak self, weak cell] in
             guard let self else { return nil }
@@ -56,7 +56,11 @@ public final class PostCardStaking {
                 for: menuState(for: key),
                 stake: { [weak self, weak cell] amount in
                     guard let self, let cell else { return }
-                    stake(amount, on: key, cell: cell)
+                    stake(.points(amount), on: key, cell: cell)
+                },
+                shoot: { [weak self, weak cell] in
+                    guard let self, let cell else { return }
+                    stake(.shot, on: key, cell: cell)
                 },
                 undo: { [weak self, weak cell] in
                     guard let self else { return }
@@ -80,20 +84,23 @@ public final class PostCardStaking {
 
     // MARK: - Spending
 
-    private func menuState(for key: String) -> StakeMenu.State {
+    /// Internal for tests: the menu's state is the testable seam (a raised
+    /// menu cannot be read back from a cell).
+    func menuState(for key: String) -> StakeMenu.State {
         StakeMenu.State(
             balance: wallet.balance,
             stakedOnTarget: wallet.boostTotal(forTarget: key),
             undoable: session[key] ?? 0,
             perTargetCap: WalletStore.Policy.perTargetBoostCap,
-            denominations: WalletStore.Policy.boostDenominations,
-            tapAmount: WalletStore.Policy.tapBoostAmount
+            tapAmount: WalletStore.Policy.defaultStakeAmount,
+            shotsLeft: wallet.stakeShots,
+            shotAmount: WalletStore.Policy.StakePack.pointsPerShot
         )
     }
 
-    private func stake(_ amount: Int, on key: String, cell: PostGridListRowCell) {
-        guard amount > 0 else { return }
-        switch wallet.boost(targetID: key, amount: amount) {
+    func stake(_ spend: WalletStakeSpend, on key: String, cell: PostGridListRowCell) {
+        if case .points(let amount) = spend, amount <= 0 { return }
+        switch wallet.stake(spend, on: key) {
         case .boosted(_, let targetTotal, let spent):
             session[key, default: 0] += spent
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
@@ -103,7 +110,7 @@ public final class PostCardStaking {
                 cell.setViewerStake(targetTotal)
                 cell.playStakeConfirmation(amount: spent)
             }
-        case .insufficientBalance, .targetCapReached:
+        case .insufficientBalance, .targetCapReached, .noShotsLeft:
             UINotificationFeedbackGenerator().notificationOccurred(.error)
             if isBound(cell, to: key) { cell.playStakeDenied() }
         }

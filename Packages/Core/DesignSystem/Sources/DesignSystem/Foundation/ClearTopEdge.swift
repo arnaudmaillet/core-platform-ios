@@ -17,10 +17,10 @@ public extension UIScrollView {
     /// only chrome. Hidden is the same on both systems, which a style never
     /// was. (The Explore tab's map keeps a light blur under its status bar;
     /// that is MapKit's own edge effect, private and unswitchable. Since
-    /// 2026-10-01 the full-screen screens wear the same one, on purpose:
-    /// `StatusBarBlurView` keeps ONE effect uncleared, on an inert scroll view
-    /// of its own, which UIKit draws over the status band alone — the lists
-    /// still clear theirs.)
+    /// 2026-10-01 other screens wear the same one, on purpose, and since
+    /// 2026-10-02 every screen does: `StatusBarBlurView` keeps ONE effect
+    /// uncleared, on an inert scroll view of its own in the window, which
+    /// UIKit draws over the status band alone — the lists still clear theirs.)
     ///
     /// ## ⚠️ A pager needs it as well as its pages
     ///
