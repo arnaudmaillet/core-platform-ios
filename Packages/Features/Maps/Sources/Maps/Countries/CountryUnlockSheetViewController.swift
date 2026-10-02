@@ -25,6 +25,12 @@ import UIKit
 final class CountryUnlockSheetViewController: UIViewController {
     /// The country was unlocked; the sheet is on its way out.
     var onUnlocked: ((String) -> Void)?
+    /// The sheet is committed to leaving — as it STARTS going down, unlocked
+    /// or not (`OfferCloseFlight`). At most once per close.
+    var onClosing: (() -> Void)?
+    /// A dismissal that had already reported `onClosing` was cancelled: the
+    /// sheet is back up.
+    var onCloseCancelled: (() -> Void)?
     /// The sheet is gone, unlocked or not.
     var onDismissed: (() -> Void)?
 
@@ -33,6 +39,7 @@ final class CountryUnlockSheetViewController: UIViewController {
     private let stack = UIStackView()
     private let unlockButton = UIButton(configuration: .prominentGlass())
     private let balanceLabel = UILabel()
+    private var closeFlight = OfferCloseFlight()
     private static let detent = UISheetPresentationController.Detent.Identifier("country.unlock")
     /// The sheet's height above the bottom safe area — measured when the
     /// view loads; the map frames the country above it.
@@ -128,6 +135,55 @@ final class CountryUnlockSheetViewController: UIViewController {
             stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -Spacing.lg),
         ])
         measure()
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        guard isBeingDismissed else { return }
+        // ⚠️ Not `viewDidDisappear`: the map's flight back waits for nothing
+        // the sheet does on its way down — see `OfferCloseFlight`.
+        let coordinator = transitionCoordinator
+        let interactive = coordinator?.isInteractive ?? false
+        #if DEBUG
+        OfferLog.note("dismissal began interactive=\(interactive)")
+        #endif
+        dismissalBegan(interactive: interactive)
+        coordinator?.notifyWhenInteractionChanges { [weak self] context in
+            #if DEBUG
+            OfferLog.note("released cancelled=\(context.isCancelled)")
+            #endif
+            self?.dismissalReleased(cancelled: context.isCancelled)
+        }
+        coordinator?.animate(alongsideTransition: nil) { [weak self] context in
+            #if DEBUG
+            OfferLog.note("dismissal ended cancelled=\(context.isCancelled)")
+            #endif
+            self?.dismissalEnded(cancelled: context.isCancelled)
+        }
+    }
+
+    // The dismissal's three moments, as the transition coordinator reports
+    // them (internal: a package test host never completes a modal, so the
+    // tests drive these directly).
+
+    func dismissalBegan(interactive: Bool) {
+        perform(closeFlight.dismissalBegan(interactive: interactive))
+    }
+
+    func dismissalReleased(cancelled: Bool) {
+        perform(closeFlight.interactionEnded(cancelled: cancelled))
+    }
+
+    func dismissalEnded(cancelled: Bool) {
+        perform(closeFlight.dismissalEnded(cancelled: cancelled))
+    }
+
+    private func perform(_ action: OfferCloseFlight.Action) {
+        switch action {
+        case .none: break
+        case .close: onClosing?()
+        case .restore: onCloseCancelled?()
+        }
     }
 
     override func viewDidDisappear(_ animated: Bool) {
