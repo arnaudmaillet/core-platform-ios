@@ -1,9 +1,9 @@
 import UIKit
 
-/// The blur behind the system status bar (clock, network, battery) on the
-/// full-screen screens. It is the SAME effect the Map draws under its status
+/// The blur behind the system status bar (clock, network, battery), on EVERY
+/// screen of the app. It is the SAME effect the Map draws under its status
 /// bar, not a copy of it: UIKit's own top scroll edge effect, hosted by an
-/// empty scroll view that does nothing else.
+/// empty scroll view that does nothing else — installed ONCE, in the window.
 ///
 /// ## Why an inert scroll view
 ///
@@ -20,26 +20,54 @@ import UIKit
 /// (`prefersClearTopEdge`, the 2026-09-22 "no blur under any header"
 /// decision). So this view brings back one, on a scroll view whose only job is
 /// to own it: never scrolls, never takes a touch, never answers the
-/// status-bar tap, invisible to VoiceOver, empty. The dump of this view's
-/// effect on For You, Messages, Profile (tab root and pushed) and the place
-/// page matched the Map's filter for filter — same radius, scale, height and a
-/// byte-identical mask image — in light and in dark; the snap feed, which
-/// always wears dark, matched the Map's dark variant. The previous
-/// version (#333, a masked `UIVisualEffectView` behind `-status-bar-blur`) was
-/// a hand-built frost and could never match it.
+/// status-bar tap, invisible to VoiceOver, empty. The previous version (#333,
+/// a masked `UIVisualEffectView` behind `-status-bar-blur`) was a hand-built
+/// frost and could never match it.
 ///
-/// ## ⚠️ A bar TITLE changes what UIKit draws
+/// ## Why in the WINDOW, not in each screen (2026-10-02)
 ///
-/// `.automatic` is resolved from the navigation bar the screen sits under (a
-/// `FloatingBarContainerView` trait the navigation controller hands down — not
-/// public, not overridable). Under a bar with a title it becomes the whole
-/// header: 156pt, a gaussian frost plus a tinting colour matrix — the header
-/// blur the 2026-09-22 decision removed. Measured on the post detail ("Post"):
-/// hosting the scroll view in a child controller, in a nested navigation
-/// controller, or clipping it to the status band all kept that variant; only
-/// removing the title (or leaving the navigation controller's hierarchy
-/// altogether) gave the Map's. So a screen with a bar title must NOT install
-/// this view — which is why the post detail does not.
+/// Until then (#337) five full-screen screens each installed one in their own
+/// view. The user asked for the band to be there ALWAYS — every pushed screen,
+/// every presentation, every frame of a transition. A band inside a screen
+/// travels with that screen: a hero flight scales the destination up from its
+/// card, band included, and a screen without an install (the post detail, the
+/// pushed lists, the galleries) had none. One band in the window, over
+/// everything the app draws, belongs to no screen.
+///
+/// - **Over every presentation.** UIKit adds each one as a later window
+///   subview; the band's `layer.zPosition` keeps it drawn over all of them,
+///   whatever their order (hit-testing ignores `zPosition`, and the band takes
+///   no touch anyway). The status bar itself is the system's, in a window
+///   above this one.
+/// - **The bar-title trap is gone.** `.automatic` is resolved from the
+///   navigation bar a scroll view sits under (a `FloatingBarContainerView`
+///   trait the navigation controller hands down — not public, not
+///   overridable): under a bar with a TITLE it becomes the whole header,
+///   156pt, a gaussian frost plus a tinting colour matrix — the header blur
+///   the 2026-09-22 decision removed. Measured on the post detail in #337:
+///   only removing the title, or leaving the navigation controller's
+///   hierarchy altogether, gave the Map's. A window subview is outside every
+///   navigation controller, so titled screens get the Map's band too.
+/// - **Sheets.** A large sheet's top sits at the foot of the status band (62pt
+///   on an iPhone 18 Pro, iOS 27), so the band lies over what the sheet
+///   leaves visible behind the clock — the presenting screen — just as it
+///   did before the sheet came up, and never over a sheet's own content or
+///   grabber. The camera is such a sheet: its preview is never blurred.
+/// - **Blur over blur** where something under the band draws an effect of its
+///   own: the notifications drawer (its soft edge, once scrolled) and the
+///   Messages thread (a frosted top of its own). Kept on purpose: one more
+///   backdrop over 62pt, and no rule about which screen is on top to get
+///   wrong mid-transition. (The Map: dumped on iOS 27 with the band in the
+///   window, no edge effect of MapKit's reached the band — the band is the
+///   only blur there.)
+///
+/// ## Light and dark
+///
+/// The band follows the window's style. A screen that pins a style of its own
+/// while it covers the band — the snap feed is dark over a photograph — LENDS
+/// it (`lendStyle(_:from:)`) and takes it back when it leaves
+/// (`returnStyle(from:)`), so the band wears the dark variant over it, as it
+/// did when it lived in that screen's view.
 ///
 /// ## Why it is "scrolled"
 ///
@@ -50,51 +78,75 @@ import UIKit
 ///
 /// ## Geometry
 ///
-/// Pinned to all four edges of its host (a full-screen controller's view), so
-/// the scroll view inherits exactly the safe area a real list there would —
-/// which is what UIKit sizes the effect from. Hidden when the host does not
-/// reach into the window's status band (`bandHeight == 0`): a panel or sheet
-/// lower down, landscape without a status bar. It sits above the host's
-/// content (`layer.zPosition`, so subviews added later stay under it) and —
-/// being inside the controller's view — below the navigation bar and its
-/// items.
+/// The whole window, so the scroll view inherits the window's safe area —
+/// what UIKit sizes the effect from. Hidden when the window has no status
+/// band (`bandHeight == 0`: landscape without a status bar).
 ///
 /// ## Cost
 ///
-/// One backdrop over the status band, the one the Map draws and the one every
-/// list here would draw if it did not hide its own. On the iOS 27 simulator,
+/// One backdrop over the status band — the one the Map draws, and the one
+/// every list here would draw if it did not hide its own — made once per
+/// window instead of once per screen. On the iOS 27 simulator (#337),
 /// dragging For You for 12s: 720 frames, every one 16.67ms, with and without
-/// the view (main-thread pacing; render-server cost is a device question).
+/// it (main-thread pacing; render-server cost is a device question). In the
+/// window (`-status-bar-blur-audit`, 2026-10-02): the same filters as before
+/// — one `variableBlur` backdrop, 402x62, plus the half-opacity gaussian in
+/// dark — no layer forcing an offscreen pass (`HeroScrollFrameProbe.Census`
+/// 0), and nothing of it in a screen's presentation turn any more.
+///
+/// Verify with `-status-bar-blur-audit` (every frame: there, frontmost,
+/// style, accessibility, touch) and `-status-bar-blur-audit-deep` (filters).
 public final class StatusBarBlurView: UIView {
 
-    /// Adds the blur to `host` (a full-screen controller's view, under a bar
-    /// with no title — see above); a no-op when `host` already carries one.
-    /// Returns the installed view.
+    /// Adds the band to `window`, over everything the app draws in it; a no-op
+    /// when the window already carries one. Returns the band.
+    ///
+    /// A window only, never a screen's view — see "Why in the WINDOW".
     @discardableResult
-    public static func install(in host: UIView) -> StatusBarBlurView {
-        if let existing = host.subviews.lazy.compactMap({ $0 as? StatusBarBlurView }).first {
-            return existing
-        }
+    public static func install(in window: UIWindow) -> StatusBarBlurView {
+        if let existing = installed(in: window) { return existing }
         let blur = StatusBarBlurView()
-        host.addSubview(blur)
-        blur.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            blur.topAnchor.constraint(equalTo: host.topAnchor),
-            blur.leadingAnchor.constraint(equalTo: host.leadingAnchor),
-            blur.trailingAnchor.constraint(equalTo: host.trailingAnchor),
-            blur.bottomAnchor.constraint(equalTo: host.bottomAnchor),
-        ])
+        blur.frame = window.bounds
+        blur.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        window.addSubview(blur)
         return blur
+    }
+
+    /// The band `window` carries, if any.
+    public static func installed(in window: UIWindow?) -> StatusBarBlurView? {
+        window?.subviews.lazy.compactMap { $0 as? StatusBarBlurView }.first
     }
 
     // MARK: - Arithmetic
 
     /// How much of the window's status band (`statusBandHeight`, the window's
-    /// top safe-area inset) a host whose top edge sits at `hostTopInWindow`
+    /// top safe-area inset) a view whose top edge sits at `hostTopInWindow`
     /// overlaps. Never negative, never more than the band. Zero hides the
-    /// view.
+    /// band.
     public static func bandHeight(statusBandHeight: CGFloat, hostTopInWindow: CGFloat) -> CGFloat {
         min(max(0, statusBandHeight - hostTopInWindow), max(0, statusBandHeight))
+    }
+
+    // MARK: - Style
+
+    /// Who lent the band its current style, if anyone.
+    private(set) weak var styleLender: AnyObject?
+
+    /// Makes the band wear `style` on behalf of `lender`: a screen that pins
+    /// its own style while it covers the band. `.unspecified` is the window's
+    /// style, with `lender` still the owner. The latest lender wins.
+    public func lendStyle(_ style: UIUserInterfaceStyle, from lender: AnyObject) {
+        styleLender = lender
+        if overrideUserInterfaceStyle != style { overrideUserInterfaceStyle = style }
+    }
+
+    /// Hands the band back to the window's style — only if `lender` is still
+    /// the one that lent it, so a screen leaving late never undoes the style
+    /// of the screen that came over it.
+    public func returnStyle(from lender: AnyObject) {
+        guard styleLender === lender else { return }
+        styleLender = nil
+        overrideUserInterfaceStyle = .unspecified
     }
 
     // MARK: - View
@@ -107,9 +159,13 @@ public final class StatusBarBlurView: UIView {
         super.init(frame: .zero)
         isUserInteractionEnabled = false
         accessibilityElementsHidden = true
-        layer.zPosition = 1_000
+        layer.zPosition = Self.zPosition
         addSubview(edgeScrollView)
     }
+
+    /// Over every sibling in the window: presentations' containers, a hero
+    /// flight's chrome replica, the emote suggestion strip — all at 0.
+    static let zPosition: CGFloat = 10_000
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -144,6 +200,11 @@ public final class StatusBarBlurView: UIView {
             band = Self.bandHeight(statusBandHeight: window.safeAreaInsets.top, hostTopInWindow: top)
         }
         isHidden = band <= 0
+        // A lender gone without handing the style back (released mid-flight)
+        // must not leave the band pinned.
+        if styleLender == nil, overrideUserInterfaceStyle != .unspecified {
+            overrideUserInterfaceStyle = .unspecified
+        }
         edgeScrollView.frame = bounds
         // "Scrolled" over empty content, so the effect shows (see above).
         let size = CGSize(width: bounds.width, height: bounds.height * 3)
