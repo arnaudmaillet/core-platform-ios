@@ -32,8 +32,8 @@ public struct MapPin: Sendable, Equatable, Identifiable {
     /// Pin cover image; `nil` for a `.text` pin (and for a media post the
     /// backend never stamped a thumbnail on — see `kind`).
     public let thumbnailURL: URL?
-    /// Photo / video / text discriminator, driving the play badge and the text
-    /// face. Until `RadarPin.media_kind` (additive field 5) is published and
+    /// Photo / video / text discriminator, driving live-preview autoplay and
+    /// the text face. Until `RadarPin.media_kind` (additive field 5) is published and
     /// regenerated, the repository can only tell text from media — every media
     /// pin reads as `.photo`; see `GeoDiscoveryRepository.kind(for:)`.
     public let kind: Kind

@@ -30,9 +30,8 @@ protocol MapMarkerDressing: MKAnnotationView {
 /// photographs rather than as equal-weight squares.
 /// The face itself is a `PinCardView` — the same component the hero transition
 /// flies — so the pin and the flight card are twins by construction.
-/// A play badge overlays video pins — dormant today because the Radar path
-/// carries no media kind yet (see `GeoDiscoveryRepository`), and it lights up
-/// automatically once field 5 lands.
+/// No play badge: a video marker says it moves by moving (its preview sheet),
+/// and its bottom-right corner belongs to the place badge.
 final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing {
     static let reuseIdentifier = "MapAnnotationView"
 
@@ -44,7 +43,6 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing
 
     /// The pin's face; also the exact blueprint of the flying card.
     let card = PinCardView(frame: CGRect(x: 0, y: 0, width: side, height: side))
-    private let playBadge = UIImageView()
     #if DEBUG
     private var representedKind = "-"
     #endif
@@ -155,16 +153,6 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing
         // A soft drop shadow lifts the pin off the map tiles (the card clips,
         // so the shadow must live on this outer, non-clipping layer).
         PinCardView.applyPinShadow(to: layer)
-
-        playBadge.image = UIImage(systemName: "play.circle.fill")?
-            .withConfiguration(UIImage.SymbolConfiguration(pointSize: 18, weight: .bold))
-        playBadge.tintColor = .white
-        playBadge.layer.shadowColor = UIColor.black.cgColor
-        playBadge.layer.shadowOpacity = 0.5
-        playBadge.layer.shadowRadius = 2
-        playBadge.layer.shadowOffset = .zero
-        playBadge.isHidden = true
-        addSubview(playBadge)
         applyFace(.media)
     }
 
@@ -202,16 +190,13 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing
         // recycled across faces, so a card that last wore an icon (no shadow)
         // would hand that setting to the photograph that dequeues it next.
         PinCardView.applyPinShadow(to: layer, face: face, hasArt: card.wornIcon != nil)
-        // The badge hangs off the card's own trailing-bottom corner, so it
-        // tracks whichever size the face just chose.
-        playBadge.frame = CGRect(x: side - 22, y: side - 22, width: 20, height: 20)
     }
 
-    /// Renders the pin's thumbnail and (dormant) video badge — or, for a
-    /// text-only post, the symbol face instead of a cover.
+    /// Renders the pin's thumbnail — or, for a text-only post, the symbol face
+    /// instead of a cover.
     func configure(
         with pin: MapPin, dress: MapMarkerDress = .neutral, imagePipeline: ImagePipeline,
-        iconCatalog: AnimatedIconCatalog? = nil, previewCatalog: AnimatedIconCatalog? = nil
+        iconCatalog: (any AnimatedIconProviding)? = nil, previewCatalog: AnimatedIconCatalog? = nil
     ) {
         self.imagePipeline = imagePipeline
         // ABOVE the guard, like the cluster's: an unlock changes the dress of
@@ -233,7 +218,6 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing
         case .text: "text"
         }
         #endif
-        playBadge.isHidden = pin.kind != .video || dress.isLocked
         // Set on every configure, not only for text: this view is recycled, so
         // a media pin dequeuing a view that last wore the text face has to take
         // it off again — and get its square back.
@@ -407,17 +391,14 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing
         card.setTextAvatar(nil)
         applyDress(.neutral)
         applyFace(.media)
-        playBadge.isHidden = true
     }
 
     /// See `MapClusterAnnotationView.applyDress`. A local lone pin speaks for
     /// no place, so all it wears beyond the neutral ring is the lock; a band's
     /// group of one wears its place's dress (`MapAnnotation.hierarchyKind`).
-    /// A locked pin's play badge would promise a video it will not open.
     private func applyDress(_ dress: MapMarkerDress) {
         card.setDress(dress)
         displayPriority = dress.isLocked ? MapMarkerDress.lockedPriority : .required
         accessibilityHint = dress.isLocked ? "Locked country. Shows how to unlock it" : nil
-        playBadge.isHidden = dress.isLocked || representedPin?.kind != .video
     }
 }
