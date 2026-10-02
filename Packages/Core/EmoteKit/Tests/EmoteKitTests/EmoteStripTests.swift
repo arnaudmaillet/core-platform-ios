@@ -5,9 +5,9 @@ import UIKit
 @testable import EmoteKit
 
 /// The conversation footer's strip: every emote the build ships, every
-/// DISPLAYED tile dressed and nothing else holding a slot, art that moves only
-/// while the strip scrolls, and a scroll view that runs the capsule's whole
-/// width.
+/// DISPLAYED tile dressed and nothing else, art that moves only while the
+/// strip scrolls (and holds a slot only then), and a scroll view that runs
+/// the capsule's whole width.
 @MainActor
 @Suite(.serialized, .sharesMainThread)
 struct EmoteStripTests {
@@ -93,8 +93,8 @@ struct EmoteStripTests {
         #expect(first.bounds.height == Self.size.height - EmoteStripView.cellInset * 2)
     }
 
-    /// Every displayed tile is dressed; a tile scrolled out gives its slot
-    /// back at once, so the slots in use never exceed what is on screen.
+    /// Every displayed tile is dressed; a tile scrolled out lets its art go
+    /// at once. A still tile holds no slot, and none is taken from the labels.
     @Test func displayedTilesAreDressedAndOnlyThose() throws {
         let engine = warmEngine()
         let (strip, window) = hosted(engine)
@@ -102,19 +102,23 @@ struct EmoteStripTests {
         let tiles = strip.displayedTiles
         try #require(!tiles.isEmpty)
         #expect(tiles.allSatisfy { $0.isShowingArt }, "every displayed tile is dressed, emoji or house emote")
-        #expect(engine.animatedCount == tiles.count)
+        #expect(engine.playingTileCount == 0, "at rest, nothing plays")
 
         let grid = strip.collectionView
+        strip.scrollViewWillBeginDragging(grid)
         for step in 1...6 {
             grid.setContentOffset(CGPoint(x: CGFloat(step) * 400, y: grid.contentOffset.y), animated: false)
             grid.layoutIfNeeded()
             let shown = strip.displayedTiles
             #expect(shown.allSatisfy { $0.isShowingArt })
-            #expect(engine.animatedCount == shown.count, "step \(step): \(engine.animatedCount) slots, \(shown.count) shown")
+            #expect(engine.playingTileCount == shown.count,
+                    "step \(step): \(engine.playingTileCount) slots, \(shown.count) shown")
         }
+        #expect(engine.animatedCount == 0, "the labels' budget is untouched")
 
         strip.removeFromSuperview()
-        #expect(engine.animatedCount == 0, "off the window, nothing plays")
+        #expect(engine.playingTileCount == 0, "off the window, nothing plays")
+        #expect(tiles.allSatisfy { !$0.isShowingArt }, "nor holds its art")
     }
 
     /// At rest nothing moves: the first appearance dresses every tile still,
@@ -155,7 +159,7 @@ struct EmoteStripTests {
             let shown = strip.displayedTiles
             try #require(!shown.isEmpty)
             #expect(shown.allSatisfy { $0.isAnimating }, "step \(step): a tile scrolled in plays")
-            #expect(engine.animatedCount == shown.count, "step \(step): the slots still follow the screen")
+            #expect(engine.playingTileCount == shown.count, "step \(step): the slots follow the screen")
         }
 
         strip.scrollViewDidEndDragging(grid, willDecelerate: true)
@@ -163,6 +167,7 @@ struct EmoteStripTests {
         strip.scrollViewDidEndDecelerating(grid)
         #expect(!strip.isScrolling)
         #expect(strip.displayedTiles.allSatisfy { $0.isShowingArt && !$0.isAnimating }, "stopped, nothing plays")
+        #expect(engine.playingTileCount == 0, "a still tile gives its slot back")
 
         // A drag let go without a glide stops it as well.
         strip.scrollViewWillBeginDragging(grid)
