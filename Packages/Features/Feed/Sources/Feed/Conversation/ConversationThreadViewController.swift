@@ -10,7 +10,7 @@ import UIKit
 /// The pieces are the text page's own, not look-alikes: messages are
 /// `CommentRowView`s (avatar, "Name · 14:32", body — the viewer's too), the
 /// composer is `CommentsInputBar` resting where the text page rests it, the
-/// header and footer frost are the same `ProgressiveFrostView` bands, and the
+/// footer frost is the same `ProgressiveFrostView` band, and the
 /// footer is `SnapFooterToolbar` with the emote strip where a post shows its
 /// music. What a conversation leaves out is what only a post has: the stake
 /// (there is nothing to like), and the footer's save and repost — the strip
@@ -71,15 +71,14 @@ final class ConversationThreadViewController: UIViewController {
         composeBar.railFace = .pin(isPinned: pinned == true)
         composeBar.isRailFaceEnabled = pinned != nil
     }
-    private let headerFrost = ProgressiveFrostView(
-        maskColors: SnapCommentsLayout.headerFrostMaskColors,
-        maskLocations: SnapCommentsLayout.headerFrostMaskLocations
-    )
+    /// No band of its own at the top (asked 2026-10-02): the window's
+    /// status-bar blur (`StatusBarBlurView`) is the only material up there,
+    /// and the nav capsules are glass of their own. A header frost under that
+    /// band was a blur over a blur.
     private let composerBackdrop = ProgressiveFrostView(
         maskColors: SnapCommentsLayout.footerFrostMaskColors,
         maskLocations: SnapCommentsLayout.footerFrostMaskLocations
     )
-    private var headerFrostHeight: NSLayoutConstraint?
     private let statusLabel = UILabel()
     private let peerPill = SnapAuthorIdentityView()
     private let walletBadge = WalletBadgeButton()
@@ -137,7 +136,6 @@ final class ConversationThreadViewController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
         configureCollectionView()
-        configureHeaderFrost()
         if mode == .full {
             configureComposer()
             configureToolbar()
@@ -165,8 +163,8 @@ final class ConversationThreadViewController: UIViewController {
     override func viewIsAppearing(_ animated: Bool) {
         super.viewIsAppearing(animated)
         // Materials in a window only — built in init they stall headless CI.
-        for band in [headerFrost, composerBackdrop] where band.superview != nil && band.effect == nil {
-            band.effect = UIBlurEffect(style: SnapCommentsLayout.frostStyle)
+        if composerBackdrop.superview != nil, composerBackdrop.effect == nil {
+            composerBackdrop.effect = UIBlurEffect(style: SnapCommentsLayout.frostStyle)
         }
     }
 
@@ -176,11 +174,6 @@ final class ConversationThreadViewController: UIViewController {
         guard mode == .full else { return }
         // Taken away on the way out, or the inbox inherits an empty bar.
         navigationController?.setToolbarHidden(true, animated: animated)
-    }
-
-    override func viewSafeAreaInsetsDidChange() {
-        super.viewSafeAreaInsetsDidChange()
-        headerFrostHeight?.constant = SnapCommentsLayout.commentsTopInset(topInset: view.safeAreaInsets.top)
     }
 
     override func viewDidLayoutSubviews() {
@@ -313,22 +306,6 @@ final class ConversationThreadViewController: UIViewController {
         }
     }
 
-    private func configureHeaderFrost() {
-        headerFrost.setVeilOpacity(SnapCommentsLayout.frostVeilOpacity(hasMedia: false))
-        headerFrost.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(headerFrost)
-        let height = headerFrost.heightAnchor.constraint(
-            equalToConstant: SnapCommentsLayout.commentsTopInset(topInset: view.safeAreaInsets.top)
-        )
-        headerFrostHeight = height
-        NSLayoutConstraint.activate([
-            headerFrost.topAnchor.constraint(equalTo: view.topAnchor),
-            headerFrost.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            headerFrost.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            height,
-        ])
-    }
-
     /// The text page's composer, at the text page's resting place: just above
     /// the footer for good — only its input row rides the keyboard.
     private func configureComposer() {
@@ -402,8 +379,9 @@ final class ConversationThreadViewController: UIViewController {
     }
 
     private func configureNavigationItem() {
-        // The text page's bar: transparent, so the header frost is the only
-        // band, and set per item so the inbox behind keeps its own.
+        // The text page's bar: transparent, so the window's status-bar band
+        // is the only material up there, and set per item so the inbox
+        // behind keeps its own.
         let appearance = UINavigationBarAppearance()
         appearance.configureWithTransparentBackground()
         navigationItem.standardAppearance = appearance

@@ -184,11 +184,23 @@ final class CommentsInputBar: UIView {
 
     private static var restingFieldHeights: [UIContentSizeCategory: CGFloat] = [:]
 
-    private enum Metrics {
+    enum Metrics {
         static let maxLines: CGFloat = 4
         static let controlSize: CGFloat = 38
-        /// The emote toggle inside the field: a 30pt target on the 38pt line.
-        static let emoteToggleWidth: CGFloat = 30
+        /// The emote toggle inside the field: 32pt wide on the 38pt line —
+        /// room for its widest face, the keyboard glyph (26pt), with a margin
+        /// either side.
+        static let emoteToggleWidth: CGFloat = 32
+        /// The field's trailing button is the field's trailing CAP: a 38pt
+        /// square flush with the field's end, so its glyph is concentric
+        /// with the capsule's round end. The send disc (29pt) used to stand
+        /// in a 30pt column 4pt in from the edge — no margin at all, and its
+        /// sides came out shaved (asked 2026-10-02).
+        static let fieldActionSide: CGFloat = controlSize
+        /// The smallest touch target the field's two buttons answer to —
+        /// UIKit's 44pt, reached by `hitTest` around their drawn frames,
+        /// which the 38pt line cannot hold.
+        static let minimumHitSide: CGFloat = 44
         /// The face FILLS its 38pt bubble, edge to edge — the bubble's own
         /// capsule clip is the disc's circle. It used to sit inset at 30pt so
         /// the glass read as a rim around it; that ring of glass read as a
@@ -276,12 +288,20 @@ final class CommentsInputBar: UIView {
     private static let glyphConfiguration = UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
 
     /// The field button's two faces. Send is the filled arrow in a disc —
-    /// iMessage's own, at home inside a field — in the tint; the waveform is
-    /// the field's quiet ink, like the emote button beside it.
+    /// iMessage's own, at home inside a field — in `sendTint`; the waveform
+    /// is the field's quiet ink, like the emote button beside it.
     static let waveformSymbol = "waveform"
     static let sendSymbol = "arrow.up.circle.fill"
-    private static let waveformConfiguration = UIImage.SymbolConfiguration(weight: .semibold)
-    private static let sendConfiguration = UIImage.SymbolConfiguration(pointSize: 24, weight: .semibold)
+    /// Every glyph in the field has a POINT SIZE of its own — see the
+    /// trailing buttons' constraints in `init`.
+    static let waveformConfiguration = UIImage.SymbolConfiguration(pointSize: 17, weight: .semibold)
+    static let sendConfiguration = UIImage.SymbolConfiguration(pointSize: 24, weight: .semibold)
+    static let emoteToggleConfiguration = UIImage.SymbolConfiguration(pointSize: 17, weight: .medium)
+    /// The send arrow's colour, on every host: system blue, NAMED rather than
+    /// inherited. It was `.tintColor`, which resolves against the button's
+    /// ancestors — and came out grey in a conversation while the post's was
+    /// blue (asked 2026-10-02: one blue for every composer).
+    static let sendTint: UIColor = .systemBlue
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -323,11 +343,23 @@ final class CommentsInputBar: UIView {
             emoteToggle.bottomAnchor.constraint(equalTo: field.contentView.bottomAnchor),
             emoteToggle.widthAnchor.constraint(equalToConstant: Metrics.emoteToggleWidth),
             emoteToggle.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
-            fieldActionButton.trailingAnchor.constraint(equalTo: field.contentView.trailingAnchor, constant: -Spacing.xs),
+            fieldActionButton.trailingAnchor.constraint(equalTo: field.contentView.trailingAnchor),
             fieldActionButton.bottomAnchor.constraint(equalTo: field.contentView.bottomAnchor),
-            fieldActionButton.widthAnchor.constraint(equalToConstant: Metrics.emoteToggleWidth),
-            fieldActionButton.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
+            fieldActionButton.widthAnchor.constraint(equalToConstant: Metrics.fieldActionSide),
+            fieldActionButton.heightAnchor.constraint(equalToConstant: Metrics.fieldActionSide),
         ])
+        // The trailing glyphs hold one size at every text size, as a bar's
+        // do: the field grows with the text, but its buttons stay the 38pt
+        // line's, and a glyph that scaled with the text overflowed them (the
+        // emote face and the waveform had no size of their own). The large
+        // content viewer is the accessibility answer instead — a long press
+        // at the accessibility sizes shows the glyph big.
+        emoteToggle.setPreferredSymbolConfiguration(Self.emoteToggleConfiguration, forImageIn: .normal)
+        for button in [emoteToggle, fieldActionButton] {
+            button.showsLargeContentViewer = true
+            button.scalesLargeContentImage = true
+        }
+        addInteraction(UILargeContentViewerInteraction())
 
         placeholderLabel.text = "Add a comment…"
         placeholderLabel.font = textView.font
@@ -557,6 +589,36 @@ final class CommentsInputBar: UIView {
         guard showsStake else { return false }
         let station = visibilityMenu == nil ? boostButton : visibilityButton
         return station.frame.contains(point)
+    }
+
+    /// The field's two buttons answer to a 44pt target around their drawn
+    /// frames (`Metrics.minimumHitSide`): the 38pt line cannot hold one, and
+    /// the emote toggle and the send arrow are the field's most hit spots.
+    /// Where the two targets overlap, the nearer button's centre wins.
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        if let button = fieldButton(near: point) { return button }
+        return super.hitTest(point, with: event)
+    }
+
+    /// The field button whose 44pt target holds `point` (bar coordinates),
+    /// the nearer one when both do. Internal for tests.
+    func fieldButton(near point: CGPoint) -> UIButton? {
+        guard isUserInteractionEnabled, !isHidden, alpha > 0.01 else { return nil }
+        var best: (button: UIButton, distance: CGFloat)?
+        for button in [emotes.toggleButton, fieldActionButton] {
+            guard !button.isHidden, button.isEnabled, button.isUserInteractionEnabled,
+                  button.bounds.width > 0 else { continue }
+            let frame = button.convert(button.bounds, to: self)
+            let target = frame.insetBy(
+                dx: -max(0, Metrics.minimumHitSide - frame.width) / 2,
+                dy: -max(0, Metrics.minimumHitSide - frame.height) / 2
+            )
+            guard target.contains(point) else { continue }
+            let distance = hypot(point.x - frame.midX, point.y - frame.midY)
+            if let current = best, current.distance <= distance { continue }
+            best = (button, distance)
+        }
+        return best?.button
     }
 
     /// The stake's station on or off the column (`showsStake`): its claim on
@@ -940,8 +1002,11 @@ final class CommentsInputBar: UIView {
         let text = arguments[index + 1]
         let report: @MainActor (String) -> Void = { [weak self] step in
             guard let self else { return }
+            let ink = self.fieldActionButton.imageView?.tintColor.resolvedColor(with: self.traitCollection)
             let face = "rail=\(self.debugRailSymbol ?? "-") field=\(self.fieldActionSymbol ?? "-")"
                 + " label=\(self.fieldActionButton.accessibilityLabel ?? "-")"
+                + " ink=\(ink.map { String(describing: $0) } ?? "-")"
+                + " dimmed=\(self.fieldActionButton.tintAdjustmentMode == .dimmed)"
             let frame = self.window.map { self.convert(self.bounds, to: $0) } ?? .zero
             // stderr: unbuffered, so a detached `--stderr=` sink is live.
             FileHandle.standardError.write(Data(
@@ -993,9 +1058,10 @@ final class CommentsInputBar: UIView {
     }
 
     /// `-composer-keyboard-qa` (DEBUG): focuses the field ~1.5 s after the bar
-    /// is SHOWN, types a draft 3 s later and empties it 6 s after that (time
-    /// for a real tap on send, which logs `sent`), the
-    /// keyboard up throughout, and leaves the keyboard up for a manual
+    /// is SHOWN, types a draft 3 s later, breaks it onto a second, third and
+    /// fourth line one a second, takes them back one a second, and empties
+    /// it 8 s after the first (time for a real tap on send, which logs
+    /// `sent`), the keyboard up throughout, and leaves the keyboard up for a manual
     /// (interactive) dismissal. Logs `[composer-kbd]` at each step and on
     /// every keyboard notification, and `[composer-rise]` whenever a layout
     /// pass moves the rise — so a keyboard animating in or a finger dragging
@@ -1022,7 +1088,20 @@ final class CommentsInputBar: UIView {
                 self?.draftText = "Typed with the keyboard up"
                 self?.debugLogKeyboardStep("typed")
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 10.5) { [weak self] in
+            // Line breaks, one a second, then taken back one a second: the
+            // field's growth and shrink on camera (`grow` lines).
+            let lines = ["Typed with the keyboard up", "a second line", "a third", "and a fourth"]
+            for count in 2...lines.count {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 4.5 + Double(count - 1)) { [weak self] in
+                    self?.insertIntoComposer("\n" + lines[count - 1])
+                    self?.debugLogKeyboardStep("line \(count)")
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 11.5 - Double(count - 1)) { [weak self] in
+                    self?.draftText = lines.prefix(count - 1).joined(separator: "\n")
+                    self?.debugLogKeyboardStep("back to \(count - 1) line(s)")
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 12.5) { [weak self] in
                 self?.draftText = ""
                 self?.debugLogKeyboardStep("cleared")
             }
@@ -1263,7 +1342,7 @@ final class CommentsInputBar: UIView {
                 systemName: symbol,
                 withConfiguration: sends ? Self.sendConfiguration : Self.waveformConfiguration
             )
-            fieldActionButton.configuration?.baseForegroundColor = sends ? .tintColor : .secondaryLabel
+            fieldActionButton.configuration?.baseForegroundColor = sends ? Self.sendTint : .secondaryLabel
         }
         if fieldActionButton.configuration?.showsActivityIndicator != isSending {
             fieldActionButton.configuration?.showsActivityIndicator = isSending
@@ -1320,7 +1399,16 @@ final class CommentsInputBar: UIView {
 
     /// Grows the field with its content up to `maxLines`, then hands the
     /// overflow to the text view's own scrolling.
-    private func updateFieldHeight() {
+    ///
+    /// `animated` (a line typed, pasted, sent or deleted): the new height
+    /// lands in ONE spring with the host's whole layout — the field, the bar
+    /// (and the column standing on it), the footer band riding the input row,
+    /// and the stream's clearance and offset — so nothing jumps a line ahead
+    /// of the rest, growing or shrinking (asked 2026-10-02: a line break grew
+    /// the field abruptly). A layout pass (`layoutSubviews`: a width change
+    /// rewrapping the draft, the keyboard's rise) passes false: it already
+    /// runs inside whatever animation moved the width.
+    private func updateFieldHeight(animated: Bool = false) {
         guard textView.bounds.width > 0 else { return }
         let insets = textView.textContainerInset
         let lineHeight = textView.font?.lineHeight ?? UIFont.preferredFont(forTextStyle: .body).lineHeight
@@ -1332,7 +1420,41 @@ final class CommentsInputBar: UIView {
 
         let scrolls = fitting > maxHeight
         if textView.isScrollEnabled != scrolls { textView.isScrollEnabled = scrolls }
-        if fieldHeight.constant != target { fieldHeight.constant = target }
+        guard fieldHeight.constant != target else { return }
+        guard animated, window != nil, UIView.areAnimationsEnabled, let root = layoutRoot else {
+            fieldHeight.constant = target
+            return
+        }
+        #if DEBUG
+        if Self.logsRise {
+            debugLogKeyboardStep(String(format: "grow %.1f->%.1f", fieldHeight.constant, target))
+        }
+        #endif
+        UIView.animate(
+            springDuration: Self.growthSpringDuration, bounce: 0, initialSpringVelocity: 0,
+            delay: 0, options: [.allowUserInteraction]
+        ) {
+            self.fieldHeight.constant = target
+            root.layoutIfNeeded()
+        }
+    }
+
+    /// The line-growth spring: critically damped, as UIKit's own layout
+    /// springs are, and about as long as the keyboard's curve — the 0.5 s
+    /// default of `UIView.animate(springDuration:)` trails a typed line.
+    static let growthSpringDuration: TimeInterval = 0.35
+
+    /// The view whose layout the field's growth runs in: the host
+    /// controller's root view — the nearest ancestor a view controller owns —
+    /// so the host's `viewDidLayoutSubviews` (its stream's clearance and
+    /// offset) runs inside the same animation. The bar's superview at worst.
+    private var layoutRoot: UIView? {
+        var candidate = superview
+        while let view = candidate {
+            if view.next is UIViewController { return view }
+            candidate = view.superview
+        }
+        return superview
     }
 }
 
@@ -1340,7 +1462,7 @@ extension CommentsInputBar: UITextViewDelegate {
     func textViewDidChange(_ textView: UITextView) {
         placeholderLabel.isHidden = textView.hasText
         updateFieldAction()
-        updateFieldHeight()
+        updateFieldHeight(animated: true)
         onTextChange?(textView.text ?? "")
     }
 }
