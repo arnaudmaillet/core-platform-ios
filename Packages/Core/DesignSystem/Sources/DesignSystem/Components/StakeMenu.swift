@@ -19,21 +19,25 @@ public enum StakeMenu {
         public var undoable: Int
         /// The most one viewer can stake on one post.
         public var perTargetCap: Int
-        /// The fixed amounts offered besides Max.
-        public var denominations: [Int]
-        /// What a plain tap spends.
+        /// What a plain tap spends — the default amount, and the menu's only
+        /// plain amount.
         public var tapAmount: Int
+        /// Shots left in the viewer's ×10 cartridge pack; 0 = no pack.
+        public var shotsLeft: Int
+        /// What ONE shot stakes.
+        public var shotAmount: Int
 
         public init(
             balance: Int, stakedOnTarget: Int, undoable: Int,
-            perTargetCap: Int, denominations: [Int], tapAmount: Int
+            perTargetCap: Int, tapAmount: Int, shotsLeft: Int, shotAmount: Int
         ) {
             self.balance = balance
             self.stakedOnTarget = stakedOnTarget
             self.undoable = undoable
             self.perTargetCap = perTargetCap
-            self.denominations = denominations
             self.tapAmount = tapAmount
+            self.shotsLeft = shotsLeft
+            self.shotAmount = shotAmount
         }
 
         /// Room left under the per-post cap.
@@ -46,43 +50,41 @@ public enum StakeMenu {
             return remaining > 0 && balance >= cost
         }
 
-        /// What Max would actually spend.
-        public var maxAmount: Int { min(remaining, balance) }
+        /// Whether a shot can fire its WHOLE amount: a loaded pack, the
+        /// points, and room for all of them on this post. A shot the cap
+        /// would clamp is not offered — a pack's shot is worth its number.
+        public var canShoot: Bool {
+            shotsLeft > 0 && balance >= shotAmount && remaining >= shotAmount
+        }
     }
 
     public nonisolated static let title = "Stake on this post"
 
-    /// The menu, top to bottom: **Max** (what a fill-up would actually
-    /// spend), the fixed denomination(s), and Undo while the surface holds a
-    /// spend to take back. Unaffordable entries are drawn DISABLED rather than
-    /// left out, so the menu always says what exists.
+    /// The menu, top to bottom: the ×10 SHOT (loaded: "×10 — N left"; no
+    /// pack: drawn disabled, pointing to the Shop), the default amount, and
+    /// Undo while the surface holds a spend to take back.
+    ///
+    /// ⚠️ **NO MULTI-POINT AMOUNT IS FREE.** Staking several points in one
+    /// gesture is what the shop's ×10 cartridge pack sells (2026-10-02): the
+    /// menu used to offer Max and 100 to everyone, and now offers only the
+    /// default amount unless a pack is loaded. Unavailable entries are drawn
+    /// DISABLED rather than left out, with a subtitle saying why, so the menu
+    /// always says what exists and how to get it.
     public static func elements(
         for state: State,
         stake: @escaping @MainActor (Int) -> Void,
+        shoot: @escaping @MainActor () -> Void,
         undo: (@MainActor () -> Void)?
     ) -> [UIMenuElement] {
-        var actions: [UIMenuElement] = []
-        // The label names the REAL spend when one is possible; disabled it
-        // still names the door (the remainder, or the cap on a full post).
-        let maxAmount = state.maxAmount
-        let shownMax = maxAmount > 0
-            ? maxAmount
-            : (state.remaining > 0 ? state.remaining : state.perTargetCap)
-        let maxAction = UIAction(
-            title: "Max (\(shownMax) points)",
-            image: UIImage(systemName: PointsSymbol.glyph)
-        ) { _ in stake(maxAmount) }
-        if maxAmount <= 0 { maxAction.attributes = .disabled }
-        actions.append(maxAction)
+        var actions: [UIMenuElement] = [shotAction(for: state, shoot: shoot)]
 
-        for amount in state.denominations.reversed() {
-            let action = UIAction(
-                title: "\(amount) points",
-                image: UIImage(systemName: PointsSymbol.glyph)
-            ) { _ in stake(amount) }
-            if amount > state.balance || amount > state.remaining { action.attributes = .disabled }
-            actions.append(action)
-        }
+        let tap = UIAction(
+            title: points(state.tapAmount),
+            image: UIImage(systemName: PointsSymbol.glyph)
+        ) { _ in stake(state.tapAmount) }
+        if !state.canTap { tap.attributes = .disabled }
+        actions.append(tap)
+
         if state.undoable > 0, let undo {
             actions.append(UIAction(
                 title: "Undo stakes (\(state.undoable))",
@@ -93,12 +95,47 @@ public enum StakeMenu {
         return actions
     }
 
+    /// The pack's name, after what one shot stakes: "×10". The shop's row
+    /// and the menu's entry both read it.
+    public nonisolated static func shotName(_ shotAmount: Int) -> String { "×\(shotAmount)" }
+
+    /// The shot glyph — the menu's entry and the shop's row.
+    public nonisolated static let shotGlyph = "bolt.fill"
+
+    /// "×10 — 7 left" with a pack; "×10", disabled, without one.
+    private static func shotAction(for state: State, shoot: @escaping @MainActor () -> Void) -> UIAction {
+        let name = shotName(state.shotAmount)
+        let action = UIAction(
+            title: state.shotsLeft > 0 ? "\(name) — \(state.shotsLeft) left" : name,
+            image: UIImage(systemName: shotGlyph)
+        ) { _ in shoot() }
+        if state.shotsLeft == 0 {
+            action.subtitle = "Get \(name) cartridges in the Shop"
+        } else if state.remaining < state.shotAmount {
+            action.subtitle = state.remaining == 0
+                ? "This post holds all it can take"
+                : "Only \(points(state.remaining)) more fit on this post"
+        } else if state.balance < state.shotAmount {
+            action.subtitle = "Not enough points"
+        } else {
+            action.subtitle = "\(points(state.shotAmount)) in one tap"
+        }
+        if !state.canShoot { action.attributes = .disabled }
+        return action
+    }
+
+    /// "1 point", "10 points".
+    public nonisolated static func points(_ amount: Int) -> String {
+        amount == 1 ? "1 point" : "\(amount) points"
+    }
+
     /// The whole menu, titled.
     public static func menu(
         for state: State,
         stake: @escaping @MainActor (Int) -> Void,
+        shoot: @escaping @MainActor () -> Void,
         undo: (@MainActor () -> Void)?
     ) -> UIMenu {
-        UIMenu(title: title, children: elements(for: state, stake: stake, undo: undo))
+        UIMenu(title: title, children: elements(for: state, stake: stake, shoot: shoot, undo: undo))
     }
 }

@@ -76,6 +76,8 @@ final class WalletClaimViewController: UIViewController {
     /// The account's countries — what the Shop sells. Nil hides the Shop item
     /// (the fleet, until the backend carries unlocks).
     private let countries: (any CountryAccess)?
+    /// The Shop's Boosts — the ×10 cartridge pack. Nil sells none.
+    private let stakePacks: (any StakePackSelling)?
 
     private nonisolated enum Section: Hashable { case summary, active, settled }
     private nonisolated enum Item: Hashable {
@@ -128,10 +130,12 @@ final class WalletClaimViewController: UIViewController {
         lookUpPosts: PostLookup? = nil,
         imagePipeline: ImagePipeline? = nil,
         openFeedHero: OpenFeedHero? = nil,
-        countries: (any CountryAccess)? = nil
+        countries: (any CountryAccess)? = nil,
+        stakePacks: (any StakePackSelling)? = nil
     ) {
         self.openFeedHero = openFeedHero
         self.countries = countries
+        self.stakePacks = stakePacks
         self.wallet = wallet
         self.lookUpPosts = lookUpPosts
         self.imagePipeline = imagePipeline
@@ -550,7 +554,7 @@ final class WalletClaimViewController: UIViewController {
     /// comes back to the balance they came from.
     func openShop() {
         guard let countries, presentedViewController == nil else { return }
-        present(CountryShopViewController.sheet(access: countries), animated: true)
+        present(CountryShopViewController.sheet(access: countries, stakePacks: stakePacks), animated: true)
     }
 
     // MARK: - State

@@ -510,8 +510,9 @@ final class SnapShortcutRailView: UIScrollView {
 /// on the button can never page the feed.
 ///
 /// Two intents, one control: a TAP spends the default amount; a LONG-PRESS
-/// opens the denomination menu (`showsMenuAsPrimaryAction` stays false so
-/// the tap keeps firing `primaryActionTriggered`). Both land on `onBoost` —
+/// opens the stake menu — the default amount, and the ×10 shot when a pack is
+/// loaded (`showsMenuAsPrimaryAction` stays false so the tap keeps firing
+/// `primaryActionTriggered`). Both land on `onBoost` —
 /// the button knows amounts, never targets; the chrome's owner attaches the
 /// post identity.
 ///
@@ -521,8 +522,9 @@ final class SnapShortcutRailView: UIScrollView {
 /// main-thread stall on headless CI simulators, where unit-tested views
 /// never join a window and must never pay it.
 final class SnapRailBoostButton: UIButton {
-    /// Fired with the point amount to spend — the tap default or a menu pick.
-    var onBoost: ((Int) -> Void)?
+    /// Fired with what to spend — the tap's default amount, or a menu pick
+    /// (the default again, or one ×10 shot).
+    var onBoost: ((WalletStakeSpend) -> Void)?
     /// Fired by the menu's Undo entry — the host refunds the session spend
     /// (it owns the tally and the wallet; the button only shows the door).
     var onUndo: (() -> Void)?
@@ -541,12 +543,14 @@ final class SnapRailBoostButton: UIButton {
     /// historical always-enabled affordance.
     private var availableBalance = Int.max
     private var undoableAmount = 0
+    /// Shots left in the viewer's ×10 cartridge pack — the menu's loaded face.
+    private var stakeShots = 0
 
     init() {
         super.init(frame: .zero)
         applyFace()
         addAction(
-            UIAction { [weak self] _ in self?.onBoost?(WalletStore.Policy.tapBoostAmount) },
+            UIAction { [weak self] _ in self?.onBoost?(.points(WalletStore.Policy.defaultStakeAmount)) },
             for: .primaryActionTriggered
         )
         // DEFERRED and uncached: the menu is built at present time from the
@@ -569,9 +573,10 @@ final class SnapRailBoostButton: UIButton {
     /// NOTHING to offer — tap unaffordable (or the post full) AND nothing
     /// to undo — because a disabled `UIButton` delivers no long-press
     /// either, and the menu is the undo's only door.
-    func setWalletContext(balance: Int, undoableAmount: Int) {
+    func setWalletContext(balance: Int, undoableAmount: Int, stakeShots: Int = 0) {
         availableBalance = balance
         self.undoableAmount = undoableAmount
+        self.stakeShots = stakeShots
         refreshEnabled()
     }
 
@@ -579,7 +584,7 @@ final class SnapRailBoostButton: UIButton {
         let remaining = max(0, WalletStore.Policy.perTargetBoostCap - spentTotal)
         // A tap near the cap costs only the remainder (the store clamps),
         // so affordability is judged against that, not the flat tap price.
-        let tapCost = min(WalletStore.Policy.tapBoostAmount, remaining)
+        let tapCost = min(WalletStore.Policy.defaultStakeAmount, remaining)
         isEnabled = undoableAmount > 0 || (remaining > 0 && availableBalance >= tapCost)
     }
 
@@ -596,10 +601,12 @@ final class SnapRailBoostButton: UIButton {
                 stakedOnTarget: spentTotal,
                 undoable: undoableAmount,
                 perTargetCap: WalletStore.Policy.perTargetBoostCap,
-                denominations: WalletStore.Policy.boostDenominations,
-                tapAmount: WalletStore.Policy.tapBoostAmount
+                tapAmount: WalletStore.Policy.defaultStakeAmount,
+                shotsLeft: stakeShots,
+                shotAmount: WalletStore.Policy.StakePack.pointsPerShot
             ),
-            stake: { [weak self] amount in self?.onBoost?(amount) },
+            stake: { [weak self] amount in self?.onBoost?(.points(amount)) },
+            shoot: { [weak self] in self?.onBoost?(.shot) },
             undo: { [weak self] in self?.onUndo?() }
         )
     }

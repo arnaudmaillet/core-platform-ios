@@ -8,73 +8,70 @@ import UIKit
 
 /// The boost controls' spend contract — the same on both surfaces that carry
 /// one (the rail anchor on media pages, the comments composer's trailing
-/// button): a tap asks for the default denomination, the long-press menu
-/// offers exactly the policy's denominations, and neither control decides
-/// affordability (that verdict is the wallet-holding host's, delivered back
-/// as feedback).
+/// button): a tap asks for the DEFAULT amount, the long-press menu offers the
+/// default and the ×10 shot (live only with a pack loaded), and neither
+/// control decides affordability (that verdict is the wallet-holding host's,
+/// delivered back as feedback).
 @MainActor
 struct BoostControlTests {
 
+    /// The user's call (2026-10-02): one point a tap. Every surface below
+    /// reads it from the one constant.
+    @Test func theDefaultStakeIsOnePoint() {
+        #expect(WalletStore.Policy.defaultStakeAmount == 1)
+        #expect(WalletStore.Policy.StakePack.pointsPerShot == 10)
+    }
+
     // MARK: - Rail anchor
 
-    @Test func railBoostTapAsksForTheDefaultDenomination() {
+    @Test func railBoostTapAsksForTheDefaultAmount() {
         let button = SnapRailBoostButton()
-        var received: [Int] = []
+        var received: [WalletStakeSpend] = []
         button.onBoost = { received.append($0) }
 
         button.sendActions(for: .primaryActionTriggered)
 
-        #expect(received == [WalletStore.Policy.tapBoostAmount])
+        #expect(received == [.points(WalletStore.Policy.defaultStakeAmount)])
     }
 
-    /// Menu order: Max first (a fresh, un-broke context fills the whole
-    /// cap), then the fixed denomination(s). Through the builder, not
+    /// No pack: the menu offers the default amount and a disabled ×10 that
+    /// points to the Shop — no Max, no 100. Through the builder, not
     /// `menu.children`: the menu is a deferred element resolved only at
     /// present time.
-    @Test func railBoostMenuOffersMaxThenTheDenominations() {
+    @Test func railMenuWithoutAPackOffersOnlyTheDefault() {
         let button = SnapRailBoostButton()
+        button.setWalletContext(balance: 200, undoableAmount: 0)
         let actions = button.currentMenuActions().compactMap { $0 as? UIAction }
-        var expected = ["Max (\(WalletStore.Policy.perTargetBoostCap) points)"]
-        expected += WalletStore.Policy.boostDenominations.reversed().map { "\($0) points" }
-        #expect(actions.map(\.title) == expected)
+        #expect(actions.map(\.title) == ["×10", StakeMenu.points(WalletStore.Policy.defaultStakeAmount)])
+        #expect(actions[0].attributes.contains(.disabled))
+        #expect(actions[1].attributes.contains(.disabled) == false)
     }
 
-    /// Max asks for the CAP'S REMAINDER bounded by the balance — the "put
-    /// everything this post can take" gesture.
-    @Test func maxAsksForTheCapRemainderBoundedByBalance() throws {
+    /// A loaded pack: "×10 — N left", and picking it asks for a SHOT.
+    @Test func railMenuWithAPackAsksForAShot() throws {
         let button = SnapRailBoostButton()
-        var received: [Int] = []
+        var received: [WalletStakeSpend] = []
         button.onBoost = { received.append($0) }
+        button.setWalletContext(balance: 200, undoableAmount: 0, stakeShots: 7)
 
-        // Fresh post, deep wallet: Max = the whole cap.
-        let full = try #require(button.currentMenuActions().first as? UIAction)
-        full.performWithSender(nil, target: nil)
-        #expect(received == [WalletStore.Policy.perTargetBoostCap])
-
-        // 60 already on the post, balance 120: Max = the 190 remainder,
-        // bounded to 120.
-        button.setSpentTotal(60)
-        button.setWalletContext(balance: 120, undoableAmount: 0)
-        let bounded = try #require(button.currentMenuActions().first as? UIAction)
-        #expect(bounded.title == "Max (120 points)")
-        bounded.performWithSender(nil, target: nil)
-        #expect(received == [WalletStore.Policy.perTargetBoostCap, 120])
+        let shot = try #require(button.currentMenuActions().first as? UIAction)
+        #expect(shot.title == "×10 — 7 left")
+        shot.performWithSender(nil, target: nil)
+        #expect(received == [.shot])
     }
 
-    /// A full post disables everything but Undo: Max and the denominations
-    /// arrive disabled, and the control itself only stays enabled while a
-    /// session spend is takeable.
+    /// A full post disables everything but Undo: the control itself only
+    /// stays enabled while a session spend is takeable.
     @Test func aFullPostRefusesEverythingButUndo() {
         let button = SnapRailBoostButton()
         button.setSpentTotal(WalletStore.Policy.perTargetBoostCap)
-        button.setWalletContext(balance: 500, undoableAmount: 0)
+        button.setWalletContext(balance: 500, undoableAmount: 0, stakeShots: 5)
         #expect(!button.isEnabled)
 
-        button.setWalletContext(balance: 500, undoableAmount: 30)
+        button.setWalletContext(balance: 500, undoableAmount: 30, stakeShots: 5)
         #expect(button.isEnabled)
         let actions = button.currentMenuActions().compactMap { $0 as? UIAction }
-        #expect(actions.first?.attributes.contains(.disabled) == true)
-        #expect(actions.first { $0.title == "100 points" }?.attributes.contains(.disabled) == true)
+        #expect(actions.dropLast().allSatisfy { $0.attributes.contains(.disabled) })
         #expect(actions.last?.title == "Undo stakes (30)")
     }
 
@@ -87,40 +84,33 @@ struct BoostControlTests {
         let button = SnapRailBoostButton()
         #expect(button.isEnabled) // unwired default: historical affordance
 
-        button.setWalletContext(balance: 5, undoableAmount: 0)
+        button.setWalletContext(balance: 0, undoableAmount: 0)
         #expect(!button.isEnabled)
 
-        button.setWalletContext(balance: 5, undoableAmount: 10)
+        button.setWalletContext(balance: 0, undoableAmount: 10)
         #expect(button.isEnabled)
 
-        button.setWalletContext(balance: WalletStore.Policy.tapBoostAmount, undoableAmount: 0)
+        button.setWalletContext(balance: WalletStore.Policy.defaultStakeAmount, undoableAmount: 0)
         #expect(button.isEnabled)
     }
 
-    /// Denominations the balance can't cover arrive disabled; the Undo
-    /// entry exists exactly while a session spend is takeable, and fires
-    /// the undo callback.
-    @Test func railMenuDisablesUnaffordableAndOffersUndo() throws {
+    /// The Undo entry exists exactly while a session spend is takeable, and
+    /// fires the undo callback.
+    @Test func railMenuOffersUndoOnlyWhileTakeable() throws {
         let button = SnapRailBoostButton()
         button.setWalletContext(balance: 60, undoableAmount: 20)
         var undone = false
         button.onUndo = { undone = true }
 
         let actions = button.currentMenuActions().compactMap { $0 as? UIAction }
-        // Max (bounded to the 60 balance) enabled, 100 unaffordable,
-        // plus the Undo entry.
-        #expect(actions.count == WalletStore.Policy.boostDenominations.count + 2)
-        let byTitle = { (title: String) in actions.first { $0.title.hasPrefix(title) } }
-        #expect(byTitle("Max (60 points)")?.attributes.contains(.disabled) == false)
-        #expect(byTitle("100 points")?.attributes.contains(.disabled) == true)
-
-        let undo = try #require(byTitle("Undo stakes (20)"))
+        #expect(actions.count == 3)
+        let undo = try #require(actions.first { $0.title == "Undo stakes (20)" })
         undo.performWithSender(nil, target: nil)
         #expect(undone)
 
         // Nothing undoable → no entry.
         button.setWalletContext(balance: 60, undoableAmount: 0)
-        #expect(button.currentMenuActions().count == WalletStore.Policy.boostDenominations.count + 1)
+        #expect(button.currentMenuActions().count == 2)
     }
 
     @Test func composerBoostSharesTheSameContextContract() throws {
@@ -129,9 +119,9 @@ struct BoostControlTests {
             bar.subviews.compactMap { $0 as? UIButton }
                 .first { $0.accessibilityLabel == "Boost post" }
         )
-        bar.setBoostContext(balance: 3, undoableAmount: 0)
+        bar.setBoostContext(balance: 0, undoableAmount: 0)
         #expect(!boost.isEnabled)
-        bar.setBoostContext(balance: 3, undoableAmount: 50)
+        bar.setBoostContext(balance: 0, undoableAmount: 50)
         #expect(boost.isEnabled)
 
         var undone = false
@@ -142,11 +132,24 @@ struct BoostControlTests {
         #expect(undone)
     }
 
+    /// The composer's menu is the rail's: the shot, live with a pack.
+    @Test func composerMenuWithAPackAsksForAShot() throws {
+        let bar = CommentsInputBar()
+        var received: [WalletStakeSpend] = []
+        bar.onBoost = { received.append($0) }
+        bar.setBoostContext(balance: 200, undoableAmount: 0, stakeShots: 2)
+
+        let shot = try #require(bar.currentBoostMenuActions().first as? UIAction)
+        #expect(shot.title == "×10 — 2 left")
+        shot.performWithSender(nil, target: nil)
+        #expect(received == [.shot])
+    }
+
     // MARK: - Comments composer
 
-    @Test func composerBoostTapAsksForTheDefaultDenomination() throws {
+    @Test func composerBoostTapAsksForTheDefaultAmount() throws {
         let bar = CommentsInputBar()
-        var received: [Int] = []
+        var received: [WalletStakeSpend] = []
         bar.onBoost = { received.append($0) }
 
         let boost = try #require(
@@ -155,7 +158,7 @@ struct BoostControlTests {
         )
         boost.sendActions(for: .primaryActionTriggered)
 
-        #expect(received == [WalletStore.Policy.tapBoostAmount])
+        #expect(received == [.points(WalletStore.Policy.defaultStakeAmount)])
     }
 
     @Test func composerBoostCarriesTheTrendingGlyphAndAMenu() throws {
@@ -166,10 +169,10 @@ struct BoostControlTests {
         )
         // The star face, not the "+" this slot used to wear.
         #expect(boost.configuration?.image != nil)
-        // Long-press: Max + the denominations (deferred menu — counted
+        // Long-press: the ×10 shot + the default (deferred menu — counted
         // through the builder), tap kept as the primary action.
         #expect(boost.menu != nil)
-        #expect(bar.currentBoostMenuActions().count == WalletStore.Policy.boostDenominations.count + 1)
+        #expect(bar.currentBoostMenuActions().count == 2)
         #expect(boost.showsMenuAsPrimaryAction == false)
     }
 

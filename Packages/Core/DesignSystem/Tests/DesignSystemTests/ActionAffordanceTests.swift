@@ -108,41 +108,88 @@ struct ActionAffordanceTests {
 /// The stake menu the rail and every card raise.
 @MainActor
 struct StakeMenuTests {
-    private func state(balance: Int = 250, staked: Int = 0, undoable: Int = 0) -> StakeMenu.State {
+    private func state(
+        balance: Int = 250, staked: Int = 0, undoable: Int = 0, shots: Int = 0
+    ) -> StakeMenu.State {
         StakeMenu.State(
             balance: balance, stakedOnTarget: staked, undoable: undoable,
-            perTargetCap: 250, denominations: [100], tapAmount: 10
+            perTargetCap: 250, tapAmount: 1, shotsLeft: shots, shotAmount: 10
         )
     }
 
-    private func titles(_ elements: [UIMenuElement]) -> [String] {
-        elements.compactMap { ($0 as? UIAction)?.title }
+    private func actions(_ elements: [UIMenuElement]) -> [UIAction] {
+        elements.compactMap { $0 as? UIAction }
     }
 
-    @Test func maxNamesTheRealSpend() {
-        let elements = StakeMenu.elements(for: state(balance: 60), stake: { _ in }, undo: nil)
-        #expect(titles(elements) == ["Max (60 points)", "100 points"])
-        let hundred = elements[1] as? UIAction
-        #expect(hundred?.attributes.contains(.disabled) == true)
+    private func titles(_ elements: [UIMenuElement]) -> [String] {
+        actions(elements).map(\.title)
+    }
+
+    /// No pack: the only amount on offer is the default; the ×10 is there,
+    /// DISABLED, and says where to get it.
+    @Test func withoutAPackOnlyTheDefaultIsOffered() throws {
+        let elements = StakeMenu.elements(for: state(), stake: { _ in }, shoot: {}, undo: nil)
+        #expect(titles(elements) == ["×10", "1 point"])
+        let shot = try #require(actions(elements).first)
+        #expect(shot.attributes.contains(.disabled))
+        #expect(shot.subtitle == "Get ×10 cartridges in the Shop")
+        #expect(actions(elements)[1].attributes.contains(.disabled) == false)
+    }
+
+    /// A loaded pack: "×10 — N left", enabled, and it asks for a SHOT, not an
+    /// amount.
+    @Test func aLoadedPackOffersTheShotWithItsCount() throws {
+        var shots = 0
+        var amounts: [Int] = []
+        let elements = StakeMenu.elements(
+            for: state(shots: 7), stake: { amounts.append($0) }, shoot: { shots += 1 }, undo: nil
+        )
+        #expect(titles(elements) == ["×10 — 7 left", "1 point"])
+        let shot = try #require(actions(elements).first)
+        #expect(shot.attributes.contains(.disabled) == false)
+        #expect(shot.subtitle == "10 points in one tap")
+
+        shot.performWithSender(nil, target: nil)
+        actions(elements)[1].performWithSender(nil, target: nil)
+        #expect(shots == 1)
+        #expect(amounts == [1])
+    }
+
+    /// A shot is worth its whole number: short of the points, or of room on
+    /// the post, it is disabled — and says which.
+    @Test func aShotThatCannotFireWhollyIsDisabled() {
+        #expect(state(balance: 9, shots: 3).canShoot == false)
+        #expect(state(staked: 245, shots: 3).canShoot == false)
+        #expect(state(balance: 10, staked: 240, shots: 3).canShoot)
+
+        let broke = actions(StakeMenu.elements(for: state(balance: 9, shots: 3), stake: { _ in }, shoot: {}, undo: nil))
+        #expect(broke.first?.subtitle == "Not enough points")
+        let nearlyFull = actions(StakeMenu.elements(for: state(staked: 245, shots: 3), stake: { _ in }, shoot: {}, undo: nil))
+        #expect(nearlyFull.first?.subtitle == "Only 5 points more fit on this post")
     }
 
     @Test func aFullPostDisablesEverySpend() {
-        let elements = StakeMenu.elements(for: state(staked: 250), stake: { _ in }, undo: nil)
-        #expect(elements.compactMap { $0 as? UIAction }.allSatisfy { $0.attributes.contains(.disabled) })
+        let elements = StakeMenu.elements(for: state(staked: 250, shots: 4), stake: { _ in }, shoot: {}, undo: nil)
+        #expect(actions(elements).allSatisfy { $0.attributes.contains(.disabled) })
         #expect(state(staked: 250).canTap == false)
     }
 
     @Test func undoAppearsOnlyWithSomethingToTakeBack() {
-        let none = StakeMenu.elements(for: state(), stake: { _ in }, undo: {})
+        let none = StakeMenu.elements(for: state(), stake: { _ in }, shoot: {}, undo: {})
         #expect(titles(none).contains { $0.hasPrefix("Undo") } == false)
 
-        let some = StakeMenu.elements(for: state(undoable: 30), stake: { _ in }, undo: {})
+        let some = StakeMenu.elements(for: state(undoable: 30), stake: { _ in }, shoot: {}, undo: {})
         #expect(titles(some).last == "Undo stakes (30)")
     }
 
     /// Near the cap a tap costs only the remainder, so that is what decides.
     @Test func aTapNearTheCapIsJudgedOnTheRemainder() {
-        #expect(state(balance: 5, staked: 245).canTap)
-        #expect(state(balance: 4, staked: 245).canTap == false)
+        #expect(state(balance: 1, staked: 249).canTap)
+        #expect(state(balance: 0, staked: 249).canTap == false)
+    }
+
+    @Test func pointsAreCountedInEnglish() {
+        #expect(StakeMenu.points(1) == "1 point")
+        #expect(StakeMenu.points(10) == "10 points")
     }
 }

@@ -54,6 +54,7 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
     ///   the false default keeps any other construction identity-clean.
     ///   Release builds ignore it — the catalog does not exist there.
     private let countryAccess: (any CountryAccess)?
+    private let stakePacks: (any StakePackSelling)?
 
     public init(
         repository: any GeoDiscoveryProviding,
@@ -78,9 +79,13 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
         previewCatalog: AnimatedIconCatalog? = nil,
         /// Which countries the account has unlocked — see `CountryAccess`.
         /// Nil opens every country and sells none.
-        countryAccess: (any CountryAccess)? = nil
+        countryAccess: (any CountryAccess)? = nil,
+        /// What the Shop's Boosts sells — see `StakePackSelling`. Nil sells
+        /// none.
+        stakePacks: (any StakePackSelling)? = nil
     ) {
         self.countryAccess = countryAccess
+        self.stakePacks = stakePacks
         self.iconCatalog = iconCatalog
         self.previewCatalog = previewCatalog
         self.repository = repository
@@ -233,7 +238,8 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
             prewarm: { ids in await feedFeature().prewarmPosts(ids) },
             openProfile: openProfile,
             openConversation: openConversation,
-            countryAccess: countryAccess
+            countryAccess: countryAccess,
+            stakePacks: stakePacks
         )
     }
 }

@@ -29,14 +29,15 @@ struct CardStakeTests {
         return cell
     }
 
-    @Test func aTapStakesTheTapAmount() {
+    /// The chip's tap stakes the ONE default amount unless told otherwise.
+    @Test func aTapStakesTheDefaultAmount() {
         let cell = row()
         var asked: [Int] = []
-        cell.stakeTapAmount = 10
+        #expect(cell.stakeTapAmount == WalletStore.Policy.defaultStakeAmount)
         cell.onStake = { asked.append($0) }
 
         #expect(cell.debugTapLikesChip())
-        #expect(asked == [10])
+        #expect(asked == [WalletStore.Policy.defaultStakeAmount])
     }
 
     @Test func anUnwiredChipIsACounter() {
@@ -54,12 +55,52 @@ struct CardStakeTests {
 
         #expect(cell.debugTapLikesChip())
 
-        #expect(wallet.balance == before - WalletStore.Policy.tapBoostAmount)
-        #expect(wallet.boostTotal(forTarget: "post-1") == WalletStore.Policy.tapBoostAmount)
-        #expect(staking.debugUndoable(on: PostID("post-1")) == WalletStore.Policy.tapBoostAmount)
+        #expect(wallet.balance == before - WalletStore.Policy.defaultStakeAmount)
+        #expect(wallet.boostTotal(forTarget: "post-1") == WalletStore.Policy.defaultStakeAmount)
+        #expect(staking.debugUndoable(on: PostID("post-1")) == WalletStore.Policy.defaultStakeAmount)
 
         staking.endSession()
         #expect(staking.debugUndoable(on: PostID("post-1")) == 0)
+    }
+
+    /// The card's menu reads the wallet's pack: the default only without one,
+    /// "×10 — N left" with one.
+    @Test func theCardMenuReadsThePack() {
+        let wallet = WalletStore(defaults: Self.defaults())
+        let staking = PostCardStaking(wallet: wallet)
+
+        let empty = staking.menuState(for: "post-1")
+        #expect(empty.shotsLeft == 0)
+        #expect(empty.tapAmount == WalletStore.Policy.defaultStakeAmount)
+        #expect(empty.canShoot == false)
+
+        #expect(wallet.buyStakePack() == .bought(
+            shots: WalletStore.Policy.StakePack.shots,
+            remainingGems: WalletStore.Policy.seededGems - WalletStore.Policy.StakePack.price
+        ))
+        let loaded = staking.menuState(for: "post-1")
+        #expect(loaded.shotsLeft == WalletStore.Policy.StakePack.shots)
+        #expect(loaded.shotAmount == WalletStore.Policy.StakePack.pointsPerShot)
+        #expect(loaded.canShoot)
+    }
+
+    /// A shot from a card: ten points in one gesture, one shot off the pack,
+    /// and the "+10" receipt's amount is what the wallet spent.
+    @Test func aShotFromACardStakesTenAndUsesOneShot() {
+        let wallet = WalletStore(defaults: Self.defaults())
+        wallet.buyStakePack()
+        let before = wallet.balance
+        let staking = PostCardStaking(wallet: wallet)
+        let cell = row()
+        staking.bind(cell, to: PostID("post-1"))
+
+        staking.stake(.shot, on: "post-1", cell: cell)
+
+        let shot = WalletStore.Policy.StakePack.pointsPerShot
+        #expect(wallet.balance == before - shot)
+        #expect(wallet.boostTotal(forTarget: "post-1") == shot)
+        #expect(wallet.stakeShots == WalletStore.Policy.StakePack.shots - 1)
+        #expect(staking.debugUndoable(on: PostID("post-1")) == shot)
     }
 
     /// A recycled row forgets the stake it was wired for — it would otherwise
