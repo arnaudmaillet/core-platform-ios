@@ -275,7 +275,8 @@ struct MapSemanticClusterTests {
         #expect(items[0].isHierarchyMarker)
         #expect(items[0].place == paris)
         #expect(items[0].hierarchyKind == .city)
-        #expect(!items[0].isSemanticCluster, "its tap is still a single post's")
+        #expect(!items[0].isSemanticCluster, "a group of one is no semantic CLUSTER…")
+        #expect(items[0].hierarchyPlace == paris, "…but it is Paris's marker, and routes as one")
     }
 
     /// One band up, a country with a single post in view is a COUNTRY
