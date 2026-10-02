@@ -161,6 +161,12 @@ struct CommentsInputBarFieldTests {
             )
             screen.view.layoutIfNeeded()
             #expect(toggle.showsLargeContentViewer && action.showsLargeContentViewer)
+            // The spinner too: it sizes itself by the button's text size
+            // (63pt at XXXL on iOS 26), so the buttons read the default one.
+            for button in [toggle, action] {
+                #expect(button.traitCollection.preferredContentSizeCategory <= .large,
+                        "\(category.rawValue): the button reads \(button.traitCollection.preferredContentSizeCategory.rawValue)")
+            }
             return [toggle, action].compactMap { button in
                 button.layoutIfNeeded()
                 return Self.descendants(of: button).compactMap { $0 as? UIImageView }
@@ -237,6 +243,29 @@ struct CommentsInputBarFieldTests {
         bar.draftText = ""
         #expect(abs(field.bounds.height - oneLine) < 0.5)
         #expect(Self.isAnimated(field), "the field snapped back down")
+    }
+
+    /// ⚠️ A DRAFT SET BEFORE THE FIRST LAYOUT SIZES IN THAT LAYOUT — in no
+    /// window at all. The height used to be measured off the text view, which
+    /// has no width on the bar's first pass (it lays out inside the field's
+    /// content view, after the bar), so it stayed one line until something
+    /// else laid the bar out again — seen off a window on iOS 27 and in a
+    /// window on the iOS 26.2 host (CI). Measured at the field's width now.
+    @Test func aDraftSetBeforeTheFirstLayoutSizesInThatLayout() throws {
+        let bar = CommentsInputBar()
+        bar.draftText = "One\nTwo\nThree"
+        let host = UIView(frame: CGRect(x: 0, y: 0, width: 390, height: 600))
+        host.addSubview(bar)
+        bar.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            bar.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            bar.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            bar.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+        ])
+        host.layoutIfNeeded()
+        let field = try #require(SnapActionColumnLayoutTests.fieldView(in: bar))
+        #expect(field.bounds.height > CommentsInputBar.Metrics.controlSize + 20,
+                "three lines, one line tall: \(field.bounds.height)")
     }
 
     /// A draft set before the bar is on screen (a prefill, a restored draft)

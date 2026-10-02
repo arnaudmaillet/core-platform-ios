@@ -354,8 +354,15 @@ final class CommentsInputBar: UIView {
         // emote face and the waveform had no size of their own). The large
         // content viewer is the accessibility answer instead — a long press
         // at the accessibility sizes shows the glyph big.
+        //
+        // ⚠️ AND THE SPINNER. The send's in-flight face is the
+        // configuration's activity indicator, sized by the button's text size
+        // — 33×41pt at accessibility M and 63×71pt at XXXL on iOS 26.2 (CI),
+        // spilling out of the 38pt cap. Capping the buttons' size category
+        // holds every face, glyph or spinner, at its default size.
         emoteToggle.setPreferredSymbolConfiguration(Self.emoteToggleConfiguration, forImageIn: .normal)
         for button in [emoteToggle, fieldActionButton] {
+            button.maximumContentSizeCategory = .large
             button.showsLargeContentViewer = true
             button.scalesLargeContentImage = true
         }
@@ -796,7 +803,9 @@ final class CommentsInputBar: UIView {
         // The keyboard has placed the field by now; its width follows, in
         // this same pass (see `applyRise`).
         if applyRise() { super.layoutSubviews() }
-        updateFieldHeight()
+        // The field is placed: its height for the draft lands in this same
+        // pass too (see `updateFieldHeight`).
+        if updateFieldHeight() { super.layoutSubviews() }
     }
 
     private func sendTapped() {
@@ -1408,22 +1417,35 @@ final class CommentsInputBar: UIView {
     /// the field abruptly). A layout pass (`layoutSubviews`: a width change
     /// rewrapping the draft, the keyboard's rise) passes false: it already
     /// runs inside whatever animation moved the width.
-    private func updateFieldHeight(animated: Bool = false) {
-        guard textView.bounds.width > 0 else { return }
+    ///
+    /// ⚠️ MEASURED AT THE FIELD'S WIDTH, not the text view's. The text view
+    /// sits in the field's content view, which lays out AFTER the bar's own
+    /// pass: on the bar's first pass the text view has no width yet (and a
+    /// widening rise leaves it a pass behind). Measuring its bounds skipped
+    /// that first pass, and nothing asked again — a draft set before the bar
+    /// was laid out (a shared link's prefill) stayed one line tall until some
+    /// unrelated layout came along (iOS 26 test host: for good). The text's
+    /// width is the field's less the two trailing buttons, known as soon as
+    /// the field is placed. Returns whether the height moved without an
+    /// animation, for `layoutSubviews` to apply it in the same pass.
+    @discardableResult
+    private func updateFieldHeight(animated: Bool = false) -> Bool {
+        let textWidth = field.bounds.width - Metrics.emoteToggleWidth - Metrics.fieldActionSide
+        guard textWidth > 0 else { return false }
         let insets = textView.textContainerInset
         let lineHeight = textView.font?.lineHeight ?? UIFont.preferredFont(forTextStyle: .body).lineHeight
         let maxHeight = ceil(lineHeight * Metrics.maxLines) + insets.top + insets.bottom
         let fitting = textView.sizeThatFits(
-            CGSize(width: textView.bounds.width, height: .greatestFiniteMagnitude)
+            CGSize(width: textWidth, height: .greatestFiniteMagnitude)
         ).height
         let target = min(max(ceil(fitting), Metrics.controlSize), maxHeight)
 
         let scrolls = fitting > maxHeight
         if textView.isScrollEnabled != scrolls { textView.isScrollEnabled = scrolls }
-        guard fieldHeight.constant != target else { return }
+        guard fieldHeight.constant != target else { return false }
         guard animated, window != nil, UIView.areAnimationsEnabled, let root = layoutRoot else {
             fieldHeight.constant = target
-            return
+            return true
         }
         #if DEBUG
         if Self.logsRise {
@@ -1437,6 +1459,7 @@ final class CommentsInputBar: UIView {
             self.fieldHeight.constant = target
             root.layoutIfNeeded()
         }
+        return false
     }
 
     /// The line-growth spring: critically damped, as UIKit's own layout
