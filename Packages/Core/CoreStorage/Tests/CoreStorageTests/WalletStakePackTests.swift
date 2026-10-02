@@ -2,8 +2,8 @@ import Foundation
 import Testing
 @testable import CoreStorage
 
-/// The ×10 cartridge pack: bought with gems, ten shots of ten points, packs
-/// don't stack, and a shot is spent only by a stake that lands.
+/// The ×100 cartridge pack: bought with gems, three shots of a hundred
+/// points, packs don't stack, and a shot is spent only by a stake that lands.
 struct WalletStakePackTests {
     private typealias Pack = WalletStore.Policy.StakePack
 
@@ -13,6 +13,20 @@ struct WalletStakePackTests {
         let defaults = UserDefaults(suiteName: name)!
         defaults.removePersistentDomain(forName: name)
         return defaults
+    }
+
+    /// The pack's numbers, pinned: a shot is ×100, and the pack is priced
+    /// against the mock economy (`Policy.StakePack`'s note) — three shots for
+    /// 50 gems, which the seeded gems buy twice and the seeded points fire
+    /// twice.
+    @Test func thePackIsThreeShotsOfAHundredForFiftyGems() {
+        #expect(Pack.pointsPerShot == 100)
+        #expect(Pack.shots == 3)
+        #expect(Pack.price == 50)
+        #expect(WalletStore.Policy.seededGems >= 2 * Pack.price)
+        #expect(WalletStore.Policy.seededBalance / Pack.pointsPerShot == 2)
+        // A post holds two shots, never a third.
+        #expect(WalletStore.Policy.perTargetBoostCap / Pack.pointsPerShot == 2)
     }
 
     @Test func aFreshWalletHasNoPack() {
@@ -34,7 +48,11 @@ struct WalletStakePackTests {
 
     /// Packs don't stack: refused while a single shot is left, nothing charged.
     @Test func aPackCannotBeBoughtWhileTheCurrentOneHasShots() {
-        let store = WalletStore(defaults: Self.defaults())
+        // Points for every shot of two packs: the seeded 250 fire only two.
+        let defaults = Self.defaults()
+        defaults.set(true, forKey: "wallet.seeded")
+        defaults.set(2 * Pack.shots * Pack.pointsPerShot, forKey: "wallet.balance")
+        let store = WalletStore(defaults: defaults)
         store.buyStakePack()
         for _ in 0..<(Pack.shots - 1) {
             store.stake(.shot, on: "post-\(UUID().uuidString)")

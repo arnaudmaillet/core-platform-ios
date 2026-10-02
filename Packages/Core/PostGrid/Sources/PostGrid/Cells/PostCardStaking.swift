@@ -51,7 +51,7 @@ public final class PostCardStaking {
             stake(.points(amount), on: key, cell: cell)
         }
         cell.stakeMenu = { [weak self, weak cell] in
-            guard let self else { return nil }
+            guard let self, let cell else { return nil }
             return StakeMenu.menu(
                 for: menuState(for: key),
                 stake: { [weak self, weak cell] amount in
@@ -65,7 +65,11 @@ public final class PostCardStaking {
                 undo: { [weak self, weak cell] in
                     guard let self else { return }
                     undo(on: key, cell: cell)
-                }
+                },
+                // The empty pack's row opens the Shop, found up the card's
+                // responder chain (`StakeShopOpening`) — For You, a profile,
+                // a place page alike.
+                openShop: StakeShop.openAction(from: cell)
             )
         }
         cell.setViewerStake(wallet.boostTotal(forTarget: key))

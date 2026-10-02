@@ -1014,7 +1014,7 @@ final class SnapFeedViewController: UIViewController {
         // settle — the rail anchor opens it on tap, which the sim can't
         // deliver. Pair with `-wallet-log` for the ledger line and
         // `-wallet-balance 0` for the denied shake. `-wallet-demo-shot` fires
-        // one ×10 shot instead (pair with `-wallet-stake-shots N`).
+        // one ×100 shot instead (pair with `-wallet-stake-shots N`).
         if arguments.contains("-wallet-demo-boost") || arguments.contains("-wallet-demo-shot") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
                 guard let self else { return }

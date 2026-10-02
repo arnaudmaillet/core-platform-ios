@@ -206,6 +206,8 @@ final class MainTabCoordinator: NSObject, Coordinator {
         popGestureEnablers = orderedTabs.map { NativePopGestureEnabler(taking: $0.1.navigationController) }
         tabBarController.tabs = orderedTabs.map { $0.1.tab } + [createItem.tab]
         tabBarController.delegate = self
+        // The stake menu's way to the cartridge pack, from any screen.
+        tabBarController.makeStakeShopSheet = { [unowned container] in container.makeStakeShopSheet() }
         createHold.install()
         // ⚠️ **iOS 27 STOPPED DETACHING A SEARCH TAB BY ITS TYPE ALONE.** It now
         // gives the separate bubble — its "prominent" treatment — to the tab

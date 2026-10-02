@@ -9,7 +9,8 @@ import UIKit
 /// The boost controls' spend contract — the same on both surfaces that carry
 /// one (the rail anchor on media pages, the comments composer's trailing
 /// button): a tap asks for the DEFAULT amount, the long-press menu offers the
-/// default and the ×10 shot (live only with a pack loaded), and neither
+/// default and the ×100 shot (live only with a pack loaded; without one, the
+/// way to the Shop), and neither
 /// control decides affordability (that verdict is the wallet-holding host's,
 /// delivered back as feedback).
 @MainActor
@@ -19,7 +20,7 @@ struct BoostControlTests {
     /// reads it from the one constant.
     @Test func theDefaultStakeIsOnePoint() {
         #expect(WalletStore.Policy.defaultStakeAmount == 1)
-        #expect(WalletStore.Policy.StakePack.pointsPerShot == 10)
+        #expect(WalletStore.Policy.StakePack.pointsPerShot == 100)
     }
 
     // MARK: - Rail anchor
@@ -34,28 +35,66 @@ struct BoostControlTests {
         #expect(received == [.points(WalletStore.Policy.defaultStakeAmount)])
     }
 
-    /// No pack: the menu offers the default amount and a disabled ×10 that
-    /// points to the Shop — no Max, no 100. Through the builder, not
-    /// `menu.children`: the menu is a deferred element resolved only at
-    /// present time.
+    /// No pack, no Shop above: the menu offers the default amount and a
+    /// disabled ×100 that points to the Shop — no Max, no free 100. Through
+    /// the builder, not `menu.children`: the menu is a deferred element
+    /// resolved only at present time.
     @Test func railMenuWithoutAPackOffersOnlyTheDefault() {
         let button = SnapRailBoostButton()
         button.setWalletContext(balance: 200, undoableAmount: 0)
         let actions = button.currentMenuActions().compactMap { $0 as? UIAction }
-        #expect(actions.map(\.title) == ["×10", StakeMenu.points(WalletStore.Policy.defaultStakeAmount)])
+        #expect(actions.map(\.title) == ["×100", StakeMenu.points(WalletStore.Policy.defaultStakeAmount)])
+        #expect(actions[0].subtitle == "Get ×100 cartridges in the Shop")
         #expect(actions[0].attributes.contains(.disabled))
         #expect(actions[1].attributes.contains(.disabled) == false)
     }
 
-    /// A loaded pack: "×10 — N left", and picking it asks for a SHOT.
+    /// No pack, under a screen that opens the Shop (the shell, up the
+    /// responder chain): the ×100 row is enabled and asks THAT opener for the
+    /// Shop — it stakes nothing.
+    @Test func railMenuWithoutAPackOpensTheShop() throws {
+        let screen = ShopOpenerSpy()
+        let button = SnapRailBoostButton()
+        screen.view.addSubview(button)
+        var received: [WalletStakeSpend] = []
+        button.onBoost = { received.append($0) }
+        button.setWalletContext(balance: 200, undoableAmount: 0)
+
+        let row = try #require(button.currentMenuActions().first as? UIAction)
+        #expect(row.title == "×100")
+        #expect(row.attributes.contains(.disabled) == false)
+        row.performWithSender(nil, target: nil)
+
+        #expect(screen.asked == 1)
+        #expect(received.isEmpty)
+    }
+
+    /// Short of a shot's 100 points, or of room for them on the post, the
+    /// loaded shot is refused — and says which.
+    @Test func railShotNeedsAHundredPointsAndRoomForThem() throws {
+        let button = SnapRailBoostButton()
+        button.setWalletContext(balance: 99, undoableAmount: 0, stakeShots: 2)
+        let broke = try #require(button.currentMenuActions().first as? UIAction)
+        #expect(broke.attributes.contains(.disabled))
+        #expect(broke.subtitle == "Not enough points")
+
+        button.setSpentTotal(200)
+        button.setWalletContext(balance: 250, undoableAmount: 0, stakeShots: 2)
+        let full = try #require(button.currentMenuActions().first as? UIAction)
+        #expect(full.attributes.contains(.disabled))
+        #expect(full.subtitle == "Only 50 points more fit on this post")
+    }
+
+    /// A loaded pack: "×100 — N left", and picking it asks for a SHOT.
     @Test func railMenuWithAPackAsksForAShot() throws {
         let button = SnapRailBoostButton()
         var received: [WalletStakeSpend] = []
         button.onBoost = { received.append($0) }
-        button.setWalletContext(balance: 200, undoableAmount: 0, stakeShots: 7)
+        button.setWalletContext(balance: 200, undoableAmount: 0, stakeShots: 2)
 
         let shot = try #require(button.currentMenuActions().first as? UIAction)
-        #expect(shot.title == "×10 — 7 left")
+        #expect(shot.title == "×100 — 2 left")
+        #expect(shot.subtitle == "100 points in one tap")
         shot.performWithSender(nil, target: nil)
         #expect(received == [.shot])
     }
@@ -140,9 +179,27 @@ struct BoostControlTests {
         bar.setBoostContext(balance: 200, undoableAmount: 0, stakeShots: 2)
 
         let shot = try #require(bar.currentBoostMenuActions().first as? UIAction)
-        #expect(shot.title == "×10 — 2 left")
+        #expect(shot.title == "×100 — 2 left")
         shot.performWithSender(nil, target: nil)
         #expect(received == [.shot])
+    }
+
+    /// The composer's empty-pack row opens the Shop, as the rail's does.
+    @Test func composerMenuWithoutAPackOpensTheShop() throws {
+        let screen = ShopOpenerSpy()
+        let bar = CommentsInputBar()
+        screen.view.addSubview(bar)
+        var received: [WalletStakeSpend] = []
+        bar.onBoost = { received.append($0) }
+        bar.setBoostContext(balance: 200, undoableAmount: 0)
+
+        let row = try #require(bar.currentBoostMenuActions().first as? UIAction)
+        #expect(row.title == "×100")
+        #expect(row.attributes.contains(.disabled) == false)
+        row.performWithSender(nil, target: nil)
+
+        #expect(screen.asked == 1)
+        #expect(received.isEmpty)
     }
 
     // MARK: - Comments composer
@@ -169,7 +226,7 @@ struct BoostControlTests {
         )
         // The star face, not the "+" this slot used to wear.
         #expect(boost.configuration?.image != nil)
-        // Long-press: the ×10 shot + the default (deferred menu — counted
+        // Long-press: the ×100 shot + the default (deferred menu — counted
         // through the builder), tap kept as the primary action.
         #expect(boost.menu != nil)
         #expect(bar.currentBoostMenuActions().count == 2)
@@ -321,5 +378,17 @@ private final class InertFeedProvider: FeedProviding, @unchecked Sendable {
             ),
             likeCount: 0
         )
+    }
+}
+
+/// A screen that can open the Shop — counts the asks, builds nothing (a
+/// presentation never completes in the test host; DesignSystem's
+/// `StakeShopTests` covers presenting).
+@MainActor
+private final class ShopOpenerSpy: UIViewController, StakeShopOpening {
+    var asked = 0
+    func makeStakeShop() -> UIViewController? {
+        asked += 1
+        return nil
     }
 }

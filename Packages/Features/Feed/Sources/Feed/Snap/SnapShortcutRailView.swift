@@ -510,7 +510,7 @@ final class SnapShortcutRailView: UIScrollView {
 /// on the button can never page the feed.
 ///
 /// Two intents, one control: a TAP spends the default amount; a LONG-PRESS
-/// opens the stake menu — the default amount, and the ×10 shot when a pack is
+/// opens the stake menu — the default amount, and the ×100 shot when a pack is
 /// loaded (`showsMenuAsPrimaryAction` stays false so the tap keeps firing
 /// `primaryActionTriggered`). Both land on `onBoost` —
 /// the button knows amounts, never targets; the chrome's owner attaches the
@@ -523,7 +523,7 @@ final class SnapShortcutRailView: UIScrollView {
 /// never join a window and must never pay it.
 final class SnapRailBoostButton: UIButton {
     /// Fired with what to spend — the tap's default amount, or a menu pick
-    /// (the default again, or one ×10 shot).
+    /// (the default again, or one ×100 shot).
     var onBoost: ((WalletStakeSpend) -> Void)?
     /// Fired by the menu's Undo entry — the host refunds the session spend
     /// (it owns the tally and the wallet; the button only shows the door).
@@ -543,7 +543,7 @@ final class SnapRailBoostButton: UIButton {
     /// historical always-enabled affordance.
     private var availableBalance = Int.max
     private var undoableAmount = 0
-    /// Shots left in the viewer's ×10 cartridge pack — the menu's loaded face.
+    /// Shots left in the viewer's ×100 cartridge pack — the menu's loaded face.
     private var stakeShots = 0
 
     init() {
@@ -607,7 +607,10 @@ final class SnapRailBoostButton: UIButton {
             ),
             stake: { [weak self] amount in self?.onBoost?(.points(amount)) },
             shoot: { [weak self] in self?.onBoost?(.shot) },
-            undo: { [weak self] in self?.onUndo?() }
+            undo: { [weak self] in self?.onUndo?() },
+            // The empty pack's row opens the Shop, found up this button's
+            // responder chain (`StakeShopOpening`).
+            openShop: StakeShop.openAction(from: self)
         )
     }
 

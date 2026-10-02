@@ -148,7 +148,7 @@ final class SnapChromeView: UIView {
     var onCommentsTapped: (() -> Void)?
 
     /// The rail's boost anchor asked to spend on this post (tap = the
-    /// default amount, long-press menu = the default or one ×10 shot).
+    /// default amount, long-press menu = the default or one ×100 shot).
     /// The cell forwards it with the post identity attached; whether the
     /// wallet can afford it is the OWNER's answer, which comes back through
     /// `playBoostConfirmation` / `playBoostDenied`.

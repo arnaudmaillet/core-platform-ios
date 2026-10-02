@@ -232,23 +232,24 @@ struct CountryShopViewControllerTests {
 
     // MARK: - Boosts
 
-    /// A ×10 pack seller over a plain count, mirroring the wallet's rules.
+    /// A ×100 pack seller over a plain count, mirroring the wallet's rules
+    /// and its numbers (`WalletStore.Policy.StakePack`: 3 shots, 50 gems).
     private final class FakePacks: StakePackSelling {
         let access: FakeAccess
         var shotsLeft = 0
         init(access: FakeAccess) { self.access = access }
 
         var offer: StakePackOffer {
-            StakePackOffer(shotsPerPack: 10, pointsPerShot: 10, price: 20, shotsLeft: shotsLeft)
+            StakePackOffer(shotsPerPack: 3, pointsPerShot: 100, price: 50, shotsLeft: shotsLeft)
         }
 
         func buyPack() -> StakePackPurchase {
             guard shotsLeft == 0 else { return .packStillActive(shotsLeft: shotsLeft) }
-            guard access.gems >= 20 else { return .insufficientGems(needed: 20, have: access.gems) }
-            access.gems -= 20
-            shotsLeft = 10
+            guard access.gems >= 50 else { return .insufficientGems(needed: 50, have: access.gems) }
+            access.gems -= 50
+            shotsLeft = 3
             NotificationCenter.default.post(name: .stakePackDidChange, object: self)
-            return .bought(shots: 10, remainingGems: access.gems)
+            return .bought(shots: 3, remainingGems: access.gems)
         }
     }
 
@@ -271,9 +272,29 @@ struct CountryShopViewControllerTests {
         #expect(header(shop, .boosts) == "Boosts")
 
         let row = try packRow(shop)
-        #expect(row.titleLabel.text == "×10 cartridges")
-        #expect(row.detailLabel.text == "10 shots · 10 points a tap")
-        #expect(row.accessibilityValue == "20 gems")
+        #expect(row.titleLabel.text == "×100 cartridges")
+        #expect(row.detailLabel.text == "3 shots · 100 points a tap")
+        #expect(row.accessibilityValue == "50 gems")
+    }
+
+    /// Opened by the stake menu's "Get ×100 cartridges in the Shop": the
+    /// same sheet, focused on Boosts, whose pack row flashes (selected, then
+    /// let go) — and opened to browse, it carries no focus.
+    @Test func theStakeMenusShopFlashesTheCartridgePack() throws {
+        let access = FakeAccess()
+        let packs = FakePacks(access: access)
+        let sheet = CountryShopViewController.sheet(access: access, stakePacks: packs, focus: .boosts)
+        let shop = try #require((sheet as? UINavigationController)?.viewControllers.first as? CountryShopViewController)
+        #expect(shop.focus == .boosts)
+        #expect(sheet.sheetPresentationController?.selectedDetentIdentifier == .medium)
+        let browsing = CountryShopViewController.sheet(access: access, stakePacks: packs)
+        #expect(((browsing as? UINavigationController)?.viewControllers.first as? CountryShopViewController)?.focus == nil)
+
+        let row = try packRow(shop)
+        let path = try #require(shop.dataSource.indexPath(for: .stakePack))
+        shop.flashStakePack()
+        #expect(shop.collectionView.indexPathsForSelectedItems == [path])
+        #expect(row.isSelected)
     }
 
     /// Without one — the fleet — there is no Boosts section at all.
@@ -286,23 +307,24 @@ struct CountryShopViewControllerTests {
     /// while it lasts, a second pack is refused (packs don't stack).
     @Test func buyingThePackShowsItActiveAndRefusesAnother() throws {
         let access = FakeAccess()
+        access.gems = 70
         let packs = FakePacks(access: access)
         let shop = CountryShopViewController(access: access, stakePacks: packs)
         shop.loadViewIfNeeded()
 
-        #expect(shop.buyStakePack() == .bought(shots: 10, remainingGems: 20))
+        #expect(shop.buyStakePack() == .bought(shots: 3, remainingGems: 20))
         #expect(access.gems == 20)
         let row = try packRow(shop)
-        #expect(row.accessibilityValue == "Active — 10 left")
-        #expect(CountryShopViewController.activeText(packs.offer) == "Active — 10 left")
+        #expect(row.accessibilityValue == "Active — 3 left")
+        #expect(CountryShopViewController.activeText(packs.offer) == "Active — 3 left")
 
-        #expect(shop.buyStakePack() == .packStillActive(shotsLeft: 10))
+        #expect(shop.buyStakePack() == .packStillActive(shotsLeft: 3))
         #expect(access.gems == 20)
 
         // Spent down (in the feed), the price comes back.
         packs.shotsLeft = 0
         NotificationCenter.default.post(name: .stakePackDidChange, object: packs)
-        #expect(try packRow(shop).accessibilityValue == "20 gems")
+        #expect(try packRow(shop).accessibilityValue == "50 gems")
     }
 
     /// Boosts is not a country: a search hides it, clearing it brings it back.

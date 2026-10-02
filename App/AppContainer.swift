@@ -316,6 +316,16 @@ final class AppContainer {
         ).wrappedInSheet()
     }
 
+    /// The Shop opened on its Boosts — where the stake menu's "Get ×100
+    /// cartridges in the Shop" goes, from the feed rail, the composer and
+    /// every card (`ShellTabBarController`, `StakeShopOpening`). The SAME
+    /// sheet the points sheet's Shop and the Explore header open, with the
+    /// same sellers; nil where they sell nothing (no shop door either).
+    func makeStakeShopSheet() -> UIViewController? {
+        guard let countryAccess, let stakePacks else { return nil }
+        return CountryShopViewController.sheet(access: countryAccess, stakePacks: stakePacks, focus: .boosts)
+    }
+
     /// The Text Post page's drafts: ONE store for the app's lifetime.
     ///
     /// ⚠️ Built once here and handed to the feed builder, because
@@ -486,7 +496,7 @@ final class AppContainer {
         )
     }()
 
-    /// The Shop's Boosts: the ×10 cartridge pack, over the ONE wallet. Mock
+    /// The Shop's Boosts: the ×100 cartridge pack, over the ONE wallet. Mock
     /// mode only, like the shop itself (no `countryAccess`, no shop door).
     private(set) lazy var stakePacks: StakePackService? = {
         guard environment == .mock else { return nil }

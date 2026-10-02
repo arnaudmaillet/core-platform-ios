@@ -64,7 +64,7 @@ struct CardStakeTests {
     }
 
     /// The card's menu reads the wallet's pack: the default only without one,
-    /// "×10 — N left" with one.
+    /// "×100 — N left" with one.
     @Test func theCardMenuReadsThePack() {
         let wallet = WalletStore(defaults: Self.defaults())
         let staking = PostCardStaking(wallet: wallet)
@@ -84,9 +84,9 @@ struct CardStakeTests {
         #expect(loaded.canShoot)
     }
 
-    /// A shot from a card: ten points in one gesture, one shot off the pack,
-    /// and the "+10" receipt's amount is what the wallet spent.
-    @Test func aShotFromACardStakesTenAndUsesOneShot() {
+    /// A shot from a card: a hundred points in one gesture, one shot off the
+    /// pack, and the "+100" receipt's amount is what the wallet spent.
+    @Test func aShotFromACardStakesAHundredAndUsesOneShot() {
         let wallet = WalletStore(defaults: Self.defaults())
         wallet.buyStakePack()
         let before = wallet.balance
@@ -103,6 +103,60 @@ struct CardStakeTests {
         #expect(staking.debugUndoable(on: PostID("post-1")) == shot)
     }
 
+    /// Two shots fill a post but for 50: a third would be clamped, so the
+    /// card's menu refuses it — and says how much still fits.
+    @Test func aThirdShotOnOnePostIsRefusedByTheMenu() throws {
+        let defaults = Self.defaults()
+        defaults.set(true, forKey: "wallet.seeded")
+        defaults.set(1_000, forKey: "wallet.balance")
+        let wallet = WalletStore(defaults: defaults)
+        wallet.buyStakePack()
+        let staking = PostCardStaking(wallet: wallet)
+        let cell = row()
+        staking.bind(cell, to: PostID("post-1"))
+        staking.stake(.shot, on: "post-1", cell: cell)
+        staking.stake(.shot, on: "post-1", cell: cell)
+
+        let state = staking.menuState(for: "post-1")
+        #expect(state.stakedOnTarget == 200)
+        #expect(state.shotsLeft == 1)
+        #expect(state.canShoot == false)
+        let shot = try #require(cell.stakeMenu?()?.children.first as? UIAction)
+        #expect(shot.attributes.contains(.disabled))
+        #expect(shot.subtitle == "Only 50 points more fit on this post")
+    }
+
+    /// Without a pack, the card's "×100" row is the Shop's door: enabled
+    /// under a screen that can open the Shop, and picking it asks THAT
+    /// opener (found up the card's responder chain) for the Shop.
+    @Test func theCardsEmptyPackRowOpensTheShop() throws {
+        let wallet = WalletStore(defaults: Self.defaults())
+        let staking = PostCardStaking(wallet: wallet)
+        let screen = ShopOpenerSpy()
+        let cell = row()
+        screen.view.addSubview(cell)
+        staking.bind(cell, to: PostID("post-1"))
+
+        let row = try #require(cell.stakeMenu?()?.children.first as? UIAction)
+        #expect(row.title == "×100")
+        #expect(row.subtitle == StakeMenu.shopSubtitle(100))
+        #expect(row.attributes.contains(.disabled) == false)
+
+        row.performWithSender(nil, target: nil)
+        #expect(screen.asked == 1)
+        #expect(wallet.boostTotal(forTarget: "post-1") == 0)
+    }
+
+    /// No Shop above the card (the fleet): the row stays a disabled signpost.
+    @Test func withoutAShopTheEmptyPackRowIsDisabled() throws {
+        let staking = PostCardStaking(wallet: WalletStore(defaults: Self.defaults()))
+        let cell = row()
+        staking.bind(cell, to: PostID("post-1"))
+
+        let row = try #require(cell.stakeMenu?()?.children.first as? UIAction)
+        #expect(row.attributes.contains(.disabled))
+    }
+
     /// A recycled row forgets the stake it was wired for — it would otherwise
     /// spend on someone else's post.
     @Test func aRecycledRowForgetsTheStake() {
@@ -114,5 +168,16 @@ struct CardStakeTests {
         _ = cell.debugTapLikesChip()
 
         #expect(asked == 0)
+    }
+}
+
+/// A screen that can open the Shop — counts the asks, builds nothing (a
+/// presentation never completes in the test host; `StakeShopTests` covers it).
+@MainActor
+private final class ShopOpenerSpy: UIViewController, StakeShopOpening {
+    var asked = 0
+    func makeStakeShop() -> UIViewController? {
+        asked += 1
+        return nil
     }
 }
