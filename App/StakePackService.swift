@@ -2,7 +2,7 @@ import CoreStorage
 import Foundation
 import Maps
 
-/// The Shop's ×10 cartridge pack over the wallet — the shell's answer to
+/// The Shop's ×100 cartridge pack over the wallet — the shell's answer to
 /// `StakePackSelling`, as `CountryAccessService` is to `CountryAccess`.
 ///
 /// The pack lives in `WalletStore` beside the gems that buy it and the points

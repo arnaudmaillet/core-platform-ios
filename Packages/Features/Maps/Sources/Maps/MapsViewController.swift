@@ -195,7 +195,7 @@ final class MapsViewController: UIViewController {
     /// the map. Nil: every country is open (the fleet, until the backend
     /// carries unlocks).
     private let countryAccess: (any CountryAccess)?
-    /// What the Shop's Boosts sells (the ×10 cartridge pack); nil sells none.
+    /// What the Shop's Boosts sells (the ×100 cartridge pack); nil sells none.
     private let stakePacks: (any StakePackSelling)?
     /// The country each pin stands in, looked up once per post: the atlas
     /// test is point-in-polygon, and the reconcile runs on every settle.
