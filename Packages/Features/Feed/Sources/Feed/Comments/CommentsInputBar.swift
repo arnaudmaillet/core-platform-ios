@@ -302,6 +302,33 @@ final class CommentsInputBar: UIView {
     /// ancestors — and came out grey in a conversation while the post's was
     /// blue (asked 2026-10-02: one blue for every composer).
     static let sendTint: UIColor = .systemBlue
+    /// The waveform's ink: the field's quiet one, the emote button's.
+    static let waveformTint: UIColor = .secondaryLabel
+
+    /// The waveform ↔ send swap, both ways: the old glyph shrinks away and
+    /// the new one grows into its place, at 2.5× the system's speed — about
+    /// 0.13 s end to end, filmed at 60 fps (asked 2026-10-02: at the default
+    /// speed, about 0.3 s, it trailed the typing). `.offUp` was filmed too
+    /// and rejected: the old glyph vanished at once but the new one took
+    /// 4–7 frames to show, an EMPTY field blinking between the two faces.
+    static let fieldActionTransition = UISymbolContentTransition(
+        .replace.downUp, options: .speed(fieldActionTransitionSpeed)
+    )
+    static let fieldActionTransitionSpeed: Double = 2.5
+
+    /// The field button's face, COLOUR BAKED IN. Each glyph carries its own
+    /// ink (`.alwaysOriginal`), so the button's tint plays no part in what
+    /// is drawn: the replace swaps a grey waveform for a blue arrow as one
+    /// image change. With the glyphs templated, the colour rode the image
+    /// view's tint — a channel of its own, applied apart from the replace —
+    /// and the leaving waveform flashed blue (or the arriving arrow grey) in
+    /// the frames between the two.
+    static func fieldActionImage(sends: Bool) -> UIImage? {
+        UIImage(
+            systemName: sends ? sendSymbol : waveformSymbol,
+            withConfiguration: sends ? sendConfiguration : waveformConfiguration
+        )?.withTintColor(sends ? sendTint : waveformTint, renderingMode: .alwaysOriginal)
+    }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -329,7 +356,7 @@ final class CommentsInputBar: UIView {
         // — the voice note's place in iMessage's own field, and its send's.
         var action = UIButton.Configuration.plain()
         action.contentInsets = .zero
-        action.symbolContentTransition = UISymbolContentTransition(.replace)
+        action.symbolContentTransition = Self.fieldActionTransition
         fieldActionButton.configuration = action
         fieldActionButton.addAction(UIAction { [weak self] _ in self?.fieldActionTapped() }, for: .primaryActionTriggered)
         fieldActionButton.translatesAutoresizingMaskIntoConstraints = false
@@ -1341,20 +1368,28 @@ final class CommentsInputBar: UIView {
     /// an emote lands in the field precisely to be sent, and a voice note over
     /// a draft turned the one action there into a "not available" notice.
     /// Every write goes through the button's configuration, whose
-    /// `symbolContentTransition` replaces the old glyph with the new one.
+    /// `symbolContentTransition` (`fieldActionTransition`) replaces the old
+    /// glyph with the new one.
+    ///
+    /// ONE configuration write per change, applied on the spot. Each
+    /// `configuration?.x = …` is a write of its own, and the image and the
+    /// colour used to land as two; the face also waited for the next layout
+    /// pass, which a line break runs INSIDE the field's growth spring
+    /// (`updateFieldHeight`), stretching the swap to the spring's length.
     private func updateFieldAction() {
         let sends = hasDraft || isSending
         let symbol = sends ? Self.sendSymbol : Self.waveformSymbol
+        guard var face = fieldActionButton.configuration else { return }
         if fieldActionSymbol != symbol {
             fieldActionSymbol = symbol
-            fieldActionButton.configuration?.image = UIImage(
-                systemName: symbol,
-                withConfiguration: sends ? Self.sendConfiguration : Self.waveformConfiguration
-            )
-            fieldActionButton.configuration?.baseForegroundColor = sends ? Self.sendTint : .secondaryLabel
+            face.image = Self.fieldActionImage(sends: sends)
+            // The spinner's ink (the glyphs carry their own).
+            face.baseForegroundColor = sends ? Self.sendTint : Self.waveformTint
         }
-        if fieldActionButton.configuration?.showsActivityIndicator != isSending {
-            fieldActionButton.configuration?.showsActivityIndicator = isSending
+        face.showsActivityIndicator = isSending
+        if face != fieldActionButton.configuration {
+            fieldActionButton.configuration = face
+            fieldActionButton.layoutIfNeeded()
         }
         fieldActionButton.accessibilityLabel = sends
             ? sendAccessibilityLabel ?? "Send comment"

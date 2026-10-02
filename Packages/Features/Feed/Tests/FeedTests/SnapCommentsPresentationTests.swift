@@ -39,11 +39,13 @@ struct SnapCommentsPresentationTests {
     }
 
     /// The background treatment is a real dim that still shows the post:
-    /// opaque enough for white body text, never a curtain (the opaque black
-    /// container this replaced is exactly what the layout exists to undo).
+    /// opaque enough for the comments to stand out, never a curtain (the
+    /// opaque black container this replaced is exactly what the layout
+    /// exists to undo). 0.65 read as too faint over the post (asked
+    /// 2026-10-02: darker), so the floor sits above it.
     @Test func backdropDimsWithoutHidingTheMedia() {
-        #expect(SnapCommentsLayout.backdropDimOpacity > 0.25)
-        #expect(SnapCommentsLayout.backdropDimOpacity < 0.75)
+        #expect(SnapCommentsLayout.backdropDimOpacity > 0.75)
+        #expect(SnapCommentsLayout.backdropDimOpacity < 0.9)
         // The bands are the system's standard separator blur — adaptive,
         // semi-translucent. The protection comes from the LEAD, not from a
         // denser material (thick was tried and read as too solid).
@@ -127,6 +129,9 @@ struct SnapCommentsPresentationTests {
         #expect(abs(container.alpha - 0.5) < 0.01)
         #expect(backdrop.dimOpacity < SnapCommentsLayout.backdropDimOpacity)
         #expect(backdrop.dimOpacity > 0)
+        // Linear in progress, from the ONE constant: the drag and the spring
+        // both interpolate to whatever it says.
+        #expect(abs(backdrop.dimOpacity - SnapCommentsLayout.backdropDimOpacity / 2) < 0.001)
         // THE BANDS DO NOT SCALE. The container carries no transform at all
         // — the shrink belongs to the hosted stream — so the footer's band
         // (inside it) and the header's (a sibling) both hold their size at
