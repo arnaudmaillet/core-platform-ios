@@ -71,14 +71,44 @@ public enum DiscoverListLayout {
         layout.configuration = configuration
     }
 
+    /// The gap between the two cards of a pair, and between two rows of pairs:
+    /// the list's own row spacing, so a block reads as the same list folded
+    /// in two rather than as a grid of its own.
+    public static let pairGutter: CGFloat = PostGridListLayout.rowSpacing
+
+    /// A paired card's height over its width: 3:4, the For You FOLLOWING
+    /// card's own shape (`ForYouRailsView.Metrics.cardAspect`, which a Feed
+    /// test pins to this) — a paired card IS that card, at half the list's
+    /// width. Every paired post is taller than 4:5, so the box only ever crops
+    /// height, and one fixed box is what makes a pair one row.
+    public static let pairCardHeightRatio: CGFloat = 4.0 / 3.0
+
+    /// One half-width card's width in a list `containerWidth` wide.
+    public static func pairCardWidth(containerWidth: CGFloat) -> CGFloat {
+        max(0, (containerWidth - PostGridListLayout.sideMargin * 2 - pairGutter) / 2)
+    }
+
+    /// One half-width card's size in a list `containerWidth` wide, on whole
+    /// points.
+    public static func pairCardSize(containerWidth: CGFloat) -> CGSize {
+        let width = pairCardWidth(containerWidth: containerWidth)
+        return CGSize(width: width, height: (width * pairCardHeightRatio).rounded())
+    }
+
     /// `chunk(section)` answers the chunk a section holds, or nil for a run of
     /// cards (and for any section the model does not know — a skeleton, a
-    /// reload in flight — which is laid out as cards).
+    /// reload in flight — which is laid out as cards). `isPairs(section)` says
+    /// a section is a block of paired half-width cards (experimental — see
+    /// `DiscoverSegment.pairs`).
     public static func layout(
-        chunk: @escaping @MainActor (Int) -> MosaicChunk?
+        chunk: @escaping @MainActor (Int) -> MosaicChunk?,
+        isPairs: @escaping @MainActor (Int) -> Bool = { _ in false }
     ) -> UICollectionViewCompositionalLayout {
         UICollectionViewCompositionalLayout { index, environment in
             let margin = PostGridListLayout.sideMargin
+            if isPairs(index) {
+                return pairsSection(environment: environment)
+            }
             guard let chunk = chunk(index) else {
                 let item = NSCollectionLayoutItem(layoutSize: .init(
                     widthDimension: .fractionalWidth(1),
@@ -127,5 +157,37 @@ public enum DiscoverListLayout {
             ]
             return section
         }
+    }
+
+    /// A block of paired cards: rows of two half-width cards, `pairGutter`
+    /// between them, on the cards' own margins — so a pair's outer edges line
+    /// up with the full-width cards above and below it.
+    ///
+    /// FIXED sizes, not self-sizing: a paired card is a Following card, all
+    /// picture with its words over it, so its size is a function of the width
+    /// alone (`pairCardSize`) and a row's two feet are one line by
+    /// construction.
+    private static func pairsSection(
+        environment: any NSCollectionLayoutEnvironment
+    ) -> NSCollectionLayoutSection {
+        let margin = PostGridListLayout.sideMargin
+        let size = pairCardSize(containerWidth: environment.container.effectiveContentSize.width)
+        let item = NSCollectionLayoutItem(layoutSize: .init(
+            widthDimension: .absolute(size.width),
+            heightDimension: .absolute(size.height)
+        ))
+        let group = NSCollectionLayoutGroup.horizontal(
+            layoutSize: .init(widthDimension: .fractionalWidth(1), heightDimension: .absolute(size.height)),
+            subitems: [item, item]
+        )
+        group.interItemSpacing = .fixed(pairGutter)
+        let section = NSCollectionLayoutSection(group: group)
+        section.interGroupSpacing = PostGridListLayout.rowSpacing
+        // The gap to whatever follows on the TRAILING edge, as a run's — see
+        // the cards' section above.
+        section.contentInsets = NSDirectionalEdgeInsets(
+            top: 0, leading: margin, bottom: gapAboveChunk, trailing: margin
+        )
+        return section
     }
 }
