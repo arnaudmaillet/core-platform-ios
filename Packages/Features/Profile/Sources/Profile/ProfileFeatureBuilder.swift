@@ -150,7 +150,12 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                             switcher: makeSwitcherFactory(),
                             makeDestination: { section in
                                 switch section {
-                                case .account: AccountSettingsViewController(account: account)
+                                case .account:
+                                    AccountSettingsViewController(
+                                        account: account,
+                                        lifecycle: account as? any AccountLifecycleManaging,
+                                        onAccountDeleted: onLogout
+                                    )
                                 case .security:
                                     accountSessions.map {
                                         SecuritySettingsViewController(
