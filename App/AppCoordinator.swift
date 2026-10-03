@@ -3,6 +3,7 @@ import AuthInterface
 import CoreModels
 import CoreNavigation
 import CoreRealtime
+import CoreStorage
 import DesignSystem
 import MediaPlayback
 import UIKit
@@ -206,6 +207,13 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         case .authenticated: isMember = true
         }
         container.memberGate.isMember = isMember
+        // The welcome gift: a guest's opens (once per device), a member's
+        // first arrival credits whatever it holds and closes it for good.
+        if isMember {
+            container.welcomeGift.settle(into: container.walletStore)
+        } else {
+            container.welcomeGift.open()
+        }
         guard let tabCoordinator = mainTabCoordinator else {
             showShell(isMember: isMember)
             if isMember { didSignIn() }
@@ -255,7 +263,7 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
             finishSignUp(signedIn: false)
             return
         }
-        let flow = container.authFeature.makeSignInViewController(prompt: action?.signUpPrompt) { [weak self] in
+        let flow = container.authFeature.makeSignInViewController(prompt: signUpPrompt(for: action)) { [weak self] in
             self?.presentedSignIn?.dismiss(animated: true)
         }
         // ⚠️ EVERY way the sheet leaves must answer the gate, or the action
@@ -284,6 +292,19 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         identifier: .init("signUpMethods")
     ) { context in
         min(context.maximumDetentValue, 540)
+    }
+
+    /// The sheet's headline: the action's own, except where the welcome gift
+    /// is the point — a like or a claim names the likes waiting (report §3.2).
+    private func signUpPrompt(for action: GatedAction?) -> String? {
+        if let waiting = container.welcomeGift.lockedAmount, waiting > 0 {
+            switch action {
+            case .like: return "Sign up to use your \(waiting) likes"
+            case .claim: return "Sign up to claim your \(waiting) likes"
+            default: break
+            }
+        }
+        return action?.signUpPrompt
     }
 
     private func finishSignUp(signedIn: Bool) {

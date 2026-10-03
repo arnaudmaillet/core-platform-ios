@@ -1,3 +1,5 @@
+import AuthInterface
+import CoreModels
 import CoreNavigation
 import CoreStorage
 import DesignSystem
@@ -31,7 +33,16 @@ final class WalletBadgeInstaller: NSObject {
     /// change is the same slot, not a new one.
     static let itemIdentifier = "shell.wallet-balance"
 
+    /// What a GUEST's badge shows instead of the wallet: the welcome gift,
+    /// locked until they sign up (guest mode decision 11). The gate says who
+    /// is looking; the gift says how much is waiting.
+    struct WelcomeGiftFace {
+        let gift: WelcomeGift
+        let gate: any MemberGating
+    }
+
     private let wallet: WalletStore
+    private let welcome: WelcomeGiftFace?
     private let badge = WalletBadgeButton()
     /// The presenting screen, for the sheet.
     private weak var presenter: UIViewController?
@@ -41,8 +52,8 @@ final class WalletBadgeInstaller: NSObject {
     /// install and again whenever the count's width changes.
     private let apply: (UIBarButtonItem) -> Void
 
-    /// Wakes the badge when the hourly claim unlocks. One-shot, re-armed from
-    /// every refresh.
+    /// Wakes the badge when the hourly claim unlocks — or, on a guest's
+    /// badge, when the gift next grows. One-shot, re-armed from every refresh.
     private var claimUnlockTimer: Timer?
 
     /// - Parameter apply: hands the host a bar item to install. Called
@@ -53,17 +64,19 @@ final class WalletBadgeInstaller: NSObject {
     init(
         wallet: WalletStore,
         presenter: UIViewController?,
+        welcome: WelcomeGiftFace?,
         makeSheet: @escaping () -> UIViewController,
         apply: @escaping (UIBarButtonItem) -> Void
     ) {
         self.wallet = wallet
+        self.welcome = welcome
         self.presenter = presenter
         self.makeSheet = makeSheet
         self.apply = apply
         super.init()
 
         badge.addAction(
-            UIAction { [weak self] _ in self?.presentSheet() },
+            UIAction { [weak self] _ in self?.badgeTapped() },
             for: .primaryActionTriggered
         )
         badge.onFittedWidthChange = { [weak self] in
@@ -82,6 +95,17 @@ final class WalletBadgeInstaller: NSObject {
             self, selector: #selector(walletDidChange),
             name: WalletStore.didChangeNotification, object: wallet
         )
+        // A guest's face follows the gift (it opens, it settles) and the
+        // viewer (a sign-out after the gift settled changes no store).
+        if let welcome {
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(walletDidChange),
+                name: WelcomeGift.didChangeNotification, object: welcome.gift
+            )
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(walletDidChange), name: .viewerDidChange, object: nil
+            )
+        }
         apply(makeItem())
         refresh()
     }
@@ -96,11 +120,12 @@ final class WalletBadgeInstaller: NSObject {
     static func attach(
         to host: UIViewController,
         wallet: WalletStore,
+        welcome: WelcomeGiftFace?,
         makeSheet: @escaping () -> UIViewController
     ) {
         guard host is any HeaderAccessoryHosting else { return }
         let installer = WalletBadgeInstaller(
-            wallet: wallet, presenter: host, makeSheet: makeSheet
+            wallet: wallet, presenter: host, welcome: welcome, makeSheet: makeSheet
         ) { [weak host] item in
             (host as? any HeaderAccessoryHosting)?.setTrailingAccessoryItem(item)
         }
@@ -145,6 +170,15 @@ final class WalletBadgeInstaller: NSObject {
     /// Renders one wallet snapshot onto the badge, and arms the wake-up for the
     /// moment the countdown ends.
     private func refresh() {
+        claimUnlockTimer?.invalidate()
+        claimUnlockTimer = nil
+        if let welcome, !welcome.gate.isMember {
+            // 0 once this device's gift is spent: a guest still sees what an
+            // account would hold, never a wallet that isn't theirs.
+            badge.update(lockedGift: welcome.gift.lockedAmount ?? 0)
+            if let growsAt = welcome.gift.nextGrowthAt { wake(at: growsAt) }
+            return
+        }
         let snapshot = wallet.snapshot()
         badge.update(
             balance: snapshot.balance,
@@ -154,17 +188,31 @@ final class WalletBadgeInstaller: NSObject {
             }
         )
 
-        claimUnlockTimer?.invalidate()
-        claimUnlockTimer = nil
         guard let unlockAt = snapshot.nextClaimAt else { return }
+        wake(at: unlockAt)
+    }
+
+    private func wake(at date: Date) {
         // +1s so the re-read lands strictly past the gate, never on it.
         let timer = Timer(
-            fire: unlockAt.addingTimeInterval(1), interval: 0, repeats: false
+            fire: date.addingTimeInterval(1), interval: 0, repeats: false
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.refresh() }
         }
         RunLoop.main.add(timer, forMode: .common)
         claimUnlockTimer = timer
+    }
+
+    /// A guest's tap asks them to sign up — the gift is theirs once they have,
+    /// and the sheet then opens on the wallet it was credited to.
+    private func badgeTapped() {
+        guard let welcome, !welcome.gate.isMember else {
+            presentSheet()
+            return
+        }
+        Task { @MainActor [weak self] in
+            if await welcome.gate.requireMember(for: .claim) { self?.presentSheet() }
+        }
     }
 
     func presentSheet() {

@@ -56,6 +56,7 @@ final class ForYouTabCoordinator: TabCoordinator {
         walletBadge = WalletBadgeInstaller(
             wallet: container.walletStore,
             presenter: navigationController,
+            welcome: container.welcomeGiftFace,
             makeSheet: { [unowned container] in container.makeWalletSheet() }
         ) { [weak forYou] item in
             (forYou as? (any HeaderAccessoryHosting))?.setTrailingAccessoryItem(item)
