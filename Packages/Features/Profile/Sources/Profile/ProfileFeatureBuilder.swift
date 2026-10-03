@@ -44,6 +44,9 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     /// Lists and ends the account's sessions (Settings → Security and Login).
     /// Nil leaves that section on its coming-soon page.
     private let accountSessions: (any AccountSessionsManaging)?
+    /// Active restrictions on the account (Safety → Account Status). Nil
+    /// leaves the row under Coming Soon.
+    private let accountStatus: (any AccountStatusProviding)?
 
     public init(
         repository: any ProfileProviding,
@@ -55,7 +58,8 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
         router: (any Router)? = nil,
         account: (any AccountProviding)? = nil,
         switching: (any ProfileSwitching)? = nil,
-        accountSessions: (any AccountSessionsManaging)? = nil
+        accountSessions: (any AccountSessionsManaging)? = nil,
+        accountStatus: (any AccountStatusProviding)? = nil
     ) {
         self.repository = repository
         self.reporting = reporting
@@ -67,6 +71,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
         self.account = account
         self.switching = switching
         self.accountSessions = accountSessions
+        self.accountStatus = accountStatus
     }
 
     private func makeSwitcherFactory() -> ProfileSwitcherMenuFactory? {
@@ -144,7 +149,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             // profile action, and it is safe at any stack depth.
             makeSettingsViewController: onLogout.flatMap { onLogout in
                 account.map { account in
-                    { [switching, accountSessions, imagePipeline] in
+                    { [switching, accountSessions, accountStatus, imagePipeline] in
                         SettingsViewController(
                             switching: switching,
                             switcher: makeSwitcherFactory(),
@@ -165,16 +170,24 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                     }
                                 case .safety:
                                     (repository as? any BlockedAccountsManaging).map { blocks in
-                                        SafetySettingsViewController(
-                                            destinations: [
-                                                .init(title: "Blocked Accounts", symbolName: "nosign") {
-                                                    BlockedAccountsViewController(
-                                                        viewModel: BlockedAccountsViewModel(blocks: blocks),
-                                                        imagePipeline: imagePipeline
-                                                    )
-                                                }
-                                            ],
-                                            planned: ["Muted accounts", "Hidden words and comment filters", "Your reports", "Account status and appeals"]
+                                        var destinations: [SafetySettingsViewController.Destination] = [
+                                            .init(title: "Blocked Accounts", symbolName: "nosign") {
+                                                BlockedAccountsViewController(
+                                                    viewModel: BlockedAccountsViewModel(blocks: blocks),
+                                                    imagePipeline: imagePipeline
+                                                )
+                                            }
+                                        ]
+                                        if let accountStatus {
+                                            destinations.append(.init(title: "Account Status", symbolName: "checkmark.shield") {
+                                                AccountStatusViewController(status: accountStatus)
+                                            })
+                                        }
+                                        return SafetySettingsViewController(
+                                            destinations: destinations,
+                                            planned: ["Muted accounts", "Hidden words and comment filters", "Your reports"]
+                                                + (accountStatus == nil ? ["Account status"] : [])
+                                                + ["Statements of reasons and appeals"]
                                         )
                                     }
                                 case .privacy:
