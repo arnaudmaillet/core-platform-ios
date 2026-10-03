@@ -139,7 +139,7 @@ What we take from it:
 | Messages tab | Inbox, requests, suggestions | 🔒 | Full-page state: "Sign up to message friends" |
 | Notifications | Bell + drawer | 🔒 | Drawer shows the sign-up state; no badge |
 | Create "+" | Camera, upload, text post, long-press camera | 🔒 | TikTok behaviour: the "+" stays, a tap opens the sheet |
-| Wallet | Balance badge | ✅ | Shows the locked welcome gift (§3.2), with a lock |
+| Wallet | Balance badge, wallet sheet | ✅ | The badge shows the welcome gift (§3.2) and pulses; the sheet's Claim button is locked |
 | Wallet | Daily claim, spending likes, shop | 🔒 | The sheet names the amount waiting |
 | Settings | Language, app preferences (#409), captions, comment ticker, data saver, clear cache, personalisation off, help, legal, "delete my guest data" | ✅ | Reached from the Profile tab gear |
 | Settings | Everything account-scoped | — | Shown after sign-up |
@@ -177,8 +177,8 @@ How it works:
 | Welcome gift | 50 likes, granted at first launch |
 | Daily allowance | One un-streaked claim per day (`WalletStore.Policy.baseClaimAmount`, 25 today) |
 | Accumulation cap | 3 days (75), so at most 125 likes waiting |
-| Where it shows | The wallet badge shows the amount with a lock. Nothing pops up (decision 8). |
-| What a tap does | Badge, like or daily claim opens the sign-up sheet titled with the amount: "Sign up to claim your 125 likes" |
+| Where it shows | The wallet badge shows the amount with the claim-ready pulse and opens the wallet sheet, where the Claim button carries the lock ("🔒 Claim 75 likes"). Nothing pops up (decision 8). |
+| What a tap does | The sheet's Claim button opens the sign-up sheet titled with the amount: "Sign up to claim your 125 likes". A like says "Sign up to use your 125 likes". |
 | At sign-up | The server credits the gift and the accrued days, then the pending action replays (the like is spent from the new balance) |
 | Once per device | Keyed to the guest id and App Attest (B1): a second account on the same device gets no second gift |
 
