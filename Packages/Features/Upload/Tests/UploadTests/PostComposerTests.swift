@@ -18,6 +18,18 @@ private struct ViewerSessionStub: AuthSessionProviding {
     func logout() async {}
 }
 
+/// A session whose account a test can change: sign out, sign in as someone else.
+private actor SwitchableSession: AuthSessionProviding {
+    var state: AuthState = .authenticated(AccountID(MockAuthService.accountID))
+    func currentState() async -> AuthState { state }
+    func stateUpdates() async -> AsyncStream<AuthState> {
+        let state = state
+        return AsyncStream { $0.yield(state); $0.finish() }
+    }
+    func logout() async { state = .unauthenticated }
+    func signIn(_ accountID: AccountID) { state = .authenticated(accountID) }
+}
+
 private func solidImage(_ size: CGSize = CGSize(width: 400, height: 300)) -> UIImage {
     UIGraphicsImageRenderer(size: size).image { ctx in
         UIColor.systemTeal.setFill()
@@ -44,7 +56,9 @@ struct PostComposerTests {
     /// `posterFrame` stands in for the one step whose FAILURE has to be
     /// exercised: a real exporter always finds a frame in a file it just wrote.
     private func makeHarness(
-        posterFrame: (@Sendable (ExportedVideo) async -> UIImage?)? = nil
+        posterFrame: (@Sendable (ExportedVideo) async -> UIImage?)? = nil,
+        authSession: any AuthSessionProviding = ViewerSessionStub(),
+        viewer: (any ViewerProviding)? = nil
     ) -> Harness {
         let bff = MockBFF()
         let blobStore = MockBlobStore()
@@ -61,7 +75,8 @@ struct PostComposerTests {
             mediaClient: Media_V1_MediaServiceClient(client: client),
             postClient: Post_V1_PostServiceClient(client: client),
             profileClient: Profile_V1_ProfileServiceClient(client: client),
-            authSession: ViewerSessionStub(),
+            authSession: authSession,
+            viewer: viewer,
             uploadTransport: MockMediaUploadTransport(store: blobStore),
             imagePipeline: pipeline,
             composedChannel: channel,
@@ -288,5 +303,34 @@ struct PostComposerTests {
             try await harness.composer.publish(media: nil, caption: "Not mine", as: stranger)
         }
         #expect(!harness.bff.recordedRequests.map(\.path).contains("/post.v1.PostService/CreatePost"))
+    }
+
+    /// No author named: the post goes out as the ACTIVE profile — a switch made
+    /// anywhere in the app, not the account's first profile.
+    @Test func publishingWithoutAnAuthorUsesTheActiveProfile() async throws {
+        let session = ViewerSessionStub()
+        let viewer = ViewerSession(authSession: session) { _ in
+            [ProfileID(MockSocialDataset.viewerProfileID), ProfileID("prof-0"), ProfileID("prof-1")]
+        }
+        await viewer.setActiveProfile(ProfileID("prof-0"))
+        let harness = makeHarness(authSession: session, viewer: viewer)
+        let entry = try await harness.composer.publish(media: nil, caption: "As Ava", as: nil)
+
+        #expect(entry.author.id == ProfileID("prof-0"))
+    }
+
+    /// Signed out, then in as an account with no profile: the previous
+    /// account's profiles must not be offered as the author.
+    @Test func anotherAccountNeverPublishesAsThePreviousOnesProfile() async throws {
+        let session = SwitchableSession()
+        let harness = makeHarness(authSession: session)
+        _ = try await harness.composer.publish(media: nil, caption: "First account", as: nil)
+
+        await session.logout()
+        await session.signIn(AccountID("acct-without-profiles"))
+
+        await #expect(throws: ComposeError.noViewerProfile) {
+            try await harness.composer.publish(media: nil, caption: "Second account", as: nil)
+        }
     }
 }

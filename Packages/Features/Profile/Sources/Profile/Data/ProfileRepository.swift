@@ -2,6 +2,7 @@ import AuthInterface
 import Connect
 import CoreContracts
 import CoreModels
+import CoreNetworking
 import Foundation
 import OSLog
 
@@ -255,10 +256,9 @@ public protocol ProfileVisibilityManaging: Sendable {
 }
 
 /// Multi-profile support for the switcher: list the account's profiles, read the
-/// active one, and switch it. "Active" is scoped to the identity surfaces the
-/// `ProfileRepository` drives (the profile screen + the map avatar) — switching
-/// overrides its cached viewer id; the other feature repositories keep their own
-/// viewer caches.
+/// active one, and switch it. "Active" is app-wide: the switch goes through the
+/// shared `ViewerProviding`, so every repository that asks "who am I" (feed,
+/// comments, chat, notifications, the post composer) follows it.
 public protocol ProfileSwitching: Sendable {
     /// All profiles linked to the signed-in account.
     func accountProfiles() async throws -> [AccountProfile]
@@ -298,13 +298,16 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
     private let followEvents: FollowGraphEvents?
     private let logger = Logger(subsystem: "cn.wynn.core-platform-ios", category: "profile")
 
-    private var viewerProfileID: ProfileID?
+    /// Who is signed in, and as which profile — shared with every other
+    /// repository (`ViewerSession`), so a switch or a sign-out reaches all of them.
+    private let viewer: any ViewerProviding
 
     public init(
         profileClient: any Profile_V1_ProfileServiceClientInterface,
         counterClient: any Counter_V1_CounterServiceClientInterface,
         socialGraphClient: any SocialGraph_V1_SocialGraphServiceClientInterface,
         authSession: any AuthSessionProviding,
+        viewer: (any ViewerProviding)? = nil,
         edgeSampleLimit: Int32 = 200,
         followEvents: FollowGraphEvents? = nil
     ) {
@@ -313,6 +316,12 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
         self.counterClient = counterClient
         self.socialGraphClient = socialGraphClient
         self.authSession = authSession
+        // Nil only outside the app (tests, previews): a session of its own,
+        // resolving through this repository's profile client.
+        self.viewer = viewer ?? ViewerSession(authSession: authSession) { [profileClient] account in
+            try await AccountProfilesReader.profileIDs(ofAccount: account.rawValue, using: profileClient)
+                .map { ProfileID($0) }
+        }
         self.edgeSampleLimit = edgeSampleLimit
     }
 
@@ -559,26 +568,14 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
     }
 
     private func resolveViewerProfileID() async throws -> ProfileID {
-        if let viewerProfileID {
-            return viewerProfileID
-        }
-        guard case .authenticated(let accountID) = await authSession.currentState() else {
+        do {
+            return try await viewer.activeProfileID()
+        } catch ViewerError.requiresMember {
             throw ProfileError.notAuthenticated
-        }
-
-        var request = Profile_V1_ListProfilesByAccountRequest()
-        request.accountID = accountID.rawValue
-        let response = await profileClient.listProfilesByAccount(request: request, headers: [:])
-        switch response.result {
-        case .success(let body):
-            guard let profile = body.profiles.first else {
-                throw ProfileError.noProfileForAccount
-            }
-            let id = ProfileID(profile.profileID)
-            viewerProfileID = id
-            return id
-        case .failure(let error):
-            throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+        } catch ViewerError.noProfileForAccount {
+            throw ProfileError.noProfileForAccount
+        } catch let error as AccountProfilesReader.ReadError {
+            throw ProfileError.transport(message: error.message)
         }
     }
 
@@ -621,10 +618,10 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
     }
 
     public func setActiveProfile(_ id: ProfileID) async {
-        // Overriding the cached viewer id is the whole switch: `currentUserProfile`
-        // (profile screen) and `viewerAvatarImage` (map avatar) both resolve
-        // through this, so they refresh to the chosen profile on their next read.
-        viewerProfileID = id
+        // The shared viewer is the whole switch: `currentUserProfile` (profile
+        // screen), `viewerAvatarImage` (map avatar) and every other repository
+        // resolve through it, so they all read the chosen profile next.
+        await viewer.setActiveProfile(id)
     }
 
     // MARK: - BlockedAccountsManaging

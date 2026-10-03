@@ -16,7 +16,7 @@ private struct AuthenticatedSessionStub: AuthSessionProviding {
 }
 
 struct CommentsRepositoryTests {
-    private func makeRepository() -> CommentsRepository {
+    private func makeRepository(viewer: (any ViewerProviding)? = nil) -> CommentsRepository {
         let dataset = MockSocialDataset()
         let bff = MockBFF()
         MockSocialServices(dataset: dataset).register(on: bff) // viewer resolve + author hydration
@@ -25,8 +25,26 @@ struct CommentsRepositoryTests {
         return CommentsRepository(
             commentClient: Comment_V1_CommentServiceClient(client: client),
             profileClient: Profile_V1_ProfileServiceClient(client: client),
-            authSession: AuthenticatedSessionStub()
+            authSession: AuthenticatedSessionStub(),
+            viewer: viewer
         )
+    }
+
+    /// A switch made through ONE repository reaches every other repository on
+    /// the same viewer — the profile screen's switch reaching the composer here.
+    @Test func aSwitchReachesEveryRepositoryOnTheSameViewer() async throws {
+        let session = AuthenticatedSessionStub()
+        let viewer = ViewerSession(authSession: session) { _ in
+            [ProfileID(MockSocialDataset.viewerProfileID), ProfileID("prof-0")]
+        }
+        let switcher = makeRepository(viewer: viewer)
+        let writer = makeRepository(viewer: viewer)
+        _ = try await writer.addComment("Before", to: PostID("post-0001"), parentID: nil)
+
+        await switcher.setActiveViewer(ProfileID("prof-0"))
+        let created = try await writer.addComment("After", to: PostID("post-0001"), parentID: nil)
+
+        #expect(created.authorID == ProfileID("prof-0"))
     }
 
     // post-0001 carries the mock's default sparse seed; post-0000 is one of

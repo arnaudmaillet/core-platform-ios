@@ -1,6 +1,7 @@
 import AuthInterface
 import CoreContracts
 import CoreModels
+import CoreNetworking
 import Foundation
 
 public enum ChatError: Error, Equatable, Sendable {
@@ -178,7 +179,9 @@ public actor ChatRepository: ChatProviding {
     private let authSession: any AuthSessionProviding
     private let pageSize: Int32
 
-    private var viewerProfileID: ProfileID?
+    /// Who is signed in, and as which profile — shared with every other
+    /// repository (`ViewerSession`), so a switch or a sign-out reaches all of them.
+    private let viewer: any ViewerProviding
     private var nameCache: [ProfileID: String] = [:]
     private var handleCache: [ProfileID: String] = [:]
 
@@ -186,11 +189,18 @@ public actor ChatRepository: ChatProviding {
         chatClient: any Chat_V1_ChatServiceClientInterface,
         profileClient: any Profile_V1_ProfileServiceClientInterface,
         authSession: any AuthSessionProviding,
+        viewer: (any ViewerProviding)? = nil,
         pageSize: Int32 = 50
     ) {
         self.chatClient = chatClient
         self.profileClient = profileClient
         self.authSession = authSession
+        // Nil only outside the app (tests, previews): a session of its own,
+        // resolving through this repository's profile client.
+        self.viewer = viewer ?? ViewerSession(authSession: authSession) { [profileClient] account in
+            try await AccountProfilesReader.profileIDs(ofAccount: account.rawValue, using: profileClient)
+                .map { ProfileID($0) }
+        }
         self.pageSize = pageSize
     }
 
@@ -482,23 +492,14 @@ public actor ChatRepository: ChatProviding {
     }
 
     private func resolveViewerProfileID() async throws -> ProfileID {
-        if let viewerProfileID {
-            return viewerProfileID
-        }
-        guard case .authenticated(let accountID) = await authSession.currentState() else {
+        do {
+            return try await viewer.activeProfileID()
+        } catch ViewerError.requiresMember {
             throw ChatError.notAuthenticated
-        }
-        var request = Profile_V1_ListProfilesByAccountRequest()
-        request.accountID = accountID.rawValue
-        let response = await profileClient.listProfilesByAccount(request: request, headers: [:])
-        switch response.result {
-        case .success(let body):
-            guard let profile = body.profiles.first else { throw ChatError.noProfileForAccount }
-            let id = ProfileID(profile.profileID)
-            viewerProfileID = id
-            return id
-        case .failure(let error):
-            throw ChatError.transport(message: error.message ?? "code \(error.code)")
+        } catch ViewerError.noProfileForAccount {
+            throw ChatError.noProfileForAccount
+        } catch let error as AccountProfilesReader.ReadError {
+            throw ChatError.transport(message: error.message)
         }
     }
 }

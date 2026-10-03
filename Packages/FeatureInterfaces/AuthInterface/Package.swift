@@ -11,6 +11,7 @@ let package = Package(
         .package(path: "../../Kit/CoreModels")
     ],
     targets: [
-        .target(name: "AuthInterface", dependencies: ["CoreModels"])
+        .target(name: "AuthInterface", dependencies: ["CoreModels"]),
+        .testTarget(name: "AuthInterfaceTests", dependencies: ["AuthInterface", "CoreModels"])
     ]
 )

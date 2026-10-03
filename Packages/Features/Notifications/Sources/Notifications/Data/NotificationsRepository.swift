@@ -1,6 +1,7 @@
 import AuthInterface
 import CoreContracts
 import CoreModels
+import CoreNetworking
 import Foundation
 
 public enum NotificationsError: Error, Equatable, Sendable {
@@ -129,7 +130,9 @@ public actor NotificationsRepository: NotificationsProviding {
     private let postClient: (any Post_V1_PostServiceClientInterface)?
     private let authSession: any AuthSessionProviding
 
-    private var viewerProfileID: ProfileID?
+    /// Who is signed in, and as which profile — shared with every other
+    /// repository (`ViewerSession`), so a switch or a sign-out reaches all of them.
+    private let viewer: any ViewerProviding
     /// Absence is cached with presence: a profile that could not be read is
     /// not asked for again on the next load.
     private var actorCache: [ProfileID: NotificationActor?] = [:]
@@ -143,12 +146,19 @@ public actor NotificationsRepository: NotificationsProviding {
         notificationClient: any Notification_V1_NotificationServiceClientInterface,
         profileClient: any Profile_V1_ProfileServiceClientInterface,
         postClient: (any Post_V1_PostServiceClientInterface)? = nil,
-        authSession: any AuthSessionProviding
+        authSession: any AuthSessionProviding,
+        viewer: (any ViewerProviding)? = nil
     ) {
         self.notificationClient = notificationClient
         self.profileClient = profileClient
         self.postClient = postClient
         self.authSession = authSession
+        // Nil only outside the app (tests, previews): a session of its own,
+        // resolving through this repository's profile client.
+        self.viewer = viewer ?? ViewerSession(authSession: authSession) { [profileClient] account in
+            try await AccountProfilesReader.profileIDs(ofAccount: account.rawValue, using: profileClient)
+                .map { ProfileID($0) }
+        }
     }
 
     // MARK: - NotificationsProviding
@@ -317,23 +327,14 @@ public actor NotificationsRepository: NotificationsProviding {
     }
 
     private func resolveViewerProfileID() async throws -> ProfileID {
-        if let viewerProfileID {
-            return viewerProfileID
-        }
-        guard case .authenticated(let accountID) = await authSession.currentState() else {
+        do {
+            return try await viewer.activeProfileID()
+        } catch ViewerError.requiresMember {
             throw NotificationsError.notAuthenticated
-        }
-        var request = Profile_V1_ListProfilesByAccountRequest()
-        request.accountID = accountID.rawValue
-        let response = await profileClient.listProfilesByAccount(request: request, headers: [:])
-        switch response.result {
-        case .success(let body):
-            guard let profile = body.profiles.first else { throw NotificationsError.noProfileForAccount }
-            let id = ProfileID(profile.profileID)
-            viewerProfileID = id
-            return id
-        case .failure(let error):
-            throw NotificationsError.transport(message: error.message ?? "code \(error.code)")
+        } catch ViewerError.noProfileForAccount {
+            throw NotificationsError.noProfileForAccount
+        } catch let error as AccountProfilesReader.ReadError {
+            throw NotificationsError.transport(message: error.message)
         }
     }
 }

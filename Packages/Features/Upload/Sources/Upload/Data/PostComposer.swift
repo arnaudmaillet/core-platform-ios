@@ -1,5 +1,6 @@
 import AuthInterface
 import CoreContracts
+import CoreNetworking
 import MediaCore
 import MediaPlayback
 import CoreModels
@@ -157,12 +158,16 @@ public actor PostComposer: PostComposing {
     /// published as. Cached after the first read; refreshed once when asked to
     /// publish as a profile it does not contain (one created since).
     private var cachedAccount: (accountID: AccountID, profiles: [AuthorSummary])?
+    /// Who is signed in and as which profile — the author a post takes when
+    /// the screen names none. Shared with every repository (`ViewerSession`).
+    private let viewer: any ViewerProviding
 
     public init(
         mediaClient: any Media_V1_MediaServiceClientInterface,
         postClient: any Post_V1_PostServiceClientInterface,
         profileClient: any Profile_V1_ProfileServiceClientInterface,
         authSession: any AuthSessionProviding,
+        viewer: (any ViewerProviding)? = nil,
         uploadTransport: any MediaUploadTransport,
         imagePipeline: ImagePipeline,
         composedChannel: ComposedPostChannel,
@@ -179,6 +184,12 @@ public actor PostComposer: PostComposing {
         self.postClient = postClient
         self.profileClient = profileClient
         self.authSession = authSession
+        // Nil only outside the app (tests, previews): a session of its own,
+        // resolving through this composer's profile client.
+        self.viewer = viewer ?? ViewerSession(authSession: authSession) { [profileClient] account in
+            try await AccountProfilesReader.profileIDs(ofAccount: account.rawValue, using: profileClient)
+                .map { ProfileID($0) }
+        }
         self.uploadTransport = uploadTransport
         self.imagePipeline = imagePipeline
         self.composedChannel = composedChannel
@@ -470,8 +481,7 @@ public actor PostComposer: PostComposing {
     }
 
     /// The profile a post is published as: `author` when the account holds it,
-    /// otherwise — nil — the account's first profile, the only answer there was
-    /// before a screen could say who.
+    /// otherwise — nil — the active profile (the account's first until a switch).
     ///
     /// An author the cached list does not contain (a profile created since) is
     /// looked for once more before being refused: publishing as a profile this
@@ -479,8 +489,11 @@ public actor PostComposer: PostComposing {
     private func resolveViewer(as author: AuthorSummary?) async throws -> (accountID: AccountID, author: AuthorSummary) {
         var account = try await resolveAccount(refresh: false)
         guard let author else {
-            guard let first = account.profiles.first else { throw ComposeError.noViewerProfile }
-            return (account.accountID, first)
+            let active = try? await viewer.activeProfileID()
+            guard let profile = account.profiles.first(where: { $0.id == active }) ?? account.profiles.first else {
+                throw ComposeError.noViewerProfile
+            }
+            return (account.accountID, profile)
         }
         if !account.profiles.contains(where: { $0.id == author.id }) {
             account = try await resolveAccount(refresh: true)
@@ -494,11 +507,13 @@ public actor PostComposer: PostComposing {
     }
 
     private func resolveAccount(refresh: Bool) async throws -> (accountID: AccountID, profiles: [AuthorSummary]) {
-        if !refresh, let cachedAccount {
-            return cachedAccount
-        }
         guard case .authenticated(let accountID) = await authSession.currentState() else {
             throw ComposeError.notAuthenticated
+        }
+        // Keyed by account: after a sign-out and another sign-in, the previous
+        // account's profiles must never be offered as authors.
+        if !refresh, let cachedAccount, cachedAccount.accountID == accountID {
+            return cachedAccount
         }
         var request = Profile_V1_ListProfilesByAccountRequest()
         request.accountID = accountID.rawValue
