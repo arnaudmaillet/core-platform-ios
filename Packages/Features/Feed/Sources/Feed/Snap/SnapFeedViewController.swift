@@ -5097,6 +5097,8 @@ final class SnapFeedViewController: UIViewController {
     /// decoder and the platform caps how many can render at once, so this is
     /// the one warm that has to stay stingy.
     func warmPlayers(at items: [Int]) {
+        // Data saver on cellular: upcoming videos aren't loaded ahead (#409).
+        guard MediaPlaybackPolicy.preloads else { return }
         for item in items where orderedIDs.indices.contains(item) {
             guard let model = modelsByID[orderedIDs[item]],
                   model.mediaKind == .video, let url = model.mediaURL else { continue }
