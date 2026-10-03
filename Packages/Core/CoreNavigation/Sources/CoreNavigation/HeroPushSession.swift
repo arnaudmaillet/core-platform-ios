@@ -45,6 +45,7 @@ public final class HeroPushSession {
     /// per-screen (dismissal targets, intermediates, debug scripts).
     public let controller: ZoomTransitionController
     private weak var navigationController: UINavigationController?
+    private weak var destination: (any ZoomTransitionDestination)?
     /// Drivers that hold the delegate slot on this session's behalf (a card
     /// close forwarding `.hero` pops to the controller). Weak: each is owned by
     /// whoever armed it.
@@ -72,6 +73,7 @@ public final class HeroPushSession {
             source: source, destination: destination, presents: presents
         )
         self.navigationController = navigationController
+        self.destination = destination
         if retainsItself { strongSelf = self }
         controller.onSourceReturned = { [weak self] in self?.close(.returned) }
         controller.onPresentationCancelled = { [weak self] in self?.close(.reversed) }
@@ -84,6 +86,18 @@ public final class HeroPushSession {
     public func takeDelegateSlot() {
         guard let nav = navigationController else { return }
         NavigationDelegateHub.of(nav).lease(controller)
+    }
+
+    /// Pays the destination's first layout and raster NOW, in the tap's own
+    /// turn, rather than in the flight's first frames
+    /// (`ZoomTransitionDestination.zoomPrepareForPresentation`). Called right
+    /// before the push, and only for a REUSED destination: measured on For
+    /// You's feed, build 54-75ms down to 22ms. A destination built fresh per
+    /// tap pays a COLD layout here, between the finger lifting and the flight
+    /// starting — measured on the map as a pause before the animation.
+    public func prepareDestination() {
+        guard let nav = navigationController else { return }
+        destination?.zoomPrepareForPresentation(in: nav.view.bounds)
     }
 
     /// Registers `driver` as holding the delegate slot for this session (it
@@ -109,7 +123,18 @@ public final class HeroPushSession {
         // with nothing captured that could be stale.
         if let nav = navigationController, let hub = NavigationDelegateHub.existing(on: nav) {
             hub.release(controller)
-            for forwarder in forwarders.compactMap(\.value) { hub.release(forwarder) }
+            // ⚠️ A FORWARDER ENDS ITS OWN LEASE, once it has heard its news.
+            // A card close leased beside the flight learns its feed was popped
+            // from the `didShow` that follows — and a session can close BEFORE
+            // that `didShow` (a presenter's sweep runs in `viewDidAppear`).
+            // Releasing it here kept it from ever hearing the pop: its
+            // `onFeedPopped` never ran, and For You's playback handoff stayed
+            // open (caught by `ArrivalInvariants`, `grid.handoffClosed`). Only a
+            // REVERSED push takes them along: its feed never showed, so no pop
+            // will ever come for them to hear.
+            if ending == .reversed {
+                for forwarder in forwarders.compactMap(\.value) { hub.release(forwarder) }
+            }
         }
         onClose?(ending)
         // Released a turn later: the close-out runs inside a delegate callback

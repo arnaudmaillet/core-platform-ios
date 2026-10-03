@@ -134,6 +134,16 @@ public enum ZoomTransitionGeometry {
         return measured
     }
 
+    /// The source rect a flight takes off from or lands on, as measured, or
+    /// the centred fallback when the measurement is not a rect: non-finite (a
+    /// layout that divided by zero) or empty (a view with no size). A flight
+    /// posed on NaN draws nothing and an empty one collapses to a point; the
+    /// fallback is where an off-screen source already lands.
+    public static func sourceFrame(measured: CGRect, container: CGRect) -> CGRect {
+        guard measured.isFinite, !measured.isEmpty else { return centeredFallback(in: container) }
+        return measured
+    }
+
     public static func centeredFallback(in bounds: CGRect, side: CGFloat = 56) -> CGRect {
         CGRect(
             x: bounds.midX - side / 2,

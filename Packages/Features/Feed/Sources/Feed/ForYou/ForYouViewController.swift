@@ -1261,7 +1261,10 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // close would otherwise run and which rebuilds the geometry for another
         // post. See `resetForNewPresentation`.
         textSlideDismissal.resetForNewPresentation()
-        let revealing = installTextReveal(feed: feed, postID: tapped.id)
+        // Reduce Motion opens every post with the stack's own push: no window,
+        // no flight (`HeroMotionPolicy`).
+        let reducesMotion = HeroMotionPolicy.prefersNativePush
+        let revealing = !reducesMotion && installTextReveal(feed: feed, postID: tapped.id)
         // ⚠️ NOT REBUILT FOR THE POST THE VIEWER ENDS ON, and NOT adopted into
         // the tapped post's slot. The list keeps its order; the window travels
         // to wherever the arrival row actually is.
@@ -1299,7 +1302,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
               // A reveal never also flies a hero. For a TEXT row this changes
               // nothing — it has no hero to fly — and for OPTION A it is what
               // sends a media row down the window's path instead.
-              !revealing,
+              !revealing, !reducesMotion,
               page.hero(for: tapped.id, in: view) != nil
         else {
             // No hero available — a text-only row has no media to fly, and a
@@ -1356,7 +1359,11 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             // hero to fly after all. Attached BEFORE the slide installs, so the
             // slide saves this controller as the delegate it displaced and can
             // forward a hero pop straight back to it.
-            let alongside = attachFlightAlongsideCardClose(feed: feed, tappedID: tapped.id)
+            // Reduce Motion: no flight rides along either, so a media page
+            // closes with the window's own slide, not a hero home.
+            let alongside = reducesMotion
+                ? nil
+                : attachFlightAlongsideCardClose(feed: feed, tappedID: tapped.id)
             textSlideDismissal.arbitratesWithHeroGrab = true
             // ⚠️ AND CLAIM THE DRAGS THE HERO DECLINES — asked of the hero's
             // own gate, see `heroLandingArbiter`.
@@ -1415,28 +1422,11 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             settledCover: { [weak feed] in
                 (feed as? any SnapFeedSettleReporting)?.settledCoverImage
             },
-            // NOT hoisted — the two dismissals share one surface flow.
-            //
-            // Hoisting lifted the live layer out of the card and into a host
-            // above the navigation controller for the return, and only the
-            // tap-back path ever did it: the grab keeps the surface inside the
-            // card the whole way. That asymmetry is where tap-back's two
-            // defects lived. The hoisted landing has a refusal branch — if
-            // `adoptHostedPlayback` cannot match the surface to a realized
-            // tile it calls `detachForReplacement()` and drops the view — and a
-            // torn-down surface means the tile starts a FRESH player, which is
-            // the video restarting from zero mid-return. Nothing on the grab
-            // path can do that, which is why only tap-back showed it.
-            //
-            // The readiness drop the hoist was introduced to remove is already
-            // gone by other means: `adoptAttachedSurface` gives the landing tile
-            // its OWN surface primed with the current frame, so the player layer
-            // is never re-parented either way. Both paths now land through
-            // `zoomAdoptLiveMediaView` and hold on the same
-            // `zoomLandingMediaIsReady` gate.
-            hoistLive: nil,
-            poseHoisted: nil,
-            releaseHoisted: nil,
+            // No hoist: the hoisted tap-back landing (a host above the
+            // navigation controller) restarted the clip whenever its refusal
+            // branch dropped the surface, and the grab never needed it. Both
+            // dismissals land through `zoomAdoptLiveMediaView`, and the seam
+            // itself is gone (hero audit PR F).
             donateLive: { [weak self, weak page] in
                 // Under `-avsbdl-render` the card joins the tile's playback as
                 // an extra surface instead of taking it over. The tile keeps
@@ -1509,11 +1499,10 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             self?.navigationController?.popViewController(animated: true)
         }
         session.takeDelegateSlot()
-        // Pay the destination's first layout and raster HERE — see
-        // `prepareForHeroPresentation`. In the tap's own frame a stall is
-        // invisible; in the flight's first frames it is the pause.
-        (feed as? SnapFeedViewController)?
-            .prepareForHeroPresentation(in: navigationController.view.bounds)
+        // Pay the destination's first layout and raster HERE: in the tap's
+        // own frame a stall is invisible; in the flight's first frames it is
+        // the pause.
+        session.prepareDestination()
         navigationController.pushViewController(feed, animated: true)
         // ⚠️ THE OTHER DRIVER RIDES ALONG, for the post this screen may end on.
         //

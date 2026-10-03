@@ -313,8 +313,12 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // was flown anyway (from a rect it had to invent), and a destination
         // that failed the cast was silently dropped on the floor — the tap did
         // nothing at all. Neither is a presentation.
-        guard origin.hasHero, let flyable = destination as? any ZoomTransitionDestination else {
-            pushWithoutFlight(destination, on: nav, reveal: origin.textReveal)
+        // Reduce Motion: the stack's own push, no flight and no window
+        // (`HeroMotionPolicy`).
+        let reducesMotion = HeroMotionPolicy.prefersNativePush
+        guard origin.hasHero, !reducesMotion,
+              let flyable = destination as? any ZoomTransitionDestination else {
+            pushWithoutFlight(destination, on: nav, reveal: reducesMotion ? nil : origin.textReveal)
             return
         }
         // The feed is a pager and this origin lands where it took off, so the
@@ -465,6 +469,11 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         nav.tabBarController?.setTabBarHidden(true, animated: true)
         #endif
         session.takeDelegateSlot()
+        // No `session.prepareDestination()`: this feed is built fresh on every
+        // tap, so the pre-paid layout would be a cold one paid between the
+        // finger lifting and the flight starting — the map measured that as a
+        // pause before the animation (see `MapsViewController`). Only a REUSED
+        // destination (For You's) gains from it.
         nav.pushViewController(destination, animated: true)
         // ⚠️ AFTER THE PUSH, and that is the whole of whether it works. The
         // line above hands the stack's delegate to the flight, so a driver

@@ -153,35 +153,6 @@ public protocol ZoomTransitionSource: AnyObject {
     /// force.
     func zoomFinalizeLanding()
 
-    /// Takes the flight card's live surface and hosts it ABOVE the navigation
-    /// controller for the duration of a dismissal, positioned at `rect`.
-    ///
-    /// A navigation controller removes non-top views from the window, so a
-    /// surface left in the card — or in either screen — leaves the render tree
-    /// and its layer re-acquires on the way back. Hosting it one level up means
-    /// it never leaves, and the flight becomes pure geometry. Returns whether
-    /// the source took it; `false` leaves the card flying it as before.
-    /// `cornerRadius` is the radius the surface must START at — the page's
-    /// display-corner radius — so it interpolates to the tile's radius on the
-    /// same spring as the card. Hoisting without it left the surface at 0 while
-    /// the card animated 55 -> 10: square corners over rounded ones for the
-    /// whole flight, converging only at the very end, which reads as a snap.
-    func zoomHoistLiveMedia(_ view: UIView, at rect: CGRect, in space: UICoordinateSpace, cornerRadius: CGFloat) -> Bool
-
-    /// Poses the hosted surface. Called inside the flight's animation block, so
-    /// it interpolates on the same spring as the card.
-    func zoomPoseHoistedMedia(at rect: CGRect, in space: UICoordinateSpace, cornerRadius: CGFloat)
-
-    /// Un-hoists the dismissal's live surface and hands it back, for a flight
-    /// the viewer REVERSED.
-    ///
-    /// A hoisted surface is parented above the navigation controller and is no
-    /// longer reachable through `zoomLiveMediaSurface` — a card poses only
-    /// media it still contains. Without this a cancelled dismissal left it
-    /// hosted, drawing at the grid cell's rect over the feed that just came
-    /// back. `nil` when nothing is hosted.
-    func zoomReleaseHoistedMedia() -> UIView?
-
     /// Whether the row this dismissal would land on can RECEIVE a flight.
     ///
     /// ⚠️ THE OTHER HALF OF A QUESTION THAT WAS ONLY EVER ASKED OF THE
@@ -214,14 +185,6 @@ public extension ZoomTransitionSource {
     func zoomAdoptLiveMediaView(_ view: UIView) {}
     var zoomLandingMediaIsReady: Bool { true }
     func zoomFinalizeLanding() {}
-    /// `cornerRadius` is the radius the surface must START at — the page's
-    /// display-corner radius — so it interpolates to the tile's radius on the
-    /// same spring as the card. Hoisting without it left the surface at 0 while
-    /// the card animated 55 -> 10: square corners over rounded ones for the
-    /// whole flight, converging only at the very end, which reads as a snap.
-    func zoomHoistLiveMedia(_ view: UIView, at rect: CGRect, in space: UICoordinateSpace, cornerRadius: CGFloat) -> Bool { false }
-    func zoomPoseHoistedMedia(at rect: CGRect, in space: UICoordinateSpace, cornerRadius: CGFloat) {}
-    func zoomReleaseHoistedMedia() -> UIView? { nil }
     var zoomLandingAcceptsHero: Bool { true }
 }
 

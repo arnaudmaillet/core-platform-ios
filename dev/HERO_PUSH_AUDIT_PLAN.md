@@ -217,6 +217,31 @@ Rules:
 ### Not done, by judgement
 A `TransitionPlaybackSession` object owning begin/end. The invariant above detects the unpaired case on every host without moving the six hosts' begin/end calls into a new type. The identity APIs remove the ambiguity the session was meant to hide.
 
+
+## PR F outcome (2026-10-03)
+
+### Done
+- **3.4 Dead seams removed:**
+  - the hoist API: 3 source requirements and the animator's hoisted branches; the only conformer passed `nil`;
+  - the grid's hosted surfaces: `adoptHostedSurface`, `hostedSurfaces`, `onHostedSurfaceReleased`, `adoptHostedPlayback` and its host geometry hooks;
+  - `parkForHandoff` and its two tests.
+
+  `zoomPrepareForPresentation` is now reached through `HeroPushSession.prepareDestination()`, and only For You calls it. It pays off only for a REUSED destination: a fresh feed pays a cold layout between the tap and the flight, which the map measured as a pause, so the builder and Maps keep not calling it, and say why.
+- **4.1 Reduce Motion → native push** (`HeroMotionPolicy`, DEBUG `-hero-reduce-motion`). For You, the builder (Profile, Search, Discover, rows, place page tiles) and Maps open every post through their existing plain-push path: no flight, no reveal window. The place page closes with the stack's pop. "Prefer Cross-Fade Transitions" comes free with UIKit's push.
+- **4.2 Off-screen landing fades.** Tap-back and grab both fade card and shadow toward the centred fallback instead of landing an opaque pin, and hold nothing.
+- **4.3 Source rects sanitized** (`ZoomTransitionGeometry.sourceFrame`): NaN, infinite or empty → centred fallback, on all three legs and at grab release.
+- **4.4 Routes wait for a flight** (`UINavigationController.whenAtRest`). `RouteResolver.push` and `FeedFlowCoordinator.push` used to be dropped silently by UIKit mid-transition.
+
+### Regression caught by the arrival audit, fixed here
+**Introduced in PR C and carried by D and E.** A `HeroPushSession` closing BEFORE the `didShow` of its pop (For You's sweep runs in `viewDidAppear`) took its forwarders' leases (the card close) with it. The card close never heard the pop, its `onFeedPopped` never ran, and For You's playback handoff stayed open: `[arrival] FAIL … grid.handoffClosed`.
+
+Forwarders now end their own leases. Only a reversed push (no pop will ever come) releases them. A close-only controller (`presents: false`) also never flies the push. It had been vending a hero present that turned the "plain" fallback push into a flight. **Merge the stack through F.**
+
+### Not done, by judgement
+- **2.14 (reveal staging stale after a cancel).** The only safe remedy, restaging on every attempt, replays the host's `adoptForClose`, which moves a post into a grid slot. Replaying that after a cancel could move a second post. Cosmetic mismatch (ground tint and corner on one sequence) against a risk to the grid's order: left as is.
+- **3.5–3.7 (protocol slimming, file splits, `DebugFlags`).** Pure churn on the most-edited files, not needed for correctness. Worth doing in a quiet week, one file at a time.
+- **2.16 (header glass dimmed after a reversed push).** Still open; see the PR B notes.
+
 ## Phase 3: structure (behaviour-preserving refactors, one PR each)
 
 **3.0 One dismissal arbiter.** The rule for which driver claims a drag is

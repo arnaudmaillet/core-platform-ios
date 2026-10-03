@@ -21,7 +21,7 @@ import UIKit
 /// protocol; that is the maintenance contract this file buys.
 @MainActor
 struct ZoomExistentialDispatchTests {
-    // MARK: - Source (10 defaulted members)
+    // MARK: - Source (defaulted members)
 
     @Test func everyDefaultedSourceMemberDispatchesDynamically() {
         let spy = SpySource()
@@ -36,14 +36,11 @@ struct ZoomExistentialDispatchTests {
         source.zoomAdoptLiveMediaView(probe)
         #expect(source.zoomLandingMediaIsReady == false)
         source.zoomFinalizeLanding()
-        #expect(source.zoomHoistLiveMedia(probe, at: .zero, in: UIView(), cornerRadius: 5))
-        source.zoomPoseHoistedMedia(at: .zero, in: UIView(), cornerRadius: 5)
-        #expect(source.zoomReleaseHoistedMedia() === spy.hoistedRelease)
         #expect(source.zoomLandingAcceptsHero == false)
 
         #expect(spy.calls == [
             "surfaceIfReady", "carriesLivePlayer", "depthView", "willStageDismissal", "abandonDismissal", "adopt",
-            "landingReady", "finalizeLanding", "hoist", "poseHoisted", "releaseHoisted",
+            "landingReady", "finalizeLanding",
             "landingAcceptsHero",
         ])
     }
@@ -121,7 +118,6 @@ private final class SpySource: NSObject, ZoomTransitionSource {
     private(set) var calls: [String] = []
     let readySurface = UIView()
     let depthView = UIView()
-    let hoistedRelease = UIView()
 
     // Required members.
     func zoomHeroFrame(in container: UICoordinateSpace) -> CGRect { .zero }
@@ -138,13 +134,6 @@ private final class SpySource: NSObject, ZoomTransitionSource {
     func zoomAdoptLiveMediaView(_ view: UIView) { calls.append("adopt") }
     var zoomLandingMediaIsReady: Bool { calls.append("landingReady"); return false }
     func zoomFinalizeLanding() { calls.append("finalizeLanding") }
-    func zoomHoistLiveMedia(
-        _ view: UIView, at rect: CGRect, in space: UICoordinateSpace, cornerRadius: CGFloat
-    ) -> Bool { calls.append("hoist"); return true }
-    func zoomPoseHoistedMedia(at rect: CGRect, in space: UICoordinateSpace, cornerRadius: CGFloat) {
-        calls.append("poseHoisted")
-    }
-    func zoomReleaseHoistedMedia() -> UIView? { calls.append("releaseHoisted"); return hoistedRelease }
     var zoomLandingAcceptsHero: Bool { calls.append("landingAcceptsHero"); return false }
 }
 

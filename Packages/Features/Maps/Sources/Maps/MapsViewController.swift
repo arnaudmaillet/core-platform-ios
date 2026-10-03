@@ -3094,7 +3094,7 @@ extension MapsViewController: MKMapViewDelegate {
         print("[maps] tap face=\(face) presentation=\(MapMarkerPresentation(face: face)) "
               + "posts=\(postIDs.count) first=\(postIDs.first?.rawValue ?? "-")")
         #endif
-        switch MapMarkerPresentation(face: face) {
+        switch MapMarkerPresentation(face: face, reducesMotion: HeroMotionPolicy.prefersNativePush) {
         case .reveal where navigationController != nil:
             // The disc IS the window. Same seam as the plain push below — the
             // feed owns the pushed screen's gestures either way — with an

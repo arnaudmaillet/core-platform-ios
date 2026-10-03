@@ -303,7 +303,9 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // this rect is stable for the grab's lifetime — but it is recomputed at
         // release anyway (see `releaseGrab`), because staging can be seconds
         // earlier on a view that had not settled.
-        let sourceFrame = source.zoomHeroFrame(in: container)
+        let sourceFrame = ZoomTransitionGeometry.sourceFrame(
+            measured: source.zoomHeroFrame(in: container), container: container.bounds
+        )
 
         let dim = ZoomFlight.makeDimView(frame: container.bounds)
         dim.alpha = 1
@@ -512,7 +514,9 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         guard let source, source.zoomSourceIsOnScreen else { return stagedLanding }
         let recede = presentingView?.transform ?? .identity
         presentingView?.transform = .identity
-        let rect = source.zoomHeroFrame(in: container)
+        let rect = ZoomTransitionGeometry.sourceFrame(
+            measured: source.zoomHeroFrame(in: container), container: container.bounds
+        )
         presentingView?.transform = recede
         return rect
     }
@@ -720,6 +724,9 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // the map it is taken on a view freshly re-attached after the navigation
         // controller unloaded it, before its restored camera settled.
         let landing = commit ? currentLanding(in: context.containerView) : flight.sourceFrame
+        // A landing nobody can see fades out — see `ZoomAnimator.dismiss`.
+        let landsOffScreen = commit && source?.zoomSourceIsOnScreen == false
+        releasedOffScreen = landsOffScreen
 
         // The drag set model values directly, so "current state" needs no
         // presentation-layer capture: the spring starts from the card's exact
@@ -769,6 +776,10 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
             ))
             if commit {
                 flight.poseAtSource(at: landing)
+                if landsOffScreen {
+                    flight.card.alpha = 0
+                    flight.shadow.alpha = 0
+                }
                 dim?.alpha = 0
                 presentingView?.transform = .identity
             } else {
@@ -814,6 +825,9 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     /// (finish/cancelInteractiveTransition was already reported at release.)
     /// The release's touch shield — see `releaseGrab`.
     private var releaseShield: UIView?
+    /// Whether the committed release faded the card toward an off-screen
+    /// landing (no hold then).
+    private var releasedOffScreen = false
     /// Held from staging to the end of the transition; a landing hold takes
     /// its own.
     private var orientationLease: FlightOrientationLock.Lease?
@@ -862,6 +876,12 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
                 }
             case .holdCardOverLanding:
                 guard let card else { break }
+                // Nothing to hold over: the card faded out on its way to a
+                // landing off screen.
+                if releasedOffScreen {
+                    card.removeFromSuperview()
+                    break
+                }
                 ZoomAnimator.holdCard(card,
                                       liveMediaIsDrawing: { [weak card] in
                                           card?.zoomLiveMediaIsDrawing ?? true

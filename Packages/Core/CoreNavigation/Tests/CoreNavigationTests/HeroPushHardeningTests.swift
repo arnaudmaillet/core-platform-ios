@@ -43,6 +43,20 @@ struct HeroPushHardeningTests {
         #expect(ZoomTransitionGeometry.pageFrame(measured: nan, container: container) == container)
     }
 
+    // MARK: - F 4.3 A source rect that is not one lands on the fallback
+
+    @Test func aSourceRectThatIsNotOneFallsBackToTheCentre() {
+        let container = CGRect(x: 0, y: 0, width: 402, height: 874)
+        let fallback = ZoomTransitionGeometry.centeredFallback(in: container)
+        let tile = CGRect(x: 20, y: 300, width: 120, height: 160)
+        #expect(ZoomTransitionGeometry.sourceFrame(measured: tile, container: container) == tile)
+        #expect(ZoomTransitionGeometry.sourceFrame(measured: .zero, container: container) == fallback)
+        let nan = CGRect(x: 20, y: CGFloat.nan, width: 120, height: 160)
+        #expect(ZoomTransitionGeometry.sourceFrame(measured: nan, container: container) == fallback)
+        let infinite = CGRect(x: 20, y: 300, width: CGFloat.infinity, height: 160)
+        #expect(ZoomTransitionGeometry.sourceFrame(measured: infinite, container: container) == fallback)
+    }
+
     // MARK: - 1.11 A back chevron asks the landing too
 
     /// The grabs refuse a hero onto a landing that cannot receive one (a TEXT

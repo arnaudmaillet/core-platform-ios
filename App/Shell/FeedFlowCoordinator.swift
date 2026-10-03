@@ -41,6 +41,15 @@ final class FeedFlowCoordinator: Coordinator {
     /// elsewhere) it is lifted off invisibly first — a view controller can
     /// only ever have one parent.
     func push(on navigationController: UINavigationController) {
+        // Not mid-transition: UIKit would drop the push, after the dock had
+        // been hidden and the dismissal installed for a screen that never came.
+        guard navigationController.transitionCoordinator == nil else {
+            navigationController.whenAtRest { [weak self, weak navigationController] in
+                guard let navigationController else { return }
+                self?.push(on: navigationController)
+            }
+            return
+        }
         let feed = feedViewController
         if let currentStack = feed.navigationController {
             if currentStack === navigationController {

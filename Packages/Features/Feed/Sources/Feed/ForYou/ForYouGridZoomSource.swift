@@ -97,14 +97,8 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         activeMediaPage: (() -> Int?)? = nil,
         depthView: UIView?,
         settledCover: (() -> UIImage?)? = nil,
-        hoistLive: ((UIView, CGRect, UICoordinateSpace, CGFloat) -> Bool)? = nil,
-        poseHoisted: ((CGRect, UICoordinateSpace, CGFloat) -> Void)? = nil,
-        releaseHoisted: (() -> UIView?)? = nil,
         donateLive: (() -> VideoRenderView?)? = nil
     ) {
-        self.hoistLive = hoistLive
-        self.poseHoisted = poseHoisted
-        self.releaseHoisted = releaseHoisted
         self.page = page
         anchorID = tappedID
         departureID = tappedID
@@ -325,24 +319,6 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
     func zoomFinalizeLanding() {
         page?.finalizeLandingLayout(for: anchorID)
     }
-
-    /// Hoists the dismissal's live surface into the tab-bar-level host.
-    private let hoistLive: ((UIView, CGRect, UICoordinateSpace, CGFloat) -> Bool)?
-    private let poseHoisted: ((CGRect, UICoordinateSpace, CGFloat) -> Void)?
-    private let releaseHoisted: (() -> UIView?)?
-
-    func zoomHoistLiveMedia(_ view: UIView, at rect: CGRect, in space: UICoordinateSpace, cornerRadius: CGFloat) -> Bool {
-        hoistLive?(view, rect, space, cornerRadius) ?? false
-    }
-
-    func zoomPoseHoistedMedia(at rect: CGRect, in space: UICoordinateSpace, cornerRadius: CGFloat) {
-        poseHoisted?(rect, space, cornerRadius)
-    }
-
-    func zoomReleaseHoistedMedia() -> UIView? {
-        releaseHoisted?()
-    }
-
 
     func zoomAdoptLiveMediaView(_ view: UIView) {
         guard let view = view as? VideoRenderView else { return }

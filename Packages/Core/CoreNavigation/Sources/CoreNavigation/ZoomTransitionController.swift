@@ -118,6 +118,7 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
         self.destination = destination
         self.feedViewController = destination as? UIViewController
         hasSeenFeedOnStack = !presents
+        self.presents = presents
         super.init()
         #if DEBUG
         Self.debugMostRecent = self
@@ -235,6 +236,12 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
         guard let destination, let feed = feedViewController else { return nil }
         switch operation {
         case .push where toVC === feed:
+            // ⚠️ A CLOSE-ONLY CONTROLLER NEVER FLIES THE PUSH. A card close
+            // leased beside it forwards a push it has no window for to the
+            // delegate it covers; when that is this controller, a push meant to
+            // be plain (no hero available, or Reduce Motion) flew a hero from
+            // the fallback rect.
+            guard presents else { return nil }
             let animator = ZoomAnimator(isPresenting: true, source: source, destination: destination)
             animator.onPresentationReversed = { [weak self] in
                 // The flight this interruptor served is over; didShow will not
@@ -348,6 +355,11 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
     /// occupant did, and needs the same edge. A close-only controller is made
     /// beside a screen already up, so it starts having seen it.
     private var hasSeenFeedOnStack: Bool
+
+    /// Whether this controller flies the push at all. A close-only controller
+    /// (`presents: false`) is made beside a screen that is already up, or is
+    /// being pushed WITHOUT a flight; it must not hand UIKit a present.
+    private let presents: Bool
 
     public func navigationController(
         _ navigationController: UINavigationController,

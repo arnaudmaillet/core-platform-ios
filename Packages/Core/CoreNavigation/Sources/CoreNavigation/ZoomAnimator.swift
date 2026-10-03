@@ -264,7 +264,9 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         // areas the card's chrome replica bakes in below.
         container.layoutIfNeeded()
 
-        let sourceFrame = source.zoomHeroFrame(in: container)
+        let sourceFrame = ZoomTransitionGeometry.sourceFrame(
+            measured: source.zoomHeroFrame(in: container), container: container.bounds
+        )
         let pageFrame = ZoomTransitionGeometry.pageFrame(
             measured: destination?.zoomTargetFrame(in: container), container: container.bounds
         )
@@ -1083,7 +1085,15 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         // reversed close earlier in this visit may have left the source
         // showing. The feed still covers the screen, so this cannot open a gap.
         source.setZoomSourceHidden(true)
-        let sourceFrame = source.zoomHeroFrame(in: container)
+        let sourceFrame = ZoomTransitionGeometry.sourceFrame(
+            measured: source.zoomHeroFrame(in: container), container: container.bounds
+        )
+        // ⚠️ A LANDING NOBODY CAN SEE FADES OUT. With the source off screen the
+        // rect above is the centred fallback, and the card used to land there
+        // as an opaque pin — ring and shadow at full strength in the middle of
+        // the screen — then vanish on the hold's last tick. It dissolves on the
+        // way instead, and nothing is held over a landing that is not there.
+        let landsOffScreen = !source.zoomSourceIsOnScreen
 
         // Dim starts opaque (fully presented) and lifts to reveal the map as
         // the card shrinks.
@@ -1101,26 +1111,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         // to — so the landing adopts a running item instead of starting a fresh
         // one at zero. Strictly after `build`, or the card would have nothing
         // left to mirror.
-        // Hoist the live surface above the navigation controller for the whole
-        // return, so the video never leaves the render tree and the flight is
-        // pure geometry. The card keeps flying its chrome; the two ride the
-        // same spring and stay aligned because they are posed from the same
-        // rects.
-        //
-        // At the PICTURE's rect, with the picture's corner: under a page window
-        // the picture is the fitted rect, square-cornered, and hoisted at the
-        // page rect it would take off as a full-screen crop of a page that was
-        // showing the whole frame. Both are the page's own for a filling page.
-        var hoisted = false
-        if let surface = flight.card.zoomLiveMediaSurface {
-            hoisted = source.zoomHoistLiveMedia(
-                surface, at: flight.mediaFrame, in: container,
-                cornerRadius: flight.mediaCornerRadius(
-                    forPage: ZoomFlight.screenCornerRadius(behind: container)
-                )
-            )
-        }
-        if flight.card.zoomLiveMediaSurface != nil || hoisted {
+        if flight.card.zoomLiveMediaSurface != nil {
             destination?.zoomParkLiveMediaForHandoff()
             // NOT warmed here, deliberately. Warming the landing tile mid-flight
             // works on its own terms — the tile's layer reaches ready — but it
@@ -1220,11 +1211,9 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         #endif
         animator.addAnimations {
             flight.poseAtSource()
-            if hoisted {
-                self.source.zoomPoseHoistedMedia(
-                    at: sourceFrame, in: container,
-                    cornerRadius: flight.card.zoomRestingCornerRadius
-                )
+            if landsOffScreen {
+                flight.card.alpha = 0
+                flight.shadow.alpha = 0
             }
             dim.alpha = 0
             presentingView?.transform = .identity
@@ -1239,17 +1228,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
                 // REVERSED mid-flight: the feed is staying, so everything the
                 // flight took has to go back before it is handed control again.
                 self.isFirstFrameHandoffClosed = true
-                //
-                // The hoisted surface is the piece that cannot be reached the
-                // usual way — `zoomLiveMediaSurface` is nil once it has been
-                // hoisted — so without an explicit release it would stay
-                // parented above the navigation controller, drawing at the grid
-                // cell's rect over the feed.
-                if hoisted {
-                    if let surface = self.source.zoomReleaseHoistedMedia() {
-                        self.destination?.zoomReclaimLiveMediaView(surface)
-                    }
-                } else if let surface = flight.card.zoomLiveMediaSurface {
+                if let surface = flight.card.zoomLiveMediaSurface {
                     self.destination?.zoomReclaimLiveMediaView(surface)
                 }
                 // No landing hold: nothing is landing. The card goes outright.
@@ -1292,13 +1271,9 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             // Same handshake in reverse: the landing tile takes the surface
             // the card was flying, so it renders immediately instead of
             // starting a fresh layer that is blank for ~100ms.
-            // Only when the surface was NOT hoisted. A hosted surface is landed
-            // by its host, which deliberately does not re-parent it into the
-            // cell — calling this would undo exactly that and reintroduce the
-            // readiness drop the hoist exists to remove.
             // The landing overtakes a frame-0 hide still waiting on its gate.
             self.isFirstFrameHandoffClosed = true
-            if !hoisted, let surface = flight.card.zoomLiveMediaSurface {
+            if let surface = flight.card.zoomLiveMediaSurface {
                 self.source.zoomAdoptLiveMediaView(surface)
             }
             flight.shadow.removeFromSuperview()
@@ -1310,20 +1285,26 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             // Re-binding a player layer costs a decode round-trip that no
             // ordering avoids; holding the twin over it for those few frames is
             // what keeps the dip off screen.
-            Self.holdCard(flight.card,
-                          liveMediaIsDrawing: { [weak card = flight.card] in
-                              card?.zoomLiveMediaIsDrawing ?? true
-                          },
-                          liveMediaState: { [weak card = flight.card] in
-                              card?.zoomLiveMediaDebugState ?? "card gone"
-                          },
-                          finalizeLanding: { [weak sourceRef = self.source] in
-                              sourceRef?.zoomFinalizeLanding()
-                          },
-                          path: "animator/tap-back",
-                          while: { [weak sourceRef = self.source] in
-                              sourceRef.map { !$0.zoomLandingMediaIsReady } ?? false
-                          })
+            if landsOffScreen {
+                flight.card.removeFromSuperview()
+            } else {
+                Self.holdCard(
+                    flight.card,
+                    liveMediaIsDrawing: { [weak card = flight.card] in
+                        card?.zoomLiveMediaIsDrawing ?? true
+                    },
+                    liveMediaState: { [weak card = flight.card] in
+                        card?.zoomLiveMediaDebugState ?? "card gone"
+                    },
+                    finalizeLanding: { [weak sourceRef = self.source] in
+                        sourceRef?.zoomFinalizeLanding()
+                    },
+                    path: "animator/tap-back",
+                    while: { [weak sourceRef = self.source] in
+                        sourceRef.map { !$0.zoomLandingMediaIsReady } ?? false
+                    }
+                )
+            }
             self.destination?.setZoomContentHidden(false)
             // The destination is being popped: its page must not reclaim the
             // player the landing tile just adopted.

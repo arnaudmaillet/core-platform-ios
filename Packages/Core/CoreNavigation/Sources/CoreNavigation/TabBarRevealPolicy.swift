@@ -342,3 +342,25 @@ public extension UIViewController {
         }
     }
 }
+
+@MainActor
+public extension UINavigationController {
+    /// Runs `work` now if the stack is at rest, or once the transition running
+    /// on it has finished (one turn after its completion, so the stack's own
+    /// bookkeeping is done).
+    ///
+    /// ⚠️ UIKit DROPS a push or pop requested mid-transition, silently. A
+    /// route (a deep link, a notification tap) arriving while a hero is in the
+    /// air was simply lost — after its caller had already hidden the dock and
+    /// installed a dismissal for a screen that never came. Routes wait for the
+    /// flight instead.
+    func whenAtRest(_ work: @escaping @MainActor () -> Void) {
+        guard let coordinator = transitionCoordinator else { return work() }
+        coordinator.animate(alongsideTransition: nil) { _ in
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.whenAtRest(work)
+            }
+        }
+    }
+}

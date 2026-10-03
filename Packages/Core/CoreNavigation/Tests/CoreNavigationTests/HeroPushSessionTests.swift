@@ -55,9 +55,20 @@ struct HeroPushSessionTests {
         #expect(session.holdsDelegateSlot)
 
         session.close(.returned)
-
+        #expect(nav.leasedDelegate === cardClose,
+                "a forwarder was released before it could hear its own pop")
+        NavigationDelegateHub.of(nav).release(cardClose)
         #expect(nav.leasedDelegate === owner)
-        withExtendedLifetime((owner, cardClose)) {}
+
+        // A REVERSED push takes its forwarders along: no pop will ever come.
+        let (reversed, reversedNav, reversedOwner) = stage()
+        reversed.takeDelegateSlot()
+        let orphan = PreviousOwner()
+        reversed.registerForwarder(orphan)
+        NavigationDelegateHub.of(reversedNav).lease(orphan)
+        reversed.close(.reversed)
+        #expect(reversedNav.leasedDelegate === reversedOwner)
+        withExtendedLifetime((owner, cardClose, reversedOwner, orphan)) {}
     }
 
     @Test func aStackOwnedByNoOneIsLeftWithNoLease() {

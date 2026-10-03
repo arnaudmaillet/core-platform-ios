@@ -357,6 +357,9 @@ final class PlaceProfileViewController: UIViewController {
 
     private func installMapReturnIfTop() {
         guard let nav = navigationController, nav.topViewController === self else { return }
+        // Reduce Motion: the page closes with the stack's own pop, neither a
+        // flight to the marker nor a window into it (`HeroMotionPolicy`).
+        guard !HeroMotionPolicy.prefersNativePush else { return }
         if let markerClose {
             installMarkerClose(markerClose, on: nav)
             return
