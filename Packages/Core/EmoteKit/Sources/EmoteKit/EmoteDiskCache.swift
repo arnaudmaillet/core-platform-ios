@@ -12,6 +12,15 @@ import UniformTypeIdentifiers
 /// ⚠️ **VERSIONED BY FOLDER.** Changing how a sheet is baked (rate, gutter,
 /// caps) must bump `version`, or a device keeps playing sheets cut by the old
 /// rules against the new metadata.
+/// The root of EmoteKit's on-disk sheet cache (`Caches/EmoteKit`), for the
+/// settings that measure and clear rebuildable caches (#409). Every sheet in
+/// it is baked again on demand.
+public enum EmoteCache {
+    public static var directory: URL? {
+        EmoteDiskCache.standard()?.directory.deletingLastPathComponent()
+    }
+}
+
 struct EmoteDiskCache: Sendable {
     static let version = 1
     let directory: URL

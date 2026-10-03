@@ -183,7 +183,7 @@ public actor NotificationsRepository: NotificationsProviding {
     }
 
     public func markAllRead() async throws {
-        let viewer = try await resolveViewerProfileID()
+        let viewer = try await resolveViewerProfileID(forWrite: "markAllRead")
         var request = Notification_V1_MarkAllReadRequest()
         request.profileID = viewer.rawValue
         let response = await notificationClient.markAllRead(request: request, headers: [:])
@@ -326,10 +326,13 @@ public actor NotificationsRepository: NotificationsProviding {
         }
     }
 
-    private func resolveViewerProfileID() async throws -> ProfileID {
+    /// `write` names the caller when it is a write, so a guest reaching it is
+    /// reported (`GateAudit`): the member gate should have stopped them first.
+    private func resolveViewerProfileID(forWrite write: String? = nil) async throws -> ProfileID {
         do {
             return try await viewer.activeProfileID()
         } catch ViewerError.requiresMember {
+            if let write { GateAudit.ungatedWrite(write) }
             throw NotificationsError.notAuthenticated
         } catch ViewerError.noProfileForAccount {
             throw NotificationsError.noProfileForAccount

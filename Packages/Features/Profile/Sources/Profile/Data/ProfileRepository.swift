@@ -391,7 +391,7 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
     }
 
     public func setFollowing(_ following: Bool, for profileID: ProfileID) async throws {
-        let viewer = try await resolveViewerProfileID()
+        let viewer = try await resolveViewerProfileID(forWrite: "setFollowing")
         guard viewer != profileID else { return } // no-op: can't follow yourself
 
         if following {
@@ -409,7 +409,7 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
     }
 
     public func setBlocked(_ blocked: Bool, for profileID: ProfileID) async throws {
-        let viewer = try await resolveViewerProfileID()
+        let viewer = try await resolveViewerProfileID(forWrite: "setBlocked")
         guard viewer != profileID else { return } // no-op: can't block yourself
 
         if blocked {
@@ -434,7 +434,7 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
     /// entitled to refuse), this falls back to blocking the one profile the
     /// viewer actually asked about, and says so by returning just that id.
     public func blockAccount(behind profileID: ProfileID) async throws -> [ProfileID] {
-        let viewer = try await resolveViewerProfileID()
+        let viewer = try await resolveViewerProfileID(forWrite: "blockAccount")
         let targets = await accountSiblings(of: profileID, viewer: viewer)
 
         // Concurrent, and INDEPENDENT: one rejected block must not strand the
@@ -567,10 +567,13 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
         }
     }
 
-    private func resolveViewerProfileID() async throws -> ProfileID {
+    /// `write` names the caller when it is a write, so a guest reaching it is
+    /// reported (`GateAudit`): the member gate should have stopped them first.
+    private func resolveViewerProfileID(forWrite write: String? = nil) async throws -> ProfileID {
         do {
             return try await viewer.activeProfileID()
         } catch ViewerError.requiresMember {
+            if let write { GateAudit.ungatedWrite(write) }
             throw ProfileError.notAuthenticated
         } catch ViewerError.noProfileForAccount {
             throw ProfileError.noProfileForAccount

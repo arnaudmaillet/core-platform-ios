@@ -1905,6 +1905,12 @@ final class SnapFeedViewController: UIViewController {
     ///
     /// Internal for tests.
     func followAuthor(_ author: ProfileID) {
+        MemberGates.perform(.follow(handle: nil), from: self) { [weak self] in
+            self?.commitFollow(author)
+        }
+    }
+
+    private func commitFollow(_ author: ProfileID) {
         guard let socialGraph, offersFollow(to: author), !followsInFlight.contains(author),
               let before = followRelationsByAuthor[author] else { return }
         followsInFlight.insert(author)
@@ -2236,8 +2242,10 @@ final class SnapFeedViewController: UIViewController {
     /// Optimistic local toggle (no backend seam yet — see the set's comment);
     /// the glyph flips immediately, scoped to the acted-on post.
     private func toggleBookmark(for id: PostID) {
-        bookmarks.toggle(id.rawValue)
-        refreshBookmarkGlyph(for: id)
+        MemberGates.perform(.save, from: self) { [weak self] in
+            self?.bookmarks.toggle(id.rawValue)
+            self?.refreshBookmarkGlyph(for: id)
+        }
     }
 
     /// Points the bookmark glyph at `id`'s state — called on toggle and when
@@ -2534,6 +2542,12 @@ final class SnapFeedViewController: UIViewController {
     /// asked. A nil wallet (unwired host) drops the tap silently; the mock
     /// store is always wired in the app itself.
     private func performBoost(on id: PostID, spend: WalletStakeSpend, feedbackCell: SnapFeedCell?) {
+        MemberGates.perform(.like, from: self) { [weak self, weak feedbackCell] in
+            self?.commitBoost(on: id, spend: spend, feedbackCell: feedbackCell)
+        }
+    }
+
+    private func commitBoost(on id: PostID, spend: WalletStakeSpend, feedbackCell: SnapFeedCell?) {
         guard let wallet else { return }
         let outcome = wallet.stake(spend, on: id.rawValue)
         switch outcome {
@@ -5083,6 +5097,8 @@ final class SnapFeedViewController: UIViewController {
     /// decoder and the platform caps how many can render at once, so this is
     /// the one warm that has to stay stingy.
     func warmPlayers(at items: [Int]) {
+        // Data saver on cellular: upcoming videos aren't loaded ahead (#409).
+        guard MediaPlaybackPolicy.preloads else { return }
         for item in items where orderedIDs.indices.contains(item) {
             guard let model = modelsByID[orderedIDs[item]],
                   model.mediaKind == .video, let url = model.mediaURL else { continue }

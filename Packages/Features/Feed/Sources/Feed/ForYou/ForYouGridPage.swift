@@ -3354,9 +3354,12 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
             staking?.bind(cell, to: post.id)
             cell.isBookmarked = bookmarks.isSaved(post.id.rawValue)
             cell.onBookmarkTapped = { [weak self, weak cell] in
-                guard let self else { return }
-                _ = bookmarks.toggle(post.id.rawValue)
-                cell?.isBookmarked = bookmarks.isSaved(post.id.rawValue)
+                guard let self, let cell else { return }
+                MemberGates.perform(.save, from: cell) { [weak self, weak cell] in
+                    guard let self else { return }
+                    _ = bookmarks.toggle(post.id.rawValue)
+                    cell?.isBookmarked = bookmarks.isSaved(post.id.rawValue)
+                }
             }
             cell.onMediaTapped = { [weak self, weak cell] in
                 guard let self, let cell,
