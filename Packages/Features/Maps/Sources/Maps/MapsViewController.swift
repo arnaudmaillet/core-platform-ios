@@ -117,6 +117,8 @@ final class MapsViewController: UIViewController {
     /// Runaway guard: clustering already bounds the visible set to a handful, but
     /// cap the sweep in case it runs during a pre-cluster frame.
     private static let prewarmCap = 16
+    /// Read once: `reconcileClustersForSettle` runs on every settle, in release too.
+    private static let reconcileThrottleEnabled = ProcessInfo.processInfo.arguments.contains("-maps-reconcile-throttle")
     /// The flight in progress, held for its life; its close-out is the
     /// session's (`HeroPushSession`).
     private var activeSession: HeroPushSession?
@@ -1911,7 +1913,7 @@ final class MapsViewController: UIViewController {
         // ⚠️ A single earlier pair showed hitches 30.9 -> 17.2 and nearly shipped
         // as a 44% win. The control arm alone swings 17.4-27.7 between runs.
         // One pair could not have told these apart.
-        guard ProcessInfo.processInfo.arguments.contains("-maps-reconcile-throttle") else {
+        guard Self.reconcileThrottleEnabled else {
             #if DEBUG
             MapChurnCounters.fromSettle += 1
             #endif
