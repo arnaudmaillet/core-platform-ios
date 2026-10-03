@@ -34,6 +34,7 @@ let package = Package(
                 "FeedInterface",
                 "CoreContracts",
                 "CoreModels",
+                "CoreNetworking",
                 "DesignSystem",
                 "MediaCore",
                 "MediaPlayback",

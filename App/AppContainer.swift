@@ -109,6 +109,37 @@ final class AppContainer {
         configuration: .init(deviceID: Self.persistentDeviceID(), userAgent: Self.userAgent())
     )
 
+    /// Who is signed in and as which profile, for the whole app: every
+    /// repository that needs the viewer asks this one session, so a profile
+    /// switch or a sign-out reaches all of them at once.
+    private(set) lazy var viewerSession = ViewerSession(authSession: sessionManager) { [authenticatedRPCClient] account in
+        try await AccountProfilesReader.profileIDs(
+            ofAccount: account.rawValue,
+            using: Profile_V1_ProfileServiceClient(client: authenticatedRPCClient)
+        )
+        .map { ProfileID($0) }
+    }
+
+    private var viewerTransitionsTask: Task<Void, Never>?
+
+    /// Drops every viewer-scoped cache when the viewer becomes someone else —
+    /// another account, a sign-out or a profile switch. Started by the app
+    /// coordinator once its startup sign-in sequence is over, so that sequence
+    /// never counts as a change.
+    func observeViewerTransitions() {
+        guard viewerTransitionsTask == nil else { return }
+        let viewer = viewerSession
+        let scoped: [any ViewerScoped] = [feedRepository, commentsRepository]
+        viewerTransitionsTask = Task {
+            for await state in await viewer.transitions() {
+                for cache in scoped {
+                    await cache.viewerDidChange(state)
+                }
+                NotificationCenter.default.post(name: .viewerDidChange, object: nil)
+            }
+        }
+    }
+
     private(set) lazy var authFeature: any AuthFeatureBuilding = AuthFeatureBuilder(
         sessionManager: sessionManager
     )
@@ -345,6 +376,7 @@ final class AppContainer {
         counterClient: Counter_V1_CounterServiceClient(client: authenticatedRPCClient),
         engagementClient: Engagement_V1_EngagementServiceClient(client: authenticatedRPCClient),
         authSession: sessionManager,
+        viewer: viewerSession,
         snapshotStore: CodableFileStore<[FeedEntry]>(name: "feed-first-page")
     )
 
@@ -358,14 +390,13 @@ final class AppContainer {
         let repository = CommentsRepository(
             commentClient: Comment_V1_CommentServiceClient(client: authenticatedRPCClient),
             profileClient: Profile_V1_ProfileServiceClient(client: authenticatedRPCClient),
-            authSession: sessionManager
+            authSession: sessionManager,
+            viewer: viewerSession
         )
-        // ⚠️ THE REPOSITORY HOLDS ITS OWN "WHO AM I", and a switch used to reach
-        // it only through an open comments panel's observer. A switch made from
-        // the Profile tab with no panel alive left it on the old profile — and
-        // the Text Post page, which takes its author from here, then showed and
-        // published as a profile the viewer had already left. Heard here, once,
-        // it is told every switch whatever is on screen.
+        // The shared viewer already carries the switch; this only drops the
+        // composer's cached face the moment a switch is announced, without
+        // waiting for the viewer's transition to reach the repository. The
+        // Text Post page reads that face synchronously when it is built.
         activeViewerObserver = NotificationCenter.default.addObserver(
             forName: .activeProfileDidChange, object: nil, queue: .main
         ) { [repository] notification in
@@ -680,6 +711,7 @@ final class AppContainer {
         counterClient: Counter_V1_CounterServiceClient(client: authenticatedRPCClient),
         socialGraphClient: SocialGraph_V1_SocialGraphServiceClient(client: authenticatedRPCClient),
         authSession: sessionManager,
+        viewer: viewerSession,
         followEvents: followGraphEvents
     )
 
@@ -853,7 +885,8 @@ final class AppContainer {
         profileClient: Profile_V1_ProfileServiceClient(client: authenticatedRPCClient),
         // The subject post's still (or a text post's opening) for each row.
         postClient: Post_V1_PostServiceClient(client: authenticatedRPCClient),
-        authSession: sessionManager
+        authSession: sessionManager,
+        viewer: viewerSession
     )
 
     private(set) lazy var notificationsFeature: any NotificationsFeatureBuilding = NotificationsFeatureBuilder(
@@ -867,7 +900,8 @@ final class AppContainer {
     private lazy var chatRepository = ChatRepository(
         chatClient: Chat_V1_ChatServiceClient(client: authenticatedRPCClient),
         profileClient: Profile_V1_ProfileServiceClient(client: authenticatedRPCClient),
-        authSession: sessionManager
+        authSession: sessionManager,
+        viewer: viewerSession
     )
 
     /// Answers both social questions the inbox asks — "do I follow this peer"
@@ -975,6 +1009,7 @@ final class AppContainer {
                 postClient: Post_V1_PostServiceClient(client: authenticatedRPCClient),
                 profileClient: Profile_V1_ProfileServiceClient(client: authenticatedRPCClient),
                 authSession: sessionManager,
+                viewer: viewerSession,
                 uploadTransport: uploadTransport,
                 imagePipeline: imagePipeline,
                 composedChannel: composedPostChannel

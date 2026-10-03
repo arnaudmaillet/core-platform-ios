@@ -35,6 +35,7 @@ let package = Package(
                 "CoreContracts",
                 "CoreModels",
                 "CoreNavigation",
+                "CoreNetworking",
                 "CoreStorage",
                 "DesignSystem",
                 "EmoteKit",

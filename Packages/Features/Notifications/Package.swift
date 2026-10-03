@@ -26,6 +26,7 @@ let package = Package(
                 "CoreContracts",
                 "CoreModels",
                 "CoreNavigation",
+                "CoreNetworking",
                 "DesignSystem",
                 "MediaCore"
             ]

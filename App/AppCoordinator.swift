@@ -76,6 +76,9 @@ final class AppCoordinator: Coordinator {
     /// change, so the moment this is called is itself a decision about what gets
     /// rendered — not merely when.
     private func observeAuthState() {
+        // Here, not in `start()`: under `-mock-auto-login` this runs after the
+        // logout-then-login, which must not read as a change of viewer.
+        container.observeViewerTransitions()
         stateObservation = Task { [weak self] in
             guard let container = self?.container else { return }
             let realtimeClient = container.realtimeClient

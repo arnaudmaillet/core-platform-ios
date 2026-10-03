@@ -1,3 +1,4 @@
+import AuthInterface
 import CoreModels
 import Foundation
 
@@ -37,9 +38,23 @@ public final class ProfileCache {
     /// Keeps cached relationships agreeing with a follow made anywhere else
     /// while no screen for that profile is alive to hear it.
     private var followSubscription: FollowGraphSubscription?
+    /// Every relationship here is the VIEWER's ("you follow them"): once the
+    /// viewer is someone else, none of it is true any more.
+    private var viewerObserver: NSObjectProtocol?
 
     public init(limit: Int = 16) {
         self.limit = limit
+        viewerObserver = NotificationCenter.default.addObserver(
+            forName: .viewerDidChange, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.removeAll() }
+        }
+    }
+
+    /// Forgets everything — what a change of viewer calls.
+    public func removeAll() {
+        entries.removeAll()
+        recency.removeAll()
     }
 
     public func profile(for id: ProfileID) -> UserProfile? {

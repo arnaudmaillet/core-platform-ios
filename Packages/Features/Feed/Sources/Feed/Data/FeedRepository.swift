@@ -1,6 +1,7 @@
 import AuthInterface
 import CoreContracts
 import CoreModels
+import CoreNetworking
 import CoreStorage
 import Foundation
 import OSLog
@@ -88,7 +89,9 @@ public actor FeedRepository: FeedProviding {
     private let pageSize: Int32
     private let logger = Logger(subsystem: "cn.wynn.core-platform-ios", category: "feed")
 
-    private var viewerProfileID: ProfileID?
+    /// Who is signed in, and as which profile — shared with every other
+    /// repository (`ViewerSession`), so a switch or a sign-out reaches all of them.
+    private let viewer: any ViewerProviding
     private var authorCache: [ProfileID: AuthorSummary] = [:]
 
     /// Bounded LRU cache of hydrated posts, warmed by `prewarm` and read by
@@ -109,6 +112,7 @@ public actor FeedRepository: FeedProviding {
         counterClient: any Counter_V1_CounterServiceClientInterface,
         engagementClient: any Engagement_V1_EngagementServiceClientInterface,
         authSession: any AuthSessionProviding,
+        viewer: (any ViewerProviding)? = nil,
         snapshotStore: CodableFileStore<[FeedEntry]>? = nil,
         pageSize: Int32 = 20
     ) {
@@ -118,6 +122,12 @@ public actor FeedRepository: FeedProviding {
         self.counterClient = counterClient
         self.engagementClient = engagementClient
         self.authSession = authSession
+        // Nil only outside the app (tests, previews): a session of its own,
+        // resolving through this repository's profile client.
+        self.viewer = viewer ?? ViewerSession(authSession: authSession) { [profileClient] account in
+            try await AccountProfilesReader.profileIDs(ofAccount: account.rawValue, using: profileClient)
+                .map { ProfileID($0) }
+        }
         self.snapshotStore = snapshotStore
         self.pageSize = pageSize
     }
@@ -363,26 +373,14 @@ public actor FeedRepository: FeedProviding {
     }
 
     private func resolveViewerProfileID() async throws -> ProfileID {
-        if let viewerProfileID {
-            return viewerProfileID
-        }
-        guard case .authenticated(let accountID) = await authSession.currentState() else {
+        do {
+            return try await viewer.activeProfileID()
+        } catch ViewerError.requiresMember {
             throw FeedError.notAuthenticated
-        }
-
-        var request = Profile_V1_ListProfilesByAccountRequest()
-        request.accountID = accountID.rawValue
-        let response = await profileClient.listProfilesByAccount(request: request, headers: [:])
-        switch response.result {
-        case .success(let body):
-            guard let profile = body.profiles.first else {
-                throw FeedError.noProfileForAccount
-            }
-            let id = ProfileID(profile.profileID)
-            viewerProfileID = id
-            return id
-        case .failure(let error):
-            throw FeedError.transport(message: error.message ?? "code \(error.code)")
+        } catch ViewerError.noProfileForAccount {
+            throw FeedError.noProfileForAccount
+        } catch let error as AccountProfilesReader.ReadError {
+            throw FeedError.transport(message: error.message)
         }
     }
 
@@ -479,5 +477,18 @@ private final class LockedPostCacheMirror: @unchecked Sendable {
 
     func remove(_ id: PostID) {
         lock.withLock { entries[id] = nil }
+    }
+}
+
+extension FeedRepository: ViewerScoped {
+    /// The first-page snapshot is the PREVIOUS viewer's following timeline:
+    /// shown on the next launch, it would open the feed on someone else's
+    /// people. Hydrated posts and authors are not the viewer's and stay.
+    public func viewerDidChange(_ state: ViewerState) async {
+        do {
+            try snapshotStore?.clear()
+        } catch {
+            logger.error("feed snapshot clear failed: \(error)")
+        }
     }
 }

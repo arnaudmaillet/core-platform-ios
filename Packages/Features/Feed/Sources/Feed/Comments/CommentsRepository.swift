@@ -1,6 +1,7 @@
 import AuthInterface
 import CoreContracts
 import CoreModels
+import CoreNetworking
 import Foundation
 
 public enum CommentsError: Error, Equatable, Sendable {
@@ -138,7 +139,9 @@ public actor CommentsRepository: CommentsProviding {
     private let authSession: any AuthSessionProviding
     private let pageSize: Int32
 
-    private var viewerProfileID: ProfileID?
+    /// Who is signed in, and as which profile — shared with every other
+    /// repository (`ViewerSession`), so a switch or a sign-out reaches all of them.
+    private let viewer: any ViewerProviding
     private var authorCache: [ProfileID: (name: String, handle: String, avatarURL: URL?)] = [:]
     /// The prefetched first pages, OUTSIDE this actor's isolation so the panel
     /// can read one synchronously while it mounts. Locked rather than
@@ -150,11 +153,18 @@ public actor CommentsRepository: CommentsProviding {
         commentClient: any Comment_V1_CommentServiceClientInterface,
         profileClient: any Profile_V1_ProfileServiceClientInterface,
         authSession: any AuthSessionProviding,
+        viewer: (any ViewerProviding)? = nil,
         pageSize: Int32 = 50
     ) {
         self.commentClient = commentClient
         self.profileClient = profileClient
         self.authSession = authSession
+        // Nil only outside the app (tests, previews): a session of its own,
+        // resolving through this repository's profile client.
+        self.viewer = viewer ?? ViewerSession(authSession: authSession) { [profileClient] account in
+            try await AccountProfilesReader.profileIDs(ofAccount: account.rawValue, using: profileClient)
+                .map { ProfileID($0) }
+        }
         self.pageSize = pageSize
     }
 
@@ -264,7 +274,7 @@ public actor CommentsRepository: CommentsProviding {
         )
         // Mirrored only if nobody switched while this was in flight: a peek
         // must never answer with a face the viewer has already left.
-        if viewerProfileID == viewer { viewerMirror.set(identity) }
+        if await activeProfile() == viewer { viewerMirror.set(identity) }
         return identity
     }
 
@@ -276,15 +286,23 @@ public actor CommentsRepository: CommentsProviding {
         topPages.set(entries, for: postID)
     }
 
-    /// Overrides the resolved viewer — the same one-line move
-    /// `ProfileRepository.setActiveProfile` makes, because the two actors
-    /// hold SEPARATE caches of "who am I" and only the profile side hears
-    /// about a switch. The author cache is keyed by profile id, so the new
+    /// Adopts `id` through the shared viewer — idempotent next to
+    /// `ProfileRepository.setActiveProfile`, which makes the same move for the
+    /// same switch. The author cache is keyed by profile id, so the new
     /// identity's name and avatar are already there if that profile has
     /// appeared in any thread.
     public func setActiveViewer(_ id: ProfileID) async {
-        if id != viewerProfileID { viewerMirror.set(nil) }
-        viewerProfileID = id
+        // Against the mirror itself, not the viewer: `ProfileRepository` has
+        // usually switched the shared viewer already, and the face held here
+        // is still the old one.
+        if viewerMirror.value?.profileID != id { viewerMirror.set(nil) }
+        await viewer.setActiveProfile(id)
+    }
+
+    /// The active profile as already resolved, or nil — never a fetch.
+    private func activeProfile() async -> ProfileID? {
+        guard case .member(_, let profile) = await viewer.current() else { return nil }
+        return profile
     }
 
     /// The last resolved identity, readable without awaiting — the one read a
@@ -357,23 +375,14 @@ public actor CommentsRepository: CommentsProviding {
     }
 
     private func resolveViewerProfileID() async throws -> ProfileID {
-        if let viewerProfileID {
-            return viewerProfileID
-        }
-        guard case .authenticated(let accountID) = await authSession.currentState() else {
+        do {
+            return try await viewer.activeProfileID()
+        } catch ViewerError.requiresMember {
             throw CommentsError.notAuthenticated
-        }
-        var request = Profile_V1_ListProfilesByAccountRequest()
-        request.accountID = accountID.rawValue
-        let response = await profileClient.listProfilesByAccount(request: request, headers: [:])
-        switch response.result {
-        case .success(let body):
-            guard let profile = body.profiles.first else { throw CommentsError.noProfileForAccount }
-            let id = ProfileID(profile.profileID)
-            viewerProfileID = id
-            return id
-        case .failure(let error):
-            throw CommentsError.transport(message: error.message ?? "code \(error.code)")
+        } catch ViewerError.noProfileForAccount {
+            throw CommentsError.noProfileForAccount
+        } catch let error as AccountProfilesReader.ReadError {
+            throw CommentsError.transport(message: error.message)
         }
     }
 }
@@ -399,5 +408,13 @@ private final class TopCommentsCache: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         pages[postID] = entries
+    }
+}
+
+extension CommentsRepository: ViewerScoped {
+    /// The composer's face belongs to whoever was signed in: another account,
+    /// a sign-out or a switch drops it until the new viewer resolves.
+    public func viewerDidChange(_ state: ViewerState) async {
+        viewerMirror.set(nil)
     }
 }
