@@ -49,6 +49,11 @@ import UIKit
 /// list is counted in its sections, and a header that scrolls with them
 /// changes none of that arithmetic.
 ///
+/// **Experimentally, the Following row is two lanes** — media cards over
+/// text cards twice as wide, one scroller (`ForYouFollowingLanes`,
+/// `-foryou-following-two-lanes`); every card is still found by its post, so
+/// the flights, the previews and the playback read it the same way.
+///
 /// A row with nothing in it is not drawn at all — no heading over nothing,
 /// the inbox's rule for its sections — and with both empty the header is zero
 /// tall and the list starts at the top.
@@ -121,22 +126,57 @@ final class ForYouRailsView: UIView {
     }
 
     /// The height the rows need at `width` — what the host sizes its header to.
-    static func height(forWidth width: CGFloat, friends: Int, following: Int) -> CGFloat {
+    ///
+    /// - Parameter lanes: the Following row's media and text counts when it is
+    ///   drawn as two lanes (`ForYouFollowingLanes`); nil, the single lane.
+    static func height(
+        forWidth width: CGFloat, friends: Int, following: Int,
+        lanes: (media: Int, text: Int)? = nil
+    ) -> CGFloat {
         var height: CGFloat = 0
         if friends > 0 {
             height += SectionTitleView.Metrics.height + Metrics.storySize(forWidth: width).height
         }
         if following > 0 {
             if friends > 0 { height += Metrics.rowGap }
-            height += SectionTitleView.Metrics.height + Metrics.cardSize(forWidth: width).height
+            height += SectionTitleView.Metrics.height + followingRowHeight(forWidth: width, lanes: lanes)
         }
         // "For you" under whatever rows there are; nothing at all without them.
         guard height > 0 else { return 0 }
         return height + Metrics.rowGap + SectionTitleView.Metrics.height + Metrics.listGap
     }
 
-    var preferredHeight: CGFloat {
-        Self.height(forWidth: bounds.width, friends: stories.count, following: cards.count)
+    /// The Following row's own height: one card's, or the two lanes'.
+    private static func followingRowHeight(forWidth width: CGFloat, lanes: (media: Int, text: Int)?) -> CGFloat {
+        guard let lanes else { return Metrics.cardSize(forWidth: width).height }
+        return ForYouFollowingLanes.geometry(
+            forWidth: width, mediaCount: lanes.media, textCount: lanes.text
+        ).height
+    }
+
+    var preferredHeight: CGFloat { preferredHeight(forWidth: bounds.width) }
+
+    /// The height these rows need at `width` — what the host sizes its header
+    /// to.
+    func preferredHeight(forWidth width: CGFloat) -> CGFloat {
+        Self.height(forWidth: width, friends: stories.count, following: cards.count, lanes: laneCounts)
+    }
+
+    /// Whether the Following row is drawn as two lanes, media over text
+    /// (`ForYouFollowingLanes`, `-foryou-following-two-lanes`). Fixed at
+    /// creation: it picks the row's layout.
+    let usesFollowingLanes: Bool
+
+    /// The row's two lanes' layout, when it has them.
+    private var lanesLayout: ForYouFollowingLanesLayout? {
+        cardsView.collectionViewLayout as? ForYouFollowingLanesLayout
+    }
+
+    /// Each lane's count, when the row has lanes.
+    private var laneCounts: (media: Int, text: Int)? {
+        guard usesFollowingLanes else { return nil }
+        let text = cards.filter { ForYouFollowingLanes.Lane($0) == .text }.count
+        return (cards.count - text, text)
     }
 
     /// A story's avatar was tapped.
@@ -226,8 +266,11 @@ final class ForYouRailsView: UIView {
     /// with no speed left snaps by (`ForYouRowSnap`). Nil between drags.
     private var drag: (row: UIScrollView, tracker: ForYouRowDragTracker)?
 
-    init(imagePipeline: ImagePipeline, videoPlayback: VideoPlaybackController?) {
+    /// - Parameter followingLanes: draws the Following row as two lanes, media
+    ///   over text (`ForYouFollowingLanes`).
+    init(imagePipeline: ImagePipeline, videoPlayback: VideoPlaybackController?, followingLanes: Bool = false) {
         self.imagePipeline = imagePipeline
+        usesFollowingLanes = followingLanes
         playback = videoPlayback.map {
             GridVideoPlaybackCoordinator(pool: $0, maxConcurrent: Self.concurrentPlayers)
         }
@@ -236,9 +279,12 @@ final class ForYouRailsView: UIView {
         storiesView = UICollectionView(frame: .zero, collectionViewLayout: Self.rowLayout(
             itemSize: ForYouStoryCell.Metrics.size(discSide: 70)
         ))
-        cardsView = UICollectionView(frame: .zero, collectionViewLayout: Self.rowLayout(
-            itemSize: CGSize(width: 150, height: 200)
-        ))
+        cardsView = UICollectionView(
+            frame: .zero,
+            collectionViewLayout: followingLanes
+                ? ForYouFollowingLanesLayout()
+                : Self.rowLayout(itemSize: CGSize(width: 150, height: 200))
+        )
         super.init(frame: .zero)
         for row in [storiesView, cardsView] {
             row.backgroundColor = .clear
@@ -325,7 +371,17 @@ final class ForYouRailsView: UIView {
         friendsHeader.content = .init(title: "Friends", newCount: rails.friendsBadge, isLink: true)
         followingHeader.content = .init(title: "Following", newCount: rails.followingBadge, isLink: true)
         if storiesChanged { applyStories(animated: window != nil) }
-        if cardsChanged { applyCards() }
+        if cardsChanged {
+            applyCards()
+            #if DEBUG
+            if usesFollowingLanes {
+                // Which `-foryou-open-card` index opens which lane's card.
+                let text = cards.indices.filter { ForYouFollowingLanes.Lane(cards[$0]) == .text }
+                let media = cards.indices.filter { !text.contains($0) }
+                print("[qa] following lanes: media=\(media) text=\(text)")
+            }
+            #endif
+        }
         holdStoryOrderIfShown()
         setNeedsLayout()
         if preferredHeight != oldHeight { onHeightChange?() }
@@ -397,8 +453,16 @@ final class ForYouRailsView: UIView {
 
     private func applyCards() {
         var snapshot = NSDiffableDataSourceSnapshot<Int, PostID>()
-        snapshot.appendSections([0])
-        snapshot.appendItems(cards.map(\.id))
+        if usesFollowingLanes {
+            // A section per lane, each in the row's order (`ForYouFollowingLanes`).
+            let lanes = ForYouFollowingLanes.partition(cards)
+            snapshot.appendSections(ForYouFollowingLanes.Lane.allCases.map(\.rawValue))
+            snapshot.appendItems(lanes.media.map(\.id), toSection: ForYouFollowingLanes.Lane.media.rawValue)
+            snapshot.appendItems(lanes.text.map(\.id), toSection: ForYouFollowingLanes.Lane.text.rawValue)
+        } else {
+            snapshot.appendSections([0])
+            snapshot.appendItems(cards.map(\.id))
+        }
         cardSource.apply(snapshot, animatingDifferences: window != nil) { [weak self] in
             self?.updateAutoplay()
         }
@@ -440,8 +504,11 @@ final class ForYouRailsView: UIView {
                layout.itemSize != size {
                 layout.itemSize = size
             }
-            cardsView.frame = CGRect(x: 0, y: y, width: width, height: size.height)
-            y += size.height
+            // Two lanes are as tall as both and the gap between them; their
+            // layout sizes its cards from the row's width itself.
+            let height = Self.followingRowHeight(forWidth: width, lanes: laneCounts)
+            cardsView.frame = CGRect(x: 0, y: y, width: width, height: height)
+            y += height
         }
         listHeader.isHidden = !(hasStories || hasCards)
         if !listHeader.isHidden {
@@ -723,9 +790,38 @@ final class ForYouRailsView: UIView {
         row.layoutIfNeeded()
         guard let frame = row.layoutAttributesForItem(at: indexPath)?.frame else { return }
         let visible = row.bounds.insetBy(dx: Metrics.sideMargin, dy: 0)
-        guard !visible.contains(frame) else { return }
-        row.scrollRectToVisible(frame.insetBy(dx: -Metrics.sideMargin, dy: 0), animated: false)
+        // Horizontally: a lane's card is in view whatever its height.
+        guard !(visible.minX <= frame.minX && frame.maxX <= visible.maxX) else { return }
+        if row === cardsView, let lanesLayout {
+            // Two lanes come to rest on a SPREAD (`ForYouFollowingLanes`), so
+            // the card returns on the one that holds it — the grid a swipe
+            // would have left it on, not a column flush with a margin.
+            let offset = Self.lanesOffset(
+                bringing: frame, into: row.bounds,
+                extents: lanesLayout.geometry.snapExtents, offsets: Self.offsetRange(of: row)
+            )
+            row.setContentOffset(CGPoint(x: offset, y: row.contentOffset.y), animated: false)
+        } else {
+            row.scrollRectToVisible(frame.insetBy(dx: -Metrics.sideMargin, dy: 0), animated: false)
+        }
         row.layoutIfNeeded()
+    }
+
+    /// The offset that brings `frame` wholly into a two-lane row seen through
+    /// `bounds`: the spread holding it flush with the margin on the side it
+    /// was cut by — its leading edge on the left margin when it lay to the
+    /// left, its trailing edge on the right one when it lay to the right.
+    static func lanesOffset(
+        bringing frame: CGRect, into bounds: CGRect,
+        extents: [ClosedRange<CGFloat>], offsets: ClosedRange<CGFloat>
+    ) -> CGFloat {
+        let margin = Metrics.sideMargin
+        let extent = extents.first { $0.lowerBound <= frame.minX + 0.5 && frame.maxX - 0.5 <= $0.upperBound }
+            ?? frame.minX...frame.maxX
+        let offset = frame.minX < bounds.minX + margin
+            ? extent.lowerBound - margin
+            : extent.upperBound + margin - bounds.width
+        return min(max(offset, offsets.lowerBound), offsets.upperBound)
     }
 
     /// On screen: in a window, and within its row's visible bounds.
@@ -840,11 +936,24 @@ final class ForYouRailsView: UIView {
     /// The long-press configuration for card `index`, through the row's own
     /// delegate path.
     func debugCardMenuConfiguration(at index: Int, point: CGPoint = .zero) -> UIContextMenuConfiguration? {
-        guard cards.indices.contains(index) else { return nil }
-        return collectionView(
-            cardsView, contextMenuConfigurationForItemsAt: [IndexPath(item: index, section: 0)], point: point
-        )
+        guard let indexPath = debugCardIndexPath(at: index) else { return nil }
+        return collectionView(cardsView, contextMenuConfigurationForItemsAt: [indexPath], point: point)
     }
+
+    /// Where card `index` (into `cards`) sits in the row's collection — its
+    /// lane's section, with lanes.
+    func debugCardIndexPath(at index: Int) -> IndexPath? {
+        guard cards.indices.contains(index) else { return nil }
+        return cardSource.indexPath(for: cards[index].id)
+    }
+
+    /// Card `index`'s frame in the row's content space, from its layout.
+    func debugCardLayoutFrame(at index: Int) -> CGRect? {
+        debugCardIndexPath(at: index).flatMap { cardsView.layoutAttributesForItem(at: $0)?.frame }
+    }
+
+    /// The two lanes' geometry, when the row has lanes.
+    var debugLanesGeometry: ForYouFollowingLanes.Geometry? { lanesLayout?.geometry }
 
     /// Card `index`'s cell, when the row has realized it.
     func debugCardCell(at index: Int) -> ForYouFollowingCardCell? {
@@ -877,8 +986,8 @@ final class ForYouRailsView: UIView {
 
     /// Taps card `index` through the row's own selection path.
     func debugTapCard(at index: Int) -> Bool {
-        guard cards.indices.contains(index) else { return false }
-        collectionView(cardsView, didSelectItemAt: IndexPath(item: index, section: 0))
+        guard let indexPath = debugCardIndexPath(at: index) else { return false }
+        collectionView(cardsView, didSelectItemAt: indexPath)
         return true
     }
 
@@ -969,12 +1078,14 @@ extension ForYouRailsView: UICollectionViewDelegate {
     }
 
     /// Where `row` rests after a release — its items' extents, read from its
-    /// layout, handed to `ForYouRowSnap`.
+    /// layout, handed to `ForYouRowSnap`. Two lanes hand their spreads
+    /// instead (`ForYouFollowingLanes.Geometry.snapExtents`).
     func snapTarget(
         in row: UICollectionView, projected: CGFloat, direction: ForYouRowSnap.Direction?
     ) -> CGFloat {
         let content = CGRect(origin: .zero, size: row.collectionViewLayout.collectionViewContentSize)
-        let items = (row.collectionViewLayout.layoutAttributesForElements(in: content) ?? [])
+        let items = (row.collectionViewLayout as? ForYouFollowingLanesLayout)?.geometry.snapExtents
+            ?? (row.collectionViewLayout.layoutAttributesForElements(in: content) ?? [])
             .filter { $0.representedElementCategory == .cell }
             .map { $0.frame.minX...$0.frame.maxX }
             .sorted { $0.lowerBound < $1.lowerBound }
