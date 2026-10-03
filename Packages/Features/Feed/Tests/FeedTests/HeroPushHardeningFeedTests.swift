@@ -83,6 +83,27 @@ struct HeroPushHardeningFeedTests {
         #expect(!onScreen.isAwaitingRevealPresentation, "a close staging was read as a presentation")
     }
 
+    // MARK: - 2.16 A feed leaving with its flight hands the bars' style back
+
+    /// A push caught and thrown back never reaches the feed's
+    /// `viewWillDisappear`, which is where the shared bars' style was handed
+    /// back — the presenter's header stayed in the feed's dark style. The
+    /// flight's own "you are departing" now hands it back.
+    @Test func aFeedDepartingWithItsFlightHandsTheBarsStyleBack() {
+        let feed = Self.feed()
+        let nav = UINavigationController(rootViewController: UIViewController())
+        nav.pushViewController(feed, animated: false)
+        nav.navigationBar.overrideUserInterfaceStyle = .dark   // lent for the visit
+        nav.toolbar.overrideUserInterfaceStyle = .dark
+
+        feed.zoomTransitionWillDepart()
+        feed.zoomTransitionDidEnd()
+
+        #expect(nav.navigationBar.overrideUserInterfaceStyle == .unspecified,
+                "the presenter's header kept the feed's style")
+        #expect(nav.toolbar.overrideUserInterfaceStyle == .unspecified)
+    }
+
     // MARK: - Fixtures
 
     private static func feed() -> SnapFeedViewController {

@@ -242,6 +242,21 @@ Forwarders now end their own leases. Only a reversed push (no pop will ever come
 - **3.5–3.7 (protocol slimming, file splits, `DebugFlags`).** Pure churn on the most-edited files, not needed for correctness. Worth doing in a quiet week, one file at a time.
 - **2.16 (header glass dimmed after a reversed push).** Still open; see the PR B notes.
 
+
+## 2.16 resolved (2026-10-03): ours, not UIKit's
+
+**The earlier reading was wrong.** The frozen platter cross-fade measured at 1s (0.21/0.79) is transient: at rest every bar layer is back at opacity 1, and UIKit's view state (enabled, highlighted, tint) is identical to a normal return. Neither the interrupt's spring curve nor its scrub mattered (four variants, all dimmed).
+
+**The real cause.** `SnapFeedViewController.applyChromeTheme` LENDS the stack's navigation bar, toolbar and toolbar glass host its own interface style (dark over media) in `viewWillAppear`, and `releaseChromeTheme` hands it back in `viewWillDisappear`. A push caught and thrown back never reaches the second. The presenter's header stayed in the feed's dark style over its own light content: grey glass, thin light icons.
+
+**Fix.** A feed departing with its flight (`zoomTransitionWillDepart`, which a reversed push also calls) releases the theme. This is idempotent after an ordinary pop.
+
+**Guard.** `ArrivalInvariants` now fails at rest when:
+- a screen that does not lend bar styles finds the navigation bar or toolbar styled (`navbar/toolbar.styleLeftByAnotherScreen`);
+- any bar layer is half-faded (`navbar.itemsHalfFaded`).
+
+Proven by reverting the fix: 2 FAIL lines. With the fix, an 8-scenario sweep shows no FAIL.
+
 ## Phase 3: structure (behaviour-preserving refactors, one PR each)
 
 **3.0 One dismissal arbiter.** The rule for which driver claims a drag is

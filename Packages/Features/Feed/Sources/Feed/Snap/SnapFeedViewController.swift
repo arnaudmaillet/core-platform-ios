@@ -6351,6 +6351,14 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         isDepartingWithFlight = false
         if departing {
             activeSnapCell?.releasePlaybackForDeparture()
+            // ⚠️ AND THE SHARED BARS' STYLE (hero audit 2.16). `viewWillAppear`
+            // lends the stack's navigation bar, toolbar and glass host this
+            // page's style (dark over media); `viewWillDisappear` hands it
+            // back. A push caught and thrown back never reaches the second:
+            // the presenter's header stayed in the feed's dark style over its
+            // own light content — glass gone grey, icons thin — until the next
+            // visit. Idempotent after an ordinary pop, which already did it.
+            releaseChromeTheme()
         } else {
             activeSnapCell?.reclaimPlayback()
             // And the presenting leg's held-back start runs now: the card is

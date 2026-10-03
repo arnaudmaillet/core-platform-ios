@@ -59,6 +59,50 @@ public enum ArrivalInvariants {
         }
     }
 
+    /// `-bar-dump`: every layer under the bar's platters with what decides how
+    /// it composites, model and presentation side by side.
+    static func dumpBar(_ bar: UIView, phase: String, sink: (String) -> Void) {
+        func walk(_ layer: CALayer, _ depth: Int, _ inPlatter: Bool) {
+            let name = layer.delegate.map { String(describing: type(of: $0)) } ?? String(describing: type(of: layer))
+            let platter = inPlatter || name.contains("Platter")
+            if platter {
+                let p = layer.presentation()
+                let filters = (layer.filters ?? []).map { String(describing: $0) }.joined(separator: "|")
+                var state = ""
+                if let view = layer.delegate as? UIView {
+                    state += " tam=\(view.tintAdjustmentMode.rawValue)"
+                    if let control = view as? UIControl {
+                        state += " en=\(control.isEnabled ? "Y" : "N") hl=\(control.isHighlighted ? "Y" : "n") sel=\(control.isSelected ? "Y" : "n")"
+                    }
+                    if view is UIImageView || view is UIButton {
+                        state += " tint=\(view.tintColor.map { String(describing: $0) } ?? "-")"
+                    }
+                }
+                sink(String(format: "[bar-dump] %@ %@%@ op=%.2f pop=%.2f hid=%@ filters=[%@] anims=%@%@",
+                            phase, String(repeating: " ", count: depth), name,
+                            layer.opacity, p?.opacity ?? -1, layer.isHidden ? "Y" : "n",
+                            filters, (layer.animationKeys() ?? []).joined(separator: ","), state))
+            }
+            for sub in layer.sublayers ?? [] { walk(sub, depth + 1, platter) }
+        }
+        walk(bar.layer, 0, false)
+    }
+
+    /// Views inside `bar` drawn at a partial alpha, by type and value — an
+    /// item cross-fade that stopped short. Hidden subtrees are skipped.
+    static func halfFadedViews(in bar: UIView) -> [String] {
+        var found: [String] = []
+        var queue: [UIView] = [bar]
+        while let view = queue.popLast() {
+            guard !view.isHidden else { continue }
+            if view.alpha > 0.01, view.alpha < 0.99 {
+                found.append("\(type(of: view))@\(String(format: "%.2f", view.alpha))")
+            }
+            queue.append(contentsOf: view.subviews)
+        }
+        return found
+    }
+
     private static func check(
         _ nav: UINavigationController, arrival: UIViewController, path: String, phase: String
     ) {
@@ -96,6 +140,29 @@ public enum ArrivalInvariants {
         // screen.
         if phase == "rested", let tabs = nav.tabBarController, tabs.selectedViewController === nav {
             require(tabs.isTabBarHidden == !nav.showsAppTabBar(for: screen), "tabbar.matchesScreen")
+        }
+
+        // ⚠️ THE NAVIGATION BAR'S ITEMS ARE NOT LEFT HALF-FADED (2.16). UIKit
+        // cross-fades a screen's bar items into the next one's inside the
+        // bar's glass platters; a push caught and thrown back left that fade
+        // frozen at the fraction it reached — the header's buttons dimmed at
+        // rest. Read-only: native chrome is UIKit's, this only looks.
+        if ProcessInfo.processInfo.arguments.contains("-bar-dump") {
+            Self.dumpBar(nav.navigationBar, phase: phase, sink: sink)
+        }
+        if phase == "rested" {
+            let halfFaded = Self.halfFadedViews(in: nav.navigationBar)
+            require(halfFaded.isEmpty, "navbar.itemsHalfFaded=\(halfFaded.joined(separator: ","))")
+            // ⚠️ AND NO STYLE LENT TO THE SHARED BARS by a screen that is not
+            // up (2.16). A full-bleed snap surface lends the stack's bars its
+            // style for its visit; any other screen at rest must find them
+            // unstyled. A push caught and thrown back once left the feed's dark
+            // style on the presenter's header: grey glass, thin icons.
+            let lends = (screen as? any ZoomTransitionDestination)?.concealsAppTabBar == true
+            if !lends {
+                require(nav.navigationBar.overrideUserInterfaceStyle == .unspecified, "navbar.styleLeftByAnotherScreen")
+                require(nav.toolbar.overrideUserInterfaceStyle == .unspecified, "toolbar.styleLeftByAnotherScreen")
+            }
         }
 
         // No dismissal pan whose driver is gone, on the screen itself.
