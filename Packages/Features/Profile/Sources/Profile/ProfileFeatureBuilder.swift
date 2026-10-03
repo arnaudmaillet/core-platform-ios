@@ -139,7 +139,20 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             // profile action, and it is safe at any stack depth.
             makeSettingsViewController: onLogout.flatMap { onLogout in
                 account.map { account in
-                    { AccountSettingsViewController(account: account, onLogout: onLogout) }
+                    { [switching] in
+                        SettingsViewController(
+                            switching: switching,
+                            switcher: makeSwitcherFactory(),
+                            makeDestination: { section in
+                                switch section {
+                                case .account: AccountSettingsViewController(account: account)
+                                case .privacy: PrivacySettingsViewController(store: RelationshipPrivacyStore())
+                                default: nil
+                                }
+                            },
+                            onLogout: onLogout
+                        )
+                    }
                 }
             },
             switcherFactory: onLogout == nil ? nil : makeSwitcherFactory(),

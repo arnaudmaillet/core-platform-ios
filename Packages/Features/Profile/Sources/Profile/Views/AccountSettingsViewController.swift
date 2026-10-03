@@ -1,17 +1,16 @@
 import DesignSystem
 import UIKit
 
-/// The viewer's account settings, pushed from the profile header's gear. A
-/// native inset-grouped list following the same push-to-child pattern as Edit
-/// Profile: account rows show `[Label]  [Value] ›` and push a focused editor;
-/// a destructive Log Out sits in its own section at the bottom.
+/// Settings → Account: the account-wide identity rows, pushed from the root
+/// `SettingsViewController`. A native inset-grouped list following the same
+/// push-to-child pattern as Edit Profile: account rows show
+/// `[Label]  [Value] ›` and push a focused editor.
 ///
 /// Contract reality (see `AccountRepository`): email/phone are read-only —
 /// `account.v1` has no change RPC — so their editors are honest placeholders
-/// (Save reports "not available yet"). Only Log Out is a live action here.
+/// (Save reports "not available yet").
 final class AccountSettingsViewController: UIViewController {
     private let account: any AccountProviding
-    private let onLogout: () -> Void
 
     private var details: AccountDetails?
     private var isShowingSkeleton = false
@@ -20,23 +19,19 @@ final class AccountSettingsViewController: UIViewController {
     private var pendingNotice: String?
 
     private enum Section: Int, CaseIterable {
-        case accountInfo, security, danger, session
+        case accountInfo, management
 
         var title: String? {
             switch self {
             case .accountInfo: "Account Information"
-            case .security: "Security & Privacy"
-            case .danger: "Danger Zone"
-            case .session: nil
+            case .management: "Account Management"
             }
         }
     }
 
     private enum Row: Hashable {
         case email, phone
-        case changePassword, privacy
         case deactivate, dataExport
-        case logOut
     }
 
     private enum Item: Hashable {
@@ -48,13 +43,9 @@ final class AccountSettingsViewController: UIViewController {
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
 
-    init(account: any AccountProviding, onLogout: @escaping () -> Void) {
+    init(account: any AccountProviding) {
         self.account = account
-        self.onLogout = onLogout
         super.init(nibName: nil, bundle: nil)
-        // Settings is somewhere you go and come back from, not a fifth tab.
-        // Declared here rather than at the push site so it holds wherever this
-        // screen is pushed from.
         hidesBottomBarWhenPushed = true
     }
 
@@ -63,7 +54,8 @@ final class AccountSettingsViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "Settings"
+        title = SettingsSection.account.title
+        navigationItem.largeTitleDisplayMode = .never
         configureCollectionView()
         configureDataSource()
         // Only the account-info values wait on the network; the rest is static.
@@ -122,15 +114,13 @@ final class AccountSettingsViewController: UIViewController {
 
     private func makeSnapshot(loaded: Bool) -> NSDiffableDataSourceSnapshot<Section, Item> {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
-        snapshot.appendSections([.accountInfo, .security, .danger, .session])
+        snapshot.appendSections([.accountInfo, .management])
         if loaded {
             snapshot.appendItems([.row(.email), .row(.phone)], toSection: .accountInfo)
         } else {
             snapshot.appendItems([.skeleton(0), .skeleton(1)], toSection: .accountInfo)
         }
-        snapshot.appendItems([.row(.changePassword), .row(.privacy)], toSection: .security)
-        snapshot.appendItems([.row(.deactivate), .row(.dataExport)], toSection: .danger)
-        snapshot.appendItems([.row(.logOut)], toSection: .session)
+        snapshot.appendItems([.row(.deactivate), .row(.dataExport)], toSection: .management)
         return snapshot
     }
 
@@ -160,16 +150,10 @@ final class AccountSettingsViewController: UIViewController {
             valueCell(cell, label: "Email", value: details?.email, verified: details?.emailVerified)
         case .phone:
             valueCell(cell, label: "Phone", value: details?.phone.isEmpty == false ? details?.phone : "Not set", verified: details?.phoneVerified)
-        case .changePassword:
-            disclosureCell(cell, label: "Change Password")
-        case .privacy:
-            disclosureCell(cell, label: "Privacy")
         case .deactivate:
             actionCell(cell, label: "Deactivate Account", destructive: true)
         case .dataExport:
             actionCell(cell, label: "Request Data Export", destructive: false)
-        case .logOut:
-            actionCell(cell, label: "Log Out", destructive: true)
         }
     }
 
@@ -192,14 +176,6 @@ final class AccountSettingsViewController: UIViewController {
         cell.accessories = accessories
     }
 
-    /// `[Label]  ›` — a plain row that pushes a child.
-    private func disclosureCell(_ cell: UICollectionViewListCell, label: String) {
-        var content = UIListContentConfiguration.cell()
-        content.text = label
-        cell.contentConfiguration = content
-        cell.accessories = [.disclosureIndicator()]
-    }
-
     /// A tappable action row (no chevron); `destructive` tints the label red.
     private func actionCell(_ cell: UICollectionViewListCell, label: String, destructive: Bool) {
         var content = UIListContentConfiguration.cell()
@@ -219,16 +195,10 @@ final class AccountSettingsViewController: UIViewController {
             pushEmailEditor()
         case .phone:
             pushPhoneEditor()
-        case .changePassword:
-            push(SettingsPlaceholderViewController(title: "Change Password", message: "Password change isn't available yet."))
-        case .privacy:
-            push(SettingsPlaceholderViewController(title: "Privacy", message: "Privacy settings are coming soon."))
         case .deactivate:
             confirmComingSoonAction(title: "Deactivate Account?", confirm: "Deactivate", message: "Account deactivation isn't available yet.")
         case .dataExport:
             confirmComingSoonAction(title: "Request Data Export?", confirm: "Request Export", message: "Data export isn't available yet.")
-        case .logOut:
-            confirmLogout()
         }
     }
 
@@ -290,19 +260,6 @@ final class AccountSettingsViewController: UIViewController {
         presentSheet(sheet)
     }
 
-    private func confirmLogout() {
-        let sheet = UIAlertController(
-            title: "Are you sure you want to log out?",
-            message: nil,
-            preferredStyle: .actionSheet
-        )
-        sheet.addAction(UIAlertAction(title: "Log Out", style: .destructive) { [weak self] _ in
-            self?.onLogout()
-        })
-        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        presentSheet(sheet)
-    }
-
     // MARK: - Helpers
 
     private func push(_ viewController: UIViewController) {
@@ -345,44 +302,6 @@ extension AccountSettingsViewController: UICollectionViewDelegate {
         collectionView.deselectItem(at: indexPath, animated: true)
         guard case .row(let row) = dataSource.itemIdentifier(for: indexPath) else { return }
         handle(row)
-    }
-}
-
-// MARK: - Placeholder child
-
-/// A minimal pushed placeholder for settings destinations without a contract
-/// yet (Change Password, Privacy): a titled, grouped, centered empty state.
-private final class SettingsPlaceholderViewController: UIViewController {
-    private let message: String
-
-    init(title: String, message: String) {
-        self.message = message
-        super.init(nibName: nil, bundle: nil)
-        self.title = title
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        view.backgroundColor = .systemGroupedBackground
-
-        let label = UILabel()
-        label.text = message
-        label.font = .preferredFont(forTextStyle: .subheadline)
-        label.adjustsFontForContentSizeCategory = true
-        label.textColor = .secondaryLabel
-        label.textAlignment = .center
-        label.numberOfLines = 0
-        label.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(label)
-        NSLayoutConstraint.activate([
-            label.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            label.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            label.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 24),
-            label.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -24)
-        ])
     }
 }
 
