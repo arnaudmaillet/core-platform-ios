@@ -68,21 +68,18 @@ final class ForYouGridPage: UIView {
 
     /// What the cards' like chips stake with — nil leaves the chip a counter
     /// (a host with no wallet, a test). Shared by every row this page draws.
+    ///
+    /// The COMPACT cards — the mosaic's tiles (a chunk's, the gallery's) and
+    /// the paired half-width cards — read it too, for their heart's colour,
+    /// and never spend through it: their like is a readout
+    /// (`PostCardStaking.bindReadout`).
     var staking: PostCardStaking?
 
-    /// Whether the COMPACT cards stake too — the mosaic's tiles (a chunk's,
-    /// the gallery's) and the paired half-width cards — with a heart in their
-    /// bottom-right corner (`ForYouCardLikes`, `-foryou-card-likes`). Off,
-    /// they carry no like and a tile's count is a readout, as on every other
-    /// grid. Through `staking`, so nothing without a wallet.
-    var stakesOnCompactCards = false
-
-    /// What the viewer has staked on `postID` when its card is a compact
-    /// card that stakes — what a copy of that card (a flight's, a close's
-    /// stand-in) draws its heart from. Nil when the card carries no like.
-    func compactCardStake(for postID: PostID) -> Int? {
-        guard stakesOnCompactCards, drawsAsTile(postID), let staking else { return nil }
-        return staking.viewerStake(on: postID)
+    /// What the viewer has staked on `postID` — what a compact card's heart
+    /// is drawn with, and a copy of that card (a flight's, a close's
+    /// stand-in) with it, so nothing changes colour in the landing frame.
+    func viewerStake(on postID: PostID) -> Int {
+        staking?.viewerStake(on: postID) ?? 0
     }
 
     /// The posts whose cards are ON SCREEN and worth warming — their first page
@@ -346,7 +343,7 @@ final class ForYouGridPage: UIView {
         let size = cell(for: postID)?.bounds.size ?? slotSize(of: postID)
         return ForYouFollowingCardCell.makeOverlay(
             for: post, restingSize: size, imagePipeline: imagePipeline,
-            stake: compactCardStake(for: postID)
+            viewerStake: viewerStake(on: postID)
         )
     }
 
@@ -2179,10 +2176,8 @@ final class ForYouGridPage: UIView {
                 ?? post.thumbnailURL.flatMap { imagePipeline.cachedImage(for: $0) }
             return ForYouFollowingCardCell.makeStandIn(
                 for: post, cover: cover, size: size, imagePipeline: imagePipeline,
-                // The slot's heart, as the card in it draws it.
-                stake: compactCardStake(for: occupantID).map { _ in
-                    staking?.viewerStake(on: post.id) ?? 0
-                }
+                // The heart, as the card in the slot will draw it.
+                viewerStake: viewerStake(on: post.id)
             )
         }
         return PostGridTileStandInView(
@@ -2192,9 +2187,7 @@ final class ForYouGridPage: UIView {
             // curve are one decision — see `tileCornerRadius`.
             cornerRadius: tileCornerRadius,
             imagePipeline: imagePipeline,
-            viewerStake: compactCardStake(for: occupantID).map { _ in
-                staking?.viewerStake(on: post.id) ?? 0
-            }
+            viewerStake: viewerStake(on: post.id)
         )
     }
 
@@ -3304,9 +3297,8 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
                 withReuseIdentifier: ForYouFollowingCardCell.reuseID, for: indexPath
             ) as! ForYouFollowingCardCell
             cell.configure(with: post, imagePipeline: imagePipeline)
-            // Its one action, when the compact cards stake: the heart closing
-            // the author line (`ForYouCardLikes`).
-            if stakesOnCompactCards { staking?.bind(cell, to: post.id) }
+            // The heart closing the author line reads the viewer's stake.
+            staking?.bindReadout(cell, to: post.id)
             // Autoplay is gated on the cover, as for a tile.
             cell.onCoverLoaded = { [weak self] in self?.updateAutoplay() }
             cell.isHidden = isFlying
@@ -3421,9 +3413,8 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
             ) as! PostGridTileCell
             cell.cornerRadius = tileCornerRadius
             cell.configure(with: post, imagePipeline: imagePipeline)
-            // The count becomes the like, in place, when the compact cards
-            // stake (`ForYouCardLikes`).
-            if stakesOnCompactCards { staking?.bind(cell, to: post.id) }
+            // The count's heart reads the viewer's stake (red once staked).
+            staking?.bindReadout(cell, to: post.id)
             // Autoplay is gated on the cover, so the arrival of a cover is a
             // reason to re-run the gate. Without this a tile whose cover lands
             // while the grid is stationary fails the gate once and is never

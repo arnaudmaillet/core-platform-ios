@@ -42,7 +42,7 @@ public final class PostCardStaking {
 
     /// Wires `cell`'s like chip to stake on `postID`. Call after
     /// `configure(with:)`.
-    public func bind(_ cell: any PostCardStakeTarget, to postID: PostID) {
+    public func bind(_ cell: PostGridListRowCell, to postID: PostID) {
         let key = postID.rawValue
         cells.setObject(key as NSString, forKey: cell)
         cell.stakeTapAmount = WalletStore.Policy.defaultStakeAmount
@@ -75,6 +75,17 @@ public final class PostCardStaking {
         cell.setViewerStake(wallet.boostTotal(forTarget: key))
     }
 
+    /// Keeps `readout`'s heart on what the viewer has staked on `postID` —
+    /// now, and whenever the wallet moves (a stake placed in the feed shows
+    /// on the card that opened it) — WITHOUT making it a control: nothing on
+    /// it spends. For You's compact cards (`PostLikeReadoutView`, a mosaic
+    /// tile's count). Call after `configure(with:)`.
+    public func bindReadout(_ readout: any PostCardLikeReadout, to postID: PostID) {
+        let key = postID.rawValue
+        cells.setObject(key as NSString, forKey: readout)
+        readout.setViewerStake(wallet.boostTotal(forTarget: key))
+    }
+
     /// What the viewer has staked on `postID` — the answer a bound row draws,
     /// for a stand-in that has no binding (`RevealDismissCardView.RowActions`).
     public func viewerStake(on postID: PostID) -> Int {
@@ -102,7 +113,7 @@ public final class PostCardStaking {
         )
     }
 
-    func stake(_ spend: WalletStakeSpend, on key: String, cell: any PostCardStakeTarget) {
+    func stake(_ spend: WalletStakeSpend, on key: String, cell: PostGridListRowCell) {
         if case .points(let amount) = spend, amount <= 0 { return }
         switch wallet.stake(spend, on: key) {
         case .boosted(_, let targetTotal, let spent):
@@ -120,7 +131,7 @@ public final class PostCardStaking {
         }
     }
 
-    private func undo(on key: String, cell: (any PostCardStakeTarget)?) {
+    private func undo(on key: String, cell: PostGridListRowCell?) {
         guard let amount = session[key], amount > 0,
               let result = wallet.undoBoost(targetID: key, amount: amount) else { return }
         session[key] = nil
@@ -133,7 +144,7 @@ public final class PostCardStaking {
 
     /// Whether `cell` still shows `key` — a row can be recycled between the
     /// press and the store's answer.
-    private func isBound(_ cell: any PostCardStakeTarget, to key: String) -> Bool {
+    private func isBound(_ cell: UIView, to key: String) -> Bool {
         (cells.object(forKey: cell) as String?) == key
     }
 
@@ -141,7 +152,7 @@ public final class PostCardStaking {
     /// its post's total back.
     private func refreshBoundCells() {
         let enumerator = cells.keyEnumerator()
-        while let cell = enumerator.nextObject() as? any PostCardStakeTarget {
+        while let cell = enumerator.nextObject() as? any PostCardLikeReadout {
             guard let key = cells.object(forKey: cell) else { continue }
             cell.setViewerStake(wallet.boostTotal(forTarget: key as String))
         }

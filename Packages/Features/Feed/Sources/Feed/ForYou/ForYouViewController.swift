@@ -215,12 +215,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         staking = wallet.map(PostCardStaking.init)
         super.init(nibName: nil, bundle: nil)
         page.staking = staking
-        // The compact cards' likes (`ForYouCardLikes`): the list's paired
-        // cards and chunk tiles, the Following row's text cards — and the
-        // gallery's tiles, handed the same flag at its push.
-        page.stakesOnCompactCards = ForYouCardLikes.isEnabled
         rails.staking = staking
-        rails.stakesOnTextCards = ForYouCardLikes.isEnabled
         // NOT hidesBottomBarWhenPushed: this is a tab root, and the bar is how
         // the viewer leaves it.
     }
@@ -1118,7 +1113,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         let gallery = DiscoverGalleryViewController(
             imagePipeline: imagePipeline, videoPlayback: videoPlayback,
             header: makePushedHeader(),
-            staking: staking, stakesOnTiles: ForYouCardLikes.isEnabled,
+            staking: staking,
             openPost: openPostHero
         )
         gallery.onNearEnd = { [weak self] in self?.viewModel.loadNextPageIfNeeded() }

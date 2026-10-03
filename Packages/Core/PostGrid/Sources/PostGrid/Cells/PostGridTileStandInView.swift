@@ -53,15 +53,15 @@ public final class PostGridTileStandInView: UIView, RevealStandInShaping {
     /// share `PostGridTileCell` space their tiles differently, and gap and
     /// curve are one decision (see `ChaoticSliceLayout.harmonisedGutter`).
     ///
-    /// `viewerStake`: on a surface whose tiles STAKE, what the viewer has
-    /// staked on `post` — the heart is red once there is any, as on the tile
-    /// it lands on (`PostGridTileCell.showStakeAsScenery`). Nil: a readout.
+    /// `viewerStake`: what the viewer has staked on `post`, on a surface
+    /// whose tiles show it — the heart is red once there is any, as on the
+    /// tile it lands on (`PostGridTileCell.setViewerStake`).
     public init(
         post: GalleryPost,
         size: CGSize,
         cornerRadius: CGFloat = PostGridTileCell.mosaicCornerRadius,
         imagePipeline: ImagePipeline,
-        viewerStake: Int? = nil
+        viewerStake: Int = 0
     ) {
         tile = PostGridTileCell(frame: CGRect(origin: .zero, size: size))
         super.init(frame: CGRect(origin: .zero, size: size))
@@ -72,7 +72,7 @@ public final class PostGridTileStandInView: UIView, RevealStandInShaping {
 
         tile.cornerRadius = cornerRadius
         tile.configure(with: post, imagePipeline: imagePipeline)
-        if let viewerStake { tile.showStakeAsScenery(viewerStake: viewerStake) }
+        tile.setViewerStake(viewerStake)
         tile.layoutIfNeeded()
 
         clipsToBounds = true
@@ -112,4 +112,9 @@ public final class PostGridTileStandInView: UIView, RevealStandInShaping {
     public func setContentOpacity(_ alpha: CGFloat) {
         tile.alpha = alpha
     }
+
+    #if DEBUG
+    /// Whether the tile's heart is the points' red.
+    var debugIsStaked: Bool { tile.debugIsStaked }
+    #endif
 }

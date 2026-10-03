@@ -209,9 +209,9 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
             post: page?.post(for: anchorID) ?? Self.placeholder(id: anchorID),
             cover: appearance?.cover,
             style: appearance?.style ?? .tile,
-            // A staking brick's heart is red once the viewer has staked — the
-            // card wears what the brick wears.
-            viewerStake: page?.compactCardStake(for: anchorID) ?? 0
+            // A brick's heart is red once the viewer has staked — the card
+            // wears what the brick wears.
+            viewerStake: page?.viewerStake(on: anchorID) ?? 0
         )
         // A paired (Following) card wears its words as the flight's resting
         // furniture, faded as it grows — the Following row's arrangement

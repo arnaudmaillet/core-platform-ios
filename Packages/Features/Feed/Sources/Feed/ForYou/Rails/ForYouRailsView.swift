@@ -161,19 +161,14 @@ final class ForYouRailsView: UIView {
     var cardMenuElements: ((GalleryPost) -> [UIMenuElement])?
     /// The rows changed which of them are drawn — the host re-sizes its header.
     var onHeightChange: (() -> Void)?
-    /// What a card's like stakes with — For You's, shared with the list.
+    /// Where a card's like reads the viewer's stake — For You's, shared with
+    /// the list. The cards' hearts are readouts: nothing here spends.
     var staking: PostCardStaking?
-    /// Whether the TEXT cards carry a like, closing their author line in the
-    /// card's bottom-right corner (`ForYouCardLikes`, `-foryou-card-likes`).
-    /// The media cards do not: the product asked for the text ones.
-    var stakesOnTextCards = false
 
-    /// What the viewer has staked on `post` when its card carries a like —
-    /// what a COPY of the card (a flight's furniture, a close's stand-in)
-    /// draws its heart from. Nil for a card with no like.
-    func cardStake(for post: GalleryPost) -> Int? {
-        guard stakesOnTextCards, post.kind == .text, let staking else { return nil }
-        return staking.viewerStake(on: post.id)
+    /// What the viewer has staked on `post` — what a COPY of its card (a
+    /// flight's furniture, a close's stand-in) draws its heart from.
+    func cardStake(for post: GalleryPost) -> Int {
+        staking?.viewerStake(on: post.id) ?? 0
     }
     /// The part of the screen the viewer can see, in THIS view's space, for
     /// autoplay: a card under the navigation bar is not one they are looking
@@ -282,8 +277,8 @@ final class ForYouRailsView: UIView {
             ) as! ForYouFollowingCardCell
             guard let self, let post = cards.first(where: { $0.id == id }) else { return cell }
             cell.configure(with: post, imagePipeline: imagePipeline)
-            // A text card's like (`ForYouCardLikes`).
-            if stakesOnTextCards, post.kind == .text { staking?.bind(cell, to: post.id) }
+            // The heart closing the author line reads the viewer's stake.
+            staking?.bindReadout(cell, to: post.id)
             // Autoplay is gated on the cover: its arrival re-opens the gate
             // for a card that came up faceless while the row sat still.
             cell.onCoverLoaded = { [weak self] in self?.updateAutoplay() }
@@ -1029,12 +1024,6 @@ extension ForYouRailsView: UICollectionViewDelegate {
         }
         guard let id = cardSource.itemIdentifier(for: indexPath),
               let post = cards.first(where: { $0.id == id }) else { return nil }
-        // A hold on a card's HEART is the stake's (`StakeMenu`), not the
-        // card's preview.
-        if let card = collectionView.cellForItem(at: indexPath) as? ForYouFollowingCardCell,
-           card.isOnStakeControl(point, in: collectionView) {
-            return nil
-        }
         return UIContextMenuConfiguration(
             identifier: MenuTarget.card(id).identifier,
             previewProvider: {
