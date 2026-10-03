@@ -113,8 +113,26 @@ public extension UITabBarController {
     /// UIKit's own end-of-transition bookkeeping was measured to swallow an
     /// un-hide (see `whenCommitted`). A BACKSTOP — the bar is normally up by
     /// then, and this finds nothing to do.
+    ///
+    /// ⚠️ RE-ASKED WHEN IT RUNS. A turn is long enough for the viewer to tap
+    /// again: a tile tap processed inside it re-opens the feed and hides the
+    /// bar, and a backstop that still showed it put the dock over the feed it
+    /// had just been told to clear. Whether the bar belongs on screen is
+    /// answered when the turn comes, by the stack as it is then.
     func showTabBarNativelyNextTurn() {
-        DispatchQueue.main.async { [weak self] in self?.showTabBarNatively() }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.selectedStackShowsTabBarAtRest else { return }
+            self.showTabBarNatively()
+        }
+    }
+
+    /// Whether the selected tab's stack, as it stands, wants the bar: at rest
+    /// (a transition in flight decides the bar through its own appearance
+    /// policy) and topped by a screen that shows it.
+    var selectedStackShowsTabBarAtRest: Bool {
+        guard let nav = selectedViewController as? UINavigationController else { return true }
+        guard nav.transitionCoordinator == nil else { return false }
+        return nav.showsAppTabBar(for: nav.topViewController)
     }
 
     /// Hides the bar through UIKit, on UIKit's own animation. Idempotent.
@@ -321,6 +339,49 @@ public extension UIViewController {
                 guard let coordinator else { return install() }
                 coordinator.whenLanded { install() }
             }
+        }
+    }
+}
+
+@MainActor
+public extension UINavigationController {
+    /// Runs `work` now if the stack is at rest, or once the transition running
+    /// on it has finished (one turn after its completion, so the stack's own
+    /// bookkeeping is done).
+    ///
+    /// ⚠️ UIKit DROPS a push or pop requested mid-transition, silently. A
+    /// route (a deep link, a notification tap) arriving while a hero is in the
+    /// air was simply lost — after its caller had already hidden the dock and
+    /// installed a dismissal for a screen that never came. Routes wait for the
+    /// flight instead.
+    func whenAtRest(_ work: @escaping @MainActor () -> Void) {
+        guard let coordinator = transitionCoordinator else { return work() }
+        coordinator.animate(alongsideTransition: nil) { _ in
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.whenAtRest(work)
+            }
+        }
+    }
+}
+
+@MainActor
+public extension UINavigationController {
+    /// Whether a push or pop of THIS stack is running — not merely any
+    /// transition `transitionCoordinator` reports.
+    ///
+    /// ⚠️ `transitionCoordinator` ALSO ANSWERS FOR THE STACK BEING PRESENTED.
+    /// A stack presented modally (`OverSheetFeedHost`, over the sound sheet)
+    /// opens its post from the presentation's completion, where the coordinator
+    /// of that presentation is still reported. A guard reading "any
+    /// coordinator" as "a push is running" refused every post opened from the
+    /// sound sheet. Only a transition between screens of this stack counts.
+    var isTransitioningItsStack: Bool {
+        guard let coordinator = transitionCoordinator else { return false }
+        let involved = [coordinator.viewController(forKey: .from), coordinator.viewController(forKey: .to)]
+        return involved.contains { screen in
+            guard let screen, screen !== self else { return false }
+            return screen.navigationController === self || viewControllers.contains(screen)
         }
     }
 }

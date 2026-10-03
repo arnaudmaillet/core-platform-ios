@@ -21,7 +21,7 @@ import UIKit
 /// protocol; that is the maintenance contract this file buys.
 @MainActor
 struct ZoomExistentialDispatchTests {
-    // MARK: - Source (10 defaulted members)
+    // MARK: - Source (defaulted members)
 
     @Test func everyDefaultedSourceMemberDispatchesDynamically() {
         let spy = SpySource()
@@ -32,16 +32,16 @@ struct ZoomExistentialDispatchTests {
         #expect(source.zoomFlightCarriesLivePlayer == false)
         #expect(source.zoomPresenterDepthView === spy.depthView)
         source.zoomSourceWillStageDismissal()
+        source.zoomSourceDidAbandonDismissal()
         source.zoomAdoptLiveMediaView(probe)
         #expect(source.zoomLandingMediaIsReady == false)
         source.zoomFinalizeLanding()
-        #expect(source.zoomHoistLiveMedia(probe, at: .zero, in: UIView(), cornerRadius: 5))
-        source.zoomPoseHoistedMedia(at: .zero, in: UIView(), cornerRadius: 5)
-        #expect(source.zoomReleaseHoistedMedia() === spy.hoistedRelease)
+        #expect(source.zoomLandingAcceptsHero == false)
 
         #expect(spy.calls == [
-            "surfaceIfReady", "carriesLivePlayer", "depthView", "willStageDismissal", "adopt",
-            "landingReady", "finalizeLanding", "hoist", "poseHoisted", "releaseHoisted",
+            "surfaceIfReady", "carriesLivePlayer", "depthView", "willStageDismissal", "abandonDismissal", "adopt",
+            "landingReady", "finalizeLanding",
+            "landingAcceptsHero",
         ])
     }
 
@@ -64,6 +64,7 @@ struct ZoomExistentialDispatchTests {
         destination.zoomReclaimLiveMediaView(probe)
         destination.zoomAdoptLiveMediaView(probe)
         destination.zoomTransitionWillBegin(flyingLivePlayer: true)
+        destination.zoomTransitionWillDepart()
         destination.zoomPrepareForPresentation(in: .zero)
         destination.setZoomDismissState(ZoomDismissState(
             progress: 0.5, card: .zero, cornerRadius: 1, isSettling: false
@@ -74,7 +75,7 @@ struct ZoomExistentialDispatchTests {
         #expect(spy.calls == [
             "kind", "contentReady", "ownsDismissal", "concealsTabBar", "mediaRendering",
             "verticalPermitted", "horizontalPermitted", "mirror", "donate",
-            "reclaim", "adopt", "willBegin", "prepareForPresentation", "dismissState", "park",
+            "reclaim", "adopt", "willBegin", "willDepart", "prepareForPresentation", "dismissState", "park",
             "framing",
         ])
     }
@@ -100,11 +101,13 @@ struct ZoomExistentialDispatchTests {
         card.setZoomLandingLiveMedia(probe)
         card.prepareZoomLiveMediaForFlight(destinationSize: CGSize(width: 3, height: 4))
         card.applyZoomRestingShadow(to: CALayer())
+        card.fadeInAdoptedLiveMedia(over: 0.1)
+        card.zoomLiveMediaDidStall()
 
         #expect(spy.calls == [
             "isDrawing", "debugState", "nativeSize", "surface", "cover", "contentRect",
             "adoptMirror", "adoptView", "hold", "tracksBounds", "blend", "landingLive", "prepare",
-            "applyShadow",
+            "applyShadow", "fadeIn", "stalled",
         ])
     }
 }
@@ -115,7 +118,6 @@ private final class SpySource: NSObject, ZoomTransitionSource {
     private(set) var calls: [String] = []
     let readySurface = UIView()
     let depthView = UIView()
-    let hoistedRelease = UIView()
 
     // Required members.
     func zoomHeroFrame(in container: UICoordinateSpace) -> CGRect { .zero }
@@ -128,16 +130,11 @@ private final class SpySource: NSObject, ZoomTransitionSource {
     var zoomFlightCarriesLivePlayer: Bool { calls.append("carriesLivePlayer"); return false }
     var zoomPresenterDepthView: UIView? { calls.append("depthView"); return depthView }
     func zoomSourceWillStageDismissal() { calls.append("willStageDismissal") }
+    func zoomSourceDidAbandonDismissal() { calls.append("abandonDismissal") }
     func zoomAdoptLiveMediaView(_ view: UIView) { calls.append("adopt") }
     var zoomLandingMediaIsReady: Bool { calls.append("landingReady"); return false }
     func zoomFinalizeLanding() { calls.append("finalizeLanding") }
-    func zoomHoistLiveMedia(
-        _ view: UIView, at rect: CGRect, in space: UICoordinateSpace, cornerRadius: CGFloat
-    ) -> Bool { calls.append("hoist"); return true }
-    func zoomPoseHoistedMedia(at rect: CGRect, in space: UICoordinateSpace, cornerRadius: CGFloat) {
-        calls.append("poseHoisted")
-    }
-    func zoomReleaseHoistedMedia() -> UIView? { calls.append("releaseHoisted"); return hoistedRelease }
+    var zoomLandingAcceptsHero: Bool { calls.append("landingAcceptsHero"); return false }
 }
 
 private final class SpyDestination: NSObject, ZoomTransitionDestination {
@@ -169,6 +166,7 @@ private final class SpyDestination: NSObject, ZoomTransitionDestination {
     func zoomReclaimLiveMediaView(_ view: UIView) { calls.append("reclaim") }
     func zoomAdoptLiveMediaView(_ view: UIView) { calls.append("adopt") }
     func zoomTransitionWillBegin(flyingLivePlayer: Bool) { calls.append("willBegin") }
+    func zoomTransitionWillDepart() { calls.append("willDepart") }
     func zoomPrepareForPresentation(in bounds: CGRect) { calls.append("prepareForPresentation") }
     func setZoomDismissState(_ state: ZoomDismissState) { calls.append("dismissState") }
     func zoomParkLiveMediaForHandoff() -> Bool { calls.append("park"); return true }
@@ -205,4 +203,6 @@ private final class SpyCard: UIView, ZoomFlightCard {
     func setZoomLandingLiveMedia(_ view: UIView) { calls.append("landingLive") }
     func prepareZoomLiveMediaForFlight(destinationSize: CGSize) { calls.append("prepare") }
     func applyZoomRestingShadow(to layer: CALayer) { calls.append("applyShadow") }
+    func fadeInAdoptedLiveMedia(over duration: TimeInterval) { calls.append("fadeIn") }
+    func zoomLiveMediaDidStall() { calls.append("stalled") }
 }

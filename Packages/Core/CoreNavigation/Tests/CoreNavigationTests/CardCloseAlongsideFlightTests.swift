@@ -238,7 +238,7 @@ struct CardCloseAlongsideFlightTests {
         let flight = Flight()
         nav.delegate = flight
         driver.install(on: nav)
-        #expect(nav.delegate === driver, "precondition: the close holds the slot")
+        #expect(nav.leasedDelegate === driver, "precondition: the close holds the slot")
         let pushed = driver.navigationController(nav, animationControllerFor: .push, from: host, to: feed)
         #expect(pushed === flight, "the feed's push fell to UIKit's slide")
         let other = driver.navigationController(nav, animationControllerFor: .push, from: host, to: UIViewController())

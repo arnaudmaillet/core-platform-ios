@@ -2164,7 +2164,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             // player having one render slot, and it has nothing to work around
             // here — the card, the tile and this page all draw the same frames
             // at the same time.
-            guard videoPlayback.attachSurface(view, to: url) else { return }
+            guard videoPlayback.attachSurface(view, to: url, scope: playbackScope) else { return }
             // The tile's thumbnail-rung cap is NOT lifted here, deliberately.
             // An uncap invites an ABR switch, a switch changes the decoded
             // buffer's dimensions, and the layer re-fits the new buffer into
@@ -2204,7 +2204,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // lift used to ride the warm attach — flight staging — which invited
         // the ladder's next switch point (a one-frame dimension re-fit on the
         // layer) to land mid-flight.
-        videoPlayback.setPeakBitRate(0, for: url)
+        videoPlayback.setPeakBitRate(0, for: url, scope: playbackScope)
         guard hasDeferredPlayback else { return }
         hasDeferredPlayback = false
         let view = mediaCard.renderView
@@ -2219,7 +2219,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // so try the join again first — it is the very player the flight
         // card was flying, which is what makes this a continuation. Mint
         // only when there is genuinely nothing to join.
-        if VideoRenderFlags.usesSampleBufferLayer, videoPlayback.attachSurface(view, to: url) {
+        if VideoRenderFlags.usesSampleBufferLayer, videoPlayback.attachSurface(view, to: url, scope: playbackScope) {
             view.revealOnFirstFrame()
             return
         }
@@ -2381,6 +2381,18 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// separate `play` to blank the screen.
     func adoptLiveRenderView(_ view: VideoRenderView) {
         defersPlaybackForFlight = false
+        // ⚠️ ASKED BEFORE THE SWAP, not after. A card can land carrying a
+        // player this page's pool does not own — a map pin mirrors the MAPS
+        // pool's preview, which the map retires the moment the feed shows. The
+        // swap used to happen first, so the page showed that dead surface and
+        // its own (playing) one was thrown away; the post opened from a live
+        // pin sat blank until paged away and back. Refusing keeps the page's
+        // own surface, which is already rendering or about to.
+        if VideoRenderFlags.usesSampleBufferLayer, let videoPlayback,
+           !videoPlayback.canAdoptSurface(view) {
+            refreshMediaLoader()
+            return
+        }
         // Read BEFORE the restore: it is the surface the restore throws away,
         // and under N-surface it is the one holding this page's pool loan.
         let replaced = mediaCard.renderView
@@ -2949,6 +2961,18 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     func reclaimPlayback() {
         guard playsVideo, let videoPlayback else { return }
         videoPlayback.reclaim(mediaCard.renderView)
+    }
+
+    /// The page is leaving with the flight that ended
+    /// (`SnapFeedViewController.zoomTransitionWillDepart`): nothing deferred
+    /// will start on it, and the deferral is cleared so a later visit of the
+    /// reused screen does not inherit it. Its surface is deliberately left as
+    /// it is: a reused screen keeps its clip paused in place for the next
+    /// opening of the same post, and the grid repairs its own player at the
+    /// landing.
+    func releasePlaybackForDeparture() {
+        defersPlaybackForFlight = false
+        hasDeferredPlayback = false
     }
 
     /// The still this page is actually drawing — the picture a presenter's

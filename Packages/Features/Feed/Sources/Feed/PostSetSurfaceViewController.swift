@@ -119,7 +119,11 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
     /// written down so it reads as a choice rather than an omission.
     private func openTile(at index: Int) {
         let posts = page.posts
-        guard posts.indices.contains(index), let openPost else { return }
+        // One opening at a time — checked BEFORE the handoff begins, which a
+        // refused second tap would otherwise leave open on another tile.
+        guard posts.indices.contains(index), let openPost,
+              navigationController.map({ FeedFeatureBuilder.canOpen(from: self, on: $0) }) ?? true
+        else { return }
         let tapped = posts[index]
         let stream = Array(posts[index...].prefix(Self.seedWindow))
         let hero = page.hero(for: tapped.id, in: view)
@@ -193,10 +197,31 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
     /// nothing had ever said they were being looked at. For You drives the same
     /// call from its own appearance and from its pager's settle, and only for
     /// the page at the active index.
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        closeOpeningRoundTrip()
+    }
+
     func setPlaybackActive(_ active: Bool) {
         loadViewIfNeeded()
         isPlaybackActive = active
+        // Not while a push or pop is still running: the handoff belongs to the
+        // flight until it lands, and appearance closes it then.
+        if active, navigationController?.transitionCoordinator == nil { closeOpeningRoundTrip() }
         page.setAutoplayActive(active)
+    }
+
+    /// ⚠️ THE HANDOFF A TAP OPENED ENDS WHEN THIS SCREEN IS BACK, the sweep
+    /// Discover and the post list make in `viewDidAppear`. This screen began
+    /// one on every open and never ended it: the tapped post stayed out of the
+    /// grid's ranking and out of its stop loop, so it kept its player frozen
+    /// on the frame the feed paused and never autoplayed again. Idempotent,
+    /// and asked from both doors back (appearance, and the host saying this
+    /// grid is the visible one again), because either can come first.
+    private func closeOpeningRoundTrip() {
+        page.clearRevealConcealment()
+        page.clearHeroConcealment()
+        page.endPlaybackHandoff()
     }
 
     /// ⚠️ REMEMBERED, BECAUSE VISIBILITY ARRIVES BEFORE THE CONTENT DOES.

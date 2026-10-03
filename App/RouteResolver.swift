@@ -87,6 +87,14 @@ final class RouteResolver: Router {
         animated: Bool = true
     ) {
         guard let navigation = navigator.activeNavigationController else { return }
+        // A route arriving while a transition runs (a deep link during a hero
+        // flight) waits for it: UIKit would drop the push silently.
+        guard navigation.transitionCoordinator == nil else {
+            navigation.whenAtRest { [weak self] in
+                self?.push(destination, using: navigator, animated: animated)
+            }
+            return
+        }
         // The overwhelmingly common case takes the plain path, untouched. This
         // app drives pushes through custom navigation delegates — zoom
         // transitions, the pop-gesture enabler — and `setViewControllers` is a

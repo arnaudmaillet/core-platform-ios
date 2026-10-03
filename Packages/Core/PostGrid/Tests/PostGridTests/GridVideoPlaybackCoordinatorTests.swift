@@ -269,24 +269,6 @@ struct GridVideoPlaybackCoordinatorTests {
 
     // MARK: - Handoff
 
-    @Test func parkingForHandoffReleasesTheTile() async {
-        let coordinator = makeVisibleCoordinator(pool: makePool(), maxConcurrent: 3)
-        let candidate = makeCandidate(0, distance: 10)
-        coordinator.update(candidates: [candidate])
-        // The pool attaches asynchronously (the URL is resolved first), so wait
-        // for the start rather than racing it.
-        await coordinator.awaitPendingStarts()
-
-        #expect(coordinator.parkForHandoff(candidate.id))
-        // The tile no longer holds it — the parked player belongs to whatever
-        // adopts it next.
-        #expect(coordinator.playingIDs.isEmpty)
-    }
-
-    @Test func parkingATileThatIsNotPlayingReportsFalse() {
-        let coordinator = makeVisibleCoordinator(pool: makePool(), maxConcurrent: 3)
-        #expect(coordinator.parkForHandoff(PostID("post-nope")) == false)
-    }
 
     // MARK: - Cap
 

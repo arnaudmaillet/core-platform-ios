@@ -513,8 +513,14 @@ final class RevealDismissInteractionController: NSObject,
         // `whenViewSettles`.
         whenViewSettles(
             windowMask, settlingAt: target.mask, ceiling: viewSettleCeiling
-        ) { [weak self] in
-            self?.finish(cancelled: !commit)
+        ) {
+            // ⚠️ STRONG, deliberately. Once `releaseSwipe` drops its
+            // reference, the only owner left is UIKit's private transition
+            // context, which promises nothing. A weak capture there could find
+            // nobody to call `completeTransition` on, and that leaves the
+            // stack mid-transition for good. The watcher is bounded by its
+            // ceiling, so this holds the driver for the settle and no longer.
+            self.finish(cancelled: !commit)
         }
     }
 

@@ -110,6 +110,18 @@ public protocol ZoomTransitionSource: AnyObject {
     /// rect is read. Defaults to nothing — a map pin is wherever the map left it.
     func zoomSourceWillStageDismissal()
 
+    /// The dismissal staged by `zoomSourceWillStageDismissal` will NOT land:
+    /// the grab was cancelled, or the close was caught and thrown back. The
+    /// page is staying, so whatever the staging started for a landing has to
+    /// stand down — a landing picture still being demanded, a playback scope
+    /// pointed at the landing row (which kept that row's player running,
+    /// hidden under the page, until the final close).
+    ///
+    /// Concealment is NOT this hook's business: the settlement keeps the
+    /// source concealed, since the page it impersonates is still up.
+    /// Default is nothing.
+    func zoomSourceDidAbandonDismissal()
+
     /// Takes the flight card's live media view at LANDING, so this side is
     /// already rendering before the card is removed.
     ///
@@ -141,35 +153,6 @@ public protocol ZoomTransitionSource: AnyObject {
     /// force.
     func zoomFinalizeLanding()
 
-    /// Takes the flight card's live surface and hosts it ABOVE the navigation
-    /// controller for the duration of a dismissal, positioned at `rect`.
-    ///
-    /// A navigation controller removes non-top views from the window, so a
-    /// surface left in the card — or in either screen — leaves the render tree
-    /// and its layer re-acquires on the way back. Hosting it one level up means
-    /// it never leaves, and the flight becomes pure geometry. Returns whether
-    /// the source took it; `false` leaves the card flying it as before.
-    /// `cornerRadius` is the radius the surface must START at — the page's
-    /// display-corner radius — so it interpolates to the tile's radius on the
-    /// same spring as the card. Hoisting without it left the surface at 0 while
-    /// the card animated 55 -> 10: square corners over rounded ones for the
-    /// whole flight, converging only at the very end, which reads as a snap.
-    func zoomHoistLiveMedia(_ view: UIView, at rect: CGRect, in space: UICoordinateSpace, cornerRadius: CGFloat) -> Bool
-
-    /// Poses the hosted surface. Called inside the flight's animation block, so
-    /// it interpolates on the same spring as the card.
-    func zoomPoseHoistedMedia(at rect: CGRect, in space: UICoordinateSpace, cornerRadius: CGFloat)
-
-    /// Un-hoists the dismissal's live surface and hands it back, for a flight
-    /// the viewer REVERSED.
-    ///
-    /// A hoisted surface is parented above the navigation controller and is no
-    /// longer reachable through `zoomLiveMediaSurface` — a card poses only
-    /// media it still contains. Without this a cancelled dismissal left it
-    /// hosted, drawing at the grid cell's rect over the feed that just came
-    /// back. `nil` when nothing is hosted.
-    func zoomReleaseHoistedMedia() -> UIView?
-
     /// Whether the row this dismissal would land on can RECEIVE a flight.
     ///
     /// ⚠️ THE OTHER HALF OF A QUESTION THAT WAS ONLY EVER ASKED OF THE
@@ -198,17 +181,10 @@ public extension ZoomTransitionSource {
     var zoomFlightCarriesLivePlayer: Bool { true }
     var zoomPresenterDepthView: UIView? { nil }
     func zoomSourceWillStageDismissal() {}
+    func zoomSourceDidAbandonDismissal() {}
     func zoomAdoptLiveMediaView(_ view: UIView) {}
     var zoomLandingMediaIsReady: Bool { true }
     func zoomFinalizeLanding() {}
-    /// `cornerRadius` is the radius the surface must START at — the page's
-    /// display-corner radius — so it interpolates to the tile's radius on the
-    /// same spring as the card. Hoisting without it left the surface at 0 while
-    /// the card animated 55 -> 10: square corners over rounded ones for the
-    /// whole flight, converging only at the very end, which reads as a snap.
-    func zoomHoistLiveMedia(_ view: UIView, at rect: CGRect, in space: UICoordinateSpace, cornerRadius: CGFloat) -> Bool { false }
-    func zoomPoseHoistedMedia(at rect: CGRect, in space: UICoordinateSpace, cornerRadius: CGFloat) {}
-    func zoomReleaseHoistedMedia() -> UIView? { nil }
     var zoomLandingAcceptsHero: Bool { true }
 }
 
@@ -398,6 +374,21 @@ public protocol ZoomTransitionDestination: AnyObject {
     /// chrome reference and any transition-scoped state.
     func zoomTransitionDidEnd()
 
+    /// Called just before `zoomTransitionDidEnd` when the flight that is
+    /// ending takes this destination OFF screen: a completed close, or a push
+    /// reversed before it ever showed.
+    ///
+    /// ⚠️ THE ONE THING `zoomTransitionDidEnd` COULD NOT SAY. It was the same
+    /// call for a page that stays and a page that leaves, so a page leaving
+    /// did what a page staying must: it reclaimed its player (rebinding it to
+    /// its own hidden view right after the landing tile had adopted it),
+    /// uncapped its bitrate and started a deferred play on a screen about to
+    /// be removed. A destination that is told it departs does none of that.
+    ///
+    /// Default is nothing. A REQUIREMENT, for the existential-dispatch reason
+    /// spelled out on `zoomPageFraming`.
+    func zoomTransitionWillDepart()
+
     /// A presentation is about to stage. Called before the destination is laid
     /// out, which is the only moment early enough to matter.
     ///
@@ -556,6 +547,7 @@ public extension ZoomTransitionDestination {
     func zoomReclaimLiveMediaView(_ view: UIView) {}
     func zoomAdoptLiveMediaView(_ view: UIView) {}
     func zoomTransitionWillBegin(flyingLivePlayer: Bool) {}
+    func zoomTransitionWillDepart() {}
     func zoomPrepareForPresentation(in bounds: CGRect) {}
     func setZoomDismissState(_ state: ZoomDismissState) {}
     @discardableResult

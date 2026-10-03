@@ -187,7 +187,11 @@ final class DiscoverGalleryViewController: UIViewController {
     /// the search results' `openTile`, for a page that is only ever a grid.
     private func openTile(at index: Int) {
         let posts = page.posts
-        guard posts.indices.contains(index), let openPost else { return }
+        // One opening at a time — checked BEFORE the handoff begins, which a
+        // refused second tap would otherwise leave open on another tile.
+        guard posts.indices.contains(index), let openPost,
+              navigationController.map({ FeedFeatureBuilder.canOpen(from: self, on: $0) }) ?? true
+        else { return }
         let tapped = posts[index]
         let stream = Array(posts[index...].prefix(Self.seedWindow))
         let hero = page.hero(for: tapped.id, in: view)

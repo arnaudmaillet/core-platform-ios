@@ -43,6 +43,12 @@ enum MapMarkerPresentation: Equatable {
     /// representative leads `memberIDs`, so the face, the transition and the
     /// landing page are the same post. The rest of the group (photos included)
     /// is a swipe away either way.
+    /// With `reducesMotion` (`HeroMotionPolicy`), every face opens with the
+    /// plain push: no zoom, no growing window.
+    init(face: PinCardView.Face, reducesMotion: Bool) {
+        self = reducesMotion ? .plainPush : MapMarkerPresentation(face: face)
+    }
+
     init(face: PinCardView.Face) {
         // ⚠️ Written as "is it media" rather than "is it text", so a face
         // added later routes to the REVEAL by default. An icon pin is a text

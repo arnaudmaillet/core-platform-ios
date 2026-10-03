@@ -893,7 +893,9 @@ final class ForYouRailsView: UIView {
             // One playback, several surfaces: the card gets its own, primed on
             // attach, and the flight card's is released once it leaves the
             // window. Nothing is re-parented.
-            if playback.adoptAttachedSurface(for: id, url: url, cell: cell) { landingCard = id }
+            if playback.adoptAttachedSurface(
+                for: id, url: url, cell: cell, drawnBy: view as? VideoRenderView
+            ) { landingCard = id }
             return
         }
         guard let view = view as? VideoRenderView else { return }

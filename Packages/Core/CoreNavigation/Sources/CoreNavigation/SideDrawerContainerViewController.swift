@@ -289,7 +289,14 @@ public final class SideDrawerContainerViewController: UIViewController {
     public override var childForHomeIndicatorAutoHidden: UIViewController? { mainViewController }
     public override var childForScreenEdgesDeferringSystemGestures: UIViewController? { mainViewController }
     public override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
-        mainViewController.supportedInterfaceOrientations
+        // A hero in the air pins the orientation it took off in — see
+        // `FlightOrientationLock`.
+        if FlightOrientationLock.isHeld,
+           let current = view.window?.windowScene?.effectiveGeometry.interfaceOrientation,
+           let held = FlightOrientationLock.mask(holding: current) {
+            return held
+        }
+        return mainViewController.supportedInterfaceOrientations
     }
     public override var preferredInterfaceOrientationForPresentation: UIInterfaceOrientation {
         mainViewController.preferredInterfaceOrientationForPresentation

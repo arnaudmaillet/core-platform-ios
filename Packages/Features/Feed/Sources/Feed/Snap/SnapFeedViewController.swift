@@ -225,9 +225,21 @@ final class SnapFeedViewController: UIViewController {
     /// reaches `zoomTransitionWillBegin` / `zoomTransitionDidEnd`: the
     /// installer raises this before the push and `viewDidAppear` — the push's
     /// landing — lowers it.
-    private var isAwaitingRevealPresentation = false
+    private(set) var isAwaitingRevealPresentation = false
+
+    /// Set by `zoomTransitionWillDepart`, read once by `zoomTransitionDidEnd`:
+    /// the ending flight takes this screen off screen.
+    private var isDepartingWithFlight = false
 
     public func beginRevealPresentation() {
+        // ⚠️ AN OPENING ONLY. The installer that calls this also builds every
+        // card-shaped CLOSE's geometry, and a close is staged while this screen
+        // is on screen. Raised there, nothing lowered it (the feed never
+        // reappears after a committed close), and For You reuses this
+        // controller: the next opening replayed the comment band's entrance,
+        // deferred the author pill and skipped the comments prewarm. An
+        // opening is the one case where the screen is not yet in a window.
+        guard viewIfLoaded?.window == nil else { return }
         isAwaitingRevealPresentation = true
     }
 
@@ -665,6 +677,12 @@ final class SnapFeedViewController: UIViewController {
                          navigationController?.transitionCoordinator == nil ? "none" : "LIVE"))
         }
         #endif
+        // ⚠️ NOT WHILE A TRANSITION RUNS. UIKit drops a pop requested
+        // mid-transition, silently, but everything before it here already ran:
+        // the dock rose for a close that never happened (and stayed over the
+        // feed when it was the present still landing), and the owner restaged
+        // for it. The chevron is simply not live until the stack is at rest.
+        if let nav = navigationController, nav.isTransitioningItsStack { return }
         onWillCloseFeed?()
         if let nav = navigationController, nav.viewControllers.first !== self {
             revealDockBeforePop(on: nav)
@@ -825,8 +843,13 @@ final class SnapFeedViewController: UIViewController {
         super.viewDidAppear(animated)
         // The backstop, on a return only: whatever a transition left, a feed
         // on screen has no dock under it.
+        //
+        // On UIKit's own animation: this is reached on a REVERSED close, where
+        // the chevron raised the dock before the pop and the flight was caught
+        // and thrown back. Hidden without animation, the dock that had been
+        // rising over the returning feed vanished in a single frame.
         if hasAppeared, isClosable, let tabBarController, !tabBarController.isTabBarHidden {
-            tabBarController.setTabBarHidden(true, animated: false)
+            tabBarController.hideTabBarNatively()
         }
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-pill-probe") { authorIdentityView.debugProbe("didAppear") }
@@ -5283,6 +5306,10 @@ extension SnapFeedViewController: UICollectionViewDelegate {
     // via the toolbar's more menu; the identity pill opens the profile.
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        // A landing cover still waiting for the page's picture is an inert
+        // still of the post that opened; the viewer is now moving the pages
+        // under it, so it goes, and adopts nothing (`ZoomLandingLeftovers`).
+        if scrollView === collectionView { ZoomLandingLeftovers.clear(over: view) }
         // Unreachable while engaged (the pager is disabled — the total
         // dead-end doctrine; the swipe exit is bar-owned and pages
         // programmatically). Kept as belt and braces: if any future path
@@ -5986,6 +6013,12 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // controller would then start its next flight already believing it is
         // in one.
         isAwaitingZoomPresentation = false
+        // A reused screen starts its next visit with no flight pending and
+        // nothing hidden, whatever the last visit's flight left behind.
+        isAwaitingRevealPresentation = false
+        view.alpha = 1
+        // And nothing the last visit's landing parked over it.
+        ZoomLandingLeftovers.clear(over: view)
         donatedLiveView = nil
         flightChrome = nil
         pageDriveStartOffset = nil
@@ -6256,6 +6289,10 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         activeSnapCell?.reclaimDonatedPlayback(view)
     }
 
+    public func zoomTransitionWillDepart() {
+        isDepartingWithFlight = true
+    }
+
     public func zoomTransitionDidEnd() {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-zoom-profile") {
@@ -6304,11 +6341,32 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // card gone, the cell reclaims the render slot (only the most
         // recently attached layer of a shared player is guaranteed to
         // display). Harmless when nothing was mirrored.
-        activeSnapCell?.reclaimPlayback()
-        // And the presenting leg's held-back start runs now: the card is gone,
-        // so attaching here is the hand-off rather than a theft. Adopts the
-        // parked player, so the page resumes instead of restarting.
-        activeSnapCell?.startDeferredPlayback()
+        //
+        // ⚠️ NOT FOR A PAGE THAT LEAVES WITH THE FLIGHT
+        // (`zoomTransitionWillDepart`). Reclaiming rebound the player to this
+        // hidden page right after the landing tile adopted it, and the
+        // deferred start below played a clip on a screen being removed. A
+        // departing page only lets go, so the next visit starts clean.
+        let departing = isDepartingWithFlight
+        isDepartingWithFlight = false
+        if departing {
+            activeSnapCell?.releasePlaybackForDeparture()
+            // ⚠️ AND THE SHARED BARS' STYLE (hero audit 2.16). `viewWillAppear`
+            // lends the stack's navigation bar, toolbar and glass host this
+            // page's style (dark over media); `viewWillDisappear` hands it
+            // back. A push caught and thrown back never reaches the second:
+            // the presenter's header stayed in the feed's dark style over its
+            // own light content — glass gone grey, icons thin — until the next
+            // visit. Idempotent after an ordinary pop, which already did it.
+            releaseChromeTheme()
+        } else {
+            activeSnapCell?.reclaimPlayback()
+            // And the presenting leg's held-back start runs now: the card is
+            // gone, so attaching here is the hand-off rather than a theft.
+            // Adopts the parked player, so the page resumes instead of
+            // restarting.
+            activeSnapCell?.startDeferredPlayback()
+        }
         // The comments warm was held back across the flight (see
         // `prewarmComments`) — and it does NOT resume here, because "landed"
         // is not yet "idle". Measured: run at this instant it produced a
@@ -6720,3 +6778,21 @@ final class SnapFeedCollectionView: UICollectionView {
         return false
     }
 }
+
+#if DEBUG
+extension SnapFeedViewController: ArrivalInvariantReporting {
+    /// Every transition-scoped flag is down once a flight has ended on this
+    /// screen — the reused-feed defects (a hide never undone, a reveal flag
+    /// raised by a close) were all one of these left up.
+    public func arrivalFacts() -> [(name: String, holds: Bool)] {
+        [
+            ("feed.awaitingZoom", !isAwaitingZoomPresentation),
+            ("feed.awaitingReveal", !isAwaitingRevealPresentation),
+            ("feed.maskedReveal", !isMaskedRevealActive),
+            ("feed.engagedDismissal", !isEngagedDismissalActive),
+            ("feed.flightChrome", flightChrome == nil),
+            ("feed.departing", !isDepartingWithFlight),
+        ]
+    }
+}
+#endif

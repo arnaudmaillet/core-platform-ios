@@ -67,6 +67,9 @@ final class LandingLiveMediaRetry: NSObject {
         self.link = link
     }
 
+    /// Stops asking: the landing this retry served is not coming.
+    func cancel() { stop() }
+
     private func stop() {
         link?.invalidate()
         link = nil

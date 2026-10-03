@@ -65,6 +65,9 @@ final class HeroTransitionAudit {
         probe.isAccessibilityElement = true
         probe.accessibilityLabel = "hero audit"
         emit("[hero-audit] START \(Date()) sink=\(sinkURL.path)")
+        // The arrival checks report through the same sink, so one log carries
+        // both the census and what each landing left the screen in.
+        ArrivalInvariants.sink = { [weak self] line in self?.emit(line) }
         let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.sample() }
         }

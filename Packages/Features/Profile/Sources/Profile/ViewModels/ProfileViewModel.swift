@@ -872,8 +872,15 @@ public final class ProfileViewModel {
             renderGallery()
             return
         }
-        savedPage = .loading
-        renderGallery()
+        // ⚠️ SKELETONS ONLY FOR A PAGE WITH NOTHING TO SHOW. This runs on
+        // every appearance, including the one a closing post delivers, and a
+        // `.loading` over shown tiles reloaded the grid as bones mid-dismissal:
+        // the card had no tile to land on and collapsed to the fallback rect.
+        // A page already showing its tiles keeps them while the refresh runs.
+        if case .content = savedPage {} else {
+            savedPage = .loading
+            renderGallery()
+        }
         Task { [weak self] in
             let tiles = (try? await gallery.posts(ids: ids)) ?? []
             guard let self else { return }
