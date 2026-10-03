@@ -20,6 +20,7 @@ let package = Package(
         .package(path: "../../Core/CoreStorage"),
         .package(path: "../../Core/DesignSystem"),
         .package(path: "../../Core/EmoteKit"),
+        .package(path: "../../Core/MediaPlayback"),
         .package(path: "../../Core/PostGrid")
     ],
     targets: [
@@ -37,6 +38,10 @@ let package = Package(
                 "CoreStorage",
                 "DesignSystem",
                 "EmoteKit",
+                // Settings → App Preferences measures and clears the video
+                // cache it names (`VideoSourceCache`); the builder already
+                // imported it through PostGrid, which only a warm tree allows.
+                "MediaPlayback",
                 // ⚠️ The library target, not only the test one. `PostCounterReader`
                 // lives in CoreNetworking and this feature reads its counters
                 // through it — declared here because a warm derived-data tree
