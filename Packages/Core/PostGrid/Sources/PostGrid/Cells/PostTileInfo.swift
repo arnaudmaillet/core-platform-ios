@@ -2,9 +2,10 @@ import CoreGraphics
 
 /// Which mosaic tiles wear their post's author and the start of its caption
 /// over the picture — the Following card's foot (`PostCardCaptionOverlay`) —
-/// and how much of the caption. The EXPERIMENT `-gallery-tile-info`
-/// (2026-10-03), on For You's chunks and the pushed Discover gallery; off, a
-/// tile is the picture and its likes, as on every grid.
+/// and how much of the caption. On For You's chunks and the pushed Discover
+/// gallery — the `-gallery-tile-info` experiment, validated on 3 October 2026
+/// and on by default since; every other grid's tile is still the picture and
+/// its likes (`PostGridTileCell.showsInfo` is the host's call).
 ///
 /// ## The rule: by the tile's size in points, never by its share of the mosaic
 ///

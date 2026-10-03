@@ -75,19 +75,18 @@ final class DiscoverGalleryViewController: UIViewController {
     /// - Parameter staking: where the tiles' hearts read the viewer's stake
     ///   (red once staked) — For You's own, so the gallery and the list
     ///   behind it agree. The hearts are readouts; nothing here spends.
-    /// - Parameter showsTileInfo: the large tiles wear their author and
-    ///   caption start (`GalleryTileInfo`, `-gallery-tile-info`).
     init(
         imagePipeline: ImagePipeline,
         videoPlayback: VideoPlaybackController?,
         header: PushedScreenHeader,
         staking: PostCardStaking? = nil,
-        showsTileInfo: Bool = false,
         openPost: ((UIViewController, SnapFeedHeroOrigin, [PostID]) -> Void)?
     ) {
         page = ForYouGridPage(imagePipeline: imagePipeline, style: .grid, videoPlayback: videoPlayback)
         page.staking = staking
-        page.showsTileInfo = showsTileInfo
+        // The large tiles wear their author and caption start (`PostTileInfo`),
+        // as Discover's chunks do.
+        page.showsTileInfo = true
         self.header = header
         self.openPost = openPost
         super.init(nibName: nil, bundle: nil)
@@ -234,7 +233,7 @@ final class DiscoverGalleryViewController: UIViewController {
                     if !committed { page?.clearRevealConcealment() }
                 }
             ),
-            // A large tile's words (`-gallery-tile-info`), worn by the card
+            // A large tile's words (`PostTileInfo`), worn by the card
             // at the tile's end and faded as it grows — the Following row's
             // arrangement. Nil for a tile that wears none.
             restingOverlay: { [weak page] in page?.restingOverlay(for: tapped.id) },
@@ -260,6 +259,9 @@ final class DiscoverGalleryViewController: UIViewController {
 
     /// Tile `index`'s size on screen — nil while it is not realized. What
     /// picks a tile large enough for words (`PostTileInfo`) to film or test.
+    /// Whether the mosaic's tiles wear their words (`PostTileInfo`).
+    var debugShowsTileInfo: Bool { page.showsTileInfo }
+
     func debugTileSize(at index: Int) -> CGSize? {
         guard page.posts.indices.contains(index) else { return nil }
         return page.debugCell(for: page.posts[index].id)?.bounds.size

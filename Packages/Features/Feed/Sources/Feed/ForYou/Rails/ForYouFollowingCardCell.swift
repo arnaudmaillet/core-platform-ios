@@ -9,19 +9,25 @@ import UIKit
 
 /// The bottom of a Following card — who posted, and the first two lines of
 /// what they said. The overlay lives in PostGrid since the mosaic's large
-/// tiles wear it too (`PostCardCaptionOverlay`, `-gallery-tile-info`); this is
+/// tiles wear it too (`PostCardCaptionOverlay`); this is
 /// the name the Following card has always called it by.
 typealias ForYouCardCaptionOverlay = PostCardCaptionOverlay
 
-/// One card in For You's Following row: a post, equal-sized with its
-/// neighbours, playing (muted) whenever it is half on screen, with its first
-/// two lines over the bottom of it.
+/// One MEDIA card in For You's Following row (its top lane,
+/// `ForYouFollowingLanes`) and in Discover's pairs: a photo or a video,
+/// equal-sized with its neighbours, playing (muted) whenever it is half on
+/// screen, with its author and first two lines over the bottom of it.
 ///
 /// A mosaic brick's twin in everything the playback and the flight ask
 /// (`GridPlaybackCell`, like `PostGridTileCell`): a cover image, a video
 /// surface built on first use above it, the cover kept as the poster until the
 /// first frame, and the surface handed back on reuse. What it adds is the
-/// overlay, and a TEXT post's own face — the card is its words.
+/// overlay.
+///
+/// Media only, since 3 October 2026: a text post in the Following row is the
+/// list's own card (`PostGridListRowCell`) in the bottom lane, and the text
+/// face this card used to draw — its words on the card's fill — is gone, with
+/// its stand-in. Pairs are vertical media by construction.
 final class ForYouFollowingCardCell: UICollectionViewCell {
     static let reuseID = "ForYouFollowingCardCell"
 
@@ -77,15 +83,11 @@ final class ForYouFollowingCardCell: UICollectionViewCell {
 
     func configure(with post: GalleryPost, imagePipeline: ImagePipeline) {
         self.post = post
-        let isText = post.kind == .text
-        contentView.backgroundColor = isText
-            ? PostGridListRowCell.cardFillColor
-            : PostGridTileCell.fillColor(for: post)
+        contentView.backgroundColor = PostGridTileCell.fillColor(for: post)
         // Its like reads the viewer's stake once a host binds the card
         // (`PostCardStaking.bindReadout`); unstaked until then.
         let overlay = ForYouCardCaptionOverlay(
-            post: post, placement: isText ? .onCard : .onMedia, imagePipeline: imagePipeline,
-            viewerStake: 0
+            post: post, placement: .onMedia, imagePipeline: imagePipeline, viewerStake: 0
         )
         contentView.addSubview(overlay)
         overlay.frame = contentView.bounds
@@ -93,7 +95,7 @@ final class ForYouFollowingCardCell: UICollectionViewCell {
         accessibilityLabel = [post.authorName, post.caption].compactMap { $0 }.joined(separator: ", ")
 
         imageView.image = nil
-        guard !isText, let url = post.thumbnailURL else { return }
+        guard let url = post.thumbnailURL else { return }
         if let cached = imagePipeline.cachedImage(for: url) {
             imageView.image = cached
             return
@@ -140,15 +142,14 @@ final class ForYouFollowingCardCell: UICollectionViewCell {
         viewerStake: Int = 0
     ) -> ForYouCardCaptionOverlay {
         let overlay = ForYouCardCaptionOverlay(
-            post: post, placement: post.kind == .text ? .onCard : .onMedia, referenceSize: restingSize,
+            post: post, placement: .onMedia, referenceSize: restingSize,
             imagePipeline: imagePipeline, viewerStake: viewerStake
         )
         UIView.performWithoutAnimation { overlay.layoutIfNeeded() }
         return overlay
     }
 
-    /// The card as it rests, drawn fresh at `size` — what a window opening from
-    /// it starts as and a close lands on, whatever kind of post it is.
+    /// The card as it rests, drawn fresh at `size` — what a close lands on.
     ///
     /// ⚠️ A MEDIA CARD CLOSES AS A WINDOW TOO. It opens with a flight, but the
     /// feed is a pager: page from its photograph onto a TEXT post and there is
@@ -161,9 +162,6 @@ final class ForYouFollowingCardCell: UICollectionViewCell {
         for post: GalleryPost, cover: UIImage?, size: CGSize, imagePipeline: ImagePipeline? = nil,
         viewerStake: Int = 0
     ) -> UIView {
-        guard post.kind != .text else {
-            return makeTextStandIn(for: post, size: size, imagePipeline: imagePipeline, viewerStake: viewerStake)
-        }
         let card = UIView(frame: CGRect(origin: .zero, size: size))
         card.backgroundColor = PostGridTileCell.fillColor(for: post)
         card.layer.cornerRadius = cornerRadius
@@ -175,25 +173,7 @@ final class ForYouFollowingCardCell: UICollectionViewCell {
         picture.image = cover
         picture.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         card.addSubview(picture)
-        addAnchoredOverlay(
-            for: post, placement: .onMedia, to: card, imagePipeline: imagePipeline, viewerStake: viewerStake
-        )
-        return card
-    }
-
-    /// A text card, drawn fresh at `size` — what a window opening from this
-    /// card starts as and a close lands on.
-    static func makeTextStandIn(
-        for post: GalleryPost, size: CGSize, imagePipeline: ImagePipeline? = nil, viewerStake: Int = 0
-    ) -> UIView {
-        let card = UIView(frame: CGRect(origin: .zero, size: size))
-        card.backgroundColor = PostGridListRowCell.cardFillColor
-        card.layer.cornerRadius = cornerRadius
-        card.layer.cornerCurve = .continuous
-        card.clipsToBounds = true
-        addAnchoredOverlay(
-            for: post, placement: .onCard, to: card, imagePipeline: imagePipeline, viewerStake: viewerStake
-        )
+        addAnchoredOverlay(for: post, to: card, imagePipeline: imagePipeline, viewerStake: viewerStake)
         return card
     }
 
@@ -204,14 +184,13 @@ final class ForYouFollowingCardCell: UICollectionViewCell {
     /// reveal resizes a stand-in with the window and lays it out inside its
     /// own block (`RevealStage.apply`); a caption meeting its FIRST pass there
     /// grew out of the window's top-left corner for the whole close — the
-    /// text cards' half of the defect the flight's overlay had. From here on
-    /// every pass only re-poses what this one wrapped.
+    /// same defect the flight's overlay had. From here on every pass only
+    /// re-poses what this one wrapped.
     private static func addAnchoredOverlay(
-        for post: GalleryPost, placement: ForYouCardCaptionOverlay.Placement, to card: UIView,
-        imagePipeline: ImagePipeline?, viewerStake: Int
+        for post: GalleryPost, to card: UIView, imagePipeline: ImagePipeline?, viewerStake: Int
     ) {
         let overlay = ForYouCardCaptionOverlay(
-            post: post, placement: placement, referenceSize: card.bounds.size,
+            post: post, placement: .onMedia, referenceSize: card.bounds.size,
             imagePipeline: imagePipeline, viewerStake: viewerStake
         )
         overlay.frame = card.bounds

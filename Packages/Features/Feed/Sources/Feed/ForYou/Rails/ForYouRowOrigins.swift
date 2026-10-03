@@ -201,35 +201,37 @@ enum ForYouRowOrigins {
             // The card takes off PLAYING, joining its own surface.
             donateLiveMedia: { [weak rails] in rails?.liveCardSurface(for: id) },
             depthView: { [weak page] in page },
-            // EVERY card — see the note on this type.
-            textReveal: cardReveal(
-                for: tapped, cover: cover, rails: rails, page: page, closeStaged: closeStaged
-            ),
+            // EVERY card — see the note on this type. A text card is the
+            // list's own card, and opens and closes as the list's do.
+            textReveal: hasMedia
+                ? cardReveal(for: tapped, cover: cover, rails: rails, page: page, closeStaged: closeStaged)
+                : textCardReveal(for: tapped, rails: rails, page: page, closeStaged: closeStaged),
             // A close hands the page's playback to the card before the flight
             // card goes, and waits for it to draw — no thumbnail between the
             // two (`ForYouRailsView.adoptLandingPlayback`).
             adoptLandingLiveMedia: { [weak rails] view in rails?.adoptLandingPlayback(view, for: id) },
             landingMediaIsReady: { [weak rails] in rails?.isLandingPlaybackReady(for: id) ?? true },
             // Wrapped at the card's own size, and only ever posed after — see
-            // `ForYouCardCaptionOverlay`.
-            restingOverlay: { [weak rails] in
+            // `ForYouCardCaptionOverlay`. A media card's: a text card never
+            // flies.
+            restingOverlay: hasMedia ? { [weak rails] in
                 let size = rails.flatMap { $0.cardFrame(for: id, in: $0)?.size } ?? tappedSize
                 return ForYouFollowingCardCell.makeOverlay(
                     for: tapped, restingSize: size, imagePipeline: rails?.imagePipeline,
                     viewerStake: rails?.cardStake(for: tapped) ?? 0
                 )
-            },
+            } : nil,
             willStageDismissal: { [weak rails, weak page] in
                 stageClose(page: page, then: closeStaged) { rails?.bringCardIntoView(id) }
             }
         )
     }
 
-    /// The window a card opens (a TEXT card) and closes (any card, once the
-    /// feed is on a text page) through — marker-shaped, for the place page's
-    /// reason (`PlaceProfileViewController.textRowReveal`): the feed is a
-    /// pager, so the card and the page are the same post only until the first
-    /// swipe. The card itself, drawn fresh as it rests, is the stand-in.
+    /// The window a MEDIA card closes through once the feed is on a text page
+    /// — marker-shaped, for the place page's reason
+    /// (`PlaceProfileViewController.textRowReveal`): the feed is a pager, so
+    /// the card and the page are the same post only until the first swipe.
+    /// The card itself, drawn fresh as it rests, is the stand-in.
     static func cardReveal(
         for post: GalleryPost,
         cover: UIImage?,
@@ -264,11 +266,55 @@ enum ForYouRowOrigins {
             alignsPageToSource: false,
             pageFit: .covering,
             cornerRadius: ForYouFollowingCardCell.cornerRadius,
-            // The card's own ground: the card fill for words, the brick's
-            // floor for a picture — what the cell itself is painted.
-            fill: post.kind == .text
-                ? PostGridListRowCell.cardFillColor
-                : PostGridTileCell.fillColor(for: post),
+            // The card's own ground: the brick's floor — what the cell itself
+            // is painted.
+            fill: PostGridTileCell.fillColor(for: post),
+            setConcealed: { [weak rails] concealed in rails?.setCardConcealed(concealed, for: id) },
+            willStageDismissal: { [weak rails, weak page] _ in
+                stageClose(page: page, then: closeStaged) { rails?.bringCardIntoView(id) }
+            },
+            dismissalDidEnd: { [weak page] _ in page?.endHeroFreeze() }
+        )
+    }
+
+    /// The window a TEXT card opens and closes through — the one Discover's
+    /// list opens its text cards through (`ForYouViewController
+    /// .installTextReveal`), since the card IS the list's card: the page grows
+    /// out of the card with its caption aligned to the card's (`captionTop`),
+    /// the card's author band borrowed for the flight, the page veiled below
+    /// where the card's two lines stop (`captionEnd`), and the close carrying
+    /// the card home as the list's stand-in (`RevealDismissCardView`, at the
+    /// lane's size and two lines) onto the card it opened from, whatever post
+    /// the viewer paged to — the row keeps its order, the list's rule.
+    ///
+    /// The caption's cut and top are read at the tap, as the list reads them:
+    /// properties of the card's caption, which a card scrolled out of the row
+    /// could not answer at the close.
+    static func textCardReveal(
+        for post: GalleryPost,
+        rails: ForYouRailsView,
+        page: ForYouGridPage,
+        closeStaged: @escaping () -> Void = {}
+    ) -> TextRevealOrigin {
+        let id = post.id
+        return TextRevealOrigin(
+            rowFrame: { [weak rails] space in
+                inView(rails?.cardFrame(for: id, in: space)) {
+                    rails?.bringCardIntoView(id)
+                    return rails?.cardFrame(for: id, in: space)
+                }
+            },
+            captionEnd: rails.textCardCaptionEnd(for: id),
+            depthView: { [weak page] in page },
+            captionTop: rails.textCardCaptionTop(for: id),
+            authorBand: rails.textCardAuthorBand(for: id),
+            makeDismissStandIn: { [weak rails] _ in rails?.makeTextCardStandIn(for: id) },
+            // The list's: the page itself grows out of the card.
+            alignsPageToSource: true,
+            // The media fills the window, always — see `RevealPageFit.covering`.
+            pageFit: .covering,
+            // The list's card, its own curve and fill (the initialiser's
+            // defaults are the card's).
             setConcealed: { [weak rails] concealed in rails?.setCardConcealed(concealed, for: id) },
             willStageDismissal: { [weak rails, weak page] _ in
                 stageClose(page: page, then: closeStaged) { rails?.bringCardIntoView(id) }

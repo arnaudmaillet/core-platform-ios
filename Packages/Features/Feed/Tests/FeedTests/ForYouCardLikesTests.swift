@@ -9,14 +9,15 @@ import UIKit
 @testable import Feed
 
 /// The hearts on For You's compact cards — the paired half-width cards and
-/// chunk tiles of the Discover list, the pushed gallery's tiles, and every
-/// card of the Following row, media and text — at each card's bottom-right
+/// chunk tiles of the Discover list, the pushed gallery's tiles, and the
+/// Following row's media cards — at each card's bottom-right
 /// (a tile's corner, the end of a Following card's author line).
 ///
 /// No flag (validated 3 October 2026), and DISPLAY ONLY: the post's count,
 /// red once the viewer has staked, never a control — a tap on the heart is a
 /// tap on the card, and nothing on it spends. The list's full cards keep
-/// their staking chip (`CardStakeTests`).
+/// their staking chip (`CardStakeTests`), and so do the Following row's text
+/// cards, which are the list's card.
 @MainActor
 struct ForYouCardLikesTests {
     private struct SilentFetcher: ImageFetching {
@@ -224,24 +225,16 @@ struct ForYouCardLikesTests {
         return rails
     }
 
-    /// Every Following card — words AND picture — closes its author line, its
-    /// foot on a text card, with the heart and the post's count.
+    /// Every Following MEDIA card closes its author line with the heart and
+    /// the post's count. A TEXT card is the list's own card (since 3 October
+    /// 2026), whose like is the staking chip — see `aFollowingTextCardsLikeStakes`.
     @Test func everyFollowingCardShowsTheHeartOnItsAuthorLine() throws {
         let wallet = Self.wallet()
         stake(on: PostID("picture"), in: wallet)
         let rails = rails(wallet: wallet)
 
-        let words = try #require(rails.debugCardCell(at: 0))
-        words.layoutIfNeeded()
-        let wordsLike = try #require(words.debugLikeReadout)
-        #expect(wordsLike.ground == .card)
-        #expect(wordsLike.debugCountText == "7")
-        #expect(wordsLike.debugIsStaked == false)
-        let frame = wordsLike.convert(wordsLike.bounds, to: words.contentView)
-        let bounds = words.contentView.bounds
-        #expect(abs(frame.maxX - (bounds.maxX - 10)) < 0.5, "\(frame)")
-        #expect(frame.maxY < bounds.maxY && frame.maxY > bounds.maxY - 30, "on the foot line: \(frame)")
-        expectTouchFallsThrough(wordsLike, in: words)
+        #expect(rails.debugCardCell(at: 0) == nil, "the text post is not a Following card")
+        #expect(rails.debugTextCardCell(at: 0) != nil, "the text post is the list's card")
 
         let picture = try #require(rails.debugCardCell(at: 1))
         picture.layoutIfNeeded()
@@ -256,8 +249,8 @@ struct ForYouCardLikesTests {
         #expect(rails.cardStake(for: rails.cards[1]) == 1)
     }
 
-    /// A tap opens the post; a hold on the heart is the card's own preview
-    /// (no stake menu) — and nothing is spent either way.
+    /// A tap opens the post; a hold on a media card's heart is the card's own
+    /// preview (no stake menu) — and nothing is spent either way.
     @Test func theHeartOfAFollowingCardIsTheCardsToTapAndHold() throws {
         let wallet = Self.wallet()
         let before = wallet.balance
@@ -265,24 +258,37 @@ struct ForYouCardLikesTests {
         var opened: [Int] = []
         rails.onCardTapped = { opened.append($0) }
 
-        #expect(rails.debugTapCard(at: 0))
-        #expect(opened == [0])
+        #expect(rails.debugTapCard(at: 1))
+        #expect(opened == [1])
 
-        let words = try #require(rails.debugCardCell(at: 0))
-        words.layoutIfNeeded()
-        let like = try #require(words.debugLikeReadout)
+        let picture = try #require(rails.debugCardCell(at: 1))
+        picture.layoutIfNeeded()
+        let like = try #require(picture.debugLikeReadout)
         let onHeart = like.convert(CGPoint(x: like.bounds.midX, y: like.bounds.midY), to: rails.debugCardsView)
-        #expect(rails.debugCardMenuConfiguration(at: 0, point: onHeart) != nil, "the card's preview")
+        #expect(rails.debugCardMenuConfiguration(at: 1, point: onHeart) != nil, "the card's preview")
         #expect(wallet.balance == before)
     }
 
+    /// ⚠️ A TEXT card's like is NOT a readout: it is the list's staking chip,
+    /// and a tap on it spends, the heart turning red.
+    @Test func aFollowingTextCardsLikeStakes() throws {
+        let wallet = Self.wallet()
+        let before = wallet.balance
+        let rails = rails(wallet: wallet)
+        let words = try #require(rails.debugTextCardCell(at: 0))
+        #expect(words.debugTapLikesChip())
+        #expect(wallet.balance == before - WalletStore.Policy.defaultStakeAmount)
+        #expect(rails.cardStake(for: rails.cards[0]) == WalletStore.Policy.defaultStakeAmount)
+    }
+
     /// The copies a flight and a close wear carry the card's heart, in the
-    /// card's colour — the text card's and the picture card's alike.
+    /// card's colour.
     @Test func aFollowingCardsCopiesWearTheHeart() throws {
         let post = GalleryPost(
-            id: PostID("words"), kind: .text, isRepost: false, thumbnailURL: nil,
-            caption: "Third coffee.", publishedAtMS: 1,
-            authorID: ProfileID("bo"), authorName: "Bo", authorHandle: "bo", reactionCount: 7
+            id: PostID("picture"), kind: .photo, isRepost: false,
+            thumbnailURL: URL(string: "https://example.com/picture.jpg"),
+            caption: "Sunset", publishedAtMS: 1,
+            authorID: ProfileID("cy"), authorName: "Cy", authorHandle: "cy", reactionCount: 7
         )
         let size = CGSize(width: 150, height: 200)
         let overlay = ForYouFollowingCardCell.makeOverlay(for: post, restingSize: size, viewerStake: 2)
@@ -291,7 +297,7 @@ struct ForYouCardLikesTests {
         #expect(!overlay.debugLikeFrame.isNull)
 
         let standIn = ForYouFollowingCardCell.makeStandIn(for: post, cover: nil, size: size)
-        let standInOverlay = try #require(standIn.subviews.first as? ForYouCardCaptionOverlay)
+        let standInOverlay = try #require(standIn.subviews.compactMap { $0 as? ForYouCardCaptionOverlay }.first)
         #expect(standInOverlay.likeReadout?.debugIsStaked == false)
         #expect(standInOverlay.likeReadout?.debugCountText == "7")
     }

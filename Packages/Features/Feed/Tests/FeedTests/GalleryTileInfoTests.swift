@@ -8,12 +8,14 @@ import Testing
 import UIKit
 @testable import Feed
 
-/// EXPERIMENT `-gallery-tile-info`: on For You's chunks and the pushed
-/// Discover gallery, a tile large enough wears its author and the start of its
-/// caption over the picture — the Following card's foot — and flies it: the
-/// flight's card carries a copy as its resting furniture (faded as it grows,
-/// #319's arrangement) and a close's stand-in lands wearing it. Flag off,
-/// every tile is exactly what it was.
+/// On For You's chunks and the pushed Discover gallery, a tile large enough
+/// wears its author and the start of its caption over the picture — the
+/// Following card's foot — and flies it: the flight's card carries a copy as
+/// its resting furniture (faded as it grows, #319's arrangement) and a close's
+/// stand-in lands wearing it. Began as `-gallery-tile-info`; validated on 3
+/// October 2026, so For You's surfaces always ask, and the flag is gone. A
+/// grid that does not ask (a place's, a post set's) keeps every tile exactly
+/// what it was.
 @MainActor
 struct GalleryTileInfoTests {
     private struct SilentFetcher: ImageFetching {
@@ -63,36 +65,45 @@ struct GalleryTileInfoTests {
         }
     }
 
-    // MARK: - The flag
+    // MARK: - On by default
 
-    @Test func theFlagIsTheLaunchArgument() {
-        #expect(GalleryTileInfo.launchArgument == "-gallery-tile-info")
-        #expect(GalleryTileInfo.isEnabled(arguments: ["App", "-gallery-tile-info"]))
-        #expect(GalleryTileInfo.isEnabled(arguments: ["App"]) == false)
+    /// No flag: For You's Discover list and its pushed gallery both ask for
+    /// the words, out of the box.
+    @Test func forYousSurfacesWearTheWordsByDefault() {
+        let screen = ForYouViewController(
+            viewModel: ForYouViewModel(repository: EmptyProvider()),
+            imagePipeline: pipeline(),
+            makeSnapFeed: { _ in UIViewController() },
+            prewarm: { _ in }
+        )
+        #expect(screen.debugShowsTileInfo)
+        let gallery = DiscoverGalleryViewController(
+            imagePipeline: pipeline(), videoPlayback: nil,
+            header: PushedScreenHeader(wallet: nil, makeWalletSheet: nil, router: nil),
+            openPost: nil
+        )
+        #expect(gallery.debugShowsTileInfo)
     }
 
-    /// Flag off, on both surfaces: no tile wears words, every tile keeps its
-    /// corner count, and no tile's flight or close carries any.
-    @Test func withoutTheFlagEveryTileIsUnchanged() throws {
-        for style in [ForYouGridPage.Style.discover, .grid] {
-            let page = page(style: style, showsInfo: false)
-            let tiles = tiles(on: page)
-            #expect(tiles.isEmpty == false, "precondition: \(style) realized tiles")
-            for (post, cell) in tiles {
-                #expect(cell.debugInfoOverlay == nil)
-                #expect(cell.debugShowsCornerLikes)
-                #expect(page.restingOverlay(for: post.id) == nil)
-                let standIn = try #require(page.makeDismissStandIn(for: post.id) as? PostGridTileStandInView)
-                #expect((standIn.subviews.first as? PostGridTileCell)?.debugInfoOverlay == nil)
-            }
+    /// A grid that does not ask — a place's, a post set's — keeps bare
+    /// tiles: no words, every tile its corner count, no flight or close
+    /// carrying any.
+    @Test func aGridThatDoesNotAskKeepsBareTiles() throws {
+        let page = page(style: .grid, showsInfo: false)
+        let tiles = tiles(on: page)
+        #expect(tiles.isEmpty == false, "precondition: realized tiles")
+        for (post, cell) in tiles {
+            #expect(cell.debugInfoOverlay == nil)
+            #expect(cell.debugShowsCornerLikes)
+            #expect(page.restingOverlay(for: post.id) == nil)
+            let standIn = try #require(page.makeDismissStandIn(for: post.id) as? PostGridTileStandInView)
+            #expect((standIn.subviews.first as? PostGridTileCell)?.debugInfoOverlay == nil)
         }
     }
 
-    // MARK: - Flag on
-
-    /// Flag on: each tile wears the variant ITS size earns — the rule, cell
-    /// by cell — and the mosaic genuinely holds both kinds (some tiles carry
-    /// words, some stay pictures).
+    /// Each tile wears the variant ITS size earns — the rule, cell by cell —
+    /// and the mosaic genuinely holds both kinds (some tiles carry words, some
+    /// stay pictures).
     @Test func eachTileWearsWhatItsSizeEarns() {
         for style in [ForYouGridPage.Style.discover, .grid] {
             let page = page(style: style, showsInfo: true)
@@ -112,7 +123,7 @@ struct GalleryTileInfoTests {
     }
 
     /// The list's cards and the paired cards are not tiles: they keep their
-    /// own furniture whatever the flag says.
+    /// own furniture.
     @Test func pairedCardsAndCardsAreUntouched() throws {
         let page = page(style: .discover, showsInfo: true)
         let paired = try #require(page.segments.first(where: \.isPairs)?.posts.first)
@@ -191,7 +202,6 @@ struct GalleryTileInfoTests {
         let gallery = DiscoverGalleryViewController(
             imagePipeline: pipeline(), videoPlayback: nil,
             header: PushedScreenHeader(wallet: nil, makeWalletSheet: nil, router: nil),
-            showsTileInfo: true,
             openPost: { _, origin, _ in opened = origin }
         )
         gallery.loadViewIfNeeded()
@@ -231,4 +241,10 @@ struct GalleryTileInfoTests {
         #expect(overlay.debugAuthorFrame == own.debugAuthorFrame)
         #expect(overlay.debugLikeFrame == own.debugLikeFrame)
     }
+}
+
+/// Pages nothing — the default needs the screen, not its content.
+private final class EmptyProvider: ForYouProviding, @unchecked Sendable {
+    func firstPage() async throws -> ForYouPage { ForYouPage(posts: [], nextPageToken: nil) }
+    func page(after token: String) async throws -> ForYouPage { ForYouPage(posts: [], nextPageToken: nil) }
 }

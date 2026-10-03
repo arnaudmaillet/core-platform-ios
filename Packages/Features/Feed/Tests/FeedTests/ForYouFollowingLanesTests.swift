@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import FeedInterface
 import Foundation
 import MediaCore
@@ -7,40 +8,36 @@ import Testing
 import UIKit
 @testable import Feed
 
-/// The Following row as two lanes (`-foryou-following-two-lanes`, 2026-10-03):
-/// media cards on top, text cards twice as wide below, one scroller — and,
-/// without the flag, the single-lane row exactly as it was.
+/// The Following row as two lanes (validated 3 October 2026, no flag): media
+/// cards on top, text posts below as the LIST's own card — two media cards
+/// wide, two lines of caption, its repost, save, comments and staking like —
+/// one scroller.
 @MainActor
 struct ForYouFollowingLanesTests {
     private typealias Metrics = ForYouRailsView.Metrics
     private typealias Lanes = ForYouFollowingLanes
 
-    // MARK: - The flag
+    // MARK: - Always two lanes
 
-    @Test func theFlagIsTheLaunchArgument() {
-        #expect(Lanes.isEnabled(arguments: ["app", "-foryou-following-two-lanes"]))
-        #expect(!Lanes.isEnabled(arguments: ["app", "-foryou-card-likes"]))
-        #expect(!Lanes.isEnabled(arguments: []))
+    /// No flag: the row is the lanes layout, a section per lane.
+    @Test func theRowIsAlwaysTheTwoLanes() throws {
+        let fixture = Fixture(cards: Self.mixed)
+        let row = try #require(fixture.cardsRow)
+        #expect(row.collectionViewLayout is ForYouFollowingLanesLayout)
+        #expect(row.numberOfSections == 2)
     }
 
-    /// ⚠️ FLAG OFF IS TODAY'S ROW: one section in the row's order, the flow
-    /// layout, one card tall — mixed kinds and all.
-    @Test func withoutTheFlagTheRowIsTheSingleLane() throws {
-        let cards = Self.mixed
-        let fixture = Fixture(cards: cards, lanes: false)
+    /// A row with no text post is the media lane alone: one card tall, every
+    /// card a Following card at the card size.
+    @Test func withoutTextTheRowIsTheMediaLane() throws {
+        let cards = Self.mixed.filter { $0.kind != .text }
+        let fixture = Fixture(cards: cards)
         let row = try #require(fixture.cardsRow)
-
-        #expect(row.collectionViewLayout is UICollectionViewFlowLayout)
-        #expect(row.numberOfSections == 1)
-        #expect(row.numberOfItems(inSection: 0) == cards.count)
-        for index in cards.indices {
-            #expect(fixture.rails.debugCardIndexPath(at: index) == IndexPath(item: index, section: 0))
-        }
         let card = Metrics.cardSize(forWidth: 402)
         #expect(row.bounds.height == card.height)
+        #expect(row.numberOfItems(inSection: 1) == 0)
         #expect(ForYouRailsView.height(forWidth: 402, friends: 0, following: cards.count)
             == fixture.rails.preferredHeight(forWidth: 402))
-        // Every card, text ones included, is the same card.
         for index in cards.indices {
             #expect(fixture.rails.debugCardLayoutFrame(at: index)?.size == card)
         }
@@ -52,11 +49,7 @@ struct ForYouFollowingLanesTests {
     /// row's order; a tap still opens the post it shows.
     @Test func mediaOnTopTextBelowEachInOrder() throws {
         let cards = Self.mixed
-        let fixture = Fixture(cards: cards, lanes: true)
-        let row = try #require(fixture.cardsRow)
-
-        #expect(row.collectionViewLayout is ForYouFollowingLanesLayout)
-        #expect(row.numberOfSections == 2)
+        let fixture = Fixture(cards: cards)
         let media = cards.filter { $0.kind != .text }.map(\.id)
         let text = cards.filter { $0.kind == .text }.map(\.id)
         #expect(Lanes.partition(cards).media.map(\.id) == media)
@@ -67,6 +60,9 @@ struct ForYouFollowingLanesTests {
             #expect(indexPath.section == (post.kind == .text ? 1 : 0))
             #expect(indexPath.item == lane.firstIndex(of: post.id))
         }
+        #expect(ForYouRailsView.height(
+            forWidth: 402, friends: 0, following: cards.count, textCards: text.count
+        ) == fixture.rails.preferredHeight(forWidth: 402))
 
         var opened: [Int] = []
         fixture.rails.onCardTapped = { opened.append($0) }
@@ -83,10 +79,11 @@ struct ForYouFollowingLanesTests {
     @Test(arguments: [375, 402, 440] as [CGFloat])
     func aTextCardSpansTwoColumns(width: CGFloat) throws {
         let cards = Self.mixed
-        let fixture = Fixture(cards: cards, lanes: true, width: width)
+        let fixture = Fixture(cards: cards, width: width)
         let row = try #require(fixture.cardsRow)
         let card = Metrics.cardSize(forWidth: width)
         let gap = Metrics.itemGap
+        let textHeight = Lanes.textCardHeight(forWidth: width)
         let media = cards.indices.filter { cards[$0].kind != .text }
         let text = cards.indices.filter { cards[$0].kind == .text }
 
@@ -100,115 +97,125 @@ struct ForYouFollowingLanesTests {
             let frame = try #require(fixture.rails.debugCardLayoutFrame(at: index))
             #expect(frame.width == card.width * 2 + gap, "a text card is two media cards and their gap")
             #expect(frame.minY == card.height + gap, "the bottom lane sits under the top one")
-            #expect(frame.height == Lanes.textCardHeight)
+            #expect(frame.height == textHeight)
             #expect(frame.minX == Metrics.sideMargin + CGFloat(position * 2) * (card.width + gap),
                     "a text card starts on an even column")
         }
 
         // ONE scroll view: both lanes' cells are its subviews, and it is as
         // tall as both lanes and the gap.
-        #expect(row.bounds.height == card.height + gap + Lanes.textCardHeight)
+        #expect(row.bounds.height == card.height + gap + textHeight)
         #expect(fixture.rails.subviews.compactMap { $0 as? UICollectionView }.count == 2,
                 "the Friends row and ONE Following scroller")
         let sections = Set(row.visibleCells.compactMap { row.indexPath(for: $0)?.section })
         #expect(sections == [0, 1], "both lanes are cells of the same scroller")
         // The content is as wide as the longer lane.
-        let geometry = try #require(fixture.rails.debugLanesGeometry)
+        let geometry = fixture.rails.debugLanesGeometry
         let longest = max(media.count, text.count * 2)
         #expect(row.contentSize.width == Metrics.sideMargin * 2 + CGFloat(longest) * (card.width + gap) - gap)
         #expect(geometry.contentSize == row.contentSize)
     }
 
-    /// A lane with nothing in it takes no room: all media is today's height,
+    /// A lane with nothing in it takes no room: all media is one card tall,
     /// all text is the text lane alone.
     @Test func anEmptyLaneTakesNoRoom() {
         let card = Metrics.cardSize(forWidth: 402)
         let media = Lanes.geometry(forWidth: 402, mediaCount: 5, textCount: 0)
         #expect(media.height == card.height)
         let text = Lanes.geometry(forWidth: 402, mediaCount: 0, textCount: 3)
-        #expect(text.height == Lanes.textCardHeight)
+        #expect(text.height == Lanes.textCardHeight(forWidth: 402))
         #expect(text.textFrame(at: 0).minY == 0)
-        #expect(ForYouRailsView.height(forWidth: 402, friends: 0, following: 3, lanes: (0, 3))
-            < ForYouRailsView.height(forWidth: 402, friends: 0, following: 3))
+        #expect(ForYouRailsView.height(forWidth: 402, friends: 0, following: 3, textCards: 3)
+            != ForYouRailsView.height(forWidth: 402, friends: 0, following: 3))
     }
 
-    // MARK: - Two lines
+    // MARK: - The text card is the list's card
 
-    /// The bottom lane's card holds two lines of words and truncates the
-    /// rest; today's text card still holds seven.
-    @Test func aLaneTextCardShowsTwoLines() throws {
+    /// ⚠️ THE LANE'S TEXT CARD IS THE CLASSIC CARD (the user's call, 3 October
+    /// 2026): the list's own cell — author band, caption, closing line with
+    /// repost and save — held to two lines with an ellipsis and no "Show
+    /// more", at the lane's size, on the list card's own curve.
+    @Test(arguments: [375, 402, 440] as [CGFloat])
+    func aLaneTextCardIsTheListsCard(width: CGFloat) throws {
         let long = String(repeating: "A long post that goes on and on. ", count: 12)
         let cards = [Self.post("m0", kind: .photo), Self.post("t0", kind: .text, caption: long)]
-        let fixture = Fixture(cards: cards, lanes: true)
-        let cell = try #require(fixture.rails.debugCardCell(at: 1))
+        let fixture = Fixture(cards: cards, width: width)
+        let cell = try #require(fixture.rails.debugTextCardCell(at: 1))
         cell.layoutIfNeeded()
-        let overlay = try #require(Self.overlay(in: cell))
-        overlay.layoutIfNeeded()
+        #expect(fixture.rails.debugCardCell(at: 1) == nil, "no Following card draws words any more")
 
-        #expect(overlay.debugCaptionLines == 2)
-        #expect(overlay.debugCaptionHeight <= (overlay.debugCaptionLineHeight * 2).rounded(.up) + 0.5)
-        #expect(overlay.debugCaptionHeight > overlay.debugCaptionLineHeight * 1.5, "two lines, not one")
-        #expect(overlay.debugAuthorFrame.maxY <= cell.bounds.height, "the author line stays on the card")
+        #expect(cell.fixedCaptionLines == Lanes.textLines)
+        #expect(Lanes.textLines == 2)
+        #expect(cell.debugCaptionLineLimit == 2)
+        #expect(cell.debugCaptionLineBreakMode == .byTruncatingTail)
+        #expect(!cell.debugShowsMoreAffordance)
+        #expect(cell.debugCaptionText == long, "the label cuts the words; they are all there")
+        let line = UIFont.preferredFont(forTextStyle: .body).lineHeight
+        #expect(cell.debugCaptionFrame.height > line * 1.5, "two lines, not one")
+        #expect(cell.debugCaptionFrame.height < line * 2.6, "two lines, not more")
 
-        // The flight's copy and the close's stand-in wrap the same way.
-        let copy = ForYouFollowingCardCell.makeOverlay(for: cards[1], restingSize: cell.bounds.size)
-        #expect(copy.debugCaptionLines == 2)
-        let standIn = ForYouFollowingCardCell.makeTextStandIn(for: cards[1], size: cell.bounds.size)
-        let standInOverlay = try #require(standIn.subviews.compactMap { $0 as? ForYouCardCaptionOverlay }.first)
-        #expect(standInOverlay.debugCaptionLines == 2)
+        // The band names the author; the closing line holds repost and save.
+        #expect(cell.authorBandModel?.name == "Bo")
+        #expect(cell.visibleRowActions.repost)
+        #expect(cell.visibleRowActions.bookmark)
+        // Everything on the card, the closing line at its foot.
+        let closing = cell.debugClosingLineFrame
+        #expect(!closing.isNull)
+        #expect(abs(closing.maxY - (cell.bounds.height - PostGridListRowCell.metaBottomInset)) < 0.5)
+        #expect(cell.debugCaptionFrame.maxY <= closing.minY)
 
-        // Today's tall text card: seven, as before.
-        let tall = ForYouFollowingCardCell.makeOverlay(
-            for: cards[1], restingSize: Metrics.cardSize(forWidth: 402)
-        )
-        #expect(tall.debugCaptionLines == ForYouCardCaptionOverlay.textCaptionLines)
+        // The lane's size: two media cards and their gap, the height the
+        // list's card needs for its two lines at that width.
+        let card = Metrics.cardSize(forWidth: width)
+        #expect(cell.bounds.width == card.width * 2 + Metrics.itemGap)
+        #expect(cell.bounds.height == PostGridListRowCell.fixedTextCardHeight(
+            width: cell.bounds.width, captionLines: 2
+        ))
     }
 
-    /// ⚠️ THE LANE'S TEXT CARD IS TODAY'S TEXT CARD (the user's call, live on
-    /// the sim): the same cell, ground, corner, type, author line, heart and
-    /// insets — only its size and its two lines differ. Pinned against the
-    /// single-lane row's own text card, and the flight's copy and the close's
-    /// stand-in against the lane card.
-    @Test func aLaneTextCardIsTodaysTextCardAtTheLaneSize() throws {
-        let words = Self.post("t0", kind: .text, caption: String(repeating: "Words, words. ", count: 20))
-        let cards = [Self.post("m0", kind: .photo), words]
-        let lane = try #require(Fixture(cards: cards, lanes: true).rails.debugCardCell(at: 1))
-        let today = try #require(Fixture(cards: cards, lanes: false).rails.debugCardCell(at: 1))
-        for cell in [lane, today] { cell.layoutIfNeeded() }
-        let laneOverlay = try #require(Self.overlay(in: lane))
-        let todayOverlay = try #require(Self.overlay(in: today))
+    /// A short caption keeps the card's size and its closing line where a
+    /// long one puts it — the lane is one height.
+    @Test func aShortCaptionKeepsTheLanesShape() throws {
+        let cards = [
+            Self.post("t0", kind: .text, caption: String(repeating: "Long words here. ", count: 20)),
+            Self.post("t1", kind: .text, caption: "Short.")
+        ]
+        let fixture = Fixture(cards: cards)
+        let long = try #require(fixture.rails.debugTextCardCell(at: 0))
+        let short = try #require(fixture.rails.debugTextCardCell(at: 1))
+        for cell in [long, short] { cell.layoutIfNeeded() }
+        #expect(long.bounds.size == short.bounds.size)
+        #expect(long.debugClosingLineFrame == short.debugClosingLineFrame)
+    }
 
-        #expect(lane.contentView.backgroundColor == today.contentView.backgroundColor)
-        #expect(lane.contentView.layer.cornerRadius == today.contentView.layer.cornerRadius)
-        #expect(laneOverlay.debugCaptionLineHeight == todayOverlay.debugCaptionLineHeight, "the same type")
-        // The same insets: the words from the top-left, the author line and
-        // the heart on the foot.
-        #expect(laneOverlay.debugCaptionFrame.origin == todayOverlay.debugCaptionFrame.origin)
-        #expect(laneOverlay.debugAuthorFrame.minX == todayOverlay.debugAuthorFrame.minX)
-        #expect(lane.bounds.height - laneOverlay.debugAuthorFrame.maxY
-            == today.bounds.height - todayOverlay.debugAuthorFrame.maxY)
-        #expect(laneOverlay.debugAuthorFrame.height == todayOverlay.debugAuthorFrame.height)
-        #expect(!todayOverlay.debugLikeFrame.isNull, "precondition: today's card has its heart")
-        #expect(!laneOverlay.debugLikeFrame.isNull, "the lane card lost its heart")
-        #expect(lane.bounds.width - laneOverlay.debugLikeFrame.maxX
-            == today.bounds.width - todayOverlay.debugLikeFrame.maxX)
-        #expect(lane.bounds.height - laneOverlay.debugLikeFrame.maxY
-            == today.bounds.height - todayOverlay.debugLikeFrame.maxY)
-        // Only the lines and the size differ.
-        #expect(laneOverlay.debugCaptionLines == 2)
-        #expect(todayOverlay.debugCaptionLines == ForYouCardCaptionOverlay.textCaptionLines)
+    // MARK: - Its controls
 
-        // The copies a flight and a close draw are the lane card.
-        let copy = ForYouFollowingCardCell.makeOverlay(for: words, restingSize: lane.bounds.size)
-        let standIn = ForYouFollowingCardCell.makeTextStandIn(for: words, size: lane.bounds.size)
-        let standInOverlay = try #require(standIn.subviews.compactMap { $0 as? ForYouCardCaptionOverlay }.first)
-        #expect(standIn.backgroundColor == lane.contentView.backgroundColor)
-        for twin in [copy, standInOverlay] {
-            #expect(twin.debugCaptionFrame == laneOverlay.debugCaptionFrame)
-            #expect(twin.debugAuthorFrame == laneOverlay.debugAuthorFrame)
-            #expect(twin.debugLikeFrame == laneOverlay.debugLikeFrame)
-            #expect(twin.debugCaptionLines == 2)
-        }
+    /// ⚠️ THE LIKE IS THE REAL STAKE, not the compact cards' readout: a tap
+    /// on the chip spends from the wallet and the heart turns red.
+    @Test func aLaneTextCardsLikeStakes() throws {
+        let wallet = Self.wallet()
+        let before = wallet.balance
+        let fixture = Fixture(cards: Self.mixed, staking: PostCardStaking(wallet: wallet))
+        let index = try #require(Self.mixed.firstIndex { $0.kind == .text })
+        let cell = try #require(fixture.rails.debugTextCardCell(at: index))
+        let id = Self.mixed[index].id
+
+        #expect(cell.debugTapLikesChip(), "the chip is wired")
+        #expect(wallet.balance == before - WalletStore.Policy.defaultStakeAmount)
+        #expect(wallet.boostTotal(forTarget: id.rawValue) == WalletStore.Policy.defaultStakeAmount)
+        #expect(fixture.rails.cardStake(for: Self.mixed[index]) == WalletStore.Policy.defaultStakeAmount)
+    }
+
+    /// The comment count opens the card's post, as a tap on the card does;
+    /// the band's "..." offers the host's rows.
+    @Test func aLaneTextCardsCommentsOpenItsPost() throws {
+        let fixture = Fixture(cards: Self.mixed)
+        var opened: [Int] = []
+        fixture.rails.onCardTapped = { opened.append($0) }
+        let index = try #require(Self.mixed.firstIndex { $0.kind == .text })
+        let cell = try #require(fixture.rails.debugTextCardCell(at: index))
+        #expect(cell.debugTapCommentsChip())
+        #expect(opened == [index])
     }
 
     // MARK: - Snapping
@@ -259,7 +266,7 @@ struct ForYouFollowingLanesTests {
         #expect(snap(-50, .backward) == 0)
     }
 
-    /// No text card: the row snaps by column, exactly as the single lane.
+    /// No text card: the row snaps by column, one media card at a time.
     @Test func withoutTextTheRowSnapsByColumn() {
         let geometry = Lanes.geometry(forWidth: 402, mediaCount: 6, textCount: 0)
         #expect(geometry.snapExtents == (0..<6).map { geometry.mediaFrame(at: $0) }.map { $0.minX...$0.maxX })
@@ -269,9 +276,9 @@ struct ForYouFollowingLanesTests {
     /// with the second text card flush right, a flick back returns to the
     /// start.
     @Test func theLanesSnapThroughTheirDelegate() throws {
-        let fixture = Fixture(cards: Self.mixed, lanes: true)
+        let fixture = Fixture(cards: Self.mixed)
         let row = try #require(fixture.cardsRow)
-        let geometry = try #require(fixture.rails.debugLanesGeometry)
+        let geometry = fixture.rails.debugLanesGeometry
 
         var target = CGPoint(x: 40, y: 0)
         fixture.rails.scrollViewWillEndDragging(row, withVelocity: CGPoint(x: 1.5, y: 0), targetContentOffset: &target)
@@ -289,13 +296,15 @@ struct ForYouFollowingLanesTests {
     @Test(arguments: [GalleryPost.Kind.video, .text])
     func eitherLanesCardIsAHeroSource(kind: GalleryPost.Kind) throws {
         let cards = Self.mixed
-        let fixture = Fixture(cards: cards, lanes: true)
+        let fixture = Fixture(cards: cards)
         let index = try #require(cards.firstIndex { $0.kind == kind })
         let tapped = cards[index]
         let origin = ForYouRowOrigins.card(
             tapped, stream: cards, rails: fixture.rails, page: fixture.page, host: fixture.host.view
         )
-        let cell = try #require(fixture.rails.debugCardCell(at: index))
+        let cell: UICollectionViewCell = try #require(
+            kind == .text ? fixture.rails.debugTextCardCell(at: index) : fixture.rails.debugCardCell(at: index)
+        )
         let frame = try #require(origin.frame(fixture.host.view))
 
         #expect(frame == cell.convert(cell.bounds, to: fixture.host.view))
@@ -303,7 +312,60 @@ struct ForYouFollowingLanesTests {
         let reveal = try #require(origin.textReveal)
         #expect(reveal.rowFrame(fixture.host.view) == frame)
         let standIn = try #require(reveal.makeDismissStandIn(nil))
-        #expect(standIn.bounds.size == frame.size, "the close lands as the lane's own card")
+        standIn.frame = CGRect(origin: .zero, size: frame.size)
+        standIn.layoutIfNeeded()
+        if kind == .text {
+            // The list's stand-in, drawing the lane's card.
+            #expect(standIn is RevealDismissCardView)
+            let card = try #require(standIn.subviews.first as? PostGridListRowCell)
+            #expect(card.bounds.size == frame.size, "the close lands as the lane's own card")
+        } else {
+            #expect(standIn.bounds.size == frame.size, "the close lands as the lane's own card")
+        }
+    }
+
+    /// ⚠️ A TEXT CARD OPENS THE WAY DISCOVER'S LIST OPENS ITS TEXT CARDS: the
+    /// page aligned to the card's caption, the card's band borrowed for the
+    /// flight, the page veiled below the card's two lines, on the list card's
+    /// own corner and fill — and it never flies or wears a furniture copy.
+    @Test func aTextCardOpensAsTheListsWindow() throws {
+        let long = String(repeating: "A long post that goes on and on. ", count: 12)
+        let cards = [Self.post("m0", kind: .photo), Self.post("t0", kind: .text, caption: long)]
+        let fixture = Fixture(cards: cards)
+        let cell = try #require(fixture.rails.debugTextCardCell(at: 1))
+        cell.layoutIfNeeded()
+        let origin = ForYouRowOrigins.card(
+            cards[1], stream: cards, rails: fixture.rails, page: fixture.page, host: fixture.host.view
+        )
+        let reveal = try #require(origin.textReveal)
+
+        #expect(!origin.hasHero)
+        #expect(origin.restingOverlay == nil, "a text card never flies, so it wears no copy")
+        #expect(reveal.alignsPageToSource, "the page grows out of the card, caption on caption")
+        #expect(reveal.captionTop == cell.revealCaptionTop)
+        #expect(reveal.captionTop > 0, "under the band")
+        #expect(reveal.captionEnd == cell.revealCut)
+        #expect(reveal.captionEnd.map { $0 < cell.bounds.height - cell.revealCaptionTop } == true,
+                "a cut caption veils the page below its two lines")
+        #expect(reveal.authorBand == cell.authorBandModel)
+        #expect(reveal.cornerRadius == nil, "the card's own curve")
+        #expect(reveal.fill == PostGridListRowCell.cardFillColor)
+
+        // The stand-in is the card, line for line.
+        let standIn = try #require(reveal.makeDismissStandIn(nil))
+        standIn.frame = cell.bounds
+        standIn.layoutIfNeeded()
+        let card = try #require(standIn.subviews.first as? PostGridListRowCell)
+        #expect(card.fixedCaptionLines == 2)
+        #expect(card.debugCaptionFrame == cell.debugCaptionFrame)
+        #expect(card.debugClosingLineFrame == cell.debugClosingLineFrame)
+        #expect(card.visibleRowActions.repost && card.visibleRowActions.bookmark)
+
+        // The opening hides the card under its window; the close puts it back.
+        reveal.setConcealed(true)
+        #expect(cell.isHidden)
+        reveal.setConcealed(false)
+        #expect(!cell.isHidden)
     }
 
     /// A card scrolled away under the open post is brought back before the
@@ -312,9 +374,9 @@ struct ForYouFollowingLanesTests {
     @Test(arguments: [GalleryPost.Kind.photo, .text])
     func aCardScrolledAwayComesBackOnASpread(kind: GalleryPost.Kind) throws {
         let cards = Self.mixed
-        let fixture = Fixture(cards: cards, lanes: true)
+        let fixture = Fixture(cards: cards)
         let row = try #require(fixture.cardsRow)
-        let geometry = try #require(fixture.rails.debugLanesGeometry)
+        let geometry = fixture.rails.debugLanesGeometry
         // The LAST card of its lane, from the start: off to the right.
         let index = try #require(cards.lastIndex { ($0.kind == .text) == (kind == .text) })
         let origin = ForYouRowOrigins.card(
@@ -344,10 +406,11 @@ struct ForYouFollowingLanesTests {
         #expect(row.contentOffset.x == 0, "the first card returns flush left, at the start")
     }
 
-    /// The long press lifts a text card's preview too.
+    /// The long press lifts a text card's preview too — the Following row's
+    /// preview, committed into the card's own open.
     @Test func aTextCardLiftsAPreview() throws {
         let cards = Self.mixed
-        let fixture = Fixture(cards: cards, lanes: true)
+        let fixture = Fixture(cards: cards)
         let index = try #require(cards.firstIndex { $0.kind == .text })
         let configuration = try #require(fixture.rails.debugCardMenuConfiguration(at: index))
         var opened: [Int] = []
@@ -373,12 +436,15 @@ struct ForYouFollowingLanesTests {
             caption: caption ?? "caption \(id)", publishedAtMS: 1,
             authorID: ProfileID("bo"), authorName: "Bo", authorHandle: "bo",
             // A count, so every card wears its heart as the mock's do.
-            reactionCount: 234
+            reactionCount: 234, commentCount: 5
         )
     }
 
-    private static func overlay(in cell: UICollectionViewCell) -> ForYouCardCaptionOverlay? {
-        cell.contentView.subviews.compactMap { $0 as? ForYouCardCaptionOverlay }.first
+    private static func wallet() -> WalletStore {
+        let name = "foryou-lanes-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        defaults.removePersistentDomain(forName: name)
+        return WalletStore(defaults: defaults)
     }
 
     private struct SilentFetcher: ImageFetching {
@@ -393,10 +459,11 @@ struct ForYouFollowingLanesTests {
         let rails: ForYouRailsView
         let page: ForYouGridPage
 
-        init(cards: [GalleryPost], lanes: Bool, width: CGFloat = 402) {
+        init(cards: [GalleryPost], width: CGFloat = 402, staking: PostCardStaking? = nil) {
             window = UIWindow(frame: CGRect(x: 0, y: 0, width: width, height: 874))
             let pipeline = ImagePipeline(fetcher: SilentFetcher())
-            rails = ForYouRailsView(imagePipeline: pipeline, videoPlayback: nil, followingLanes: lanes)
+            rails = ForYouRailsView(imagePipeline: pipeline, videoPlayback: nil)
+            rails.staking = staking
             page = ForYouGridPage(imagePipeline: pipeline, style: .discover, videoPlayback: nil)
             var model = ForYouViewModel.Rails()
             model.following = cards

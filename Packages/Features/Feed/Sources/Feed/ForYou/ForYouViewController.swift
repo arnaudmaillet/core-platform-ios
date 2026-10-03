@@ -211,17 +211,14 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         self.reporting = reporting
         self.socialGraph = socialGraph
         page = ForYouGridPage(imagePipeline: imagePipeline, style: .discover, videoPlayback: videoPlayback)
-        rails = ForYouRailsView(
-            imagePipeline: imagePipeline, videoPlayback: videoPlayback,
-            followingLanes: ForYouFollowingLanes.isEnabled
-        )
+        rails = ForYouRailsView(imagePipeline: imagePipeline, videoPlayback: videoPlayback)
         staking = wallet.map(PostCardStaking.init)
         super.init(nibName: nil, bundle: nil)
         page.staking = staking
         rails.staking = staking
         // The chunks' large tiles wear their author and caption start
-        // (`GalleryTileInfo`) — the gallery's too, handed the flag at its push.
-        page.showsTileInfo = GalleryTileInfo.isEnabled
+        // (`PostTileInfo`) — the Discover gallery's too.
+        page.showsTileInfo = true
         // NOT hidesBottomBarWhenPushed: this is a tab root, and the bar is how
         // the viewer leaves it.
     }
@@ -321,6 +318,15 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         rails.onListHeaderTapped = { [weak self] in self?.pushDiscoverGallery() }
         rails.storyMenuElements = { [weak self] story in self?.storyMenuElements(for: story) ?? [] }
         rails.cardMenuElements = { [weak self] post in self?.cardMenuElements(for: post) ?? [] }
+        // A text card is the list's card: its band opens the author and its
+        // "..." offers the list's rows.
+        rails.onCardAuthorTapped = { [weak self] post in self?.openAuthor(of: post) }
+        rails.cardAuthorMenuActions = { [weak self] post, anchor in
+            guard let self, let authorID = post.authorID else { return [] }
+            return authorMenuActions(
+                for: ForYouGridPage.AuthorMenuContext(post: post, authorID: authorID, anchor: anchor)
+            )
+        }
         // The rows' players keep time with the list's: the list's reconcile
         // runs as it scrolls, which is also when a row enters or leaves the
         // band. The rows are reconciled FIRST and the list plays what the
@@ -1118,7 +1124,6 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             imagePipeline: imagePipeline, videoPlayback: videoPlayback,
             header: makePushedHeader(),
             staking: staking,
-            showsTileInfo: GalleryTileInfo.isEnabled,
             openPost: openPostHero
         )
         gallery.onNearEnd = { [weak self] in self?.viewModel.loadNextPageIfNeeded() }
@@ -2849,6 +2854,8 @@ extension ForYouViewController: DebugItemSelectable {
 extension ForYouViewController {
     /// The rows leading the list — their headers' own tap paths.
     var debugRails: ForYouRailsView { rails }
+    /// Whether Discover's chunk tiles wear their words (`PostTileInfo`).
+    var debugShowsTileInfo: Bool { page.showsTileInfo }
     /// Presses a chunk's "View all", as its footer does.
     func debugPressViewAll() { page.onViewAllTapped?() }
 }

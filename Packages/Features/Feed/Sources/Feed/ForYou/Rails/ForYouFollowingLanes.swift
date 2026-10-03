@@ -3,20 +3,34 @@ import Foundation
 import PostGrid
 import UIKit
 
-/// EXPERIMENT (2026-10-03, `-foryou-following-two-lanes`): the Following row
-/// as TWO LANES in one horizontal scroller — pictures on top, words below.
+/// The Following row as TWO LANES in one horizontal scroller — pictures on
+/// top, words below. Began as the `-foryou-following-two-lanes` experiment
+/// (#375) and was validated on 3 October 2026: it is the row now, and the
+/// single lane it replaced is gone.
 ///
 /// ```
 ///     Following 5 ›
 ///   ┌──────┐ ┌──────┐ ┌───       the top lane: MEDIA posts only, the
-///   │ ▶    │ │ ▶    │ │ ▶        row's cards as they are today
+///   │ ▶    │ │ ▶    │ │ ▶        Following cards (`ForYouFollowingCardCell`)
 ///   │ Ana  │ │ Bo   │ │
 ///   └──────┘ └──────┘ └───
 ///   ┌───────────────┐ ┌────     the bottom lane: TEXT posts only, each
-///   │ two lines of… │ │ two     card as wide as two media cards and the
-///   │ ◉ Cy          │ │ ◉ D     gap between them, two lines at most
+///   │ ◉ Cy @cy · 2h │ │ ◉ D     the list's own card (`PostGridListRowCell`)
+///   │ two lines of… │ │ two     as wide as two media cards and the gap
+///   │ ⎘ ⌑     💬 ♡ │ │ ⎘ ⌑     between them, two lines at most
 ///   └───────────────┘ └────
 /// ```
+///
+/// **A text card is the CLASSIC card**, the one Discover's list draws: the
+/// author band, the caption, and the closing line with its repost, save,
+/// comments and like — the like a real stake (`PostCardStaking.bind`), not
+/// the compact cards' readout. Only two things differ from the list's: its
+/// caption stops at two lines with an ellipsis and no "Show more"
+/// (`PostGridListRowCell.fixedCaptionLines`), and its height is the lane's,
+/// what that card needs for two lines at the lane's width
+/// (`textCardHeight(forWidth:)`) — a shorter caption leaves its air above the
+/// closing line. It opens and closes as the list's text cards do, a window
+/// with the page aligned to its caption (`ForYouRowOrigins.textCardReveal`).
 ///
 /// **One scroll view, two rows of items.** The lanes move together because
 /// they are one collection: section 0 is the top lane, section 1 the bottom
@@ -47,38 +61,18 @@ import UIKit
 /// by single columns would leave every other rest with a text card cut in
 /// half on BOTH sides of the screen — the bottom lane never at rest. The
 /// start is still flush left and the end flush right (`RowEdgeSnap` adds both
-/// ends). A row with no text card snaps by column, exactly as the
-/// single-lane row does; a row with no media card is its text cards, which
-/// are the spreads.
+/// ends). A row with no text card snaps by column, one media card at a time;
+/// a row with no media card is its text cards, which are the spreads.
 ///
 /// **A lane with nothing in it is not drawn**: no media posts, and the text
-/// lane is the whole row; no text posts, and the row is today's.
-///
-/// Off by default: without the launch argument the row is the single lane it
-/// has always been.
+/// lane is the whole row; no text posts, and the row is the media cards alone.
 enum ForYouFollowingLanes {
-    /// The launch argument that turns the experiment on.
-    static let launchArgument = "-foryou-following-two-lanes"
-
-    /// Whether `arguments` ask for the experiment. Release builds never do.
-    static func isEnabled(arguments: [String]) -> Bool {
-        #if DEBUG
-        arguments.contains(launchArgument)
-        #else
-        false
-        #endif
-    }
-
-    /// Whether this process asked for it — what For You builds its row with.
-    static var isEnabled: Bool {
-        isEnabled(arguments: ProcessInfo.processInfo.arguments)
-    }
-
     /// A lane, by its section in the row's collection.
     enum Lane: Int, CaseIterable {
-        /// Photos and videos — the row's cards as they have always been.
+        /// Photos and videos — the Following cards.
         case media = 0
-        /// Words alone: short wide cards, two lines at most.
+        /// Words alone: the list's card, two media cards wide, two lines at
+        /// most.
         case text = 1
 
         init(_ post: GalleryPost) {
@@ -103,9 +97,10 @@ enum ForYouFollowingLanes {
         var margin: CGFloat
         /// Between two columns, and between the two lanes.
         var gap: CGFloat
-        /// A media card — the single-lane row's card.
+        /// A media card — a Following card.
         var cardSize: CGSize
-        /// A text card's height: its two lines and its author line.
+        /// A text card's height: the list's card with two lines of caption
+        /// (`textCardHeight(forWidth:)`).
         var textHeight: CGFloat
         var mediaCount: Int
         var textCount: Int
@@ -175,15 +170,19 @@ enum ForYouFollowingLanes {
         }
     }
 
-    /// A text card's height when its words take `lines` lines: the card's
-    /// own insets around the words and its author line
-    /// (`ForYouCardCaptionOverlay.textCardHeight`).
+    /// A text card's height in a row `width` wide: the list's card at the
+    /// lane's width (two media cards and the gap) with its caption filling
+    /// `textLines` lines — band, words and closing line
+    /// (`PostGridListRowCell.fixedTextCardHeight`).
     @MainActor
-    static var textCardHeight: CGFloat {
-        ForYouCardCaptionOverlay.textCardHeight(lines: textLines)
+    static func textCardHeight(forWidth width: CGFloat) -> CGFloat {
+        let card = ForYouRailsView.Metrics.cardSize(forWidth: width).width
+        return PostGridListRowCell.fixedTextCardHeight(
+            width: card * 2 + ForYouRailsView.Metrics.itemGap, captionLines: textLines
+        )
     }
 
-    /// The row's geometry at `width`, with the single-lane row's card, margin
+    /// The row's geometry at `width`, with the Following card's size, margin
     /// and gap.
     @MainActor
     static func geometry(forWidth width: CGFloat, mediaCount: Int, textCount: Int) -> Geometry {
@@ -193,7 +192,8 @@ enum ForYouFollowingLanes {
             margin: Metrics.sideMargin,
             gap: Metrics.itemGap,
             cardSize: Metrics.cardSize(forWidth: width),
-            textHeight: textCardHeight,
+            // Measured only when there is a text card to size.
+            textHeight: textCount > 0 ? textCardHeight(forWidth: width) : 0,
             mediaCount: mediaCount,
             textCount: textCount
         )

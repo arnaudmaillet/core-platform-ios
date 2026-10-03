@@ -306,7 +306,7 @@ final class PostGridFlightCard: UIView {
     /// flight's first frame animates FROM.
     ///
     /// ⚠️ AN OVERLAY THAT DRAWS ITS OWN HEART REPLACES THE COUNT. A large
-    /// mosaic tile wearing its words (`-gallery-tile-info`) closes its author
+    /// mosaic tile wearing its words (`PostTileInfo`) closes its author
     /// line with its likes and drops the corner readout
     /// (`PostGridTileCell.showsInfo`) — so the card, the tile's twin, flies
     /// one heart, the overlay's, not two.
