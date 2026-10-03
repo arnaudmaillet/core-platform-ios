@@ -116,8 +116,8 @@ final class LoginFlowCoordinator {
         methodSelection.onMethodSelected = { [self] method in
             select(method)
         }
-        methodSelection.onCreateAccount = { [self] in
-            showRegistration()
+        methodSelection.onLogIn = { [self] in
+            showEmailAuth()
         }
         methodSelection.flowToolbarItems = flowToolbarItems
 
@@ -154,7 +154,7 @@ final class LoginFlowCoordinator {
         }
         phone.flowToolbarItems = flowToolbarItems
         phone.navigationItem.rightBarButtonItem = makeLanguageNavItem()
-        navigationController?.pushViewController(phone, animated: true)
+        push(phone)
     }
 
     /// The OTP seam. There is no SMS/OTP plane on the BFF yet (see
@@ -200,7 +200,7 @@ final class LoginFlowCoordinator {
         }
         credentials.flowToolbarItems = flowToolbarItems
         credentials.navigationItem.rightBarButtonItem = makeLanguageNavItem()
-        navigationController?.pushViewController(credentials, animated: true)
+        push(credentials)
     }
 
     /// The reset-dispatch seam: there is no reset plane on the BFF yet —
@@ -214,7 +214,7 @@ final class LoginFlowCoordinator {
         }
         reset.flowToolbarItems = flowToolbarItems
         reset.navigationItem.rightBarButtonItem = makeLanguageNavItem()
-        navigationController?.pushViewController(reset, animated: true)
+        push(reset)
     }
 
     private func presentPasswordResetUnavailable() {
@@ -247,9 +247,22 @@ final class LoginFlowCoordinator {
         }
     }
 
+    /// Pushes a step of the flow. A credential step needs the keyboard and
+    /// the whole height, so a sheet resting at its shorter detent grows first.
+    private func push(_ screen: UIViewController) {
+        guard let navigationController else { return }
+        if let sheet = navigationController.sheetPresentationController,
+           sheet.selectedDetentIdentifier != .large {
+            sheet.animateChanges { sheet.selectedDetentIdentifier = .large }
+        }
+        navigationController.pushViewController(screen, animated: true)
+    }
+
+    /// The account-creation steps (code, date of birth, handle) land here once
+    /// the backend has a sign-up contract (#449); nothing reaches it until then.
     private func showRegistration() {
         if let makeRegistrationViewController {
-            navigationController?.pushViewController(makeRegistrationViewController(), animated: true)
+            push(makeRegistrationViewController())
             return
         }
         pushPlaceholder(
@@ -284,7 +297,7 @@ final class LoginFlowCoordinator {
         configuration.text = text
         configuration.secondaryText = secondaryText
         placeholder.contentUnavailableConfiguration = configuration
-        navigationController?.pushViewController(placeholder, animated: true)
+        push(placeholder)
     }
 
     /// Federated sign-in has no backend yet (no OAuth plane on the BFF);

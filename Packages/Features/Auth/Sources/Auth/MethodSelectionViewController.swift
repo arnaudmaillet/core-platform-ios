@@ -2,13 +2,14 @@ import DesignSystem
 import UIKit
 
 /// Screen 1 of the sign-in flow: an explicit method menu — the federated
-/// providers plus the email and phone credential flows — with the account
-/// creation action set off below an "or" separator. No input, no keyboard:
+/// providers plus the email and phone credential flows — with "Already have
+/// an account? Log in" set off below an "or" separator. No input, no keyboard:
 /// a pure branch point. Dumb view: reports selections upward; the flow
 /// coordinator decides where to go.
 final class MethodSelectionViewController: BottomAnchoredTableViewController {
     var onMethodSelected: ((SignInMethod) -> Void)?
-    var onCreateAccount: (() -> Void)?
+    /// "Already have an account? Log in": straight to the email login.
+    var onLogIn: (() -> Void)?
     /// Why the flow opened, when a guest's gated action opened it ("Sign up to
     /// like this post"): set as the headline over the methods. Nil from a
     /// plain "Log in or sign up", which needs no reason.
@@ -17,16 +18,16 @@ final class MethodSelectionViewController: BottomAnchoredTableViewController {
     private static let methodCornerRadius: CGFloat = 12
 
     /// Each method gets its own standalone section (one row each); the
-    /// sign-up link closes the menu below the "or" separator.
+    /// log-in link closes the menu below the "or" separator.
     private enum Section: Equatable {
         case method(SignInMethod)
-        case createAccount
+        case logIn
     }
 
     private let sections: [Section] =
-        SignInMethod.all.map(Section.method) + [.createAccount]
+        SignInMethod.all.map(Section.method) + [.logIn]
 
-    private lazy var createAccountCell = makeLinkCell(title: "Create an Account")
+    private lazy var logInCell = makeLinkCell(title: "Already have an account? Log in")
 
     init() {
         super.init(style: .insetGrouped)
@@ -47,8 +48,8 @@ final class MethodSelectionViewController: BottomAnchoredTableViewController {
 
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         switch sections[indexPath.section] {
-        case .createAccount:
-            return createAccountCell
+        case .logIn:
+            return logInCell
         case .method(let method):
             let cell = UITableViewCell()
             // Sharper corners than input capsules so methods read as
@@ -75,8 +76,8 @@ final class MethodSelectionViewController: BottomAnchoredTableViewController {
         switch sections[indexPath.section] {
         case .method(let method):
             onMethodSelected?(method)
-        case .createAccount:
-            onCreateAccount?()
+        case .logIn:
+            onLogIn?()
         }
     }
 
@@ -87,7 +88,7 @@ final class MethodSelectionViewController: BottomAnchoredTableViewController {
         if let prompt, section == 0 {
             return makePromptHeader(prompt)
         }
-        guard sections[section] == .createAccount else { return nil }
+        guard sections[section] == .logIn else { return nil }
         return makeCenteredTextHeader(
             text: "or",
             textStyle: .footnote,
@@ -105,7 +106,7 @@ final class MethodSelectionViewController: BottomAnchoredTableViewController {
                 return prompt == nil ? Spacing.xl : UITableView.automaticDimension
             }
             return Spacing.sm - Self.collapsedFooterHeight // tight cohesive menu
-        case .createAccount:
+        case .logIn:
             return UITableView.automaticDimension // the "or" separator view
         }
     }
@@ -142,7 +143,6 @@ private extension SignInMethod {
         switch self {
         case .provider(.apple): UIImage(systemName: "apple.logo")
         case .provider(.google): UIImage(systemName: "g.circle")
-        case .provider(.microsoft): UIImage(systemName: "m.square")
         case .email: UIImage(systemName: "envelope")
         case .phone: UIImage(systemName: "phone")
         }

@@ -267,8 +267,23 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         let signIn = SignInSheetContainer(content: flow) { [weak self] in
             self?.finishSignUp(signedIn: false)
         }
+        // A sheet over what the guest was doing, not a screen instead of it:
+        // tall enough for the methods, growing to full height for a credential
+        // step (the flow asks for that itself).
+        if let sheet = signIn.sheetPresentationController {
+            sheet.detents = [Self.signUpMethodsDetent, .large()]
+            sheet.prefersGrabberVisible = true
+        }
         presentedSignIn = signIn
         StakeShop.topPresenter(over: shell).present(signIn, animated: true)
+    }
+
+    /// The sign-up sheet's resting height: the methods and the way to log in,
+    /// with the screen behind it still in view.
+    private static let signUpMethodsDetent = UISheetPresentationController.Detent.custom(
+        identifier: .init("signUpMethods")
+    ) { context in
+        min(context.maximumDetentValue, 540)
     }
 
     private func finishSignUp(signedIn: Bool) {
@@ -282,7 +297,18 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
     /// A session landed: put away the sign-in flow if a guest opened one, and
     /// start what only a member has.
     private func didSignIn() {
-        presentedSignIn?.dismiss(animated: true)
+        if let sheet = presentedSignIn {
+            // Signed in from the sheet: say so once it is gone, over the
+            // screen the guest was on — where the action they started has
+            // just landed.
+            sheet.dismiss(animated: true) { [weak self] in
+                // The screen on top of the active tab: its safe area clears the
+                // tab bar, which the shell's own view does not.
+                guard let host = self?.mainTabCoordinator?.activeNavigationController?.topViewController?.view
+                else { return }
+                ToastView.present("You're signed in", in: host)
+            }
+        }
         finishSignUp(signedIn: true)
         #if DEBUG
         // `-mock-likes-still`: no ticking like counts — so a refresh can
