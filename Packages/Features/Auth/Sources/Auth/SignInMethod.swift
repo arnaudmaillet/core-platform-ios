@@ -3,16 +3,17 @@ import Foundation
 /// External identity providers offered on the method-selection screen.
 /// Selecting one routes to a federated flow (no backend support yet —
 /// surfaced as unavailable).
+///
+/// Apple and Google only (guest mode, decision 2): Sign in with Apple is the
+/// equivalent login guideline 4.8 requires next to Google.
 enum IdentityProvider: CaseIterable, Sendable {
     case apple
     case google
-    case microsoft
 
     var displayName: String {
         switch self {
         case .apple: "Apple"
         case .google: "Google"
-        case .microsoft: "Microsoft"
         }
     }
 }
@@ -30,8 +31,8 @@ enum SignInMethod: Equatable, Sendable {
     var displayName: String {
         switch self {
         case .provider(let provider): "Continue with \(provider.displayName)"
-        case .email: "Login with Email"
-        case .phone: "Login with Phone"
+        case .email: "Continue with email"
+        case .phone: "Continue with phone"
         }
     }
 }
