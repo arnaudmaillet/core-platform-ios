@@ -1,3 +1,4 @@
+import DesignSystem
 import UIKit
 
 /// Whether a post opens with a hero (or a reveal window) at all.
@@ -25,7 +26,7 @@ public enum HeroMotionPolicy {
         // `-hero-reduce-motion`: the same route without toggling the setting.
         if ProcessInfo.processInfo.arguments.contains("-hero-reduce-motion") { return true }
         #endif
-        return UIAccessibility.isReduceMotionEnabled
+        return MotionPreference.reducesMotion
     }
 
     /// True when posts should open with the stack's ordinary push.

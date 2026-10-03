@@ -3,7 +3,7 @@ import DesignSystem
 import ProfileInterface
 import UIKit
 
-/// Settings, pushed from the own profile's gear: the thirteen sections of
+/// Settings, pushed from the own profile's gear: the sections of
 /// `SettingsCatalog` grouped by scope, then Switch Profile and Log Out.
 ///
 /// ## Why the scope is on screen
@@ -203,7 +203,8 @@ final class SettingsViewController: UIViewController {
         switch scope {
         case .account: "Account-Wide"
         case .profile: activeHandle.map { "Profile · \($0)" } ?? "Profile"
-        case .app: "App and Legal"
+        case .device: "App and Device"
+        case .support: "Support and Legal"
         }
     }
 
@@ -214,7 +215,9 @@ final class SettingsViewController: UIViewController {
         case .profile:
             activeHandle.map { "Applies to \($0) only. Switch profile to change another profile's settings." }
                 ?? "Applies to the active profile only."
-        case .app:
+        case .device:
+            "Applies to this iPhone, whichever profile is active."
+        case .support:
             nil
         }
     }

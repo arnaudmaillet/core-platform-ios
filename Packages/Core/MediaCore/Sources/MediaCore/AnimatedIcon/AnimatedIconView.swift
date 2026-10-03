@@ -1,3 +1,4 @@
+import DesignSystem
 import QuartzCore
 import UIKit
 
@@ -44,7 +45,7 @@ public final class AnimatedIconView: UIView {
     }
 
     public static var devicePolicy: MotionPolicy {
-        if UIAccessibility.isReduceMotionEnabled { return .still }
+        if MotionPreference.reducesMotion { return .still }
         if ProcessInfo.processInfo.thermalState.rawValue
             >= ProcessInfo.ThermalState.serious.rawValue { return .still }
         if ProcessInfo.processInfo.isLowPowerModeEnabled { return .reduced }

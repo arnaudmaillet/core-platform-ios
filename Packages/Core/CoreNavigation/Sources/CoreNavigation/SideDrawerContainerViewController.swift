@@ -1,3 +1,4 @@
+import DesignSystem
 import UIKit
 
 /// A container that keeps a drawer BEHIND its main screen and reveals it by
@@ -438,7 +439,7 @@ public final class SideDrawerContainerViewController: UIViewController {
             finish()
             return
         }
-        if UIAccessibility.isReduceMotionEnabled {
+        if MotionPreference.reducesMotion {
             UIView.animate(
                 withDuration: Self.reducedMotionDuration, delay: 0,
                 options: [.curveEaseInOut, .allowUserInteraction]
@@ -501,7 +502,7 @@ public final class SideDrawerContainerViewController: UIViewController {
         mainHost.transform = slide
         dimView.transform = slide
         let reveal = min(max(progress, 0), 1)
-        let parallax = UIAccessibility.isReduceMotionEnabled ? 0 : Self.drawerParallax
+        let parallax = MotionPreference.reducesMotion ? 0 : Self.drawerParallax
         drawerHost.transform = CGAffineTransform(translationX: -(1 - reveal) * width * parallax, y: 0)
         dimView.alpha = reveal
         let followsDrawer = reveal >= 0.5

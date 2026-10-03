@@ -7,8 +7,13 @@ let package = Package(
     products: [
         .library(name: "MediaCore", targets: ["MediaCore"])
     ],
+    dependencies: [
+        // `MotionPreference`: the app-level Reduce Motion the animated icons
+        // honour alongside the iOS setting (#468).
+        .package(path: "../DesignSystem")
+    ],
     targets: [
-        .target(name: "MediaCore"),
+        .target(name: "MediaCore", dependencies: ["DesignSystem"]),
         .testTarget(name: "MediaCoreTests", dependencies: ["MediaCore"])
     ]
 )
