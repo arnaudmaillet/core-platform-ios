@@ -56,12 +56,21 @@ public final class PostGridTileStandInView: UIView, RevealStandInShaping {
     /// `viewerStake`: what the viewer has staked on `post`, on a surface
     /// whose tiles show it — the heart is red once there is any, as on the
     /// tile it lands on (`PostGridTileCell.setViewerStake`).
+    ///
+    /// `showsInfo`: the tile it lands on wears its author and caption
+    /// (`PostGridTileCell.showsInfo`, `-gallery-tile-info`), so the twin does
+    /// too — decided and wrapped at `size`, the LANDING tile's, and only
+    /// posed as the window carries it (`PostCardCaptionOverlay`): words
+    /// re-wrapped at every size of a travelling window grew out of its
+    /// top-left corner on the Following cards, and a variant decided at the
+    /// window's size would swap from two lines to none mid-close.
     public init(
         post: GalleryPost,
         size: CGSize,
         cornerRadius: CGFloat = PostGridTileCell.mosaicCornerRadius,
         imagePipeline: ImagePipeline,
-        viewerStake: Int = 0
+        viewerStake: Int = 0,
+        showsInfo: Bool = false
     ) {
         tile = PostGridTileCell(frame: CGRect(origin: .zero, size: size))
         super.init(frame: CGRect(origin: .zero, size: size))
@@ -71,9 +80,14 @@ public final class PostGridTileStandInView: UIView, RevealStandInShaping {
         isUserInteractionEnabled = false
 
         tile.cornerRadius = cornerRadius
-        tile.configure(with: post, imagePipeline: imagePipeline)
+        tile.configure(
+            with: post, imagePipeline: imagePipeline,
+            showsInfo: showsInfo, infoReferenceSize: showsInfo ? size : nil
+        )
         tile.setViewerStake(viewerStake)
-        tile.layoutIfNeeded()
+        // Laid out now, at the landing size and outside any animation: the
+        // words' first pass must never run inside the window's block.
+        UIView.performWithoutAnimation { tile.layoutIfNeeded() }
 
         clipsToBounds = true
         tile.translatesAutoresizingMaskIntoConstraints = false

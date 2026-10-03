@@ -2569,6 +2569,21 @@ public final class PostGridTileCell: UICollectionViewCell {
         imageView.image = nil
         // The viewer's stake was the last post's; the next host reads its own.
         setViewerStake(0)
+        // The words were this post's; the next host says whether it wants
+        // any (`configure(…showsInfo:)`).
+        showsInfo = false
+        infoPost = nil
+        infoReferenceSize = nil
+        infoDecidedSize = nil
+        removeInfoOverlay()
+    }
+
+    override public func layoutSubviews() {
+        super.layoutSubviews()
+        // The variant follows the tile's size — a cell configured before the
+        // collection view sized it decides here, once it has a size.
+        refreshInfoOverlay()
+        infoOverlay?.frame = contentView.bounds
     }
 
     /// Puts a cover on the tile immediately, without waiting for the async load
@@ -2628,14 +2643,22 @@ public final class PostGridTileCell: UICollectionViewCell {
 
     #if DEBUG
     /// The count the tile shows, as drawn — nil while it is hidden.
-    public var debugCounterText: String? { likes.isHidden ? nil : likes.debugText }
+    public var debugCounterText: String? {
+        if let like = infoOverlay?.likeReadout { return like.debugCountText }
+        return likes.isHidden ? nil : likes.debugText
+    }
     /// Whether the count's heart is the points' red (`setViewerStake`).
     public var debugIsStaked: Bool { viewerStaked }
+    /// The author-and-caption foot the tile wears — nil while it wears none.
+    public var debugInfoOverlay: PostCardCaptionOverlay? { infoOverlay }
+    /// Whether the tile's own likes readout (bottom-right) is drawn.
+    public var debugShowsCornerLikes: Bool { !likes.isHidden }
     #endif
 
     /// Takes `post`'s counter and nothing else — see the list row's.
     public func updateCounts(from post: GalleryPost) {
         likes.set(post.reactionCount)
+        infoOverlay?.setLikeCount(post.reactionCount)
     }
 
     // MARK: - The viewer's like
@@ -2649,6 +2672,9 @@ public final class PostGridTileCell: UICollectionViewCell {
     /// stays the post's. The flight card draws the same heart
     /// (`PostGridFlightCard`'s `viewerStake`), so a landing never recolours.
     public func setViewerStake(_ total: Int) {
+        // The words' heart too, whatever the corner's state: it is drawn
+        // with the total, and a variant built later reads it from here.
+        setInfoViewerStake(total)
         let staked = total > 0
         guard staked != viewerStaked else { return }
         viewerStaked = staked
@@ -2657,12 +2683,135 @@ public final class PostGridTileCell: UICollectionViewCell {
         )
     }
 
-    public func configure(with post: GalleryPost, imagePipeline: ImagePipeline) {
+    // MARK: - Author and caption (`-gallery-tile-info`)
+
+    /// Whether the tile wears its post's author and the start of its caption
+    /// over the picture, when it is large enough for them (`PostTileInfo`) —
+    /// the Following card's foot, its heart closing the author line. Set by a
+    /// host at `configure`; off, the tile is the picture and its likes, as on
+    /// every grid.
+    public private(set) var showsInfo = false
+    /// The post the words are drawn from.
+    private var infoPost: GalleryPost?
+    private var infoImagePipeline: ImagePipeline?
+    /// The size the variant is decided and the words wrapped at, for a COPY
+    /// that travels with a window (`PostGridTileStandInView`) — see
+    /// `PostCardCaptionOverlay` for why a copy never re-lays out. Nil: the
+    /// tile's own size, as any cell.
+    private var infoReferenceSize: CGSize?
+    /// What the viewer has staked on the post, for the overlay's heart.
+    private var infoViewerStake = 0
+    private var infoOverlay: PostCardCaptionOverlay?
+    /// The variant the tile wears now.
+    public private(set) var infoVariant: PostTileInfo.Variant = .none
+    /// The size `infoVariant` was decided at — nil until the next decision.
+    private var infoDecidedSize: CGSize?
+
+    /// The words a tile of `restingSize` wears, built and laid out at that
+    /// size — what a flight carries as the tile's resting furniture
+    /// (`PostGridFlightCard.installRestingOverlay`), so the card takes off
+    /// wearing exactly what the tile wore and the flight fades it. Nil when a
+    /// tile of that size wears none.
+    public static func makeInfoOverlay(
+        for post: GalleryPost, restingSize: CGSize, imagePipeline: ImagePipeline?, viewerStake: Int = 0
+    ) -> PostCardCaptionOverlay? {
+        let variant = PostTileInfo.variant(for: restingSize)
+        guard variant != .none else { return nil }
+        let overlay = makeInfoOverlay(
+            for: post, variant: variant, referenceSize: restingSize,
+            imagePipeline: imagePipeline, viewerStake: viewerStake
+        )
+        overlay.frame = CGRect(origin: .zero, size: restingSize)
+        UIView.performWithoutAnimation { overlay.layoutIfNeeded() }
+        return overlay
+    }
+
+    /// The one recipe, for the tile and every copy of it.
+    ///
+    /// The heart is ALWAYS there (a tile always shows its likes), a readout
+    /// like the corner's it replaces. The text shadow is drawn into the glyphs: a screen of tiles is
+    /// a dozen overlays at once, and a layer shadow on each label would be an
+    /// offscreen pass apiece (`PostCardCaptionOverlay.TextShadow`).
+    private static func makeInfoOverlay(
+        for post: GalleryPost, variant: PostTileInfo.Variant, referenceSize: CGSize?,
+        imagePipeline: ImagePipeline?, viewerStake: Int
+    ) -> PostCardCaptionOverlay {
+        PostCardCaptionOverlay(
+            post: post, placement: .onMedia, captionLines: variant.captionLines,
+            referenceSize: referenceSize, imagePipeline: imagePipeline, viewerStake: viewerStake,
+            textShadow: .inline
+        )
+    }
+
+    /// Builds, swaps or drops the overlay to match the tile's size — only
+    /// when the VARIANT changes, so a layout pass at the same size costs one
+    /// comparison and the words are laid out once per tile.
+    private func refreshInfoOverlay() {
+        let size = infoReferenceSize ?? contentView.bounds.size
+        // Decided once per size: a layout pass at the size already decided
+        // (every pass but a resize) asks nothing of the rule or the fonts.
+        guard size != infoDecidedSize else { return }
+        infoDecidedSize = size
+        let variant: PostTileInfo.Variant = showsInfo && infoPost != nil && size.width > 0 && size.height > 0
+            ? PostTileInfo.variant(for: size)
+            : .none
+        guard variant != infoVariant else { return }
+        removeInfoOverlay()
+        infoVariant = variant
+        if variant != .none, let infoPost {
+            let overlay = Self.makeInfoOverlay(
+                for: infoPost, variant: variant, referenceSize: infoReferenceSize,
+                imagePipeline: infoImagePipeline, viewerStake: infoViewerStake
+            )
+            overlay.frame = contentView.bounds
+            // Above the picture and any video surface (both sit just above
+            // the image view), below the corner readout it replaces.
+            contentView.insertSubview(overlay, belowSubview: likes)
+            infoOverlay = overlay
+        }
+        applyCornerLikes()
+    }
+
+    /// The corner count, unless the words carry the heart: then it closes
+    /// the author line, as on a Following card, and two hearts on one tile
+    /// would be one too many.
+    private func applyCornerLikes() {
+        likes.isHidden = infoOverlay != nil
+    }
+
+    private func removeInfoOverlay() {
+        infoOverlay?.removeFromSuperview()
+        infoOverlay = nil
+        infoVariant = .none
+        applyCornerLikes()
+    }
+
+    private func setInfoViewerStake(_ total: Int) {
+        infoViewerStake = total
+        infoOverlay?.setViewerStake(total)
+    }
+
+    /// - Parameter showsInfo: see `showsInfo`.
+    /// - Parameter infoReferenceSize: for a copy that rides a window — see
+    ///   `infoReferenceSize`. Nil for a cell.
+    public func configure(
+        with post: GalleryPost, imagePipeline: ImagePipeline,
+        showsInfo: Bool = false, infoReferenceSize: CGSize? = nil
+    ) {
         // Video tiles keep a dark floor: their poster may be unrenderable
         // (or plain black in the simulator), and the glyph needs a stage.
         contentView.backgroundColor = Self.fillColor(for: post)
 
         likes.set(post.reactionCount)
+
+        // The words: a new post is a new overlay, whatever the variant.
+        removeInfoOverlay()
+        self.showsInfo = showsInfo
+        infoPost = post
+        infoImagePipeline = imagePipeline
+        self.infoReferenceSize = infoReferenceSize
+        infoDecidedSize = nil
+        refreshInfoOverlay()
 
         imageView.image = nil
         guard let url = post.thumbnailURL else { return }

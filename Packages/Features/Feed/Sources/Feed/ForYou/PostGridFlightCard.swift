@@ -304,11 +304,18 @@ final class PostGridFlightCard: UIView {
     /// here — see `poseRestingChrome`. The card is usually still 0x0 when this
     /// runs, so nothing is laid out now: a pass at zero would be the pose the
     /// flight's first frame animates FROM.
+    ///
+    /// ⚠️ AN OVERLAY THAT DRAWS ITS OWN HEART REPLACES THE COUNT. A large
+    /// mosaic tile wearing its words (`-gallery-tile-info`) closes its author
+    /// line with its likes and drops the corner readout
+    /// (`PostGridTileCell.showsInfo`) — so the card, the tile's twin, flies
+    /// one heart, the overlay's, not two.
     func installRestingOverlay(_ overlay: UIView) {
         overlay.isUserInteractionEnabled = false
         overlay.autoresizingMask = []
         restingChromeView.insertSubview(overlay, at: 0)
         restingOverlayView = overlay
+        if (overlay as? PostCardCaptionOverlay)?.likeReadout != nil { likes.isHidden = true }
         if bounds.width > 0, bounds.height > 0 {
             UIView.performWithoutAnimation { poseRestingChrome() }
         }
@@ -643,6 +650,12 @@ final class PostGridFlightCard: UIView {
         imageView.isHidden = !isOpaque
         backgroundColor = isOpaque ? restingBackground : .clear
     }
+
+    #if DEBUG
+    /// Whether the card draws its own corner count — false on a style that
+    /// draws none, and under an overlay that carries the heart itself.
+    var debugShowsCornerCount: Bool { style.showsCounters && !likes.isHidden }
+    #endif
 }
 
 // MARK: - ZoomFlightCard
