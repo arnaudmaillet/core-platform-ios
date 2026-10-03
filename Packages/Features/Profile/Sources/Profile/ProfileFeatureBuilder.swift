@@ -190,6 +190,10 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                                 + ["Statements of reasons and appeals"]
                                         )
                                     }
+                                case .help:
+                                    SettingsLinksViewController.help(links: .current)
+                                case .legal:
+                                    SettingsLinksViewController.legal(links: .current, version: SettingsLinksViewController.appVersion())
                                 case .privacy:
                                     if let visibility = repository as? any ProfileVisibilityManaging {
                                         PrivacySectionViewController(
