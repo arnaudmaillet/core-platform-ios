@@ -221,7 +221,8 @@ struct ForYouCardLikesTests {
         ]
         rails.render(state)
         rails.layoutIfNeeded()
-        rails.debugCardsView.layoutIfNeeded()
+        rails.debugMediaRow.layoutIfNeeded()
+        rails.debugTextRow.layoutIfNeeded()
         return rails
     }
 
@@ -264,7 +265,7 @@ struct ForYouCardLikesTests {
         let picture = try #require(rails.debugCardCell(at: 1))
         picture.layoutIfNeeded()
         let like = try #require(picture.debugLikeReadout)
-        let onHeart = like.convert(CGPoint(x: like.bounds.midX, y: like.bounds.midY), to: rails.debugCardsView)
+        let onHeart = like.convert(CGPoint(x: like.bounds.midX, y: like.bounds.midY), to: rails.debugMediaRow)
         #expect(rails.debugCardMenuConfiguration(at: 1, point: onHeart) != nil, "the card's preview")
         #expect(wallet.balance == before)
     }

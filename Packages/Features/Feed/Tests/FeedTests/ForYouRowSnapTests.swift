@@ -238,7 +238,7 @@ struct ForYouRowSnapTests {
         state.following = (0..<8).map { post("c\($0)") }
         rails.render(state)
         rails.layoutIfNeeded()
-        let row = try #require(rails.subviews.compactMap { $0 as? UICollectionView }.last)
+        let row = rails.debugMediaRow
         row.layoutIfNeeded()
 
         var target = CGPoint(x: 40, y: 0)

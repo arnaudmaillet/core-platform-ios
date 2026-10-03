@@ -284,7 +284,7 @@ enum ForYouRowOrigins {
     /// the card's author band borrowed for the flight, the page veiled below
     /// where the card's two lines stop (`captionEnd`), and the close carrying
     /// the card home as the list's stand-in (`RevealDismissCardView`, at the
-    /// lane's size and two lines) onto the card it opened from, whatever post
+    /// row's size and two lines) onto the card it opened from, whatever post
     /// the viewer paged to — the row keeps its order, the list's rule.
     ///
     /// The caption's cut and top are read at the tap, as the list reads them:

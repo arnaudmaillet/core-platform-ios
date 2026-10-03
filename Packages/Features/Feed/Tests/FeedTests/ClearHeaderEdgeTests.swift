@@ -21,13 +21,14 @@ struct ClearHeaderEdgeTests {
         #expect(list.topEdgeEffect.isHidden)
     }
 
-    /// ⚠️ AND THE ROWS' OWN SCROLLERS. For You's list is led by two
-    /// horizontal rows (`ForYouRailsView`); a row is a scroll view under the
-    /// same header, and its effect would draw a band across the header too.
+    /// ⚠️ AND THE ROWS' OWN SCROLLERS. For You's list is led by horizontal
+    /// rows (`ForYouRailsView`: Friends, then Following's media and text
+    /// rows); a row is a scroll view under the same header, and its effect
+    /// would draw a band across the header too.
     @Test func theForYouRowsHideTheirEffectToo() throws {
         let rails = ForYouRailsView(imagePipeline: pipeline(), videoPlayback: nil)
         let rows = rails.subviews.compactMap { $0 as? UIScrollView }
-        #expect(rows.count == 2)
+        #expect(rows.count == 3)
         #expect(rows.allSatisfy { $0.topEdgeEffect.isHidden })
     }
 }
