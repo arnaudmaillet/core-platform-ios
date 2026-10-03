@@ -11,6 +11,10 @@ import UIKit
 /// (Save reports "not available yet").
 final class AccountSettingsViewController: UIViewController {
     private let account: any AccountProviding
+    /// Backs Delete Account. Nil hides the row rather than offering a
+    /// deletion that cannot be sent.
+    private let lifecycle: (any AccountLifecycleManaging)?
+    private let onAccountDeleted: () -> Void
 
     private var details: AccountDetails?
     private var isShowingSkeleton = false
@@ -31,7 +35,7 @@ final class AccountSettingsViewController: UIViewController {
 
     private enum Row: Hashable {
         case email, phone
-        case deactivate, dataExport
+        case deactivate, delete, dataExport
     }
 
     private enum Item: Hashable {
@@ -43,8 +47,14 @@ final class AccountSettingsViewController: UIViewController {
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
 
-    init(account: any AccountProviding) {
+    init(
+        account: any AccountProviding,
+        lifecycle: (any AccountLifecycleManaging)? = nil,
+        onAccountDeleted: @escaping () -> Void = {}
+    ) {
         self.account = account
+        self.lifecycle = lifecycle
+        self.onAccountDeleted = onAccountDeleted
         super.init(nibName: nil, bundle: nil)
         hidesBottomBarWhenPushed = true
     }
@@ -120,7 +130,10 @@ final class AccountSettingsViewController: UIViewController {
         } else {
             snapshot.appendItems([.skeleton(0), .skeleton(1)], toSection: .accountInfo)
         }
-        snapshot.appendItems([.row(.deactivate), .row(.dataExport)], toSection: .management)
+        snapshot.appendItems([.row(.dataExport), .row(.deactivate)], toSection: .management)
+        if lifecycle != nil {
+            snapshot.appendItems([.row(.delete)], toSection: .management)
+        }
         return snapshot
     }
 
@@ -152,6 +165,9 @@ final class AccountSettingsViewController: UIViewController {
             valueCell(cell, label: "Phone", value: details?.phone.isEmpty == false ? details?.phone : "Not set", verified: details?.phoneVerified)
         case .deactivate:
             actionCell(cell, label: "Deactivate Account", destructive: true)
+        case .delete:
+            actionCell(cell, label: "Delete Account", destructive: true)
+            cell.accessories = [.disclosureIndicator()]
         case .dataExport:
             actionCell(cell, label: "Request Data Export", destructive: false)
         }
@@ -196,7 +212,15 @@ final class AccountSettingsViewController: UIViewController {
         case .phone:
             pushPhoneEditor()
         case .deactivate:
-            confirmComingSoonAction(title: "Deactivate Account?", confirm: "Deactivate", message: "Account deactivation isn't available yet.")
+            // Not a fake confirmation: a deactivated account cannot sign back
+            // in yet (#385), so the row only says so.
+            presentInfo("Deactivating isn't available yet: a deactivated account couldn't log back in. You can delete your account instead.")
+        case .delete:
+            guard let lifecycle else { return }
+            push(DeleteAccountViewController(
+                viewModel: DeleteAccountViewModel(lifecycle: lifecycle),
+                onAccountDeleted: onAccountDeleted
+            ))
         case .dataExport:
             confirmComingSoonAction(title: "Request Data Export?", confirm: "Request Export", message: "Data export isn't available yet.")
         }
