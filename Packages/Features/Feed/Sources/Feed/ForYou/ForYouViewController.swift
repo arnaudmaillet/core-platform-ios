@@ -211,7 +211,10 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         self.reporting = reporting
         self.socialGraph = socialGraph
         page = ForYouGridPage(imagePipeline: imagePipeline, style: .discover, videoPlayback: videoPlayback)
-        rails = ForYouRailsView(imagePipeline: imagePipeline, videoPlayback: videoPlayback)
+        rails = ForYouRailsView(
+            imagePipeline: imagePipeline, videoPlayback: videoPlayback,
+            followingLanes: ForYouFollowingLanes.isEnabled
+        )
         staking = wallet.map(PostCardStaking.init)
         super.init(nibName: nil, bundle: nil)
         page.staking = staking
@@ -419,9 +422,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     private func updateLeadHeight() {
         let width = page.bounds.width
         guard width > 0 else { return }
-        page.setLead(rails, height: ForYouRailsView.height(
-            forWidth: width, friends: rails.stories.count, following: rails.cards.count
-        ))
+        page.setLead(rails, height: rails.preferredHeight(forWidth: width))
     }
 
     /// The part of the screen the viewer can see, in the rows' space: under
@@ -2682,7 +2683,9 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
                     return rails.debugCardIsReady(at: index)
                 }) { [weak self] in
                     guard let self else { return }
-                    print("[qa] -foryou-open-card \(index): \(rails.cards[index].id.rawValue)")
+                    let card = rails.cards[index]
+                    let lane = rails.debugCardIndexPath(at: index).map { " lane=\($0.section).\($0.item)" } ?? ""
+                    print("[qa] -foryou-open-card \(index): \(card.id.rawValue) kind=\(card.kind)\(lane)")
                     scheduleDemoCloseIfRequested()
                     _ = rails.debugTapCard(at: index)
                 }

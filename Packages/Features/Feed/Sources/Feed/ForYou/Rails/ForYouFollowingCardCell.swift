@@ -74,8 +74,41 @@ final class ForYouCardCaptionOverlay: UIView {
     /// Two lines over a picture — the product call: enough to know what the
     /// post is about, not so much that the picture is covered.
     static let mediaCaptionLines = 2
-    /// A text card's words fill it.
+    /// A text card's words fill it — up to this many lines, or as many whole
+    /// lines as its height holds when that is fewer: the short, wide card of
+    /// the two-lane row holds two (`ForYouFollowingLanes`). Read from the
+    /// HEIGHT rather than told, so every copy of a card — a flight's
+    /// furniture, a close's stand-in, each built at the card's resting size —
+    /// wraps exactly as the card in the row does.
     static let textCaptionLines = 7
+
+    /// The fonts the overlay sets its words and its author in.
+    private static func captionFont(onMedia: Bool) -> UIFont {
+        onMedia
+            ? .systemFont(ofSize: UIFont.preferredFont(forTextStyle: .footnote).pointSize, weight: .medium)
+            : .systemFont(ofSize: UIFont.preferredFont(forTextStyle: .headline).pointSize, weight: .semibold)
+    }
+
+    private static var authorFont: UIFont {
+        .systemFont(ofSize: UIFont.preferredFont(forTextStyle: .caption1).pointSize, weight: .semibold)
+    }
+
+    /// How tall a text card is when its words take exactly `lines` lines —
+    /// the `.onCard` layout below, read backwards: the words from the top
+    /// inset, the author line on the bottom one, an inset between them.
+    static func textCardHeight(lines: Int) -> CGFloat {
+        let words = (captionFont(onMedia: false).lineHeight * CGFloat(lines)).rounded(.up)
+        return inset * 3 + authorFont.lineHeight.rounded(.up) + words
+    }
+
+    /// The whole lines of words a text card's caption has room for in
+    /// `height`, at most `textCaptionLines`.
+    static func textLines(fitting height: CGFloat) -> Int {
+        let line = captionFont(onMedia: false).lineHeight
+        guard line > 0 else { return textCaptionLines }
+        // A hair of slack: `textCardHeight` rounds the words' block up.
+        return max(1, min(textCaptionLines, Int(((height + 0.5) / line).rounded(.down))))
+    }
 
     /// The scrim, as a VIEW: a bare sublayer's frame does not ride a UIKit
     /// animation block, so a scrim posed inside one jumped to its landing
@@ -126,9 +159,7 @@ final class ForYouCardCaptionOverlay: UIView {
         let onMedia = placement == .onMedia
         scrim.isHidden = !onMedia
         addSubview(scrim)
-        authorLabel.font = .systemFont(
-            ofSize: UIFont.preferredFont(forTextStyle: .caption1).pointSize, weight: .semibold
-        )
+        authorLabel.font = Self.authorFont
         authorLabel.textColor = onMedia ? .white : .secondaryLabel
         authorLabel.text = post.authorName ?? post.authorHandle.map { "@\($0)" }
         let diameter = Self.avatarDiameter(for: authorLabel.font)
@@ -144,9 +175,7 @@ final class ForYouCardCaptionOverlay: UIView {
         if onMedia { avatar.overrideUserInterfaceStyle = .dark }
         avatarPicture.isHidden = true
         avatarPicture.pin(to: avatar)
-        captionLabel.font = onMedia
-            ? .systemFont(ofSize: UIFont.preferredFont(forTextStyle: .footnote).pointSize, weight: .medium)
-            : .systemFont(ofSize: UIFont.preferredFont(forTextStyle: .headline).pointSize, weight: .semibold)
+        captionLabel.font = Self.captionFont(onMedia: onMedia)
         captionLabel.textColor = onMedia ? .white : .label
         captionLabel.numberOfLines = onMedia ? Self.mediaCaptionLines : Self.textCaptionLines
         captionLabel.lineBreakMode = .byTruncatingTail
@@ -254,6 +283,11 @@ final class ForYouCardCaptionOverlay: UIView {
                 y: line.midY - likeSize.height / 2,
                 width: likeSize.width, height: likeSize.height
             )
+        }
+        if placement == .onCard {
+            // As many lines as the card holds between its top inset and its
+            // author line — see `textCaptionLines`.
+            captionLabel.numberOfLines = Self.textLines(fitting: size.height - inset * 3 - authorHeight)
         }
         let fitted = captionLabel.sizeThatFits(
             CGSize(width: width, height: .greatestFiniteMagnitude)
@@ -375,6 +409,11 @@ final class ForYouCardCaptionOverlay: UIView {
     var debugShowsAvatarPicture: Bool { !avatarPicture.isHidden && avatarPicture.image != nil }
     /// The width the caption is wrapped at — the card's, never the window's.
     var debugCaptionWrapWidth: CGFloat { captionLabel.bounds.width }
+    /// The most lines the words may take, the height they are drawn in, and
+    /// one line's height.
+    var debugCaptionLines: Int { captionLabel.numberOfLines }
+    var debugCaptionHeight: CGFloat { captionLabel.bounds.height }
+    var debugCaptionLineHeight: CGFloat { captionLabel.font.lineHeight }
     /// Where the heart is drawn, in this overlay's space — `.null` without one.
     var debugLikeFrame: CGRect { likeReadout.map { $0.isHidden ? .null : $0.frame } ?? .null }
     #endif
