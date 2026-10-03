@@ -14,6 +14,7 @@ final class PrivacySectionViewController: UIViewController {
         case loading
         case failed
         case hideLists
+        case dataTransparency
         case planned(String)
     }
 
@@ -21,12 +22,19 @@ final class PrivacySectionViewController: UIViewController {
 
     private let viewModel: PrivacySectionViewModel
     private let makeListPrivacy: () -> UIViewController
+    /// "Your Data and Permissions" (#414); nil hides the row.
+    private let makeDataTransparency: (() -> UIViewController)?
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
 
-    init(viewModel: PrivacySectionViewModel, makeListPrivacy: @escaping () -> UIViewController) {
+    init(
+        viewModel: PrivacySectionViewModel,
+        makeListPrivacy: @escaping () -> UIViewController,
+        makeDataTransparency: (() -> UIViewController)? = nil
+    ) {
         self.viewModel = viewModel
         self.makeListPrivacy = makeListPrivacy
+        self.makeDataTransparency = makeDataTransparency
         super.init(nibName: nil, bundle: nil)
         title = SettingsSection.privacy.title
         hidesBottomBarWhenPushed = true
@@ -130,6 +138,11 @@ final class PrivacySectionViewController: UIViewController {
             content.image = UIImage(systemName: "person.2")
             content.imageProperties.tintColor = .label
             cell.accessories = [.disclosureIndicator()]
+        case .dataTransparency:
+            content.text = "Your Data and Permissions"
+            content.image = UIImage(systemName: "doc.text.magnifyingglass")
+            content.imageProperties.tintColor = .label
+            cell.accessories = [.disclosureIndicator()]
         case .planned(let title):
             content.text = title
             content.textProperties.color = .secondaryLabel
@@ -145,7 +158,7 @@ final class PrivacySectionViewController: UIViewController {
         case .loaded: snapshot.appendItems([.privateAccount], toSection: .visibility)
         case .failed: snapshot.appendItems([.failed], toSection: .visibility)
         }
-        snapshot.appendItems([.hideLists], toSection: .lists)
+        snapshot.appendItems([.hideLists] + (makeDataTransparency == nil ? [] : [.dataTransparency]), toSection: .lists)
         snapshot.appendItems(Self.planned.map(Item.planned), toSection: .comingSoon)
         // The switch reads the phase and the saving flag at configuration.
         if case .loaded = viewModel.phase { snapshot.reconfigureItems([.privateAccount]) }
@@ -171,7 +184,7 @@ final class PrivacySectionViewController: UIViewController {
 extension PrivacySectionViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         switch dataSource.itemIdentifier(for: indexPath) {
-        case .hideLists, .failed: true
+        case .hideLists, .dataTransparency, .failed: true
         default: false
         }
     }
@@ -181,6 +194,10 @@ extension PrivacySectionViewController: UICollectionViewDelegate {
         switch dataSource.itemIdentifier(for: indexPath) {
         case .hideLists:
             navigationController?.pushViewController(makeListPrivacy(), animated: true)
+        case .dataTransparency:
+            if let screen = makeDataTransparency?() {
+                navigationController?.pushViewController(screen, animated: true)
+            }
         case .failed:
             Task { await viewModel.load() }
         default:

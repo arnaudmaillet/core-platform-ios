@@ -198,7 +198,8 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                     if let visibility = repository as? any ProfileVisibilityManaging {
                                         PrivacySectionViewController(
                                             viewModel: PrivacySectionViewModel(visibility: visibility),
-                                            makeListPrivacy: { PrivacySettingsViewController(store: RelationshipPrivacyStore()) }
+                                            makeListPrivacy: { PrivacySettingsViewController(store: RelationshipPrivacyStore()) },
+                                            makeDataTransparency: { DataTransparencyViewController() }
                                         )
                                     } else {
                                         PrivacySettingsViewController(store: RelationshipPrivacyStore())
