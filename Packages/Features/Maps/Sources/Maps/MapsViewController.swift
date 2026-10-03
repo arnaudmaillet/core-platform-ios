@@ -3351,10 +3351,7 @@ extension MapsViewController: MKMapViewDelegate {
         // The transition object is the stack's delegate for the feed's
         // lifetime.
         guard openGate.openBegan(.hero) else { return }
-        // The map is a tab root: its stack belongs to no one between flights.
-        let session = HeroPushSession(
-            source: source, destination: destination, on: nav, handsSlotBack: false
-        )
+        let session = HeroPushSession(source: source, destination: destination, on: nav)
         let transition = session.controller
         activeSession = session
 
@@ -3416,8 +3413,8 @@ extension MapsViewController: MKMapViewDelegate {
         }
 
         // ONE close-out per ending (`HeroPushSession.Ending`). The session has
-        // already handed the stack's slot back — emptied it, only if it was
-        // still the flight's: a place page that took it keeps it.
+        // already ended its leases on the stack's delegate slot; a place page
+        // that leased it on top keeps it.
         //
         // ⚠️ `.reversed` is the flight caught mid-air and thrown back, which
         // once had no handler here at all: the latch stayed set and every

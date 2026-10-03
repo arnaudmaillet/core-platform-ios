@@ -407,8 +407,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             // dragging ran UIKit's plain pop (this controller refuses `.card`),
             // and the card close never heard a `didShow` again, so it leaked
             // on every committed grab, with the row it concealed.
-            if let transition, session?.holdsDelegateSlot == false {
-                nav?.delegate = transition
+            if let transition, let nav, session?.holdsDelegateSlot == false {
+                NavigationDelegateHub.of(nav).lease(transition)
             }
             // ⚠️ NOTHING ABOUT THE DOCK HERE any more. Grab-begin used to put
             // the bar's state back at alpha 0 and the landing showed it. The

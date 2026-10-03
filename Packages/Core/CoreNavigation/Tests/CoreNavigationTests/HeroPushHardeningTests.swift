@@ -70,27 +70,33 @@ struct HeroPushHardeningTests {
     // MARK: - 1.14 A re-assert does not swallow the displaced flight's news
 
     /// An owner re-asserts its slide driver on appearance, inside the pop's
-    /// `completeTransition` and before `didShow`. The delegate it displaces is
-    /// the flight landing on it, which must still hear that it landed, once.
-    @Test func aReassertForwardsTheNextDidShowToWhomItDisplaced() {
+    /// `completeTransition` and before `didShow`. The flight it covers must
+    /// still hear that it landed: it stays LEASED beneath the driver, and the
+    /// hub tells every lease — once each, even though the driver also forwards
+    /// to the delegate it captured.
+    @Test func aReassertLeavesTheCoveredFlightHearingItsLanding() {
         let nav = UINavigationController(rootViewController: UIViewController())
         let original = DidShowSpy()
         nav.delegate = original
         let slide = InteractiveSlideDismissal()
         slide.install(on: nav)
+        #expect(slide.debugSavedDelegate === original)
 
+        let hub = NavigationDelegateHub.of(nav)
         let landingFlight = DidShowSpy()
-        nav.delegate = landingFlight
+        hub.lease(landingFlight)
         slide.install(on: nav)
-        #expect(nav.delegate === slide)
+        #expect(nav.leasedDelegate === slide)
 
         let screen = nav.topViewController!
-        slide.navigationController(nav, didShow: screen, animated: true)
-        #expect(landingFlight.didShowCount == 1, "the displaced flight never heard it landed")
-        #expect(original.didShowCount == 1)
+        hub.navigationController(nav, didShow: screen, animated: true)
+        #expect(landingFlight.didShowCount == 1, "the covered flight never heard it landed")
+        #expect(original.didShowCount == 1, "a delegate both leased and forwarded to heard it twice")
 
-        slide.navigationController(nav, didShow: screen, animated: true)
-        #expect(landingFlight.didShowCount == 1, "the displaced delegate is owed one didShow, not all of them")
+        // Until it ends its lease, it keeps hearing; after, it does not.
+        hub.release(landingFlight)
+        hub.navigationController(nav, didShow: screen, animated: true)
+        #expect(landingFlight.didShowCount == 1)
         #expect(original.didShowCount == 2)
         withExtendedLifetime(original) {}
     }

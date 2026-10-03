@@ -14,9 +14,9 @@ import UIKit
 /// Every one of those is a rule about the SESSION, not about the screen,
 /// so it lives here once:
 /// - the controller is built here and kept alive until the session closes;
-/// - the stack's delegate slot is LEASED: the delegate found there is
-///   remembered and given back on close, but only if the slot is still this
-///   session's (its controller, or a driver registered as forwarding to it);
+/// - the stack's delegate slot is LEASED (`NavigationDelegateHub`): the
+///   controller, and every driver registered as forwarding to it, give
+///   their leases back on close, uncovering whatever lies below;
 /// - every ending — returned, reversed, abandoned — runs ONE idempotent
 ///   close-out, then the presenter's hook with the reason;
 /// - objects are released a turn after the close-out, because it runs inside
@@ -45,13 +45,11 @@ public final class HeroPushSession {
     /// per-screen (dismissal targets, intermediates, debug scripts).
     public let controller: ZoomTransitionController
     private weak var navigationController: UINavigationController?
-    private weak var previousDelegate: (any UINavigationControllerDelegate)?
     /// Drivers that hold the delegate slot on this session's behalf (a card
     /// close forwarding `.hero` pops to the controller). Weak: each is owned by
     /// whoever armed it.
     private var forwarders: [WeakDelegate] = []
     private var strongSelf: HeroPushSession?
-    private let handsSlotBack: Bool
     public private(set) var isClosed = false
 
     /// The presenter's own close-out, run once, after the session's.
@@ -63,19 +61,13 @@ public final class HeroPushSession {
     ///   - retainsItself: `true` for a presenter that cannot hold the session
     ///     (a struct builder): the session then keeps itself alive until it
     ///     closes. Otherwise the presenter holds it.
-    ///   - handsSlotBack: whether the close restores the delegate the slot held
-    ///     before (`true`, for a presenter whose stack has an owner of its
-    ///     own, such as a profile's slide dismissal) or empties it (`false`,
-    ///     for a tab root whose stack belongs to no one between flights).
     public init(
         source: any ZoomTransitionSource,
         destination: any ZoomTransitionDestination,
         on navigationController: UINavigationController,
         presents: Bool = true,
-        retainsItself: Bool = false,
-        handsSlotBack: Bool = true
+        retainsItself: Bool = false
     ) {
-        self.handsSlotBack = handsSlotBack
         controller = ZoomTransitionController(
             source: source, destination: destination, presents: presents
         )
@@ -86,15 +78,12 @@ public final class HeroPushSession {
         controller.onDismissedToIntermediate = { [weak self] _ in self?.close(.toIntermediate) }
     }
 
-    /// Takes the stack's delegate slot for the controller, remembering who
-    /// held it. Called once, right before the push (or, for a close-only
-    /// session, right after the screen it closes is up).
+    /// Leases the stack's delegate slot to the controller
+    /// (`NavigationDelegateHub`). Called once, right before the push (or, for a
+    /// close-only session, right after the screen it closes is up).
     public func takeDelegateSlot() {
         guard let nav = navigationController else { return }
-        if nav.delegate !== controller, !isForwarder(nav.delegate) {
-            previousDelegate = nav.delegate
-        }
-        nav.delegate = controller
+        NavigationDelegateHub.of(nav).lease(controller)
     }
 
     /// Registers `driver` as holding the delegate slot for this session (it
@@ -103,11 +92,12 @@ public final class HeroPushSession {
         forwarders.append(WeakDelegate(value: driver))
     }
 
-    /// Whether the slot currently holds this session's controller or one of its
+    /// Whether the slot's top lease is this session's controller or one of its
     /// forwarders.
     public var holdsDelegateSlot: Bool {
-        guard let nav = navigationController else { return false }
-        return nav.delegate === controller || isForwarder(nav.delegate)
+        guard let nav = navigationController,
+              let top = NavigationDelegateHub.existing(on: nav)?.top else { return false }
+        return top === controller || isForwarder(top)
     }
 
     /// Ends the session. Idempotent: every ending may call it, and the first
@@ -115,8 +105,11 @@ public final class HeroPushSession {
     public func close(_ ending: Ending) {
         guard !isClosed else { return }
         isClosed = true
-        if let nav = navigationController, nav.delegate == nil || holdsDelegateSlot {
-            nav.delegate = handsSlotBack ? previousDelegate : nil
+        // The flight's leases end with it: whatever lies below is uncovered,
+        // with nothing captured that could be stale.
+        if let nav = navigationController, let hub = NavigationDelegateHub.existing(on: nav) {
+            hub.release(controller)
+            for forwarder in forwarders.compactMap(\.value) { hub.release(forwarder) }
         }
         onClose?(ending)
         // Released a turn later: the close-out runs inside a delegate callback

@@ -117,6 +117,7 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
         self.source = source
         self.destination = destination
         self.feedViewController = destination as? UIViewController
+        hasSeenFeedOnStack = !presents
         super.init()
         #if DEBUG
         Self.debugMostRecent = self
@@ -335,22 +336,18 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
         flightInterruptor = nil
     }
 
-    /// The delegate this controller displaced, so its news is not swallowed.
+    /// Whether the feed has been seen on the stack since this controller was
+    /// made — the arrival edge `onSourceReturned` needs.
     ///
-    /// ⚠️ DISPLACING A DELEGATE TAKES ITS NEWS AS WELL, and `didShow` is news,
-    /// not a choice. `InteractiveSlideDismissal` already keeps this contract
-    /// and says why; this controller did not, and the cost was a whole route
-    /// that never completed.
-    ///
-    /// Traced: a vertical grab off a hierarchy marker lands on the place page,
-    /// and the page installs its OWN controller as the delegate the moment it
-    /// becomes top — before UIKit delivers `didShow`. So the map's controller
-    /// never heard that its dismissal had landed: `onDismissedToIntermediate`
-    /// never fired, `activeTransition` stayed set, the tapped marker stayed
-    /// concealed, and the census showed `drivers=3 controllers=2` alive for the
-    /// rest of the session with `stranded=0` — invisible on screen and fatal to
-    /// the seam, since that controller is the map's re-entrancy lock.
-    public weak var displacedDelegate: (any UINavigationControllerDelegate)?
+    /// ⚠️ "NOT ON THE STACK" IS NOT "LEFT IT". The slide driver learned this
+    /// first (`InteractiveSlideDismissal.hasSeenFeedOnStack`): a `didShow` from
+    /// an EARLIER transition can arrive after this controller took the slot and
+    /// before its feed is pushed, and reading it as a return closed the session
+    /// before its flight. The hub (`NavigationDelegateHub`) tells every lease
+    /// every `didShow`, so this controller hears more of them than a lone slot
+    /// occupant did, and needs the same edge. A close-only controller is made
+    /// beside a screen already up, so it starts having seen it.
+    private var hasSeenFeedOnStack: Bool
 
     public func navigationController(
         _ navigationController: UINavigationController,
@@ -362,10 +359,6 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
         // but a retained one whose pan the container's teardown had already
         // orphaned.
         releaseFlightInterruptor()
-        // ⚠️ FORWARDED FIRST, and unconditionally — see `displacedDelegate`.
-        displacedDelegate?.navigationController?(
-            navigationController, didShow: viewController, animated: animated
-        )
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-grab-log") {
             print("[zoom] didShow \(type(of: viewController))"
@@ -378,6 +371,7 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
         // push animation, so VoiceOver is told where it now is.
         if animated { UIAccessibility.post(notification: .screenChanged, argument: nil) }
         if viewController === feedViewController {
+            hasSeenFeedOnStack = true
             onDestinationShown?()
             return
         }
@@ -395,7 +389,8 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
         let feedStillOnStack = feedViewController.map {
             navigationController.viewControllers.contains($0)
         } ?? false
-        if !feedStillOnStack {
+        if feedStillOnStack { hasSeenFeedOnStack = true }
+        if !feedStillOnStack, hasSeenFeedOnStack {
             onSourceReturned?()
         }
     }

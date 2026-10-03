@@ -33,9 +33,6 @@ public final class InteractiveSlideDismissal: NSObject {
     /// dormant `ZoomTransitionController`, when a deep link pushes the timeline
     /// above a pin-opened feed) — restored on teardown.
     private weak var savedDelegate: (any UINavigationControllerDelegate)?
-    /// A delegate a re-assert displaced mid-transition, owed exactly the next
-    /// `didShow` — see `install(on:)`.
-    private weak var displacedDelegate: (any UINavigationControllerDelegate)?
 
     #if DEBUG
     /// Which axes this driver was armed for.
@@ -321,7 +318,7 @@ public final class InteractiveSlideDismissal: NSObject {
     }
 
     public func install(on nav: UINavigationController) {
-        guard nav.delegate !== self else { return }
+        guard NavigationDelegateHub.of(nav).top !== self else { return }
         // CAPTURED ONCE, and that distinction is the whole of a three-level
         // unwind working.
         //
@@ -336,34 +333,24 @@ public final class InteractiveSlideDismissal: NSObject {
         //
         // The first capture is the one that matters: whoever owned the stack
         // before this screen existed is who should own it again afterwards.
+        let hub = NavigationDelegateHub.of(nav)
         if !hasCapturedSavedDelegate {
-            savedDelegate = nav.delegate
+            savedDelegate = hub.top
             hasCapturedSavedDelegate = true
-        } else if let current = nav.delegate, current !== savedDelegate {
-            // ⚠️ A RE-ASSERT DISPLACES SOMEONE, and takes their news with it.
-            //
-            // The owner re-asserts on appearance, and the appearance a pop
-            // delivers runs INSIDE `completeTransition`, BEFORE the stack's
-            // delegate hears `didShow`. The delegate at that instant is the
-            // flight that is landing here: a post opened from this screen.
-            // Restoring the captured-once delegate is still right; dropping the
-            // displaced one's `didShow` is not. Its `onSourceReturned` never
-            // fired, so every post opened from the place page leaked its
-            // controller, retainer and card-close for the life of the process.
-            // The same contract `ZoomTransitionController.displacedDelegate`
-            // keeps, for exactly the next `didShow`.
-            displacedDelegate = current
         }
-        nav.delegate = self
+        // A re-assert may cover a flight that is landing here (the appearance
+        // a pop delivers runs before `didShow`). It stays leased beneath this
+        // driver, so the hub still tells it it landed — the news a slot swap
+        // used to swallow, which leaked every post opened from the place page.
+        hub.lease(self)
         navigationController = nav
     }
 
     private func teardown() {
-        if let nav = navigationController, nav.delegate === self {
-            nav.delegate = savedDelegate
+        if let nav = navigationController {
+            NavigationDelegateHub.existing(on: nav)?.release(self)
         }
         savedDelegate = nil
-        displacedDelegate = nil
         hasCapturedSavedDelegate = false
         hasSeenFeedOnStack = false
         navigationController = nil
@@ -724,18 +711,9 @@ extension InteractiveSlideDismissal: UINavigationControllerDelegate {
             print("[pop] didShow \(type(of: viewController))")
         }
         #endif
-        // The displaced flight first, once: its landing is what this
-        // `didShow` reports.
-        if let displaced = displacedDelegate {
-            displacedDelegate = nil
-            if displaced !== savedDelegate {
-                displaced.navigationController?(
-                    navigationController, didShow: viewController, animated: animated
-                )
-            }
-        }
-        savedDelegate?.navigationController?(
-            navigationController, didShow: viewController, animated: animated
+        NavigationDelegateHub.deliverDidShow(
+            to: savedDelegate, in: navigationController,
+            viewController: viewController, animated: animated
         )
         // Completed transitions only (a cancelled swipe reports nothing): once
         // the feed is off the stack, hand the delegate slot back.

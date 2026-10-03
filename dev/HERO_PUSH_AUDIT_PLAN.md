@@ -174,6 +174,33 @@ The tab bar and toolbars are UIKit's, animation included. An overlap while UIKit
 ### Deferred
 **2.14 → PR F.** The once-only staging latch would have to restage after a cancel, and the host's staging moves a grid slot (`adoptForClose`). Making that idempotent is not worth the risk for a cosmetic tint and corner mismatch on one sequence.
 
+
+## PR D outcome (2026-10-03)
+
+### What the hub does
+`NavigationDelegateHub` is the one occupant of a stack's delegate slot. The
+four remaining writers lease it:
+- `HeroPushSession`;
+- `InteractiveSlideDismissal`;
+- the place page's map-return;
+- the builder's grab re-take.
+
+Rules:
+- **Routing.** UIKit's questions go to the top lease alone, as they went to the single occupant. Leases still forward (a card close forwards a `.hero` pop to its flight).
+- **Broadcast.** `didShow` goes to every live lease, bottom first, once each. A lease's own forwarding goes through `deliverDidShow`, which dedupes within a dispatch.
+- **Release.** Releasing a lease uncovers the one below; nothing captured can be stale.
+- **Direct writes.** A delegate written to the slot directly is adopted: at the bottom if it was there first, on top if written later.
+
+### Removed
+- `ZoomTransitionController.displacedDelegate`.
+- `InteractiveSlideDismissal`'s displaced hand-off (from PR A 1.14), now structural.
+- `HeroPushSession.handsSlotBack` and its previous-delegate capture.
+- The place page's `mapReturnPreviousDelegate`.
+
+### Added
+- **`ZoomTransitionController` arrival edge.** It reads `onSourceReturned` only after having seen its feed on the stack (`hasSeenFeedOnStack`, the slide's rule). Close-only controllers start having seen it. Every lease now hears every `didShow`, so a premature one must not read as a return.
+- **`UINavigationController.leasedDelegate`**, for tests and diagnostics.
+
 ## Phase 3: structure (behaviour-preserving refactors, one PR each)
 
 **3.0 One dismissal arbiter.** The rule for which driver claims a drag is

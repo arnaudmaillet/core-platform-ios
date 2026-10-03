@@ -7,14 +7,14 @@ import UIKit
 @MainActor
 struct HeroPushSessionTests {
     private func stage(
-        handsSlotBack: Bool = true, retainsItself: Bool = false
+        retainsItself: Bool = false
     ) -> (HeroPushSession, UINavigationController, PreviousOwner) {
         let nav = UINavigationController(rootViewController: UIViewController())
         let owner = PreviousOwner()
         nav.delegate = owner
         let session = HeroPushSession(
             source: SessionSource(), destination: SessionFeed(), on: nav,
-            retainsItself: retainsItself, handsSlotBack: handsSlotBack
+            retainsItself: retainsItself
         )
         return (session, nav, owner)
     }
@@ -24,13 +24,13 @@ struct HeroPushSessionTests {
         var endings: [HeroPushSession.Ending] = []
         session.onClose = { endings.append($0) }
         session.takeDelegateSlot()
-        #expect(nav.delegate === session.controller)
+        #expect(nav.leasedDelegate === session.controller)
 
         session.controller.onPresentationCancelled?()   // a reversed push
         session.controller.onSourceReturned?()          // a later, stale ending
 
         #expect(endings == [.reversed], "a second ending ran the close-out again")
-        #expect(nav.delegate === owner, "the slot did not go back to its owner")
+        #expect(nav.leasedDelegate === owner, "the slot did not go back to its owner")
         withExtendedLifetime(owner) {}
     }
 
@@ -38,11 +38,11 @@ struct HeroPushSessionTests {
         let (session, nav, owner) = stage()
         session.takeDelegateSlot()
         let newOwner = PreviousOwner()
-        nav.delegate = newOwner
+        NavigationDelegateHub.of(nav).lease(newOwner)
 
         session.close(.returned)
 
-        #expect(nav.delegate === newOwner, "the close took the slot from a screen that owns it now")
+        #expect(nav.leasedDelegate === newOwner, "the close took the slot from a screen that owns it now")
         withExtendedLifetime((owner, newOwner)) {}
     }
 
@@ -51,21 +51,22 @@ struct HeroPushSessionTests {
         session.takeDelegateSlot()
         let cardClose = PreviousOwner()
         session.registerForwarder(cardClose)
-        nav.delegate = cardClose
+        NavigationDelegateHub.of(nav).lease(cardClose)
         #expect(session.holdsDelegateSlot)
 
         session.close(.returned)
 
-        #expect(nav.delegate === owner)
+        #expect(nav.leasedDelegate === owner)
         withExtendedLifetime((owner, cardClose)) {}
     }
 
-    @Test func aTabRootsSlotIsEmptiedNotHandedBack() {
-        let (session, nav, owner) = stage(handsSlotBack: false)
+    @Test func aStackOwnedByNoOneIsLeftWithNoLease() {
+        let nav = UINavigationController(rootViewController: UIViewController())
+        let session = HeroPushSession(source: SessionSource(), destination: SessionFeed(), on: nav)
         session.takeDelegateSlot()
+        #expect(nav.leasedDelegate === session.controller)
         session.close(.abandoned)
-        #expect(nav.delegate == nil)
-        withExtendedLifetime(owner) {}
+        #expect(nav.leasedDelegate == nil)
     }
 
     @Test func aSelfRetainedSessionLivesUntilATurnAfterItsClose() async {

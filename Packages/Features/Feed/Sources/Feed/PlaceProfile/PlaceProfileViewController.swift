@@ -255,9 +255,6 @@ final class PlaceProfileViewController: UIViewController {
     /// button and the horizontal grab fly home to the marker instead of
     /// sliding. Retained here (the controller holds its destination weakly).
     private var mapReturnTransition: ZoomTransitionController?
-    /// Whoever owned the delegate slot before this page's first install —
-    /// handed the slot back when the page pops for good.
-    private weak var mapReturnPreviousDelegate: (any UINavigationControllerDelegate)?
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
@@ -373,29 +370,20 @@ final class PlaceProfileViewController: UIViewController {
             transition.attachInteractiveDismissal(to: view, axes: [.horizontal]) { [weak nav] in
                 nav?.popViewController(animated: true)
             }
-            transition.onSourceReturned = { [weak self, weak nav] in
-                // Landed on the map: the flow is over, the slot goes back to
-                // whoever owned it before this page existed.
-                guard let self, let nav else { return }
-                if nav.delegate === self.mapReturnTransition {
-                    nav.delegate = self.mapReturnPreviousDelegate
-                }
+            transition.onSourceReturned = { [weak transition, weak nav] in
+                // Landed on the map: the flow is over, and its lease ends,
+                // uncovering whoever owned the stack before this page.
+                guard let transition, let nav else { return }
+                NavigationDelegateHub.existing(on: nav)?.release(transition)
             }
             mapReturnTransition = transition
         }
-        guard let transition = mapReturnTransition, nav.delegate !== transition else { return }
-        if mapReturnPreviousDelegate == nil {
-            mapReturnPreviousDelegate = nav.delegate
-        }
-        // ⚠️ AND THE DISPLACED DELEGATE IS TOLD, not merely remembered. This
-        // page becomes top DURING the pop that lands on it, so it takes the
-        // slot before UIKit delivers `didShow` — and the driver that flew the
-        // feed here never learns its dismissal landed. Its owner's
-        // `onDismissedToIntermediate` is that news, and without it the map
-        // keeps its re-entrancy lock, its concealed marker and its whole
-        // transition graph alive for the rest of the session.
-        transition.displacedDelegate = mapReturnPreviousDelegate
-        nav.delegate = transition
+        guard let transition = mapReturnTransition else { return }
+        // Leased on top on every appearance. A flight landing here (a post
+        // opened from this page) stays leased beneath and still hears that it
+        // landed — the hub tells every lease, which is what the old
+        // `displacedDelegate` hand-off did for this one case by hand.
+        NavigationDelegateHub.of(nav).lease(transition)
     }
 
     /// Arms the window close: the rightward grab and the back button both

@@ -1463,12 +1463,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // zoom drivers both claimed the next drag.
         cardPathFlight?.close(.abandoned)
         cardPathFlight = nil
-        // The tab root's stack belongs to no one between flights: the slot is
-        // emptied at the close, as it always was here.
-        let session = HeroPushSession(
-            source: source, destination: destination, on: navigationController,
-            handsSlotBack: false
-        )
+        let session = HeroPushSession(source: source, destination: destination, on: navigationController)
         let transition = session.controller
         activeSession = session
         // A flight is staging, and it attaches its own grab below — so this
@@ -1646,7 +1641,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // own playback for the rest of its life, with nothing to retract it.
         let session = HeroPushSession(
             source: source, destination: destination, on: navigationController,
-            presents: false, handsSlotBack: false
+            presents: false
         )
         let transition = session.controller
         cardPathFlight = session

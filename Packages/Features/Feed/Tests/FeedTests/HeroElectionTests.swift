@@ -31,7 +31,7 @@ struct HeroElectionTests {
             origin: origin(hasHero: false, reveal: reveal())
         )
 
-        let slide = try #require(stack.nav.delegate as? InteractiveSlideDismissal,
+        let slide = try #require(stack.nav.leasedDelegate as? InteractiveSlideDismissal,
                                  "the reveal rides the slide driver's slot")
         #expect(slide.revealPresents, "the OPENING must be the reveal's, not just the close")
         #expect(slide.revealGeometry != nil, "a reveal with no geometry is a plain push")
@@ -46,7 +46,7 @@ struct HeroElectionTests {
             origin: origin(hasHero: false, reveal: nil)
         )
 
-        let slide = try #require(stack.nav.delegate as? InteractiveSlideDismissal)
+        let slide = try #require(stack.nav.leasedDelegate as? InteractiveSlideDismissal)
         #expect(!slide.revealPresents)
         #expect(slide.revealGeometry == nil)
     }
@@ -89,7 +89,7 @@ struct HeroElectionTests {
         // ones it does not own straight back. A flight holding the slot itself
         // would never let a `.card` page begin a dismissal at all, which is the
         // defect this driver exists to cure.
-        let owner = try #require(stack.nav.delegate as? InteractiveSlideDismissal,
+        let owner = try #require(stack.nav.leasedDelegate as? InteractiveSlideDismissal,
                                  "the card-shaped close must be the one UIKit asks")
         #expect(owner.debugSavedDelegate is ZoomTransitionController,
                 "it took the slot from the flight and saved nothing to give back")
@@ -154,13 +154,13 @@ struct HeroElectionTests {
             postIDs: [PostID("m1")], from: stack.presenter,
             origin: origin(hasHero: true, setConcealed: { concealment.append($0) })
         )
-        let transition = try #require(stack.nav.delegate as? ZoomTransitionController)
-        #expect(stack.nav.delegate !== previousDelegate, "precondition: the flight took the slot")
+        let transition = try #require(stack.nav.leasedDelegate as? ZoomTransitionController)
+        #expect(stack.nav.leasedDelegate !== previousDelegate, "precondition: the flight took the slot")
         #expect(stack.tabs.isTabBarHidden, "precondition: the push took the bar down")
 
         transition.onSourceReturned?()
 
-        #expect(stack.nav.delegate === previousDelegate,
+        #expect(stack.nav.leasedDelegate === previousDelegate,
                 "the delegate slot was not handed back to its previous owner")
         #expect(concealment.last == false,
                 "the tile was left concealed after the flight that hid it ended")

@@ -29,11 +29,11 @@ struct HeroPushHardeningFeedTests {
         )
         weak let transition = ZoomTransitionController.debugMostRecent
         #expect(transition != nil)
-        #expect(stack.nav.delegate is InteractiveSlideDismissal, "precondition: the card close holds the slot")
+        #expect(stack.nav.leasedDelegate is InteractiveSlideDismissal, "precondition: the card close holds the slot")
 
         transition?.onPresentationCancelled?()
 
-        #expect(stack.nav.delegate == nil, "the stack's delegate stayed on a flight that never showed")
+        #expect(stack.nav.leasedDelegate == nil, "the stack's delegate stayed on a flight that never showed")
         // Released a turn later by design (the close-out may run inside one
         // of these objects' own callbacks).
         try await Task.sleep(nanoseconds: 100_000_000)
