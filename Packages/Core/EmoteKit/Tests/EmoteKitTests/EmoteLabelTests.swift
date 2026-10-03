@@ -307,13 +307,29 @@ struct EmoteLabelTests {
 
     /// A linear flight on `position.x`, long enough to still be running when
     /// the test reads it, held where it starts (`timeOffset` 0, speed 0) so
-    /// the presentation is exactly `from`.
+    /// the presentation is exactly `from` — from the moment it is committed,
+    /// not from the moment it begins.
+    ///
+    /// ⚠️ **AN ANIMATION ADDED WITHOUT A `beginTime` BEGINS AFTER THE FLUSH
+    /// THAT COMMITS IT.** Core Animation stamps it with a begin time a little
+    /// ahead of the commit: 30-75 µs for a transaction that has been open a
+    /// while, ~1 ms for one opened just before it was flushed (measured
+    /// 2026-10-03, iPhone 18 Pro iOS 27 simulator: 400 of 400 reads straight
+    /// after `CATransaction.flush()` came before the begin time). Until then
+    /// the animation is not active, and without a backwards fill the
+    /// presentation is the MODEL: a read straight after the flush saw the
+    /// bubble at its model position, outside the band. Whether a test read
+    /// landed before or after the begin time depended on how long the
+    /// test had run since its transaction opened — a fast Mac failed 4 runs
+    /// in 5 where CI passed. `.backwards` makes the read the
+    /// same on either side of the begin time.
     private func parkedFlight(fromX: CGFloat, toX: CGFloat) -> CABasicAnimation {
         let flight = CABasicAnimation(keyPath: "position.x")
         flight.fromValue = fromX
         flight.toValue = toX
         flight.duration = 100
         flight.speed = 0
+        flight.fillMode = .backwards
         return flight
     }
 
@@ -406,7 +422,10 @@ struct EmoteLabelTests {
         let hold = CAKeyframeAnimation(keyPath: "opacity")
         hold.values = [1, 1]
         hold.duration = 0.01
-        hold.fillMode = .forwards
+        // Both ways: `.forwards` alone reads the model (0) until the begin
+        // time Core Animation stamps a little after the flush (see
+        // `parkedFlight`).
+        hold.fillMode = .both
         hold.isRemovedOnCompletion = false
         container.layer.add(hold, forKey: "subtitle-cue")
         CATransaction.flush()
