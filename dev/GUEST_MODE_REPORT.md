@@ -18,7 +18,9 @@ The good news is that the iOS side is well placed:
 - Comments, posts, other people's profiles, search and map tiles are already read without needing a viewer.
 - The `StakeShopOpening` responder-chain pattern is a ready-made shape for a "sign in to continue" gate.
 
-**Recommended path:**
+**Decisions settled on 2026-10-03** (§10): a guest token; Apple, Google, email or phone at sign-up; non-personalised regional trending for guests; restricted content by default; guest reports allowed; bookmarks gated; a non-blocking legal card; no nudges (unlimited browsing); location unlocks the current country only.
+
+**Path:**
 1. Build the iOS guest shell against the mock first (no backend dependency).
 2. In parallel, the backend ships five launch blockers:
    - a guest session token;
@@ -90,7 +92,7 @@ What we take from it:
 - **Apple backs it up.** Guideline 5.1.1(v): if an app "doesn't include significant account-based features, let people use it without a login." Browsing public posts is not account-based, so a login wall is challengeable at review.
 - **Guests are read-only everywhere.** The common set is: watch, open profiles, read comments, search, share a link. Every write is gated.
 - **The prompt is per action, not on a timer.** It is usually a half sheet with context ("Sign up to like").
-- **Guest personalisation is a choice, not a given.** Douyin and TikTok personalise per device. Kuaishou's visitor mode is random curated content. YouTube chose to show nothing. Apple 5.1.1(ii) requires consent for usage data "even if such data is considered to be anonymous".
+- **Guest personalisation is a choice, not a given.** Douyin and TikTok personalise per device. Kuaishou's visitor mode is random curated content. YouTube chose to show nothing. We start non-personalised (decision 3). Apple 5.1.1(ii) requires consent for usage data "even if such data is considered to be anonymous".
 
 ## 3. Guest scope and rights
 
@@ -156,8 +158,8 @@ How it works:
 | Precision | Approximate location is enough (`kCLLocationAccuracyReduced`; `NSLocationDefaultAccuracyReduced = YES`). Country borders are kilometres wide. |
 | On device | The coordinate becomes a country code through the bundled borders (`CountryAtlas.shared.country(owning:)`). **Only the ISO code leaves the device, never the coordinate.** |
 | Unlock | `CountryAccess` gains `currentCountry: String?`. `isUnlocked(code)` = home, purchased, or current. The map refreshes through the existing `.countryAccessDidChange` notification. |
-| Refresh | Re-read at each app foreground and on significant location change. Travelling unlocks the new country; the previous one locks again unless it is home or purchased. |
-| Denied or unavailable | No country is unlocked from location. The card stays on the map and links to iOS Settings. Members keep their home country. (Fallback for guests: §10, decision 9.) |
+| Refresh | Re-read at each app foreground and on significant location change. Travelling unlocks the new country; the previous one locks again unless it is home or purchased (decision 10). |
+| Denied or unavailable | No country is unlocked from location, and there is no storefront fallback (decision 9). The card stays on the map and links to iOS Settings. Members keep their home country. |
 | Member home country | Set at sign-up from the current country when known, otherwise from the App Store storefront country. It stays unlocked for good, as `BACKEND_COUNTRY_UNLOCKS.md` already proposes (`home_country`, "set at signup"). |
 
 **The server enforces it.** Following `BACKEND_COUNTRY_UNLOCKS.md`, which says the client never filters the map on the device's word:
@@ -191,7 +193,7 @@ This is the `GatedAction` enum the code would carry (§6.3). Each case maps to o
 2. **Guest session.** A guest session token is fetched in the background on first launch (§7.1). The first feed request awaits it, adding about one round trip. It is kept in the keychain and refreshed like a member token. If the request fails, the feed shows its normal error and retries.
 3. **Legal notice.**
    - A one-time, non-blocking card at the bottom of the first feed session: "By using the app you agree to the Terms and acknowledge the Privacy Policy", with links (#424) and a dismiss button.
-   - It does not block the feed. Whether this is enough in the EU, or whether personalisation needs explicit opt-in, is a decision for counsel (§10).
+   - It does not block the feed (decision 7). Guests get no personalisation in v1 (decision 3), which keeps the card sufficient; counsel still reviews the wording before launch.
    - No ATT prompt: the app has no IDFA, ads or cross-app tracking.
 4. **No age gate for guests.** Age is asked at sign-up (#394, 13+). Because a guest's age is unknown, guests get the restricted content level by default (§8).
 5. **No location prompt at launch.** Location is asked only from the map, in context (§3.1).
@@ -200,15 +202,17 @@ This is the `GatedAction` enum the code would carry (§6.3). Each case maps to o
 
 **The sheet.**
 - A half sheet (medium detent, expandable) with a contextual title from the gated action.
-- Below the title: Continue with Apple, then Continue with email / phone.
+- Below the title: Continue with Apple, Continue with Google, then Continue with email / phone (decision 2).
 - Footer: "Already have an account? Log in".
 - It is dismissible by swipe or ✕, and dismissing does nothing else: no nag, no counter.
 - It opens over whatever is on screen, including a hero-presented post or another sheet.
 
 **Methods.**
-- **Sign in with Apple is the primary button.** It costs the user the fewest steps, and it becomes mandatory-equivalent under guideline 4.8 the moment Google or any social login is added.
+- **Sign in with Apple is the primary button.** It costs the user the fewest steps, and because Google is offered, guideline 4.8 requires an equivalent privacy-preserving login: Sign in with Apple is that login.
+- **Continue with Google** comes second, through `ASWebAuthenticationSession` and the IdP's Google broker (no Google SDK needed).
 - Email and phone follow, with OTP verification.
 - Password login stays for existing accounts.
+- **One person, one account.** If a sign-up's verified email already belongs to an account created with another method, the sheet offers to log in with that method instead of creating a duplicate. Apple's private relay addresses never match, so linking methods from Settings comes later.
 
 **Sign-up flow** (inside the sheet, expanding to large):
 1. Method.
@@ -228,7 +232,7 @@ The account and its first profile are created in one flow. If the app is killed 
 
 **Logout returns to guest mode, not to a login screen.** Member-scoped local state is wiped (§6.6); device preferences stay.
 
-**Nudges (P2, off at launch).** A soft banner after N posts watched, capped once per session. Start without it and measure.
+**No nudges, unlimited browsing (decision 8).** A guest is never interrupted, capped or reminded: the only sign-up prompts are the ones their own taps open. Abuse is handled server-side by rate limits (§7.7), not by a browsing cap.
 
 ## 6. iOS architecture
 
@@ -372,7 +376,7 @@ A small `ScopedDefaults(scope: .device | .account(id) | .profile(id))` wrapper a
 
 ### 7.1 Guest principal (P0)
 
-Recommended: a guest session token (option A). It fits ADR-0005 and gives per-guest rate limits and attribution. Optional auth (option B: decode a token when present, pass through otherwise) is simpler but anonymous to the rate limiter and to personalisation.
+Decided: a guest session token (option A). It fits ADR-0005 and gives per-guest rate limits and attribution. Optional auth (option B: decode a token when present, pass through otherwise) was simpler but anonymous to the rate limiter and to personalisation.
 
 ```proto
 // auth.v1 — edge: public
@@ -459,7 +463,7 @@ message GetDiscoveryFeedRequest {
 
 | Need | Proposal |
 | --- | --- |
-| Create an account from the client | Enable Keycloak self-registration with brokered Sign in with Apple, plus auto-provisioning in `GrpcAccountDirectory::resolve_or_provision` (the deferred TODO at `:47-51`). Alternatively, a public `auth.v1.SignUp` that drives the IdP. Either way, `Login`/`SignUp` can take the guest token for the merge. |
+| Create an account from the client | Enable Keycloak self-registration with brokered Sign in with Apple and Google, plus auto-provisioning in `GrpcAccountDirectory::resolve_or_provision` (the deferred TODO at `:47-51`). Alternatively, a public `auth.v1.SignUp` that drives the IdP. Either way, `Login`/`SignUp` can take the guest token for the merge. |
 | Verify email / phone | `account.v1.SendVerificationCode` + `ConfirmVerificationCode` (today `VerifyEmail` only flips a flag) |
 | Date of birth | Field on the account, set at sign-up, 13+ enforced server-side (#394) |
 | Consent | `account.v1.RecordConsent{consent_version, data_processing, marketing}`; the GDPR record fields already exist |
@@ -492,8 +496,8 @@ Extend the `BACKEND_COUNTRY_UNLOCKS.md` proposal:
 | Topic | Decision |
 | --- | --- |
 | Apple 5.1.1(v) | Guest mode is the defensible posture. In-app deletion stays required for members (#386). |
-| Apple 4.8 | Sign in with Apple ships with, or before, any third-party login |
-| Apple 5.1.1(ii) | Guest personalisation needs consent that is easy to withdraw → "Personalised feed" toggle in guest settings. v1 can ship non-personalised and avoid the question. |
+| Apple 4.8 | Google is offered, so Sign in with Apple ships alongside it as the equivalent login |
+| Apple 5.1.1(ii) | v1 guests get a non-personalised feed (decision 3), so no usage-data consent is needed yet. If guest personalisation comes later, it ships with a "Personalised feed" toggle that is easy to withdraw. |
 | Age and minors | No age gate for guests. Guests get `ContentLevel.RESTRICTED`: no sensitive or mature content until a date of birth is known. This also covers DSA Art. 28 (minors) and teen mode (#401). |
 | GDPR | Privacy policy names guest data (install id, guest id, signals), the retention period, and the merge at sign-up. Guest data is erasable from the device. |
 | DSA | Guests can report (Art. 16). A non-profiled feed option is required for very large platforms; `ranking = TRENDING` provides it. |
@@ -502,7 +506,7 @@ Extend the `BACKEND_COUNTRY_UNLOCKS.md` proposal:
 
 ## 9. Delivery plan
 
-**Phase 0: decisions and contracts (1 week).** Settle §10. Backend designs the guest token, edge permission and discovery contract; iOS pins them in the mock.
+**Phase 0: contracts (1 week).** Decisions are settled (§10). Backend designs the guest token, edge permission and discovery contract; iOS pins them in the mock.
 
 **Phase 1: iOS guest shell on the mock (no backend dependency).**
 
@@ -525,7 +529,7 @@ Extend the `BACKEND_COUNTRY_UNLOCKS.md` proposal:
 | B1 (#446) | `StartGuestSession`, guest token claims, `read:public` permission, guest rejection on writes | P0 |
 | B2 (#447) | Viewer-aware public reads (§7.2) | P0 |
 | B3 (#448) | `GetDiscoveryFeed` v1, non-personalised, regional trending with decay | P0 |
-| B4 (#449) | Sign-up path: self-registration + Sign in with Apple, OTP verification, date of birth, consent, handle availability, token re-mint | P0 |
+| B4 (#449) | Sign-up path: self-registration + Sign in with Apple and Google, OTP verification, date of birth, consent, handle availability, token re-mint | P0 |
 | B5 (#450) | Per-IP / per-guest rate limits, `per_caller` in prod, App Attest, WAF | P0 |
 | B6 (#451) | CloudFront for media delivery | P0 |
 | B7 (#452) | Guest reports accepted by moderation | P0 |
@@ -534,31 +538,32 @@ Extend the `BACKEND_COUNTRY_UNLOCKS.md` proposal:
 | B10 (#455) | Country access from location: `current_country` verified against GeoIP, guest country set, `home_country` at sign-up (§7.6) | P1 |
 
 **Phase 3: real network and conversion.**
-- **iOS** (P0): sign-up screens (Sign in with Apple, OTP, date of birth, handle) on real contracts; discovery repository; guest token in `SessionManager`.
+- **iOS** (P0): sign-up screens (Sign in with Apple, Google, OTP, date of birth, handle) on real contracts; discovery repository; guest token in `SessionManager`.
 - **iOS** (P1): universal links.
 - **Backend** (P1): sign-up with guest-token merge.
 
 **Phase 4: personalisation and growth.**
 - `RecordImpressions` / not-interested signals.
-- Personalised `FOR_YOU` for guests (with the consent toggle).
+- Personalised `FOR_YOU` for guests (with the consent toggle), if v1 data says it is worth it.
 - Optional in-feed interest card.
-- Measured soft nudges.
 - Push for guests (#392, keyed by install).
 
 The existing settings issues that gain a guest variant: #409 (app preferences, guest-visible), #407/#413 (personalisation off, guest-visible), #424 (legal links in guest settings), #399 (reports, guest reporter), #386 (guest data deletion next to account deletion).
 
-## 10. Decisions needed
+## 10. Decisions (settled 2026-10-03)
 
-1. **Guest principal.** Guest token (recommended) or optional auth?
-2. **Sign-up methods at launch.** Sign in with Apple + email + phone (recommended), or also Google (then 4.8 applies)?
-3. **Guest personalisation in v1.** Non-personalised regional trending (recommended: simpler, no consent question), or device-level personalisation with consent?
-4. **Content level for guests.** Restricted by default (recommended), or full?
-5. **Guest reporting.** Allowed (recommended, DSA Art. 16), or gated?
-6. **Bookmarks.** Gated (recommended, matches the benchmark), or kept locally and merged at sign-up?
-7. **First-run legal notice in the EU.** Non-blocking card (recommended, pending counsel), nothing, or an explicit opt-in?
-8. **Nudges.** None at launch (recommended), or a capped banner after N posts?
-9. **Guest map without location.** No country unlocked, with the map inviting the person to allow location (recommended: the rule stays simple and honest), or fall back to the storefront country?
-10. **Country left behind.** When a person travels, does the previous current country lock again (recommended), or stay unlocked as "visited"?
+| # | Question | Decision |
+| --- | --- | --- |
+| 1 | Guest principal | Guest session token (§7.1) |
+| 2 | Sign-up methods at launch | Sign in with Apple, Google, email or phone. Apple satisfies guideline 4.8 next to Google; duplicate accounts are avoided by email matching (§5) |
+| 3 | Guest personalisation in v1 | None: non-personalised regional trending |
+| 4 | Content level for guests | Restricted by default |
+| 5 | Guest reporting | Allowed (DSA Art. 16) |
+| 6 | Bookmarks | Gated |
+| 7 | First-run legal notice | Non-blocking card; counsel reviews the wording |
+| 8 | Nudges | None; guest browsing is unlimited |
+| 9 | Guest map without location | No country unlocked; the map invites the person to allow location, which unlocks the country they are in |
+| 10 | Country left behind | Locks again; the new country unlocks |
 
 ## Appendix: interaction inventory
 
