@@ -1,6 +1,8 @@
 import DesignSystem
 import MapsInterface
 import UIKit
+import CoreModels
+import CoreNavigation
 
 /// Every country, and unlocking them: the Shop behind the Explore header's
 /// storefront and the wallet sheet's Shop item.
@@ -467,7 +469,10 @@ public final class CountryShopViewController: UIViewController {
         let buy = UIAction(
             title: "Buy for \(offer.price) gems",
             image: GemSymbol.glyphImage()
-        ) { [weak self] _ in self?.buyStakePack() }
+        ) { [weak self] _ in
+            guard let self else { return }
+            MemberGates.perform(.shop, from: self) { [weak self] in self?.buyStakePack() }
+        }
         if gems < offer.price {
             buy.attributes = .disabled
             buy.subtitle = "\(offer.price - gems) more gems needed"

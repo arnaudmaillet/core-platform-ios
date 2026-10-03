@@ -1856,8 +1856,11 @@ final class PlaceProfileViewController: UIViewController {
     private func configureFollowButton() {
         guard let following else { return }
         let item = UIBarButtonItem(primaryAction: UIAction { [weak self] _ in
-            guard let self, let following = self.following else { return }
-            self.renderFollowState(following.toggle())
+            guard let self else { return }
+            MemberGates.perform(.followPlace, from: self) { [weak self] in
+                guard let self, let following = self.following else { return }
+                self.renderFollowState(following.toggle())
+            }
         })
         followItem = item
         renderFollowState(following.isFollowing())

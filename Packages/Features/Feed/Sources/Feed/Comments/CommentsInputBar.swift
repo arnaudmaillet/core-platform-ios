@@ -3,6 +3,8 @@ import DesignSystem
 import EmoteKit
 import MediaCore
 import UIKit
+import CoreModels
+import CoreNavigation
 
 /// The comments composer — and, since the conversation became the text post's
 /// screen, the MESSAGES composer too — in the app's native Liquid Glass
@@ -1517,6 +1519,19 @@ final class CommentsInputBar: UIView {
 }
 
 extension CommentsInputBar: UITextViewDelegate {
+    /// A guest cannot write: the field opens the sign-up sheet instead of the
+    /// keyboard, and takes focus after they sign up — the comment they were
+    /// about to write. Every entry into editing passes here (a tap, a reply
+    /// row, the emote panel), so this one check covers them all.
+    func textViewShouldBeginEditing(_ textView: UITextView) -> Bool {
+        guard let gate = MemberGates.gate(from: self), !gate.isMember else { return true }
+        Task { @MainActor [weak self] in
+            guard await gate.requireMember(for: .comment) else { return }
+            self?.textView.becomeFirstResponder()
+        }
+        return false
+    }
+
     func textViewDidChange(_ textView: UITextView) {
         placeholderLabel.isHidden = textView.hasText
         updateFieldAction()

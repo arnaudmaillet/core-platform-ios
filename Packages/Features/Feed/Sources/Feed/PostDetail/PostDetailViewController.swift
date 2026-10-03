@@ -1,4 +1,5 @@
 import CoreModels
+import CoreNavigation
 import CoreStorage
 import MediaCore
 import DesignSystem
@@ -589,7 +590,10 @@ final class PostDetailViewController: UIViewController {
         likeConfig.image = UIImage(systemName: "heart")
         likeConfig.contentInsets = .zero
         likeButton.configuration = likeConfig
-        likeButton.addAction(UIAction { [weak self] _ in self?.viewModel.toggleLike() }, for: .primaryActionTriggered)
+        likeButton.addAction(UIAction { [weak self] _ in
+            guard let self else { return }
+            MemberGates.perform(.like, from: self) { [weak self] in self?.viewModel.toggleLike() }
+        }, for: .primaryActionTriggered)
         likeCountLabel.font = .preferredFont(forTextStyle: .subheadline)
         likeCountLabel.textColor = .secondaryLabel
         let likeRow = UIStackView(arrangedSubviews: [likeButton, likeCountLabel, UIView()])
@@ -776,26 +780,30 @@ final class PostDetailViewController: UIViewController {
         // Debit-first, so the animation never promises a state the balance
         // doesn't have. Nil wallet (an unwired host) leaves the tap inert.
         composeBar.onBoost = { [weak self] spend in
-            guard let self, let wallet = self.wallet else { return }
-            // A DRAFT is not a post yet, and a boost has nothing to land on —
-            // said, rather than spent against an id that does not exist.
-            guard let postID = self.viewModel.postID else {
-                return self.presentNotice("Boost", "You can boost your post once it's published.")
+            guard let self else { return }
+            // A guest signs up first; the boost then lands as asked.
+            MemberGates.perform(.like, from: self) { [weak self] in
+                guard let self, let wallet = self.wallet else { return }
+                // A DRAFT is not a post yet, and a boost has nothing to land on —
+                // said, rather than spent against an id that does not exist.
+                guard let postID = self.viewModel.postID else {
+                    return self.presentNotice("Boost", "You can boost your post once it's published.")
+                }
+                switch wallet.stake(spend, on: postID.rawValue) {
+                case .boosted(_, let targetTotal, let spent):
+                    // `spent`, never the request — a near-cap boost is clamped.
+                    self.sessionBoostAmount += spent
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    // Receipt before theatre — the button flips to (or grows)
+                    // its number face, then the "+N" float rises off it.
+                    self.composeBar.setBoostTotal(targetTotal)
+                    self.composeBar.playBoostConfirmation(amount: spent)
+                case .insufficientBalance, .targetCapReached, .noShotsLeft, .shotDoesNotFit:
+                    UINotificationFeedbackGenerator().notificationOccurred(.error)
+                    self.composeBar.playBoostDenied()
+                }
+                self.refreshComposeBarBoostState()
             }
-            switch wallet.stake(spend, on: postID.rawValue) {
-            case .boosted(_, let targetTotal, let spent):
-                // `spent`, never the request — a near-cap boost is clamped.
-                self.sessionBoostAmount += spent
-                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                // Receipt before theatre — the button flips to (or grows)
-                // its number face, then the "+N" float rises off it.
-                self.composeBar.setBoostTotal(targetTotal)
-                self.composeBar.playBoostConfirmation(amount: spent)
-            case .insufficientBalance, .targetCapReached, .noShotsLeft, .shotDoesNotFit:
-                UINotificationFeedbackGenerator().notificationOccurred(.error)
-                self.composeBar.playBoostDenied()
-            }
-            self.refreshComposeBarBoostState()
         }
         // The menu's Undo entry: takes back everything this bar spent while
         // the screen stayed up. Session-scoped by construction — the tally
@@ -2194,8 +2202,11 @@ final class PostDetailViewController: UIViewController {
         row.setLiked(liked, count: liked ? 1 : 0)
         row.onLikeTap = { [weak self, weak row] in
             guard let self else { return }
-            let nowLiked = self.viewModel.toggleCommentLike(commentID: model.id)
-            row?.setLiked(nowLiked, count: nowLiked ? 1 : 0)
+            MemberGates.perform(.comment, from: self) { [weak self, weak row] in
+                guard let self else { return }
+                let nowLiked = self.viewModel.toggleCommentLike(commentID: model.id)
+                row?.setLiked(nowLiked, count: nowLiked ? 1 : 0)
+            }
         }
     }
 

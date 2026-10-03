@@ -648,9 +648,12 @@ final class SoundSheetViewController: UIViewController {
 
     /// Saves the sound, or unsaves it; the glyph and its label follow.
     private func toggleSaved() {
-        let saved = savedSounds.toggle(sound.id)
-        refreshBookmark()
-        trace("saved \(sound.id): \(saved)")
+        MemberGates.perform(.saveSound, from: self) { [weak self] in
+            guard let self else { return }
+            let saved = savedSounds.toggle(sound.id)
+            refreshBookmark()
+            trace("saved \(sound.id): \(saved)")
+        }
     }
 
     /// The bookmark's glyph for the sound's state — what a test reads.
@@ -1639,7 +1642,10 @@ final class SoundSheetViewController: UIViewController {
     private func useSound() {
         guard let onUseSound else { return }
         let sound = sound
-        dismiss(animated: true) { onUseSound(sound) }
+        // "Use" opens the camera: a guest signs up first, then lands in it.
+        MemberGates.perform(.useSound, from: self) { [weak self] in
+            self?.dismiss(animated: true) { onUseSound(sound) }
+        }
     }
 
     private func share(from item: UIBarButtonItem?) {

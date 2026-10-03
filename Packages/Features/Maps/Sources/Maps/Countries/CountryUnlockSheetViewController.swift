@@ -1,5 +1,7 @@
 import DesignSystem
 import UIKit
+import CoreModels
+import CoreNavigation
 
 /// The offer a locked country makes when it is tapped on the map:
 ///
@@ -104,7 +106,10 @@ final class CountryUnlockSheetViewController: UIViewController {
         configuration?.cornerStyle = .capsule
         unlockButton.configuration = configuration
         unlockButton.tintColor = .systemBlue
-        unlockButton.addAction(UIAction { [weak self] _ in self?.unlock() }, for: .primaryActionTriggered)
+        unlockButton.addAction(UIAction { [weak self] _ in
+            guard let self else { return }
+            MemberGates.perform(.unlockCountry, from: self) { [weak self] in self?.unlock() }
+        }, for: .primaryActionTriggered)
         unlockButton.heightAnchor.constraint(equalToConstant: 50).isActive = true
 
         balanceLabel.font = .preferredFont(forTextStyle: .footnote)
