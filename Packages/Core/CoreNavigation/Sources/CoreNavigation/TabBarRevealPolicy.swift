@@ -342,3 +342,24 @@ public extension UIViewController {
         }
     }
 }
+
+@MainActor
+public extension UINavigationController {
+    /// Whether a push or pop of THIS stack is running — not merely any
+    /// transition `transitionCoordinator` reports.
+    ///
+    /// ⚠️ `transitionCoordinator` ALSO ANSWERS FOR THE STACK BEING PRESENTED.
+    /// A stack presented modally (`OverSheetFeedHost`, over the sound sheet)
+    /// opens its post from the presentation's completion, where the coordinator
+    /// of that presentation is still reported. A guard reading "any
+    /// coordinator" as "a push is running" refused every post opened from the
+    /// sound sheet. Only a transition between screens of this stack counts.
+    var isTransitioningItsStack: Bool {
+        guard let coordinator = transitionCoordinator else { return false }
+        let involved = [coordinator.viewController(forKey: .from), coordinator.viewController(forKey: .to)]
+        return involved.contains { screen in
+            guard let screen, screen !== self else { return false }
+            return screen.navigationController === self || viewControllers.contains(screen)
+        }
+    }
+}

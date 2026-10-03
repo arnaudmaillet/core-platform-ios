@@ -682,7 +682,7 @@ final class SnapFeedViewController: UIViewController {
         // the dock rose for a close that never happened (and stayed over the
         // feed when it was the present still landing), and the owner restaged
         // for it. The chevron is simply not live until the stack is at rest.
-        if let nav = navigationController, nav.transitionCoordinator != nil { return }
+        if let nav = navigationController, nav.isTransitioningItsStack { return }
         onWillCloseFeed?()
         if let nav = navigationController, nav.viewControllers.first !== self {
             revealDockBeforePop(on: nav)
