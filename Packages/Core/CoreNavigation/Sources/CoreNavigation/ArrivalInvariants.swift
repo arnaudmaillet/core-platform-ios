@@ -11,6 +11,13 @@ public protocol ArrivalInvariantReporting: UIViewController {
     func arrivalFacts() -> [(name: String, holds: Bool)]
 }
 
+/// The same, for a VIEW a screen hosts: a component reused by many screens
+/// (a post grid) states its own facts once, and every host is checked.
+@MainActor
+public protocol ArrivalInvariantReportingView: UIView {
+    func arrivalFacts() -> [(name: String, holds: Bool)]
+}
+
 /// Checks the screen a hero flight ends on, once it should be at rest
 /// (`dev/HERO_PUSH_AUDIT_PLAN.md` 2.15).
 ///
@@ -108,6 +115,25 @@ public enum ArrivalInvariants {
 
         if let reporting = screen as? any ArrivalInvariantReporting {
             for fact in reporting.arrivalFacts() { require(fact.holds, fact.name) }
+        }
+        // Components report at REST only: a landing legitimately holds their
+        // scopes open until it settles.
+        if phase == "rested" {
+            for view in reportingViews(in: screen.view) {
+                for fact in view.arrivalFacts() { require(fact.holds, fact.name) }
+            }
+        }
+
+        func reportingViews(in root: UIView) -> [any ArrivalInvariantReportingView] {
+            var found: [any ArrivalInvariantReportingView] = []
+            var queue: [UIView] = [root]
+            while let view = queue.popLast() {
+                if let reporting = view as? any ArrivalInvariantReportingView, !view.isHidden, view.window != nil {
+                    found.append(reporting)
+                }
+                queue.append(contentsOf: view.subviews)
+            }
+            return found
         }
 
         let head = "[arrival] screen=\(type(of: screen)) path=\(path) phase=\(phase)"

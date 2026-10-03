@@ -201,6 +201,22 @@ Rules:
 - **`ZoomTransitionController` arrival edge.** It reads `onSourceReturned` only after having seen its feed on the stack (`hasSeenFeedOnStack`, the slide's rule). Close-only controllers start having seen it. Every lease now hears every `didShow`, so a premature one must not read as a return.
 - **`UINavigationController.leasedDelegate`**, for tests and diagnostics.
 
+
+## PR E outcome (2026-10-03)
+
+### Done
+- **Lookups by identity and scope, not by asset (3.3):**
+  - `transferOwnership(of:drawnBy:to:)` resolves the player from the surface the viewer watched land (the flight card's), and takes the loan from EVERY key that owns that player, so no co-owner keeps it decoding behind a hidden page.
+  - A park is cleared only if it is that player.
+  - The grid's landing (`adoptAttachedSurface(...drawnBy:)`) and the rails' landing pass the card surface.
+  - The landing caps the bitrate by the owning surface (`setPeakBitRate(_:in:)`).
+  - The grid's flight card joins the tile's watched surface by identity (`attachSurface(_:alongsideSurface:)`), falling back to the URL.
+  - The feed page's joins and its bitrate uncap go to its post's scope first (`attachSurface(_:to:scope:)`, `setPeakBitRate(_:for:scope:)`), so a repost running the same file in another scope is not taken.
+- **Handoff pairing, checked:** `ArrivalInvariantReportingView`. A component states its facts once and every host of it is checked at rest. `ForYouGridPage` reports `grid.handoffClosed`: the class of 1.5 (Search never ended its handoff) is now a FAIL line.
+
+### Not done, by judgement
+A `TransitionPlaybackSession` object owning begin/end. The invariant above detects the unpaired case on every host without moving the six hosts' begin/end calls into a new type. The identity APIs remove the ambiguity the session was meant to hide.
+
 ## Phase 3: structure (behaviour-preserving refactors, one PR each)
 
 **3.0 One dismissal arbiter.** The rule for which driver claims a drag is

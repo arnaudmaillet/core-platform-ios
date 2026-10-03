@@ -2164,7 +2164,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             // player having one render slot, and it has nothing to work around
             // here — the card, the tile and this page all draw the same frames
             // at the same time.
-            guard videoPlayback.attachSurface(view, to: url) else { return }
+            guard videoPlayback.attachSurface(view, to: url, scope: playbackScope) else { return }
             // The tile's thumbnail-rung cap is NOT lifted here, deliberately.
             // An uncap invites an ABR switch, a switch changes the decoded
             // buffer's dimensions, and the layer re-fits the new buffer into
@@ -2204,7 +2204,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // lift used to ride the warm attach — flight staging — which invited
         // the ladder's next switch point (a one-frame dimension re-fit on the
         // layer) to land mid-flight.
-        videoPlayback.setPeakBitRate(0, for: url)
+        videoPlayback.setPeakBitRate(0, for: url, scope: playbackScope)
         guard hasDeferredPlayback else { return }
         hasDeferredPlayback = false
         let view = mediaCard.renderView
@@ -2219,7 +2219,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // so try the join again first — it is the very player the flight
         // card was flying, which is what makes this a continuation. Mint
         // only when there is genuinely nothing to join.
-        if VideoRenderFlags.usesSampleBufferLayer, videoPlayback.attachSurface(view, to: url) {
+        if VideoRenderFlags.usesSampleBufferLayer, videoPlayback.attachSurface(view, to: url, scope: playbackScope) {
             view.revealOnFirstFrame()
             return
         }

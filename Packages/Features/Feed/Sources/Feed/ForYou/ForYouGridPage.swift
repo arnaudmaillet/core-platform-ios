@@ -1874,7 +1874,9 @@ final class ForYouGridPage: UIView {
             // the current frame on attach — and takes the pool loan; the card's
             // is released once it leaves the window. Nothing is re-parented,
             // which is the ~65ms drop `holdCard` was covering.
-            playback.adoptAttachedSurface(for: postID, url: url, cell: cell)
+            playback.adoptAttachedSurface(
+                for: postID, url: url, cell: cell, drawnBy: view
+            )
             return
         }
         playback.adoptLiveSurface(view, for: postID, url: url, cell: cell)
@@ -3657,3 +3659,16 @@ private final class LeadHostView: UICollectionReusableView {
         view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     }
 }
+
+#if DEBUG
+extension ForYouGridPage: ArrivalInvariantReportingView {
+    /// ⚠️ A grid at rest has no playback handoff open. Every host begins one
+    /// when it opens a post and must end it when the screen is back; Search
+    /// began and never ended, which froze the tapped tile out of the grid's
+    /// ranking for the rest of the session (hero audit 1.5). Stated here, once,
+    /// every host of this page is checked.
+    func arrivalFacts() -> [(name: String, holds: Bool)] {
+        [("grid.handoffClosed", !(playback?.isHandoffOpen ?? false))]
+    }
+}
+#endif

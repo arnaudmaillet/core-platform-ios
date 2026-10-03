@@ -146,6 +146,9 @@ public final class GridVideoPlaybackCoordinator {
     /// full-screen page. Inside a handoff this coordinator treats that post as
     /// none of its business: `reconcile` neither starts nor stops it.
     private var handoffID: PostID?
+    /// Whether a playback handoff is open — for the arrival audit, which
+    /// requires every grid at rest to have closed the one its open began.
+    public var isHandoffOpen: Bool { handoffID != nil }
     /// In-flight `play` calls, keyed by post. Held so a stop arriving while the
     /// URL is still resolving cancels it, rather than letting a late attach
     /// bind a player to a tile that has already scrolled away.
@@ -710,7 +713,13 @@ public final class GridVideoPlaybackCoordinator {
         // screen and playing the same clip until the flight's first-frame
         // gate hides it.
         view.paintsOpaqueGround = false
-        guard pool.attachSurface(view, to: url) else { return nil }
+        // Joined to the surface the TILE is showing, by identity: the card
+        // flies the player this tile is drawing, never another player running
+        // the same asset. The asset is only the fallback, for a tile whose
+        // surface cannot be followed to a renderer.
+        let tileSurface = loans[id].map { $0.watchedClipSurface ?? $0.makeVideoRenderViewIfNeeded() }
+        let joined = tileSurface.map { pool.attachSurface(view, alongsideSurface: $0) } ?? false
+        guard joined || pool.attachSurface(view, to: url) else { return nil }
         // Refuse a surface that could not be primed.
         //
         // `attachSurface` succeeds whenever something is playing the URL, but
@@ -817,7 +826,13 @@ public final class GridVideoPlaybackCoordinator {
         return view
     }
 
-    public func adoptAttachedSurface(for id: PostID, url: URL, cell: any GridPlaybackCell) -> Bool {
+    /// - `flightSurface`: the surface the viewer watched land (the flight
+    ///   card's). The loan is taken from the player IT draws, by identity, so
+    ///   a second player running the same asset cannot be adopted by mistake.
+    public func adoptAttachedSurface(
+        for id: PostID, url: URL, cell: any GridPlaybackCell,
+        drawnBy flightSurface: VideoRenderView? = nil
+    ) -> Bool {
         let view = cell.makeVideoRenderViewIfNeeded()
         #if DEBUG
         view.debugLabel = "tile"
@@ -829,7 +844,7 @@ public final class GridVideoPlaybackCoordinator {
         // becomes visible it already has the right pixels. Unhiding first
         // exposed one frame of an empty surface at the exact moment the flight
         // card is taken away, which is a flash at landing.
-        guard pool.transferOwnership(of: url, to: view) else { return false }
+        guard pool.transferOwnership(of: url, drawnBy: flightSurface, to: view) else { return false }
         // ⚠️ AND THE COMMENT ABOVE WAS WRONG FOR THIS EXACT CASE.
         //
         // "`transferOwnership` attaches the surface, which primes it" holds only
@@ -843,7 +858,9 @@ public final class GridVideoPlaybackCoordinator {
         // just set two lines up: the clip's thumbnail, over the clip.
         pool.primeSurface(view)
         view.revealOnFirstFrame()
-        pool.setPeakBitRate(Self.tileBitRateCap, for: url)
+        // By the surface that now owns it, not by URL: the cap belongs to THIS
+        // tile's player.
+        pool.setPeakBitRate(Self.tileBitRateCap, in: view)
         loans[id] = cell
         // ⚠️ AND THE STREAM, with the loan — the two are one fact to `update`.
         //
