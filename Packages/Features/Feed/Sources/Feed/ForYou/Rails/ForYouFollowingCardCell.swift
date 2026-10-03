@@ -13,8 +13,8 @@ import UIKit
 /// the name the Following card has always called it by.
 typealias ForYouCardCaptionOverlay = PostCardCaptionOverlay
 
-/// One MEDIA card in For You's Following row (its top lane,
-/// `ForYouFollowingLanes`) and in Discover's pairs: a photo or a video,
+/// One MEDIA card in For You's Following section (its media row,
+/// `ForYouFollowingRows`) and in Discover's pairs: a photo or a video,
 /// equal-sized with its neighbours, playing (muted) whenever it is half on
 /// screen, with its author and first two lines over the bottom of it.
 ///
@@ -24,8 +24,8 @@ typealias ForYouCardCaptionOverlay = PostCardCaptionOverlay
 /// first frame, and the surface handed back on reuse. What it adds is the
 /// overlay.
 ///
-/// Media only, since 3 October 2026: a text post in the Following row is the
-/// list's own card (`PostGridListRowCell`) in the bottom lane, and the text
+/// Media only, since 3 October 2026: a text post in the Following section is the
+/// list's own card (`PostGridListRowCell`) in the text row, and the text
 /// face this card used to draw — its words on the card's fill — is gone, with
 /// its stand-in. Pairs are vertical media by construction.
 final class ForYouFollowingCardCell: UICollectionViewCell {

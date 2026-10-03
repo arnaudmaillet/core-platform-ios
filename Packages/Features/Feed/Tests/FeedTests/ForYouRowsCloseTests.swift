@@ -133,7 +133,8 @@ struct ForYouRowsCloseTests {
     /// `geometry=false`). The rect is found without a window, and a card
     /// scrolled away is brought back to be found.
     @Test func aCardsWindowFindsItsRowOutOfTheWindowAndScrolledAway() throws {
-        let cards = (0..<8).map { Self.post("c\($0)", kind: $0 == 0 ? .video : .text) }
+        // Media, all of them: the media row is the one scrolled away.
+        let cards = (0..<8).map { Self.post("c\($0)", kind: $0 == 0 ? .video : .photo) }
         let fixture = Fixture(cards: cards)
         let row = try #require(fixture.cardsRow)
         let reveal = try #require(ForYouRowOrigins.card(
@@ -301,10 +302,8 @@ struct ForYouRowsCloseTests {
             for row in rails.subviews.compactMap({ $0 as? UICollectionView }) { row.layoutIfNeeded() }
         }
 
-        /// The Following row — the second of the rows' two scroll views.
-        var cardsRow: UICollectionView? {
-            rails.subviews.compactMap { $0 as? UICollectionView }.last
-        }
+        /// Following's media row.
+        var cardsRow: UICollectionView? { rails.debugMediaRow }
 
         var isFrozen: Bool { page.debugInsetState.contains("frozen=Y") }
     }

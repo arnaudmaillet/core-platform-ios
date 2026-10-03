@@ -2693,8 +2693,8 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
                 }) { [weak self] in
                     guard let self else { return }
                     let card = rails.cards[index]
-                    let lane = rails.debugCardIndexPath(at: index).map { " lane=\($0.section).\($0.item)" } ?? ""
-                    print("[qa] -foryou-open-card \(index): \(card.id.rawValue) kind=\(card.kind)\(lane)")
+                    let place = rails.debugCardPlaceName(at: index).map { " row=\($0)" } ?? ""
+                    print("[qa] -foryou-open-card \(index): \(card.id.rawValue) kind=\(card.kind)\(place)")
                     scheduleDemoCloseIfRequested()
                     _ = rails.debugTapCard(at: index)
                 }
