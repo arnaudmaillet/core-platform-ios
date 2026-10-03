@@ -164,6 +164,53 @@ struct ForYouFollowingLanesTests {
         #expect(tall.debugCaptionLines == ForYouCardCaptionOverlay.textCaptionLines)
     }
 
+    /// ⚠️ THE LANE'S TEXT CARD IS TODAY'S TEXT CARD (the user's call, live on
+    /// the sim): the same cell, ground, corner, type, author line, heart and
+    /// insets — only its size and its two lines differ. Pinned against the
+    /// single-lane row's own text card, and the flight's copy and the close's
+    /// stand-in against the lane card.
+    @Test func aLaneTextCardIsTodaysTextCardAtTheLaneSize() throws {
+        let words = Self.post("t0", kind: .text, caption: String(repeating: "Words, words. ", count: 20))
+        let cards = [Self.post("m0", kind: .photo), words]
+        let lane = try #require(Fixture(cards: cards, lanes: true).rails.debugCardCell(at: 1))
+        let today = try #require(Fixture(cards: cards, lanes: false).rails.debugCardCell(at: 1))
+        for cell in [lane, today] { cell.layoutIfNeeded() }
+        let laneOverlay = try #require(Self.overlay(in: lane))
+        let todayOverlay = try #require(Self.overlay(in: today))
+
+        #expect(lane.contentView.backgroundColor == today.contentView.backgroundColor)
+        #expect(lane.contentView.layer.cornerRadius == today.contentView.layer.cornerRadius)
+        #expect(laneOverlay.debugCaptionLineHeight == todayOverlay.debugCaptionLineHeight, "the same type")
+        // The same insets: the words from the top-left, the author line and
+        // the heart on the foot.
+        #expect(laneOverlay.debugCaptionFrame.origin == todayOverlay.debugCaptionFrame.origin)
+        #expect(laneOverlay.debugAuthorFrame.minX == todayOverlay.debugAuthorFrame.minX)
+        #expect(lane.bounds.height - laneOverlay.debugAuthorFrame.maxY
+            == today.bounds.height - todayOverlay.debugAuthorFrame.maxY)
+        #expect(laneOverlay.debugAuthorFrame.height == todayOverlay.debugAuthorFrame.height)
+        #expect(!todayOverlay.debugLikeFrame.isNull, "precondition: today's card has its heart")
+        #expect(!laneOverlay.debugLikeFrame.isNull, "the lane card lost its heart")
+        #expect(lane.bounds.width - laneOverlay.debugLikeFrame.maxX
+            == today.bounds.width - todayOverlay.debugLikeFrame.maxX)
+        #expect(lane.bounds.height - laneOverlay.debugLikeFrame.maxY
+            == today.bounds.height - todayOverlay.debugLikeFrame.maxY)
+        // Only the lines and the size differ.
+        #expect(laneOverlay.debugCaptionLines == 2)
+        #expect(todayOverlay.debugCaptionLines == ForYouCardCaptionOverlay.textCaptionLines)
+
+        // The copies a flight and a close draw are the lane card.
+        let copy = ForYouFollowingCardCell.makeOverlay(for: words, restingSize: lane.bounds.size)
+        let standIn = ForYouFollowingCardCell.makeTextStandIn(for: words, size: lane.bounds.size)
+        let standInOverlay = try #require(standIn.subviews.compactMap { $0 as? ForYouCardCaptionOverlay }.first)
+        #expect(standIn.backgroundColor == lane.contentView.backgroundColor)
+        for twin in [copy, standInOverlay] {
+            #expect(twin.debugCaptionFrame == laneOverlay.debugCaptionFrame)
+            #expect(twin.debugAuthorFrame == laneOverlay.debugAuthorFrame)
+            #expect(twin.debugLikeFrame == laneOverlay.debugLikeFrame)
+            #expect(twin.debugCaptionLines == 2)
+        }
+    }
+
     // MARK: - Snapping
 
     /// With text cards, the row rests on SPREADS — a text card's edges, two
@@ -324,7 +371,9 @@ struct ForYouFollowingLanesTests {
             id: PostID(id), kind: kind, isRepost: false,
             thumbnailURL: kind == .text ? nil : URL(string: "https://example.com/\(id).jpg"),
             caption: caption ?? "caption \(id)", publishedAtMS: 1,
-            authorID: ProfileID("bo"), authorName: "Bo", authorHandle: "bo"
+            authorID: ProfileID("bo"), authorName: "Bo", authorHandle: "bo",
+            // A count, so every card wears its heart as the mock's do.
+            reactionCount: 234
         )
     }
 
