@@ -34,9 +34,29 @@ public protocol AccountProviding: Sendable {
     func currentAccount() async throws -> AccountDetails
 }
 
+/// The account's GDPR lifecycle (Settings → Account): erasure now, the data
+/// export alongside it in #387.
+public protocol AccountLifecycleManaging: Sendable {
+    /// Starts an Art. 17 erasure request for the signed-in account.
+    func requestDeletion() async throws
+    /// When deletion was requested, or nil when it never was.
+    func deletionRequestedAt() async throws -> Date?
+}
+
+/// How long a deletion request waits before it is permanent. A product
+/// decision (2026-10-03, matching Instagram and TikTok); the backend's
+/// `AnonymizeAccount` retention must match it.
+public enum AccountDeletionPolicy {
+    public static let gracePeriodDays = 30
+
+    public static func permanentDate(requestedAt: Date, calendar: Calendar = .current) -> Date {
+        calendar.date(byAdding: .day, value: gracePeriodDays, to: requestedAt) ?? requestedAt
+    }
+}
+
 /// Reads the viewer's account from `account.v1` (`GetAccountById`), resolving
 /// the account id from the auth session. Mirrors `ProfileRepository`'s shape.
-public actor AccountRepository: AccountProviding {
+public actor AccountRepository: AccountProviding, AccountLifecycleManaging {
     private let accountClient: any Account_V1_AccountServiceClientInterface
     private let authSession: any AuthSessionProviding
 
@@ -68,5 +88,35 @@ public actor AccountRepository: AccountProviding {
         case .failure(let error):
             throw AccountError.transport(message: error.message ?? "code \(error.code)")
         }
+    }
+
+    public func requestDeletion() async throws {
+        var request = Account_V1_RequestGdprDeletionRequest()
+        request.accountID = try await accountID()
+        let response = await accountClient.requestGdprDeletion(request: request, headers: [:])
+        if case .failure(let error) = response.result {
+            throw AccountError.transport(message: error.message ?? "code \(error.code)")
+        }
+    }
+
+    public func deletionRequestedAt() async throws -> Date? {
+        var request = Account_V1_GetGdprRecordRequest()
+        request.accountID = try await accountID()
+        let response = await accountClient.getGdprRecord(request: request, headers: [:])
+        switch response.result {
+        case .success(let record):
+            guard record.hasDeletionRequestedAt else { return nil }
+            let stamp = record.deletionRequestedAt
+            return Date(timeIntervalSince1970: TimeInterval(stamp.seconds) + TimeInterval(stamp.nanos) / 1e9)
+        case .failure(let error):
+            throw AccountError.transport(message: error.message ?? "code \(error.code)")
+        }
+    }
+
+    private func accountID() async throws -> String {
+        guard case .authenticated(let accountID) = await authSession.currentState() else {
+            throw AccountError.notAuthenticated
+        }
+        return accountID.rawValue
     }
 }

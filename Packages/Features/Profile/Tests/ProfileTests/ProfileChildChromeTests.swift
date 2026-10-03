@@ -58,8 +58,14 @@ struct ProfileChildChromeTests {
     }
 
     @Test func accountSettingsHidesTheTabBar() {
-        let settings = AccountSettingsViewController(account: StubAccount(), onLogout: {})
+        let settings = AccountSettingsViewController(account: StubAccount())
         #expect(settings.hidesBottomBarWhenPushed)
+    }
+
+    @Test func settingsAndItsComingSoonPagesHideTheTabBar() {
+        let settings = SettingsViewController(switching: nil, switcher: nil, makeDestination: { _ in nil }, onLogout: {})
+        #expect(settings.hidesBottomBarWhenPushed)
+        #expect(SettingsComingSoonViewController(section: .wallet).hidesBottomBarWhenPushed)
     }
 
     /// ⚠️ Both lists run under their bar with no system effect drawn there —
@@ -75,7 +81,14 @@ struct ProfileChildChromeTests {
     }
 
     @Test func accountSettingsRunsUnderItsBarWithNoSystemEffect() throws {
-        let settings = AccountSettingsViewController(account: StubAccount(), onLogout: {})
+        let settings = AccountSettingsViewController(account: StubAccount())
+        settings.loadViewIfNeeded()
+        let list = try #require(settings.view.subviews.compactMap { $0 as? UICollectionView }.first)
+        #expect(list.topEdgeEffect.isHidden)
+    }
+
+    @Test func settingsRunsUnderItsBarWithNoSystemEffect() throws {
+        let settings = SettingsViewController(switching: nil, switcher: nil, makeDestination: { _ in nil }, onLogout: {})
         settings.loadViewIfNeeded()
         let list = try #require(settings.view.subviews.compactMap { $0 as? UICollectionView }.first)
         #expect(list.topEdgeEffect.isHidden)

@@ -772,6 +772,37 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
                 self?.qaTapFollowItem()
             }
         }
+        // Dev convenience: `-open-settings [section]` pushes Settings once this
+        // screen is at rest on top, then the named section (a
+        // `SettingsSection` raw value: account, security, privacy, legal…).
+        // The gear is a bar item, which takes no simulated touch.
+        if let flag = arguments.firstIndex(of: "-open-settings") {
+            let next = arguments.index(after: flag)
+            let sectionName = next < arguments.endIndex && !arguments[next].hasPrefix("-") ? arguments[next] : nil
+            QAWait.until("open-settings push", { [weak self] in
+                guard let self, let navigation = self.navigationController else { return false }
+                return navigation.topViewController === self && navigation.transitionCoordinator == nil
+            }) { [weak self] in
+                guard let self else { return }
+                guard self.makeSettingsViewController != nil else {
+                    QAWait.fail("open-settings", "this profile has no settings (not the viewer's own)")
+                    return
+                }
+                self.pushSettings()
+                guard let sectionName else { return }
+                guard let section = SettingsSection(rawValue: sectionName) else {
+                    QAWait.fail("open-settings", "unknown section \(sectionName)")
+                    return
+                }
+                QAWait.until("open-settings section", { [weak self] in
+                    guard let navigation = self?.navigationController else { return false }
+                    return navigation.topViewController is SettingsViewController
+                        && navigation.transitionCoordinator == nil
+                }) { [weak self] in
+                    (self?.navigationController?.topViewController as? SettingsViewController)?.open(section)
+                }
+            }
+        }
         // Dev convenience: `-profile-relationships [following]` opens the
         // followers / following screen once the profile has loaded — it lives
         // behind a tap on the counter row, which the simulator can't deliver.

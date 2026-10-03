@@ -41,6 +41,9 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     private let account: (any AccountProviding)?
     /// Multi-profile switching for the account (lists profiles, switches active).
     private let switching: (any ProfileSwitching)?
+    /// Lists and ends the account's sessions (Settings → Security and Login).
+    /// Nil leaves that section on its coming-soon page.
+    private let accountSessions: (any AccountSessionsManaging)?
 
     public init(
         repository: any ProfileProviding,
@@ -51,7 +54,8 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
         imagePipeline: ImagePipeline,
         router: (any Router)? = nil,
         account: (any AccountProviding)? = nil,
-        switching: (any ProfileSwitching)? = nil
+        switching: (any ProfileSwitching)? = nil,
+        accountSessions: (any AccountSessionsManaging)? = nil
     ) {
         self.repository = repository
         self.reporting = reporting
@@ -62,6 +66,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
         self.router = router
         self.account = account
         self.switching = switching
+        self.accountSessions = accountSessions
     }
 
     private func makeSwitcherFactory() -> ProfileSwitcherMenuFactory? {
@@ -139,7 +144,32 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             // profile action, and it is safe at any stack depth.
             makeSettingsViewController: onLogout.flatMap { onLogout in
                 account.map { account in
-                    { AccountSettingsViewController(account: account, onLogout: onLogout) }
+                    { [switching, accountSessions] in
+                        SettingsViewController(
+                            switching: switching,
+                            switcher: makeSwitcherFactory(),
+                            makeDestination: { section in
+                                switch section {
+                                case .account:
+                                    AccountSettingsViewController(
+                                        account: account,
+                                        lifecycle: account as? any AccountLifecycleManaging,
+                                        onAccountDeleted: onLogout
+                                    )
+                                case .security:
+                                    accountSessions.map {
+                                        SecuritySettingsViewController(
+                                            viewModel: SecuritySettingsViewModel(sessions: $0),
+                                            onSignedOutEverywhere: onLogout
+                                        )
+                                    }
+                                case .privacy: PrivacySettingsViewController(store: RelationshipPrivacyStore())
+                                default: nil
+                                }
+                            },
+                            onLogout: onLogout
+                        )
+                    }
                 }
             },
             switcherFactory: onLogout == nil ? nil : makeSwitcherFactory(),
