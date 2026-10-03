@@ -256,7 +256,10 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     /// before they begin a playback handoff, in one place for the screens
     /// that open through this builder.
     public static func canOpen(from presenter: UIViewController, on nav: UINavigationController) -> Bool {
-        guard nav.transitionCoordinator == nil, let top = nav.topViewController else { return false }
+        // A push or pop of this stack — not the stack's own modal presentation
+        // (`isTransitioningItsStack`): the sound sheet's host opens its post
+        // from that presentation's completion.
+        guard !nav.isTransitioningItsStack, let top = nav.topViewController else { return false }
         var screen: UIViewController? = presenter
         while let current = screen, current !== top { screen = current.parent }
         return screen === top
