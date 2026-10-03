@@ -34,13 +34,27 @@ public protocol AccountProviding: Sendable {
     func currentAccount() async throws -> AccountDetails
 }
 
-/// The account's GDPR lifecycle (Settings → Account): erasure now, the data
-/// export alongside it in #387.
+/// Where the account's GDPR requests stand, from `GetGdprRecord`.
+public struct AccountGdprStatus: Equatable, Sendable {
+    public var deletionRequestedAt: Date?
+    public var exportRequestedAt: Date?
+    public var exportCompletedAt: Date?
+
+    public init(deletionRequestedAt: Date? = nil, exportRequestedAt: Date? = nil, exportCompletedAt: Date? = nil) {
+        self.deletionRequestedAt = deletionRequestedAt
+        self.exportRequestedAt = exportRequestedAt
+        self.exportCompletedAt = exportCompletedAt
+    }
+}
+
+/// The account's GDPR lifecycle (Settings → Account): erasure (#386) and the
+/// data export (#387).
 public protocol AccountLifecycleManaging: Sendable {
     /// Starts an Art. 17 erasure request for the signed-in account.
     func requestDeletion() async throws
-    /// When deletion was requested, or nil when it never was.
-    func deletionRequestedAt() async throws -> Date?
+    /// Starts an Art. 20 portability export for the signed-in account.
+    func requestDataExport() async throws
+    func gdprStatus() async throws -> AccountGdprStatus
 }
 
 /// How long a deletion request waits before it is permanent. A product
@@ -99,15 +113,32 @@ public actor AccountRepository: AccountProviding, AccountLifecycleManaging {
         }
     }
 
-    public func deletionRequestedAt() async throws -> Date? {
+    public func requestDataExport() async throws {
+        var request = Account_V1_RequestDataExportRequest()
+        request.accountID = try await accountID()
+        let response = await accountClient.requestDataExport(request: request, headers: [:])
+        if case .failure(let error) = response.result {
+            throw AccountError.transport(message: error.message ?? "code \(error.code)")
+        }
+    }
+
+    public func gdprStatus() async throws -> AccountGdprStatus {
         var request = Account_V1_GetGdprRecordRequest()
         request.accountID = try await accountID()
         let response = await accountClient.getGdprRecord(request: request, headers: [:])
         switch response.result {
         case .success(let record):
-            guard record.hasDeletionRequestedAt else { return nil }
-            let stamp = record.deletionRequestedAt
-            return Date(timeIntervalSince1970: TimeInterval(stamp.seconds) + TimeInterval(stamp.nanos) / 1e9)
+            func date(_ seconds: Int64, _ nanos: Int32) -> Date {
+                Date(timeIntervalSince1970: TimeInterval(seconds) + TimeInterval(nanos) / 1e9)
+            }
+            return AccountGdprStatus(
+                deletionRequestedAt: record.hasDeletionRequestedAt
+                    ? date(record.deletionRequestedAt.seconds, record.deletionRequestedAt.nanos) : nil,
+                exportRequestedAt: record.hasDataExportRequestedAt
+                    ? date(record.dataExportRequestedAt.seconds, record.dataExportRequestedAt.nanos) : nil,
+                exportCompletedAt: record.hasDataExportCompletedAt
+                    ? date(record.dataExportCompletedAt.seconds, record.dataExportCompletedAt.nanos) : nil
+            )
         case .failure(let error):
             throw AccountError.transport(message: error.message ?? "code \(error.code)")
         }

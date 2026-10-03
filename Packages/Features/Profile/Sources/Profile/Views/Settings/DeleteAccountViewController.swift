@@ -15,11 +15,12 @@ import UIKit
 /// perform.
 final class DeleteAccountViewController: UIViewController {
     private enum Section: Hashable {
-        case consequences, action
+        case consequences, beforeYouGo, action
     }
 
     private enum Item: Hashable {
         case consequence(String)
+        case downloadData
         case loading
         case delete
         case requested
@@ -34,12 +35,19 @@ final class DeleteAccountViewController: UIViewController {
 
     private let viewModel: DeleteAccountViewModel
     private let onAccountDeleted: () -> Void
+    /// "Download your data first" — offered before the irreversible step.
+    private let makeDataExport: () -> UIViewController?
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
 
-    init(viewModel: DeleteAccountViewModel, onAccountDeleted: @escaping () -> Void) {
+    init(
+        viewModel: DeleteAccountViewModel,
+        onAccountDeleted: @escaping () -> Void,
+        makeDataExport: @escaping () -> UIViewController? = { nil }
+    ) {
         self.viewModel = viewModel
         self.onAccountDeleted = onAccountDeleted
+        self.makeDataExport = makeDataExport
         super.init(nibName: nil, bundle: nil)
         title = "Delete Account"
         hidesBottomBarWhenPushed = true
@@ -105,6 +113,11 @@ final class DeleteAccountViewController: UIViewController {
                 content.text = text
                 content.image = UIImage(systemName: "minus.circle")
                 content.imageProperties.tintColor = .secondaryLabel
+            case .downloadData:
+                content.text = "Download Your Data"
+                content.image = UIImage(systemName: "arrow.down.doc")
+                content.imageProperties.tintColor = .label
+                cell.accessories = [.disclosureIndicator()]
             case .loading:
                 content.text = "Checking your account…"
                 content.textProperties.color = .secondaryLabel
@@ -124,7 +137,11 @@ final class DeleteAccountViewController: UIViewController {
             elementKind: UICollectionView.elementKindSectionHeader
         ) { [weak self] view, _, indexPath in
             var content = UIListContentConfiguration.header()
-            content.text = self?.dataSource.sectionIdentifier(for: indexPath.section) == .consequences ? "What Gets Deleted" : nil
+            switch self?.dataSource.sectionIdentifier(for: indexPath.section) {
+            case .consequences: content.text = "What Gets Deleted"
+            case .beforeYouGo: content.text = "Before You Go"
+            default: content.text = nil
+            }
             view.contentConfiguration = content
         }
         let footer = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
@@ -144,8 +161,13 @@ final class DeleteAccountViewController: UIViewController {
 
     private func applySnapshot() {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
-        snapshot.appendSections([.consequences, .action])
+        snapshot.appendSections([.consequences])
         snapshot.appendItems(Self.consequences.map(Item.consequence), toSection: .consequences)
+        if case .ready = viewModel.phase, hasDataExport {
+            snapshot.appendSections([.beforeYouGo])
+            snapshot.appendItems([.downloadData], toSection: .beforeYouGo)
+        }
+        snapshot.appendSections([.action])
         switch viewModel.phase {
         case .loading: snapshot.appendItems([.loading], toSection: .action)
         case .ready: snapshot.appendItems([.delete], toSection: .action)
@@ -155,6 +177,8 @@ final class DeleteAccountViewController: UIViewController {
         snapshot.reloadSections([.action])
         dataSource.apply(snapshot, animatingDifferences: false)
     }
+
+    private lazy var hasDataExport = makeDataExport() != nil
 
     // MARK: - Actions
 
@@ -198,13 +222,21 @@ final class DeleteAccountViewController: UIViewController {
 
 extension DeleteAccountViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
-        dataSource.itemIdentifier(for: indexPath) == .delete
+        let item = dataSource.itemIdentifier(for: indexPath)
+        return item == .delete || item == .downloadData
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         collectionView.deselectItem(at: indexPath, animated: true)
-        if dataSource.itemIdentifier(for: indexPath) == .delete {
+        switch dataSource.itemIdentifier(for: indexPath) {
+        case .delete:
             confirmDeletion()
+        case .downloadData:
+            if let export = makeDataExport() {
+                navigationController?.pushViewController(export, animated: true)
+            }
+        default:
+            break
         }
     }
 }

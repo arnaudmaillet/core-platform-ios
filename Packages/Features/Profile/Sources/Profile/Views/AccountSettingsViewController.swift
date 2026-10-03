@@ -169,7 +169,8 @@ final class AccountSettingsViewController: UIViewController {
             actionCell(cell, label: "Delete Account", destructive: true)
             cell.accessories = [.disclosureIndicator()]
         case .dataExport:
-            actionCell(cell, label: "Request Data Export", destructive: false)
+            actionCell(cell, label: "Download Your Data", destructive: false)
+            if lifecycle != nil { cell.accessories = [.disclosureIndicator()] }
         }
     }
 
@@ -219,10 +220,15 @@ final class AccountSettingsViewController: UIViewController {
             guard let lifecycle else { return }
             push(DeleteAccountViewController(
                 viewModel: DeleteAccountViewModel(lifecycle: lifecycle),
-                onAccountDeleted: onAccountDeleted
+                onAccountDeleted: onAccountDeleted,
+                makeDataExport: { [weak self] in self?.makeDataExport() }
             ))
         case .dataExport:
-            confirmComingSoonAction(title: "Request Data Export?", confirm: "Request Export", message: "Data export isn't available yet.")
+            guard let export = makeDataExport() else {
+                confirmComingSoonAction(title: "Request Data Export?", confirm: "Request Export", message: "Data export isn't available yet.")
+                return
+            }
+            push(export)
         }
     }
 
@@ -253,6 +259,10 @@ final class AccountSettingsViewController: UIViewController {
             helperText: "Used for account recovery and verification.",
             onSave: { [weak self] _ in self?.reportReadOnly("Changing your phone number isn't available yet.") }
         )))
+    }
+
+    private func makeDataExport() -> UIViewController? {
+        lifecycle.map { DataExportViewController(viewModel: DataExportViewModel(lifecycle: $0), email: details?.email) }
     }
 
     /// The child editor pops itself on Save; report the read-only reality on the
