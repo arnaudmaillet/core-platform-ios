@@ -121,7 +121,7 @@ struct HeroCardCloseParityTests {
             origin: origin(reveal: reveal(Box()))
         )
 
-        let close = stack.nav.delegate as? InteractiveSlideDismissal
+        let close = stack.nav.leasedDelegate as? InteractiveSlideDismissal
         #expect(close != nil, "a flight from a list row left no card close beside it")
         #expect(close?.arbitratesWithHeroGrab == true)
         #expect(close?.prepareForDismissal != nil)
@@ -140,7 +140,7 @@ struct HeroCardCloseParityTests {
         )
         #expect(stack.tabs.isTabBarHidden, "precondition: the push hides the dock")
 
-        (stack.nav.delegate as? InteractiveSlideDismissal)?.onWillBeginPop?(.vertical)
+        (stack.nav.leasedDelegate as? InteractiveSlideDismissal)?.onWillBeginPop?(.vertical)
 
         // ⚠️ NO ALPHA EXPECTATION HERE: on iOS 27 UIKit's own hide animates
         // the bar's model alpha to 0 (measured with `-dock-trace`,
@@ -187,7 +187,7 @@ struct HeroCardCloseParityTests {
         stack.builder.presentSnapFeedHero(
             postIDs: [PostID("m1")], from: stack.presenter, origin: origin(reveal: nil)
         )
-        #expect(stack.nav.delegate is ZoomTransitionController)
+        #expect(stack.nav.leasedDelegate is ZoomTransitionController)
     }
 
     /// The other direction: a post opened as a WINDOW and paged onto a photo.
@@ -200,7 +200,7 @@ struct HeroCardCloseParityTests {
             postIDs: [PostID("t1")], from: stack.presenter,
             origin: origin(reveal: reveal(Box()), hasHero: false)
         )
-        let slide = stack.nav.delegate as? InteractiveSlideDismissal
+        let slide = stack.nav.leasedDelegate as? InteractiveSlideDismissal
         #expect(slide?.revealGeometry != nil, "precondition: opened as a window")
         #expect(slide?.heroLandingAcceptsHero?() == false)
     }

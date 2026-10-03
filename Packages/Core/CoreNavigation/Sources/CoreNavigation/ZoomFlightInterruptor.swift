@@ -131,9 +131,9 @@ final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
     // MARK: - Touch catcher
 
     @objc private func handleTouch(_ recogniser: UILongPressGestureRecognizer) {
-        // The container can outlive `completeTransition` by a beat; a touch
-        // in that window must not pause a transition that already reported.
-        guard container?.window != nil else { return }
+        guard Self.honoursTouch(recogniser.state, containerInWindow: container?.window != nil) else {
+            return
+        }
         switch recogniser.state {
         case .began:
             // Freezes the animator wherever the spring had got to.
@@ -160,6 +160,28 @@ final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
             }
         default:
             break
+        }
+    }
+
+    /// Whether a touch-catcher event may act.
+    ///
+    /// The container can outlive `completeTransition` by a beat, and a touch
+    /// landing in that window must not pause a transition that already
+    /// reported, so a BEGIN off-window is ignored.
+    ///
+    /// ⚠️ AN END IS NEVER IGNORED. A touch-down that froze the flight has
+    /// already paused it, and only the matching touch-up resumes it. When the
+    /// container left its window in between (a route switching tabs, a
+    /// full-screen modal), dropping the touch-up left the flight paused for
+    /// good: `completeTransition` never ran, the stack stayed mid-transition,
+    /// and every open guard refused from then on. Resolving it is always safe,
+    /// because the state machine only answers a touch-up for a flight it froze.
+    static func honoursTouch(
+        _ state: UIGestureRecognizer.State, containerInWindow: Bool
+    ) -> Bool {
+        switch state {
+        case .began: containerInWindow
+        default: true
         }
     }
 
@@ -395,8 +417,12 @@ final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
     #endif
 
     /// Takes both recognisers off the container once a decision is made, so
-    /// the same flight cannot be grabbed twice on its way out.
-    private func detach() {
+    /// the same flight cannot be grabbed twice on its way out — and once the
+    /// flight is over, caught or not (`ZoomTransitionController`): the
+    /// container is UIKit's and can outlive the transition, and a zero-duration
+    /// press left on it with no delegate would claim touches meant for the
+    /// screens below.
+    func detach() {
         if let pan { container?.removeGestureRecognizer(pan) }
         if let touchCatcher { container?.removeGestureRecognizer(touchCatcher) }
         pan = nil

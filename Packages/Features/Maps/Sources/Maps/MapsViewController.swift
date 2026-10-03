@@ -117,8 +117,13 @@ final class MapsViewController: UIViewController {
     /// Runaway guard: clustering already bounds the visible set to a handful, but
     /// cap the sweep in case it runs during a pre-cluster frame.
     private static let prewarmCap = 16
-    /// Retains the transitioning delegate for the life of a presentation.
-    private var activeTransition: ZoomTransitionController?
+    /// Read once: `reconcileClustersForSettle` runs on every settle, in release too.
+    private static let reconcileThrottleEnabled = ProcessInfo.processInfo.arguments.contains("-maps-reconcile-throttle")
+    /// The flight in progress, held for its life; its close-out is the
+    /// session's (`HeroPushSession`).
+    private var activeSession: HeroPushSession?
+    /// The "one flight at a time" latch, and the flight's controller.
+    private var activeTransition: ZoomTransitionController? { activeSession?.controller }
     /// The card-shaped close that rides alongside the flight, for the posts
     /// the flight cannot carry (see `attachCardCloseAlongsideFlight`). Held
     /// because `UINavigationController.delegate` is weak and nothing else
@@ -777,6 +782,27 @@ final class MapsViewController: UIViewController {
         // no-op: the feed's close has shown the bar already.
         barsStack.alpha = 1
         tabBarController?.showTabBarNativelyNextTurn()
+        releaseStaleTransitionNextTurn()
+    }
+
+    /// ⚠️ THE BACKSTOP'S MISSING HALF. Everything above is put back on any
+    /// return, whoever finished it — but not the flight itself. A return that
+    /// reached neither `onSourceReturned` nor a close's `dismissalDidEnd` left
+    /// `activeTransition` set for the rest of the session: the previews never
+    /// resumed (`viewWillAppear` skips them while a flight is up) and the bars
+    /// stayed frozen at their in-flight inset.
+    ///
+    /// A turn later, and only if still set: the normal close-outs run at the
+    /// stack's `didShow`, which UIKit delivers AFTER this appearance, and
+    /// releasing the controller before it would free it mid-callback.
+    private func releaseStaleTransitionNextTurn() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let stale = activeSession,
+                  let nav = navigationController, nav.topViewController === self,
+                  nav.transitionCoordinator == nil
+            else { return }
+            stale.close(.abandoned)
+        }
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -1887,7 +1913,7 @@ final class MapsViewController: UIViewController {
         // ⚠️ A single earlier pair showed hitches 30.9 -> 17.2 and nearly shipped
         // as a 44% win. The control arm alone swings 17.4-27.7 between runs.
         // One pair could not have told these apart.
-        guard ProcessInfo.processInfo.arguments.contains("-maps-reconcile-throttle") else {
+        guard Self.reconcileThrottleEnabled else {
             #if DEBUG
             MapChurnCounters.fromSettle += 1
             #endif
@@ -3070,7 +3096,7 @@ extension MapsViewController: MKMapViewDelegate {
         print("[maps] tap face=\(face) presentation=\(MapMarkerPresentation(face: face)) "
               + "posts=\(postIDs.count) first=\(postIDs.first?.rawValue ?? "-")")
         #endif
-        switch MapMarkerPresentation(face: face) {
+        switch MapMarkerPresentation(face: face, reducesMotion: HeroMotionPolicy.prefersNativePush) {
         case .reveal where navigationController != nil:
             // The disc IS the window. Same seam as the plain push below — the
             // feed owns the pushed screen's gestures either way — with an
@@ -3215,11 +3241,9 @@ extension MapsViewController: MKMapViewDelegate {
                 openGate.dismissalEnded(committed: committed)
                 guard committed else { return }
                 // A BACKSTOP — the close's commit has normally shown the dock.
-                barsStack.alpha = 1
-                tabBarController?.showTabBarNativelyNextTurn()
-                activeTransition = nil
-                videoCoordinator.setSurfaceVisible(true)
-                refreshVideoPlayback()
+                // A card close finished the flight's pop: the session's
+                // close-out, the gate already settled above.
+                activeSession?.close(.abandoned)
             }
         )
     }
@@ -3329,8 +3353,9 @@ extension MapsViewController: MKMapViewDelegate {
         // The transition object is the stack's delegate for the feed's
         // lifetime.
         guard openGate.openBegan(.hero) else { return }
-        let transition = ZoomTransitionController(source: source, destination: destination)
-        activeTransition = transition
+        let session = HeroPushSession(source: source, destination: destination, on: nav)
+        let transition = session.controller
+        activeSession = session
 
         // CASE B (cluster-gallery milestone): a HIERARCHY marker — the active
         // band's own city or country cluster — carries a place page beneath
@@ -3386,45 +3411,50 @@ extension MapsViewController: MKMapViewDelegate {
                     nav?.popViewController(animated: true)
                 }
             }
-            transition.onDismissedToIntermediate = { [weak self, source] _ in
-                // The gallery is the screen now — an ordinary one. The flow's
-                // transition is over: hand the delegate slot back so the
-                // gallery's own pushes/pops are native, and let the map's
-                // chrome settle silently beneath (it is invisible until the
-                // gallery pops, when `viewWillAppear` finds
-                // `activeTransition == nil` and resumes previews normally).
-                guard let self else { return }
-                // ⚠️ ONLY IF IT IS STILL OURS. The page we just landed on has
-                // already installed its own controller as the delegate — that
-                // is how this callback reached us at all — and clearing the
-                // slot here would take the page's map-return with it.
-                if self.navigationController?.delegate === self.activeTransition {
-                    self.navigationController?.delegate = nil
-                }
-                self.activeTransition = nil
-                self.openGate.dismissedToIntermediate()
-                self.barsStack.alpha = 1
-                // The present flight hid the tapped marker; nothing on the
-                // gallery path would ever restore it.
-                source.setZoomSourceHidden(false)
-            }
+            // Its landing is the session's `.toIntermediate` ending (below).
         }
 
-        // ⚠️ THE FLIGHT CAUGHT MID-AIR AND THROWN BACK, which had no handler
-        // here at all. `activeTransition` stayed set, and since it was both the
-        // lock and the state handle, every marker tap for the rest of the
-        // session did nothing — on screen, broken markers rather than a stuck
-        // animation, which is how it survived. The hook is generic and two
-        // other surfaces already wire it.
-        transition.onPresentationCancelled = { [weak self, weak nav] in
+        // ONE close-out per ending (`HeroPushSession.Ending`). The session has
+        // already ended its leases on the stack's delegate slot; a place page
+        // that leased it on top keeps it.
+        //
+        // ⚠️ `.reversed` is the flight caught mid-air and thrown back, which
+        // once had no handler here at all: the latch stayed set and every
+        // marker tap for the rest of the session did nothing.
+        session.onClose = { [weak self, source] ending in
             guard let self else { return }
-            nav?.delegate = nil
-            self.activeTransition = nil
-            self.openGate.presentationCancelled()
+            self.activeSession = nil
             self.barsStack.alpha = 1
+            switch ending {
+            case .toIntermediate:
+                // The gallery is the screen now, an ordinary one; the map's
+                // chrome settles silently beneath it (invisible until the
+                // gallery pops, when `viewWillAppear` resumes previews). The
+                // present flight hid the tapped marker, and nothing on the
+                // gallery path would ever restore it.
+                self.openGate.dismissedToIntermediate()
+                source.setZoomSourceHidden(false)
+                return
+            case .reversed:
+                self.openGate.presentationCancelled()
+                // The card close armed beside the flight serves a feed that
+                // never showed; released a turn later, as the closing callbacks
+                // of these objects may still be unwinding.
+                let abandonedClose = self.cardClose
+                self.cardClose = nil
+                DispatchQueue.main.async { withExtendedLifetime(abandonedClose) {} }
+            case .returned:
+                self.openGate.dismissalBegan()
+                self.openGate.dismissalEnded(committed: true)
+            case .abandoned:
+                break // whoever ended it settled the gate
+            }
             self.tabBarController?.showTabBarNativelyNextTurn()
             self.videoCoordinator.setSurfaceVisible(true)
             self.refreshVideoPlayback()
+            // The flight froze the bars' inset (`syncBarsPosition` stands down
+            // while one is up); the screen is at rest again.
+            self.syncBarsPosition()
         }
 
         var didLand = false
@@ -3457,20 +3487,6 @@ extension MapsViewController: MKMapViewDelegate {
         // UIKit shows it once the close is committed (`viewWillAppear`'s
         // policy, and the feed's own close); this is the backstop. See
         // `TabBarRevealPolicy`.
-        transition.onSourceReturned = { [weak self, weak nav] in
-            // Completed pop only — a cancelled grab reports through
-            // `onDismissalCancelled`, so the transition (and future grabs)
-            // survives it by construction.
-            nav?.delegate = nil
-            guard let self else { return }
-            self.barsStack.alpha = 1
-            self.tabBarController?.showTabBarNativelyNextTurn()
-            self.activeTransition = nil
-            self.openGate.dismissalBegan()
-            self.openGate.dismissalEnded(committed: true)
-            self.videoCoordinator.setSurfaceVisible(true)
-            self.refreshVideoPlayback()
-        }
         transition.onDismissalCancelled = { [weak self, gallery, weak nav, weak feedVC] in
             // The feed is STAYING, so the gate does not reopen — it goes back to
             // `.open`, which is what `committed: false` means.
@@ -3549,7 +3565,7 @@ extension MapsViewController: MKMapViewDelegate {
         // bar hidden — today no such route fires from inside the feed.
         tabBarController?.hideTabBarNatively()
         setFilterBar(hidden: true)
-        nav.delegate = transition
+        session.takeDelegateSlot()
         // ⚠️ NOT pre-paying the destination's layout here, and the empty space
         // is deliberate.
         //
@@ -3619,6 +3635,8 @@ extension MapsViewController: MKMapViewDelegate {
         let landing = gallery as? any CardCloseLanding
         let slide = InteractiveSlideDismissal()
         cardClose = slide
+        // It holds the stack's slot on the flight's behalf.
+        activeSession?.registerForwarder(slide)
         #if DEBUG
         print("[card-close] map armed placePage=\(landing != nil)")
         #endif
@@ -4021,3 +4039,16 @@ private final class MapsChromeTraceProxy {
 #endif
 
 extension MapsViewController: MapCountryShopHosting {}
+
+#if DEBUG
+extension MapsViewController: ArrivalInvariantReporting {
+    /// Back on the map, no flight is held and no marker is still concealed.
+    public func arrivalFacts() -> [(name: String, holds: Bool)] {
+        let hidden = mapView.annotations.compactMap { mapView.view(for: $0) }.filter(\.isHidden).count
+        return [
+            ("maps.activeTransition", activeTransition == nil),
+            ("maps.hiddenMarkers=\(hidden)", hidden == 0),
+        ]
+    }
+}
+#endif

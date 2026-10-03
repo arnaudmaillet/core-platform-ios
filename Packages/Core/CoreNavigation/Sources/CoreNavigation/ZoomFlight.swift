@@ -329,6 +329,10 @@ struct ZoomFlight {
         let card = source.makeZoomFlightCard()
         card.frame = pageFrame
         card.isUserInteractionEnabled = false
+        // A twin, not content: VoiceOver reads the real screens on either side.
+        // Left exposed, it read a duplicate caption and author off the chrome
+        // replica — for up to 3s when the card stays on as a landing cover.
+        card.accessibilityElementsHidden = true
         // The card's own still is the page's fallback for a shape it has not
         // measured and a backdrop it has not rendered — a cold open's page has
         // neither yet, and the tile's cover is the same picture.
@@ -336,6 +340,7 @@ struct ZoomFlight {
             sourcePicture: (card.zoomCoverSurface as? UIImageView)?.image
         )
         let window = framing.map { ZoomPageWindowCard(media: card, framing: $0, frame: pageFrame) }
+        window?.accessibilityElementsHidden = true
         let fittedMedia: CGRect = framing.map {
             let size = ZoomTransitionGeometry.fittedMediaSize(aspect: $0.mediaAspect, in: pageFrame.size)
             return CGRect(
@@ -810,6 +815,7 @@ struct ZoomFlight {
     /// curvature with nothing to synchronize.
     static func applyRecededChrome(to view: UIView?, radius: CGFloat) {
         guard let view else { return }
+        RecededChromeSnapshot.take(of: view.layer)
         view.layer.cornerRadius = radius
         view.layer.cornerCurve = .continuous
         view.layer.masksToBounds = true
@@ -818,10 +824,17 @@ struct ZoomFlight {
     /// Cleared only while the reset is undetectable: under the opaque feed
     /// (present) or back at scale 1, where the bezel clips the same curve
     /// (dismiss).
+    ///
+    /// ⚠️ RESTORED, not zeroed. Every depth view so far happened not to clip
+    /// or round on its own, so writing `0` / `false` looked like a reset; a
+    /// presenter whose depth view did would have lost its own rounding after
+    /// the first flight. The values the first apply found are put back.
     static func clearRecededChrome(from view: UIView?) {
         guard let view else { return }
-        view.layer.cornerRadius = 0
-        view.layer.masksToBounds = false
+        let found = RecededChromeSnapshot.release(of: view.layer)
+        view.layer.cornerRadius = found?.cornerRadius ?? 0
+        view.layer.cornerCurve = found?.cornerCurve ?? view.layer.cornerCurve
+        view.layer.masksToBounds = found?.masksToBounds ?? false
     }
 
     /// The physical display's corner radius, so the card's corners land flush
@@ -831,5 +844,43 @@ struct ZoomFlight {
     /// screen-impersonating surface rounds identically.
     static func screenCornerRadius(behind view: UIView) -> CGFloat {
         ScreenGeometry.cornerRadius(behind: view)
+    }
+}
+
+/// What a depth view's layer looked like before the receded chrome was put on
+/// it, held until the chrome comes off. The FIRST apply wins: a dismissal
+/// re-applies over a present's chrome that was cleared, and a re-apply over
+/// chrome still on would otherwise snapshot the chrome itself.
+@MainActor
+enum RecededChromeSnapshot {
+    struct Values {
+        let cornerRadius: CGFloat
+        let cornerCurve: CALayerCornerCurve
+        let masksToBounds: Bool
+    }
+
+    private struct Entry {
+        weak var layer: CALayer?
+        let values: Values
+    }
+
+    private static var entries: [ObjectIdentifier: Entry] = [:]
+
+    static func take(of layer: CALayer) {
+        entries = entries.filter { $0.value.layer != nil }
+        let key = ObjectIdentifier(layer)
+        guard entries[key] == nil else { return }
+        entries[key] = Entry(layer: layer, values: Values(
+            cornerRadius: layer.cornerRadius,
+            cornerCurve: layer.cornerCurve,
+            masksToBounds: layer.masksToBounds
+        ))
+    }
+
+    static func release(of layer: CALayer) -> Values? {
+        let key = ObjectIdentifier(layer)
+        defer { entries[key] = nil }
+        guard let entry = entries[key], entry.layer === layer else { return nil }
+        return entry.values
     }
 }

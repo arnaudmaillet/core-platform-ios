@@ -44,7 +44,7 @@ struct SlidePrematurePopTests {
         slide.navigationController(nav, didShow: root, animated: false)
 
         #expect(popped == 0, "an unpushed feed was reported popped")
-        #expect(nav.delegate === slide, "the slot was handed back before the feed ever showed")
+        #expect(nav.leasedDelegate === slide, "the slot was handed back before the feed ever showed")
     }
 
     /// And the real pop still reports, exactly once: seen on the stack, then

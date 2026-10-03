@@ -1789,50 +1789,17 @@ final class ForYouGridPage: UIView {
 
 
 
-    /// Lands a hosted surface WITHOUT moving it into the cell: the layer stays
-    /// where it is and the tile publishes geometry instead.
-    @discardableResult
-    func adoptHostedPlayback(_ view: VideoRenderView, for postID: PostID) -> Bool {
-        guard let playback,
-              let index = posts.firstIndex(where: { $0.id == postID }),
-              let url = posts[index].videoURL,
-              let cell = collectionView.cellForItem(
-                  at: indexPath(for: index)
-              ) as? any GridPlaybackCell
-        else { return false }
-        let adopted = playback.adoptHostedSurface(view, for: postID, url: url, cell: cell)
-        #if DEBUG
-        if !adopted, ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
-            // Both URLs, because a refusal is almost always the two sides
-            // naming the same asset differently.
-            print("[zoom-live] adopt REFUSED tile=\(url.absoluteString) parked=\(playback.debugParkedURL?.absoluteString ?? "nil")")
-        }
-        #endif
-        return adopted
-    }
 
-    /// Where the tile for `postID` currently is, in `space`. The host reads
-    /// this every scroll frame to keep the hosted surface glued to its brick.
-    /// `nil` once the tile is no longer realized.
-    func tileRect(for postID: PostID, in space: UICoordinateSpace) -> CGRect? {
-        guard let index = posts.firstIndex(where: { $0.id == postID }),
-              let cell = collectionView.cellForItem(at: indexPath(for: index))
-        else { return nil }
-        return cell.convert(cell.bounds, to: space)
-    }
-
-    /// The grid's own rect, so the host can clip a hosted surface to it rather
-    /// than letting it draw over the bars.
-    func gridRect(in space: UICoordinateSpace) -> CGRect {
-        collectionView.convert(collectionView.bounds, to: space)
-    }
-
-    /// Called on every scroll frame while a surface is hosted.
-    var onGeometryChanged: (() -> Void)?
-
-    /// Forwards the coordinator's teardown so the host can drop its reference.
-    func setHostedSurfaceReleasedHandler(_ handler: @escaping (PostID) -> Void) {
-        playback?.onHostedSurfaceReleased = handler
+    /// The clip a landing on `index` shows: the carousel's CURRENT page when
+    /// the row is a carousel, the post's clip otherwise.
+    ///
+    /// ⚠️ The flight and its staging already resolved it this way; the two
+    /// landings keyed by `posts[index].videoURL`, which is page 0. Landing on a
+    /// later clip page, the transfer was refused (a still flash, the page's
+    /// player orphaned) or took a prewarmed page-0 player.
+    private func landingVideoURL(at index: Int) -> URL? {
+        let row = collectionView.cellForItem(at: indexPath(for: index)) as? PostGridListRowCell
+        return row?.currentPageVideoURL ?? posts[index].videoURL
     }
 
     /// Installs the flight card's live surface on the landing tile, so it is
@@ -1840,7 +1807,7 @@ final class ForYouGridPage: UIView {
     func adoptLivePlayback(_ view: VideoRenderView, for postID: PostID) {
         guard let playback,
               let index = posts.firstIndex(where: { $0.id == postID }),
-              let url = posts[index].videoURL,
+              let url = landingVideoURL(at: index),
               let cell = collectionView.cellForItem(
                   at: indexPath(for: index)
               ) as? any GridPlaybackCell
@@ -1862,7 +1829,9 @@ final class ForYouGridPage: UIView {
             // the current frame on attach — and takes the pool loan; the card's
             // is released once it leaves the window. Nothing is re-parented,
             // which is the ~65ms drop `holdCard` was covering.
-            playback.adoptAttachedSurface(for: postID, url: url, cell: cell)
+            playback.adoptAttachedSurface(
+                for: postID, url: url, cell: cell, drawnBy: view
+            )
             return
         }
         playback.adoptLiveSurface(view, for: postID, url: url, cell: cell)
@@ -3517,10 +3486,6 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        // Unthrottled, unlike the autoplay reconcile below: a hosted surface is
-        // a separate view tracking a moving cell, and anything less than every
-        // frame reads as the video sliding against its own tile.
-        onGeometryChanged?()
         positionPagingFooter()
         if hostedTopInset != nil {
             // Content can land without a layout pass reaching the host —
@@ -3645,3 +3610,16 @@ private final class LeadHostView: UICollectionReusableView {
         view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     }
 }
+
+#if DEBUG
+extension ForYouGridPage: ArrivalInvariantReportingView {
+    /// ⚠️ A grid at rest has no playback handoff open. Every host begins one
+    /// when it opens a post and must end it when the screen is back; Search
+    /// began and never ended, which froze the tapped tile out of the grid's
+    /// ranking for the rest of the session (hero audit 1.5). Stated here, once,
+    /// every host of this page is checked.
+    func arrivalFacts() -> [(name: String, holds: Bool)] {
+        [("grid.handoffClosed", !(playback?.isHandoffOpen ?? false))]
+    }
+}
+#endif

@@ -160,9 +160,11 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         return item
     }()
 
-    /// Retains the navigation-controller delegate for the life of a flight —
-    /// the stack holds its delegate weakly.
-    private var activeTransition: ZoomTransitionController?
+    /// The flight in progress, held for its life (the stack holds its
+    /// delegate weakly). Its close-out is the session's (`HeroPushSession`).
+    private var activeSession: HeroPushSession?
+    /// The "one flight at a time" latch every open checks.
+    private var activeTransition: ZoomTransitionController? { activeSession?.controller }
 
     /// The flight attached to a screen that was opened as a WINDOW, held only
     /// so it outlives this function.
@@ -173,7 +175,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// opening has no such completion, so storing this one there left it set
     /// for ever: every later tile tap returned at the guard and did nothing.
     /// Reported as the screen breaking after a few open/close cycles.
-    private var cardPathFlight: ZoomTransitionController?
+    private var cardPathFlight: HeroPushSession?
 
     /// How many posts a tile tap hands the feed, counting from the tapped one.
     ///
@@ -1259,7 +1261,10 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // close would otherwise run and which rebuilds the geometry for another
         // post. See `resetForNewPresentation`.
         textSlideDismissal.resetForNewPresentation()
-        let revealing = installTextReveal(feed: feed, postID: tapped.id)
+        // Reduce Motion opens every post with the stack's own push: no window,
+        // no flight (`HeroMotionPolicy`).
+        let reducesMotion = HeroMotionPolicy.prefersNativePush
+        let revealing = !reducesMotion && installTextReveal(feed: feed, postID: tapped.id)
         // ⚠️ NOT REBUILT FOR THE POST THE VIEWER ENDS ON, and NOT adopted into
         // the tapped post's slot. The list keeps its order; the window travels
         // to wherever the arrival row actually is.
@@ -1297,7 +1302,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
               // A reveal never also flies a hero. For a TEXT row this changes
               // nothing — it has no hero to fly — and for OPTION A it is what
               // sends a media row down the window's path instead.
-              !revealing,
+              !revealing, !reducesMotion,
               page.hero(for: tapped.id, in: view) != nil
         else {
             // No hero available — a text-only row has no media to fly, and a
@@ -1354,7 +1359,11 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             // hero to fly after all. Attached BEFORE the slide installs, so the
             // slide saves this controller as the delegate it displaced and can
             // forward a hero pop straight back to it.
-            let alongside = attachFlightAlongsideCardClose(feed: feed, tappedID: tapped.id)
+            // Reduce Motion: no flight rides along either, so a media page
+            // closes with the window's own slide, not a hero home.
+            let alongside = reducesMotion
+                ? nil
+                : attachFlightAlongsideCardClose(feed: feed, tappedID: tapped.id)
             textSlideDismissal.arbitratesWithHeroGrab = true
             // ⚠️ AND CLAIM THE DRAGS THE HERO DECLINES — asked of the hero's
             // own gate, see `heroLandingArbiter`.
@@ -1413,28 +1422,11 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             settledCover: { [weak feed] in
                 (feed as? any SnapFeedSettleReporting)?.settledCoverImage
             },
-            // NOT hoisted — the two dismissals share one surface flow.
-            //
-            // Hoisting lifted the live layer out of the card and into a host
-            // above the navigation controller for the return, and only the
-            // tap-back path ever did it: the grab keeps the surface inside the
-            // card the whole way. That asymmetry is where tap-back's two
-            // defects lived. The hoisted landing has a refusal branch — if
-            // `adoptHostedPlayback` cannot match the surface to a realized
-            // tile it calls `detachForReplacement()` and drops the view — and a
-            // torn-down surface means the tile starts a FRESH player, which is
-            // the video restarting from zero mid-return. Nothing on the grab
-            // path can do that, which is why only tap-back showed it.
-            //
-            // The readiness drop the hoist was introduced to remove is already
-            // gone by other means: `adoptAttachedSurface` gives the landing tile
-            // its OWN surface primed with the current frame, so the player layer
-            // is never re-parented either way. Both paths now land through
-            // `zoomAdoptLiveMediaView` and hold on the same
-            // `zoomLandingMediaIsReady` gate.
-            hoistLive: nil,
-            poseHoisted: nil,
-            releaseHoisted: nil,
+            // No hoist: the hoisted tap-back landing (a host above the
+            // navigation controller) restarted the clip whenever its refusal
+            // branch dropped the surface, and the grab never needed it. Both
+            // dismissals land through `zoomAdoptLiveMediaView`, and the seam
+            // itself is gone (hero audit PR F).
             donateLive: { [weak self, weak page] in
                 // Under `-avsbdl-render` the card joins the tile's playback as
                 // an extra surface instead of taking it over. The tile keeps
@@ -1455,8 +1447,15 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
                 return surface
             }
         )
-        let transition = ZoomTransitionController(source: source, destination: destination)
-        activeTransition = transition
+        // A text visit's close-only flight is over: this opening is a new
+        // visit. Left alive (a text visit that ended without `onFeedPopped`),
+        // its driver sat on the reused feed beside this one's, and two live
+        // zoom drivers both claimed the next drag.
+        cardPathFlight?.close(.abandoned)
+        cardPathFlight = nil
+        let session = HeroPushSession(source: source, destination: destination, on: navigationController)
+        let transition = session.controller
+        activeSession = session
         // A flight is staging, and it attaches its own grab below — so this
         // screen owns its dismissal and the native edge pop must stay out of
         // its way. Stated rather than left at the default: the controller is
@@ -1467,16 +1466,17 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // before the pop for a chevron, at the release for a grab — the feed
         // asks for it (`SnapFeedViewController.revealDockBeforePop`), and so
         // does this screen's `viewWillAppear` policy. See `TabBarRevealPolicy`.
-        transition.onSourceReturned = { [weak self, weak page] in
+        // ONE close-out for every ending (`HeroPushSession.Ending`): a
+        // return, a push reversed mid-air (the feed never showed, `didShow`
+        // reports nothing — without this the latch made every later tap a
+        // silent no-op and the handoff kept the grid's players down), or this
+        // screen's own sweep. The session hands the stack's slot back first.
+        session.onClose = { [weak self, weak page] ending in
             // A card-shaped close that was cancelled left a row hidden under
             // the page; if the viewer then left by this flight instead, nothing
             // else would put it back. See `clearRevealConcealment`.
             page?.clearRevealConcealment()
-            // Completed pop only — a cancelled grab reports through
-            // `onDismissalCancelled`, so the transition (and future grabs)
-            // survives it by construction.
-            self?.navigationController?.delegate = nil
-            self?.activeTransition = nil
+            self?.activeSession = nil
             // A BACKSTOP for the dock, through UIKit — normally already up.
             self?.tabBarController?.showTabBarNativelyNextTurn()
             // Close the handoff scope. This is the single act that restores the
@@ -1485,22 +1485,8 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             // subset survived the transition.
             self?.page.endPlaybackHandoff()
             #if DEBUG
-            self?.debugAdvanceGrabCycleIfNeeded()
+            if ending != .reversed { self?.debugAdvanceGrabCycleIfNeeded() }
             #endif
-        }
-        // A cancelled grab: the feed is staying up. The bar was never raised —
-        // it waits for a COMMITTED release — so there is nothing to put back.
-        transition.onPresentationCancelled = { [weak self] in
-            // The PUSH was reversed mid-air: the feed never showed, `didShow`
-            // reports nothing, and the grid is the screen again. The same
-            // idempotent close-out as `onSourceReturned`, minus the landing —
-            // a present hoists nothing, so there is nothing to land. Without
-            // this, the retained transition made every future tile tap a
-            // silent no-op and the handoff scope kept the grid's players down.
-            self?.navigationController?.delegate = nil
-            self?.activeTransition = nil
-            self?.tabBarController?.showTabBarNativelyNextTurn()
-            self?.page.endPlaybackHandoff()
         }
         // Accessing `view` loads it so the grab-to-dismiss pan can attach.
         transition.attachInteractiveDismissal(to: feed.view) { [weak self] in
@@ -1512,12 +1498,11 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             // UIKit shows it when the release commits. A cancel never raises it.
             self?.navigationController?.popViewController(animated: true)
         }
-        navigationController.delegate = transition
-        // Pay the destination's first layout and raster HERE — see
-        // `prepareForHeroPresentation`. In the tap's own frame a stall is
-        // invisible; in the flight's first frames it is the pause.
-        (feed as? SnapFeedViewController)?
-            .prepareForHeroPresentation(in: navigationController.view.bounds)
+        session.takeDelegateSlot()
+        // Pay the destination's first layout and raster HERE: in the tap's
+        // own frame a stall is invisible; in the flight's first frames it is
+        // the pause.
+        session.prepareDestination()
         navigationController.pushViewController(feed, animated: true)
         // ⚠️ THE OTHER DRIVER RIDES ALONG, for the post this screen may end on.
         //
@@ -1533,6 +1518,8 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // controller as `savedDelegate`, which is where a hero pop is forwarded
         // back to.
         attachCardCloseAlongsideFlight(feed: feed, departureID: tapped.id, flightSource: source)
+        // It holds the slot on the flight's behalf from here.
+        session.registerForwarder(textSlideDismissal)
         #if DEBUG
         zoomProfilerNote("push returned")
         #endif
@@ -1641,17 +1628,22 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // ⚠️ `presents: false` — this one only ever CLOSES. The feed is already
         // pushed, so announcing a staging here would leave it suppressing its
         // own playback for the rest of its life, with nothing to retract it.
-        let transition = ZoomTransitionController(
-            source: source, destination: destination, presents: false
+        let session = HeroPushSession(
+            source: source, destination: destination, on: navigationController,
+            presents: false
         )
-        cardPathFlight = transition
+        let transition = session.controller
+        cardPathFlight = session
         // The same dock rule as the flight path: UIKit shows it once the close
         // is committed (`viewWillAppear`'s policy); this is the backstop, and
         // an abandoned grab never raised it.
-        transition.onSourceReturned = { [weak self] in
+        session.onClose = { [weak self] _ in
             self?.tabBarController?.showTabBarNativelyNextTurn()
         }
-        navigationController.delegate = transition
+        session.takeDelegateSlot()
+        // The window's slide installs after this and forwards a `.hero` pop
+        // to the flight, so it holds the slot on the session's behalf.
+        session.registerForwarder(textSlideDismissal)
         #if DEBUG
         // `-foryou-demo-grab [delay]` on the WINDOW path too. This flight is the
         // one a text-opened screen ends on once the viewer pages onto a post
@@ -2048,25 +2040,29 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // row's close pinned (`ForYouRowOrigins`) and its own completion
         // normally hands back — this is the backstop for a close finished by
         // anything else.
-        if flyingStory != nil || flyingCard != nil {
-            #if DEBUG
-            logRowSource("landed")
-            #endif
-            page.endHeroFreeze()
-        }
+        #if DEBUG
+        if flyingStory != nil || flyingCard != nil { logRowSource("landed") }
+        #endif
+        // UNCONDITIONALLY: a grid flight freezes the inset too
+        // (`zoomSourceWillStageDismissal`), and only a landing thaws it. A
+        // cancelled grab keeps it frozen while the feed stays up — correctly —
+        // so a feed that then left by another route (pop-to-root, a multi-pop)
+        // left the grid on `.never` insets for good. Idempotent.
+        page.endHeroFreeze()
         flyingStory = nil
         flyingCard = nil
-        guard activeTransition != nil, navigationController?.topViewController === self else {
+        // A text visit's close-only flight ends with the visit, whoever ended it.
+        cardPathFlight?.close(.abandoned)
+        cardPathFlight = nil
+        guard let activeSession, navigationController?.topViewController === self else {
             return
         }
-        navigationController?.delegate = nil
-        activeTransition = nil
-        // The same close-out the callbacks do, for the same reason: whatever
-        // the flight was holding down has to come back up. A turn later,
-        // through UIKit: this runs in `viewDidAppear`, where an inline un-hide
-        // was measured never to render.
-        tabBarController?.showTabBarNativelyNextTurn()
-        page.endPlaybackHandoff()
+        // The same close-out the flight's own endings run (the dock a turn
+        // later, through UIKit: this runs in `viewDidAppear`, where an inline
+        // un-hide was measured never to render). The session keeps its objects
+        // a turn longer, so the `didShow` still on its way finds them alive and
+        // closed rather than freed mid-transition.
+        activeSession.close(.abandoned)
     }
 
     /// How much of this screen's foot the tab bar actually covers.

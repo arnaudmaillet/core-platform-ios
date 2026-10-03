@@ -367,6 +367,12 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing
 
     override func prepareForReuse() {
         super.prepareForReuse()
+        // ⚠️ A CONCEALED MARKER CAN BE RETIRED WHILE CONCEALED. A flight hides
+        // the tapped marker with `isHidden`; a query landing while the feed is
+        // up can retire its annotation, and every restore looks the view up
+        // by annotation, which is gone. The view then came back from the pool
+        // invisible and untappable for whatever pin dequeued it.
+        isHidden = false
         // Pop state is per-APPEARANCE, not per-view: a marker retired mid-fade
         // goes back to the pool at alpha 0 and half scale, and the next pin to
         // dequeue it would be invisible until something happened to animate it

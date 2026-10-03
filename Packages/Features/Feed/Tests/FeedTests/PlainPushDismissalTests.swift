@@ -59,7 +59,7 @@ struct PlainPushDismissalTests {
         // controller pops instantly instead of following the finger.
         let pans = pushed?.view.gestureRecognizers?.filter { $0 is UIPanGestureRecognizer } ?? []
         #expect(!pans.isEmpty, "claimed the dismissal and attached no gesture to honour it")
-        #expect(stack.nav.delegate is InteractiveSlideDismissal,
+        #expect(stack.nav.leasedDelegate is InteractiveSlideDismissal,
                 "nothing would vend the interaction controller the pan drives")
     }
 
@@ -77,7 +77,7 @@ struct PlainPushDismissalTests {
             .compactMap { $0 as? UIPanGestureRecognizer }.first
 
         #expect(pan?.delegate != nil, "the dismissal was released before the first touch")
-        #expect(pan?.delegate === (stack.nav.delegate as? InteractiveSlideDismissal))
+        #expect(pan?.delegate === (stack.nav.leasedDelegate as? InteractiveSlideDismissal))
     }
 
     /// The feed owns the whole screen either way it is arrived at.
@@ -119,7 +119,7 @@ struct PlainPushDismissalTests {
         )
 
         #expect(stack.nav.viewControllers.count == 2)
-        #expect(stack.nav.delegate is InteractiveSlideDismissal)
+        #expect(stack.nav.leasedDelegate is InteractiveSlideDismissal)
     }
 
     // MARK: - The control
@@ -132,7 +132,7 @@ struct PlainPushDismissalTests {
             postIDs: [PostID("m1")], from: stack.presenter, origin: origin(hasHero: true)
         )
 
-        #expect(stack.nav.delegate is ZoomTransitionController,
+        #expect(stack.nav.leasedDelegate is ZoomTransitionController,
                 "a flyable post lost its flight")
         #expect(stack.tabs.isTabBarHidden)
     }
@@ -218,7 +218,7 @@ struct PlainPushDismissalTests {
         #expect((pushed as? any ZoomTransitionDestination)?.zoomOwnsInteractiveDismissal == true)
         let pans = pushed?.view.gestureRecognizers?.filter { $0 is UIPanGestureRecognizer } ?? []
         #expect(!pans.isEmpty, "claimed the dismissal and attached no gesture to honour it")
-        #expect(stack.nav.delegate is InteractiveSlideDismissal,
+        #expect(stack.nav.leasedDelegate is InteractiveSlideDismissal,
                 "nothing would vend the interaction controller the pan drives")
     }
 
@@ -227,7 +227,7 @@ struct PlainPushDismissalTests {
     @Test func anOriginLessPushDoesNotFly() {
         let stack = Stack()
         stack.builder.pushSnapFeed(postIDs: [PostID("t1")], from: stack.presenter)
-        #expect(!(stack.nav.delegate is ZoomTransitionController))
+        #expect(!(stack.nav.leasedDelegate is ZoomTransitionController))
     }
 
     @Test func anOriginLessPushHidesTheTabBar() {

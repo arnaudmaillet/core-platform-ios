@@ -1484,6 +1484,22 @@ public final class VideoPlaybackController {
     /// the one answer that cannot show the wrong frames. Passive exactly
     /// like `attachSurface(_:to:)`: the new surface holds no pool loan.
     /// Returns false when the sibling is bound to nothing.
+    /// `attachSurface(_:to:)` for THIS post's player first (`scope`): a page
+    /// joining the player of the post it shows, not whichever player happens
+    /// to run the same file. Falls back to the asset alone.
+    @discardableResult
+    public func attachSurface(_ view: VideoRenderView, to mediaURL: URL, scope: String?) -> Bool {
+        forgetDeadSurfaces()
+        guard let player = sharedActivePlayer(playing: mediaURL, scope: scope)
+                ?? activePlayer(playing: mediaURL) else {
+            VideoPlaybackTrace.emit("attachSurface REFUSED \(mediaURL.lastPathComponent)")
+            return false
+        }
+        VideoPlaybackTrace.emit("attachSurface \(mediaURL.lastPathComponent)")
+        bind(player, to: view)
+        return true
+    }
+
     @discardableResult
     public func attachSurface(_ view: VideoRenderView, alongsideSurface sibling: VideoRenderView) -> Bool {
         if let player = activePlayers[ObjectIdentifier(sibling)] {
@@ -1531,19 +1547,30 @@ public final class VideoPlaybackController {
     /// returned (`stop`), since nothing will ever draw it again. Nothing is
     /// re-bound and the player's state is left alone: this moves bookkeeping,
     /// not pixels. Returns whether `view` owns its playback afterwards.
+    ///
+    /// ⚠️ A REFUSAL TOUCHES NOTHING. The replaced surface's leftover loan is
+    /// returned only once `view` owns its playback: on a refusal the host keeps
+    /// (or must put back) `previous`, and stopping it there destroyed the one
+    /// player still drawing. That is what a post opened from a live map pin
+    /// met: the card arrived carrying ANOTHER pool's player, the adoption was
+    /// refused, and the page's own fresh player was retired with it.
     @discardableResult
     public func adoptSurface(_ view: VideoRenderView, replacing previous: VideoRenderView?) -> Bool {
         let key = ObjectIdentifier(view)
         let previousKey = previous.flatMap { $0 === view ? nil : ObjectIdentifier($0) }
-        defer {
-            // Whatever the replaced surface still holds is a loan nobody will
-            // ever stop — the exact orphan this method exists to prevent.
+        // Whatever the replaced surface still holds once `view` owns its
+        // playback is a loan nobody will ever stop — the exact orphan this
+        // method exists to prevent. Success paths only.
+        func returnPreviousLeftover() {
             if let previous, let previousKey, activePlayers[previousKey] != nil {
                 stop(previous)
             }
         }
         guard let player = view.boundPlayer else { return false }
-        if activePlayers[key] === player { return true }
+        if activePlayers[key] === player {
+            returnPreviousLeftover()
+            return true
+        }
         let ownerKey = previousKey.flatMap { activePlayers[$0] === player ? $0 : nil }
             ?? activePlayers.first(where: { $0.value === player })?.key
         let url: URL?
@@ -1584,7 +1611,20 @@ public final class VideoPlaybackController {
             traceSound("audible MOVED \(previous.debugProducerName) -> \(view.debugProducerName)")
             #endif
         }
+        returnPreviousLeftover()
         return true
+    }
+
+    /// Whether `adoptSurface(view, replacing:)` would succeed: `view` draws a
+    /// player this pool loans out or holds parked.
+    ///
+    /// For a host that must decide BEFORE it swaps surfaces. A view can arrive
+    /// drawing a player this pool has never seen (a card that mirrored another
+    /// pool's player), or one already retired; swapping it in first and asking
+    /// after left the page showing a dead surface with its own one discarded.
+    public func canAdoptSurface(_ view: VideoRenderView) -> Bool {
+        guard let player = view.boundPlayer else { return false }
+        return activePlayers.values.contains { $0 === player } || parked?.player === player
     }
 
     /// How many surfaces are currently showing `mediaURL`.
@@ -1620,7 +1660,27 @@ public final class VideoPlaybackController {
     /// the caller has already joined it.
     @discardableResult
     public func transferOwnership(of mediaURL: URL, to view: VideoRenderView) -> Bool {
-        guard let player = activePlayer(playing: mediaURL) else {
+        transferOwnership(of: mediaURL, drawnBy: nil, to: view)
+    }
+
+    /// `transferOwnership(of:to:)`, resolving the player by the surface the
+    /// viewer is WATCHING rather than by its URL.
+    ///
+    /// ⚠️ A URL NAMES AN ASSET, NOT A PLAYER. Two players can run one asset —
+    /// a repost in another scope, a page that minted its own beside a tile —
+    /// and the URL lookup took whichever the dictionary listed first, so a
+    /// landing could adopt the OTHER clock. The flight card's surface is bound
+    /// to exactly the player the viewer saw land; `surface` names it. Falls
+    /// back to the URL when the surface is nil or draws nothing this pool owns.
+    @discardableResult
+    public func transferOwnership(
+        of mediaURL: URL, drawnBy surface: VideoRenderView?, to view: VideoRenderView
+    ) -> Bool {
+        let watched = surface?.boundPlayer.flatMap { candidate in
+            (activePlayers.values.contains { $0 === candidate } || parked?.player === candidate)
+                ? candidate : nil
+        }
+        guard let player = watched ?? activePlayer(playing: mediaURL) else {
             VideoPlaybackTrace.emit("transferOwnership REFUSED \(mediaURL.lastPathComponent)")
             return false
         }
@@ -1640,13 +1700,18 @@ public final class VideoPlaybackController {
         // "one asset, two clocks" this file is built to prevent — and the
         // playhead ledger, which is keyed by the post, has nothing to file
         // under when that loan ends.
-        let previousScope = playingURL.first(where: { $0.value == mediaURL })
-            .flatMap { playingScope[$0.key] }
-        if let previous = playingURL.first(where: { $0.value == mediaURL })?.key,
-           previous != ObjectIdentifier(view) {
-            // Clear the old owner's registration WITHOUT `detach` — detaching
-            // pauses the player and hands it back to the pool, which is exactly
-            // the teardown this exists to get ahead of.
+        // EVERY key that owns THIS player, by identity. Several can: a page
+        // that joined and then took a loan files a second key on the same
+        // player. Clearing only the first one left the other a co-owner, so
+        // when the tile later stopped, the player was "still in use" and kept
+        // decoding behind a hidden page.
+        let key = ObjectIdentifier(view)
+        let previousOwners = activePlayers.filter { $0.value === player && $0.key != key }.map(\.key)
+        let previousScope = previousOwners.lazy.compactMap { self.playingScope[$0] }.first
+        for previous in previousOwners {
+            // Cleared WITHOUT `detach` — detaching pauses the player and hands
+            // it back to the pool, which is exactly the teardown this exists to
+            // get ahead of. The previous surfaces stay bound, as joined ones.
             activePlayers[previous] = nil
             playingURL[previous] = nil
             playingScope[previous] = nil
@@ -1656,8 +1721,7 @@ public final class VideoPlaybackController {
         // URL: never paused, never re-pooled, decoding forever with nothing on
         // screen. A mismatched park stays put for its own claimant, or for the
         // next discard sweep.
-        if parked?.url == mediaURL { parked = nil }
-        let key = ObjectIdentifier(view)
+        if parked?.player === player { parked = nil }
         // Supersede any in-flight resolution for this view, so a late `play`
         // cannot attach a second item over the one just adopted.
         generation[key] = nextGenerationToken()
@@ -1691,6 +1755,14 @@ public final class VideoPlaybackController {
     /// tile's rung — `tileBitRateCap`, sized for a thumbnail — and stays there.
     public func setPeakBitRate(_ peakBitRate: Double, for mediaURL: URL) {
         activePlayer(playing: mediaURL)?.currentItem?.preferredPeakBitRate = peakBitRate
+    }
+
+    /// `setPeakBitRate(_:for:)` for THIS post's player first (`scope`), so a
+    /// repost running the same file in another scope is not re-capped by it;
+    /// the asset alone when no scoped player exists.
+    public func setPeakBitRate(_ peakBitRate: Double, for mediaURL: URL, scope: String?) {
+        (sharedActivePlayer(playing: mediaURL, scope: scope) ?? activePlayer(playing: mediaURL))?
+            .currentItem?.preferredPeakBitRate = peakBitRate
     }
 
     /// A player bound to some surface and playing `mediaURL`. Deliberately

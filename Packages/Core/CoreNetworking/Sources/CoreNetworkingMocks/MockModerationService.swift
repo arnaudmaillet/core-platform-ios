@@ -1,11 +1,13 @@
 import Connect
 import CoreContracts
 import Foundation
+import SwiftProtobuf
 
-/// Fake of moderation.v1 — currently just the one RPC a *user-facing* surface
-/// calls, `OpenCase` (the profile's Report action). The rest of the service is
-/// a moderator console (`listQueue`, `assignCase`, `decideCase`, appeals) with
-/// no client in this app, so mocking it would be fiction with no reader.
+/// Fake of moderation.v1 — the RPCs a *user-facing* surface calls: `OpenCase`
+/// (the profile's Report action) and `GetEnforcementState` (Settings →
+/// Account Status). The rest of the service is a moderator console
+/// (`listQueue`, `assignCase`, `decideCase`, `resolveAppeal`) with no client
+/// in this app, so mocking it would be fiction with no reader.
 ///
 /// This mock is how the report flow is verified at all: `moderation.v1` is not
 /// routed through the dev gateway (see `dev/BACKEND_GAPS.md` §11), so against
@@ -20,10 +22,33 @@ public final class MockModerationService: @unchecked Sendable {
 
     private let lock = NSLock()
     private var storage: [Moderation_V1_CaseView] = []
+    private let seedsViewerRestriction: Bool
 
-    public init() {}
+    /// `seedsViewerRestriction` gives the viewer's account one active,
+    /// time-boxed restriction (comments limited for a week).
+    public init(seedsViewerRestriction: Bool = false) {
+        self.seedsViewerRestriction = seedsViewerRestriction
+    }
 
     public func register(on bff: MockBFF) {
+        bff.register(path: "/moderation.v1.ModerationService/GetEnforcementState") { [self] (request: Moderation_V1_GetEnforcementStateRequest) in
+            var response = Moderation_V1_GetEnforcementStateResponse()
+            if seedsViewerRestriction, request.actorID == MockAuthService.accountID {
+                var enforcement = Moderation_V1_EnforcementView()
+                enforcement.enforcementID = "enf-seed-1"
+                enforcement.subject.entityType = .account
+                enforcement.subject.entityID = MockAuthService.accountID
+                enforcement.subject.actorID = MockAuthService.accountID
+                enforcement.action = .restrictActor
+                enforcement.status = .active
+                enforcement.version = 1
+                enforcement.appliedAt = .init(date: Date().addingTimeInterval(-2 * 86_400))
+                enforcement.expiresAt = .init(date: Date().addingTimeInterval(5 * 86_400))
+                response.actorRestricted = true
+                response.activeEnforcements = [enforcement]
+            }
+            return .success(response)
+        }
         bff.register(path: "/moderation.v1.ModerationService/OpenCase") { [self] (request: Moderation_V1_OpenCaseRequest) in
             var response = Moderation_V1_OpenCaseResponse()
             // Idempotent open, per the contract: a second report of the same

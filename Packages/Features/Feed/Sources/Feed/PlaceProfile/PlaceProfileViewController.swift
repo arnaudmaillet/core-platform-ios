@@ -115,6 +115,8 @@ final class PlaceProfileViewController: UIViewController {
     /// to "hand it over".
     private var selectorAccessory: SelectorAccessory?
     private var pager: HorizontalPagerView!
+    /// The grab's hold on the pager — see `setContentScrollEnabled`.
+    private var pagerLock = ScrollLock()
 
     /// The floating header: banner + metrics + tab bar in one host that
     /// RIDES THE ACTIVE PAGE'S OFFSET (the profile page's mechanics, adopted
@@ -253,9 +255,6 @@ final class PlaceProfileViewController: UIViewController {
     /// button and the horizontal grab fly home to the marker instead of
     /// sliding. Retained here (the controller holds its destination weakly).
     private var mapReturnTransition: ZoomTransitionController?
-    /// Whoever owned the delegate slot before this page's first install —
-    /// handed the slot back when the page pops for good.
-    private weak var mapReturnPreviousDelegate: (any UINavigationControllerDelegate)?
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
@@ -285,6 +284,12 @@ final class PlaceProfileViewController: UIViewController {
         // Whatever happened above, nothing on THIS page may be hidden while it
         // is the screen: the same blanket rule the map applies to its markers.
         clearLandingConcealment()
+        // The tap's playback claim (`ForYouGridPage.open` focuses the tapped
+        // post) ends with the round trip, as the other grid hosts end it in
+        // their own `viewDidAppear`. This page never did, so the last post
+        // opened from it stayed pinned first in the ranking for good.
+        page.endPlaybackHandoff()
+        activityPage.endPlaybackHandoff()
         // The flight that left here is over, whichever way it ended. A stale
         // departure would answer for the NEXT close — including the map's Case
         // B, whose whole point is that it has no departure on this page.
@@ -352,39 +357,36 @@ final class PlaceProfileViewController: UIViewController {
 
     private func installMapReturnIfTop() {
         guard let nav = navigationController, nav.topViewController === self else { return }
+        // Reduce Motion: the page closes with the stack's own pop, neither a
+        // flight to the marker nor a window into it (`HeroMotionPolicy`).
+        guard !HeroMotionPolicy.prefersNativePush else { return }
         if let markerClose {
             installMarkerClose(markerClose, on: nav)
             return
         }
         if mapReturnTransition == nil,
            let source = mapReturn?({ [weak self] in self?.departureStill() }) {
-            let transition = ZoomTransitionController(source: source, destination: self)
+            // `presents: false`: this controller only ever flies the page HOME.
+            // Announcing a staging would tell the page a flight is arriving
+            // that never does (see `ZoomTransitionController.init`).
+            let transition = ZoomTransitionController(source: source, destination: self, presents: false)
             transition.attachInteractiveDismissal(to: view, axes: [.horizontal]) { [weak nav] in
                 nav?.popViewController(animated: true)
             }
-            transition.onSourceReturned = { [weak self, weak nav] in
-                // Landed on the map: the flow is over, the slot goes back to
-                // whoever owned it before this page existed.
-                guard let self, let nav else { return }
-                if nav.delegate === self.mapReturnTransition {
-                    nav.delegate = self.mapReturnPreviousDelegate
-                }
+            transition.onSourceReturned = { [weak transition, weak nav] in
+                // Landed on the map: the flow is over, and its lease ends,
+                // uncovering whoever owned the stack before this page.
+                guard let transition, let nav else { return }
+                NavigationDelegateHub.existing(on: nav)?.release(transition)
             }
             mapReturnTransition = transition
         }
-        guard let transition = mapReturnTransition, nav.delegate !== transition else { return }
-        if mapReturnPreviousDelegate == nil {
-            mapReturnPreviousDelegate = nav.delegate
-        }
-        // ⚠️ AND THE DISPLACED DELEGATE IS TOLD, not merely remembered. This
-        // page becomes top DURING the pop that lands on it, so it takes the
-        // slot before UIKit delivers `didShow` — and the driver that flew the
-        // feed here never learns its dismissal landed. Its owner's
-        // `onDismissedToIntermediate` is that news, and without it the map
-        // keeps its re-entrancy lock, its concealed marker and its whole
-        // transition graph alive for the rest of the session.
-        transition.displacedDelegate = mapReturnPreviousDelegate
-        nav.delegate = transition
+        guard let transition = mapReturnTransition else { return }
+        // Leased on top on every appearance. A flight landing here (a post
+        // opened from this page) stays leased beneath and still hears that it
+        // landed — the hub tells every lease, which is what the old
+        // `displacedDelegate` hand-off did for this one case by hand.
+        NavigationDelegateHub.of(nav).lease(transition)
     }
 
     /// Arms the window close: the rightward grab and the back button both
@@ -1882,7 +1884,10 @@ final class PlaceProfileViewController: UIViewController {
     private func openTile(
         at index: Int, in grid: ForYouGridPage?, showingComments: Bool = false
     ) {
-        guard let grid else { return }
+        // One opening at a time — before anything below claims the tile.
+        guard let grid,
+              navigationController.map({ FeedFeatureBuilder.canOpen(from: self, on: $0) }) ?? true
+        else { return }
         let posts = grid.posts
         guard posts.indices.contains(index) else { return }
         let tapped = posts[index]
@@ -2813,7 +2818,16 @@ extension PlaceProfileViewController: ZoomTransitionDestination {
 
     /// Freeze the tab pager while a grab drives, so the drag that is flying
     /// the page home cannot also page it sideways.
+    ///
+    /// RESTORED, not re-enabled: paging can be off for its own reasons (a
+    /// multi-selection in progress), and a grab ending must hand back the
+    /// state it found — the feed's `ScrollLock` rule.
     func setContentScrollEnabled(_ enabled: Bool) {
-        pager.isPagingEnabled = enabled
+        guard let pager else { return }
+        if enabled {
+            pagerLock.thaw(pager.pagingScrollView)
+        } else {
+            pagerLock.freeze(pager.pagingScrollView)
+        }
     }
 }

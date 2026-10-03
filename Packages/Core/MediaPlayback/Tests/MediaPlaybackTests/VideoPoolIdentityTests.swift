@@ -231,6 +231,88 @@ struct VideoPoolIdentityTests {
         #expect(controller.isMuted(in: adopted) == false)
     }
 
+    /// ⚠️ A REFUSED ADOPTION LEAVES THE REPLACED SURFACE'S PLAYER ALONE.
+    ///
+    /// The shape a post opened from a live map pin produced: the card arrives
+    /// drawing ANOTHER pool's player, the adoption is refused, and the refusal
+    /// used to stop the page's own player on its way out.
+    @Test func aRefusedAdoptionKeepsTheReplacedSurfacePlaying() async {
+        let controller = pool()
+        let otherPool = pool()
+        let url = URL(string: "mock://video/page")!
+        let page = VideoRenderView()
+        let foreign = VideoRenderView()
+        await controller.play(url, in: page)
+        await otherPool.play(URL(string: "mock://video/pin")!, in: foreign)
+        let player = controller.activePlayer(in: page)
+        #expect(player != nil)
+
+        #expect(!controller.canAdoptSurface(foreign))
+        #expect(!controller.adoptSurface(foreign, replacing: page))
+
+        #expect(controller.activePlayer(in: page) === player, "a refused adoption retired the page's player")
+        otherPool.stop(foreign)
+    }
+
+    // MARK: - Lookups by identity, not by asset (hero audit PR E)
+
+    /// Two posts can run ONE file on two players (a repost in another scope).
+    /// A landing takes the loan of the player the viewer watched land — the
+    /// one the flight card's surface draws — not whichever player the URL
+    /// lookup lists first.
+    @Test func aLandingTakesThePlayerItWatchedNotTheFirstOnTheURL() async {
+        let controller = pool()
+        let url = URL(string: "mock://video/shared-file")!
+        let original = VideoRenderView(), repost = VideoRenderView()
+        await controller.play(url, in: original, scope: "post-a")
+        await controller.play(url, in: repost, scope: "post-b")
+        let watched = controller.activePlayer(in: repost)
+        #expect(watched != nil && watched !== controller.activePlayer(in: original),
+                "precondition: two players for one file")
+        let card = VideoRenderView()
+        #expect(controller.attachSurface(card, alongsideSurface: repost))
+
+        let tile = VideoRenderView()
+        #expect(controller.transferOwnership(of: url, drawnBy: card, to: tile))
+
+        #expect(controller.activePlayer(in: tile) === watched, "the landing adopted the other post's clock")
+        #expect(controller.activePlayer(in: original) != nil, "the other post's player was taken")
+    }
+
+    /// A page that joined a player and the tile that owns it are BOTH keys of
+    /// that player. A transfer takes the loan from every one of them, or the
+    /// left-over key keeps the player "in use" behind a hidden page.
+    @Test func aTransferLeavesNoCoOwnerBehind() async {
+        let controller = pool()
+        let url = URL(string: "mock://video/co-owned")!
+        let tile = VideoRenderView(), page = VideoRenderView()
+        await controller.play(url, in: tile, scope: "post")
+        await controller.play(url, in: page, scope: "post")
+        let player = controller.activePlayer(in: tile)
+        #expect(player != nil && controller.activePlayer(in: page) === player,
+                "precondition: the page joined the tile's player as a second key")
+
+        let landing = VideoRenderView()
+        #expect(controller.transferOwnership(of: url, drawnBy: tile, to: landing))
+
+        #expect(controller.activePlayer(in: landing) === player)
+        #expect(controller.activePlayer(in: tile) == nil)
+        #expect(controller.activePlayer(in: page) == nil, "a co-owner kept its loan")
+    }
+
+    /// A page joining the player of the post it SHOWS, by scope, not the first
+    /// player running the same file.
+    @Test func aScopedAttachJoinsThePostsOwnPlayer() async {
+        let controller = pool()
+        let url = URL(string: "mock://video/scoped")!
+        let a = VideoRenderView(), b = VideoRenderView()
+        await controller.play(url, in: a, scope: "post-a")
+        await controller.play(url, in: b, scope: "post-b")
+        let page = VideoRenderView()
+        #expect(controller.attachSurface(page, to: url, scope: "post-b"))
+        #expect(page.boundPlayer === controller.activePlayer(in: b))
+    }
+
     /// A surface bound to nothing has no playback to own, and says so.
     @Test func adoptingAnUnboundSurfaceIsRefused() {
         let controller = pool()
