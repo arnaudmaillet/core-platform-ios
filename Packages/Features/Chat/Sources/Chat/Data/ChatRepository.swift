@@ -316,7 +316,7 @@ public actor ChatRepository: ChatProviding {
     }
 
     public func send(_ body: String, to conversationID: ConversationID, replyingTo replyToID: String?) async throws -> ChatMessage {
-        let viewer = try await resolveViewerProfileID()
+        let viewer = try await resolveViewerProfileID(forWrite: "send")
         var request = Chat_V1_SendMessageRequest()
         request.conversationID = conversationID.rawValue
         request.senderID = viewer.rawValue
@@ -341,7 +341,7 @@ public actor ChatRepository: ChatProviding {
 
     public func markRead(_ conversationID: ConversationID, upTo messageID: String) async throws {
         guard !messageID.isEmpty else { return }
-        let viewer = try await resolveViewerProfileID()
+        let viewer = try await resolveViewerProfileID(forWrite: "markRead")
         var request = Chat_V1_MarkReadRequest()
         request.conversationID = conversationID.rawValue
         request.memberID = viewer.rawValue
@@ -352,7 +352,7 @@ public actor ChatRepository: ChatProviding {
     // MARK: - Direct message
 
     public func directConversation(with profileID: ProfileID) async throws -> ConversationID {
-        let viewer = try await resolveViewerProfileID()
+        let viewer = try await resolveViewerProfileID(forWrite: "directConversation")
 
         // Reuse an existing 1:1 conversation (exactly viewer + target) if any.
         if let existing = await existingDirectConversation(viewer: viewer, other: profileID) {
@@ -491,10 +491,13 @@ public actor ChatRepository: ChatProviding {
         )
     }
 
-    private func resolveViewerProfileID() async throws -> ProfileID {
+    /// `write` names the caller when it is a write, so a guest reaching it is
+    /// reported (`GateAudit`): the member gate should have stopped them first.
+    private func resolveViewerProfileID(forWrite write: String? = nil) async throws -> ProfileID {
         do {
             return try await viewer.activeProfileID()
         } catch ViewerError.requiresMember {
+            if let write { GateAudit.ungatedWrite(write) }
             throw ChatError.notAuthenticated
         } catch ViewerError.noProfileForAccount {
             throw ChatError.noProfileForAccount

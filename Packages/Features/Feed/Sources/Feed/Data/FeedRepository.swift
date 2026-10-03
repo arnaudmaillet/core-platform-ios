@@ -372,10 +372,13 @@ public actor FeedRepository: FeedProviding {
         }
     }
 
-    private func resolveViewerProfileID() async throws -> ProfileID {
+    /// `write` names the caller when it is a write, so a guest reaching it is
+    /// reported (`GateAudit`): the member gate should have stopped them first.
+    private func resolveViewerProfileID(forWrite write: String? = nil) async throws -> ProfileID {
         do {
             return try await viewer.activeProfileID()
         } catch ViewerError.requiresMember {
+            if let write { GateAudit.ungatedWrite(write) }
             throw FeedError.notAuthenticated
         } catch ViewerError.noProfileForAccount {
             throw FeedError.noProfileForAccount
@@ -407,7 +410,7 @@ public actor FeedRepository: FeedProviding {
 
 extension FeedRepository: EngagementProviding {
     public func setLiked(_ liked: Bool, for postID: PostID) async throws {
-        let profileID = try await resolveViewerProfileID()
+        let profileID = try await resolveViewerProfileID(forWrite: "setLiked")
 
         if liked {
             var request = Engagement_V1_UpsertReactionRequest()

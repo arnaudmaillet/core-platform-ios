@@ -633,6 +633,10 @@ final class WalletClaimViewController: UIViewController {
     }
 
     private func claimTapped() {
+        MemberGates.perform(.claim, from: self) { [weak self] in self?.commitClaim() }
+    }
+
+    private func commitClaim() {
         switch wallet.claim() {
         case .claimed:
             UINotificationFeedbackGenerator().notificationOccurred(.success)

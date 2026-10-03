@@ -232,7 +232,7 @@ public actor CommentsRepository: CommentsProviding {
     }
 
     public func addComment(_ body: String, to postID: PostID, parentID: String?) async throws -> CommentEntry {
-        let viewer = try await resolveViewerProfileID()
+        let viewer = try await resolveViewerProfileID(forWrite: "addComment")
 
         var request = Comment_V1_CreateCommentRequest()
         request.commentID = UUID().uuidString // client-supplied id for idempotency
@@ -374,10 +374,13 @@ public actor CommentsRepository: CommentsProviding {
         }
     }
 
-    private func resolveViewerProfileID() async throws -> ProfileID {
+    /// `write` names the caller when it is a write, so a guest reaching it is
+    /// reported (`GateAudit`): the member gate should have stopped them first.
+    private func resolveViewerProfileID(forWrite write: String? = nil) async throws -> ProfileID {
         do {
             return try await viewer.activeProfileID()
         } catch ViewerError.requiresMember {
+            if let write { GateAudit.ungatedWrite(write) }
             throw CommentsError.notAuthenticated
         } catch ViewerError.noProfileForAccount {
             throw CommentsError.noProfileForAccount

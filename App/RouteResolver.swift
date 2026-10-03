@@ -163,6 +163,19 @@ final class RouteResolver: Router {
         // being prepared: that push would land on top of their newer choice.
         pendingProfile?.hold.cancel()
         pendingProfile = nil
+        // A route that writes (opening a thread to message someone) needs an
+        // account: a guest signs up first, and the route then runs as asked.
+        // Checked here so every origin — a profile's button, a share sheet, a
+        // deep link — is covered by one rule.
+        if let action = route.gatedAction,
+           let source = navigator.activeNavigationController,
+           let gate = MemberGates.gate(from: source), !gate.isMember {
+            Task { [weak self] in
+                guard await gate.requireMember(for: action) else { return }
+                self?.route(to: route)
+            }
+            return
+        }
         // The notifications drawer slides shut as the destination arrives —
         // a tap on a notification is a route, and it lands underneath.
         navigator.closeOverlays()
@@ -299,6 +312,19 @@ final class RouteResolver: Router {
             )
             push(thread, using: navigator)
 
+        }
+    }
+}
+
+private extension AppRoute {
+    /// The account a route needs before it runs, or nil for one anybody may
+    /// follow (reading a post, a profile, a place).
+    var gatedAction: GatedAction? {
+        switch self {
+        case .messageUser(_, let stub), .sendLink(_, _, let stub):
+            .message(handle: stub?.handle)
+        default:
+            nil
         }
     }
 }

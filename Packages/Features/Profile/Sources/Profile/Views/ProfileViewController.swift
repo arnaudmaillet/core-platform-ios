@@ -407,10 +407,16 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
             self?.makeMapFavoriteMenu() ?? UIMenu()
         }
         headerView.onFollowTapped = { [weak self] in
-            self?.viewModel.toggleFollow()
+            guard let self else { return }
+            MemberGates.perform(.follow(handle: viewModel.profile?.handle), from: self) { [weak self] in
+                self?.viewModel.toggleFollow()
+            }
         }
         headerView.onMessageTapped = { [weak self] in
-            self?.viewModel.messageTapped()
+            guard let self else { return }
+            MemberGates.perform(.message(handle: viewModel.profile?.handle), from: self) { [weak self] in
+                self?.viewModel.messageTapped()
+            }
         }
         headerView.onEditTapped = { [weak self] in
             self?.pushEditProfile()

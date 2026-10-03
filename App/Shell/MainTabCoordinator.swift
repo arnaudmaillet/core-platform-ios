@@ -1,4 +1,5 @@
 import ChatInterface
+import CoreModels
 import CoreNavigation
 import FeedInterface
 import MediaPlayback
@@ -56,7 +57,12 @@ final class MainTabCoordinator: NSObject, Coordinator {
     /// bound to them (`NotificationsBell`) — a bar item lives in one bar, so the
     /// single item this used to be could only ever lead the map's.
     private lazy var notificationsBell: NotificationsBell = NotificationsBell { [weak self] in
-        self?.notificationsDrawer.open()
+        guard let self else { return }
+        // A guest has no notifications: the bell invites them to sign up, and
+        // opens the drawer once they have.
+        MemberGates.perform(.notifications, from: tabBarController) { [weak self] in
+            self?.notificationsDrawer.open()
+        }
     }
     /// Notifications, as a drawer BEHIND the shell: the whole tab bar
     /// controller slides right to reveal it. See `NotificationsDrawer`.
@@ -765,6 +771,15 @@ extension MainTabCoordinator {
     }
 
     fileprivate func openCreate(_ destination: CreateTabItem.Destination) {
+        // Posting needs an account: a guest signs up first, then lands on the
+        // screen they chose. Every "+" entry (menu, long press, debug hook)
+        // comes through here.
+        MemberGates.perform(.create, from: tabBarController) { [weak self] in
+            self?.presentCreate(destination)
+        }
+    }
+
+    private func presentCreate(_ destination: CreateTabItem.Destination) {
         // A second presentation would be refused. The bar cannot be tapped
         // under one, so this only ever turns away the debug hook.
         guard tabBarController.presentedViewController == nil else { return }

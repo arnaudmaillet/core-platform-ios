@@ -5,6 +5,7 @@ import MediaCore
 import MediaPlayback
 import PostGrid
 import UIKit
+import CoreNavigation
 
 /// One format page of the gallery pager, in the fixed shape its format owns:
 /// an asymmetric media mosaic (Media) or a 1-column timeline of full-width
@@ -517,8 +518,11 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
             if let bookmarks {
                 cell.isBookmarked = bookmarks.isSaved(post.id.rawValue)
                 cell.onBookmarkTapped = { [weak cell] in
-                    _ = bookmarks.toggle(post.id.rawValue)
-                    cell?.isBookmarked = bookmarks.isSaved(post.id.rawValue)
+                    guard let cell else { return }
+                    MemberGates.perform(.save, from: cell) { [weak cell] in
+                        _ = bookmarks.toggle(post.id.rawValue)
+                        cell?.isBookmarked = bookmarks.isSaved(post.id.rawValue)
+                    }
                 }
             }
             // Captured by POST, never by index path: the row that asked can

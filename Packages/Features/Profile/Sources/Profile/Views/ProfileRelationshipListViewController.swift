@@ -2,6 +2,7 @@ import CoreModels
 import DesignSystem
 import MediaCore
 import UIKit
+import CoreNavigation
 
 /// One relationship list — Followers, or Following, or Friends — as a page in
 /// the pager `ProfileRelationshipsViewController` hosts.
@@ -109,7 +110,10 @@ final class ProfileRelationshipListViewController: UIViewController {
                 guard let self else { return }
                 switch row.action {
                 case .remove: self.confirmRemoveFollower(row)
-                case .follow, .following: self.viewModel.toggleFollow(id)
+                case .follow, .following:
+                    MemberGates.perform(.follow(handle: nil), from: self) { [weak self] in
+                        self?.viewModel.toggleFollow(id)
+                    }
                 case .inert: break
                 }
             }

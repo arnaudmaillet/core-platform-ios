@@ -5,6 +5,7 @@ import MediaCore
 import MediaPlayback
 import PostGrid
 import UIKit
+import CoreNavigation
 
 /// The two rows that lead For You's list (2026-09-29):
 ///
@@ -499,9 +500,12 @@ final class ForYouRailsView: UIView {
         cell.onRepostTapped = { [weak self] in self?.onCardRepostRequested?(post) }
         cell.isBookmarked = bookmarks.isSaved(post.id.rawValue)
         cell.onBookmarkTapped = { [weak self, weak cell] in
-            guard let self else { return }
-            _ = bookmarks.toggle(post.id.rawValue)
-            cell?.isBookmarked = bookmarks.isSaved(post.id.rawValue)
+            guard let self, let cell else { return }
+            MemberGates.perform(.save, from: cell) { [weak self, weak cell] in
+                guard let self else { return }
+                _ = bookmarks.toggle(post.id.rawValue)
+                cell?.isBookmarked = bookmarks.isSaved(post.id.rawValue)
+            }
         }
         // Captured by POST, never by index path — the list's rule: the row
         // can have changed by the time the finger arrives.

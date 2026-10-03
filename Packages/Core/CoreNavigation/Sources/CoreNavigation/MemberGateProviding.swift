@@ -31,4 +31,26 @@ public enum MemberGates {
         guard let gate = gate(from: source) else { return true }
         return await gate.requireMember(for: action)
     }
+
+    /// Runs `body` if the viewer may make this write — what a control's
+    /// handler calls.
+    ///
+    /// **Synchronous for a member** (and with no gate up the chain): the
+    /// optimistic glyph, the haptic and the stake theatre land in the same
+    /// turn as the tap, exactly as before the gate existed. Only a guest goes
+    /// through the sheet, and `body` then runs after they sign up — the action
+    /// they started — or never, if they close it.
+    public static func perform(
+        _ action: GatedAction,
+        from source: UIResponder,
+        _ body: @escaping @MainActor () -> Void
+    ) {
+        guard let gate = gate(from: source), !gate.isMember else {
+            body()
+            return
+        }
+        Task { @MainActor in
+            if await gate.requireMember(for: action) { body() }
+        }
+    }
 }

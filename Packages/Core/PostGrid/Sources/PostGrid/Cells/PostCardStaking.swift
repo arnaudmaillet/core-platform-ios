@@ -2,6 +2,7 @@ import CoreModels
 import CoreStorage
 import DesignSystem
 import UIKit
+import CoreNavigation
 
 /// What a card's like chip does with a wallet — one object per SURFACE (a For
 /// You page, a profile gallery), shared by every row it draws.
@@ -115,6 +116,15 @@ public final class PostCardStaking {
 
     func stake(_ spend: WalletStakeSpend, on key: String, cell: PostGridListRowCell) {
         if case .points(let amount) = spend, amount <= 0 { return }
+        // A guest signs up first; the stake then lands on the cell that asked,
+        // if it still shows this post.
+        MemberGates.perform(.like, from: cell) { [weak self, weak cell] in
+            guard let self, let cell else { return }
+            self.commitStake(spend, on: key, cell: cell)
+        }
+    }
+
+    private func commitStake(_ spend: WalletStakeSpend, on key: String, cell: PostGridListRowCell) {
         switch wallet.stake(spend, on: key) {
         case .boosted(_, let targetTotal, let spent):
             session[key, default: 0] += spent
