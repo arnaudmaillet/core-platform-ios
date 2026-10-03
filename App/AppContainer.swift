@@ -106,7 +106,7 @@ final class AppContainer {
     private(set) lazy var sessionManager = SessionManager(
         authClient: Auth_V1_AuthServiceClient(client: unauthenticatedRPCClient),
         store: KeychainSessionStore(store: KeychainStore(service: "cn.wynn.core-platform-ios")),
-        configuration: .init(deviceID: Self.persistentDeviceID())
+        configuration: .init(deviceID: Self.persistentDeviceID(), userAgent: Self.userAgent())
     )
 
     private(set) lazy var authFeature: any AuthFeatureBuilding = AuthFeatureBuilder(
@@ -699,6 +699,12 @@ final class AppContainer {
         authSession: sessionManager
     )
 
+    /// "Where you're logged in": `auth.v1` ListSessions / Logout / LogoutAllSessions
+    /// on the AUTHENTICATED client — they act on the calling principal's account.
+    private lazy var accountSessionsRepository = AccountSessionsRepository(
+        authClient: Auth_V1_AuthServiceClient(client: authenticatedRPCClient)
+    )
+
     /// The profile media grid's source: post listing/hydration plus the
     /// search-backed "Tagged" corpus (post caption search — mock indexes it
     /// exactly; fleet quality tracks the search index).
@@ -749,7 +755,8 @@ final class AppContainer {
             imagePipeline: imagePipeline,
             router: routeResolver,
             account: accountRepository,
-            switching: profileRepository
+            switching: profileRepository,
+            accountSessions: accountSessionsRepository
         )
         // The one place that can see both features, which is the whole reason
         // this is injected rather than reached for: Profile describes where a
@@ -988,5 +995,14 @@ final class AppContainer {
         let created = UUID().uuidString
         UserDefaults.standard.set(created, forKey: key)
         return created
+    }
+
+    /// `core-platform-ios/<version> (<model>; iOS <version>)` — the shape
+    /// `SessionDevice(userAgent:)` reads back, so "Where you're logged in"
+    /// shows "iPhone · iOS 27.0" rather than an opaque string.
+    private static func userAgent() -> String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
+        let device = UIDevice.current
+        return "core-platform-ios/\(version) (\(device.model); \(device.systemName) \(device.systemVersion))"
     }
 }

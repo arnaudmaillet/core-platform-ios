@@ -6,7 +6,7 @@
 
 Settings today has 7 rows and exactly one works (Log Out); a production social network ships 13 sections and roughly 80–120 options, about 25 of which are legal or App Store requirements.
 
-The good news: the backend already has most of the P0 contracts. `account.v1`, `auth.v1`, `social_graph.v1` and `moderation.v1` expose change password, MFA, sessions, deactivation, GDPR deletion, data export, block lists and DSA appeals — the app calls none of them from Settings.
+The good news: the backend already has most of the P0 contracts. `account.v1`, `auth.v1`, `social_graph.v1` and `moderation.v1` expose sessions, deactivation, GDPR deletion, data export, block lists and DSA appeals. Change password and MFA are the exception: their `account.v1` RPCs are internal (server-side hash, encrypted seed) and need client-facing edge RPCs first (#382, #383).
 
 The five launch blockers, in order:
 
@@ -74,7 +74,7 @@ Every option below is missing today unless marked "partial". Priority: **P0** = 
 | --- | --- | --- | --- |
 | Change email (re-verify new address, alert old one) | All four | P0 | Missing: only `VerifyEmail` |
 | Change phone (SMS code) | All four | P0 | Missing: only `VerifyPhone` |
-| Change password (current password, then new) | All four | P0 | `ChangePassword` |
+| Change password (current password, then new) | All four | P0 | Missing for clients: `account.v1.ChangePassword` takes a server-side Argon2id hash (internal RPC); needs an edge RPC (#382) |
 | Date of birth (private, editable once or via support) | TikTok, Instagram, Snapchat | P0 | Missing: no field on the account |
 | Country / region | TikTok, X | P1 | `countryOfResidence` exists, read-only |
 | Username change with cooldown (TikTok: once per 30 days) | TikTok, Instagram | P1, partial | `ChangeHandle` (no cooldown shown) |
@@ -89,10 +89,10 @@ Every option below is missing today unless marked "partial". Priority: **P0** = 
 
 | Option | Benchmark | Priority | Contract |
 | --- | --- | --- | --- |
-| Two-factor authentication: authenticator app | All four | P0 | `EnrollMfa` (TOTP), `RevokeMfa` |
+| Two-factor authentication: authenticator app | All four | P0 | Missing for clients: `account.v1.EnrollMfa` takes an AES-GCM-encrypted seed (internal RPC); needs edge RPCs (#383) |
 | Two-factor: SMS fallback + backup codes | All four | P0 | Missing: backup codes |
 | Passkeys | X, TikTok, Snapchat | P1 | Missing |
-| Where you're logged in: device, city, last active; log out one | All four | P0 | `ListSessions`; no single-session revoke |
+| Where you're logged in: device, sign-in date; log out one | All four | P0 | `auth.v1.ListSessions`, `Logout(session_id)` (shipped #384) |
 | Log out of all other sessions | All four | P0 | `LogoutAllSessions` |
 | New-login alerts (push + email) | All four | P1 | `RecordLogin` exists; no alert |
 | Login activity history | Instagram, X | P2 | Partial: `RecordLogin`, `RecordFailedLogin` |
@@ -276,7 +276,6 @@ Roughly half the P0 list can ship on today's contracts; the rest needs 8 new bac
 | Date of birth on the account + age bracket | Age gate, teen defaults, store age laws | P0 | `account.v1` |
 | Update consents (data processing, marketing, analytics) with timestamped history | GDPR consent withdrawal | P0 | `account.v1` (GDPR record exists, no write) |
 | Cancel a pending deletion; deletion status | 30-day grace period | P0 | `account.v1` |
-| Revoke one session | "Log out this device" | P0 | `auth.v1` |
 | Per-profile interaction settings: who can comment, mention, message, download, see likes | Section 3 | P0 | `profile.v1` or new `privacy.v1` |
 | Follow requests: list, approve, decline (private accounts) | Private account | P0 | `social_graph.v1` |
 | List my reports and their outcome | DSA Art. 16–17 | P0 | `moderation.v1` |
@@ -288,7 +287,7 @@ Roughly half the P0 list can ship on today's contracts; the rest needs 8 new bac
 | Clear search and watch history | Section 7 | P1 | `search.v1`, `engagement.v1` |
 | Wallet ledger: transaction history, spending limits | Section 9 | P0 once gems are sold | new economy service (§24) |
 
-Already available and unused: `ChangePassword`, `EnrollMfa`, `RevokeMfa`, `ListSessions`, `LogoutAllSessions`, `DeactivateAccount`, `ReactivateAccount`, `RequestGdprDeletion`, `RequestDataExport`, `GetGdprRecord`, `SetVisibility`, `ListBlocks`, `Unblock`, `GetEnforcementState`, `GetStatementOfReasons`, `FileAppeal`.
+Already available and unused: `ListSessions`, `LogoutAllSessions`, `DeactivateAccount`, `ReactivateAccount`, `RequestGdprDeletion`, `RequestDataExport`, `GetGdprRecord`, `SetVisibility`, `ListBlocks`, `Unblock`, `GetEnforcementState`, `GetStatementOfReasons`, `FileAppeal`.
 
 ## Roadmap
 
@@ -297,9 +296,7 @@ Start with the P0 items that need no backend work: they turn 6 dead rows into wo
 **P0a — iOS only, contracts exist**
 
 - [ ] Restructure Settings into the target sections (Account, Security, Privacy, Safety, Notifications, Activity, Wallet, Support, About), with account-wide vs per-profile labelling
-- [ ] Change password (`ChangePassword`)
-- [ ] Two-factor with an authenticator app (`EnrollMfa`, `RevokeMfa`)
-- [ ] Where you're logged in + log out all others (`ListSessions`, `LogoutAllSessions`)
+- [ ] Where you're logged in, log out one or all (`ListSessions`, `Logout`, `LogoutAllSessions`)
 - [ ] Deactivate and reactivate (`DeactivateAccount`, `ReactivateAccount`)
 - [ ] Delete account with re-authentication and a 30-day notice (`RequestGdprDeletion`)
 - [ ] Download your data (`RequestDataExport`, `GetGdprRecord`)
@@ -310,6 +307,7 @@ Start with the P0 items that need no backend work: they turn 6 dead rows into wo
 
 **P0b — needs backend first**
 
+- [ ] Change password and two-factor: edge RPCs in `auth.v1`; the `account.v1` ones are internal (#382, #383)
 - [ ] Push token registration + notification preferences
 - [ ] Change email and phone
 - [ ] Date of birth and age gate (13+, under-16s blocked in Australia)
