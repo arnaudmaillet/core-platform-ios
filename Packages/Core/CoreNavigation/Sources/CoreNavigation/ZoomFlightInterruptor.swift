@@ -417,8 +417,12 @@ final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
     #endif
 
     /// Takes both recognisers off the container once a decision is made, so
-    /// the same flight cannot be grabbed twice on its way out.
-    private func detach() {
+    /// the same flight cannot be grabbed twice on its way out — and once the
+    /// flight is over, caught or not (`ZoomTransitionController`): the
+    /// container is UIKit's and can outlive the transition, and a zero-duration
+    /// press left on it with no delegate would claim touches meant for the
+    /// screens below.
+    func detach() {
         if let pan { container?.removeGestureRecognizer(pan) }
         if let touchCatcher { container?.removeGestureRecognizer(touchCatcher) }
         pan = nil

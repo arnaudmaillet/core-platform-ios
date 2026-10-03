@@ -238,7 +238,7 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
             animator.onPresentationReversed = { [weak self] in
                 // The flight this interruptor served is over; didShow will not
                 // fire to release it.
-                self?.flightInterruptor = nil
+                self?.releaseFlightInterruptor()
                 self?.onPresentationCancelled?()
             }
             return animator
@@ -324,6 +324,14 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
     /// interaction controller weakly.
     private var flightInterruptor: ZoomFlightInterruptor?
 
+    /// Ends the interruptor's flight: its recognizers come off the container
+    /// (only a CATCH ever removed them, so every untouched flight left a
+    /// zero-duration press and a pan behind) and it is released.
+    private func releaseFlightInterruptor() {
+        flightInterruptor?.detach()
+        flightInterruptor = nil
+    }
+
     /// The delegate this controller displaced, so its news is not swallowed.
     ///
     /// ⚠️ DISPLACING A DELEGATE TAKES ITS NEWS AS WELL, and `didShow` is news,
@@ -350,7 +358,7 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
         // set, it survived until the next flight replaced it — a small object,
         // but a retained one whose pan the container's teardown had already
         // orphaned.
-        flightInterruptor = nil
+        releaseFlightInterruptor()
         // ⚠️ FORWARDED FIRST, and unconditionally — see `displacedDelegate`.
         displacedDelegate?.navigationController?(
             navigationController, didShow: viewController, animated: animated
@@ -363,6 +371,9 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
                   + " targets=\(dismissTargets.count)")
         }
         #endif
+        // The flight moved the viewer to another screen without UIKit's own
+        // push animation, so VoiceOver is told where it now is.
+        if animated { UIAccessibility.post(notification: .screenChanged, argument: nil) }
         if viewController === feedViewController {
             onDestinationShown?()
             return

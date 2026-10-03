@@ -227,6 +227,10 @@ final class SnapFeedViewController: UIViewController {
     /// landing — lowers it.
     private(set) var isAwaitingRevealPresentation = false
 
+    /// Set by `zoomTransitionWillDepart`, read once by `zoomTransitionDidEnd`:
+    /// the ending flight takes this screen off screen.
+    private var isDepartingWithFlight = false
+
     public func beginRevealPresentation() {
         // ⚠️ AN OPENING ONLY. The installer that calls this also builds every
         // card-shaped CLOSE's geometry, and a close is staged while this screen
@@ -5302,6 +5306,10 @@ extension SnapFeedViewController: UICollectionViewDelegate {
     // via the toolbar's more menu; the identity pill opens the profile.
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        // A landing cover still waiting for the page's picture is an inert
+        // still of the post that opened; the viewer is now moving the pages
+        // under it, so it goes, and adopts nothing (`ZoomLandingLeftovers`).
+        if scrollView === collectionView { ZoomLandingLeftovers.clear(over: view) }
         // Unreachable while engaged (the pager is disabled — the total
         // dead-end doctrine; the swipe exit is bar-owned and pages
         // programmatically). Kept as belt and braces: if any future path
@@ -6009,6 +6017,8 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // nothing hidden, whatever the last visit's flight left behind.
         isAwaitingRevealPresentation = false
         view.alpha = 1
+        // And nothing the last visit's landing parked over it.
+        ZoomLandingLeftovers.clear(over: view)
         donatedLiveView = nil
         flightChrome = nil
         pageDriveStartOffset = nil
@@ -6279,6 +6289,10 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         activeSnapCell?.reclaimDonatedPlayback(view)
     }
 
+    public func zoomTransitionWillDepart() {
+        isDepartingWithFlight = true
+    }
+
     public func zoomTransitionDidEnd() {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-zoom-profile") {
@@ -6327,11 +6341,24 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // card gone, the cell reclaims the render slot (only the most
         // recently attached layer of a shared player is guaranteed to
         // display). Harmless when nothing was mirrored.
-        activeSnapCell?.reclaimPlayback()
-        // And the presenting leg's held-back start runs now: the card is gone,
-        // so attaching here is the hand-off rather than a theft. Adopts the
-        // parked player, so the page resumes instead of restarting.
-        activeSnapCell?.startDeferredPlayback()
+        //
+        // ⚠️ NOT FOR A PAGE THAT LEAVES WITH THE FLIGHT
+        // (`zoomTransitionWillDepart`). Reclaiming rebound the player to this
+        // hidden page right after the landing tile adopted it, and the
+        // deferred start below played a clip on a screen being removed. A
+        // departing page only lets go, so the next visit starts clean.
+        let departing = isDepartingWithFlight
+        isDepartingWithFlight = false
+        if departing {
+            activeSnapCell?.releasePlaybackForDeparture()
+        } else {
+            activeSnapCell?.reclaimPlayback()
+            // And the presenting leg's held-back start runs now: the card is
+            // gone, so attaching here is the hand-off rather than a theft.
+            // Adopts the parked player, so the page resumes instead of
+            // restarting.
+            activeSnapCell?.startDeferredPlayback()
+        }
         // The comments warm was held back across the flight (see
         // `prewarmComments`) — and it does NOT resume here, because "landed"
         // is not yet "idle". Measured: run at this instant it produced a
@@ -6743,3 +6770,21 @@ final class SnapFeedCollectionView: UICollectionView {
         return false
     }
 }
+
+#if DEBUG
+extension SnapFeedViewController: ArrivalInvariantReporting {
+    /// Every transition-scoped flag is down once a flight has ended on this
+    /// screen — the reused-feed defects (a hide never undone, a reveal flag
+    /// raised by a close) were all one of these left up.
+    public func arrivalFacts() -> [(name: String, holds: Bool)] {
+        [
+            ("feed.awaitingZoom", !isAwaitingZoomPresentation),
+            ("feed.awaitingReveal", !isAwaitingRevealPresentation),
+            ("feed.maskedReveal", !isMaskedRevealActive),
+            ("feed.engagedDismissal", !isEngagedDismissalActive),
+            ("feed.flightChrome", flightChrome == nil),
+            ("feed.departing", !isDepartingWithFlight),
+        ]
+    }
+}
+#endif

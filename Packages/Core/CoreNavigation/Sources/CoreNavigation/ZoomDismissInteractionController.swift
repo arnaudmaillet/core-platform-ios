@@ -160,10 +160,27 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         self.axes = axes
         self.onBeginDismiss = onBeginDismiss
         self.pannedView = view
-        let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan))
+        // ⚠️ A REUSED VIEW KEEPS EVERY PAN EVER ADDED TO IT. For You hands the
+        // same feed to every opening, and each attached a fresh pan that
+        // outlived its driver: a recognizer with no target and no delegate,
+        // which begins on any drag (its delegate's default) and arbitrates
+        // against the pager. N openings left N-1 of them. The dead ones are
+        // swept here, at the one moment a new one is about to join them;
+        // live siblings (the cluster gallery's second axis) stay.
+        Self.removeDeadPans(from: view)
+        let pan = ZoomDismissPan(target: self, action: #selector(handlePan))
+        pan.driver = self
         pan.maximumNumberOfTouches = 1
         pan.delegate = self
         view.addGestureRecognizer(pan)
+    }
+
+    /// Removes every dismissal pan on `view` whose driver is gone.
+    static func removeDeadPans(from view: UIView) {
+        for pan in view.gestureRecognizers ?? [] {
+            guard let dismissal = pan as? ZoomDismissPan, dismissal.driver == nil else { continue }
+            view.removeGestureRecognizer(dismissal)
+        }
     }
 
     // MARK: - Gesture
@@ -239,6 +256,12 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         let animationsWereEnabled = UIView.areAnimationsEnabled
         UIView.setAnimationsEnabled(false)
         defer { UIView.setAnimationsEnabled(animationsWereEnabled) }
+        // The grab takes the screen — see `ZoomAnimator.dismiss`.
+        ZoomLandingLeftovers.clear(over: fromView)
+        ZoomLandingLeftovers.clear(over: container)
+        // Rotation waits for the grab (`FlightOrientationLock`).
+        orientationLease?.release()
+        orientationLease = FlightOrientationLock.acquire()
         // Reinstall the map behind the grabbed card — a navigation controller
         // removes non-top views, so it isn't in the hierarchy yet.
         if let toView = context.view(forKey: .to) {
@@ -654,6 +677,16 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
             return
         }
         isInteracting = false
+        // The settle is watchable, not touchable — the tap-back's shield, which
+        // the release lacked. The feed is hidden by now (alpha 0, skipped by
+        // hit-testing), so for the whole spring a touch reached the screen
+        // underneath: a tile tap, or a scroll or pan that moved the very
+        // landing rect this release just froze. Topmost in the container,
+        // removed when the transition finishes.
+        let shield = UIView(frame: context.containerView.bounds)
+        shield.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        context.containerView.addSubview(shield)
+        releaseShield = shield
         // Let go with the finger: the give eases out under the release spring.
         deformation?.release()
         deformation = nil
@@ -768,15 +801,30 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
             flight.card,
             settlingAt: commit ? landing : flight.pageFrame,
             ceiling: viewSettleCeiling
-        ) { [weak self] in
-            self?.finishTransition(cancelled: !commit)
+        ) {
+            // Strong, as the reveal grab's (`RevealDismissInteractionController`):
+            // this is the only call that completes the transition and lifts
+            // the release shield, and the watcher's ceiling bounds the hold.
+            self.finishTransition(cancelled: !commit)
         }
     }
 
     /// Tears the stage down exactly like the non-interactive animator's
     /// completion, then reports the outcome to UIKit and drops all state.
     /// (finish/cancelInteractiveTransition was already reported at release.)
+    /// The release's touch shield — see `releaseGrab`.
+    private var releaseShield: UIView?
+    /// Held from staging to the end of the transition; a landing hold takes
+    /// its own.
+    private var orientationLease: FlightOrientationLock.Lease?
+
     private func finishTransition(cancelled: Bool) {
+        releaseShield?.removeFromSuperview()
+        releaseShield = nil
+        defer {
+            orientationLease?.release()
+            orientationLease = nil
+        }
         // Whatever happens below, the staged frame-0 hide is stale from here.
         hasAbandonedContentHide = true
         deformation?.cancel()
@@ -853,6 +901,26 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
             progress: 0, card: .zero, cornerRadius: 0, isSettling: false
         ))
         destination?.setZoomContentHidden(false)
+        // A committed grab pops the destination: it departs, and must not
+        // reclaim the player the landing tile adopts.
+        if cancelled {
+            source?.zoomSourceDidAbandonDismissal()
+            #if DEBUG
+            // The stack through `.to`: a pop has already taken `.from` out of it.
+            ArrivalInvariants.schedule(
+                on: context?.viewController(forKey: .to)?.navigationController,
+                path: "grabCancelled"
+            )
+            #endif
+        } else {
+            destination?.zoomTransitionWillDepart()
+            #if DEBUG
+            ArrivalInvariants.schedule(
+                on: context?.viewController(forKey: .to)?.navigationController,
+                path: "grabReturned"
+            )
+            #endif
+        }
         destination?.zoomTransitionDidEnd()
         // ⚠️ THE SOURCE IS NOT TOUCHED HERE ANY MORE. It was un-hidden
         // unconditionally, cancel included, on the reasoning that a source left
@@ -1010,4 +1078,11 @@ extension ZoomDismissInteractionController: UIGestureRecognizerDelegate {
     ) -> Bool {
         true // coexist with the pager's pan; we self-gate by direction above
     }
+}
+
+/// The grab's pan, marked so a reused view can tell its dead ones from the
+/// pans other code put there. A recognizer does not retain its target, so
+/// `driver` going nil is exactly "nothing will ever handle this pan again".
+final class ZoomDismissPan: UIPanGestureRecognizer {
+    weak var driver: ZoomDismissInteractionController?
 }

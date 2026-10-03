@@ -115,7 +115,36 @@ flight can act on the next.
 | 2.13 | **`clearRecededChrome` writes defaults** (`cornerRadius 0`, `masksToBounds false`) instead of restoring the previous values. | Snapshot both in `applyRecededChrome` and restore them. |
 | 2.14 | **Reveal staging goes stale after a re-anchor or a cancel.** The fill and corner radius are evaluated eagerly for the opening post, and the once-only latch never restages. | Make them closures over `anchorID`, or restage on every attempt with an idempotent adoption. |
 | 2.15 | **The instrument that proves A + B: `ArrivalInvariants` (DEBUG).** It checks the arrival screen at didShow +2 ticks and again at +3.3s, past every ceiling. Generic checks: ancestors' alpha, hidden, interaction and transform; no flight leftovers under `nav.view`; nav idle; native chrome alpha 1; tab bar matching `TabBarRevealPolicy`; no dead-delegate recognizers; census at 0; accessibility. Screens add facts through `ArrivalInvariantReporting` (SnapFeed flags, Maps hidden markers/gate/sentinel, grid concealment/handoff). Census keys also go on the reveal grab driver, the slide dismissal and the retainers. | FAIL lines go into `hero-audit.log`, driven by the existing hero-qa args plus a new "close and reopen within 1s" case. |
-| 2.16 | **Found while verifying PR A** (it is on develop too): after a PUSH caught and reversed (`-zoom-interrupt cancel`), For You's header glass buttons stay dimmed at rest. The navigation bar's item cross-fade is left at its reversed midpoint. | Investigate in PR B: likely UIKit's coordinated bar-item transition on a cancelled non-interactive push; compare `navigationBar` subview alphas before and after. |
+| 2.16 | **Found while verifying PR A** (it is on develop too): after a PUSH caught and reversed (`-zoom-interrupt cancel`), For You's header glass buttons stay dimmed at rest. | **Root cause measured, fix deferred.** The bar's `NavigationBarPlatterContainer_v2` keeps two `_UIInheritedView` cross-fade layers frozen at the fraction the push was caught (0.21/0.79, 0.30/0.70 in two runs: model = presentation, no animation running). Reassigning the presenter's bar items (same arrays, or cleared and put back) does NOT rebuild them, so the fade lives in the platter container rather than in the items. UIKit-internal and cosmetic; needs its own investigation (what UIKit expects from a percent-driven cancel for the platter fade to run home). |
+
+
+## PR B outcome (2026-10-03)
+
+### Done
+- **2.1 / 2.2:** `ZoomLandingLeftovers`. Covers and holds are leases. A new present, a close or grab beginning, `repoint`, or a drag on the feed ends them at once, and an ended cover adopts nothing.
+- **2.3 / 2.11:** pan sweeping.
+  - The dismissal pan is a marked `ZoomDismissPan`, and dead ones are swept at the next attach.
+  - The interruptor's recognizers come off at `didShow` and on reversal.
+  - For You drops a stale `cardPathFlight`.
+- **2.4 / 2.9:** `zoomTransitionWillDepart()`, a new destination requirement. A page leaving with its flight no longer reclaims the player or starts a deferred clip.
+- **2.5 / 2.8:** `zoomSourceDidAbandonDismissal()`, a new source requirement. On a cancelled or reversed close, the grid stops the landing retry and points the playback scope back at the page's post. The landing retry now lives as long as the card (ceiling 6s), not one spring.
+- **2.6:** `FlightOrientationLock`. Flights, covers and holds take leases; the root container answers the current orientation while any is held. A 10s safety expiry covers transitions UIKit abandons.
+- **2.7:** touch shield over a released grab. The grab's completion is captured strongly.
+- **2.10:** the For You sweep thaws the inset unconditionally.
+- **2.12:** flight twins are hidden from VoiceOver; `.screenChanged` is posted on arrival.
+- **2.13:** receded chrome is restored from a snapshot.
+- **2.15:** `ArrivalInvariants`, with SnapFeed and Maps reporting facts.
+
+### Verified in the simulator under `-hero-audit`
+Every arrival line is PASS, and the census settles to empty, on these scenarios:
+- tap-back (`presented` → `returned`);
+- reversed push;
+- map pin round trip;
+- map grab, cancel then commit (`grabCancelled`, `grabReturned`).
+
+### Deferred
+- **2.14 to PR C.** Making `TextRevealOrigin`'s eager values lazy touches FeedInterface and every caller, which PR C rebuilds anyway.
+- **2.16 left open.** Root cause measured: the platter cross-fade is frozen inside UIKit, and rebuilding the bar items does not reach it.
 
 ## Phase 3: structure (behaviour-preserving refactors, one PR each)
 

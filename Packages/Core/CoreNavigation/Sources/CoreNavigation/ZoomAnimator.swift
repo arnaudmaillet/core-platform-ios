@@ -65,6 +65,11 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     /// percent driver's synced fraction is time-based and wrong for a spring.
     private(set) var stagedFlightEndpoints: (start: CGRect, end: CGRect)?
 
+    /// Rotation waits for this flight (`FlightOrientationLock`). Taken at
+    /// staging, released with the rest of the flight's state; a landing hold
+    /// or cover takes its own for as long as it stays on screen.
+    private var orientationLease: FlightOrientationLock.Lease?
+
     init(
         isPresenting: Bool,
         source: any ZoomTransitionSource,
@@ -93,6 +98,8 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     /// staged card they capture) alive for the life of the process. Called in
     /// every terminal branch, where the cycle stops earning its keep.
     private func releaseFlightState() {
+        orientationLease?.release()
+        orientationLease = nil
         interruptible = nil
         interruptibleContext = nil
         stagedFlightCard = nil
@@ -213,6 +220,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             // every later tap is refused. The destination was told a flight
             // was coming (`zoomTransitionWillBegin`); it is told it ended.
             context.completeTransition(false)
+            destination?.zoomTransitionWillDepart()
             destination?.zoomTransitionDidEnd()
             onPresentationReversed?()
             return UIViewPropertyAnimator(duration: duration, curve: .linear)
@@ -235,6 +243,12 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         let animationsWereEnabled = UIView.areAnimationsEnabled
         UIView.setAnimationsEnabled(false)
         defer { UIView.setAnimationsEnabled(animationsWereEnabled) }
+        // Whatever the last flight left landing on this stack (a held card
+        // over a tile, a cover over a reused destination) is not this
+        // flight's: it goes before this one stages over it.
+        ZoomLandingLeftovers.clear(over: container)
+        ZoomLandingLeftovers.clear(over: toView)
+        orientationLease = FlightOrientationLock.acquire()
         // Dims the map around the flying card; tail-weighted so the map reads
         // through for most of the flight and recedes to black as the card lands.
         let dim = ZoomFlight.makeDimView(frame: container.bounds)
@@ -445,10 +459,18 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
                 dim.removeFromSuperview()
                 presentingView?.transform = .identity
                 ZoomFlight.clearRecededChrome(from: presentingView)
+                // The destination never showed and is leaving with the push.
+                self.destination?.zoomTransitionWillDepart()
                 self.destination?.zoomTransitionDidEnd()
                 self.source.setZoomSourceHidden(false)
                 self.releaseFlightState()
+                #if DEBUG
+                let arrivalStack = context.viewController(forKey: .from)?.navigationController
+                #endif
                 context.completeTransition(false)
+                #if DEBUG
+                ArrivalInvariants.schedule(on: arrivalStack, path: "reversedPush")
+                #endif
                 // ⚠️ THE DESTINATION IS UN-HIDDEN TOO, after UIKit has taken it
                 // out of the container (so no frame can show it). Not doing
                 // so was harmless only while every destination was thrown away
@@ -512,6 +534,10 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             }
             let cover = flight.card
             let coverToken = LandingCoverToken()
+            var coverLease: ZoomLandingLeftovers.Lease?
+            // The cover is a full-screen still of the page it stands for, and
+            // rotation waits for it like it waits for the flight.
+            let coverOrientation = FlightOrientationLock.acquire()
             for action in ZoomPresentSettlement.onSchedule() {
                 switch action {
                 case .dropShield:
@@ -524,6 +550,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
                         cover.frame = host.bounds
                         cover.autoresizingMask = [.flexibleWidth, .flexibleHeight]
                         host.addSubview(cover)
+                        coverLease = ZoomLandingLeftovers.lease(cover, over: host)
                     } else {
                         cover.removeFromSuperview()
                     }
@@ -536,6 +563,12 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
                     self.releaseFlightState()
                 case .completeTransition:
                     context.completeTransition(!context.transitionWasCancelled)
+                    #if DEBUG
+                    ArrivalInvariants.schedule(
+                        on: context.viewController(forKey: .to)?.navigationController,
+                        path: "presented"
+                    )
+                    #endif
                 case .adoptSurfaceToDestination, .dropCover:
                     break // the readiness phase's business, below
                 }
@@ -561,10 +594,24 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             Self.whenReady(ceiling: Self.maximumHydrationHold,
                            afterTicks: 1,
                            condition: { [weak destination = self.destination] in
+                               // A cover something else took away has nothing
+                               // left to wait for.
+                               if coverLease?.isLive == false { return true }
                                guard let destination else { return true }
                                return destination.zoomDestinationContentIsReady
                                    && destination.zoomDestinationMediaIsRendering
                            }) { [weak destination = self.destination] in
+                // ⚠️ AN ENDED COVER HANDS NOTHING OVER. It was taken away
+                // because the screen moved on (a close began, the destination
+                // was re-pointed at another post, the viewer dragged it), so
+                // its surface belongs to a page that is no longer the one on
+                // screen. Adopting it there installed one post's clip in
+                // another post's cell.
+                coverOrientation.release()
+                if coverLease?.isLive == false {
+                    withExtendedLifetime(coverToken) {}
+                    return
+                }
                 #if DEBUG
                 if ProcessInfo.processInfo.arguments.contains("-zoom-profile") {
                     print(String(format: "[zoom] cover dropped at +%.1f ms",
@@ -580,6 +627,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
                             destination?.zoomAdoptLiveMediaView(surface)
                         }
                     case .dropCover:
+                        coverLease?.end(removingCard: false)
                         cover.removeFromSuperview()
                     default:
                         break // the scheduled phase's business, above
@@ -761,7 +809,8 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         }
         #endif
         let deadline = CACurrentMediaTime() + ceiling
-        let link = CADisplayLink(target: LandingHold(card: card, condition: condition,
+        let lease = card.superview.map { ZoomLandingLeftovers.lease(card, over: $0) }
+        let link = CADisplayLink(target: LandingHold(card: card, lease: lease, condition: condition,
                                                      liveMediaIsDrawing: liveMediaIsDrawing,
                                                      liveMediaState: liveMediaState,
                                                      finalizeLanding: finalizeLanding,
@@ -818,19 +867,28 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         #endif
     }
 
+    @MainActor
     private final class LandingHold {
         private let card: UIView
+        /// Ended from outside when the screen is needed before the landing
+        /// settles — see `ZoomLandingLeftovers`.
+        private let lease: ZoomLandingLeftovers.Lease?
+        /// Rotation waits for the landing too — the card is posed over a
+        /// rect measured before it.
+        private let orientation: FlightOrientationLock.Lease
         private let condition: () -> Bool
         private let liveMediaIsDrawing: () -> Bool
         private let liveMediaState: () -> String
         private let finalizeLanding: () -> Void
         private let deadline: CFTimeInterval
 
-        init(card: UIView, condition: @escaping () -> Bool,
+        init(card: UIView, lease: ZoomLandingLeftovers.Lease?, condition: @escaping () -> Bool,
              liveMediaIsDrawing: @escaping () -> Bool,
              liveMediaState: @escaping () -> String,
              finalizeLanding: @escaping () -> Void, deadline: CFTimeInterval) {
             self.card = card
+            self.lease = lease
+            self.orientation = FlightOrientationLock.acquire()
             self.condition = condition
             self.liveMediaIsDrawing = liveMediaIsDrawing
             self.liveMediaState = liveMediaState
@@ -865,6 +923,13 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
 
         @objc func tick(_ link: CADisplayLink) {
             frames += 1
+            // Taken away already (a new flight needed the screen): nothing to
+            // hold, nothing to finalize.
+            if lease?.isLive == false {
+                orientation.release()
+                link.invalidate()
+                return
+            }
             #if DEBUG
             // Is the card we are "holding" actually on screen? The hold is
             // scheduled and then `completeTransition` runs, and UIKit tears
@@ -911,6 +976,8 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
                                  CACurrentMediaTime(), timedOut ? " (TIMEOUT)" : ""))
                 }
                 #endif
+                lease?.end(removingCard: false)
+                orientation.release()
                 card.removeFromSuperview()
                 return
             }
@@ -971,6 +1038,12 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         let animationsWereEnabled = UIView.areAnimationsEnabled
         UIView.setAnimationsEnabled(false)
         defer { UIView.setAnimationsEnabled(animationsWereEnabled) }
+        // A close takes the screen: a cover still parked over the departing
+        // page (a slow open closed quickly) and a hold still landing in this
+        // container are both over.
+        ZoomLandingLeftovers.clear(over: fromView)
+        ZoomLandingLeftovers.clear(over: container)
+        orientationLease = FlightOrientationLock.acquire()
         // Reinstall the presenter (`.to`) behind the departing card — a
         // navigation controller removes non-top views, so it isn't in the
         // hierarchy yet.
@@ -1194,8 +1267,17 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
                 // back on the map under the feed, and the next close flew its
                 // card home over a visible twin.
                 self.source.setZoomSourceHidden(true)
+                // And what the staging started for the landing stands down.
+                self.source.zoomSourceDidAbandonDismissal()
                 self.releaseFlightState()
                 context.completeTransition(false)
+                #if DEBUG
+                // The stack through `.to`: a pop has already taken `.from` out of it.
+                ArrivalInvariants.schedule(
+                    on: context.viewController(forKey: .to)?.navigationController,
+                    path: "reversedClose"
+                )
+                #endif
                 #if DEBUG
                 Self.logTeardown("reversed", context: context, card: flight.card, fromView: fromView)
                 #endif
@@ -1243,10 +1325,19 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
                               sourceRef.map { !$0.zoomLandingMediaIsReady } ?? false
                           })
             self.destination?.setZoomContentHidden(false)
+            // The destination is being popped: its page must not reclaim the
+            // player the landing tile just adopted.
+            self.destination?.zoomTransitionWillDepart()
             self.destination?.zoomTransitionDidEnd()
             self.source.setZoomSourceHidden(false)
             self.releaseFlightState()
+            #if DEBUG
+            let arrivalStack = context.viewController(forKey: .to)?.navigationController
+            #endif
             context.completeTransition(true)
+            #if DEBUG
+            ArrivalInvariants.schedule(on: arrivalStack, path: "returned")
+            #endif
             #if DEBUG
             Self.logTeardown("done", context: context, card: flight.card, fromView: fromView)
             #endif

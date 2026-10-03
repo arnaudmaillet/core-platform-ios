@@ -250,7 +250,15 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
             // window while the post was open, or never entered one. The first
             // refusal demands a player rather than accepting the still.
             let landingID = anchorID
-            landingRetry = LandingLiveMediaRetry.arm(card: card) { [weak page] in
+            //
+            // ⚠️ AS LONG AS THE CARD IS IN THE AIR, not for one spring. A grab
+            // stages the card at TOUCH-DOWN, and a drag held longer than 0.42s
+            // used to land without the landing's picture. The retry still stops
+            // the moment the card leaves the tree, so the window is only a
+            // ceiling.
+            landingRetry = LandingLiveMediaRetry.arm(
+                card: card, window: Self.landingRetryCeiling
+            ) { [weak page] in
                 page?.landingFlightSurface(for: landingID)
             }
         }
@@ -370,6 +378,21 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
     /// anchor's id resolve to the departure slot; the hide goes last, because
     /// the swap reloads those two cells and a cell dequeued before the flag was
     /// set would come back visible.
+    /// How long a landing picture may be asked for — see the arm above.
+    static let landingRetryCeiling: CFTimeInterval = 6
+
+    func zoomSourceDidAbandonDismissal() {
+        isStagingDismissal = false
+        landingRetry?.cancel()
+        landingRetry = nil
+        // The scope the staging pointed at the LANDING row exempts that row
+        // from the grid's stops, and the retry may have demanded it a player:
+        // it kept playing, hidden under the page, until the final close. The
+        // page is staying, so the scope goes back to the post it shows — the
+        // one whose player really is the page's.
+        if let staying = activePostID() { page?.retargetPlaybackHandoff(to: staying) }
+    }
+
     func zoomSourceWillStageDismissal() {
         // From here on, cards belong to return flights — see `makeZoomFlightCard`.
         isStagingDismissal = true

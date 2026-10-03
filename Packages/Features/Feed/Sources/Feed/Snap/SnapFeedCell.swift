@@ -2963,6 +2963,18 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         videoPlayback.reclaim(mediaCard.renderView)
     }
 
+    /// The page is leaving with the flight that ended
+    /// (`SnapFeedViewController.zoomTransitionWillDepart`): nothing deferred
+    /// will start on it, and the deferral is cleared so a later visit of the
+    /// reused screen does not inherit it. Its surface is deliberately left as
+    /// it is: a reused screen keeps its clip paused in place for the next
+    /// opening of the same post, and the grid repairs its own player at the
+    /// landing.
+    func releasePlaybackForDeparture() {
+        defersPlaybackForFlight = false
+        hasDeferredPlayback = false
+    }
+
     /// The still this page is actually drawing — the picture a presenter's
     /// flight home has to dissolve away when the viewer is leaving from HERE
     /// rather than from the post that opened the feed.

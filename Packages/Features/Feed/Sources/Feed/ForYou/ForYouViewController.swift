@@ -1457,6 +1457,11 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         )
         let transition = ZoomTransitionController(source: source, destination: destination)
         activeTransition = transition
+        // A text visit's close-only flight is over: this opening is a new
+        // visit. Left alive (a text visit that ended without `onFeedPopped`),
+        // its driver sat on the reused feed beside this one's, and two live
+        // zoom drivers both claimed the next drag.
+        cardPathFlight = nil
         // A flight is staging, and it attaches its own grab below — so this
         // screen owns its dismissal and the native edge pop must stay out of
         // its way. Stated rather than left at the default: the controller is
@@ -2048,14 +2053,19 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // row's close pinned (`ForYouRowOrigins`) and its own completion
         // normally hands back — this is the backstop for a close finished by
         // anything else.
-        if flyingStory != nil || flyingCard != nil {
-            #if DEBUG
-            logRowSource("landed")
-            #endif
-            page.endHeroFreeze()
-        }
+        #if DEBUG
+        if flyingStory != nil || flyingCard != nil { logRowSource("landed") }
+        #endif
+        // UNCONDITIONALLY: a grid flight freezes the inset too
+        // (`zoomSourceWillStageDismissal`), and only a landing thaws it. A
+        // cancelled grab keeps it frozen while the feed stays up — correctly —
+        // so a feed that then left by another route (pop-to-root, a multi-pop)
+        // left the grid on `.never` insets for good. Idempotent.
+        page.endHeroFreeze()
         flyingStory = nil
         flyingCard = nil
+        // A text visit's close-only flight ends with the visit, whoever ended it.
+        cardPathFlight = nil
         guard activeTransition != nil, navigationController?.topViewController === self else {
             return
         }

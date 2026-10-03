@@ -4057,3 +4057,16 @@ private final class MapsChromeTraceProxy {
 #endif
 
 extension MapsViewController: MapCountryShopHosting {}
+
+#if DEBUG
+extension MapsViewController: ArrivalInvariantReporting {
+    /// Back on the map, no flight is held and no marker is still concealed.
+    public func arrivalFacts() -> [(name: String, holds: Bool)] {
+        let hidden = mapView.annotations.compactMap { mapView.view(for: $0) }.filter(\.isHidden).count
+        return [
+            ("maps.activeTransition", activeTransition == nil),
+            ("maps.hiddenMarkers=\(hidden)", hidden == 0),
+        ]
+    }
+}
+#endif

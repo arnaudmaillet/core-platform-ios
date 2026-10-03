@@ -110,6 +110,18 @@ public protocol ZoomTransitionSource: AnyObject {
     /// rect is read. Defaults to nothing — a map pin is wherever the map left it.
     func zoomSourceWillStageDismissal()
 
+    /// The dismissal staged by `zoomSourceWillStageDismissal` will NOT land:
+    /// the grab was cancelled, or the close was caught and thrown back. The
+    /// page is staying, so whatever the staging started for a landing has to
+    /// stand down — a landing picture still being demanded, a playback scope
+    /// pointed at the landing row (which kept that row's player running,
+    /// hidden under the page, until the final close).
+    ///
+    /// Concealment is NOT this hook's business: the settlement keeps the
+    /// source concealed, since the page it impersonates is still up.
+    /// Default is nothing.
+    func zoomSourceDidAbandonDismissal()
+
     /// Takes the flight card's live media view at LANDING, so this side is
     /// already rendering before the card is removed.
     ///
@@ -198,6 +210,7 @@ public extension ZoomTransitionSource {
     var zoomFlightCarriesLivePlayer: Bool { true }
     var zoomPresenterDepthView: UIView? { nil }
     func zoomSourceWillStageDismissal() {}
+    func zoomSourceDidAbandonDismissal() {}
     func zoomAdoptLiveMediaView(_ view: UIView) {}
     var zoomLandingMediaIsReady: Bool { true }
     func zoomFinalizeLanding() {}
@@ -398,6 +411,21 @@ public protocol ZoomTransitionDestination: AnyObject {
     /// chrome reference and any transition-scoped state.
     func zoomTransitionDidEnd()
 
+    /// Called just before `zoomTransitionDidEnd` when the flight that is
+    /// ending takes this destination OFF screen: a completed close, or a push
+    /// reversed before it ever showed.
+    ///
+    /// ⚠️ THE ONE THING `zoomTransitionDidEnd` COULD NOT SAY. It was the same
+    /// call for a page that stays and a page that leaves, so a page leaving
+    /// did what a page staying must: it reclaimed its player (rebinding it to
+    /// its own hidden view right after the landing tile had adopted it),
+    /// uncapped its bitrate and started a deferred play on a screen about to
+    /// be removed. A destination that is told it departs does none of that.
+    ///
+    /// Default is nothing. A REQUIREMENT, for the existential-dispatch reason
+    /// spelled out on `zoomPageFraming`.
+    func zoomTransitionWillDepart()
+
     /// A presentation is about to stage. Called before the destination is laid
     /// out, which is the only moment early enough to matter.
     ///
@@ -556,6 +584,7 @@ public extension ZoomTransitionDestination {
     func zoomReclaimLiveMediaView(_ view: UIView) {}
     func zoomAdoptLiveMediaView(_ view: UIView) {}
     func zoomTransitionWillBegin(flyingLivePlayer: Bool) {}
+    func zoomTransitionWillDepart() {}
     func zoomPrepareForPresentation(in bounds: CGRect) {}
     func setZoomDismissState(_ state: ZoomDismissState) {}
     @discardableResult
