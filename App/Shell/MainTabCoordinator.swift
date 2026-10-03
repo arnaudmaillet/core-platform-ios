@@ -1,3 +1,4 @@
+import ChatInterface
 import CoreNavigation
 import FeedInterface
 import MediaPlayback
@@ -9,8 +10,10 @@ import Upload
 import DesignSystem
 #endif
 
-/// The authenticated app shell: a `UITabBarController` composed of one child
-/// `TabCoordinator` per tab. Each tab owns its own navigation stack; this
+/// The app shell: a `UITabBarController` composed of one child
+/// `TabCoordinator` per tab. It exists for guests and members alike (guest
+/// mode, #438): a sign-in or sign-out swaps the tabs that need an account
+/// (`viewerDidChange(isMember:)`) and leaves every other stack where it is. Each tab owns its own navigation stack; this
 /// coordinator only assembles them and holds them alive.
 ///
 /// Tabs are set via the modern `UITabBarController.tabs` API. The trailing item
@@ -41,6 +44,13 @@ final class MainTabCoordinator: NSObject, Coordinator {
 
     private let container: AppContainer
     private let onLogout: () -> Void
+    /// Presents the sign-in flow over the shell — what a guest's "Log in or
+    /// sign up" calls. The app coordinator dismisses it when the session lands.
+    private let onSignIn: () -> Void
+    /// Whether the viewer has an account. Guests browse; the Profile and
+    /// Messages tabs invite them to sign in instead.
+    private(set) var isMember: Bool
+    private var messagesTab: MessagesTabCoordinator?
     /// The Notifications entry point, as every root header wears it: the unread
     /// state and the tap live here once, and each header is handed a FRESH item
     /// bound to them (`NotificationsBell`) — a bar item lives in one bar, so the
@@ -150,10 +160,35 @@ final class MainTabCoordinator: NSObject, Coordinator {
     /// feed's custom transition delegates (see `NativePopGestureEnabler`).
     private var popGestureEnablers: [NativePopGestureEnabler] = []
 
-    init(container: AppContainer, onLogout: @escaping () -> Void) {
+    init(container: AppContainer, isMember: Bool, onLogout: @escaping () -> Void, onSignIn: @escaping () -> Void) {
         self.container = container
+        self.isMember = isMember
         self.onLogout = onLogout
+        self.onSignIn = onSignIn
         super.init()
+    }
+
+    /// A sign-in or a sign-out, in the same shell. The tabs that need an
+    /// account swap their whole stack; For You is rebuilt because its rows are
+    /// the viewer's own graph; every other stack stays where it is, so a guest
+    /// who signs in from a pushed screen is still on that screen.
+    func viewerDidChange(isMember: Bool) {
+        guard isMember != self.isMember else { return }
+        self.isMember = isMember
+        if !isMember {
+            // The next viewer must never see this one's conversations.
+            container.chatFeature.forgetViewer()
+        }
+        profileTab?.show(member: isMember)
+        messagesTab?.show(member: isMember)
+        forYouTab?.start()
+        profileMenuOverlay.isContextMenuInteractionEnabled = isMember
+        loadAvatar()
+        refreshUnreadBadge()
+        Task { [weak self] in
+            await self?.profileSwitcher?.reload()
+            self?.rebuildSwitcherMenu()
+        }
     }
 
     func start() {
@@ -179,11 +214,15 @@ final class MainTabCoordinator: NSObject, Coordinator {
         self.feedFlow = feedFlow
 
         let profileTab = ProfileTabCoordinator(
-            container: container, notificationsBell: notificationsBell, onLogout: onLogout
+            container: container, notificationsBell: notificationsBell, onLogout: onLogout, onSignIn: onSignIn
         )
         self.profileTab = profileTab
         let forYouTab = ForYouTabCoordinator(container: container, notificationsBell: notificationsBell)
         self.forYouTab = forYouTab
+        let messagesTab = MessagesTabCoordinator(
+            container: container, notificationsBell: notificationsBell, onSignIn: onSignIn
+        )
+        self.messagesTab = messagesTab
         // Bar order: the four places, then the "+". The "+" is not a place, so
         // it is not in `orderedTabs` and nothing can route to it. UIKit
         // separates it from the other four because it is a `UISearchTab` — see
@@ -194,15 +233,18 @@ final class MainTabCoordinator: NSObject, Coordinator {
                 notificationsButtonItem: notificationsBell.makeItem()
             )),
             (.forYou, forYouTab),
-            (.messages, MessagesTabCoordinator(
-                container: container, notificationsBell: notificationsBell
-            )),
+            (.messages, messagesTab),
             (.profile, profileTab)
         ]
         for (_, tab) in orderedTabs {
-            tab.start()
+            if let accountTab = tab as? any AccountScopedTab {
+                accountTab.show(member: isMember)
+            } else {
+                tab.start()
+            }
             addChild(tab)
         }
+        profileMenuOverlay.isContextMenuInteractionEnabled = isMember
         popGestureEnablers = orderedTabs.map { NativePopGestureEnabler(taking: $0.1.navigationController) }
         tabBarController.tabs = orderedTabs.map { $0.1.tab } + [createItem.tab]
         tabBarController.delegate = self
@@ -537,6 +579,10 @@ final class MainTabCoordinator: NSObject, Coordinator {
     /// profile built as the canonical entry point carries its own switcher in
     /// the header, which the Profile tab root now is.
     private func loadAvatar() {
+        guard isMember else {
+            profileTab?.setAvatar(nil)
+            return
+        }
         Task { [weak self] in
             guard let self else { return }
             let image = await container.profileFeature.viewerAvatarImage()
@@ -561,6 +607,10 @@ final class MainTabCoordinator: NSObject, Coordinator {
     /// on every tab switch, and when a notifications-bearing surface (Profile /
     /// the pushed feed) is left.
     private func refreshUnreadBadge() {
+        guard isMember else {
+            notificationsBell.setUnread(false)
+            return
+        }
         Task { [weak self] in
             guard let self else { return }
             let count = await container.notificationsFeature.unreadCount()
@@ -950,3 +1000,14 @@ extension MainTabCoordinator {
     }
 }
 #endif
+
+/// A tab whose root depends on whether the viewer has an account: it installs
+/// the member content or the guest invitation, and swaps between them when
+/// the viewer signs in or out.
+@MainActor
+protocol AccountScopedTab: TabCoordinator {
+    func show(member: Bool)
+}
+
+extension ProfileTabCoordinator: AccountScopedTab {}
+extension MessagesTabCoordinator: AccountScopedTab {}

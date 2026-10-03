@@ -64,6 +64,11 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         catalog.reload()
     }
 
+    public func forgetViewer() {
+        catalog.reset()
+        directory.forgetAll()
+    }
+
     public func makeInboxViewController(
         initialCategory: MessagesCategory,
         onUnreadCountChange: ((Int) -> Void)? = nil

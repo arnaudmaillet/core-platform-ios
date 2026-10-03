@@ -28,4 +28,9 @@ public final class ConversationDirectory {
     public func title(for id: ConversationID) -> String? {
         summaries[id]?.title
     }
+
+    /// Drops every summary — the previous viewer's conversations.
+    public func forgetAll() {
+        summaries.removeAll()
+    }
 }

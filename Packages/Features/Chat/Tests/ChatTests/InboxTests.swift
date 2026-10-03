@@ -506,6 +506,48 @@ struct InboxCatalogTests {
     _ = token
     }
 
+    /// A sign-out (or another account) forgets the inbox at once: rows, pins
+    /// and the loaded phase all go, so the next viewer never sees them.
+    @Test func resetForgetsThePreviousViewersInbox() async {
+        let catalog = InboxCatalog(
+            repository: StubInboxProvider(conversations: [conversation("a", peer: "friend")]),
+            relations: StubRelations(followed: [ProfileID("friend")])
+        )
+        var latest: InboxCatalog.Snapshot?
+        let token = catalog.observe { latest = $0 }
+        catalog.reload()
+        await settle()
+        catalog.togglePin(ConversationID("a"))
+        #expect(latest?.active.map(\.id) == [ConversationID("a")])
+
+        catalog.reset()
+
+        #expect(latest == InboxCatalog.Snapshot())
+        _ = token
+    }
+
+    /// A load still in flight when the viewer changes belongs to the previous
+    /// viewer: it must never land.
+    @Test func aLoadInFlightAtResetNeverLands() async {
+        let provider = StubInboxProvider(conversations: [conversation("a", peer: "friend")])
+        await provider.setLoadGate(open: false)
+        let catalog = InboxCatalog(
+            repository: provider,
+            relations: StubRelations(followed: [ProfileID("friend")])
+        )
+        var loaded = false
+        let token = catalog.observe { if $0.phase == .loaded { loaded = true } }
+        catalog.reload()
+
+        catalog.reset()
+        await provider.setLoadGate(open: true)
+        await settle()
+
+        #expect(!loaded)
+        #expect(catalog.snapshot.active.isEmpty)
+        _ = token
+    }
+
     /// A reload over a populated inbox must not blank it first — the rows and
     /// the badge counts stay put for the whole fetch, which is what keeps a
     /// pop transition stable.

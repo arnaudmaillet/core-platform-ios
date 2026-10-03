@@ -44,6 +44,10 @@ public protocol ChatFeatureBuilding {
     /// shell makes deliberately at launch rather than something the inbox does
     /// to itself on construction.
     func primeInbox()
+    /// Forgets every conversation the inbox knew. Called when the viewer
+    /// becomes someone else (a sign-out, another account): the next viewer must
+    /// never see the previous one's messages, even for a frame.
+    func forgetViewer()
 }
 
 extension ChatFeatureBuilding {

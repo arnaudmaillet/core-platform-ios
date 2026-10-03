@@ -185,6 +185,26 @@ final class InboxCatalog {
         }
     }
 
+    /// Forgets everything — rows, follow state and the in-session pin, mute,
+    /// delete and request choices — and supersedes any load in flight, so a
+    /// late answer for the previous viewer cannot land. Observers see the
+    /// empty loading state at once.
+    func reset() {
+        load?.cancel()
+        load = nil
+        loadGeneration += 1
+        conversations = []
+        followedPeers = []
+        pinned = []
+        muted = []
+        readAheadOfServer = []
+        deleted = []
+        accepted = []
+        declined = []
+        snapshot = Snapshot()
+        emit()
+    }
+
     /// Reloads unless one is already in flight — the pull-to-refresh and
     /// became-active entry point.
     func refresh() {
