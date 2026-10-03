@@ -28,7 +28,7 @@ final class DeleteAccountViewModel {
         // A record we cannot read (the endpoint is restricted on some
         // deployments) is treated as "no request yet": the screen then offers
         // the button, and a duplicate request is harmless server-side.
-        if let requestedAt = try? await lifecycle.deletionRequestedAt() {
+        if let requestedAt = try? await lifecycle.gdprStatus().deletionRequestedAt {
             phase = .requested(on: requestedAt, permanentOn: AccountDeletionPolicy.permanentDate(requestedAt: requestedAt))
         } else {
             phase = .ready(permanentOn: AccountDeletionPolicy.permanentDate(requestedAt: now()))

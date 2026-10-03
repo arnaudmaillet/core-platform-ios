@@ -72,8 +72,10 @@ private actor StubLifecycle: AccountLifecycleManaging {
 
     func requestDeletion() async throws { requests += 1 }
 
-    func deletionRequestedAt() async throws -> Date? {
+    func requestDataExport() async throws {}
+
+    func gdprStatus() async throws -> AccountGdprStatus {
         if failsRead { throw AccountError.transport(message: "restricted") }
-        return requestedAt
+        return AccountGdprStatus(deletionRequestedAt: requestedAt)
     }
 }
