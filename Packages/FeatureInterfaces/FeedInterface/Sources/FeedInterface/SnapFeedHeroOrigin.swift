@@ -367,8 +367,8 @@ public struct SnapFeedHeroOrigin {
     /// end and the flight fades it as the card grows, the way a brick's
     /// counters leave. `nil`: the card is the picture alone.
     public let restingOverlay: (() -> UIView?)?
-    /// For a brick whose count is a STAKE, what the viewer has staked on the
-    /// post: the card's heart is the points' red once there is any, as on the
+    /// What the viewer has staked on the post, for a brick whose heart shows
+    /// it: the card's heart is the points' red once there is any, as on the
     /// brick. Read when the card is built — open and close alike. 0: the
     /// readout's white heart.
     public let viewerStake: () -> Int

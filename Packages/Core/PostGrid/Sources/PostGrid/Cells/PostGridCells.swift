@@ -2567,11 +2567,8 @@ public final class PostGridTileCell: UICollectionViewCell {
         loadTask?.cancel()
         loadTask = nil
         imageView.image = nil
-        // The stake captured its post; a recycled tile is a readout again
-        // until its next host binds it.
-        onStake = nil
-        stakeChip?.reset()
-        applyStakeVisibility()
+        // The viewer's stake was the last post's; the next host reads its own.
+        setViewerStake(0)
     }
 
     /// Puts a cover on the tile immediately, without waiting for the async load
@@ -2631,124 +2628,33 @@ public final class PostGridTileCell: UICollectionViewCell {
 
     #if DEBUG
     /// The count the tile shows, as drawn — nil while it is hidden.
-    public var debugCounterText: String? {
-        if let stakeChip, !stakeChip.isHidden { return stakeChip.debugCountText }
-        return likes.isHidden ? nil : likes.debugText
-    }
-
-    /// The like a STAKING tile wears — nil while the tile is a readout.
-    public var debugStakeChip: PostStakeChipView? {
-        guard let stakeChip, !stakeChip.isHidden else { return nil }
-        return stakeChip
-    }
+    public var debugCounterText: String? { likes.isHidden ? nil : likes.debugText }
+    /// Whether the count's heart is the points' red (`setViewerStake`).
+    public var debugIsStaked: Bool { viewerStaked }
     #endif
 
     /// Takes `post`'s counter and nothing else — see the list row's.
     public func updateCounts(from post: GalleryPost) {
-        reactionCount = post.reactionCount
         likes.set(post.reactionCount)
-        stakeChip?.setCount(post.reactionCount)
     }
 
-    // MARK: - The like, as a stake
+    // MARK: - The viewer's like
 
-    /// The count as a CONTROL — a stake on the post (`PostCardStaking`), on
-    /// the surfaces that ask for it (For You's chunks and gallery, behind
-    /// `-foryou-card-likes`). Built on first use: every other grid keeps the
-    /// readout and never pays for it.
-    ///
-    /// ⚠️ THE SAME INK IN THE SAME PLACE. The chip draws the readout's own
-    /// filled white heart and caption2 count under the same shadow, its ink
-    /// centred where the readout's is — so a tile that becomes pressable
-    /// looks the same at rest, and the flight card (which draws the readout)
-    /// lands on exactly what it carried. Staked, the heart turns red on both.
-    private var stakeChip: PostStakeChipView?
-    /// The post's count, kept for a chip built after `configure` — which is
-    /// when a host binds (`PostCardStaking.bind`).
-    private var reactionCount: Int64?
+    /// Whether the viewer has staked on the post the tile shows.
+    private var viewerStaked = false
 
-    public var onStake: ((Int) -> Void)? {
-        didSet {
-            if onStake != nil { installStakeChipIfNeeded() }
-            stakeChip?.onStake = onStake
-            applyStakeVisibility()
-        }
-    }
-
-    public var stakeTapAmount: Int {
-        get { stakeChip?.stakeTapAmount ?? WalletStore.Policy.defaultStakeAmount }
-        set {
-            installStakeChipIfNeeded()
-            stakeChip?.stakeTapAmount = newValue
-        }
-    }
-
-    public var stakeMenu: (() -> UIMenu?)? {
-        get { stakeChip?.stakeMenu }
-        set {
-            if newValue != nil { installStakeChipIfNeeded() }
-            stakeChip?.stakeMenu = newValue
-        }
-    }
-
+    /// What the viewer has staked on the post: the count's heart turns the
+    /// points' red once there is any — a READOUT still, never a control
+    /// (For You's tiles, through `PostCardStaking.bindReadout`). The count
+    /// stays the post's. The flight card draws the same heart
+    /// (`PostGridFlightCard`'s `viewerStake`), so a landing never recolours.
     public func setViewerStake(_ total: Int) {
-        stakeChip?.setViewerStake(total)
-        applyReadoutGlyph(staked: total > 0)
-    }
-
-    public func playStakeConfirmation(amount: Int) {
-        stakeChip?.playStakeConfirmation(amount: amount)
-    }
-
-    public func playStakeRefund(amount: Int) {
-        stakeChip?.playStakeRefund(amount: amount)
-    }
-
-    public func playStakeDenied() {
-        stakeChip?.playStakeDenied()
-    }
-
-    /// Draws the readout as a staking tile would — red once the viewer has
-    /// staked — without wiring anything. For a stand-in
-    /// (`PostGridTileStandInView`), which the landing swaps for the tile.
-    public func showStakeAsScenery(viewerStake: Int) {
-        applyReadoutGlyph(staked: viewerStake > 0)
-    }
-
-    private func applyReadoutGlyph(staked: Bool) {
+        let staked = total > 0
+        guard staked != viewerStaked else { return }
+        viewerStaked = staked
         likes.setGlyph(
             systemName: PointsSymbol.glyph, color: staked ? PointsSymbol.tint : .white
         )
-    }
-
-    private func installStakeChipIfNeeded() {
-        guard stakeChip == nil else { return }
-        let chip = PostStakeChipView(ground: .media, font: Self.metaFont)
-        chip.setCount(reactionCount)
-        chip.receiptHost = contentView
-        chip.isHidden = true
-        chip.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(chip)
-        // The ink on the readout's ink: the chip's box is the readout plus
-        // `inkInset` either side, centred on the same line.
-        NSLayoutConstraint.activate([
-            chip.trailingAnchor.constraint(
-                equalTo: likes.trailingAnchor, constant: PostStakeChipView.inkInset
-            ),
-            chip.centerYAnchor.constraint(equalTo: likes.centerYAnchor),
-            chip.leadingAnchor.constraint(greaterThanOrEqualTo: contentView.leadingAnchor)
-        ])
-        stakeChip = chip
-    }
-
-    /// One of the two, never both: the chip while the tile stakes, the
-    /// readout otherwise. The readout stays laid out under a shown chip — it
-    /// is what the chip is anchored to.
-    private func applyStakeVisibility() {
-        let stakes = onStake != nil && stakeChip != nil
-        stakeChip?.isHidden = !stakes
-        likes.alpha = stakes ? 0 : 1
-        if !stakes { applyReadoutGlyph(staked: false) }
     }
 
     public func configure(with post: GalleryPost, imagePipeline: ImagePipeline) {
@@ -2756,9 +2662,7 @@ public final class PostGridTileCell: UICollectionViewCell {
         // (or plain black in the simulator), and the glyph needs a stage.
         contentView.backgroundColor = Self.fillColor(for: post)
 
-        reactionCount = post.reactionCount
         likes.set(post.reactionCount)
-        stakeChip?.setCount(post.reactionCount)
 
         imageView.image = nil
         guard let url = post.thumbnailURL else { return }
@@ -2789,4 +2693,4 @@ public final class PostGridTileCell: UICollectionViewCell {
 
 extension PostGridTileCell: GridPlaybackCell {}
 
-extension PostGridTileCell: PostCardStakeTarget {}
+extension PostGridTileCell: PostCardLikeReadout {}

@@ -216,7 +216,7 @@ enum ForYouRowOrigins {
                 let size = rails.flatMap { $0.cardFrame(for: id, in: $0)?.size } ?? tappedSize
                 return ForYouFollowingCardCell.makeOverlay(
                     for: tapped, restingSize: size, imagePipeline: rails?.imagePipeline,
-                    stake: rails?.cardStake(for: tapped)
+                    viewerStake: rails?.cardStake(for: tapped) ?? 0
                 )
             },
             willStageDismissal: { [weak rails, weak page] in
@@ -247,7 +247,7 @@ enum ForYouRowOrigins {
             let picture = rails.cardCover(for: id) ?? cover
             return ForYouFollowingCardCell.makeStandIn(
                 for: post, cover: picture, size: size, imagePipeline: rails.imagePipeline,
-                stake: rails.cardStake(for: post)
+                viewerStake: rails.cardStake(for: post)
             )
         }
         return TextRevealOrigin(

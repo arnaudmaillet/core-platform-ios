@@ -8,10 +8,15 @@ import Testing
 import UIKit
 @testable import Feed
 
-/// EXPERIMENT `-foryou-card-likes`: a like (the stake) on For You's compact
-/// cards — the paired half-width cards and chunk tiles of the Discover list,
-/// the pushed gallery's tiles, the Following row's text cards — in each
-/// card's bottom-right, through the list card's own machinery. Flag off, none.
+/// The hearts on For You's compact cards — the paired half-width cards and
+/// chunk tiles of the Discover list, the pushed gallery's tiles, and every
+/// card of the Following row, media and text — at each card's bottom-right
+/// (a tile's corner, the end of a Following card's author line).
+///
+/// No flag (validated 3 October 2026), and DISPLAY ONLY: the post's count,
+/// red once the viewer has staked, never a control — a tap on the heart is a
+/// tap on the card, and nothing on it spends. The list's full cards keep
+/// their staking chip (`CardStakeTests`).
 @MainActor
 struct ForYouCardLikesTests {
     private struct SilentFetcher: ImageFetching {
@@ -47,11 +52,10 @@ struct ForYouCardLikesTests {
     }
 
     private func page(
-        style: ForYouGridPage.Style = .discover, stakes: Bool, wallet: WalletStore
+        style: ForYouGridPage.Style = .discover, wallet: WalletStore
     ) -> ForYouGridPage {
         let page = ForYouGridPage(imagePipeline: pipeline(), style: style)
         page.staking = PostCardStaking(wallet: wallet)
-        page.stakesOnCompactCards = stakes
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 6000)
         page.setCorpusComplete(true)
         page.render(.content(corpus(60)))
@@ -64,107 +68,142 @@ struct ForYouCardLikesTests {
         page.subviews.compactMap { $0 as? UICollectionView }.first!
     }
 
-    // MARK: - The flag
-
-    @Test func theFlagIsTheLaunchArgument() {
-        #expect(ForYouCardLikes.launchArgument == "-foryou-card-likes")
-        #expect(ForYouCardLikes.isEnabled(arguments: ["App", "-foryou-card-likes"]))
-        #expect(ForYouCardLikes.isEnabled(arguments: ["App"]) == false)
+    /// Stakes on `postID` straight through the wallet — the way the feed's
+    /// rail does, never through a card.
+    private func stake(on postID: PostID, in wallet: WalletStore) {
+        guard case .boosted = wallet.stake(.points(1), on: postID.rawValue) else {
+            Issue.record("the wallet refused the stake")
+            return
+        }
     }
 
-    /// Flag off: no compact card carries a like — not a paired card, not a
-    /// tile, not a copy of either. The list's full cards keep theirs.
-    @Test func withoutTheFlagNoCompactCardHasALike() throws {
-        let wallet = Self.wallet()
-        let page = page(stakes: false, wallet: wallet)
-        let paired = try #require(page.segments.first(where: \.isPairs)?.posts.first)
-        let tile = try #require(page.segments.first(where: { $0.chunk != nil })?.posts.first)
-
-        let pairedCell = try #require(page.debugCell(for: paired.id) as? ForYouFollowingCardCell)
-        #expect(pairedCell.debugStakeChip == nil)
-        let tileCell = try #require(page.debugCell(for: tile.id) as? PostGridTileCell)
-        #expect(tileCell.debugStakeChip == nil)
-        #expect(page.compactCardStake(for: paired.id) == nil)
-        let overlay = try #require(page.restingOverlay(for: paired.id) as? ForYouCardCaptionOverlay)
-        #expect(overlay.stakeChip == nil)
+    /// A touch at the heart finds the CARD — no control, no press of its own
+    /// — so the collection view's selection opens the post as it does
+    /// anywhere else on the card.
+    private func expectTouchFallsThrough(
+        _ readout: UIView, in cell: UICollectionViewCell, sourceLocation: SourceLocation = #_sourceLocation
+    ) {
+        #expect(readout.isUserInteractionEnabled == false, sourceLocation: sourceLocation)
+        #expect(ActionAffordance.attached(to: readout) == nil, "no press", sourceLocation: sourceLocation)
+        let point = readout.convert(CGPoint(x: readout.bounds.midX, y: readout.bounds.midY), to: cell)
+        let hit = cell.hitTest(point, with: nil)
+        #expect(hit === cell || hit === cell.contentView, "the card takes it: \(String(describing: hit))",
+                sourceLocation: sourceLocation)
     }
 
     // MARK: - Paired cards
 
-    /// A paired card closes its author line with the heart: bottom-right, the
-    /// ink on the card's 10pt inset, the name ending before it. A tap stakes
-    /// the one default point; a hold raises the stake menu.
-    @Test func aPairedCardStakesFromItsAuthorLine() throws {
-        let wallet = Self.wallet()
-        let before = wallet.balance
-        let page = page(stakes: true, wallet: wallet)
+    /// A paired card closes its author line with the heart and the post's
+    /// count: bottom-right, ending on the card's 10pt inset — over the
+    /// picture, the tile's white filled heart.
+    @Test func aPairedCardShowsTheHeartOnItsAuthorLine() throws {
+        let page = page(wallet: Self.wallet())
         let paired = try #require(page.segments.first(where: \.isPairs)?.posts.first)
         let cell = try #require(page.debugCell(for: paired.id) as? ForYouFollowingCardCell)
         cell.layoutIfNeeded()
-        let chip = try #require(cell.debugStakeChip)
+        let like = try #require(cell.debugLikeReadout)
 
-        let frame = chip.convert(chip.bounds, to: cell.contentView)
+        #expect(like.debugCountText == "1.2K")
+        #expect(like.debugIsStaked == false)
+        #expect(like.ground == .media)
+        let frame = like.convert(like.bounds, to: cell.contentView)
         let bounds = cell.contentView.bounds
-        #expect(abs(frame.maxX - (bounds.maxX - 10 + PostStakeChipView.inkInset)) < 0.5, "\(frame)")
+        #expect(abs(frame.maxX - (bounds.maxX - 10)) < 0.5, "\(frame)")
         #expect(frame.midY > bounds.midY, "in the card's lower half: \(frame) in \(bounds)")
         #expect(frame.maxY < bounds.maxY, "inside the card")
-        #expect(chip.ground == .media)
+        expectTouchFallsThrough(like, in: cell)
+    }
 
-        #expect(chip.debugTap())
-        #expect(wallet.balance == before - WalletStore.Policy.defaultStakeAmount)
-        #expect(chip.debugIsStaked)
-        #expect(ActionAffordance.attached(to: chip)?.debugHasMenu == true)
-        #expect(try #require(cell.stakeMenu?()).children.isEmpty == false)
+    /// Tapping where the heart is opens the post — the page's own selection,
+    /// and the wallet untouched.
+    @Test func aTapOnAPairedCardOpensThePostAndStakesNothing() throws {
+        let wallet = Self.wallet()
+        let before = wallet.balance
+        let page = page(wallet: wallet)
+        let paired = try #require(page.segments.first(where: \.isPairs)?.posts.first)
+        let index = try #require(page.posts.firstIndex(where: { $0.id == paired.id }))
+        var opened: [Int] = []
+        page.onItemTapped = { opened.append($0) }
 
-        // The copies a flight and a close wear carry the heart, red now.
+        #expect(page.debugSelectItem(at: index))
+        #expect(opened == [index])
+        #expect(wallet.balance == before)
+        #expect(wallet.boostTotal(forTarget: paired.id.rawValue) == 0)
+    }
+
+    /// Staked, the heart is red — on the card and on the copies a flight and
+    /// a close wear, so nothing changes colour in the landing frame. The
+    /// count stays the post's.
+    @Test func aStakedPairedCardsHeartIsRedOnTheCardAndItsCopies() throws {
+        let paired = try #require(page(wallet: Self.wallet()).segments.first(where: \.isPairs)?.posts.first)
+        let wallet = Self.wallet()
+        stake(on: paired.id, in: wallet)
+        let page = page(wallet: wallet)
+        let cell = try #require(page.debugCell(for: paired.id) as? ForYouFollowingCardCell)
+        let like = try #require(cell.debugLikeReadout)
+        #expect(like.debugIsStaked)
+        #expect(like.debugCountText == "1.2K", "a stake never adds to the count")
+
         let overlay = try #require(page.restingOverlay(for: paired.id) as? ForYouCardCaptionOverlay)
-        #expect(overlay.stakeChip?.debugIsStaked == true)
-        #expect(overlay.stakeChip?.isUserInteractionEnabled == false, "scenery, not a control")
-        #expect(page.compactCardStake(for: paired.id) == WalletStore.Policy.defaultStakeAmount)
+        #expect(overlay.likeReadout?.debugIsStaked == true)
+        #expect(page.viewerStake(on: paired.id) == 1)
     }
 
     // MARK: - Tiles
 
-    /// A chunk's tile: its count becomes the like, in its corner.
-    @Test func aChunkTileStakesFromItsCorner() throws {
+    /// A chunk's tile keeps its count in its corner, white until the viewer
+    /// stakes, red after — and a touch there is the tile's.
+    @Test func aChunkTileShowsTheHeartAndTheViewersStake() throws {
         let wallet = Self.wallet()
-        let before = wallet.balance
-        let page = page(stakes: true, wallet: wallet)
+        let page = page(wallet: wallet)
         let tile = try #require(page.segments.first(where: { $0.chunk != nil })?.posts.first)
         let cell = try #require(page.debugCell(for: tile.id) as? PostGridTileCell)
-        cell.layoutIfNeeded()
-        let chip = try #require(cell.debugStakeChip)
-        let frame = chip.convert(chip.bounds, to: cell.contentView)
-        #expect(abs(frame.maxX - cell.contentView.bounds.maxX) < 0.5, "\(frame)")
-        #expect(frame.midY > cell.contentView.bounds.midY)
+        #expect(cell.debugCounterText == "1.2K")
+        #expect(cell.debugIsStaked == false)
 
-        #expect(chip.debugTap())
-        #expect(wallet.balance == before - WalletStore.Policy.defaultStakeAmount)
-        #expect(ActionAffordance.attached(to: chip)?.debugHasMenu == true)
+        let staked = Self.wallet()
+        stake(on: tile.id, in: staked)
+        let stakedPage = self.page(wallet: staked)
+        let stakedCell = try #require(stakedPage.debugCell(for: tile.id) as? PostGridTileCell)
+        #expect(stakedCell.debugIsStaked)
+        #expect(stakedCell.debugCounterText == "1.2K")
     }
 
     /// The pushed gallery's tiles, the same.
-    @Test func aGalleryTileStakes() throws {
+    @Test func aGalleryTileShowsTheHeartAndTheViewersStake() throws {
         let wallet = Self.wallet()
-        let page = page(style: .grid, stakes: true, wallet: wallet)
-        let first = try #require(page.posts.first)
-        let cell = try #require(page.debugCell(for: first.id) as? PostGridTileCell)
-        let chip = try #require(cell.debugStakeChip)
-        #expect(chip.debugTap())
-        #expect(wallet.boostTotal(forTarget: first.id.rawValue) == WalletStore.Policy.defaultStakeAmount)
+        stake(on: PostID("p0"), in: wallet)
+        let page = page(style: .grid, wallet: wallet)
+        let first = try #require(page.debugCell(for: PostID("p0")) as? PostGridTileCell)
+        #expect(first.debugCounterText == "1.2K")
+        #expect(first.debugIsStaked)
+        let second = try #require(page.debugCell(for: PostID("p1")) as? PostGridTileCell)
+        #expect(second.debugIsStaked == false)
+    }
 
-        let off = self.page(style: .grid, stakes: false, wallet: wallet)
-        let unbound = try #require(off.debugCell(for: first.id) as? PostGridTileCell)
-        #expect(unbound.debugStakeChip == nil)
+    /// A stake placed elsewhere (the feed, the post page) shows on the card
+    /// that is on screen: the wallet's change reaches every bound heart.
+    @Test func aStakeElsewhereTurnsTheVisibleHeartRed() async throws {
+        let wallet = Self.wallet()
+        let page = page(wallet: wallet)
+        let tile = try #require(page.segments.first(where: { $0.chunk != nil })?.posts.first)
+        let cell = try #require(page.debugCell(for: tile.id) as? PostGridTileCell)
+        #expect(cell.debugIsStaked == false)
+
+        stake(on: tile.id, in: wallet)
+        // The wallet's notification is delivered on the main queue.
+        for _ in 0..<100 where !cell.debugIsStaked {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(cell.debugIsStaked)
     }
 
     // MARK: - The Following row
 
-    private func rails(stakes: Bool, wallet: WalletStore) -> ForYouRailsView {
+    private func rails(wallet: WalletStore) -> ForYouRailsView {
         let rails = ForYouRailsView(imagePipeline: pipeline(), videoPlayback: nil)
         rails.frame = CGRect(x: 0, y: 0, width: 393, height: 600)
         rails.staking = PostCardStaking(wallet: wallet)
-        rails.stakesOnTextCards = stakes
         var state = ForYouViewModel.Rails()
         state.following = [
             GalleryPost(
@@ -185,36 +224,75 @@ struct ForYouCardLikesTests {
         return rails
     }
 
-    /// A TEXT card closes its author line — its foot — with the heart; a
-    /// picture card in the row has none (the product asked for text cards).
-    /// A hold on the heart is the stake's menu, not the card's preview.
-    @Test func aFollowingTextCardStakesFromItsCorner() throws {
+    /// Every Following card — words AND picture — closes its author line, its
+    /// foot on a text card, with the heart and the post's count.
+    @Test func everyFollowingCardShowsTheHeartOnItsAuthorLine() throws {
         let wallet = Self.wallet()
-        let before = wallet.balance
-        let rails = rails(stakes: true, wallet: wallet)
+        stake(on: PostID("picture"), in: wallet)
+        let rails = rails(wallet: wallet)
+
         let words = try #require(rails.debugCardCell(at: 0))
         words.layoutIfNeeded()
-        let chip = try #require(words.debugStakeChip)
-        #expect(chip.ground == .card)
-        let frame = chip.convert(chip.bounds, to: words.contentView)
+        let wordsLike = try #require(words.debugLikeReadout)
+        #expect(wordsLike.ground == .card)
+        #expect(wordsLike.debugCountText == "7")
+        #expect(wordsLike.debugIsStaked == false)
+        let frame = wordsLike.convert(wordsLike.bounds, to: words.contentView)
         let bounds = words.contentView.bounds
-        #expect(abs(frame.maxX - (bounds.maxX - 10 + PostStakeChipView.inkInset)) < 0.5, "\(frame)")
+        #expect(abs(frame.maxX - (bounds.maxX - 10)) < 0.5, "\(frame)")
         #expect(frame.maxY < bounds.maxY && frame.maxY > bounds.maxY - 30, "on the foot line: \(frame)")
-        #expect(rails.debugCardCell(at: 1)?.debugStakeChip == nil, "a picture card has no like")
+        expectTouchFallsThrough(wordsLike, in: words)
 
-        #expect(chip.debugTap())
-        #expect(wallet.balance == before - WalletStore.Policy.defaultStakeAmount)
-        #expect(ActionAffordance.attached(to: chip)?.debugHasMenu == true)
-
-        let onHeart = chip.convert(CGPoint(x: chip.bounds.midX, y: chip.bounds.midY), to: rails.debugCardsView)
-        #expect(rails.debugCardMenuConfiguration(at: 0, point: onHeart) == nil, "the heart's hold")
-        let onWords = words.convert(CGPoint(x: 20, y: 20), to: rails.debugCardsView)
-        #expect(rails.debugCardMenuConfiguration(at: 0, point: onWords) != nil, "the card's preview")
+        let picture = try #require(rails.debugCardCell(at: 1))
+        picture.layoutIfNeeded()
+        let pictureLike = try #require(picture.debugLikeReadout)
+        #expect(pictureLike.ground == .media)
+        #expect(pictureLike.debugCountText == "9")
+        #expect(pictureLike.debugIsStaked, "red: the viewer staked on it")
+        let pictureFrame = pictureLike.convert(pictureLike.bounds, to: picture.contentView)
+        #expect(abs(pictureFrame.maxX - (picture.contentView.bounds.maxX - 10)) < 0.5, "\(pictureFrame)")
+        #expect(pictureFrame.midY > picture.contentView.bounds.midY)
+        expectTouchFallsThrough(pictureLike, in: picture)
+        #expect(rails.cardStake(for: rails.cards[1]) == 1)
     }
 
-    @Test func withoutTheFlagAFollowingTextCardHasNoLike() throws {
-        let rails = rails(stakes: false, wallet: Self.wallet())
-        #expect(try #require(rails.debugCardCell(at: 0)).debugStakeChip == nil)
-        #expect(rails.cardStake(for: rails.cards[0]) == nil)
+    /// A tap opens the post; a hold on the heart is the card's own preview
+    /// (no stake menu) — and nothing is spent either way.
+    @Test func theHeartOfAFollowingCardIsTheCardsToTapAndHold() throws {
+        let wallet = Self.wallet()
+        let before = wallet.balance
+        let rails = rails(wallet: wallet)
+        var opened: [Int] = []
+        rails.onCardTapped = { opened.append($0) }
+
+        #expect(rails.debugTapCard(at: 0))
+        #expect(opened == [0])
+
+        let words = try #require(rails.debugCardCell(at: 0))
+        words.layoutIfNeeded()
+        let like = try #require(words.debugLikeReadout)
+        let onHeart = like.convert(CGPoint(x: like.bounds.midX, y: like.bounds.midY), to: rails.debugCardsView)
+        #expect(rails.debugCardMenuConfiguration(at: 0, point: onHeart) != nil, "the card's preview")
+        #expect(wallet.balance == before)
+    }
+
+    /// The copies a flight and a close wear carry the card's heart, in the
+    /// card's colour — the text card's and the picture card's alike.
+    @Test func aFollowingCardsCopiesWearTheHeart() throws {
+        let post = GalleryPost(
+            id: PostID("words"), kind: .text, isRepost: false, thumbnailURL: nil,
+            caption: "Third coffee.", publishedAtMS: 1,
+            authorID: ProfileID("bo"), authorName: "Bo", authorHandle: "bo", reactionCount: 7
+        )
+        let size = CGSize(width: 150, height: 200)
+        let overlay = ForYouFollowingCardCell.makeOverlay(for: post, restingSize: size, viewerStake: 2)
+        #expect(overlay.likeReadout?.debugIsStaked == true)
+        #expect(overlay.likeReadout?.debugCountText == "7")
+        #expect(!overlay.debugLikeFrame.isNull)
+
+        let standIn = ForYouFollowingCardCell.makeStandIn(for: post, cover: nil, size: size)
+        let standInOverlay = try #require(standIn.subviews.first as? ForYouCardCaptionOverlay)
+        #expect(standInOverlay.likeReadout?.debugIsStaked == false)
+        #expect(standInOverlay.likeReadout?.debugCountText == "7")
     }
 }

@@ -158,10 +158,10 @@ final class PostGridFlightCard: UIView {
     /// - Parameter cornerCurve: the source's own curve, for a source that
     ///   supplies its own `cornerRadius` and is NOT a disc — nil keeps the
     ///   rule below (the style's squircle, or a circle for a disc).
-    /// - Parameter viewerStake: on a brick that STAKES
-    ///   (`PostGridTileCell.onStake`), what the viewer has staked on the
-    ///   post — the count's heart is the points' red once there is any, as on
-    ///   the brick. 0 draws the readout's white heart.
+    /// - Parameter viewerStake: what the viewer has staked on the post, on a
+    ///   brick whose heart shows it (`PostGridTileCell.setViewerStake`) — the
+    ///   count's heart is the points' red once there is any, as on the brick.
+    ///   0 draws the readout's white heart.
     init(
         post: GalleryPost,
         cover: UIImage?,
