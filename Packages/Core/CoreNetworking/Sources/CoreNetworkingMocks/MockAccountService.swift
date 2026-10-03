@@ -12,6 +12,10 @@ import SwiftProtobuf
 public final class MockAccountService: @unchecked Sendable {
     private let lock = NSLock()
     private var deletionRequestedAt: Date?
+    private var exportRequestedAt: Date?
+    /// How long the fake export takes to "prepare", so the screen can be seen
+    /// in both states within one session.
+    private static let exportPreparation: TimeInterval = 8
 
     public init() {}
 
@@ -21,6 +25,9 @@ public final class MockAccountService: @unchecked Sendable {
         }
         bff.register(path: "/account.v1.AccountService/RequestGdprDeletion") { [self] (request: Account_V1_RequestGdprDeletionRequest) in
             requestDeletion(request)
+        }
+        bff.register(path: "/account.v1.AccountService/RequestDataExport") { [self] (request: Account_V1_RequestDataExportRequest) in
+            requestExport(request)
         }
         bff.register(path: "/account.v1.AccountService/GetGdprRecord") { [self] (request: Account_V1_GetGdprRecordRequest) in
             gdprRecord(request)
@@ -40,6 +47,17 @@ public final class MockAccountService: @unchecked Sendable {
         return .success(response)
     }
 
+    private func requestExport(_ request: Account_V1_RequestDataExportRequest) -> Result<Account_V1_CommandResponse, ConnectError> {
+        guard request.accountID == MockAuthService.accountID else {
+            return .failure(ConnectError(code: .notFound, message: "account \(request.accountID) not found"))
+        }
+        lock.withLock { exportRequestedAt = Date() }
+        var response = Account_V1_CommandResponse()
+        response.success = true
+        response.accountID = request.accountID
+        return .success(response)
+    }
+
     private func gdprRecord(_ request: Account_V1_GetGdprRecordRequest) -> Result<Account_V1_GdprRecordView, ConnectError> {
         guard request.accountID == MockAuthService.accountID else {
             return .failure(ConnectError(code: .notFound, message: "account \(request.accountID) not found"))
@@ -49,6 +67,11 @@ public final class MockAccountService: @unchecked Sendable {
         view.dataProcessingConsented = true
         lock.withLock {
             if let deletionRequestedAt { view.deletionRequestedAt = .init(date: deletionRequestedAt) }
+            if let exportRequestedAt {
+                view.dataExportRequestedAt = .init(date: exportRequestedAt)
+                let ready = exportRequestedAt.addingTimeInterval(Self.exportPreparation)
+                if ready <= Date() { view.dataExportCompletedAt = .init(date: ready) }
+            }
         }
         return .success(view)
     }
