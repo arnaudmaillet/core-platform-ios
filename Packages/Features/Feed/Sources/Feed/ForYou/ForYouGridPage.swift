@@ -75,11 +75,13 @@ final class ForYouGridPage: UIView {
     /// (`PostCardStaking.bindReadout`).
     var staking: PostCardStaking?
 
-    /// Whether this page's MOSAIC tiles — a chunk's, the gallery's — wear
-    /// their post's author and caption when they are large enough
-    /// (`GalleryTileInfo`, `-gallery-tile-info`; the rule is `PostTileInfo`).
-    /// Paired cards and the list's cards are untouched: they always have
-    /// their words.
+    /// Whether this page's MOSAIC tiles wear their post's author and caption
+    /// when they are large enough (the rule is `PostTileInfo`). For You's own
+    /// surfaces set it — Discover's chunks and the Discover gallery, where the
+    /// `-gallery-tile-info` experiment was validated (3 October 2026); every
+    /// other grid drawn by this page (a place's, a post set's) keeps its bare
+    /// tiles. Paired cards and the list's cards are untouched: they always
+    /// have their words.
     var showsTileInfo = false
 
     /// Whether `postID`'s cell is a MOSAIC tile (not a paired card) on a page

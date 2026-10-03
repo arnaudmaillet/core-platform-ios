@@ -106,6 +106,10 @@ public final class RevealDismissCardView: UIView, RevealStandInShaping {
     /// while the row's height is whatever the collection view's layout settled
     /// on. Asking the row removes the question. `nil` falls back to the fitted
     /// height, which is all a caller with no realized row can offer.
+    ///
+    /// `captionLines` is the row's cap when it is a card of a FIXED height
+    /// (`PostGridListRowCell.fixedCaptionLines`, For You's text lane): the same
+    /// lines, the same ellipsis, the closing line at the same foot.
     public init(
         post: GalleryPost,
         width: CGFloat,
@@ -115,7 +119,8 @@ public final class RevealDismissCardView: UIView, RevealStandInShaping {
         showsAuthorIdentity: Bool = true,
         actions: RowActions = .none,
         ageText: String? = nil,
-        height: CGFloat? = nil
+        height: CGFloat? = nil,
+        captionLines: Int? = nil
     ) {
         card = PostGridListRowCell(frame: CGRect(x: 0, y: 0, width: width, height: 200))
         super.init(frame: .zero)
@@ -128,7 +133,7 @@ public final class RevealDismissCardView: UIView, RevealStandInShaping {
         // on a line that has none.
         card.configure(
             with: post, imagePipeline: imagePipeline, captionExpanded: captionExpanded,
-            showsAuthorIdentity: showsAuthorIdentity
+            showsAuthorIdentity: showsAuthorIdentity, captionLines: captionLines
         )
         // Drawn but not wired, and only when the row has one — see the note on
         // the initialiser. A stand-in with no handlers would hide the control

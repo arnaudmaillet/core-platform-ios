@@ -58,7 +58,7 @@ public final class PostGridTileStandInView: UIView, RevealStandInShaping {
     /// tile it lands on (`PostGridTileCell.setViewerStake`).
     ///
     /// `showsInfo`: the tile it lands on wears its author and caption
-    /// (`PostGridTileCell.showsInfo`, `-gallery-tile-info`), so the twin does
+    /// (`PostGridTileCell.showsInfo`), so the twin does
     /// too — decided and wrapped at `size`, the LANDING tile's, and only
     /// posed as the window carries it (`PostCardCaptionOverlay`): words
     /// re-wrapped at every size of a travelling window grew out of its

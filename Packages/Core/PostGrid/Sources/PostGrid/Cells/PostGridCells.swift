@@ -1,3 +1,4 @@
+import CoreModels
 import CoreStorage
 import DesignSystem
 import EmoteKit
@@ -92,8 +93,18 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         //
         // The whole caption is shown: the difference starts below everything
         // the card has, which is its height less the band above the caption.
-        guard showMoreRange != nil else { return bounds.height - revealCaptionTop }
+        guard showMoreRange != nil || isFixedCaptionCut else { return bounds.height - revealCaptionTop }
         return captionEnd
+    }
+
+    /// Whether a FIXED-height card's caption is cut short by its line cap
+    /// (`fixedCaptionLines`) — the label's own ellipsis, which leaves no
+    /// "Show more" range to say so.
+    private var isFixedCaptionCut: Bool {
+        guard let cap = fixedCaptionLines, !isCaptionExpanded else { return false }
+        let available = bounds.width - Self.captionInset * 2
+        guard available > 0 else { return false }
+        return Self.lineCount(Self.plain(fullCaption, font: captionLabel.font), width: available) > cap
     }
 
     /// How far below this card's top its CAPTION begins.
@@ -682,7 +693,10 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     private func composeCaption(atWidth width: CGFloat) {
         let font = captionLabel.font ?? .preferredFont(forTextStyle: .body)
         let available = width - Self.captionInset * 2
-        guard !isCaptionExpanded, !fullCaption.isEmpty, available > 0 else {
+        // A card of a FIXED height (`fixedCaptionLines`) offers no "Show more":
+        // the label cuts its own tail with an ellipsis, and the whole card
+        // opens the post.
+        guard !isCaptionExpanded, fixedCaptionLines == nil, !fullCaption.isEmpty, available > 0 else {
             showMoreRange = nil
             captionLabel.attributedText = Self.plain(fullCaption, font: font)
             return
@@ -950,6 +964,18 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         guard showMoreRange != nil else { return false }
         revealTapped()
         return true
+    }
+
+    /// The caption as drawn: its line cap, how it ends a cut line, its text,
+    /// and where it and the closing line sit in this cell's space — what a
+    /// FIXED-height card (`fixedCaptionLines`) is pinned by.
+    public var debugCaptionLineLimit: Int { captionLabel.numberOfLines }
+    public var debugCaptionLineBreakMode: NSLineBreakMode { captionLabel.lineBreakMode }
+    public var debugCaptionText: String? { captionLabel.attributedText?.string ?? captionLabel.text }
+    public var debugShowsMoreAffordance: Bool { showMoreRange != nil }
+    public var debugCaptionFrame: CGRect { captionLabel.convert(captionLabel.bounds, to: self) }
+    public var debugClosingLineFrame: CGRect {
+        metaRow.isHidden ? .null : metaRow.convert(metaRow.bounds, to: self)
     }
     #endif
 
@@ -1426,6 +1452,53 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// wall — four lines. Only the card truncates: `PostCaptionRowView`, which
     /// wears the same face on the post's own page, deliberately does not.
     public static let captionLineLimit = 4
+
+    /// The caption's cap on a card of a FIXED height — nil on every card the
+    /// list sizes to its content (the default).
+    ///
+    /// For You's Following row lays its text cards in a lane of one height
+    /// (`ForYouFollowingLanes`), so a card there can neither grow by a "Show
+    /// more" nor shrink with a short caption: the caption is held to this
+    /// many lines and the LABEL cuts the rest with an ellipsis — no
+    /// affordance, the whole card opens the post — and the closing line
+    /// stands at the card's foot whatever the caption's length, a one-line
+    /// caption leaving its air above the line rather than under it.
+    public private(set) var fixedCaptionLines: Int?
+
+    /// How tall a TEXT card `width` wide stands when its caption is held to
+    /// `captionLines` and fills them — author band, caption, closing line
+    /// (with the like, repost and save on it) — measured on a real card, the
+    /// way `RevealDismissCardView` measures. What a lane of such cards is
+    /// sized to. Cached per width, line count and text size.
+    public static func fixedTextCardHeight(width: CGFloat, captionLines: Int) -> CGFloat {
+        guard width > 0 else { return 0 }
+        let key = "\(width)|\(captionLines)|\(UIFont.preferredFont(forTextStyle: .body).pointSize)"
+        if let cached = fixedHeights[key] { return cached }
+        let card = PostGridListRowCell(frame: CGRect(x: 0, y: 0, width: width, height: 200))
+        // Words enough to fill any cap at any width, and a name and handle on
+        // the band, as every text card in a lane wears.
+        let post = GalleryPost(
+            id: PostID("fixed-height-probe"), kind: .text, isRepost: false, thumbnailURL: nil,
+            caption: String(repeating: "Measured words fill every line of the card. ", count: 12),
+            publishedAtMS: 0, authorID: ProfileID("probe"), authorName: "Name", authorHandle: "handle",
+            reactionCount: 1, commentCount: 1
+        )
+        card.configure(with: post, imagePipeline: measuringPipeline, captionLines: captionLines)
+        card.showAuthorMenuControlAsScenery()
+        card.showRowActionsAsScenery(repost: true, bookmark: true, saved: false)
+        card.showStakeAsScenery(viewerStake: 0)
+        let attributes = UICollectionViewLayoutAttributes(forCellWith: IndexPath(item: 0, section: 0))
+        attributes.frame = CGRect(x: 0, y: 0, width: width, height: 200)
+        let height = card.preferredLayoutAttributesFitting(attributes).frame.height
+        fixedHeights[key] = height
+        return height
+    }
+
+    private static var fixedHeights: [String: CGFloat] = [:]
+    /// The measuring card's pipeline: its probe names no picture, so nothing
+    /// is ever fetched through it.
+    private static let measuringPipeline = ImagePipeline(fetcher: PlaceholderImageFetcher())
+
     /// The gap between the caption and whatever follows it — the closing
     /// line, the media preview — and between the preview and the line. The
     /// same step as the gap above the caption (`authorFollowGap`), so the
@@ -1762,6 +1835,10 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     private var mediaPageCount = 1
 
     private var metaFollowsCaption: NSLayoutConstraint!
+    /// A FIXED-height card's version of `metaFollowsCaption`: the line at least
+    /// a gap under the caption, held at the card's foot by `metaClosesCard` —
+    /// see `fixedCaptionLines`.
+    private var metaStandsUnderCaption: NSLayoutConstraint!
     /// Active for media rows only: the closing row hangs off the preview.
     private var metaFollowsMedia: NSLayoutConstraint!
     /// The closers a card uses when its closing line has NOTHING on it — no
@@ -1971,6 +2048,9 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
             equalTo: captionLabel.bottomAnchor, constant: Self.captionFollowGap
         )
         metaFollowsCaption.isActive = true
+        metaStandsUnderCaption = metaRow.topAnchor.constraint(
+            greaterThanOrEqualTo: captionLabel.bottomAnchor, constant: Self.captionFollowGap
+        )
         metaFollowsMedia = metaRow.topAnchor.constraint(
             equalTo: mediaView.bottomAnchor, constant: Self.captionFollowGap
         )
@@ -2000,7 +2080,9 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // The line keeps hanging off the caption or the preview either way —
         // hidden, it draws nothing, and an unconstrained hidden view is an
         // ambiguity for nothing.
-        metaFollowsCaption.isActive = !hasMedia
+        let isFixed = fixedCaptionLines != nil
+        metaFollowsCaption.isActive = !hasMedia && !isFixed
+        metaStandsUnderCaption.isActive = !hasMedia && isFixed
         metaFollowsMedia.isActive = hasMedia
         metaClosesCard.isActive = !isEmpty
         captionClosesCard.isActive = isEmpty && !hasMedia
@@ -2177,7 +2259,9 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // post's expansion — `configure` re-applies the host's answer for the
         // post it is actually bound to.
         isCaptionExpanded = false
+        fixedCaptionLines = nil
         captionLabel.numberOfLines = Self.captionLineLimit
+        captionLabel.lineBreakMode = .byWordWrapping
         showMoreRange = nil
         // A landing's fade is per-flight state and must not ride a recycled
         // cell to whatever post it is bound to next.
@@ -2276,12 +2360,18 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     ///   the screen itself — a profile's own posts — so the band wears only
     ///   the date and the "..." rather than repeating the name above every
     ///   card.
+    /// - Parameter captionLines: a card of a FIXED height — see
+    ///   `fixedCaptionLines`. Nil: the list's card, sized to its content.
     public func configure(
         with post: GalleryPost, imagePipeline: ImagePipeline, captionExpanded: Bool = false,
-        showsAuthorIdentity: Bool = true
+        showsAuthorIdentity: Bool = true, captionLines: Int? = nil
     ) {
-        isCaptionExpanded = captionExpanded
-        captionLabel.numberOfLines = captionExpanded ? 0 : Self.captionLineLimit
+        fixedCaptionLines = captionLines
+        isCaptionExpanded = captionExpanded && captionLines == nil
+        captionLabel.numberOfLines = isCaptionExpanded ? 0 : (captionLines ?? Self.captionLineLimit)
+        // The fixed card's label cuts its own tail; the list's card writes
+        // its ellipsis and "Show more" into the text (`composeCaption`).
+        captionLabel.lineBreakMode = captionLines == nil ? .byWordWrapping : .byTruncatingTail
         fullCaption = post.caption
         bindAuthorBand(to: post, imagePipeline: imagePipeline, showsIdentity: showsAuthorIdentity)
         showMoreRange = nil
@@ -2683,13 +2773,13 @@ public final class PostGridTileCell: UICollectionViewCell {
         )
     }
 
-    // MARK: - Author and caption (`-gallery-tile-info`)
+    // MARK: - Author and caption
 
     /// Whether the tile wears its post's author and the start of its caption
     /// over the picture, when it is large enough for them (`PostTileInfo`) —
     /// the Following card's foot, its heart closing the author line. Set by a
-    /// host at `configure`; off, the tile is the picture and its likes, as on
-    /// every grid.
+    /// host at `configure` — For You's chunks and its Discover gallery do;
+    /// off, the tile is the picture and its likes, as on every other grid.
     public private(set) var showsInfo = false
     /// The post the words are drawn from.
     private var infoPost: GalleryPost?

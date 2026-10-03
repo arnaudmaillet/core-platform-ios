@@ -59,8 +59,9 @@ struct ForYouRowsHeroPolishTests {
         #expect(Self.near(overlay.debugAuthorFrame, restingAuthor))
     }
 
-    /// A text card: its words hang from the window's TOP, its author from the
-    /// FOOT — the four corners of the window carry the card's two ends.
+    /// Words on the card (`.onCard`, a text post's long-press preview): its
+    /// words hang from the window's TOP, its author from the FOOT — the four
+    /// corners of the window carry the card's two ends.
     @Test func aTextCardsWordsHangFromTheTopAndItsAuthorFromTheFoot() {
         let overlay = ForYouCardCaptionOverlay(
             post: Self.post("t", kind: .text), placement: .onCard, referenceSize: Self.card
@@ -183,13 +184,17 @@ struct ForYouRowsHeroPolishTests {
         card.removeFromSuperview()
     }
 
-    /// The text card's window, built for a reveal: its words are laid out at
-    /// the card's size BEFORE the window ever resizes it.
-    @Test func aTextStandInArrivesLaidOut() throws {
-        let standIn = ForYouFollowingCardCell.makeTextStandIn(for: Self.post("t", kind: .text), size: Self.card)
-        let overlay = try #require(standIn.subviews.first as? ForYouCardCaptionOverlay)
+    /// A media card's window stand-in, built for a close: its words are laid
+    /// out at the card's size BEFORE the window ever resizes it. (The text
+    /// card's stand-in is the list's, `RevealDismissCardView`, since the
+    /// Following row's text cards became the list's card.)
+    @Test func aStandInArrivesLaidOut() throws {
+        let standIn = ForYouFollowingCardCell.makeStandIn(
+            for: Self.post("p", kind: .photo), cover: nil, size: Self.card
+        )
+        let overlay = try #require(standIn.subviews.compactMap { $0 as? ForYouCardCaptionOverlay }.first)
         #expect(overlay.debugCaptionFrame.width > 0, "the stand-in's words meet their first layout in the window")
-        #expect(abs(overlay.debugAuthorFrame.maxY - (Self.card.height - 10)) < 0.5)
+        #expect(abs(overlay.debugCaptionFrame.maxY - (Self.card.height - 10)) < 0.5)
     }
 
     // MARK: - 2. The landing takes the playback
@@ -423,10 +428,7 @@ struct ForYouRowsHeroPolishTests {
             window.isHidden = false
             page.frame = host.view.bounds
             host.view.addSubview(page)
-            rails.frame = CGRect(
-                x: 0, y: 120, width: 402,
-                height: ForYouRailsView.height(forWidth: 402, friends: 0, following: cards.count)
-            )
+            rails.frame = CGRect(x: 0, y: 120, width: 402, height: rails.preferredHeight(forWidth: 402))
             host.view.addSubview(rails)
             window.layoutIfNeeded()
             rails.layoutIfNeeded()

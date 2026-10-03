@@ -4,11 +4,13 @@ import Testing
 import UIKit
 @testable import PostGrid
 
-/// EXPERIMENT `-gallery-tile-info`: a mosaic tile large enough wears its
-/// post's author and the start of its caption over the picture — the
-/// Following card's foot (`PostCardCaptionOverlay`) — and the small ones stay
-/// pictures. These pin the size rule, what the overlay says, that a tile not
-/// asked for words is exactly the tile it was, and that every copy of a tile
+/// A mosaic tile large enough wears its post's author and the start of its
+/// caption over the picture — the Following card's foot
+/// (`PostCardCaptionOverlay`) — and the small ones stay pictures (the
+/// `-gallery-tile-info` experiment, validated 3 October 2026: For You's hosts
+/// always ask, other grids never do). These pin the size rule, what the
+/// overlay says, that a tile not asked for words is exactly the tile it was,
+/// and that every copy of a tile
 /// (a flight's furniture, a close's stand-in) wears the same words laid out
 /// the same way.
 @MainActor

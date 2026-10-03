@@ -9,9 +9,11 @@ import UIKit
 ///
 /// Born as the Following card's overlay (`ForYouFollowingCardCell`, which
 /// still calls it `ForYouCardCaptionOverlay`), and shared since 2026-10-03 with
-/// the mosaic's LARGE tiles (`PostGridTileCell.showsInfo`, the
-/// `-gallery-tile-info` experiment) — one arrangement, so a tile and a
-/// Following card read as the same furniture at different sizes.
+/// the mosaic's LARGE tiles (`PostGridTileCell.showsInfo`) — one arrangement,
+/// so a tile and a Following card read as the same furniture at different
+/// sizes. The words-on-the-card placement (`.onCard`) now only dresses a text
+/// post's long-press preview: the Following row's text cards are the list's
+/// own card (`PostGridListRowCell`).
 ///
 /// Its own view, not a few labels inside the cell, because a flight needs a
 /// COPY of it: the card that flies out of the row wears this as its resting
@@ -90,12 +92,9 @@ public final class PostCardCaptionOverlay: UIView {
     /// Two lines over a picture — the product call: enough to know what the
     /// post is about, not so much that the picture is covered.
     nonisolated public static let mediaCaptionLines = 2
-    /// A text card's words fill it — up to this many lines, or as many whole
-    /// lines as its height holds when that is fewer: the short, wide card of
-    /// the two-lane row holds two (`ForYouFollowingLanes`). Read from the
-    /// HEIGHT rather than told, so every copy of a card — a flight's
-    /// furniture, a close's stand-in, each built at the card's resting size —
-    /// wraps exactly as the card in the row does.
+    /// A text post's words fill the card — the long press's preview of one
+    /// (`ForYouPostPreviewViewController`), the only `.onCard` left since the
+    /// Following row's text cards became the list's own card (2026-10-03).
     nonisolated public static let textCaptionLines = 7
 
     /// The fonts the overlay sets its words in.
@@ -103,23 +102,6 @@ public final class PostCardCaptionOverlay: UIView {
         onMedia
             ? .systemFont(ofSize: UIFont.preferredFont(forTextStyle: .footnote).pointSize, weight: .medium)
             : .systemFont(ofSize: UIFont.preferredFont(forTextStyle: .headline).pointSize, weight: .semibold)
-    }
-
-    /// How tall a text card is when its words take exactly `lines` lines —
-    /// the `.onCard` layout below, read backwards: the words from the top
-    /// inset, the author line on the bottom one, an inset between them.
-    public static func textCardHeight(lines: Int) -> CGFloat {
-        let words = (captionFont(onMedia: false).lineHeight * CGFloat(lines)).rounded(.up)
-        return inset * 3 + authorFont.lineHeight.rounded(.up) + words
-    }
-
-    /// The whole lines of words a text card's caption has room for in
-    /// `height`, at most `textCaptionLines`.
-    public static func textLines(fitting height: CGFloat) -> Int {
-        let line = captionFont(onMedia: false).lineHeight
-        guard line > 0 else { return textCaptionLines }
-        // A hair of slack: `textCardHeight` rounds the words' block up.
-        return max(1, min(textCaptionLines, Int(((height + 0.5) / line).rounded(.down))))
     }
 
     /// The scrim, as a VIEW: a bare sublayer's frame does not ride a UIKit
@@ -360,11 +342,6 @@ public final class PostCardCaptionOverlay: UIView {
                 y: line.midY - likeSize.height / 2,
                 width: likeSize.width, height: likeSize.height
             )
-        }
-        if placement == .onCard {
-            // As many lines as the card holds between its top inset and its
-            // author line — see `textCaptionLines`.
-            captionLabel.numberOfLines = Self.textLines(fitting: size.height - inset * 3 - authorHeight)
         }
         let fitted = captionLabel.isHidden ? 0 : captionLabel.sizeThatFits(
             CGSize(width: width, height: .greatestFiniteMagnitude)

@@ -294,10 +294,7 @@ struct ForYouRowsCloseTests {
             window.isHidden = false
             page.frame = host.view.bounds
             host.view.addSubview(page)
-            rails.frame = CGRect(
-                x: 0, y: 120, width: 402,
-                height: ForYouRailsView.height(forWidth: 402, friends: stories.count, following: cards.count)
-            )
+            rails.frame = CGRect(x: 0, y: 120, width: 402, height: rails.preferredHeight(forWidth: 402))
             host.view.addSubview(rails)
             window.layoutIfNeeded()
             rails.layoutIfNeeded()
