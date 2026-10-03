@@ -219,6 +219,9 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         super.init(nibName: nil, bundle: nil)
         page.staking = staking
         rails.staking = staking
+        // The chunks' large tiles wear their author and caption start
+        // (`GalleryTileInfo`) — the gallery's too, handed the flag at its push.
+        page.showsTileInfo = GalleryTileInfo.isEnabled
         // NOT hidesBottomBarWhenPushed: this is a tab root, and the bar is how
         // the viewer leaves it.
     }
@@ -1115,6 +1118,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             imagePipeline: imagePipeline, videoPlayback: videoPlayback,
             header: makePushedHeader(),
             staking: staking,
+            showsTileInfo: GalleryTileInfo.isEnabled,
             openPost: openPostHero
         )
         gallery.onNearEnd = { [weak self] in self?.viewModel.loadNextPageIfNeeded() }

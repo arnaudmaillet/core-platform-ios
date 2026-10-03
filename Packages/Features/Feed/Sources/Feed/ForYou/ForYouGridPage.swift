@@ -75,6 +75,20 @@ final class ForYouGridPage: UIView {
     /// (`PostCardStaking.bindReadout`).
     var staking: PostCardStaking?
 
+    /// Whether this page's MOSAIC tiles — a chunk's, the gallery's — wear
+    /// their post's author and caption when they are large enough
+    /// (`GalleryTileInfo`, `-gallery-tile-info`; the rule is `PostTileInfo`).
+    /// Paired cards and the list's cards are untouched: they always have
+    /// their words.
+    var showsTileInfo = false
+
+    /// Whether `postID`'s cell is a MOSAIC tile (not a paired card) on a page
+    /// whose tiles wear their words — what the tile, its flight's copy and
+    /// its close's stand-in all ask, so the three cannot disagree.
+    private func tileWearsInfo(_ postID: PostID) -> Bool {
+        showsTileInfo && drawsAsTile(postID) && !drawsAsPairedCard(postID)
+    }
+
     /// What the viewer has staked on `postID` — what a compact card's heart
     /// is drawn with, and a copy of that card (a flight's, a close's
     /// stand-in) with it, so nothing changes colour in the landing frame.
@@ -338,7 +352,20 @@ final class ForYouGridPage: UIView {
     /// that fades as the card grows into the page — the Following row's own
     /// arrangement (`ForYouRowOrigins.card`). Wrapped at the card's size, and
     /// only posed after (`ForYouCardCaptionOverlay`). Nil for anything else.
+    ///
+    /// And a LARGE TILE's words, when the page's tiles wear them
+    /// (`showsTileInfo`): the same overlay at the same size the tile drew
+    /// (`PostGridTileCell.makeInfoOverlay`), so the card takes off wearing
+    /// what the tile wore and lands wearing what the tile will — and nil for a
+    /// tile too small to wear any, which flies its corner count as before.
     func restingOverlay(for postID: PostID) -> UIView? {
+        if tileWearsInfo(postID), let post = post(for: postID),
+           let size = cell(for: postID)?.bounds.size ?? slotSize(of: postID) {
+            return PostGridTileCell.makeInfoOverlay(
+                for: post, restingSize: size, imagePipeline: imagePipeline,
+                viewerStake: viewerStake(on: postID)
+            )
+        }
         guard drawsAsPairedCard(postID), let post = post(for: postID) else { return nil }
         let size = cell(for: postID)?.bounds.size ?? slotSize(of: postID)
         return ForYouFollowingCardCell.makeOverlay(
@@ -2187,7 +2214,10 @@ final class ForYouGridPage: UIView {
             // curve are one decision — see `tileCornerRadius`.
             cornerRadius: tileCornerRadius,
             imagePipeline: imagePipeline,
-            viewerStake: viewerStake(on: post.id)
+            viewerStake: viewerStake(on: post.id),
+            // The slot's words, as the tile in it wears them — wrapped at the
+            // slot's size, posed as the window travels.
+            showsInfo: tileWearsInfo(occupantID)
         )
     }
 
@@ -3412,8 +3442,21 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
                 withReuseIdentifier: PostGridTileCell.reuseID, for: indexPath
             ) as! PostGridTileCell
             cell.cornerRadius = tileCornerRadius
-            cell.configure(with: post, imagePipeline: imagePipeline)
-            // The count's heart reads the viewer's stake (red once staked).
+            // A large tile wears its author and caption start when the page
+            // asks (`showsTileInfo`); the cell picks how much by its size.
+            cell.configure(with: post, imagePipeline: imagePipeline, showsInfo: showsTileInfo)
+            #if DEBUG
+            // `-gallery-tile-info-log`: which tile wears what — the flat
+            // index `-foryou-open` / `-foryou-gallery-open` take, to film a
+            // worded tile's flight.
+            if showsTileInfo, ProcessInfo.processInfo.arguments.contains("-gallery-tile-info-log") {
+                let size = cell.bounds.size
+                print("[tile-info] index=\(flatIndex(for: indexPath)) id=\(post.id.rawValue)"
+                    + " size=\(Int(size.width))x\(Int(size.height)) variant=\(PostTileInfo.variant(for: size))")
+            }
+            #endif
+            // The count's heart reads the viewer's stake (red once staked) —
+            // the corner's or, on a worded tile, the author line's.
             staking?.bindReadout(cell, to: post.id)
             // Autoplay is gated on the cover, so the arrival of a cover is a
             // reason to re-run the gate. Without this a tile whose cover lands

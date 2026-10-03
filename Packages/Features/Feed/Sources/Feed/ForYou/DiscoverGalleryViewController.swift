@@ -75,15 +75,19 @@ final class DiscoverGalleryViewController: UIViewController {
     /// - Parameter staking: where the tiles' hearts read the viewer's stake
     ///   (red once staked) — For You's own, so the gallery and the list
     ///   behind it agree. The hearts are readouts; nothing here spends.
+    /// - Parameter showsTileInfo: the large tiles wear their author and
+    ///   caption start (`GalleryTileInfo`, `-gallery-tile-info`).
     init(
         imagePipeline: ImagePipeline,
         videoPlayback: VideoPlaybackController?,
         header: PushedScreenHeader,
         staking: PostCardStaking? = nil,
+        showsTileInfo: Bool = false,
         openPost: ((UIViewController, SnapFeedHeroOrigin, [PostID]) -> Void)?
     ) {
         page = ForYouGridPage(imagePipeline: imagePipeline, style: .grid, videoPlayback: videoPlayback)
         page.staking = staking
+        page.showsTileInfo = showsTileInfo
         self.header = header
         self.openPost = openPost
         super.init(nibName: nil, bundle: nil)
@@ -230,6 +234,10 @@ final class DiscoverGalleryViewController: UIViewController {
                     if !committed { page?.clearRevealConcealment() }
                 }
             ),
+            // A large tile's words (`-gallery-tile-info`), worn by the card
+            // at the tile's end and faded as it grows — the Following row's
+            // arrangement. Nil for a tile that wears none.
+            restingOverlay: { [weak page] in page?.restingOverlay(for: tapped.id) },
             // A tile's heart flies red once the viewer has staked.
             viewerStake: { [weak page] in page?.viewerStake(on: tapped.id) ?? 0 },
             // Pinned since the tap; the close measures a mosaic holding still.
@@ -248,6 +256,13 @@ final class DiscoverGalleryViewController: UIViewController {
     /// Scrolls `offset` points into the content — `-foryou-pushed-scroll`.
     func debugScroll(to offset: CGFloat) {
         page.setVerticalOffset(offset)
+    }
+
+    /// Tile `index`'s size on screen — nil while it is not realized. What
+    /// picks a tile large enough for words (`PostTileInfo`) to film or test.
+    func debugTileSize(at index: Int) -> CGSize? {
+        guard page.posts.indices.contains(index) else { return nil }
+        return page.debugCell(for: page.posts[index].id)?.bounds.size
     }
 
     /// Whether tile `index` has a cover to fly — what a scripted open waits
