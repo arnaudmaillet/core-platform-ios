@@ -14,11 +14,14 @@ import UIKit
 ///   `onLogout` — which is also what makes the screen carry the settings gear
 ///   and its own profile switcher (see `ProfileFeatureBuilding`). That is why
 ///   losing the avatar's long-press menu does not lose the switcher.
-/// - **It is built once and retained for the session**, where the pushed profile
-///   is built per push and released on pop. A tab root cannot be rebuilt on
-///   every visit without throwing away scroll position and gallery state on
-///   every tab switch, so freshness has to come from the repositories and the
-///   image cache — which is where it already lives.
+/// - **Its root is built once per viewer**, where the pushed profile is built
+///   per push and released on pop. A tab root cannot be rebuilt on every visit
+///   without throwing away scroll position and gallery state on every tab
+///   switch, so freshness has to come from the repositories and the image
+///   cache. It IS rebuilt when the viewer changes (`show(member:)`): a guest
+///   has no profile, and a sign-in or sign-out swaps the whole stack.
+/// - **The shell outlives the session.** Logging out returns to guest mode in
+///   the same shell rather than to a login screen (guest mode, #438).
 @MainActor
 final class ProfileTabCoordinator: TabCoordinator {
     var childCoordinators: [Coordinator] = []
@@ -29,6 +32,7 @@ final class ProfileTabCoordinator: TabCoordinator {
     /// only: a pushed profile leads with its back button.
     private let notificationsBell: NotificationsBell
     private let onLogout: () -> Void
+    private let onSignIn: () -> Void
 
     private(set) lazy var tab = UITab(
         title: "Profile",
@@ -41,14 +45,33 @@ final class ProfileTabCoordinator: TabCoordinator {
     init(
         container: AppContainer,
         notificationsBell: NotificationsBell,
-        onLogout: @escaping () -> Void
+        onLogout: @escaping () -> Void,
+        onSignIn: @escaping () -> Void
     ) {
         self.container = container
         self.notificationsBell = notificationsBell
         self.onLogout = onLogout
+        self.onSignIn = onSignIn
     }
 
+    /// `TabCoordinator` conformance; the shell calls `show(member:)` instead.
     func start() {
+        show(member: true)
+    }
+
+    /// Installs the root for this viewer, replacing the whole stack: the own
+    /// profile for a member, the sign-in invitation for a guest.
+    func show(member: Bool) {
+        guard member else {
+            walletBadge = nil
+            navigationController.viewControllers = [GuestSignInViewController(
+                symbolName: "person.crop.circle",
+                title: "Your profile",
+                message: "Sign up to create your profile, post and keep what you like.",
+                onSignIn: onSignIn
+            )]
+            return
+        }
         // `.aboveBottomSafeArea` is the whole difference between a tab root and
         // a pushed profile, and it settles both halves at once: the tray is
         // hosted in the screen's own view above the bottom safe area (the top of

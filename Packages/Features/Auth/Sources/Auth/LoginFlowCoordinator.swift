@@ -101,8 +101,17 @@ final class LoginFlowCoordinator {
         viewModel = LoginViewModel(loginService: loginService)
     }
 
-    func start() -> UIViewController {
+    /// `onClose` non-nil = presented over the app rather than installed as the
+    /// window's root: the first screen gets a close button, because a guest
+    /// who opened it must be able to go back to browsing.
+    func start(onClose: (() -> Void)? = nil) -> UIViewController {
         let methodSelection = MethodSelectionViewController()
+        if let onClose {
+            methodSelection.navigationItem.leftBarButtonItem = UIBarButtonItem(
+                systemItem: .close,
+                primaryAction: UIAction { _ in onClose() }
+            )
+        }
         methodSelection.onMethodSelected = { [self] method in
             select(method)
         }

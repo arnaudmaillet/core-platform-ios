@@ -14,4 +14,8 @@ public struct AuthFeatureBuilder: AuthFeatureBuilding {
     public func makeLoginViewController() -> UIViewController {
         LoginFlowCoordinator(loginService: sessionManager).start()
     }
+
+    public func makeSignInViewController(onClose: @escaping () -> Void) -> UIViewController {
+        LoginFlowCoordinator(loginService: sessionManager).start(onClose: onClose)
+    }
 }

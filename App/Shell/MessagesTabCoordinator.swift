@@ -23,12 +23,34 @@ final class MessagesTabCoordinator: TabCoordinator {
         identifier: AppTab.messages.rawValue
     ) { [navigationController] _ in navigationController }
 
-    init(container: AppContainer, notificationsBell: NotificationsBell) {
+    private let onSignIn: () -> Void
+
+    init(container: AppContainer, notificationsBell: NotificationsBell, onSignIn: @escaping () -> Void) {
         self.container = container
         self.notificationsBell = notificationsBell
+        self.onSignIn = onSignIn
     }
 
+    /// `TabCoordinator` conformance; the shell calls `show(member:)` instead.
     func start() {
+        show(member: true)
+    }
+
+    /// Installs the root for this viewer, replacing the whole stack: the inbox
+    /// for a member, the sign-in invitation for a guest (there is no inbox
+    /// without an account, and nothing is loaded for one).
+    func show(member: Bool) {
+        guard member else {
+            walletBadge = nil
+            tab.badgeValue = nil
+            navigationController.viewControllers = [GuestSignInViewController(
+                symbolName: "bubble.left.and.bubble.right",
+                title: "Messages",
+                message: "Sign up to message friends and see who wrote to you.",
+                onSignIn: onSignIn
+            )]
+            return
+        }
         // The inbox reports every tab's badge summed; the bar item wears it.
         // Nothing here counts anything — see
         // `MessagesInboxViewController.onTotalNewCountChange` for why the sum
