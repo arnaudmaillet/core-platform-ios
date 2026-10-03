@@ -209,6 +209,13 @@ struct EmotePickerGridTests {
 
     /// Stopping holds each tile on the frame it reached — no reset to the
     /// poster — and the next scroll plays on from there.
+    ///
+    /// ⚠️ **WAIT FOR A FRAME, NOT FOR A DURATION.** The frame follows the
+    /// wall clock round a 4 s loop. A fixed 200 ms sleep came back after ~4 s
+    /// on a CI runner whose main thread the neighbouring suites held, and the
+    /// loop had wrapped to frame 0 (`held → 0`, run 37143240022). So the
+    /// tile is stopped once it shows a frame in the first half of the loop —
+    /// far from the wrap, whenever the main thread gets back here.
     @Test func stoppingHoldsTheFrameAndTheNextScrollPlaysOn() async throws {
         let frames = 40
         let (panel, window) = hosted(warmEngine(art: EmoteStripTests.sheetArt(frames: frames, step: 0.1)))
@@ -218,7 +225,10 @@ struct EmotePickerGridTests {
         #expect(tile.player.displayedFrame == 0)
 
         panel.scrollViewWillBeginDragging(grid)
-        try await Task.sleep(for: .milliseconds(200))
+        let deadline = ContinuousClock.now + .seconds(10)
+        while !(1...frames / 2).contains(tile.player.displayedFrame ?? 0), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
         panel.scrollViewDidEndDecelerating(grid)
         let held = try #require(tile.player.displayedFrame)
         #expect(held > 0, "it moved while the grid scrolled")

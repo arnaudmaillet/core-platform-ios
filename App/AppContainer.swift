@@ -705,6 +705,15 @@ final class AppContainer {
         authClient: Auth_V1_AuthServiceClient(client: authenticatedRPCClient)
     )
 
+    /// Settings → Account Status: `moderation.v1.GetEnforcementState` for the
+    /// account. Mock mode answers it (`-mock-account-restricted` seeds one
+    /// restriction); against the local fleet `moderation.v1` still needs its
+    /// gateway route — `dev/BACKEND_GAPS.md` §11.
+    private lazy var accountStatusRepository = AccountStatusRepository(
+        moderationClient: Moderation_V1_ModerationServiceClient(client: authenticatedRPCClient),
+        authSession: sessionManager
+    )
+
     /// The profile media grid's source: post listing/hydration plus the
     /// search-backed "Tagged" corpus (post caption search — mock indexes it
     /// exactly; fleet quality tracks the search index).
@@ -756,7 +765,8 @@ final class AppContainer {
             router: routeResolver,
             account: accountRepository,
             switching: profileRepository,
-            accountSessions: accountSessionsRepository
+            accountSessions: accountSessionsRepository,
+            accountStatus: accountStatusRepository
         )
         // The one place that can see both features, which is the whole reason
         // this is injected rather than reached for: Profile describes where a

@@ -18,7 +18,7 @@ The good news is that the iOS side is well placed:
 - Comments, posts, other people's profiles, search and map tiles are already read without needing a viewer.
 - The `StakeShopOpening` responder-chain pattern is a ready-made shape for a "sign in to continue" gate.
 
-**Decisions settled on 2026-10-03** (§10): a guest token; Apple, Google, email or phone at sign-up; non-personalised regional trending for guests; restricted content by default; guest reports allowed; bookmarks gated; a non-blocking legal card; no nudges (unlimited browsing); location unlocks the current country only.
+**Decisions settled on 2026-10-03** (§10): a guest token; Apple, Google, email or phone at sign-up; non-personalised regional trending for guests; restricted content by default; guest reports allowed; bookmarks gated; a non-blocking legal card; no nudges (unlimited browsing); location unlocks the current country only; a locked welcome gift of 50 likes plus daily likes that pile up for 3 days, claimed at sign-up (§3.2).
 
 **Path:**
 1. Build the iOS guest shell against the mock first (no backend dependency).
@@ -102,7 +102,7 @@ What we take from it:
 2. **A gate is an invitation, not an error.** Every gated control stays visible and opens the sign-up sheet. Hidden controls are reserved for things that make no sense without an identity (a Following scope, the favourites dock).
 3. **The action survives sign-up.** The pending action is replayed after the account exists: a like lands, a follow lands, a comment draft is kept.
 4. **Safety and legal features stay open.** Reporting illegal content must be available to "any individual or entity" (DSA Art. 16), and Apple 1.2 requires a report mechanism for user-generated content. Guests can report.
-5. **Device-only state is honest.** Nothing earned or bought lives on a guest device. Guests get no wallet, no free points, and no purchases that could not be restored.
+5. **Device-only state is honest.** Nothing earned or bought is spendable on a guest device, and nothing can be bought. A guest sees what is waiting for them (§3.2), locked until sign-up, when the server credits it.
 
 ### Rights matrix
 
@@ -139,7 +139,8 @@ What we take from it:
 | Messages tab | Inbox, requests, suggestions | 🔒 | Full-page state: "Sign up to message friends" |
 | Notifications | Bell + drawer | 🔒 | Drawer shows the sign-up state; no badge |
 | Create "+" | Camera, upload, text post, long-press camera | 🔒 | TikTok behaviour: the "+" stays, a tap opens the sheet |
-| Wallet | Balance badge, daily claim, shop | — | Badge hidden; a guest has no balance |
+| Wallet | Balance badge | ✅ | Shows the locked welcome gift (§3.2), with a lock |
+| Wallet | Daily claim, spending likes, shop | 🔒 | The sheet names the amount waiting |
 | Settings | Language, app preferences (#409), captions, comment ticker, data saver, clear cache, personalisation off, help, legal, "delete my guest data" | ✅ | Reached from the Profile tab gear |
 | Settings | Everything account-scoped | — | Shown after sign-up |
 | Realtime | Live counters, typing, presence | — | Counts refresh on load and pull-to-refresh |
@@ -167,13 +168,37 @@ How it works:
 - The server grants it only if it matches the request's IP country (ALB/CloudFront GeoIP header), within tolerance for roaming. Without that check, a spoofed GPS position would open any country for free and undercut the gem price.
 - For a guest principal, the granted set is {current country}, and `QueryTile` filters to it server-side.
 
+### 3.2 Welcome gift: likes waiting for sign-up
+
+**Rule.** At first launch a guest is shown a welcome gift of **50 likes**, and a daily allowance keeps piling up for **3 days**. None of it can be spent as a guest: it is credited when the person signs up, then the action they were attempting replays with it.
+
+| | |
+| --- | --- |
+| Welcome gift | 50 likes, granted at first launch |
+| Daily allowance | One un-streaked claim per day (`WalletStore.Policy.baseClaimAmount`, 25 today) |
+| Accumulation cap | 3 days (75), so at most 125 likes waiting |
+| Where it shows | The wallet badge shows the amount with a lock. Nothing pops up (decision 8). |
+| What a tap does | Badge, like or daily claim opens the sign-up sheet titled with the amount: "Sign up to claim your 125 likes" |
+| At sign-up | The server credits the gift and the accrued days, then the pending action replays (the like is spent from the new balance) |
+| Once per device | Keyed to the guest id and App Attest (B1): a second account on the same device gets no second gift |
+
+**Why the likes stay locked.**
+- A like is a write that counts. The guest feed is regional trending (decision 3), built from likes; guests who could like would let bots mint guests and push any post into everyone's feed.
+- The wallet is device-local today (`WalletStore`). A spendable guest balance would need guest writes and a server wallet; a locked one needs neither until sign-up.
+
+**Honesty rules.**
+- No countdown and no "expires in 24 h": the EU treats false urgency as a dark pattern (DSA Art. 25, consumer law).
+- The label says "welcome gift"; what was shown is never taken away. The cap only stops more from piling up.
+
+**Measure it.** Sign-up rate with and without the gift, through the same A/B switch as the claim sheet.
+
 ### Gated actions as a single list
 
 This is the `GatedAction` enum the code would carry (§6.3). Each case maps to one sheet title.
 
 | Action | Sheet title |
 | --- | --- |
-| `like` | Sign up to like this post |
+| `like` | Sign up to use your N likes (N = the amount waiting, §3.2) |
 | `comment` | Sign up to join the conversation |
 | `follow(profile)` | Sign up to follow @handle |
 | `save` | Sign up to save posts |
@@ -186,6 +211,7 @@ This is the `GatedAction` enum the code would carry (§6.3). Each case maps to o
 | `notifications` | Sign up to get notified |
 | `ownProfile` | Sign up to create your profile |
 | `followPlace` / `unlockCountry` / `shop` | Sign up to explore more places |
+| `claim` | Sign up to claim your N likes |
 
 ## 4. First launch
 
@@ -229,6 +255,7 @@ The account and its first profile are created in one flow. If the app is killed 
 - The Profile and Messages tabs switch from their sign-up state to real content.
 - Guest signals (not-interested, watch history once telemetry exists) are attached to the new account (§7.4).
 - The current country, if known, becomes the member's home country (§3.1).
+- The welcome gift and the accrued daily likes are credited (§3.2) before the pending action replays.
 
 **Logout returns to guest mode, not to a login screen.** Member-scoped local state is wiped (§6.6); device preferences stay.
 
@@ -263,7 +290,7 @@ public protocol ViewerProviding: Sendable {
 - `AppCoordinator.start()` builds `MainTabCoordinator` immediately, for any `ViewerState`. `render(_:)` no longer swaps the window root.
 - On a viewer change it calls `mainTabCoordinator.viewerDidChange(_:)`, which:
   - swaps the root of the Profile and Messages tabs between their sign-up state and real content;
-  - shows or hides the wallet badge, the notification badge and the favourites dock;
+  - switches the wallet badge between the locked gift and the real balance, and shows or hides the notification badge and the favourites dock;
   - leaves every navigation stack in place.
 - The login screen stops being a window root. `AuthFeatureBuilding` gains:
 
@@ -323,7 +350,7 @@ Gate where the action starts, at a handful of choke points rather than in every 
 | Messages tab | Same pattern; the inbox is not primed at shell start (`MessagesTabCoordinator.swift:58`) | |
 | Notifications drawer | Sign-up state, no unread polling | `NotificationsFeatureBuilder.swift:33-35` |
 | For You → Following | Sign-up state inside the page; Discover is the default | |
-| Wallet badge | Not installed | `WalletBadgeInstaller` |
+| Wallet badge | Locked welcome gift (§3.2); a tap opens the gate | `WalletBadgeInstaller` |
 | Map favourites dock | Not shown | `MapFavoritesRepository` |
 | Map location card | "See posts around you" when no country is unlocked; tap → location prompt (§3.1) | |
 | Settings | Guest catalog (§3) reusing `SettingsCatalog` sections | `SettingsCatalog.swift` |
@@ -346,7 +373,7 @@ Gate where the action starts, at a handful of choke points rather than in every 
 | --- | --- | --- | --- |
 | `device.identifier` (install id) | Used for the guest session | Kept | Kept |
 | Keychain `auth.session` | Holds the guest token | Replaced by the member token | Replaced by a guest token |
-| `WalletStore` (`wallet.*`) | **Not seeded**, no free points | Seeded for the member, keyed by account | Wiped |
+| `WalletStore` (`wallet.*`) | **Pending, not spendable**: welcome gift + accrued days (§3.2) | Replaced by the server-credited balance, keyed by account | Wiped (the gift is never offered again on this device) |
 | `CountryUnlockStore` | Empty (the current country comes from location and is never stored as an unlock) | Keyed by the real account (not `MockAuthService.accountID`) | Kept per account |
 | `PostBookmarkStore`, `SavedSoundStore`, `MapPlaceFollowStore`, `MapFavoritesStore` | Unused (gated) | Keyed by profile | Wiped |
 | `PostDraftStore` | Unused (gated) | Keyed by profile | Wiped |
@@ -468,6 +495,7 @@ message GetDiscoveryFeedRequest {
 | Date of birth | Field on the account, set at sign-up, 13+ enforced server-side (#394) |
 | Consent | `account.v1.RecordConsent{consent_version, data_processing, marketing}`; the GDPR record fields already exist |
 | Handle | `profile.v1.CheckHandleAvailability` (callable with a guest token) |
+| Welcome gift | Sign-up credits 50 likes plus the accrued daily allowance (25 a day, 3 days at most) to the new account, once per device (guest id + App Attest). Needs a server wallet (`BACKEND_VIRTUAL_CURRENCY.md`). |
 | Fresh profile ids | After `CreateProfile`, return re-minted tokens or document a mandatory `Refresh`. `pids` are only minted at Login/Refresh, so the first write after sign-up fails `require_profile` otherwise. |
 
 ### 7.6 Country access from location (P1)
@@ -500,6 +528,7 @@ Extend the `BACKEND_COUNTRY_UNLOCKS.md` proposal:
 | Apple 5.1.1(ii) | v1 guests get a non-personalised feed (decision 3), so no usage-data consent is needed yet. If guest personalisation comes later, it ships with a "Personalised feed" toggle that is easy to withdraw. |
 | Age and minors | No age gate for guests. Guests get `ContentLevel.RESTRICTED`: no sensitive or mature content until a date of birth is known. This also covers DSA Art. 28 (minors) and teen mode (#401). |
 | GDPR | Privacy policy names guest data (install id, guest id, signals), the retention period, and the merge at sign-up. Guest data is erasable from the device. |
+| Dark patterns | The welcome gift has no countdown or expiry and is labelled as a gift (DSA Art. 25, consumer law) |
 | DSA | Guests can report (Art. 16). A non-profiled feed option is required for very large platforms; `ranking = TRENDING` provides it. |
 | ATT | Not needed (no IDFA, no ads) |
 | Location | When-in-use, reduced accuracy, asked in context. Only a country code leaves the device. The privacy policy and App Privacy label list "coarse location, app functionality". |
@@ -517,8 +546,8 @@ Extend the `BACKEND_COUNTRY_UNLOCKS.md` proposal:
 | G3 (#439) | `MemberGating` + `MemberGate` + responder-chain lookup + `GatedAction` sheet titles | P0 |
 | G4 (#440) | Gate every choke point in §6.3; DEBUG assertion on ungated writes | P0 |
 | G5 (#441) | Sign-up sheet: login flow as a dismissible half sheet, pending-action replay | P0 |
-| G6 (#442) | Guest surfaces: Profile/Messages/Notifications/Following states, wallet badge and favourites dock hidden, guest Settings catalog | P0 |
-| G7 (#443) | `ScopedDefaults` and the local-state policy of §6.6; wallet not seeded for guests | P0 |
+| G6 (#442) | Guest surfaces: Profile/Messages/Notifications/Following states, locked welcome-gift badge, favourites dock hidden, guest Settings catalog | P0 |
+| G7 (#443) | `ScopedDefaults` and the local-state policy of §6.6; guest wallet = pending welcome gift + 3-day accrual, not spendable | P0 |
 | G8 (#444) | Mock: bearer checks + edge-policy mirror, guest session and sign-up routes, `-guest` launch argument, guest UI smoke suite | P0 |
 | G9 (#445) | Location unlocks the current country (§3.1): in-context permission, reduced accuracy, on-device country code, `CountryAccess.currentCountry` | P1 |
 
@@ -526,10 +555,10 @@ Extend the `BACKEND_COUNTRY_UNLOCKS.md` proposal:
 
 | # | Item | Priority |
 | --- | --- | --- |
-| B1 (#446) | `StartGuestSession`, guest token claims, `read:public` permission, guest rejection on writes | P0 |
+| B1 (#446) | `StartGuestSession`, guest token claims, `read:public` permission, guest rejection on writes; guest start date and device recorded for the welcome gift | P0 |
 | B2 (#447) | Viewer-aware public reads (§7.2) | P0 |
 | B3 (#448) | `GetDiscoveryFeed` v1, non-personalised, regional trending with decay | P0 |
-| B4 (#449) | Sign-up path: self-registration + Sign in with Apple and Google, OTP verification, date of birth, consent, handle availability, token re-mint | P0 |
+| B4 (#449) | Sign-up path: self-registration + Sign in with Apple and Google, OTP verification, date of birth, consent, handle availability, token re-mint, welcome-gift credit | P0 |
 | B5 (#450) | Per-IP / per-guest rate limits, `per_caller` in prod, App Attest, WAF | P0 |
 | B6 (#451) | CloudFront for media delivery | P0 |
 | B7 (#452) | Guest reports accepted by moderation | P0 |
@@ -547,6 +576,7 @@ Extend the `BACKEND_COUNTRY_UNLOCKS.md` proposal:
 - Personalised `FOR_YOU` for guests (with the consent toggle), if v1 data says it is worth it.
 - Optional in-feed interest card.
 - Push for guests (#392, keyed by install).
+- A/B measurement of the welcome gift's effect on sign-up.
 
 The existing settings issues that gain a guest variant: #409 (app preferences, guest-visible), #407/#413 (personalisation off, guest-visible), #424 (legal links in guest settings), #399 (reports, guest reporter), #386 (guest data deletion next to account deletion).
 
@@ -564,6 +594,7 @@ The existing settings issues that gain a guest variant: #409 (app preferences, g
 | 8 | Nudges | None; guest browsing is unlimited |
 | 9 | Guest map without location | No country unlocked; the map invites the person to allow location, which unlocks the country they are in |
 | 10 | Country left behind | Locks again; the new country unlocks |
+| 11 | Likes for guests | A locked welcome gift of 50 likes, plus a daily allowance that piles up for 3 days; all claimed at sign-up (§3.2) |
 
 ## Appendix: interaction inventory
 
@@ -600,7 +631,7 @@ Every write in the app today, with its handler, grouped by feature. "Gate" is th
 | Maps | Pin favourite | `MapsViewController.swift:1651-1666` | hidden |
 | Maps | Country unlock | `CountryUnlockSheetViewController.swift:107, 221` | `unlockCountry` |
 | Maps | Buy stake pack | `CountryShopViewController.swift:470, 490` | `shop` |
-| Wallet | Daily claim | `WalletClaimViewController.swift:414` | hidden |
+| Wallet | Daily claim | `WalletClaimViewController.swift:414` | `claim` |
 | Search | Recent searches | `SearchViewModel.swift:347-449` | open (device) |
 | Notifications | Mark all read | `NotificationsViewModel.swift:148-153` | `notifications` |
 | Create | "+", long-press camera | `MainTabCoordinator.swift:706-725` | `create` |

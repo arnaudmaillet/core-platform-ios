@@ -221,6 +221,39 @@ public struct AccountProfile: Equatable, Sendable {
     }
 }
 
+/// A profile the active profile has blocked, as Settings lists it.
+public struct BlockedProfile: Hashable, Sendable {
+    public let id: ProfileID
+    public let handle: String
+    public let displayName: String
+    public let avatarURL: URL?
+    public let blockedAt: Date?
+
+    public init(id: ProfileID, handle: String, displayName: String, avatarURL: URL?, blockedAt: Date?) {
+        self.id = id
+        self.handle = handle
+        self.displayName = displayName
+        self.avatarURL = avatarURL
+        self.blockedAt = blockedAt
+    }
+}
+
+/// Settings → Safety and Interactions → Blocked Accounts (#389): who the
+/// ACTIVE profile has blocked, and the way back.
+public protocol BlockedAccountsManaging: Sendable {
+    /// Newest block first.
+    func blockedProfiles() async throws -> [BlockedProfile]
+    func unblock(_ profileID: ProfileID) async throws
+}
+
+/// Public or private, for the ACTIVE profile (Settings → Privacy, #388).
+/// Per profile, like the switcher: making @maya private leaves @maya.work
+/// public.
+public protocol ProfileVisibilityManaging: Sendable {
+    func activeProfileIsPrivate() async throws -> Bool
+    func setActiveProfilePrivate(_ isPrivate: Bool) async throws
+}
+
 /// Multi-profile support for the switcher: list the account's profiles, read the
 /// active one, and switch it. "Active" is scoped to the identity surfaces the
 /// `ProfileRepository` drives (the profile screen + the map avatar) — switching
@@ -251,7 +284,7 @@ public protocol ProfileSwitching: Sendable {
 // same method, declared again in CoreModels so a feed row's "..." menu can
 // unfollow without importing this package. `SocialGraphReading` is
 // `relationship(for:)` folded to the one question a follow "+" asks.
-public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileViewerResolving,
+public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisibilityManaging, BlockedAccountsManaging, ProfileViewerResolving,
     SocialGraphWriting, SocialGraphReading {
     private let profileClient: any Profile_V1_ProfileServiceClientInterface
     private let counterClient: any Counter_V1_CounterServiceClientInterface
@@ -592,6 +625,79 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileViewe
         // (profile screen) and `viewerAvatarImage` (map avatar) both resolve
         // through this, so they refresh to the chosen profile on their next read.
         viewerProfileID = id
+    }
+
+    // MARK: - BlockedAccountsManaging
+
+    public func blockedProfiles() async throws -> [BlockedProfile] {
+        let viewer = try await resolveViewerProfileID()
+        var summaries: [SocialGraph_V1_BlockSummary] = []
+        var pageToken = ""
+        // Bounded: a block list is short, and a server that kept handing back
+        // a page token must not spin this loop forever.
+        for _ in 0..<20 {
+            var request = SocialGraph_V1_ListBlocksRequest()
+            request.blockerID = viewer.rawValue
+            request.limit = 100
+            request.pageToken = pageToken
+            let response = await socialGraphClient.listBlocks(request: request, headers: [:])
+            switch response.result {
+            case .success(let body):
+                summaries += body.blocks
+                pageToken = body.nextPageToken
+            case .failure(let error):
+                throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+            }
+            if pageToken.isEmpty { break }
+        }
+        // One read per blocked profile (the contract has no batch read). A
+        // profile that no longer resolves still lists, by id, so it can be
+        // unblocked.
+        let views = await withTaskGroup(of: (String, Profile_V1_ProfileView?).self) { group in
+            for summary in summaries {
+                group.addTask { [self] in
+                    (summary.blockeeID, try? await fetchProfileView(id: ProfileID(summary.blockeeID)))
+                }
+            }
+            var byID: [String: Profile_V1_ProfileView] = [:]
+            for await (id, view) in group { byID[id] = view }
+            return byID
+        }
+        return summaries
+            .map { summary in
+                let view = views[summary.blockeeID]
+                return BlockedProfile(
+                    id: ProfileID(summary.blockeeID),
+                    handle: view?.handle ?? summary.blockeeID,
+                    displayName: view?.displayName ?? "",
+                    avatarURL: view.flatMap { URL(string: $0.avatarURL) },
+                    blockedAt: summary.hasBlockedAt
+                        ? Date(timeIntervalSince1970: TimeInterval(summary.blockedAt.seconds) + TimeInterval(summary.blockedAt.nanos) / 1e9)
+                        : nil
+                )
+            }
+            .sorted { ($0.blockedAt ?? .distantPast) > ($1.blockedAt ?? .distantPast) }
+    }
+
+    public func unblock(_ profileID: ProfileID) async throws {
+        try await setBlocked(false, for: profileID)
+    }
+
+    // MARK: - ProfileVisibilityManaging
+
+    public func activeProfileIsPrivate() async throws -> Bool {
+        let view = try await fetchProfileView(id: try await resolveViewerProfileID())
+        return view.visibility == .private
+    }
+
+    public func setActiveProfilePrivate(_ isPrivate: Bool) async throws {
+        var request = Profile_V1_SetVisibilityRequest()
+        request.profileID = try await resolveViewerProfileID().rawValue
+        request.visibility = isPrivate ? .private : .public
+        let response = await profileClient.setVisibility(request: request, headers: [:])
+        if case .failure(let error) = response.result {
+            throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+        }
     }
 
     // MARK: - Social counters
