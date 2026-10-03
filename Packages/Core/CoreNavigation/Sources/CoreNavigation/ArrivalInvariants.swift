@@ -81,7 +81,13 @@ public enum ArrivalInvariants {
 
         // Native chrome is UIKit's: never left faded by a flight.
         require(nav.navigationBar.alpha >= 0.99 || nav.isNavigationBarHidden, "navbar.alpha")
-        if let tabs = nav.tabBarController, tabs.selectedViewController === nav {
+        // ⚠️ THE TAB BAR IS UIKIT'S, ANIMATION INCLUDED, and is judged only
+        // at REST. Two ticks after a landing UIKit may still be running its own
+        // hide or show, and an overlap while it does is acceptable by product
+        // rule (2026-10-03): nothing here may push anyone to cut that
+        // animation short. Past every ceiling, the bar has to agree with the
+        // screen.
+        if phase == "rested", let tabs = nav.tabBarController, tabs.selectedViewController === nav {
             require(tabs.isTabBarHidden == !nav.showsAppTabBar(for: screen), "tabbar.matchesScreen")
         }
 

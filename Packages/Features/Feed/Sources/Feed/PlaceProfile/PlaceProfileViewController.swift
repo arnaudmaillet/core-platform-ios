@@ -366,7 +366,10 @@ final class PlaceProfileViewController: UIViewController {
         }
         if mapReturnTransition == nil,
            let source = mapReturn?({ [weak self] in self?.departureStill() }) {
-            let transition = ZoomTransitionController(source: source, destination: self)
+            // `presents: false`: this controller only ever flies the page HOME.
+            // Announcing a staging would tell the page a flight is arriving
+            // that never does (see `ZoomTransitionController.init`).
+            let transition = ZoomTransitionController(source: source, destination: self, presents: false)
             transition.attachInteractiveDismissal(to: view, axes: [.horizontal]) { [weak nav] in
                 nav?.popViewController(animated: true)
             }

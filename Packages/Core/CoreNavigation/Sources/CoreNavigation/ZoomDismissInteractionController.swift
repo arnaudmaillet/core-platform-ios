@@ -968,9 +968,10 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // Without them the harness drove a hero over a landing the hero refuses,
         // filmed it, and called the result the product's behaviour. The card
         // close is what a finger gets there, and it was never once measured.
-        guard destination?.zoomDismissalKind != .card,
-              source?.zoomLandingAcceptsHero != false
-        else {
+        guard DismissalArbiter.heroCarries(
+            kind: destination?.zoomDismissalKind,
+            landingAcceptsHero: source?.zoomLandingAcceptsHero
+        ) else {
             print("[zoom-live] scripted grab DECLINED"
                 + " kind=\(String(describing: destination?.zoomDismissalKind))"
                 + " landingAcceptsHero=\(String(describing: source?.zoomLandingAcceptsHero))")
@@ -1016,7 +1017,7 @@ extension ZoomDismissInteractionController: UIGestureRecognizerDelegate {
         // Refusing here leaves the drag to the driver that carries a whole card
         // instead — the two gate on the same question, from opposite sides, so
         // exactly one of them claims any given grab.
-        guard destination?.zoomDismissalKind != .card
+        guard destination?.zoomDismissalKind == .hero
         else { return grabLog("post wants a card, not a hero", false) }
         // ⚠️ AND ONLY WHERE THERE IS SOMETHING TO FLY IT ONTO — see
         // `ZoomTransitionSource.zoomLandingAcceptsHero`.
@@ -1026,8 +1027,12 @@ extension ZoomDismissInteractionController: UIGestureRecognizerDelegate {
         // that does not — a list keeps its order under a pager — can be
         // carrying a photograph home to a row made of words. Refusing leaves
         // the drag to the card close, exactly as the kind gate does.
-        guard source?.zoomLandingAcceptsHero != false
-        else { return grabLog("landing cannot receive a hero", false) }
+        // Both halves together are `DismissalArbiter.heroCarries` — the one
+        // rule the card close asks from the other side.
+        guard DismissalArbiter.heroCarries(
+            kind: destination?.zoomDismissalKind,
+            landingAcceptsHero: source?.zoomLandingAcceptsHero
+        ) else { return grabLog("landing cannot receive a hero", false) }
         // `context == nil` only covers OUR transitions. A pop of a screen
         // pushed above the feed (profile, comments) can still be settling —
         // the feed is already `topViewController` then, and beginning a grab

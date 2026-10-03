@@ -181,8 +181,10 @@ public final class InteractiveSlideDismissal: NSObject {
     /// whole predicate: `heroLandingAcceptsHero`'s owners stage their own way,
     /// and widening their staging here would change a close nobody asked to.
     public func closeCarriesCard(of feed: UIViewController, axis: ZoomDismissAxis) -> Bool {
-        (feed as? any ZoomTransitionDestination)?.zoomDismissalKind == .card
-            || heroClaimsAxis?(axis) == false
+        !DismissalArbiter.heroCarries(
+            kind: (feed as? any ZoomTransitionDestination)?.zoomDismissalKind,
+            heroClaimsAxis: heroClaimsAxis?(axis)
+        )
     }
 
     /// Whether the PUSH onto this screen is the reveal's.
@@ -618,9 +620,18 @@ extension InteractiveSlideDismissal: UINavigationControllerDelegate {
         //
         // ⚠️ AND SO DOES THE AXIS (`heroClaimsAxis`): a downward close the hero
         // was told to leave alone is this driver's, whatever the post carries.
-        if (fromVC as? any ZoomTransitionDestination)?.zoomDismissalKind == .hero,
-           heroLandingAcceptsHero?() != false,
-           heroClaimsAxis?(popAxis) != false,
+        //
+        // The axis is asked only of a drag THIS driver is running. A pop with
+        // no live slide behind it was started by the hero's own grab (which
+        // claimed its axis at its gate) or by the chevron; `popAxis` reads
+        // `.horizontal` for both, which was the wrong axis to ask about a
+        // vertical hero grab.
+        let slideIsDriving = interaction != nil || revealGrab != nil
+        if DismissalArbiter.heroCarries(
+               kind: (fromVC as? any ZoomTransitionDestination)?.zoomDismissalKind,
+               landingAcceptsHero: heroLandingAcceptsHero?(),
+               heroClaimsAxis: slideIsDriving ? heroClaimsAxis?(popAxis) : nil
+           ),
            let savedDelegate {
             let forwarded = savedDelegate.navigationController?(
                 navigationController, animationControllerFor: operation, from: fromVC, to: toVC
@@ -795,9 +806,11 @@ extension InteractiveSlideDismissal: UIGestureRecognizerDelegate {
         guard let axis = ZoomDismissAxis.match(velocity: pan.velocity(in: view), axes: axes)
         else { return false }
         if arbitratesWithHeroGrab,
-           (feed as? any ZoomTransitionDestination)?.zoomDismissalKind != .card,
-           heroLandingAcceptsHero?() != false,
-           heroClaimsAxis?(axis) != false {
+           DismissalArbiter.heroCarries(
+               kind: (feed as? any ZoomTransitionDestination)?.zoomDismissalKind,
+               landingAcceptsHero: heroLandingAcceptsHero?(),
+               heroClaimsAxis: heroClaimsAxis?(axis)
+           ) {
             return false
         }
         if let canBeginDismissal, !canBeginDismissal() { return false }

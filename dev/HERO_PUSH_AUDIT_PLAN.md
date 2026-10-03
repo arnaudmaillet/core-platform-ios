@@ -146,6 +146,34 @@ Every arrival line is PASS, and the census settles to empty, on these scenarios:
 - **2.14 to PR C.** Making `TextRevealOrigin`'s eager values lazy touches FeedInterface and every caller, which PR C rebuilds anyway.
 - **2.16 left open.** Root cause measured: the platter cross-fade is frozen inside UIKit, and rebuilding the bar items does not reach it.
 
+
+## PR C outcome (2026-10-03)
+
+### Done
+- **3.0 `DismissalArbiter.heroCarries(kind:landingAcceptsHero:heroClaimsAxis:)`.** One pure rule, now asked from all six places:
+  - the zoom grab's gate;
+  - the chevron's pop;
+  - the scripted grab;
+  - the slide's begin gate;
+  - the slide's `.hero` forwarding;
+  - `closeCarriesCard`.
+
+  The slide's forwarding branch now asks about the axis only while it is driving the drag itself; it used to ask `.horizontal` for a vertical hero grab.
+- **3.1 `HeroPushSession`.** It builds and keeps the controller, leases the delegate slot (hands it back, or empties it for a tab root, only if the slot is still the session's or a registered forwarder's), and runs one idempotent close-out per ending (`returned`, `reversed`, `abandoned`, `toIntermediate`), releasing its objects a turn later. Migrated:
+  - `FeedFeatureBuilder` (self-retained session);
+  - For You's hero path;
+  - For You's close-only text path;
+  - Maps.
+
+  The place page's map-return keeps its re-asserted lease pattern; it moves to PR D (the delegate hub).
+- **Latent trap fixed:** the place page's close-only controller now passes `presents: false`.
+
+### Rule reaffirmed by the user (2026-10-03)
+The tab bar and toolbars are UIKit's, animation included. An overlap while UIKit animates is acceptable. `ArrivalInvariants` therefore judges the tab bar at rest only; its settled-phase check flagged UIKit's own fade, the same on PR B.
+
+### Deferred
+**2.14 → PR F.** The once-only staging latch would have to restage after a cancel, and the host's staging moves a grid slot (`adoptForClose`). Making that idempotent is not worth the risk for a cosmetic tint and corner mismatch on one sequence.
+
 ## Phase 3: structure (behaviour-preserving refactors, one PR each)
 
 **3.0 One dismissal arbiter.** The rule for which driver claims a drag is

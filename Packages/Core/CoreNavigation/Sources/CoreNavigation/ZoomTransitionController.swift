@@ -273,7 +273,10 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
             // (`zoomLandingAcceptsHero`) and this branch did not, so a back
             // chevron still flew a picture home onto a TEXT row.
             let landing = dismissSource(for: toVC)
-            guard destination.zoomDismissalKind != .card, landing.zoomLandingAcceptsHero else {
+            guard DismissalArbiter.heroCarries(
+                kind: destination.zoomDismissalKind,
+                landingAcceptsHero: landing.zoomLandingAcceptsHero
+            ) else {
                 // The push's hide is this controller's to pay back. Only the
                 // return FLIGHT ever did, so declining without this would land
                 // the pop on a map missing the marker that was tapped —

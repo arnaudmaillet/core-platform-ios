@@ -327,63 +327,37 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 return (id: feed?.settledPostID, cover: feed?.settledCoverImage)
             }
         )
-        let transition = ZoomTransitionController(source: source, destination: flyable)
+        // ⚠️ THE SESSION OWNS THE FLIGHT'S LIFE (`HeroPushSession`): this
+        // builder is a struct and cannot hold it, so the session keeps itself
+        // alive until it closes, leases the stack's delegate slot (SAVED, not
+        // assumed nil — a profile owns the slot through its own slide dismissal
+        // before it pushes anything, and restoring nil orphaned it), and runs
+        // ONE close-out for a return AND a reversed push. The reversed push
+        // used to restore the dock and nothing else, leaking the whole flight.
+        let session = HeroPushSession(
+            source: source, destination: flyable, on: nav, retainsItself: true
+        )
+        let transition = session.controller
         // The pushed feed owns its dismissal grab, exactly as it does when the
         // For You grid opens it — otherwise the stack's edge gesture and the
         // flight's own grab both try to drive one pop.
         (destination as? SnapFeedViewController)?.zoomOwnsInteractiveDismissal = true
 
-        // This builder is a struct, so it cannot hold the transition alive.
-        // The retainer does, and the transition retains the closure that holds
-        // the retainer — a cycle that lasts exactly as long as the flight and
-        // is broken by the return leg. The alternative was an associated object
-        // on the presenter, which hides the lifetime rather than stating it.
+        // The card close armed beside the flight and its landing, kept for as
+        // long as the session (the close holds its landing weakly).
         let retainer = HeroTransitionRetainer()
-        retainer.transition = transition
-        // SAVED, not assumed nil. The presenter may already own the stack's
-        // delegate — a profile installs an `InteractiveSlideDismissal` as one
-        // before it pushes anything — and restoring nil orphaned it: the
-        // object still believed it was installed, its pan still began and
-        // called `popViewController`, but with no delegate UIKit never asked
-        // for the interaction controller. The pop ran instantly instead of
-        // following the finger, and every grab above it stayed broken because
-        // nothing ever put the delegate back.
-        let previousDelegate = nav.delegate
-        // ⚠️ ONE CLOSE-OUT FOR EVERY END OF THE FLIGHT. It ran only on a
-        // completed return (`onSourceReturned`, a `didShow`). A push caught
-        // mid-air and dragged back completes nothing, so it reported only to
-        // `onPresentationCancelled`, which restored the dock and nothing else:
-        // the retainer cycle (controller, source, card close) leaked, and the
-        // stack's delegate stayed on the dead chain for the next opening to
-        // capture as the one to restore.
-        //
-        // The slot goes back only if it is still this flight's (the flight,
-        // or the card close forwarding to it); a screen that took it since
-        // owns it.
-        let closeOut: () -> Void = { [weak nav, weak previousDelegate, weak retainer] in
-            if let nav, let retainer,
-               nav.delegate == nil || nav.delegate === retainer.transition
-                || nav.delegate === retainer.cardClose {
-                nav.delegate = previousDelegate
-            }
+        session.onClose = { [weak nav] _ in
             origin.setConcealed(false)
-            // Released a turn LATER: this runs inside a delegate callback of
-            // one of these very objects (the flight's `didShow`, which the card
-            // close forwards from its own and then keeps executing). Dropping
-            // the last reference here would free an object mid-method.
-            let released = (retainer?.transition, retainer?.cardClose, retainer?.cardCloseLanding)
-            retainer?.cardClose = nil
-            retainer?.cardCloseLanding = nil
-            retainer?.transition = nil
+            // Released a turn later with the session: the close-out runs
+            // inside the card close's own forwarded `didShow`.
+            let released = (retainer.cardClose, retainer.cardCloseLanding)
+            retainer.cardClose = nil
+            retainer.cardCloseLanding = nil
             DispatchQueue.main.async { withExtendedLifetime(released) {} }
             // A BACKSTOP for the dock — the close's commit has normally shown
             // it already (below). Through UIKit, never an alpha.
             Self.restoreTabBar(on: nav)
         }
-        // The retainer is kept alive by THIS capture (the transition owns the
-        // closure, the retainer owns the transition) — the cycle the comment
-        // above describes, and the close-out is what breaks it.
-        transition.onSourceReturned = { withExtendedLifetime(retainer) { closeOut() } }
         // An abandoned grab leaves the post up — and never raised the dock,
         // which waits for a COMMITTED release, so there is nothing to undo.
         // ⚠️ BOTH AXES GO HOME TO THE TILE, including for a post opened from
@@ -426,14 +400,14 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // so the pan has something to attach to.
         transition.attachInteractiveDismissal(
             to: destination.view, axes: [.horizontal, .vertical]
-        ) { [weak nav, weak transition, weak retainer] in
+        ) { [weak nav, weak transition, weak session] in
             // ⚠️ NOT WHILE A CARD CLOSE HOLDS THE SLOT. It forwards a `.hero`
             // pop to this flight already, and taking the slot from it was
             // permanent: after a cancelled grab, paging to a text post and
             // dragging ran UIKit's plain pop (this controller refuses `.card`),
             // and the card close never heard a `didShow` again, so it leaked
             // on every committed grab, with the row it concealed.
-            if let transition, nav?.delegate !== retainer?.cardClose {
+            if let transition, session?.holdsDelegateSlot == false {
                 nav?.delegate = transition
             }
             // ⚠️ NOTHING ABOUT THE DOCK HERE any more. Grab-begin used to put
@@ -490,8 +464,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         #else
         nav.tabBarController?.setTabBarHidden(true, animated: true)
         #endif
-        transition.onPresentationCancelled = closeOut
-        nav.delegate = transition
+        session.takeDelegateSlot()
         nav.pushViewController(destination, animated: true)
         // ⚠️ AFTER THE PUSH, and that is the whole of whether it works. The
         // line above hands the stack's delegate to the flight, so a driver
@@ -503,7 +476,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // same ordering.
         if let cardLanding {
             Self.attachTileCardClose(
-                feed: destination, landing: cardLanding, on: nav, retainer: retainer
+                feed: destination, landing: cardLanding, on: nav,
+                retainer: retainer, session: session
             )
         }
     }
@@ -1011,10 +985,14 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         feed: UIViewController,
         landing: any CardCloseLanding,
         on nav: UINavigationController,
-        retainer: HeroTransitionRetainer
+        retainer: HeroTransitionRetainer,
+        session: HeroPushSession
     ) {
         let close = InteractiveSlideDismissal()
         retainer.cardClose = close
+        // It holds the stack's slot on the flight's behalf, so the session's
+        // close may take the slot back from it.
+        session.registerForwarder(close)
         // A landing that is not a screen has no other owner — see
         // `HeroTransitionRetainer.cardCloseLanding`. A screen needs no help.
         if landing is RowCardCloseLanding { retainer.cardCloseLanding = landing }
@@ -1337,14 +1315,11 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     }
 }
 
-/// Keeps a hero transition alive for the length of its flight.
-///
-/// `FeedFeatureBuilder` is a value type and a navigation controller's delegate
-/// is weak, so without this the transition would be released before the card
-/// left the ground.
+/// Keeps what is armed beside a hero flight — its card close and that close's
+/// landing — for as long as the flight. The flight itself is kept by its
+/// `HeroPushSession`; `FeedFeatureBuilder` is a value type and holds neither.
 @MainActor
 final class HeroTransitionRetainer {
-    var transition: ZoomTransitionController?
     /// The VERTICAL card-shaped close of a gallery-opened post — the way back
     /// for a page the viewer swiped onto that has no media to fly. Nil'd by
     /// both close-outs, because the flight's return and the escape's landing
