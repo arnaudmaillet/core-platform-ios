@@ -65,11 +65,6 @@ public final class WalletBadgeButton: UIButton {
 
     private let coinView = UIImageView()
     private let countLabel = UILabel()
-    /// The guest face's padlock, after the count (`update(lockedGift:)`).
-    private let lockView = UIImageView()
-    /// The count's trailing edge: the capsule's own, or the padlock's.
-    private var countToEdge: NSLayoutConstraint!
-    private var countToLock: NSLayoutConstraint!
     private let ringLayer = CAShapeLayer()
 
     /// The claim-waiting state as INTENT, separate from the layer's current
@@ -109,15 +104,7 @@ public final class WalletBadgeButton: UIButton {
         countLabel.textColor = .label
         countLabel.isUserInteractionEnabled = false
 
-        lockView.image = UIImage(
-            systemName: "lock.fill",
-            withConfiguration: UIImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
-        )
-        lockView.tintColor = .secondaryLabel
-        lockView.isUserInteractionEnabled = false
-        lockView.isHidden = true
-
-        for subview in [coinView, countLabel, lockView] {
+        for subview in [coinView, countLabel] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             addSubview(subview)
         }
@@ -127,13 +114,9 @@ public final class WalletBadgeButton: UIButton {
             // sm, not xs: the coin glyph fills its bounds edge-to-edge
             // (unlike the old currency glyph), so 4pt read as glued.
             countLabel.leadingAnchor.constraint(equalTo: coinView.trailingAnchor, constant: Spacing.sm),
+            countLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Spacing.sm),
             countLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            lockView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Spacing.sm),
-            lockView.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
-        countToEdge = countLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Spacing.sm)
-        countToLock = countLabel.trailingAnchor.constraint(equalTo: lockView.leadingAnchor, constant: -Spacing.xs)
-        countToEdge.isActive = true
         // 999, never required: the bar's first pass pins its item wrapper
         // with autoresizing constraints, and anything required loses to
         // that with a console break (the circular bar-button doctrine).
@@ -163,9 +146,8 @@ public final class WalletBadgeButton: UIButton {
     override public var intrinsicContentSize: CGSize {
         let icon = coinView.image?.size.width ?? 0
         let text = countLabel.intrinsicContentSize.width
-        let lock = lockView.isHidden ? 0 : Spacing.xs + (lockView.image?.size.width ?? 0)
         return CGSize(
-            width: ceil(Spacing.sm + icon + Spacing.sm + text + lock + Spacing.sm),
+            width: ceil(Spacing.sm + icon + Spacing.sm + text + Spacing.sm),
             height: Metrics.height
         )
     }
@@ -174,8 +156,21 @@ public final class WalletBadgeButton: UIButton {
     /// countdown always move together (they come from the same snapshot),
     /// so there is no half-updated frame.
     public func update(balance: Int, claimAvailable: Bool, claimProgress: ClaimProgress? = nil) {
-        setCount(balance, locked: false)
-        accessibilityHint = nil
+        // The count, in the app's one compact spelling; monospaced digits
+        // so a spend doesn't make the capsule tremble.
+        let before = intrinsicContentSize.width
+        countLabel.text = balance.formattedCompact()
+        invalidateIntrinsicContentSize()
+        // Only once INSTALLED (in a window): pre-install the item has never
+        // been measured, so the first install simply takes the right size —
+        // and a reinstall fired during a push would rebuild the trailing
+        // run mid-transition, which is its own flash.
+        if abs(intrinsicContentSize.width - before) > 0.5, window != nil {
+            // Async: the reinstall replaces bar items, and this update may
+            // already be running inside a bar layout pass.
+            DispatchQueue.main.async { [weak self] in self?.onFittedWidthChange?() }
+        }
+
         accessibilityLabel = claimAvailable
             ? "Wallet, \(balance) points, reward available"
             : "Wallet, \(balance) points"
@@ -199,42 +194,13 @@ public final class WalletBadgeButton: UIButton {
         applyRing()
     }
 
-    /// The guest face: the likes a guest has been handed and can't spend
-    /// until they sign up, with a padlock after the count. No pulse and no
-    /// ring — nothing here is claimable on a clock, and nothing counts down.
-    public func update(lockedGift amount: Int) {
-        setCount(amount, locked: true)
-        accessibilityLabel = "\(amount) likes waiting for you"
-        accessibilityHint = "Sign up to claim them"
-        setPulsing(false)
-        ringStandsFull = false
-        ringWindow = nil
-        applyRing()
-    }
-
-    /// Whether the padlock stands — a test seam, like `renderedCount`.
-    public var isLocked: Bool { !lockView.isHidden }
-
-    private func setCount(_ count: Int, locked: Bool) {
-        // The count, in the app's one compact spelling; monospaced digits
-        // so a spend doesn't make the capsule tremble.
-        let before = intrinsicContentSize.width
-        countLabel.text = count.formattedCompact()
-        if lockView.isHidden == locked {
-            lockView.isHidden = !locked
-            countToEdge.isActive = !locked
-            countToLock.isActive = locked
-        }
-        invalidateIntrinsicContentSize()
-        // Only once INSTALLED (in a window): pre-install the item has never
-        // been measured, so the first install simply takes the right size —
-        // and a reinstall fired during a push would rebuild the trailing
-        // run mid-transition, which is its own flash.
-        if abs(intrinsicContentSize.width - before) > 0.5, window != nil {
-            // Async: the reinstall replaces bar items, and this update may
-            // already be running inside a bar layout pass.
-            DispatchQueue.main.async { [weak self] in self?.onFittedWidthChange?() }
-        }
+    /// The guest face: the welcome gift's likes, which a guest can't spend
+    /// until they sign up. The count with the claim-ready pulse — a claim IS
+    /// waiting; the lock is on the sheet's Claim button, where the claiming
+    /// happens, not here.
+    public func update(guestGift amount: Int) {
+        update(balance: amount, claimAvailable: amount > 0)
+        accessibilityLabel = "Wallet, \(amount) likes waiting for you"
     }
 
     override public func didMoveToWindow() {

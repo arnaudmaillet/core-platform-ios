@@ -76,7 +76,7 @@ final class WalletBadgeInstaller: NSObject {
         super.init()
 
         badge.addAction(
-            UIAction { [weak self] _ in self?.badgeTapped() },
+            UIAction { [weak self] _ in self?.presentSheet() },
             for: .primaryActionTriggered
         )
         badge.onFittedWidthChange = { [weak self] in
@@ -175,7 +175,7 @@ final class WalletBadgeInstaller: NSObject {
         if let welcome, !welcome.gate.isMember {
             // 0 once this device's gift is spent: a guest still sees what an
             // account would hold, never a wallet that isn't theirs.
-            badge.update(lockedGift: welcome.gift.lockedAmount ?? 0)
+            badge.update(guestGift: welcome.gift.lockedAmount ?? 0)
             if let growsAt = welcome.gift.nextGrowthAt { wake(at: growsAt) }
             return
         }
@@ -201,18 +201,6 @@ final class WalletBadgeInstaller: NSObject {
         }
         RunLoop.main.add(timer, forMode: .common)
         claimUnlockTimer = timer
-    }
-
-    /// A guest's tap asks them to sign up — the gift is theirs once they have,
-    /// and the sheet then opens on the wallet it was credited to.
-    private func badgeTapped() {
-        guard let welcome, !welcome.gate.isMember else {
-            presentSheet()
-            return
-        }
-        Task { @MainActor [weak self] in
-            if await welcome.gate.requireMember(for: .claim) { self?.presentSheet() }
-        }
     }
 
     func presentSheet() {

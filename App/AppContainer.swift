@@ -360,7 +360,8 @@ final class AppContainer {
                 self.feedFeature.presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)
             },
             countries: countryAccess,
-            stakePacks: stakePacks
+            stakePacks: stakePacks,
+            welcome: welcomeGiftFace
         ).wrappedInSheet()
     }
 

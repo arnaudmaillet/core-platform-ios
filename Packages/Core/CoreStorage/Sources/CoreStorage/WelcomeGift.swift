@@ -5,9 +5,10 @@ import Foundation
 ///
 /// A guest is handed `Policy.firstLaunch` likes the first time the app opens
 /// without an account, and the day's claim amount on each of the next
-/// `Policy.dailyDays` days. None of it is spendable: the pile stands LOCKED in
-/// the balance badge until the guest signs up, and signing up credits it to
-/// the wallet once — once per device, whoever signs in.
+/// `Policy.dailyDays` days. None of it is spendable: the balance badge shows
+/// the pile, the wallet sheet's Claim button stands locked on it until the
+/// guest signs up, and signing up credits it to the wallet once — once per
+/// device, whoever signs in.
 ///
 /// No countdown, no expiry, no "last chance": the pile simply stops growing
 /// after the last day and waits (a dark-pattern line, DSA Art. 25).
