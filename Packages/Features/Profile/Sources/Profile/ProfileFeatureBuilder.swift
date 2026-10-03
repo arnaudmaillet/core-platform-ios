@@ -144,7 +144,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             // profile action, and it is safe at any stack depth.
             makeSettingsViewController: onLogout.flatMap { onLogout in
                 account.map { account in
-                    { [switching, accountSessions] in
+                    { [switching, accountSessions, imagePipeline] in
                         SettingsViewController(
                             switching: switching,
                             switcher: makeSwitcherFactory(),
@@ -161,6 +161,20 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                         SecuritySettingsViewController(
                                             viewModel: SecuritySettingsViewModel(sessions: $0),
                                             onSignedOutEverywhere: onLogout
+                                        )
+                                    }
+                                case .safety:
+                                    (repository as? any BlockedAccountsManaging).map { blocks in
+                                        SafetySettingsViewController(
+                                            destinations: [
+                                                .init(title: "Blocked Accounts", symbolName: "nosign") {
+                                                    BlockedAccountsViewController(
+                                                        viewModel: BlockedAccountsViewModel(blocks: blocks),
+                                                        imagePipeline: imagePipeline
+                                                    )
+                                                }
+                                            ],
+                                            planned: ["Muted accounts", "Hidden words and comment filters", "Your reports", "Account status and appeals"]
                                         )
                                     }
                                 case .privacy:

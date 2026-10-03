@@ -1,6 +1,7 @@
 import Connect
 import CoreContracts
 import Foundation
+import SwiftProtobuf
 
 /// Fake of social_graph.v1 over the shared dataset. Enough to make the profile
 /// surface work offline: a relation status (so Follow/Message buttons appear),
@@ -15,6 +16,8 @@ public final class MockSocialGraphService: @unchecked Sendable {
     /// reads to offer Unblock instead of Block.
     private let lock = NSLock()
     private var blocksByActorID: [String: Set<String>] = [:]
+    /// When each block was placed ("actor|target"), for `ListBlocks`.
+    private var blockDates: [String: Date] = [:]
     /// Follow edges added and torn down this session, overlaying the dataset's
     /// immutable graph.
     ///
@@ -86,6 +89,9 @@ public final class MockSocialGraphService: @unchecked Sendable {
             response.success = true
             return .success(response)
         }
+        bff.register(path: "/social_graph.v1.SocialGraphService/ListBlocks") { [self] (request: SocialGraph_V1_ListBlocksRequest) in
+            listBlocks(request)
+        }
         bff.register(path: "/social_graph.v1.SocialGraphService/Unblock") { [self] (request: SocialGraph_V1_UnblockRequest) in
             setBlocked(false, actorID: request.actorID, targetID: request.targetID)
             var response = SocialGraph_V1_CommandResponse()
@@ -153,9 +159,29 @@ public final class MockSocialGraphService: @unchecked Sendable {
         lock.withLock {
             if blocked {
                 blocksByActorID[actorID, default: []].insert(targetID)
+                blockDates["\(actorID)|\(targetID)"] = Date()
             } else {
                 blocksByActorID[actorID]?.remove(targetID)
+                blockDates["\(actorID)|\(targetID)"] = nil
             }
+        }
+    }
+
+    /// Newest first, one page: the viewer's block list is small, so the mock
+    /// never hands out a page token.
+    private func listBlocks(_ request: SocialGraph_V1_ListBlocksRequest) -> Result<SocialGraph_V1_ListBlocksResponse, ConnectError> {
+        lock.withLock {
+            var response = SocialGraph_V1_ListBlocksResponse()
+            response.blocks = (blocksByActorID[request.blockerID] ?? [])
+                .map { target in (target, blockDates["\(request.blockerID)|\(target)"] ?? .distantPast) }
+                .sorted { $0.1 > $1.1 }
+                .map { target, date in
+                    var summary = SocialGraph_V1_BlockSummary()
+                    summary.blockeeID = target
+                    summary.blockedAt = .init(date: date)
+                    return summary
+                }
+            return .success(response)
         }
     }
 
