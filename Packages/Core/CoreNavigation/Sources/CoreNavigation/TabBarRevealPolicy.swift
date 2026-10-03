@@ -361,6 +361,12 @@ public extension UINavigationController {
                 guard let self else { return }
                 self.whenAtRest(work)
             }
+        }
+    }
+}
+
+@MainActor
+public extension UINavigationController {
     /// Whether a push or pop of THIS stack is running — not merely any
     /// transition `transitionCoordinator` reports.
     ///
