@@ -190,6 +190,8 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                                 + ["Statements of reasons and appeals"]
                                         )
                                     }
+                                case .appPreferences:
+                                    AppPreferencesViewController()
                                 case .help:
                                     SettingsLinksViewController.help(links: .current)
                                 case .legal:

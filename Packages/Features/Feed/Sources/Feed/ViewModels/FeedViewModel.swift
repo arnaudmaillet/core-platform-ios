@@ -2,6 +2,7 @@ import CoreContracts
 import CoreModels
 import CoreNavigation
 import CoreRealtime
+import CoreStorage
 import Foundation
 
 /// The slice of the realtime client the feed consumes; a seam for tests.
@@ -109,6 +110,15 @@ public final class FeedViewModel {
     private let subtitleBuilder = SubtitleCommentBuilder()
     private var streamsByPost: [PostID: CommentStreams] = [:]
     private var streamLoads: [PostID: Task<Void, Never>] = [:]
+    /// Settings → App Preferences: band and subtitle switches, muted words
+    /// and accounts (#410). Applied every time a post's streams are built.
+    private let commentPreferences: MediaCommentPreferencesStore
+    /// The loaded comments behind each built stream, so a preference change
+    /// rebuilds every stream in place instead of waiting for a reload.
+    private var entriesByPost: [PostID: [CommentEntry]] = [:]
+    /// Unregisters itself when the view model goes: a block observer's
+    /// token is not `Sendable`, so the nonisolated `deinit` can't touch it.
+    private let preferencesObservation = NotificationObservation()
 
     public init(
         repository: any FeedProviding,
@@ -117,8 +127,10 @@ public final class FeedViewModel {
         realtime: (any FeedRealtimeSubscribing)? = nil,
         composedPosts: ComposedPostChannel? = nil,
         router: (any Router)? = nil,
+        commentPreferences: MediaCommentPreferencesStore = .standard,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
+        self.commentPreferences = commentPreferences
         self.repository = repository
         self.engagementProvider = engagementProvider
         self.commentsProvider = commentsProvider
@@ -126,6 +138,11 @@ public final class FeedViewModel {
         self.composedPosts = composedPosts
         self.router = router
         self.now = now
+        preferencesObservation.token = NotificationCenter.default.addObserver(
+            forName: .mediaCommentPreferencesDidChange, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.rebuildCommentStreams() }
+        }
     }
 
     deinit {
@@ -255,15 +272,38 @@ public final class FeedViewModel {
         if ProcessInfo.processInfo.arguments.contains("-no-comment-seed") { return .empty }
         #endif
         guard let entries = commentsProvider?.cachedTopComments(for: id), !entries.isEmpty else { return .empty }
-        let reactions = tickerBuilder.build(entries, postID: id)
-        let seed = CommentStreams(
-            reactions: reactions,
-            subtitles: subtitleBuilder.build(entries, postID: id, tickerIsRendering: !reactions.isEmpty),
-            commentCount: entries.count,
-            isLoaded: false
-        )
+        let seed = makeStreams(from: entries, for: id, isLoaded: false)
         seededStreams[id] = seed
         return seed
+    }
+
+    /// The band and the zone for one post, under the viewer's preferences.
+    ///
+    /// Muted words and accounts leave first, so the band's engagement gate
+    /// counts only what may actually ride. ORDER MATTERS after that: the
+    /// band resolves first, and whether it renders tells the zone how much
+    /// of the post it must speak for — a band switched off, or below its
+    /// gate, hands every comment to the zone. A zone switched off renders
+    /// nothing but never changes what the band carries.
+    func makeStreams(from entries: [CommentEntry], for id: PostID, isLoaded: Bool = true) -> CommentStreams {
+        let preferences = commentPreferences.preferences
+        let visible = entries.filter { !preferences.mutes(body: $0.body, authorHandle: $0.authorHandle) }
+        let reactions = preferences.showsReactionBand ? tickerBuilder.build(visible, postID: id) : []
+        let subtitles = preferences.showsSubtitles
+            ? subtitleBuilder.build(visible, postID: id, tickerIsRendering: !reactions.isEmpty)
+            : []
+        return CommentStreams(reactions: reactions, subtitles: subtitles, commentCount: entries.count, isLoaded: isLoaded)
+    }
+
+    /// A preference changed: rebuild every stream from the comments already
+    /// in hand and push the loaded ones to the cells showing them.
+    private func rebuildCommentStreams() {
+        seededStreams.removeAll()
+        for (id, entries) in entriesByPost {
+            let streams = makeStreams(from: entries, for: id)
+            streamsByPost[id] = streams
+            onCommentStreamsChange?(id, streams)
+        }
     }
 
     private var seededStreams: [PostID: CommentStreams] = [:]
@@ -286,21 +326,15 @@ public final class FeedViewModel {
         // Silent on failure: the load slot frees up, so the next activation
         // of this page retries.
         guard let entries = try? await commentsProvider.loadComments(for: id) else { return }
-        // ORDER MATTERS: the band resolves first, and whether it came back
-        // with a queue is what tells the zone how much of the post it has to
-        // speak for. A band below its engagement gate renders nothing, so
-        // the zone must then carry every comment — otherwise a sparse post's
-        // comments are claimed by a surface that never shows them, which is
-        // exactly how the zone ended up blank on posts that had a
-        // conversation.
-        let reactions = tickerBuilder.build(entries, postID: id)
-        let streams = CommentStreams(
-            reactions: reactions,
-            subtitles: subtitleBuilder.build(
-                entries, postID: id, tickerIsRendering: !reactions.isEmpty
-            ),
-            commentCount: entries.count
-        )
+        // ORDER MATTERS inside `makeStreams`: the band resolves first, and
+        // whether it came back with a queue is what tells the zone how much
+        // of the post it has to speak for. A band below its engagement gate
+        // renders nothing, so the zone must then carry every comment —
+        // otherwise a sparse post's comments are claimed by a surface that
+        // never shows them, which is exactly how the zone ended up blank on
+        // posts that had a conversation.
+        entriesByPost[id] = entries
+        let streams = makeStreams(from: entries, for: id)
         streamsByPost[id] = streams
         onCommentStreamsChange?(id, streams)
     }
@@ -522,5 +556,14 @@ public final class FeedViewModel {
 
     private func emit() {
         onStateChange?(RenderState(phase: phase, items: items, isColdRefreshing: isColdRefreshing))
+    }
+}
+
+/// Holds a block-based `NotificationCenter` token and removes it on release.
+final class NotificationObservation: @unchecked Sendable {
+    var token: NSObjectProtocol?
+
+    deinit {
+        if let token { NotificationCenter.default.removeObserver(token) }
     }
 }

@@ -1,4 +1,5 @@
 import DesignSystem
+import CoreStorage
 import EmoteKit
 import MediaCore
 import UIKit
@@ -47,7 +48,21 @@ final class SnapCommentTickerView: UIView {
     /// the lanes drift out of phase instead of moving as a block.
     /// Calibrated low: the band is a micro-reaction dump and should glide
     /// calmly under the media, not race across it.
-    static let laneSpeeds: [CGFloat] = [22, 26]
+    static let baseLaneSpeeds: [CGFloat] = [22, 26]
+    /// The viewer's speed choice (Settings → App Preferences, #410), read
+    /// when a stream starts — never mid-flight, where a changed speed would
+    /// break the geometry the spawns are spaced by.
+    private(set) static var speedScale: CGFloat = 1
+    /// The viewer's bubble opacity, read with the speed.
+    private(set) static var bubbleOpacity: CGFloat = 1
+    static var laneSpeeds: [CGFloat] { baseLaneSpeeds.map { $0 * speedScale } }
+
+    /// Reads the band's appearance from the device preferences.
+    static func refreshAppearance(from store: MediaCommentPreferencesStore = .standard) {
+        let preferences = store.preferences
+        speedScale = CGFloat(preferences.bandSpeed.scale)
+        bubbleOpacity = CGFloat(preferences.bandOpacity)
+    }
     /// Per-lane phase, in seconds of travel. The pre-fill shifts each lane's
     /// bubble train left by `phase × speed` points — as if that lane had
     /// entered the loop this much earlier — so the lanes land visibly out of
@@ -420,6 +435,7 @@ final class SnapCommentTickerView: UIView {
     }
 
     private func startIfNeeded(fadingIn: Bool = false) {
+        Self.refreshAppearance()
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-ticker-trace") {
             print(String(format: "[ticker] %.3f startIfNeeded active=%@ mode=%@ queue=%d width=%.0f held=%@ window=%@ alpha=%.2f hidden=%@", CACurrentMediaTime(), isActive ? "Y" : "N", "\(mode)", queue.count, bounds.width, isHeldForFlight ? "Y" : "N", window != nil ? "Y" : "N", alpha, isHidden ? "Y" : "N"))
@@ -589,6 +605,7 @@ final class SnapCommentTickerView: UIView {
     ) -> Bubble {
         let view = dequeueBubble()
         view.configure(text: item.text, avatarURL: item.avatarURL, pipeline: imagePipeline)
+        view.alpha = Self.bubbleOpacity
         view.frame = CGRect(
             x: leftEdge,
             y: CGFloat(lane) * (bubbleHeight + Self.laneSpacing),
