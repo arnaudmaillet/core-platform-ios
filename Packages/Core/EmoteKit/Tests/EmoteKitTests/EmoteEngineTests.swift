@@ -217,17 +217,34 @@ struct EmoteEngineTests {
     /// redraw (`EmoteBakeSession.waitForBirthRedraw`), the main thread is
     /// BLOCKED here while the whole sheet is drawn; were a single frame drawn
     /// on it, this would time out.
+    ///
+    /// ⚠️ **BLOCK ONLY ONCE THIS BAKE IS DRAWING.** Before that, the bake
+    /// NEEDS the main thread (the birth redraw), and blocking it is a
+    /// deadlock until the timeout — the CI flake (runs 37073903752,
+    /// 37121583833): `EmoteMapIconsTests` was drawing 🤗@128 on the SHARED
+    /// queue, so `drawingJobs` was its job, not this one, and 🥶 was still
+    /// queued behind it, its birth redraw not yet run; or a slow runner
+    /// outlasted the 2,000-sleep wait and the main thread was blocked anyway.
+    /// So this bake gets a queue of its own — its counter is its own job —
+    /// and the wait for its drawing is an async one, bounded by a clock,
+    /// that never blocks the main thread on a bake that has not got there.
     @Test func aBakeDrawsNoFrameOnTheMainThread() async throws {
         let cold = try emote("noto:1f976")
         let animation = try #require(await EmoteEngine.bundledAnimation(for: cold))
         let plan = EmoteBakePlan.make(seconds: animation.duration, side: 48)
+        let bakeQueue = EmoteBakeQueue()
         let done = DispatchSemaphore(value: 0)
         let result = BakeBox()
         Task.detached {
-            result.set(await EmoteBakeQueue.shared.bake(animation, plan: plan))
+            result.set(await bakeQueue.bake(animation, plan: plan))
             done.signal()
         }
-        for _ in 0..<2000 where EmoteBakeQueue.shared.drawingJobs == 0 && result.value == nil {
+        let deadline = ContinuousClock.now + .seconds(120)
+        while bakeQueue.drawingJobs == 0, !result.isSet {
+            guard ContinuousClock.now < deadline else {
+                Issue.record("the bake never started drawing, with the main thread free")
+                return
+            }
             try await Task.sleep(for: .milliseconds(1))
         }
         #expect(Self.block(on: done, seconds: 60), "the bake did not finish while the main thread was blocked")
@@ -326,8 +343,11 @@ struct EmoteEngineTests {
 final class BakeBox: @unchecked Sendable {
     private let lock = NSLock()
     private var stored: EmoteBakeResult?
+    private var finished = false
     var value: EmoteBakeResult? { lock.withLock { stored } }
-    func set(_ result: EmoteBakeResult?) { lock.withLock { stored = result } }
+    /// Whether the bake has returned — nil included.
+    var isSet: Bool { lock.withLock { finished } }
+    func set(_ result: EmoteBakeResult?) { lock.withLock { stored = result; finished = true } }
 }
 
 /// The drawer bakes used before they moved off the main thread: a

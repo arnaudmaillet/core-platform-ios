@@ -221,6 +221,14 @@ public struct AccountProfile: Equatable, Sendable {
     }
 }
 
+/// Public or private, for the ACTIVE profile (Settings → Privacy, #388).
+/// Per profile, like the switcher: making @maya private leaves @maya.work
+/// public.
+public protocol ProfileVisibilityManaging: Sendable {
+    func activeProfileIsPrivate() async throws -> Bool
+    func setActiveProfilePrivate(_ isPrivate: Bool) async throws
+}
+
 /// Multi-profile support for the switcher: list the account's profiles, read the
 /// active one, and switch it. "Active" is scoped to the identity surfaces the
 /// `ProfileRepository` drives (the profile screen + the map avatar) — switching
@@ -251,7 +259,7 @@ public protocol ProfileSwitching: Sendable {
 // same method, declared again in CoreModels so a feed row's "..." menu can
 // unfollow without importing this package. `SocialGraphReading` is
 // `relationship(for:)` folded to the one question a follow "+" asks.
-public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileViewerResolving,
+public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisibilityManaging, ProfileViewerResolving,
     SocialGraphWriting, SocialGraphReading {
     private let profileClient: any Profile_V1_ProfileServiceClientInterface
     private let counterClient: any Counter_V1_CounterServiceClientInterface
@@ -592,6 +600,23 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileViewe
         // (profile screen) and `viewerAvatarImage` (map avatar) both resolve
         // through this, so they refresh to the chosen profile on their next read.
         viewerProfileID = id
+    }
+
+    // MARK: - ProfileVisibilityManaging
+
+    public func activeProfileIsPrivate() async throws -> Bool {
+        let view = try await fetchProfileView(id: try await resolveViewerProfileID())
+        return view.visibility == .private
+    }
+
+    public func setActiveProfilePrivate(_ isPrivate: Bool) async throws {
+        var request = Profile_V1_SetVisibilityRequest()
+        request.profileID = try await resolveViewerProfileID().rawValue
+        request.visibility = isPrivate ? .private : .public
+        let response = await profileClient.setVisibility(request: request, headers: [:])
+        if case .failure(let error) = response.result {
+            throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+        }
     }
 
     // MARK: - Social counters
