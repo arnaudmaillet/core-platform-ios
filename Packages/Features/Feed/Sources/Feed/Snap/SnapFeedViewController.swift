@@ -225,9 +225,17 @@ final class SnapFeedViewController: UIViewController {
     /// reaches `zoomTransitionWillBegin` / `zoomTransitionDidEnd`: the
     /// installer raises this before the push and `viewDidAppear` — the push's
     /// landing — lowers it.
-    private var isAwaitingRevealPresentation = false
+    private(set) var isAwaitingRevealPresentation = false
 
     public func beginRevealPresentation() {
+        // ⚠️ AN OPENING ONLY. The installer that calls this also builds every
+        // card-shaped CLOSE's geometry, and a close is staged while this screen
+        // is on screen. Raised there, nothing lowered it (the feed never
+        // reappears after a committed close), and For You reuses this
+        // controller: the next opening replayed the comment band's entrance,
+        // deferred the author pill and skipped the comments prewarm. An
+        // opening is the one case where the screen is not yet in a window.
+        guard viewIfLoaded?.window == nil else { return }
         isAwaitingRevealPresentation = true
     }
 
@@ -665,6 +673,12 @@ final class SnapFeedViewController: UIViewController {
                          navigationController?.transitionCoordinator == nil ? "none" : "LIVE"))
         }
         #endif
+        // ⚠️ NOT WHILE A TRANSITION RUNS. UIKit drops a pop requested
+        // mid-transition, silently, but everything before it here already ran:
+        // the dock rose for a close that never happened (and stayed over the
+        // feed when it was the present still landing), and the owner restaged
+        // for it. The chevron is simply not live until the stack is at rest.
+        if let nav = navigationController, nav.transitionCoordinator != nil { return }
         onWillCloseFeed?()
         if let nav = navigationController, nav.viewControllers.first !== self {
             revealDockBeforePop(on: nav)
@@ -825,8 +839,13 @@ final class SnapFeedViewController: UIViewController {
         super.viewDidAppear(animated)
         // The backstop, on a return only: whatever a transition left, a feed
         // on screen has no dock under it.
+        //
+        // On UIKit's own animation: this is reached on a REVERSED close, where
+        // the chevron raised the dock before the pop and the flight was caught
+        // and thrown back. Hidden without animation, the dock that had been
+        // rising over the returning feed vanished in a single frame.
         if hasAppeared, isClosable, let tabBarController, !tabBarController.isTabBarHidden {
-            tabBarController.setTabBarHidden(true, animated: false)
+            tabBarController.hideTabBarNatively()
         }
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-pill-probe") { authorIdentityView.debugProbe("didAppear") }
@@ -5986,6 +6005,10 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // controller would then start its next flight already believing it is
         // in one.
         isAwaitingZoomPresentation = false
+        // A reused screen starts its next visit with no flight pending and
+        // nothing hidden, whatever the last visit's flight left behind.
+        isAwaitingRevealPresentation = false
+        view.alpha = 1
         donatedLiveView = nil
         flightChrome = nil
         pageDriveStartOffset = nil

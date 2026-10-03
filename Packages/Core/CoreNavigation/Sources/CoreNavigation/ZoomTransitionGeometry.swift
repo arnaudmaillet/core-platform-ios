@@ -118,6 +118,22 @@ public enum ZoomTransitionGeometry {
         )
     }
 
+    /// The page rect a flight lands on (present) or lifts from (dismiss):
+    /// the destination's measurement when it is a real rect, the container's
+    /// bounds when it is not.
+    ///
+    /// ⚠️ ONE RULE FOR ALL THREE LEGS. `ZoomFlight.build` assigns this to
+    /// the card's frame, and a live surface is sized against the card, so an
+    /// empty rect flies a zero-sized card at the origin — measured once on the
+    /// tap-back (`cardBounds={{0,0},{0,0}}`). Only the tap-back had the
+    /// fallback; the present and the grab trusted the measurement as it came.
+    /// Non-finite components (a layout that divided by zero) fall back as
+    /// well: a NaN frame is not a smaller rect, it is no rect at all.
+    public static func pageFrame(measured: CGRect?, container: CGRect) -> CGRect {
+        guard let measured, !measured.isEmpty, measured.isFinite else { return container }
+        return measured
+    }
+
     public static func centeredFallback(in bounds: CGRect, side: CGFloat = 56) -> CGRect {
         CGRect(
             x: bounds.midX - side / 2,
@@ -246,5 +262,13 @@ public enum ZoomTransitionGeometry {
         if velocityTowardEnd >= flickVelocity { return true }
         if velocityTowardEnd <= -flickVelocity { return false }
         return caughtFraction >= caughtThreshold
+    }
+}
+
+extension CGRect {
+    /// Every component a real number — what `isNull` and `isInfinite` do not
+    /// say about a rect built from a NaN.
+    var isFinite: Bool {
+        origin.x.isFinite && origin.y.isFinite && size.width.isFinite && size.height.isFinite
     }
 }

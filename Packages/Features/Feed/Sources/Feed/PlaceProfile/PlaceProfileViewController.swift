@@ -115,6 +115,8 @@ final class PlaceProfileViewController: UIViewController {
     /// to "hand it over".
     private var selectorAccessory: SelectorAccessory?
     private var pager: HorizontalPagerView!
+    /// The grab's hold on the pager — see `setContentScrollEnabled`.
+    private var pagerLock = ScrollLock()
 
     /// The floating header: banner + metrics + tab bar in one host that
     /// RIDES THE ACTIVE PAGE'S OFFSET (the profile page's mechanics, adopted
@@ -285,6 +287,12 @@ final class PlaceProfileViewController: UIViewController {
         // Whatever happened above, nothing on THIS page may be hidden while it
         // is the screen: the same blanket rule the map applies to its markers.
         clearLandingConcealment()
+        // The tap's playback claim (`ForYouGridPage.open` focuses the tapped
+        // post) ends with the round trip, as the other grid hosts end it in
+        // their own `viewDidAppear`. This page never did, so the last post
+        // opened from it stayed pinned first in the ranking for good.
+        page.endPlaybackHandoff()
+        activityPage.endPlaybackHandoff()
         // The flight that left here is over, whichever way it ended. A stale
         // departure would answer for the NEXT close — including the map's Case
         // B, whose whole point is that it has no departure on this page.
@@ -1882,7 +1890,10 @@ final class PlaceProfileViewController: UIViewController {
     private func openTile(
         at index: Int, in grid: ForYouGridPage?, showingComments: Bool = false
     ) {
-        guard let grid else { return }
+        // One opening at a time — before anything below claims the tile.
+        guard let grid,
+              navigationController.map({ FeedFeatureBuilder.canOpen(from: self, on: $0) }) ?? true
+        else { return }
         let posts = grid.posts
         guard posts.indices.contains(index) else { return }
         let tapped = posts[index]
@@ -2813,7 +2824,16 @@ extension PlaceProfileViewController: ZoomTransitionDestination {
 
     /// Freeze the tab pager while a grab drives, so the drag that is flying
     /// the page home cannot also page it sideways.
+    ///
+    /// RESTORED, not re-enabled: paging can be off for its own reasons (a
+    /// multi-selection in progress), and a grab ending must hand back the
+    /// state it found — the feed's `ScrollLock` rule.
     func setContentScrollEnabled(_ enabled: Bool) {
-        pager.isPagingEnabled = enabled
+        guard let pager else { return }
+        if enabled {
+            pagerLock.thaw(pager.pagingScrollView)
+        } else {
+            pagerLock.freeze(pager.pagingScrollView)
+        }
     }
 }

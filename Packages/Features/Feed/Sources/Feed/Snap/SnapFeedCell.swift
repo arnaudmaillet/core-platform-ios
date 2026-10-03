@@ -2381,6 +2381,18 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// separate `play` to blank the screen.
     func adoptLiveRenderView(_ view: VideoRenderView) {
         defersPlaybackForFlight = false
+        // ⚠️ ASKED BEFORE THE SWAP, not after. A card can land carrying a
+        // player this page's pool does not own — a map pin mirrors the MAPS
+        // pool's preview, which the map retires the moment the feed shows. The
+        // swap used to happen first, so the page showed that dead surface and
+        // its own (playing) one was thrown away; the post opened from a live
+        // pin sat blank until paged away and back. Refusing keeps the page's
+        // own surface, which is already rendering or about to.
+        if VideoRenderFlags.usesSampleBufferLayer, let videoPlayback,
+           !videoPlayback.canAdoptSurface(view) {
+            refreshMediaLoader()
+            return
+        }
         // Read BEFORE the restore: it is the surface the restore throws away,
         // and under N-surface it is the one holding this page's pool loan.
         let replaced = mediaCard.renderView

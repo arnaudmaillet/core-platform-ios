@@ -190,7 +190,15 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         }
     }
 
-    private func beginGrab() {
+    /// Disarms a grab that has no transition: the driver can begin again,
+    /// and the pager scrolls again.
+    private func abandonUnstagedGrab() {
+        isInteracting = false
+        destination?.setContentScrollEnabled(true)
+    }
+
+    /// Internal (not private) so the arming rule is testable without a finger.
+    func beginGrab() {
         // `context == nil` also gates the debug path: a new grab must never
         // begin while a previous transition is still completing.
         guard !isInteracting, context == nil else { return }
@@ -217,6 +225,9 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         let container = context.containerView
         guard let fromView = context.view(forKey: .from), let source else {
             context.completeTransition(false)
+            // `beginGrab` armed this driver and froze the pager before UIKit
+            // got here; nothing will release a grab that never staged.
+            abandonUnstagedGrab()
             return
         }
         // ⚠️ SETUP WITH VIEW ANIMATIONS OFF — see `ZoomAnimator.present` for the
@@ -237,13 +248,17 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
             container.insertSubview(toView, at: 0)
         }
 
-        let pageFrame = destination?.zoomTargetFrame(in: container) ?? container.bounds
         // Settle the presenter's own layout FIRST — it was only just
         // reinstalled above — and only then let the source move within it. The
         // order matters: a grid asked to scroll a tile into view against stale
         // bounds computes the wrong offset, and every rect read afterwards
         // inherits the error.
         container.layoutIfNeeded()
+        // The page rect too is read AFTER that layout, as the tap-back reads
+        // it, with the same fallback for a rect that is not one.
+        let pageFrame = ZoomTransitionGeometry.pageFrame(
+            measured: destination?.zoomTargetFrame(in: container), container: container.bounds
+        )
         source.zoomSourceWillStageDismissal()
         // ⚠️ THE GRAB ASSERTS THE CONCEALMENT RATHER THAN INHERITING IT.
         //
@@ -627,8 +642,17 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     }
     #endif
 
-    private func releaseGrab(translation: CGPoint, velocity: CGPoint, ended: Bool, in view: UIView) {
-        guard isInteracting, let context, let flight else { return }
+    func releaseGrab(translation: CGPoint, velocity: CGPoint, ended: Bool, in view: UIView) {
+        guard isInteracting, let context, let flight else {
+            // A grab that armed but never got a transition to drive (the pop
+            // was refused, or another driver took it). Left armed, this driver
+            // refused every later pan (`!isInteracting` in its begin gate),
+            // the pager stayed frozen, and `ZoomTransitionController` handed
+            // this dead driver the NEXT pop of the feed, a chevron included,
+            // which then waited forever for pan events.
+            if isInteracting, context == nil { abandonUnstagedGrab() }
+            return
+        }
         isInteracting = false
         // Let go with the finger: the give eases out under the release spring.
         deformation?.release()

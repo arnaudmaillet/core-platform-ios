@@ -2846,6 +2846,9 @@ extension ProfileViewController {
     /// thread already up (`showingComments`, never set for a text post: its
     /// page IS its thread).
     func openGalleryPost(_ post: GalleryPost, stream: [GalleryPost], showingComments: Bool) {
+        // One opening at a time: a second tap while the first push is in the
+        // air pushed a second feed over it.
+        guard navigationController?.transitionCoordinator == nil else { return }
         let window = stream.isEmpty ? [post] : stream
         // ⚠️ EVERY tap goes through the hero seam, including the ones with
         // no hero to fly.

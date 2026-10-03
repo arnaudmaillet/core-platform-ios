@@ -106,6 +106,9 @@ final class ProfileGalleryGridView: UIView {
     /// The post whose twin is in the air: it must not claim a player while the
     /// flight is carrying that same media.
     private var heroFlyingPostID: PostID?
+    /// What the flight carries, so a cell configured mid-flight hides as much
+    /// as `setHeroConcealed` did.
+    private var heroFlyingCarry: PostGridListRowCell.HeroCarry = .media
     /// The chrome that remains over this page's content once the header has
     /// travelled — told by the owner, which is the only thing that knows.
     private var stickyTopOcclusion: CGFloat = 0
@@ -551,6 +554,13 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
                     ) ?? []
                 }
             }
+            // ⚠️ CONCEALMENT IS RE-APPLIED ON EVERY CONFIGURE, keyed by post,
+            // the For You grid's rule. A reload while a flight is up (the Saved
+            // tab refreshes on every appearance, which a close triggers)
+            // re-dequeues the flying post's cell, and an `isHidden` set on the
+            // previous instance does not follow it: the tile showed under the
+            // card landing on it. Also resets a recycled cell that was hidden.
+            cell.setHeroConcealed(post.id == heroFlyingPostID, carrying: heroFlyingCarry)
             return cell
         case .grid:
             let cell = collectionView.dequeueReusableCell(
@@ -559,6 +569,8 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
             cell.cornerRadius = ChaoticSliceLayout.harmonisedCornerRadius
             cell.configure(with: post, imagePipeline: imagePipeline)
             cell.onCoverLoaded = { [weak self] in self?.reconcileAutoplay() }
+            // Re-applied per configure — see the row above.
+            cell.isHidden = post.id == heroFlyingPostID
             return cell
         }
     }
@@ -888,6 +900,7 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
         carrying carry: PostGridListRowCell.HeroCarry = .media
     ) {
         heroFlyingPostID = concealed ? postID : nil
+        heroFlyingCarry = carry
         if !concealed { reconcileAutoplay() }
         guard let index = posts.firstIndex(where: { $0.id == postID }),
               let cell = collectionView.cellForItem(at: IndexPath(item: index, section: 0))

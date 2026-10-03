@@ -33,6 +33,9 @@ public final class InteractiveSlideDismissal: NSObject {
     /// dormant `ZoomTransitionController`, when a deep link pushes the timeline
     /// above a pin-opened feed) — restored on teardown.
     private weak var savedDelegate: (any UINavigationControllerDelegate)?
+    /// A delegate a re-assert displaced mid-transition, owed exactly the next
+    /// `didShow` — see `install(on:)`.
+    private weak var displacedDelegate: (any UINavigationControllerDelegate)?
 
     #if DEBUG
     /// Which axes this driver was armed for.
@@ -334,6 +337,20 @@ public final class InteractiveSlideDismissal: NSObject {
         if !hasCapturedSavedDelegate {
             savedDelegate = nav.delegate
             hasCapturedSavedDelegate = true
+        } else if let current = nav.delegate, current !== savedDelegate {
+            // ⚠️ A RE-ASSERT DISPLACES SOMEONE, and takes their news with it.
+            //
+            // The owner re-asserts on appearance, and the appearance a pop
+            // delivers runs INSIDE `completeTransition`, BEFORE the stack's
+            // delegate hears `didShow`. The delegate at that instant is the
+            // flight that is landing here: a post opened from this screen.
+            // Restoring the captured-once delegate is still right; dropping the
+            // displaced one's `didShow` is not. Its `onSourceReturned` never
+            // fired, so every post opened from the place page leaked its
+            // controller, retainer and card-close for the life of the process.
+            // The same contract `ZoomTransitionController.displacedDelegate`
+            // keeps, for exactly the next `didShow`.
+            displacedDelegate = current
         }
         nav.delegate = self
         navigationController = nav
@@ -344,6 +361,7 @@ public final class InteractiveSlideDismissal: NSObject {
             nav.delegate = savedDelegate
         }
         savedDelegate = nil
+        displacedDelegate = nil
         hasCapturedSavedDelegate = false
         hasSeenFeedOnStack = false
         navigationController = nil
@@ -695,6 +713,16 @@ extension InteractiveSlideDismissal: UINavigationControllerDelegate {
             print("[pop] didShow \(type(of: viewController))")
         }
         #endif
+        // The displaced flight first, once: its landing is what this
+        // `didShow` reports.
+        if let displaced = displacedDelegate {
+            displacedDelegate = nil
+            if displaced !== savedDelegate {
+                displaced.navigationController?(
+                    navigationController, didShow: viewController, animated: animated
+                )
+            }
+        }
         savedDelegate?.navigationController?(
             navigationController, didShow: viewController, animated: animated
         )

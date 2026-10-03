@@ -133,16 +133,15 @@ final class ExternalHeroZoomSource: ZoomTransitionSource {
     }
 
     func zoomHeroFrame(in container: UICoordinateSpace) -> CGRect {
-        if let frame = origin.frame(container) { return frame }
+        // ⚠️ ON SCREEN FIRST, as the For You grid's source asks it. The
+        // origin answers a rect for any REALIZED cell, and a collection
+        // realizes cells beyond its viewport (prefetching), so a tile scrolled
+        // just off screen still had a frame — and the card landed there, out
+        // of sight, instead of on the fallback.
+        if zoomSourceIsOnScreen, let frame = origin.frame(container) { return frame }
         // Off screen: collapse to the middle of the container rather than to a
         // rect the viewer cannot see.
-        let bounds = container.bounds
-        return CGRect(
-            x: bounds.midX - fallbackSide / 2,
-            y: bounds.midY - fallbackSide / 2,
-            width: fallbackSide,
-            height: fallbackSide
-        )
+        return ZoomTransitionGeometry.centeredFallback(in: container.bounds, side: fallbackSide)
     }
 
     var zoomSourceIsOnScreen: Bool { origin.isOnScreen() }

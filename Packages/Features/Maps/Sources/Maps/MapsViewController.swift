@@ -777,6 +777,31 @@ final class MapsViewController: UIViewController {
         // no-op: the feed's close has shown the bar already.
         barsStack.alpha = 1
         tabBarController?.showTabBarNativelyNextTurn()
+        releaseStaleTransitionNextTurn()
+    }
+
+    /// ⚠️ THE BACKSTOP'S MISSING HALF. Everything above is put back on any
+    /// return, whoever finished it — but not the flight itself. A return that
+    /// reached neither `onSourceReturned` nor a close's `dismissalDidEnd` left
+    /// `activeTransition` set for the rest of the session: the previews never
+    /// resumed (`viewWillAppear` skips them while a flight is up) and the bars
+    /// stayed frozen at their in-flight inset.
+    ///
+    /// A turn later, and only if still set: the normal close-outs run at the
+    /// stack's `didShow`, which UIKit delivers AFTER this appearance, and
+    /// releasing the controller before it would free it mid-callback.
+    private func releaseStaleTransitionNextTurn() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let stale = activeTransition,
+                  let nav = navigationController, nav.topViewController === self,
+                  nav.transitionCoordinator == nil
+            else { return }
+            if nav.delegate === stale { nav.delegate = nil }
+            activeTransition = nil
+            videoCoordinator.setSurfaceVisible(true)
+            refreshVideoPlayback()
+            syncBarsPosition()
+        }
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -3220,6 +3245,7 @@ extension MapsViewController: MKMapViewDelegate {
                 activeTransition = nil
                 videoCoordinator.setSurfaceVisible(true)
                 refreshVideoPlayback()
+                syncBarsPosition()
             }
         )
     }
@@ -3425,6 +3451,15 @@ extension MapsViewController: MKMapViewDelegate {
             self.tabBarController?.showTabBarNativelyNextTurn()
             self.videoCoordinator.setSurfaceVisible(true)
             self.refreshVideoPlayback()
+            // The card close armed beside the flight serves a feed that never
+            // showed; only its own landing ever released it. A turn later, as
+            // the closing callbacks of these objects may still be unwinding.
+            let abandonedClose = self.cardClose
+            self.cardClose = nil
+            DispatchQueue.main.async { withExtendedLifetime(abandonedClose) {} }
+            // The flight froze the bars' inset (`syncBarsPosition` stands down
+            // while one is up); the screen is at rest again.
+            self.syncBarsPosition()
         }
 
         var didLand = false
@@ -3470,6 +3505,7 @@ extension MapsViewController: MKMapViewDelegate {
             self.openGate.dismissalEnded(committed: true)
             self.videoCoordinator.setSurfaceVisible(true)
             self.refreshVideoPlayback()
+            self.syncBarsPosition()
         }
         transition.onDismissalCancelled = { [weak self, gallery, weak nav, weak feedVC] in
             // The feed is STAYING, so the gate does not reopen — it goes back to

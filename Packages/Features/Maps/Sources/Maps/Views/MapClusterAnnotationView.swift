@@ -318,6 +318,12 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerD
         // player bound to a view that is about to draw a different group.
         onReuse?()
         onReuse = nil
+        // ⚠️ A CONCEALED MARKER CAN BE RETIRED WHILE CONCEALED (after the
+        // hand-back above). A flight hides the tapped marker with `isHidden`;
+        // a query landing while the feed is up can retire its annotation, and
+        // every restore looks the view up by annotation, which is gone. The
+        // view then came back from the pool invisible and untappable.
+        isHidden = false
         endVideoPreview()
         // Same reason as `MapAnnotationView`: pop state belongs to an
         // appearance, and a cluster view recycled mid-fade would otherwise

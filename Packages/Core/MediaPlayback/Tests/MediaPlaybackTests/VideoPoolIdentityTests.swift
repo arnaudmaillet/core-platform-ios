@@ -231,6 +231,29 @@ struct VideoPoolIdentityTests {
         #expect(controller.isMuted(in: adopted) == false)
     }
 
+    /// ⚠️ A REFUSED ADOPTION LEAVES THE REPLACED SURFACE'S PLAYER ALONE.
+    ///
+    /// The shape a post opened from a live map pin produced: the card arrives
+    /// drawing ANOTHER pool's player, the adoption is refused, and the refusal
+    /// used to stop the page's own player on its way out.
+    @Test func aRefusedAdoptionKeepsTheReplacedSurfacePlaying() async {
+        let controller = pool()
+        let otherPool = pool()
+        let url = URL(string: "mock://video/page")!
+        let page = VideoRenderView()
+        let foreign = VideoRenderView()
+        await controller.play(url, in: page)
+        await otherPool.play(URL(string: "mock://video/pin")!, in: foreign)
+        let player = controller.activePlayer(in: page)
+        #expect(player != nil)
+
+        #expect(!controller.canAdoptSurface(foreign))
+        #expect(!controller.adoptSurface(foreign, replacing: page))
+
+        #expect(controller.activePlayer(in: page) === player, "a refused adoption retired the page's player")
+        otherPool.stop(foreign)
+    }
+
     /// A surface bound to nothing has no playback to own, and says so.
     @Test func adoptingAnUnboundSurfaceIsRefused() {
         let controller = pool()

@@ -268,7 +268,12 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
             // mid-pop when we decline, because the gate above refuses `.card`
             // ahead of the axis match — so the interaction controller UIKit now
             // never asks for is one nothing was waiting on.
-            guard destination.zoomDismissalKind != .card else {
+            // ⚠️ AND ONLY ONTO A LANDING THAT CAN RECEIVE ONE — the other half
+            // of the same question, which the two grabs ask
+            // (`zoomLandingAcceptsHero`) and this branch did not, so a back
+            // chevron still flew a picture home onto a TEXT row.
+            let landing = dismissSource(for: toVC)
+            guard destination.zoomDismissalKind != .card, landing.zoomLandingAcceptsHero else {
                 // The push's hide is this controller's to pay back. Only the
                 // return FLIGHT ever did, so declining without this would land
                 // the pop on a map missing the marker that was tapped —
@@ -280,7 +285,7 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
                 // The flight flies to whichever screen this pop LANDS on —
                 // the presenting screen normally, a registered intermediate
                 // (the cluster gallery) when the stack carries one.
-                isPresenting: false, source: dismissSource(for: toVC), destination: destination
+                isPresenting: false, source: landing, destination: destination
             )
         default:
             return nil // e.g. comments detail above the feed — native

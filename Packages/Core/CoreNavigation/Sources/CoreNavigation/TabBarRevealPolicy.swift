@@ -113,8 +113,26 @@ public extension UITabBarController {
     /// UIKit's own end-of-transition bookkeeping was measured to swallow an
     /// un-hide (see `whenCommitted`). A BACKSTOP — the bar is normally up by
     /// then, and this finds nothing to do.
+    ///
+    /// ⚠️ RE-ASKED WHEN IT RUNS. A turn is long enough for the viewer to tap
+    /// again: a tile tap processed inside it re-opens the feed and hides the
+    /// bar, and a backstop that still showed it put the dock over the feed it
+    /// had just been told to clear. Whether the bar belongs on screen is
+    /// answered when the turn comes, by the stack as it is then.
     func showTabBarNativelyNextTurn() {
-        DispatchQueue.main.async { [weak self] in self?.showTabBarNatively() }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.selectedStackShowsTabBarAtRest else { return }
+            self.showTabBarNatively()
+        }
+    }
+
+    /// Whether the selected tab's stack, as it stands, wants the bar: at rest
+    /// (a transition in flight decides the bar through its own appearance
+    /// policy) and topped by a screen that shows it.
+    var selectedStackShowsTabBarAtRest: Bool {
+        guard let nav = selectedViewController as? UINavigationController else { return true }
+        guard nav.transitionCoordinator == nil else { return false }
+        return nav.showsAppTabBar(for: nav.topViewController)
     }
 
     /// Hides the bar through UIKit, on UIKit's own animation. Idempotent.

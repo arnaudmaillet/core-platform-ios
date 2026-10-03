@@ -251,12 +251,28 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         return forYou
     }
 
+    /// Whether `presenter` may open a post now: its stack is at rest and it
+    /// is (inside) the screen on top. What For You and the post list check
+    /// before they begin a playback handoff, in one place for the screens
+    /// that open through this builder.
+    public static func canOpen(from presenter: UIViewController, on nav: UINavigationController) -> Bool {
+        guard nav.transitionCoordinator == nil, let top = nav.topViewController else { return false }
+        var screen: UIViewController? = presenter
+        while let current = screen, current !== top { screen = current.parent }
+        return screen === top
+    }
+
     public func presentSnapFeedHero(
         postIDs: [PostID],
         from presenter: UIViewController,
         origin: SnapFeedHeroOrigin
     ) {
         guard !postIDs.isEmpty, let nav = presenter.navigationController else { return }
+        // ⚠️ ONE OPENING AT A TIME. For You and the post list guard their own
+        // taps; the screens that open through here (a profile, the place page,
+        // Discover, search) did not, so a double tap pushed two feeds, and the
+        // second captured the first flight as the delegate to restore.
+        guard Self.canOpen(from: presenter, on: nav) else { return }
         let destination = makeSnapFeedViewController(postIDs: postIDs)
         // Hand over the projection the origin is already showing, on BOTH
         // presentations. The flight used to hide the cost of not doing this —
@@ -333,14 +349,41 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // following the finger, and every grab above it stayed broken because
         // nothing ever put the delegate back.
         let previousDelegate = nav.delegate
-        transition.onSourceReturned = { [weak nav, weak previousDelegate] in
-            nav?.delegate = previousDelegate
+        // ⚠️ ONE CLOSE-OUT FOR EVERY END OF THE FLIGHT. It ran only on a
+        // completed return (`onSourceReturned`, a `didShow`). A push caught
+        // mid-air and dragged back completes nothing, so it reported only to
+        // `onPresentationCancelled`, which restored the dock and nothing else:
+        // the retainer cycle (controller, source, card close) leaked, and the
+        // stack's delegate stayed on the dead chain for the next opening to
+        // capture as the one to restore.
+        //
+        // The slot goes back only if it is still this flight's (the flight,
+        // or the card close forwarding to it); a screen that took it since
+        // owns it.
+        let closeOut: () -> Void = { [weak nav, weak previousDelegate, weak retainer] in
+            if let nav, let retainer,
+               nav.delegate == nil || nav.delegate === retainer.transition
+                || nav.delegate === retainer.cardClose {
+                nav.delegate = previousDelegate
+            }
             origin.setConcealed(false)
-            retainer.transition = nil
+            // Released a turn LATER: this runs inside a delegate callback of
+            // one of these very objects (the flight's `didShow`, which the card
+            // close forwards from its own and then keeps executing). Dropping
+            // the last reference here would free an object mid-method.
+            let released = (retainer?.transition, retainer?.cardClose, retainer?.cardCloseLanding)
+            retainer?.cardClose = nil
+            retainer?.cardCloseLanding = nil
+            retainer?.transition = nil
+            DispatchQueue.main.async { withExtendedLifetime(released) {} }
             // A BACKSTOP for the dock — the close's commit has normally shown
             // it already (below). Through UIKit, never an alpha.
             Self.restoreTabBar(on: nav)
         }
+        // The retainer is kept alive by THIS capture (the transition owns the
+        // closure, the retainer owns the transition) — the cycle the comment
+        // above describes, and the close-out is what breaks it.
+        transition.onSourceReturned = { withExtendedLifetime(retainer) { closeOut() } }
         // An abandoned grab leaves the post up — and never raised the dock,
         // which waits for a COMMITTED release, so there is nothing to undo.
         // ⚠️ BOTH AXES GO HOME TO THE TILE, including for a post opened from
@@ -383,8 +426,16 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // so the pan has something to attach to.
         transition.attachInteractiveDismissal(
             to: destination.view, axes: [.horizontal, .vertical]
-        ) { [weak nav, weak transition] in
-            if let transition { nav?.delegate = transition }
+        ) { [weak nav, weak transition, weak retainer] in
+            // ⚠️ NOT WHILE A CARD CLOSE HOLDS THE SLOT. It forwards a `.hero`
+            // pop to this flight already, and taking the slot from it was
+            // permanent: after a cancelled grab, paging to a text post and
+            // dragging ran UIKit's plain pop (this controller refuses `.card`),
+            // and the card close never heard a `didShow` again, so it leaked
+            // on every committed grab, with the row it concealed.
+            if let transition, nav?.delegate !== retainer?.cardClose {
+                nav?.delegate = transition
+            }
             // ⚠️ NOTHING ABOUT THE DOCK HERE any more. Grab-begin used to put
             // the bar's state back at alpha 0 and the landing showed it. The
             // feed brings it back itself, through UIKit, once its close is
@@ -439,7 +490,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         #else
         nav.tabBarController?.setTabBarHidden(true, animated: true)
         #endif
-        transition.onPresentationCancelled = { [weak nav] in Self.restoreTabBar(on: nav) }
+        transition.onPresentationCancelled = closeOut
         nav.delegate = transition
         nav.pushViewController(destination, animated: true)
         // ⚠️ AFTER THE PUSH, and that is the whole of whether it works. The

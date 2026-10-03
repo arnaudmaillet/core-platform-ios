@@ -1531,19 +1531,30 @@ public final class VideoPlaybackController {
     /// returned (`stop`), since nothing will ever draw it again. Nothing is
     /// re-bound and the player's state is left alone: this moves bookkeeping,
     /// not pixels. Returns whether `view` owns its playback afterwards.
+    ///
+    /// ⚠️ A REFUSAL TOUCHES NOTHING. The replaced surface's leftover loan is
+    /// returned only once `view` owns its playback: on a refusal the host keeps
+    /// (or must put back) `previous`, and stopping it there destroyed the one
+    /// player still drawing. That is what a post opened from a live map pin
+    /// met: the card arrived carrying ANOTHER pool's player, the adoption was
+    /// refused, and the page's own fresh player was retired with it.
     @discardableResult
     public func adoptSurface(_ view: VideoRenderView, replacing previous: VideoRenderView?) -> Bool {
         let key = ObjectIdentifier(view)
         let previousKey = previous.flatMap { $0 === view ? nil : ObjectIdentifier($0) }
-        defer {
-            // Whatever the replaced surface still holds is a loan nobody will
-            // ever stop — the exact orphan this method exists to prevent.
+        // Whatever the replaced surface still holds once `view` owns its
+        // playback is a loan nobody will ever stop — the exact orphan this
+        // method exists to prevent. Success paths only.
+        func returnPreviousLeftover() {
             if let previous, let previousKey, activePlayers[previousKey] != nil {
                 stop(previous)
             }
         }
         guard let player = view.boundPlayer else { return false }
-        if activePlayers[key] === player { return true }
+        if activePlayers[key] === player {
+            returnPreviousLeftover()
+            return true
+        }
         let ownerKey = previousKey.flatMap { activePlayers[$0] === player ? $0 : nil }
             ?? activePlayers.first(where: { $0.value === player })?.key
         let url: URL?
@@ -1584,7 +1595,20 @@ public final class VideoPlaybackController {
             traceSound("audible MOVED \(previous.debugProducerName) -> \(view.debugProducerName)")
             #endif
         }
+        returnPreviousLeftover()
         return true
+    }
+
+    /// Whether `adoptSurface(view, replacing:)` would succeed: `view` draws a
+    /// player this pool loans out or holds parked.
+    ///
+    /// For a host that must decide BEFORE it swaps surfaces. A view can arrive
+    /// drawing a player this pool has never seen (a card that mirrored another
+    /// pool's player), or one already retired; swapping it in first and asking
+    /// after left the page showing a dead surface with its own one discarded.
+    public func canAdoptSurface(_ view: VideoRenderView) -> Bool {
+        guard let player = view.boundPlayer else { return false }
+        return activePlayers.values.contains { $0 === player } || parked?.player === player
     }
 
     /// How many surfaces are currently showing `mediaURL`.

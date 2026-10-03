@@ -1795,7 +1795,7 @@ final class ForYouGridPage: UIView {
     func adoptHostedPlayback(_ view: VideoRenderView, for postID: PostID) -> Bool {
         guard let playback,
               let index = posts.firstIndex(where: { $0.id == postID }),
-              let url = posts[index].videoURL,
+              let url = landingVideoURL(at: index),
               let cell = collectionView.cellForItem(
                   at: indexPath(for: index)
               ) as? any GridPlaybackCell
@@ -1835,12 +1835,24 @@ final class ForYouGridPage: UIView {
         playback?.onHostedSurfaceReleased = handler
     }
 
+    /// The clip a landing on `index` shows: the carousel's CURRENT page when
+    /// the row is a carousel, the post's clip otherwise.
+    ///
+    /// ⚠️ The flight and its staging already resolved it this way; the two
+    /// landings keyed by `posts[index].videoURL`, which is page 0. Landing on a
+    /// later clip page, the transfer was refused (a still flash, the page's
+    /// player orphaned) or took a prewarmed page-0 player.
+    private func landingVideoURL(at index: Int) -> URL? {
+        let row = collectionView.cellForItem(at: indexPath(for: index)) as? PostGridListRowCell
+        return row?.currentPageVideoURL ?? posts[index].videoURL
+    }
+
     /// Installs the flight card's live surface on the landing tile, so it is
     /// rendering before the card is removed.
     func adoptLivePlayback(_ view: VideoRenderView, for postID: PostID) {
         guard let playback,
               let index = posts.firstIndex(where: { $0.id == postID }),
-              let url = posts[index].videoURL,
+              let url = landingVideoURL(at: index),
               let cell = collectionView.cellForItem(
                   at: indexPath(for: index)
               ) as? any GridPlaybackCell
