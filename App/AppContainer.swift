@@ -122,6 +122,12 @@ final class AppContainer {
 
     private var viewerTransitionsTask: Task<Void, Never>?
 
+    /// The question every write asks before it runs: is there an account? A
+    /// guest is shown the sign-up sheet and the write carries on once they are
+    /// signed in (`MemberGating`). The app coordinator presents the sheet and
+    /// keeps `isMember` in step with the session.
+    let memberGate = MemberGate()
+
     /// Drops every viewer-scoped cache when the viewer becomes someone else —
     /// another account, a sign-out or a profile switch. Started by the app
     /// coordinator once its startup sign-in sequence is over, so that sequence

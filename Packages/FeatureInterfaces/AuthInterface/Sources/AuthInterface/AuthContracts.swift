@@ -26,7 +26,8 @@ public protocol AuthFeatureBuilding {
     /// observer sees the same transition.
     func makeLoginViewController() -> UIViewController
     /// The same flow, presented over the app by a guest who chose to sign in:
-    /// it carries a close button that calls `onClose`. Success is still
+    /// it carries a close button that calls `onClose`, and `prompt` — the
+    /// reason a gated action opened it — as its headline. Success is still
     /// observed via `stateUpdates()`, and the presenter dismisses it then.
-    func makeSignInViewController(onClose: @escaping () -> Void) -> UIViewController
+    func makeSignInViewController(prompt: String?, onClose: @escaping () -> Void) -> UIViewController
 }

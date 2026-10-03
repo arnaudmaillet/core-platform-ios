@@ -30,4 +30,12 @@ struct LoginFlowCoordinatorTests {
 
         #expect(try firstScreen(of: flow).navigationItem.leftBarButtonItem == nil)
     }
+
+    /// Opened by a gated action, the flow leads with the reason.
+    @Test func aGatedActionsPromptIsTheHeadline() throws {
+        let flow = LoginFlowCoordinator(loginService: NoLogin()).start(prompt: "Sign up to like this post") {}
+
+        let methods = try #require(try firstScreen(of: flow) as? MethodSelectionViewController)
+        #expect(methods.prompt == "Sign up to like this post")
+    }
 }

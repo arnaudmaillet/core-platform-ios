@@ -15,7 +15,7 @@ public struct AuthFeatureBuilder: AuthFeatureBuilding {
         LoginFlowCoordinator(loginService: sessionManager).start()
     }
 
-    public func makeSignInViewController(onClose: @escaping () -> Void) -> UIViewController {
-        LoginFlowCoordinator(loginService: sessionManager).start(onClose: onClose)
+    public func makeSignInViewController(prompt: String?, onClose: @escaping () -> Void) -> UIViewController {
+        LoginFlowCoordinator(loginService: sessionManager).start(prompt: prompt, onClose: onClose)
     }
 }

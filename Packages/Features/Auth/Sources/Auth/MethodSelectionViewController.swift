@@ -9,6 +9,10 @@ import UIKit
 final class MethodSelectionViewController: BottomAnchoredTableViewController {
     var onMethodSelected: ((SignInMethod) -> Void)?
     var onCreateAccount: (() -> Void)?
+    /// Why the flow opened, when a guest's gated action opened it ("Sign up to
+    /// like this post"): set as the headline over the methods. Nil from a
+    /// plain "Log in or sign up", which needs no reason.
+    var prompt: String?
 
     private static let methodCornerRadius: CGFloat = 12
 
@@ -80,6 +84,9 @@ final class MethodSelectionViewController: BottomAnchoredTableViewController {
     /// creation action, as the sign-up section's header so it travels with
     /// the grouped layout.
     override func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {
+        if let prompt, section == 0 {
+            return makePromptHeader(prompt)
+        }
         guard sections[section] == .createAccount else { return nil }
         return makeCenteredTextHeader(
             text: "or",
@@ -93,12 +100,38 @@ final class MethodSelectionViewController: BottomAnchoredTableViewController {
         switch sections[section] {
         case .method(let method):
             if method == SignInMethod.all.first {
-                return Spacing.xl // breathing room under the nav bar
+                // The prompt sizes itself; without one, breathing room under
+                // the nav bar.
+                return prompt == nil ? Spacing.xl : UITableView.automaticDimension
             }
             return Spacing.sm - Self.collapsedFooterHeight // tight cohesive menu
         case .createAccount:
             return UITableView.automaticDimension // the "or" separator view
         }
+    }
+}
+
+private extension MethodSelectionViewController {
+    /// The reason the flow opened, as the headline over the methods.
+    func makePromptHeader(_ prompt: String) -> UITableViewHeaderFooterView {
+        let label = UILabel()
+        label.text = prompt
+        let descriptor = UIFontDescriptor.preferredFontDescriptor(withTextStyle: .title2)
+        label.font = UIFont(descriptor: descriptor.withSymbolicTraits(.traitBold) ?? descriptor, size: 0)
+        label.adjustsFontForContentSizeCategory = true
+        label.textColor = .label
+        label.textAlignment = .center
+        label.numberOfLines = 0
+        label.accessibilityTraits = .header
+
+        let header = UITableViewHeaderFooterView()
+        label.constrain(in: header.contentView) { parent in
+            label.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
+            label.widthAnchor.constraint(lessThanOrEqualTo: parent.widthAnchor)
+            label.topAnchor.constraint(equalTo: parent.topAnchor, constant: Spacing.xl)
+            label.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -Spacing.lg)
+        }
+        return header
     }
 }
 

@@ -21,7 +21,7 @@ import ChatInterface
 /// tell it who the viewer is now: a sign-out returns to guest browsing in the
 /// same shell, and a sign-in — made from the sheet a guest opened — keeps
 /// whatever screen they were on. The login screen is never the window's root.
-final class AppCoordinator: Coordinator {
+final class AppCoordinator: Coordinator, SignUpPresenting {
 
     var childCoordinators: [Coordinator] = []
 
@@ -32,6 +32,9 @@ final class AppCoordinator: Coordinator {
     /// The sign-in flow a guest opened, presented over the shell; dismissed
     /// when the session lands.
     private weak var presentedSignIn: UIViewController?
+    /// Who is waiting on the sheet that is up: the member gate (true once a
+    /// session lands, false if the sheet is closed or swiped away).
+    private var signUpCompletions: [@MainActor (Bool) -> Void] = []
     #if DEBUG
     /// Latches the launch-argument deep links to one application per process.
     private var hasAppliedLaunchArguments = false
@@ -52,6 +55,7 @@ final class AppCoordinator: Coordinator {
         // screen on and names the frames it spent it in (charter P2).
         PresentationBudget.installIfRequested()
         #endif
+        container.memberGate.presenter = self
         window.rootViewController = LaunchViewController()
         window.makeKeyAndVisible()
         // The blur behind the status bar, on every screen and through every
@@ -201,6 +205,7 @@ final class AppCoordinator: Coordinator {
         case .unauthenticated: isMember = false
         case .authenticated: isMember = true
         }
+        container.memberGate.isMember = isMember
         guard let tabCoordinator = mainTabCoordinator else {
             showShell(isMember: isMember)
             if isMember { didSignIn() }
@@ -217,32 +222,68 @@ final class AppCoordinator: Coordinator {
             container: container,
             isMember: isMember,
             onLogout: { Task { await sessionManager.logout() } },
-            onSignIn: { [weak self] in self?.presentSignIn() }
+            onSignIn: { [weak self] in self?.presentSignUp(for: nil) { _ in } }
         )
         tabCoordinator.start()
         // Routes resolve against this shell for the rest of the process.
         container.routeResolver.navigator = tabCoordinator
         mainTabCoordinator = tabCoordinator
         setRoot(tabCoordinator.rootViewController)
+        #if DEBUG
+        // `-gate-demo`: asks the member gate for a like ~2 s in, as a gated tap
+        // would, and logs the answer — so the sheet's prompt and its close /
+        // sign-in outcomes are verifiable before any control is gated (#440).
+        if ProcessInfo.processInfo.arguments.contains("-gate-demo") {
+            let gate = container.memberGate
+            Task {
+                try? await Task.sleep(for: .seconds(2))
+                let passed = await gate.requireMember(for: .like)
+                print("[qa] gate-demo: requireMember(.like) -> \(passed)")
+            }
+        }
+        #endif
     }
 
-    /// The sign-in flow, over whatever the guest is looking at. It is not the
-    /// window's root any more, so it carries a close button.
-    private func presentSignIn() {
-        guard presentedSignIn == nil, let shell = mainTabCoordinator?.rootViewController else { return }
-        var presenter = shell
-        while let presented = presenter.presentedViewController { presenter = presented }
-        let signIn = container.authFeature.makeSignInViewController { [weak self] in
+    /// The sign-in flow, over whatever the guest is looking at, titled with
+    /// the reason a gated action opened it. It is not the window's root any
+    /// more, so it carries a close button; `completion` hears true when a
+    /// session lands, false when the sheet is closed or swiped away.
+    func presentSignUp(for action: GatedAction?, completion: @escaping @MainActor (Bool) -> Void) {
+        signUpCompletions.append(completion)
+        guard presentedSignIn == nil else { return }
+        guard let shell = mainTabCoordinator?.rootViewController else {
+            finishSignUp(signedIn: false)
+            return
+        }
+        let flow = container.authFeature.makeSignInViewController(prompt: action?.signUpPrompt) { [weak self] in
             self?.presentedSignIn?.dismiss(animated: true)
         }
+        // ⚠️ EVERY way the sheet leaves must answer the gate, or the action
+        // that opened it waits forever and the gate never opens a sheet again:
+        // the close button, a swipe, and a dismissal from elsewhere (a route
+        // selecting a tab dismisses whatever is presented). Only the sheet's
+        // own disappearance sees all three. A sign-in answers true first, so
+        // the false here is then a no-op.
+        let signIn = SignInSheetContainer(content: flow) { [weak self] in
+            self?.finishSignUp(signedIn: false)
+        }
         presentedSignIn = signIn
-        presenter.present(signIn, animated: true)
+        StakeShop.topPresenter(over: shell).present(signIn, animated: true)
+    }
+
+    private func finishSignUp(signedIn: Bool) {
+        let completions = signUpCompletions
+        signUpCompletions = []
+        for completion in completions {
+            completion(signedIn)
+        }
     }
 
     /// A session landed: put away the sign-in flow if a guest opened one, and
     /// start what only a member has.
     private func didSignIn() {
         presentedSignIn?.dismiss(animated: true)
+        finishSignUp(signedIn: true)
         #if DEBUG
         // `-mock-likes-still`: no ticking like counts — so a refresh can
         // come back with exactly what it had (`-profile-stretch-sweep`'s
@@ -431,5 +472,40 @@ private final class LaunchViewController: UIViewController {
             spinner.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
             spinner.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
         }
+    }
+}
+
+/// Hosts the sign-in flow as the presented sheet, and reports when it is gone
+/// for any reason — the one place every dismissal passes through.
+private final class SignInSheetContainer: UIViewController {
+    private let content: UIViewController
+    private let onDismissed: () -> Void
+
+    init(content: UIViewController, onDismissed: @escaping () -> Void) {
+        self.content = content
+        self.onDismissed = onDismissed
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        addChild(content)
+        content.view.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(content.view)
+        NSLayoutConstraint.activate([
+            content.view.topAnchor.constraint(equalTo: view.topAnchor),
+            content.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            content.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            content.view.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+        ])
+        content.didMove(toParent: self)
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        if isBeingDismissed { onDismissed() }
     }
 }
