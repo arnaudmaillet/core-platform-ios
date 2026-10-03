@@ -3,6 +3,7 @@ import CoreStorage
 import DesignSystem
 import MediaCore
 import UIKit
+import CoreNavigation
 
 /// A submitted search's answer, on its own screen.
 ///
@@ -922,7 +923,8 @@ final class SearchResultsViewController: UIViewController {
     #endif
 
     private func presentFilters() {
-        present(SearchFilterSheetViewController.inSheet(groups: viewModel.filterGroups()) {
+        let isMember = MemberGates.gate(from: self)?.isMember ?? true
+        present(SearchFilterSheetViewController.inSheet(groups: viewModel.filterGroups(isMember: isMember)) {
             [weak self] group, option in
             self?.viewModel.applyFilter(group: group, option: option)
         }, animated: true)

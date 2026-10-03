@@ -1,3 +1,4 @@
+import CoreModels
 import CoreNavigation
 import UIKit
 
@@ -42,7 +43,13 @@ final class NotificationsDrawer {
         container = SideDrawerContainerViewController(main: tabBarController, drawer: navigation)
         container.dimmingAccessibilityLabel = "Close notifications"
         container.onDidOpen = onDidOpen
-        container.canOpenInteractively = { [weak self] in self?.edgeBelongsToDrawer ?? false }
+        // A guest has no notifications: the edge swipe stays shut for them (the
+        // bell asks them to sign up instead). The bell's own `open()` is left
+        // ungated, so it opens the drawer once they have.
+        container.canOpenInteractively = { [weak self, weak tabBarController] in
+            guard let self, let tabBarController else { return false }
+            return edgeBelongsToDrawer && MemberGates.gate(from: tabBarController)?.isMember != false
+        }
     }
 
     var isOpen: Bool { container.isOpen }

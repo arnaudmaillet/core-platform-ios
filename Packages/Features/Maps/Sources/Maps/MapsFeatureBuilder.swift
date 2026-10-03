@@ -55,6 +55,7 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
     ///   Release builds ignore it — the catalog does not exist there.
     private let countryAccess: (any CountryAccess)?
     private let stakePacks: (any StakePackSelling)?
+    private let isMember: @MainActor () -> Bool
 
     public init(
         repository: any GeoDiscoveryProviding,
@@ -82,8 +83,12 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
         countryAccess: (any CountryAccess)? = nil,
         /// What the Shop's Boosts sells — see `StakePackSelling`. Nil sells
         /// none.
-        stakePacks: (any StakePackSelling)? = nil
+        stakePacks: (any StakePackSelling)? = nil,
+        /// Whether the viewer has an account. A guest has no people: no
+        /// favourites dock, no Friends / Following rows.
+        isMember: @escaping @MainActor () -> Bool = { true }
     ) {
+        self.isMember = isMember
         self.countryAccess = countryAccess
         self.stakePacks = stakePacks
         self.iconCatalog = iconCatalog
@@ -239,7 +244,8 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
             openProfile: openProfile,
             openConversation: openConversation,
             countryAccess: countryAccess,
-            stakePacks: stakePacks
+            stakePacks: stakePacks,
+            isMember: isMember
         )
     }
 }

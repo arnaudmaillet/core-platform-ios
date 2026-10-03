@@ -78,6 +78,11 @@ public protocol ProfileFeatureBuilding {
     /// multi-profile switching isn't available. Call `reload()` up front so
     /// `makeMenu()` is synchronous when the menu is requested.
     func makeProfileSwitcher() -> ProfileSwitcherPresenting?
+
+    /// Settings for a guest (guest mode): only what works without an account
+    /// — the app-wide section (preferences, help, legal) — with "Log in or sign
+    /// up", which calls `onSignIn`, where Log Out would be.
+    func makeGuestSettingsViewController(onSignIn: @escaping () -> Void) -> UIViewController
 }
 
 public extension ProfileFeatureBuilding {

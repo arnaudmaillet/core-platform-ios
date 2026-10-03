@@ -88,6 +88,12 @@ final class ExploreTabCoordinator: TabCoordinator {
     /// The screen wearing the bar items, for the reinstall.
     private weak var mapViewController: UIViewController?
 
+    /// Signed in or out: the map's people (dock, Friends / Following rows)
+    /// belong to the viewer, and this stack is not rebuilt for that.
+    func viewerDidChange() {
+        (mapViewController as? any MapViewerRefreshing)?.viewerDidChange()
+    }
+
     init(container: AppContainer, notificationsButtonItem: UIBarButtonItem) {
         self.container = container
         self.notificationsButtonItem = notificationsButtonItem

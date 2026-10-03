@@ -1490,6 +1490,18 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         // waiting — the menu is rebuilt on the next open either way.
         guard viewModel.canModerate else { return groups }
 
+        let report = UIAction(
+            title: "Report",
+            image: UIImage(systemName: "flag"),
+            attributes: .destructive
+        ) { [weak self] _ in self?.presentReportReasons() }
+        // A guest can report (anyone may flag illegal content, DSA Art. 16)
+        // but has no account to block from.
+        if MemberGates.gate(from: self)?.isMember == false {
+            groups.append(UIMenu(options: .displayInline, children: [report]))
+            return groups
+        }
+
         let blocked = viewModel.isBlocked
         groups.append(UIMenu(options: .displayInline, children: [
             UIAction(
@@ -1508,11 +1520,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
                     self.confirmBlock()
                 }
             },
-            UIAction(
-                title: "Report",
-                image: UIImage(systemName: "flag"),
-                attributes: .destructive
-            ) { [weak self] _ in self?.presentReportReasons() }
+            report
         ]))
         return groups
     }
