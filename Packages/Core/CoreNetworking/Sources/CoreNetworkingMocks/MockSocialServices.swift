@@ -20,6 +20,9 @@ public final class MockSocialServices: @unchecked Sendable {
     /// static struct; these overlay it). Guarded by `lock`. Seeded with a
     /// starter custom link so the Links editor has something to show.
     private var viewerHandle = MockPostStore.viewer.handle
+    /// `SetVisibility` writes, by profile. Only the viewer's account's
+    /// profiles can be changed; others keep their seeded flag.
+    private var visibilityOverrides: [String: Profile_V1_ProfileVisibility] = [:]
     private var viewerDisplayName = MockPostStore.viewer.displayName
     private var viewerBio = MockPostStore.viewer.bio
     private var viewerWebsite = MockPostStore.viewer.websiteURL
@@ -68,6 +71,9 @@ public final class MockSocialServices: @unchecked Sendable {
         }
         bff.register(path: "/profile.v1.ProfileService/UpdateProfile") { [self] (request: Profile_V1_UpdateProfileRequest) in
             updateProfile(request)
+        }
+        bff.register(path: "/profile.v1.ProfileService/SetVisibility") { [self] (request: Profile_V1_SetVisibilityRequest) in
+            setVisibility(request)
         }
         bff.register(path: "/profile.v1.ProfileService/ChangeHandle") { [self] (request: Profile_V1_ChangeHandleRequest) in
             changeHandle(request)
@@ -251,6 +257,7 @@ public final class MockSocialServices: @unchecked Sendable {
                 proto.url = link.url
                 return proto
             }
+            view.visibility = lock.withLock { visibilityOverrides[view.profileID] } ?? .public
             return .success(view)
         }
         guard let author = dataset.author(for: request.profileID) else {
@@ -269,7 +276,8 @@ public final class MockSocialServices: @unchecked Sendable {
         // roster is restricted — see `MockSocialDataset.isRelationshipsPrivate`
         // for the pattern and `dev/BACKEND_GAPS.md` §13 for the contract this
         // is standing in for.
-        view.visibility = dataset.isRelationshipsPrivate(author.profileID) ? .private : .public
+        view.visibility = lock.withLock { visibilityOverrides[author.profileID] }
+            ?? (dataset.isRelationshipsPrivate(author.profileID) ? .private : .public)
         return .success(view)
     }
 
@@ -332,6 +340,19 @@ public final class MockSocialServices: @unchecked Sendable {
             return .failure(ConnectError(code: .invalidArgument, message: "handle cannot be empty"))
         }
         lock.withLock { viewerHandle = handle }
+        return .success(Self.accepted(profileID: request.profileID))
+    }
+
+    private func setVisibility(_ request: Profile_V1_SetVisibilityRequest) -> Result<Profile_V1_CommandResponse, ConnectError> {
+        let viewerAccount = dataset.accountID(for: MockPostStore.viewer.profileID)
+        guard request.profileID == MockPostStore.viewer.profileID
+            || dataset.accountID(for: request.profileID) == viewerAccount else {
+            return .failure(ConnectError(code: .permissionDenied, message: "can only change your own profiles"))
+        }
+        guard request.visibility == .public || request.visibility == .private else {
+            return .failure(ConnectError(code: .invalidArgument, message: "visibility must be PUBLIC or PRIVATE"))
+        }
+        lock.withLock { visibilityOverrides[request.profileID] = request.visibility }
         return .success(Self.accepted(profileID: request.profileID))
     }
 

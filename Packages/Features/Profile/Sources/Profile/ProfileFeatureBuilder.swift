@@ -163,7 +163,15 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                             onSignedOutEverywhere: onLogout
                                         )
                                     }
-                                case .privacy: PrivacySettingsViewController(store: RelationshipPrivacyStore())
+                                case .privacy:
+                                    if let visibility = repository as? any ProfileVisibilityManaging {
+                                        PrivacySectionViewController(
+                                            viewModel: PrivacySectionViewModel(visibility: visibility),
+                                            makeListPrivacy: { PrivacySettingsViewController(store: RelationshipPrivacyStore()) }
+                                        )
+                                    } else {
+                                        PrivacySettingsViewController(store: RelationshipPrivacyStore())
+                                    }
                                 default: nil
                                 }
                             },
