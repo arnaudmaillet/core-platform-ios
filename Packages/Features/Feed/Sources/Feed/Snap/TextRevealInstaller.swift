@@ -149,6 +149,7 @@ enum TextRevealInstaller {
             // for the same reason the insets are: three copies of one colour is
             // how two surfaces stop matching.
             sourceCornerRadius: origin.cornerRadius ?? PostGridListRowCell.cardCornerRadius,
+            sourceCornerCurve: origin.cornerCurve ?? .continuous,
             sourceFill: sourceFill(for: origin),
             sourceCaptionEnd: origin.captionEnd,
             installDestinationVeil: { [weak feed] cut, tint in

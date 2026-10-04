@@ -50,4 +50,42 @@ struct AvatarDiscShapeTests {
         #expect(monogram.plate.path == UIBezierPath(ovalIn: monogram.bounds).cgPath)
         #expect(monogram.plate.frame == monogram.bounds)
     }
+
+    /// A surface that asks for the super-ellipse gets it everywhere at once —
+    /// mask and plate — and wears the matching circular corner underneath, the
+    /// one a flight's layer can carry.
+    @Test func aSuperellipseShapesMaskPlateAndCorner() throws {
+        let shape = AvatarShape.superellipse(exponent: 2.6)
+        let monogram = MonogramAvatarView(diameter: 50)
+        monogram.shape = shape
+        let picture = AvatarImageView()
+        picture.shape = shape
+        let bounds = CGRect(x: 0, y: 0, width: 50, height: 50)
+        let expected = shape.path(in: bounds).cgPath
+        for view in [monogram, picture] as [UIView] {
+            view.frame = bounds
+            view.layoutIfNeeded()
+            let mask = try #require(view.layer.mask as? CAShapeLayer, "\(type(of: view)) has no mask")
+            #expect(mask.path == expected)
+            #expect(view.layer.cornerRadius == shape.cornerRadius(side: 50))
+            #expect(view.layer.cornerCurve == .circular)
+        }
+        #expect(monogram.plate.path == expected)
+        // Not a disc: a point just past the circle's corner is inside.
+        #expect(expected.contains(CGPoint(x: 7, y: 7)))
+        #expect(!UIBezierPath(ovalIn: bounds).cgPath.contains(CGPoint(x: 7, y: 7)))
+    }
+
+    /// The flight's stand-in corner meets the super-ellipse on the diagonal:
+    /// an arc of that radius reaches the outline's own diagonal point.
+    @Test func theSuperellipseCornerMatchesOnTheDiagonal() {
+        let exponent: CGFloat = 2.6
+        let side: CGFloat = 60
+        let radius = AvatarShape.superellipse(exponent: exponent).cornerRadius(side: side)
+        // Both diagonal points, as their offset from the centre on each axis.
+        let arc = (side / 2 - radius) + radius / 2.squareRoot()
+        let outline = side / 2 * pow(2, -1 / exponent)
+        #expect(abs(arc - outline) < 0.01)
+        #expect(AvatarShape.circle.cornerRadius(side: side) == 30)
+    }
 }

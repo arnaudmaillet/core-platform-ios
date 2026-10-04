@@ -105,7 +105,7 @@ final class CountryFlagAnnotationView: MKAnnotationView {
         veil.frame = local
         veil.backgroundColor = UIColor.black.withAlphaComponent(Self.lockedVeilAlpha)
         disc.addSubview(veil)
-        badge.center = MapMarkerBadgeView.center(in: local.size, cornerRadius: Self.side / 2, inside: false)
+        badge.center = MapMarkerBadgeView.center(in: local.size, cornerRadius: Self.side / 2)
         body.addSubview(disc)
         body.addSubview(badge)
         addSubview(body)

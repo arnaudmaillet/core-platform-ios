@@ -248,37 +248,24 @@ final class MapMarkerBadgeView: UIView {
         imageView.contentMode = .scaleAspectFit
     }
 
-    /// How far a badge seated INSIDE a card stands clear of the card's border
-    /// (neutral or flag: both are `PinCardView.ringWidth` wide).
-    nonisolated static let insideGap: CGFloat = 2
-
-    /// Where the badge's centre sits for a card of `size` and corner `radius`.
+    /// Where the badge's centre sits for a card of `size` and corner `radius`:
+    /// ON the corner's arc, at 45°, overlapping the edge like an app icon's
+    /// badge.
     ///
     /// ```
-    ///   inside: true             inside: false
-    ///   ╭────────╮                ╭────╮
-    ///   │        │               │      │
-    ///   │     (●)│                ╰────(●)   on the arc, at 45°
-    ///   ╰────────╯
+    ///   ╭────╮
+    ///  │      │
+    ///   ╰────(●)   on the arc, at 45°
     /// ```
     ///
-    /// `inside` — a SQUARE card (a media marker's rounded rectangle): in the
-    /// bottom-right corner, within the card, clear of its border by
-    /// `insideGap`. Hanging off the corner of a square, the badge read as
-    /// stuck onto the picture's frame; inside, it is part of the card, and
-    /// nothing of it overhangs a window the card becomes.
-    ///
-    /// Otherwise ON the corner's arc, at 45°, overlapping the edge — a disc
-    /// (a text marker, an empty country), which has no corner to sit in. An
-    /// icon's badge hugs its mark instead (`PinCardView.iconBadgeCenter`).
-    nonisolated static func center(in size: CGSize, cornerRadius radius: CGFloat, inside: Bool) -> CGPoint {
-        if inside {
-            // The badge is wider than the corner's inner curve (its radius
-            // `side / 2` ≥ the card's radius less the border), so standing
-            // clear of both straight edges keeps it clear of the curve too.
-            let inset = MapFlagBorderView.lineWidth + insideGap + side / 2
-            return CGPoint(x: size.width - inset, y: size.height - inset)
-        }
+    /// Every card with a shape: a disc (a text marker, an empty country) and,
+    /// since 2026-10-04, a media marker's rounded tile — whose matched corner
+    /// (`PinCardView.cornerRadius`) meets the tile exactly on that diagonal,
+    /// so the badge straddles the tile's own outline at the same depth as a
+    /// disc's. It sat INSIDE the corner of the old rounded square; the user
+    /// asked for it level with the round markers'. An icon's badge hugs its
+    /// mark instead (`PinCardView.iconBadgeCenter`).
+    nonisolated static func center(in size: CGSize, cornerRadius radius: CGFloat) -> CGPoint {
         // The 45° point of the arc, measured in from the bounding corner. A
         // square corner (an icon) would put the badge's centre on the very
         // corner of a mark that rarely reaches it, so it comes in a little.

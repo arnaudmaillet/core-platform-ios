@@ -443,7 +443,11 @@ struct PinCardBlendTests {
 
         card.setFace(.media)
         #expect(textFace(of: card).isHidden)
-        #expect(card.backgroundColor == .black)
+        // A RESTING media card's black ground is the picture's, inside the
+        // tile's mask; the card's own would show a hair past the ring
+        // (`PinCardView.applyRestingShape`). A flight card keeps the card's.
+        #expect(card.backgroundColor == .clear)
+        #expect(card.imageView.backgroundColor == .black)
         #expect(isAlpha(card.imageView, 1))
         #expect(isAlpha(card.ringView, 1))
     }

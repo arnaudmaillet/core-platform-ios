@@ -3,7 +3,8 @@ import DesignSystem
 import MediaCore
 import UIKit
 
-/// One friend in For You's stories row: their face in a disc, a ring around it
+/// One friend in For You's stories row: their face in a nearly-round square
+/// (`Metrics.faceShape`; "the disc" below is that slot), a ring around it
 /// while they have posts the viewer has not seen, and their name under it.
 ///
 /// **The app's avatar contract** (`avatar-rendering-contract`): the initials
@@ -38,6 +39,16 @@ final class ForYouStoryCell: UICollectionViewCell {
         static func faceDiameter(discSide: CGFloat) -> CGFloat {
             max(0, discSide - 2 * (ringWidth + ringGap))
         }
+
+        /// ⚠️ NOT A DISC (2026-10-04). A face here is a circle swelling toward
+        /// its corners — a super-ellipse, the user's reference being another
+        /// app's category tiles — so the row reads as friends' tiles, not as
+        /// the circular badges every person row wears. One outline for the
+        /// face, its ring, the long-press lift and the hand-clipped snapshot; a
+        /// flight, which can only wear a corner, takes the matching circular
+        /// radius (`ForYouRailsView.storyFaceCornerRadius`). The map's media
+        /// markers wear the same tile (`AvatarShape.roundedTile`).
+        static let faceShape = AvatarShape.roundedTile
 
         /// The cell for a disc `discSide` across: exactly the disc's width —
         /// so a snap lining the cell up on a margin lines up the ring — and
@@ -78,7 +89,9 @@ final class ForYouStoryCell: UICollectionViewCell {
         disc.layer.addSublayer(ring)
 
         monogram.translatesAutoresizingMaskIntoConstraints = true
+        monogram.shape = Metrics.faceShape
         disc.addSubview(monogram)
+        picture.shape = Metrics.faceShape
         picture.isHidden = true
         monogram.addSubview(picture)
 
@@ -108,8 +121,9 @@ final class ForYouStoryCell: UICollectionViewCell {
         CATransaction.setDisableActions(true)
         ring.frame = disc.bounds
         ringMask.frame = disc.bounds
-        ringMask.path = UIBezierPath(
-            ovalIn: disc.bounds.insetBy(dx: Metrics.ringWidth / 2, dy: Metrics.ringWidth / 2)
+        // The face's own outline, scaled out to the stroke's centre line.
+        ringMask.path = Metrics.faceShape.path(
+            in: disc.bounds.insetBy(dx: Metrics.ringWidth / 2, dy: Metrics.ringWidth / 2)
         ).cgPath
         CATransaction.commit()
         let inset = Metrics.ringWidth + Metrics.ringGap
@@ -193,9 +207,9 @@ final class ForYouStoryCell: UICollectionViewCell {
         let renderer = UIGraphicsImageRenderer(bounds: monogram.bounds)
         return renderer.image { context in
             // Clipped by hand: `render(in:)` does not honour every mask a
-            // live layer wears, and a square corner on a disc's twin is the
+            // live layer wears, and a square corner on a face's twin is the
             // one frame a flight would show it.
-            context.cgContext.addEllipse(in: monogram.bounds)
+            context.cgContext.addPath(Metrics.faceShape.path(in: monogram.bounds).cgPath)
             context.cgContext.clip()
             monogram.layer.render(in: context.cgContext)
         }

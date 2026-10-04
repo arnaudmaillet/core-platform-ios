@@ -12,6 +12,9 @@ import UIKit
 ///   locked    any of the above, its face darkened under a lock
 /// ```
 ///
+/// ⚠️ The flag-gradient borders are EXPERIMENTAL (`-maps-flag-borders`): by
+/// default a country and a city wear the neutral ring with their badge.
+///
 /// One value, resolved by the map and read back off the marker by every
 /// transition (`MKMapView.wornDress(for:)`), so the card that flies or the
 /// window that opens takes off wearing the marker's exact look.
@@ -49,20 +52,49 @@ struct MapMarkerDress: Equatable {
     /// A marker that speaks for no place: the neutral ring, no badge.
     static let neutral = MapMarkerDress()
 
+    // MARK: - Flag borders (experimental)
+
+    /// ⚠️ EXPERIMENTAL SINCE 2026-10-04: the flag-colour BORDER is behind this
+    /// launch argument. Off — the default, and always in Release — every
+    /// marker wears the neutral white ring, and only the corner badge says
+    /// where it speaks for (a city then names no country). The product call
+    /// was white by default, the flag colours kept to try.
+    static let flagBordersLaunchArgument = "-maps-flag-borders"
+
+    /// Whether `arguments` ask for flag borders. Release builds never do.
+    static func flagBordersEnabled(arguments: [String]) -> Bool {
+        #if DEBUG
+        arguments.contains(flagBordersLaunchArgument)
+        #else
+        false
+        #endif
+    }
+
+    /// Whether this process asked for flag borders — the DEFAULT `resolve`
+    /// takes; tests pass theirs per call instead (a process-wide switch would
+    /// leak across parallel suites).
+    static let flagBordersEnabled = flagBordersEnabled(arguments: ProcessInfo.processInfo.arguments)
+
     /// The dress for a marker at hierarchy depth `kind` (nil: a proximity
     /// cluster or a lone pin) whose posts are in `countryCode`.
     ///
     /// Without a country (a post on the open sea) a place marker falls back to
-    /// the neutral look rather than inventing a flag.
-    static func resolve(kind: MapPlace.Kind?, countryCode: String?, isLocked: Bool) -> MapMarkerDress {
+    /// the neutral look rather than inventing a flag. Without `flagBorders`
+    /// (the default — see `flagBordersLaunchArgument`) it keeps its badge and
+    /// wears the neutral ring.
+    static func resolve(
+        kind: MapPlace.Kind?, countryCode: String?, isLocked: Bool,
+        flagBorders: Bool = flagBordersEnabled
+    ) -> MapMarkerDress {
         guard let kind, let countryCode, !countryCode.isEmpty else {
             return MapMarkerDress(isLocked: isLocked)
         }
+        let border = flagBorders ? countryCode : nil
         switch kind {
         case .country:
-            return MapMarkerDress(badge: .flag(countryCode), borderFlag: countryCode, isLocked: isLocked)
+            return MapMarkerDress(badge: .flag(countryCode), borderFlag: border, isLocked: isLocked)
         case .city:
-            return MapMarkerDress(badge: .city, borderFlag: countryCode, isLocked: isLocked)
+            return MapMarkerDress(badge: .city, borderFlag: border, isLocked: isLocked)
         }
     }
 

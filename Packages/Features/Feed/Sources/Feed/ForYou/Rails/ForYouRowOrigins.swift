@@ -72,7 +72,10 @@ enum ForYouRowOrigins {
             textReveal: storyReveal(
                 for: author, face: face, rails: rails, page: page, closeStaged: closeStaged
             ),
-            cornerRadius: rails.storyFaceDiameter / 2,
+            // The face's own outline — a nearly-round square, not a disc —
+            // so the card leaves as the face and lands as it.
+            cornerRadius: rails.storyFaceCornerRadius,
+            cornerCurve: ForYouStoryCell.Metrics.faceShape.cornerCurve,
             // The post's own picture, if the pipeline has it: the far end of
             // the cross-dissolve. Without it the face grows into the page and
             // the page takes over at the landing — still the right motion.
@@ -133,13 +136,14 @@ enum ForYouRowOrigins {
         page: ForYouGridPage,
         closeStaged: @escaping () -> Void = {}
     ) -> TextRevealOrigin {
-        let radius = rails.storyFaceDiameter / 2
+        let radius = rails.storyFaceCornerRadius
         func standIn() -> UIView? {
             guard let face else { return nil }
             let view = UIImageView(image: face)
             view.contentMode = .scaleAspectFill
             view.clipsToBounds = true
             view.layer.cornerRadius = radius
+            view.layer.cornerCurve = ForYouStoryCell.Metrics.faceShape.cornerCurve
             return view
         }
         return TextRevealOrigin(
@@ -156,6 +160,7 @@ enum ForYouRowOrigins {
             alignsPageToSource: false,
             pageFit: .covering,
             cornerRadius: radius,
+            cornerCurve: ForYouStoryCell.Metrics.faceShape.cornerCurve,
             fill: nil,
             setConcealed: { [weak rails] concealed in
                 rails?.setStoryConcealed(concealed, for: author)
