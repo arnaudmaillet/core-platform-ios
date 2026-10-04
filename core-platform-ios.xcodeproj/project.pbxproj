@@ -325,6 +325,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = App/Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Record a video to share in a post.";
+				INFOPLIST_KEY_NSFaceIDUsageDescription = "Unlock the app with Face ID when App Lock is on.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Your location opens the country you are in on the map. Only the country leaves your device.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Capture sound while recording a video to share.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Keep a copy of the photos and videos you post, when you ask for one.";
@@ -361,6 +362,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = App/Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Record a video to share in a post.";
+				INFOPLIST_KEY_NSFaceIDUsageDescription = "Unlock the app with Face ID when App Lock is on.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Your location opens the country you are in on the map. Only the country leaves your device.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Capture sound while recording a video to share.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Keep a copy of the photos and videos you post, when you ask for one.";

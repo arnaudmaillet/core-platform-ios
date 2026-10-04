@@ -21,6 +21,7 @@ struct SettingsLinksTests {
         #expect(titles.contains("Privacy Policy"))
         #expect(titles.contains("Community Guidelines"))
         #expect(titles.contains("Legal Notice"))
+        #expect(titles.contains("Transparency Reports"))
         #expect(titles.last == "Version")
     }
 

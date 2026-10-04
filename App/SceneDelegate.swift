@@ -5,6 +5,8 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     var window: UIWindow?
     private var appCoordinator: AppCoordinator?
+    /// Settings → Security and Login → App Lock (#418).
+    private var appLock: AppLockCoordinator?
 
     func scene(
         _ scene: UIScene,
@@ -28,5 +30,21 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         let coordinator = AppCoordinator(window: window, container: AppContainer.shared)
         appCoordinator = coordinator
         coordinator.start()
+
+        let lock = AppLockCoordinator(scene: windowScene, mainWindow: window)
+        appLock = lock
+        lock.sceneDidConnect()
+    }
+
+    func sceneDidEnterBackground(_ scene: UIScene) {
+        appLock?.sceneDidEnterBackground()
+    }
+
+    func sceneWillEnterForeground(_ scene: UIScene) {
+        appLock?.sceneWillEnterForeground()
+    }
+
+    func sceneDidBecomeActive(_ scene: UIScene) {
+        appLock?.sceneDidBecomeActive()
     }
 }
