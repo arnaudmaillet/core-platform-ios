@@ -17,14 +17,18 @@ public final class MockAccountService: @unchecked Sendable {
     /// in both states within one session.
     private static let exportPreparation: TimeInterval = 8
 
-    public init() {}
+    private let lifecycle: MockAccountLifecycle
+
+    public init(lifecycle: MockAccountLifecycle = MockAccountLifecycle()) {
+        self.lifecycle = lifecycle
+    }
 
     public func register(on bff: MockBFF) {
         bff.register(path: "/account.v1.AccountService/GetAccountById") { [self] (request: Account_V1_GetAccountByIdRequest) in
             getAccountByID(request)
         }
-        bff.register(path: "/account.v1.AccountService/RequestGdprDeletion") { [self] (request: Account_V1_RequestGdprDeletionRequest) in
-            requestDeletion(request)
+        bff.register(path: "/account.v1.AccountService/RequestGdprDeletion") { [self] (request: Account_V1_RequestGdprDeletionRequest, headers: Headers) in
+            requestDeletion(request, headers: headers)
         }
         bff.register(path: "/account.v1.AccountService/RequestDataExport") { [self] (request: Account_V1_RequestDataExportRequest) in
             requestExport(request)
@@ -32,12 +36,32 @@ public final class MockAccountService: @unchecked Sendable {
         bff.register(path: "/account.v1.AccountService/GetGdprRecord") { [self] (request: Account_V1_GetGdprRecordRequest) in
             gdprRecord(request)
         }
+        bff.register(path: "/account.v1.AccountService/DeactivateAccount") { [self] (request: Account_V1_DeactivateAccountRequest, headers: Headers) in
+            deactivate(request, headers: headers)
+        }
     }
 
-    private func requestDeletion(_ request: Account_V1_RequestGdprDeletionRequest) -> Result<Account_V1_CommandResponse, ConnectError> {
+    /// Self-deactivation (#650): step-up gated, like on the fleet — a token
+    /// not stepped up in the last few minutes is PERMISSION_DENIED
+    /// "step_up_required". The next login resumes the account.
+    private func deactivate(_ request: Account_V1_DeactivateAccountRequest, headers: Headers) -> Result<Account_V1_CommandResponse, ConnectError> {
         guard request.accountID == MockAuthService.accountID else {
             return .failure(ConnectError(code: .notFound, message: "account \(request.accountID) not found"))
         }
+        if let refusal = stepUpRefusal(headers) { return .failure(refusal) }
+        lifecycle.deactivate()
+        var response = Account_V1_CommandResponse()
+        response.success = true
+        response.accountID = request.accountID
+        return .success(response)
+    }
+
+    /// Step-up gated (#648), like `DeactivateAccount`.
+    private func requestDeletion(_ request: Account_V1_RequestGdprDeletionRequest, headers: Headers) -> Result<Account_V1_CommandResponse, ConnectError> {
+        guard request.accountID == MockAuthService.accountID else {
+            return .failure(ConnectError(code: .notFound, message: "account \(request.accountID) not found"))
+        }
+        if let refusal = stepUpRefusal(headers) { return .failure(refusal) }
         lock.withLock {
             if deletionRequestedAt == nil { deletionRequestedAt = Date() }
         }
@@ -45,6 +69,15 @@ public final class MockAccountService: @unchecked Sendable {
         response.success = true
         response.accountID = request.accountID
         return .success(response)
+    }
+
+    /// PERMISSION_DENIED "step_up_required" unless the bearer was stepped up
+    /// in the last few minutes (`MockAccountLifecycle.stepUpWindow`).
+    private func stepUpRefusal(_ headers: Headers) -> ConnectError? {
+        let bearer = headers.first { $0.key.lowercased() == "authorization" }?.value.first ?? ""
+        let token = bearer.hasPrefix("Bearer ") ? String(bearer.dropFirst("Bearer ".count)) : bearer
+        return lifecycle.isSteppedUp(accessToken: token)
+            ? nil : ConnectError(code: .permissionDenied, message: "step_up_required: verify your password again")
     }
 
     private func requestExport(_ request: Account_V1_RequestDataExportRequest) -> Result<Account_V1_CommandResponse, ConnectError> {

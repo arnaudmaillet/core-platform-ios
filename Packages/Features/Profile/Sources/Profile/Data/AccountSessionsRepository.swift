@@ -97,6 +97,25 @@ public protocol AccountPasswordChanging: Sendable {
     func changePassword(current: String, new: String, signOutOtherSessions: Bool) async throws -> Int
 }
 
+/// Step-up (`auth.v1.VerifyCredentials`, #648): re-prove the holder with
+/// their password before a destructive action (deactivation, deletion,
+/// contact changes). The fresh access token it mints is installed for the
+/// session; the gated call that follows carries it.
+public protocol CredentialStepUp: Sendable {
+    func stepUp(password: String) async throws
+}
+
+/// Whoever vends the session's access token (the app's `SessionManager`):
+/// takes a step-up's fresh token in place of the current one.
+public protocol AccessTokenInstalling: Sendable {
+    func installStepUpToken(_ accessToken: String, expiresIn: Int64) async
+}
+
+public enum StepUpError: Error, Equatable {
+    case wrongPassword
+    case transport(message: String)
+}
+
 public enum PasswordChangeError: Error, Equatable {
     /// The current password didn't match (UNAUTHENTICATED, AUT-5002).
     case wrongCurrentPassword
@@ -121,11 +140,33 @@ public enum PasswordChangeError: Error, Equatable {
 /// `auth.v1` session management on the AUTHENTICATED client: the RPCs act on
 /// the calling principal's account (empty `account_id`), so the bearer token
 /// is what says whose sessions these are.
-public actor AccountSessionsRepository: AccountSessionsManaging, AccountPasswordChanging {
+public actor AccountSessionsRepository: AccountSessionsManaging, AccountPasswordChanging, CredentialStepUp {
     private let authClient: any Auth_V1_AuthServiceClientInterface
+    /// Hands a step-up's fresh access token to whoever vends tokens (the
+    /// app's `SessionManager`), so the next authenticated call carries it.
+    private let tokenInstaller: (any AccessTokenInstalling)?
 
-    public init(authClient: any Auth_V1_AuthServiceClientInterface) {
+    /// `tokenInstaller` nil: a step-up proves the password but its token goes
+    /// nowhere (tests that don't exercise gated calls).
+    public init(authClient: any Auth_V1_AuthServiceClientInterface, tokenInstaller: (any AccessTokenInstalling)? = nil) {
         self.authClient = authClient
+        self.tokenInstaller = tokenInstaller
+    }
+
+    public func stepUp(password: String) async throws {
+        var request = Auth_V1_VerifyCredentialsRequest()
+        request.credential = .password(password)
+        let response = await authClient.verifyCredentials(request: request, headers: [:])
+        switch response.result {
+        case .success(let body):
+            await tokenInstaller?.installStepUpToken(body.accessToken, expiresIn: body.expiresIn)
+        case .failure(let error):
+            if error.code == .unauthenticated,
+               (error.message ?? "").contains("AUT-5002") || !(error.message ?? "").contains("AUT-") {
+                throw StepUpError.wrongPassword
+            }
+            throw StepUpError.transport(message: error.message ?? "code \(error.code)")
+        }
     }
 
     public func activeSessions() async throws -> [AccountSession] {

@@ -15,6 +15,11 @@ final class AccountSettingsViewController: UIViewController {
     /// deletion that cannot be sent.
     private let lifecycle: (any AccountLifecycleManaging)?
     private let onAccountDeleted: () -> Void
+    private let deactivator: (any AccountDeactivating)?
+    private let stepUp: (any CredentialStepUp)?
+    /// After a deactivation: sign out, the account being asleep until the next
+    /// login.
+    private let onDeactivated: () -> Void
 
     private var details: AccountDetails?
     private var isShowingSkeleton = false
@@ -50,11 +55,17 @@ final class AccountSettingsViewController: UIViewController {
     init(
         account: any AccountProviding,
         lifecycle: (any AccountLifecycleManaging)? = nil,
-        onAccountDeleted: @escaping () -> Void = {}
+        onAccountDeleted: @escaping () -> Void = {},
+        deactivator: (any AccountDeactivating)? = nil,
+        stepUp: (any CredentialStepUp)? = nil,
+        onDeactivated: @escaping () -> Void = {}
     ) {
         self.account = account
         self.lifecycle = lifecycle
         self.onAccountDeleted = onAccountDeleted
+        self.deactivator = deactivator
+        self.stepUp = stepUp
+        self.onDeactivated = onDeactivated
         super.init(nibName: nil, bundle: nil)
         hidesBottomBarWhenPushed = true
     }
@@ -213,15 +224,18 @@ final class AccountSettingsViewController: UIViewController {
         case .phone:
             pushPhoneEditor()
         case .deactivate:
-            // Not a fake confirmation: a deactivated account cannot sign back
-            // in yet (#385), so the row only says so.
-            presentInfo("Deactivating isn't available yet: a deactivated account couldn't log back in. You can delete your account instead.")
+            guard deactivator != nil, stepUp != nil else {
+                presentInfo("Deactivating isn't available yet. You can delete your account instead.")
+                return
+            }
+            confirmDeactivation()
         case .delete:
             guard let lifecycle else { return }
             push(DeleteAccountViewController(
                 viewModel: DeleteAccountViewModel(lifecycle: lifecycle),
                 onAccountDeleted: onAccountDeleted,
-                makeDataExport: { [weak self] in self?.makeDataExport() }
+                makeDataExport: { [weak self] in self?.makeDataExport() },
+                stepUp: stepUp
             ))
         case .dataExport:
             guard let export = makeDataExport() else {
@@ -309,6 +323,66 @@ final class AccountSettingsViewController: UIViewController {
             popover.permittedArrowDirections = []
         }
         present(sheet, animated: true)
+    }
+
+    // MARK: - Deactivation (#385)
+
+    static let deactivationExplanation = "Your profiles are hidden from everyone until you log back in. Logging in again reactivates your account; nothing is deleted."
+
+    private func confirmDeactivation() {
+        let sheet = UIAlertController(
+            title: "Deactivate your account?", message: Self.deactivationExplanation, preferredStyle: .actionSheet
+        )
+        sheet.addAction(UIAlertAction(title: "Continue", style: .destructive) { [weak self] _ in
+            self?.askPasswordAndDeactivate()
+        })
+        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        if let popover = sheet.popoverPresentationController {
+            popover.sourceView = view
+            popover.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.maxY - 60, width: 0, height: 0)
+            popover.permittedArrowDirections = []
+        }
+        present(sheet, animated: true)
+    }
+
+    /// The server gates deactivation behind a fresh step-up, so the password
+    /// comes first; the deactivation runs on the token it mints.
+    private func askPasswordAndDeactivate() {
+        guard let stepUp, let deactivator else { return }
+        StepUpPrompt.present(
+            on: self,
+            message: "To deactivate your account, confirm it's you.",
+            actionTitle: "Deactivate",
+            stepUp: stepUp,
+            onVerified: { [weak self] in
+                Task { @MainActor [weak self] in
+                    do {
+                        try await deactivator.deactivate()
+                        self?.presentDeactivated()
+                    } catch AccountError.stepUpRequired {
+                        // The proof expired between the two calls: ask again.
+                        self?.askPasswordAndDeactivate()
+                    } catch {
+                        self?.presentInfo("Couldn't deactivate your account. Try again.")
+                    }
+                }
+            },
+            onFailure: { [weak self] _ in
+                self?.presentInfo("Couldn't confirm your password. Check your connection and try again.")
+            }
+        )
+    }
+
+    private func presentDeactivated() {
+        let alert = UIAlertController(
+            title: "Account Deactivated",
+            message: "Log in any time to reactivate it. Your profiles are hidden until then.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "OK", style: .default) { [weak self] _ in
+            self?.onDeactivated()
+        })
+        present(alert, animated: true)
     }
 
     private func presentInfo(_ message: String) {

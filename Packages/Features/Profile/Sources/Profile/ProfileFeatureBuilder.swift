@@ -183,7 +183,10 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                     AccountSettingsViewController(
                                         account: account,
                                         lifecycle: account as? any AccountLifecycleManaging,
-                                        onAccountDeleted: onLogout
+                                        onAccountDeleted: onLogout,
+                                        deactivator: account as? any AccountDeactivating,
+                                        stepUp: accountSessions as? any CredentialStepUp,
+                                        onDeactivated: onLogout
                                     )
                                 case .security:
                                     accountSessions.map { sessions in

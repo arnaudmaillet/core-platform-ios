@@ -52,8 +52,12 @@ public struct MockBackend: Sendable {
         let bff = MockBFF()
         bff.simulatedConditions = conditions
         bff.enforcesEdgePolicy = enforcesEdgePolicy
-        MockAuthService().register(on: bff)
-        MockAccountService().register(on: bff)
+        // One account lifecycle for both: step-up proofs minted by auth are
+        // what account's gated RPCs check, and a deactivation made through
+        // account is what the next auth login resumes.
+        let accountLifecycle = MockAccountLifecycle()
+        MockAuthService(lifecycle: accountLifecycle).register(on: bff)
+        MockAccountService(lifecycle: accountLifecycle).register(on: bff)
         MockSocialServices(dataset: dataset, postStore: postStore).register(on: bff)
         MockEngagementService(store: counterStore).register(on: bff)
         MockCounterService(store: counterStore).register(on: bff)

@@ -113,6 +113,41 @@ struct SessionManagerTests {
         #expect(try await manager.validAccessToken() == "at-1")
     }
 
+    /// Step-up (#648): the fresh access token replaces the session's; the
+    /// session and its refresh token stay.
+    @Test func aStepUpTokenReplacesTheAccessTokenOnly() async throws {
+        let client = FakeAuthClient()
+        var body = Auth_V1_LoginResponse()
+        body.accountID = "acct-1"
+        body.tokens = makeTokens(access: "at-1", refresh: "rt-1")
+        client.loginResult = .success(body)
+        let store = InMemorySessionStore()
+        let manager = SessionManager(authClient: client, store: store, configuration: Self.config)
+        try await manager.login(username: "demo", password: "pw")
+
+        await manager.installStepUpToken("at-stepped-up", expiresIn: 900)
+        #expect(try await manager.validAccessToken() == "at-stepped-up")
+        let saved = try #require(try store.load())
+        #expect(saved.accessToken == "at-stepped-up")
+        #expect(saved.refreshToken == "rt-1")
+        #expect(saved.sessionID == SessionID(body.tokens.sessionID))
+    }
+
+    /// A login that reactivated a deactivated account (#650) is said once.
+    @Test func aReactivatingLoginIsAnnouncedOnce() async throws {
+        let client = FakeAuthClient()
+        var body = Auth_V1_LoginResponse()
+        body.accountID = "acct-1"
+        body.tokens = makeTokens(access: "at-1", refresh: "rt-1")
+        body.reactivated = true
+        client.loginResult = .success(body)
+        let manager = SessionManager(authClient: client, store: InMemorySessionStore(), configuration: Self.config)
+        #expect(await !manager.consumeReactivationNotice())
+        try await manager.login(username: "demo", password: "pw")
+        #expect(await manager.consumeReactivationNotice())
+        #expect(await !manager.consumeReactivationNotice())
+    }
+
     @Test func invalidCredentialsSurfaceAsAuthError() async {
         let client = FakeAuthClient()
         client.loginResult = .failure(ConnectError(code: .unauthenticated, message: "nope"))

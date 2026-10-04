@@ -40,6 +40,9 @@ public actor SessionManager {
     private var didBootstrap = false
     private var refreshTask: Task<AuthSession, Error>?
     private var observers: [UUID: AsyncStream<AuthState>.Continuation] = [:]
+    /// The last login resumed a self-deactivated account (#650), and nobody
+    /// has said "welcome back" yet.
+    private var pendingReactivationNotice = false
 
     public init(
         authClient: any Auth_V1_AuthServiceClientInterface,
@@ -75,10 +78,37 @@ public actor SessionManager {
             )
             self.session = session
             try? store.save(session)
+            pendingReactivationNotice = body.reactivated
             broadcast(.authenticated(session.accountID))
         case .failure(let error):
             throw AuthError.loginFailure(error)
         }
+    }
+
+    /// True once after a login that reactivated a self-deactivated account,
+    /// so the shell can welcome the holder back exactly once.
+    public func consumeReactivationNotice() -> Bool {
+        defer { pendingReactivationNotice = false }
+        return pendingReactivationNotice
+    }
+
+    /// Step-up (`auth.v1.VerifyCredentials`, #648): the server re-proved the
+    /// holder and minted a fresh access token for THIS session, which
+    /// step-up-gated RPCs (deactivation, deletion, contact changes) accept
+    /// for a few minutes. It replaces the access token; the session and its
+    /// refresh token are unchanged.
+    public func installStepUpToken(_ accessToken: String, expiresIn: Int64) {
+        bootstrapIfNeeded()
+        guard let current = session, !accessToken.isEmpty else { return }
+        let updated = AuthSession(
+            accountID: current.accountID,
+            sessionID: current.sessionID,
+            accessToken: accessToken,
+            accessTokenExpiry: now().addingTimeInterval(TimeInterval(expiresIn)),
+            refreshToken: current.refreshToken
+        )
+        session = updated
+        try? store.save(updated)
     }
 
     public func logout() async {

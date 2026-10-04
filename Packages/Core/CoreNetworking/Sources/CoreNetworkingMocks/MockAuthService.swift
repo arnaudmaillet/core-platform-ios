@@ -57,6 +57,7 @@ public final class MockAuthService: @unchecked Sendable {
     /// must use the new one, as it would against the IdP.
     private var credentials: Credentials
     private let accessTokenLifetime: Int64
+    private let lifecycle: MockAccountLifecycle
 
     private let lock = NSLock()
     private var sessions: [String: SessionRecord]
@@ -68,10 +69,12 @@ public final class MockAuthService: @unchecked Sendable {
 
     public init(
         credentials: Credentials = MockAuthService.defaultCredentials,
-        accessTokenLifetimeSeconds: Int64 = 900
+        accessTokenLifetimeSeconds: Int64 = 900,
+        lifecycle: MockAccountLifecycle = MockAccountLifecycle()
     ) {
         self.credentials = credentials
         self.accessTokenLifetime = accessTokenLifetimeSeconds
+        self.lifecycle = lifecycle
         self.sessions = Self.seededOtherSessions(now: Date())
     }
 
@@ -90,6 +93,9 @@ public final class MockAuthService: @unchecked Sendable {
         }
         bff.register(path: "/auth.v1.AuthService/LogoutAllSessions") { [self] (_: Auth_V1_LogoutAllSessionsRequest) in
             logoutAllSessions()
+        }
+        bff.register(path: "/auth.v1.AuthService/VerifyCredentials") { [self] (request: Auth_V1_VerifyCredentialsRequest, headers: Headers) in
+            verifyCredentials(request, callerSession: callerSession(headers))
         }
         bff.register(path: "/auth.v1.AuthService/ChangePassword") { [self] (request: Auth_V1_ChangePasswordRequest, headers: Headers) in
             changePassword(request, callerSession: callerSession(headers))
@@ -127,6 +133,8 @@ public final class MockAuthService: @unchecked Sendable {
 
             var response = Auth_V1_LoginResponse()
             response.accountID = Self.accountID
+            // A self-deactivated account is resumed by signing back in (#650).
+            response.reactivated = lifecycle.resumeIfDeactivated()
             response.tokens = makeTokenPair(sessionID: sessionID, refreshToken: refreshToken)
             return .success(response)
         }
@@ -201,6 +209,35 @@ public final class MockAuthService: @unchecked Sendable {
             response.success = true
             response.generation = generation
             response.sessionsRevoked = Int32(live.count)
+            return .success(response)
+        }
+    }
+
+    /// Step-up (auth.v1 VerifyCredentials): the password proves the holder
+    /// again, and the caller's session gets a fresh access token that
+    /// step-up-gated RPCs accept for `MockAccountLifecycle.stepUpWindow`. The
+    /// refresh token is unchanged. An MFA code is refused: there is no MFA.
+    private func verifyCredentials(
+        _ request: Auth_V1_VerifyCredentialsRequest, callerSession: String?
+    ) -> Result<Auth_V1_VerifyCredentialsResponse, ConnectError> {
+        lock.withLock {
+            guard let callerSession, let record = sessions[callerSession], !record.revoked else {
+                return .failure(ConnectError(code: .unauthenticated, message: "AUT-5001: sign in first"))
+            }
+            guard case .password(let password)? = request.credential else {
+                return .failure(ConnectError(code: .failedPrecondition, message: "AUT-5007: no MFA enrolled"))
+            }
+            guard password == credentials.password else {
+                return .failure(ConnectError(code: .unauthenticated, message: "AUT-5002: the password is wrong"))
+            }
+            tokenCounter += 1
+            let token = "at-\(tokenCounter)"
+            sessionByAccessToken[token] = callerSession
+            lifecycle.recordStepUp(accessToken: token)
+            var response = Auth_V1_VerifyCredentialsResponse()
+            response.accessToken = token
+            response.expiresIn = accessTokenLifetime
+            response.stepUpExpiresIn = Int64(MockAccountLifecycle.stepUpWindow)
             return .success(response)
         }
     }

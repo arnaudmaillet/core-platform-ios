@@ -810,7 +810,10 @@ final class AppContainer {
     /// "Where you're logged in": `auth.v1` ListSessions / Logout / LogoutAllSessions
     /// on the AUTHENTICATED client — they act on the calling principal's account.
     private lazy var accountSessionsRepository = AccountSessionsRepository(
-        authClient: Auth_V1_AuthServiceClient(client: authenticatedRPCClient)
+        authClient: Auth_V1_AuthServiceClient(client: authenticatedRPCClient),
+        // A step-up's fresh access token replaces the session's, so the
+        // gated call right after it (deactivation…) carries the proof.
+        tokenInstaller: sessionManager
     )
 
     /// Settings → Account Status: `moderation.v1.GetEnforcementState` for the
@@ -1128,3 +1131,7 @@ final class AppContainer {
         return "core-platform-ios/\(version) (\(device.model); \(device.systemName) \(device.systemVersion))"
     }
 }
+
+/// Step-up (#648): the session manager takes a step-up's fresh access token
+/// for the session it vends (Settings → deactivate, delete…).
+extension SessionManager: @retroactive AccessTokenInstalling {}
