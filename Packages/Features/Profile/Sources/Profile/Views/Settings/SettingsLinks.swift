@@ -6,7 +6,7 @@ import Foundation
 /// its row says "Coming Soon" instead of opening a page that is not there.
 /// Filling a URL here is the whole change when a page goes live — tracked in
 /// #424 (Terms, Privacy Policy, Community Guidelines, legal notice, Help
-/// Center, contact, copyright form, cookie and SDK policy).
+/// Center, contact, copyright form, cookie and SDK policy, transparency reports).
 public struct SettingsLinks: Equatable, Sendable {
     public var helpCenter: URL?
     /// The DSA Art. 12 single point of contact — a page or a `mailto:`.
@@ -19,6 +19,8 @@ public struct SettingsLinks: Equatable, Sendable {
     public var legalNotice: URL?
     public var copyrightReport: URL?
     public var cookiePolicy: URL?
+    /// DSA Art. 15/24 moderation transparency reports (#418).
+    public var transparencyReports: URL?
 
     public init(
         helpCenter: URL? = nil,
@@ -29,7 +31,8 @@ public struct SettingsLinks: Equatable, Sendable {
         communityGuidelines: URL? = nil,
         legalNotice: URL? = nil,
         copyrightReport: URL? = nil,
-        cookiePolicy: URL? = nil
+        cookiePolicy: URL? = nil,
+        transparencyReports: URL? = nil
     ) {
         self.helpCenter = helpCenter
         self.contactSupport = contactSupport
@@ -40,6 +43,7 @@ public struct SettingsLinks: Equatable, Sendable {
         self.legalNotice = legalNotice
         self.copyrightReport = copyrightReport
         self.cookiePolicy = cookiePolicy
+        self.transparencyReports = transparencyReports
     }
 
     /// What the app ships with today: nothing live yet (#424).

@@ -10,10 +10,13 @@ import UIKit
 /// (#382, #383).
 final class SecuritySettingsViewController: UIViewController {
     private enum Section: Hashable {
-        case sessions, global, comingSoon
+        case checkup, sessions, global, appLock, comingSoon
     }
 
     private enum Item: Hashable {
+        case checkup
+        case requireLock
+        case lockDelay
         case session(AccountSession)
         case loading
         case failed
@@ -25,12 +28,21 @@ final class SecuritySettingsViewController: UIViewController {
 
     private let viewModel: SecuritySettingsViewModel
     private let onSignedOutEverywhere: () -> Void
+    private let authenticator: any DeviceAuthenticating
+    private let makeCheckup: (() -> UIViewController)?
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
 
-    init(viewModel: SecuritySettingsViewModel, onSignedOutEverywhere: @escaping () -> Void) {
+    init(
+        viewModel: SecuritySettingsViewModel,
+        onSignedOutEverywhere: @escaping () -> Void,
+        authenticator: any DeviceAuthenticating = DeviceAuthenticator(),
+        makeCheckup: (() -> UIViewController)? = nil
+    ) {
         self.viewModel = viewModel
         self.onSignedOutEverywhere = onSignedOutEverywhere
+        self.authenticator = authenticator
+        self.makeCheckup = makeCheckup
         super.init(nibName: nil, bundle: nil)
         title = SettingsSection.security.title
         hidesBottomBarWhenPushed = true
@@ -69,8 +81,9 @@ final class SecuritySettingsViewController: UIViewController {
     }
 
     private func configureDataSource() {
-        let registration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { cell, _, item in
+        let registration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [weak self] cell, _, item in
             Self.configure(cell, for: item)
+            self?.configureOwnRow(cell, for: item)
         }
         dataSource = UICollectionViewDiffableDataSource<Section, Item>(collectionView: collectionView) { collectionView, indexPath, item in
             collectionView.dequeueConfiguredReusableCell(using: registration, for: indexPath, item: item)
@@ -98,16 +111,20 @@ final class SecuritySettingsViewController: UIViewController {
 
     private static func headerText(_ section: Section) -> String? {
         switch section {
+        case .checkup: nil
         case .sessions: "Where You're Logged In"
         case .global: nil
+        case .appLock: "App Lock"
         case .comingSoon: "Coming Soon"
         }
     }
 
     private static func footerText(_ section: Section) -> String? {
         switch section {
+        case .checkup: nil
         case .sessions: "Tap another device to log it out."
         case .global: "Ends every session, including this one. You'll need to log in again."
+        case .appLock: "Applies to this iPhone. When it's on, opening the app asks for Face ID or your passcode, and the app is hidden in the app switcher."
         case .comingSoon: "These need a server update and aren't available yet."
         }
     }
@@ -116,7 +133,11 @@ final class SecuritySettingsViewController: UIViewController {
 
     private func applySnapshot() {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
-        snapshot.appendSections([.sessions, .global, .comingSoon])
+        if makeCheckup != nil {
+            snapshot.appendSections([.checkup])
+            snapshot.appendItems([.checkup], toSection: .checkup)
+        }
+        snapshot.appendSections([.sessions, .global, .appLock, .comingSoon])
         switch viewModel.phase {
         case .loading:
             snapshot.appendItems([.loading], toSection: .sessions)
@@ -126,6 +147,7 @@ final class SecuritySettingsViewController: UIViewController {
             snapshot.appendItems(sessions.map(Item.session), toSection: .sessions)
         }
         snapshot.appendItems([.logOutEverywhere], toSection: .global)
+        snapshot.appendItems(AppLockPreference.isOn ? [.requireLock, .lockDelay] : [.requireLock], toSection: .appLock)
         snapshot.appendItems(Self.planned.map(Item.planned), toSection: .comingSoon)
         dataSource.apply(snapshot, animatingDifferences: view.window != nil)
     }
@@ -163,7 +185,10 @@ final class SecuritySettingsViewController: UIViewController {
 
     private static func configure(_ cell: UICollectionViewListCell, for item: Item) {
         cell.accessories = []
+        cell.contentView.subviews.filter { $0.tag == lockControlTag }.forEach { $0.removeFromSuperview() }
         switch item {
+        case .checkup, .requireLock, .lockDelay:
+            break
         case .session(let session):
             var content = UIListContentConfiguration.subtitleCell()
             content.text = session.device.title
@@ -195,6 +220,79 @@ final class SecuritySettingsViewController: UIViewController {
             content.text = title
             content.textProperties.color = .secondaryLabel
             cell.contentConfiguration = content
+        }
+    }
+
+    // MARK: - App Lock and checkup rows
+
+    private static let lockControlTag = 0x10C4
+
+    /// The rows that need the screen (the authenticator, the lock switch).
+    private func configureOwnRow(_ cell: UICollectionViewListCell, for item: Item) {
+        switch item {
+        case .checkup:
+            var content = UIListContentConfiguration.cell()
+            content.text = "Security Checkup"
+            content.image = UIImage(systemName: "checkmark.shield")
+            content.imageProperties.tintColor = .label
+            cell.contentConfiguration = content
+            cell.accessories = [.disclosureIndicator()]
+        case .requireLock:
+            let method = authenticator.availableMethod()
+            var content = UIListContentConfiguration.subtitleCell()
+            content.text = "Require \(method ?? "Face ID")"
+            content.secondaryText = method == nil ? "Set up Face ID or a passcode in iOS Settings first." : nil
+            content.secondaryTextProperties.color = .secondaryLabel
+            content.image = UIImage(systemName: "lock")
+            content.imageProperties.tintColor = .label
+            cell.contentConfiguration = content
+            let toggle = UISwitch()
+            toggle.isOn = AppLockPreference.isOn
+            toggle.isEnabled = method != nil || AppLockPreference.isOn
+            toggle.addAction(UIAction { [weak self] action in
+                guard let toggle = action.sender as? UISwitch else { return }
+                self?.setAppLock(toggle.isOn, toggle: toggle)
+            }, for: .valueChanged)
+            cell.accessories = [.customView(configuration: .init(customView: toggle, placement: .trailing(displayed: .always)))]
+        case .lockDelay:
+            cell.contentConfiguration = nil
+            let options = AppLockPreference.Delay.allCases
+            let control = UISegmentedControl(items: options.map(\.title))
+            control.selectedSegmentIndex = options.firstIndex(of: AppLockPreference.delay) ?? 0
+            control.accessibilityLabel = "Lock after"
+            control.addAction(UIAction { action in
+                guard let control = action.sender as? UISegmentedControl else { return }
+                AppLockPreference.delay = options[control.selectedSegmentIndex]
+            }, for: .valueChanged)
+            control.tag = Self.lockControlTag
+            control.translatesAutoresizingMaskIntoConstraints = false
+            cell.contentView.addSubview(control)
+            let margins = cell.contentView.layoutMarginsGuide
+            NSLayoutConstraint.activate([
+                control.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
+                control.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
+                control.topAnchor.constraint(equalTo: cell.contentView.topAnchor, constant: 10),
+                control.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -10)
+            ])
+        default:
+            break
+        }
+    }
+
+    /// Turning App Lock on or off asks for Face ID / the passcode first, so
+    /// someone holding an unlocked phone can't switch it off.
+    private func setAppLock(_ isOn: Bool, toggle: UISwitch) {
+        Task { [weak self] in
+            guard let self else { return }
+            let confirmed = await authenticator.authenticate(
+                reason: isOn ? "Turn on App Lock" : "Turn off App Lock"
+            )
+            if confirmed {
+                AppLockPreference.isOn = isOn
+            } else {
+                toggle.setOn(!isOn, animated: true)
+            }
+            applySnapshot()
         }
     }
 
@@ -280,8 +378,8 @@ extension SecuritySettingsViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         switch dataSource.itemIdentifier(for: indexPath) {
         case .session(let session): !session.isCurrent
-        case .failed, .logOutEverywhere: true
-        case .loading, .planned, nil: false
+        case .failed, .logOutEverywhere, .checkup: true
+        case .loading, .planned, .requireLock, .lockDelay, nil: false
         }
     }
 
@@ -294,6 +392,10 @@ extension SecuritySettingsViewController: UICollectionViewDelegate {
             Task { await viewModel.load() }
         case .logOutEverywhere:
             confirmLogOutEverywhere()
+        case .checkup:
+            if let checkup = makeCheckup?() {
+                navigationController?.pushViewController(checkup, animated: true)
+            }
         default:
             break
         }

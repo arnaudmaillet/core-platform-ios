@@ -68,6 +68,7 @@ final class SettingsLinksViewController: UIViewController {
                 .link("Legal Notice", symbol: "building.columns", url: links.legalNotice),
                 .link("Copyright Report", symbol: "c.circle", url: links.copyrightReport),
                 .link("Cookie and SDK Policy", symbol: "list.bullet.rectangle", url: links.cookiePolicy),
+                .link("Transparency Reports", symbol: "chart.bar.doc.horizontal", url: links.transparencyReports),
                 .info("Version", symbol: "info.circle", value: version)
             ],
             footer: nil

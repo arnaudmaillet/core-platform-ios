@@ -5,6 +5,7 @@ import FeedInterface
 import MapsInterface
 import MediaPlayback
 import CoreStorage
+import DesignSystem
 import PostGrid
 import ProfileInterface
 import UIKit
@@ -185,10 +186,15 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                         onAccountDeleted: onLogout
                                     )
                                 case .security:
-                                    accountSessions.map {
+                                    accountSessions.map { sessions in
                                         SecuritySettingsViewController(
-                                            viewModel: SecuritySettingsViewModel(sessions: $0),
-                                            onSignedOutEverywhere: onLogout
+                                            viewModel: SecuritySettingsViewModel(sessions: sessions),
+                                            onSignedOutEverywhere: onLogout,
+                                            makeCheckup: {
+                                                SecurityCheckupViewController(
+                                                    account: account, sessions: sessions, authenticator: DeviceAuthenticator()
+                                                )
+                                            }
                                         )
                                     }
                                 case .safety:
