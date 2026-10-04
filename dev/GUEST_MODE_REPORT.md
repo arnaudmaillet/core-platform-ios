@@ -47,7 +47,7 @@ The good news is that the iOS side is well placed:
 | Local stores | Device-wide UserDefaults keys. Only `CountryUnlockStore` is keyed by account (and hard-wired to the mock account). `WalletStore` seeds free points on first init. | §6.6 |
 | Push, analytics, deep links | None. One install id exists: `device.identifier` in UserDefaults, sent as `DeviceContext.device_id` at login | `AppContainer.swift:981-991` |
 
-### Backend (`arnaudmaillet/core-platform`, develop @ `0e79ba79`)
+### Backend (`arnaudmaillet/core-platform-backend`, develop @ `0e79ba79`)
 
 | Area | Today | Evidence |
 | --- | --- | --- |
