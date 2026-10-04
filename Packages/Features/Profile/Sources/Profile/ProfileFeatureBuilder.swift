@@ -104,6 +104,10 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             switcher: nil,
             makeDestination: { section in
                 switch section {
+                // Device settings need no account: a guest's choices stay on
+                // this iPhone like anyone's (#468).
+                case .playback, .display, .mediaComments, .language, .storage:
+                    AppPreferencesViewController(page: section)
                 case .help:
                     SettingsLinksViewController.help(links: .current)
                 case .legal:
@@ -209,8 +213,8 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                                 + ["Statements of reasons and appeals"]
                                         )
                                     }
-                                case .appPreferences:
-                                    AppPreferencesViewController()
+                                case .playback, .display, .mediaComments, .language, .storage:
+                                    AppPreferencesViewController(page: section)
                                 case .help:
                                     SettingsLinksViewController.help(links: .current)
                                 case .legal:

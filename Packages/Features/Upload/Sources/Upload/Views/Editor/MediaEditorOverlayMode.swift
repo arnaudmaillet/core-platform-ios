@@ -1,3 +1,4 @@
+import DesignSystem
 import MediaPlayback
 import UIKit
 
@@ -299,7 +300,7 @@ final class MediaEditorOverlayMode: MediaEditorMode {
         composer.layoutIfNeeded()
         composer.begin(with: style, mediaWidth: layer?.mediaRect.width ?? screen.bounds.width)
         beganTyping()
-        guard !UIAccessibility.isReduceMotionEnabled else { return }
+        guard !MotionPreference.reducesMotion else { return }
         composer.alpha = 0
         UIView.animate(withDuration: 0.2) { composer.alpha = 1 }
     }

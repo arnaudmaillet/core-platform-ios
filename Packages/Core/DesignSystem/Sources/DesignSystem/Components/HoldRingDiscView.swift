@@ -106,7 +106,7 @@ public final class HoldRingDiscView: UIView {
 
     public init(
         symbolName: String,
-        reducesMotion: @escaping @MainActor () -> Bool = { UIAccessibility.isReduceMotionEnabled }
+        reducesMotion: @escaping @MainActor () -> Bool = { MotionPreference.reducesMotion }
     ) {
         self.reducesMotion = reducesMotion
         super.init(frame: CGRect(origin: .zero, size: CGSize(width: Metrics.diameter, height: Metrics.diameter)))

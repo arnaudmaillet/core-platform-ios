@@ -1,16 +1,51 @@
 import Testing
 @testable import Profile
 
-/// The shape of Settings: thirteen sections in three scopes, in the order of
+/// The shape of Settings: seventeen sections in four scopes, in the order of
 /// `dev/ACCOUNT_SETTINGS_GAP_REPORT.md`, and the scope wording that tells the
 /// viewer which profile a toggle belongs to.
 @MainActor
 struct SettingsCatalogTests {
-    @Test func thirteenSectionsSplitFiveFiveThreeByScope() {
-        #expect(SettingsSection.allCases.count == 13)
+    @Test func seventeenSectionsSplitByScope() {
+        #expect(SettingsSection.allCases.count == 17)
         #expect(SettingsSection.sections(in: .account) == [.account, .security, .familyAndTeens, .wallet, .adsAndData])
         #expect(SettingsSection.sections(in: .profile) == [.privacy, .safety, .notifications, .whatYouSee, .activity])
-        #expect(SettingsSection.sections(in: .app) == [.appPreferences, .help, .legal])
+        #expect(SettingsSection.sections(in: .device) == [.playback, .display, .mediaComments, .language, .storage])
+        #expect(SettingsSection.sections(in: .support) == [.help, .legal])
+    }
+
+    /// App and Device has its own group, out of "App and Legal" (#468), and
+    /// says it follows the phone rather than the profile.
+    @Test func theDeviceScopeHasItsOwnGroup() {
+        #expect(SettingsViewController.headerText(for: .device, activeHandle: "@maya") == "App and Device")
+        #expect(SettingsViewController.footerText(for: .device, activeHandle: "@maya")?.contains("this iPhone") == true)
+        #expect(SettingsViewController.headerText(for: .support, activeHandle: nil) == "Support and Legal")
+    }
+
+    /// A guest (no account, #472) sees this device's settings and Support
+    /// and Legal — never the account or profile groups.
+    @Test func aGuestSeesDeviceAndSupportOnly() {
+        #expect(SettingsViewController.scopes(isGuest: true) == [.device, .support])
+        #expect(SettingsViewController.scopes(isGuest: false) == SettingsScope.allCases)
+    }
+
+    /// Each App and Device page shows its own sections and nothing else.
+    @Test func eachDevicePageShowsItsSections() {
+        #expect(AppPreferencesViewController.sections(for: .playback) == [.playback])
+        #expect(AppPreferencesViewController.sections(for: .display) == [.appearance, .motion])
+        #expect(AppPreferencesViewController.sections(for: .mediaComments) == [.band, .muted, .subtitles])
+        #expect(AppPreferencesViewController.sections(for: .language) == [.language])
+        #expect(AppPreferencesViewController.sections(for: .storage) == [.storage])
+        for section in SettingsSection.sections(in: .device) {
+            let page = AppPreferencesViewController(page: section)
+            page.loadViewIfNeeded()
+            #expect(page.title == section.title)
+        }
+    }
+
+    @Test func theLanguageRowNamesTheAppLanguage() {
+        #expect(!AppPreferencesViewController.currentLanguageName().isEmpty)
+        #expect(AppPreferencesViewController.footer(.language).contains("English"))
     }
 
     /// Every section can stand in for itself before it is built: a title, an
@@ -46,6 +81,6 @@ struct SettingsCatalogTests {
     @Test func theAccountScopeSaysItFollowsEveryProfile() {
         #expect(SettingsViewController.headerText(for: .account, activeHandle: "@maya") == "Account-Wide")
         #expect(SettingsViewController.footerText(for: .account, activeHandle: "@maya") == "Applies to every profile on this account.")
-        #expect(SettingsViewController.footerText(for: .app, activeHandle: nil) == nil)
+        #expect(SettingsViewController.footerText(for: .support, activeHandle: nil) == nil)
     }
 }

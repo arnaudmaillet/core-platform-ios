@@ -314,7 +314,7 @@ final class SnapCommentTickerView: UIView {
     func setReservesBand(_ reserves: Bool) {
         guard reserves != reservesBand else { return }
         reservesBand = reserves
-        isHidden = (queue.isEmpty && !reserves) || UIAccessibility.isReduceMotionEnabled
+        isHidden = (queue.isEmpty && !reserves) || MotionPreference.reducesMotion
     }
 
     func setComments(_ comments: [TickerCommentModel]) {
@@ -333,7 +333,7 @@ final class SnapCommentTickerView: UIView {
                 .map(\.element)
             laneNextIndex[lane] = 0
         }
-        isHidden = (comments.isEmpty && !reservesBand) || UIAccessibility.isReduceMotionEnabled
+        isHidden = (comments.isEmpty && !reservesBand) || MotionPreference.reducesMotion
         startIfNeeded()
         // Data landing on a page that is ALREADY on screen (a slow network
         // beat the prefetch): ease the pre-filled train in instead of popping
@@ -449,7 +449,7 @@ final class SnapCommentTickerView: UIView {
         // a band that stayed empty until the first fresh spawn came in from
         // the right). `didMoveToWindow` lays it once there is a window.
         guard isActive, mode == .parked, !queue.isEmpty, bounds.width > 0, !isHeldForFlight,
-              window != nil, !UIAccessibility.isReduceMotionEnabled else { return }
+              window != nil, !MotionPreference.reducesMotion else { return }
         mode = .conveying
         laidWidth = bounds.width
         for lane in 0..<Self.laneCount {

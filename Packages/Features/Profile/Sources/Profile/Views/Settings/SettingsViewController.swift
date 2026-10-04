@@ -3,7 +3,7 @@ import DesignSystem
 import ProfileInterface
 import UIKit
 
-/// Settings, pushed from the own profile's gear: the thirteen sections of
+/// Settings, pushed from the own profile's gear: the sections of
 /// `SettingsCatalog` grouped by scope, then Switch Profile and Log Out.
 ///
 /// ## Why the scope is on screen
@@ -168,9 +168,7 @@ final class SettingsViewController: UIViewController {
 
     private func applySnapshot() {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
-        // A guest has no account and no profile: the app-wide section is the
-        // whole of Settings for them.
-        let scopes: [SettingsScope] = onSignIn == nil ? SettingsScope.allCases : [.app]
+        let scopes = Self.scopes(isGuest: onSignIn != nil)
         for scope in scopes {
             snapshot.appendSections([.scope(scope)])
             snapshot.appendItems(SettingsSection.sections(in: scope).map(Item.section), toSection: .scope(scope))
@@ -197,13 +195,21 @@ final class SettingsViewController: UIViewController {
         return Self.footerText(for: scope, activeHandle: activeHandle)
     }
 
+    /// What Settings shows. A guest has no account and no profile, so only
+    /// what works without one: this device's settings, and help and the
+    /// legal pages (#469 on top of the guest mode, #472).
+    static func scopes(isGuest: Bool) -> [SettingsScope] {
+        isGuest ? [.device, .support] : SettingsScope.allCases
+    }
+
     /// The scope as the viewer reads it. Static and pure so the wording is
     /// pinned by tests rather than by a screenshot.
     static func headerText(for scope: SettingsScope, activeHandle: String?) -> String {
         switch scope {
         case .account: "Account-Wide"
         case .profile: activeHandle.map { "Profile · \($0)" } ?? "Profile"
-        case .app: "App and Legal"
+        case .device: "App and Device"
+        case .support: "Support and Legal"
         }
     }
 
@@ -214,7 +220,9 @@ final class SettingsViewController: UIViewController {
         case .profile:
             activeHandle.map { "Applies to \($0) only. Switch profile to change another profile's settings." }
                 ?? "Applies to the active profile only."
-        case .app:
+        case .device:
+            "Applies to this iPhone, whichever profile is active."
+        case .support:
             nil
         }
     }

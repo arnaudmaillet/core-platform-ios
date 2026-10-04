@@ -3939,7 +3939,7 @@ extension MediaEditorViewController {
     /// top-left corner. `setEditingAccessory` lays out just above, which is what
     /// makes this the right side of the call.
     private func popTheTenantIn(_ accessory: UIView) {
-        guard !UIAccessibility.isReduceMotionEnabled else { return }
+        guard !MotionPreference.reducesMotion else { return }
         // ⚠️ **A TENANT THAT NAMES NOTHING STILL ARRIVES.** The soundtrack tools
         // are a waveform and two sliders, not a row of items, and a screen where
         // six bands ripple and the seventh blinks on reads as the seventh being
@@ -3995,7 +3995,7 @@ extension MediaEditorViewController {
     /// once and shown again; a row left at 0 alpha and three-quarter scale
     /// would come back invisible the next time it was asked for.
     private func popTheTenantOut(_ departing: UIView) {
-        guard !UIAccessibility.isReduceMotionEnabled else {
+        guard !MotionPreference.reducesMotion else {
             departing.removeFromSuperview()
             return
         }

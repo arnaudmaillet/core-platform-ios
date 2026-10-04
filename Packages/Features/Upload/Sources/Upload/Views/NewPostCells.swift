@@ -76,7 +76,7 @@ final class NewPostMediaCell: UICollectionViewListCell {
     /// simulator a test runs on cannot switch Reduce Motion on, so a cell that
     /// read `UIAccessibility` itself could only ever be tested with motion —
     /// and "instant under Reduce Motion" would be a promise nothing checked.
-    var reducesMotion: () -> Bool = { UIAccessibility.isReduceMotionEnabled }
+    var reducesMotion: () -> Bool = { MotionPreference.reducesMotion }
 
     /// ⚠️ **ONE SURFACE, BUILT ONCE AND MOVED — NOT ONE PER TILE.** The strip
     /// holds up to twenty tiles and the screen plays exactly one of them (see
