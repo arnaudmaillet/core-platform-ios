@@ -39,6 +39,9 @@ public enum UISound: String, CaseIterable, Sendable {
     /// exists for would come out as a stutter. `play(atTime:)` hands the
     /// spacing to the audio system, which is the only clock that can keep it.
     public func play(after delay: TimeInterval = 0) {
+        // The viewer's Interface Sounds switch (#471): off is silence here,
+        // the one door every interface sound goes through.
+        guard InterfaceSoundPreference.isOn else { return }
         guard let player = Self.players.take(self) else { return }
         player.currentTime = 0
         if delay > 0 {
@@ -54,10 +57,12 @@ public enum UISound: String, CaseIterable, Sendable {
     /// is tens of milliseconds — long enough for the first element of the first
     /// row to be seen landing before it is heard.
     public static func prepare() {
+        // Nothing to warm for a viewer who turned interface sounds off.
+        guard InterfaceSoundPreference.isOn else { return }
         for sound in allCases { _ = players.take(sound) }
     }
 
-    fileprivate static let players = SoundPool()
+    static let players = SoundPool()
 }
 
 /// A small ring of players per sound.

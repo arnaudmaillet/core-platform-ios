@@ -14,6 +14,9 @@ let package = Package(
         .package(path: "../MediaCore"),
         // The house `:name:` stickers are StickerKit's dotLottie files.
         .package(path: "../StickerKit"),
+        // `InterfaceSoundPreference`: the picker's click honours the app's
+        // Interface Sounds switch (#471).
+        .package(path: "../DesignSystem"),
         // Noto's animated emoji are Lottie JSON. The same declaration as
         // StickerKit's and Chat's, so all three resolve to one checkout.
         .package(url: "https://github.com/airbnb/lottie-ios.git", from: "4.5.0")
@@ -24,6 +27,7 @@ let package = Package(
             dependencies: [
                 "MediaCore",
                 "StickerKit",
+                "DesignSystem",
                 .product(name: "Lottie", package: "lottie-ios")
             ],
             // .copy, not .process: the Noto folder keeps its structure so the
