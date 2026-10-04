@@ -321,12 +321,20 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
     /// says so once: the profiles are visible again.
     private func welcomeBackIfReactivated() {
         Task { @MainActor [weak self] in
-            guard let self, await container.sessionManager.consumeReactivationNotice() else { return }
+            guard let self, await container.sessionManager.consumeReactivationNotice() else {
+                // A login that didn't reactivate anything: a deletion recorded
+                // here is no longer pending (or was cancelled elsewhere).
+                PendingDeletionNotice.clear()
+                return
+            }
+            let message = PendingDeletionNotice.consume()
+                ? "Welcome back. Your account deletion was cancelled."
+                : "Welcome back. Your account is active again."
             // After the shell has swapped in and the sign-in sheet (if any)
             // has gone, over the screen on top of the active tab.
             try? await Task.sleep(for: .milliseconds(600))
             guard let host = mainTabCoordinator?.activeNavigationController?.topViewController?.view else { return }
-            ToastView.present("Welcome back. Your account is active again.", in: host)
+            ToastView.present(message, in: host)
         }
     }
 

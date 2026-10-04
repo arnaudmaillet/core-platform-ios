@@ -264,7 +264,8 @@ final class AccountSettingsViewController: UIViewController {
                 viewModel: DeleteAccountViewModel(lifecycle: lifecycle),
                 onAccountDeleted: onAccountDeleted,
                 makeDataExport: { [weak self] in self?.makeDataExport() },
-                stepUp: stepUp
+                stepUp: stepUp,
+                canceller: lifecycle as? any AccountDeletionCancelling
             ))
         case .dataExport:
             guard let export = makeDataExport() else {

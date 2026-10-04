@@ -24,6 +24,7 @@ final class DeleteAccountViewController: UIViewController {
         case loading
         case delete
         case requested
+        case cancelRequest
     }
 
     private static let consequences = [
@@ -38,6 +39,7 @@ final class DeleteAccountViewController: UIViewController {
     /// "Download your data first" — offered before the irreversible step.
     private let makeDataExport: () -> UIViewController?
     private let stepUp: (any CredentialStepUp)?
+    private let canceller: (any AccountDeletionCancelling)?
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
 
@@ -45,8 +47,10 @@ final class DeleteAccountViewController: UIViewController {
         viewModel: DeleteAccountViewModel,
         onAccountDeleted: @escaping () -> Void,
         makeDataExport: @escaping () -> UIViewController? = { nil },
-        stepUp: (any CredentialStepUp)? = nil
+        stepUp: (any CredentialStepUp)? = nil,
+        canceller: (any AccountDeletionCancelling)? = nil
     ) {
+        self.canceller = canceller
         self.viewModel = viewModel
         self.onAccountDeleted = onAccountDeleted
         self.makeDataExport = makeDataExport
@@ -83,11 +87,11 @@ final class DeleteAccountViewController: UIViewController {
         case .ready(let permanentOn):
             "Deletion becomes permanent on \(dateFormatter.string(from: permanentOn)), "
                 + "\(AccountDeletionPolicy.gracePeriodDays) days after you ask. "
-                + "To cancel before then, contact support."
+                + "Until then your profiles are hidden, and logging back in cancels it."
         case .requested(let on, let permanentOn):
             "You asked to delete this account on \(dateFormatter.string(from: on)). "
                 + "It becomes permanent on \(dateFormatter.string(from: permanentOn)). "
-                + "To cancel before then, contact support."
+                + "Until then you can cancel it here, or by logging back in."
         }
     }
 
@@ -130,6 +134,9 @@ final class DeleteAccountViewController: UIViewController {
             case .requested:
                 content.text = "Deletion Requested"
                 content.textProperties.color = .secondaryLabel
+            case .cancelRequest:
+                content.text = "Cancel Deletion Request"
+                content.textProperties.color = .tintColor
             }
             cell.contentConfiguration = content
         }
@@ -174,7 +181,8 @@ final class DeleteAccountViewController: UIViewController {
         switch viewModel.phase {
         case .loading: snapshot.appendItems([.loading], toSection: .action)
         case .ready: snapshot.appendItems([.delete], toSection: .action)
-        case .requested: snapshot.appendItems([.requested], toSection: .action)
+        case .requested:
+            snapshot.appendItems(canceller == nil ? [.requested] : [.requested, .cancelRequest], toSection: .action)
         }
         // The footer carries the dates; reload it with the row.
         snapshot.reloadSections([.action])
@@ -190,7 +198,8 @@ final class DeleteAccountViewController: UIViewController {
         let alert = UIAlertController(
             title: "Delete your account?",
             message: "Every profile and everything on them will be permanently deleted on "
-                + "\(Self.dateFormatter.string(from: permanentOn)). You'll be logged out now.",
+                + "\(Self.dateFormatter.string(from: permanentOn)). You'll be logged out now; "
+                + "logging back in before then cancels it.",
             preferredStyle: .alert
         )
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
@@ -225,9 +234,13 @@ final class DeleteAccountViewController: UIViewController {
             guard let self else { return }
             do {
                 let permanentOn = try await viewModel.requestDeletion()
+                // So the next login on this iPhone can say the deletion was
+                // cancelled, not just that the account is active again.
+                PendingDeletionNotice.recordRequest()
                 let done = UIAlertController(
                     title: "Deletion requested",
-                    message: "Your account will be permanently deleted on \(Self.dateFormatter.string(from: permanentOn)).",
+                    message: "Your account will be permanently deleted on \(Self.dateFormatter.string(from: permanentOn)). "
+                        + "Log back in before then to cancel it.",
                     preferredStyle: .alert
                 )
                 done.addAction(UIAlertAction(title: "OK", style: .default) { [weak self] _ in
@@ -246,10 +259,40 @@ final class DeleteAccountViewController: UIViewController {
     }
 }
 
+extension DeleteAccountViewController {
+    /// Withdraws the pending erasure (#402); the screen goes back to its
+    /// ready state.
+    fileprivate func cancelRequest() {
+        guard let canceller else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await canceller.cancelDeletion()
+                PendingDeletionNotice.clear()
+                await viewModel.load()
+                presentMessage("Deletion cancelled. Your account stays.")
+            } catch DeletionCancelError.nothingPending {
+                await viewModel.load()
+                presentMessage("There's no deletion to cancel.")
+            } catch DeletionCancelError.tooLate {
+                presentMessage("It's too late to cancel: the deletion is being completed.")
+            } catch {
+                presentMessage("Couldn't cancel the deletion. Try again.")
+            }
+        }
+    }
+
+    private func presentMessage(_ message: String) {
+        let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
+    }
+}
+
 extension DeleteAccountViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         let item = dataSource.itemIdentifier(for: indexPath)
-        return item == .delete || item == .downloadData
+        return item == .delete || item == .downloadData || item == .cancelRequest
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
@@ -257,6 +300,8 @@ extension DeleteAccountViewController: UICollectionViewDelegate {
         switch dataSource.itemIdentifier(for: indexPath) {
         case .delete:
             confirmDeletion()
+        case .cancelRequest:
+            cancelRequest()
         case .downloadData:
             if let export = makeDataExport() {
                 navigationController?.pushViewController(export, animated: true)

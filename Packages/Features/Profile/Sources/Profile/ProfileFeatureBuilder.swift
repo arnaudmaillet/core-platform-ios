@@ -227,6 +227,19 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                     }
                                 case .activity:
                                     YourActivityViewController()
+                                case .adsAndData:
+                                    (account as? any AccountConsentManaging).map { manager in
+                                        ConsentsViewController(manager: manager, makeDeleteAccount: {
+                                            (account as? any AccountLifecycleManaging).map { lifecycle in
+                                                DeleteAccountViewController(
+                                                    viewModel: DeleteAccountViewModel(lifecycle: lifecycle),
+                                                    onAccountDeleted: onLogout,
+                                                    stepUp: accountSessions as? any CredentialStepUp,
+                                                    canceller: lifecycle as? any AccountDeletionCancelling
+                                                )
+                                            }
+                                        })
+                                    }
                                 case .playback, .display, .mediaComments, .language, .storage:
                                     AppPreferencesViewController(page: section)
                                 case .help:
