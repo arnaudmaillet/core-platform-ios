@@ -31,6 +31,6 @@ public enum PersonRowMetrics {
     /// The height of `count` stacked lines in these text styles, for callers
     /// whose content is type rather than a disc.
     public static func textHeight(_ styles: [UIFont.TextStyle]) -> CGFloat {
-        styles.reduce(0) { $0 + UIFont.preferredFont(forTextStyle: $1).lineHeight }
+        styles.reduce(0) { $0 + UIFont.appFont(forTextStyle: $1).lineHeight }
     }
 }

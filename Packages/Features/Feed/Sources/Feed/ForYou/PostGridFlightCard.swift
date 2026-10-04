@@ -134,9 +134,7 @@ final class PostGridFlightCard: UIView {
     private let restingChromeView = UIView()
     /// The count's font — internal because the sound sheet's tile draws the
     /// count this card lands on, and must draw it in the same type.
-    static let metaFont = UIFont.systemFont(
-        ofSize: UIFont.preferredFont(forTextStyle: .caption2).pointSize, weight: .semibold
-    )
+    static let metaFont = UIFont.scaledFont(forTextStyle: .caption2, weight: .semibold)
     private let likes = PostMetricLabel(
         symbol: "heart.fill", font: metaFont, color: .white, shadowed: true
     )

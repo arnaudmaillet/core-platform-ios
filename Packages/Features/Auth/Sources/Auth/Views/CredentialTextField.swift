@@ -1,3 +1,4 @@
+import DesignSystem
 import UIKit
 
 /// Bare text field for inset-grouped form rows: no chrome of its own (the
@@ -6,7 +7,7 @@ import UIKit
 final class CredentialTextField: UITextField {
     override init(frame: CGRect) {
         super.init(frame: frame)
-        font = .preferredFont(forTextStyle: .body)
+        font = .appFont(forTextStyle: .body)
         adjustsFontForContentSizeCategory = true
     }
 

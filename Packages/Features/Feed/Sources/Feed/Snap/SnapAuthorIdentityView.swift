@@ -217,9 +217,9 @@ final class SnapAuthorIdentityView: UIView {
         avatarView.backgroundColor = .clear
         avatarView.pin(to: monogramView)
 
-        nameLabel.font = UIFont.preferredFont(forTextStyle: .footnote).withWeight(.semibold)
+        nameLabel.font = UIFont.scaledFont(forTextStyle: .footnote, weight: .semibold)
         nameLabel.textColor = .label
-        metaLabel.font = .preferredFont(forTextStyle: .caption2)
+        metaLabel.font = .appFont(forTextStyle: .caption2)
         metaLabel.textColor = .secondaryLabel
         // THE ORDER THE PILL GIVES WAY IN, when the bar is too narrow to
         // hold everything: the display NAME truncates first, the handle

@@ -238,13 +238,13 @@ final class CaptureAccessNoticeView: UIView {
         icon.tintColor = .secondaryLabel
         icon.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 36, weight: .regular)
         title.text = kind == .denied ? "Camera access is off" : "No camera available"
-        title.font = .preferredFont(forTextStyle: .headline)
+        title.font = .appFont(forTextStyle: .headline)
         title.textColor = .label
         title.adjustsFontForContentSizeCategory = true
         body.text = kind == .denied
             ? "Allow the camera in Settings to take photos and record videos for your posts."
             : "This device has no camera to take photos or record videos with. You can still post from your library."
-        body.font = .preferredFont(forTextStyle: .subheadline)
+        body.font = .appFont(forTextStyle: .subheadline)
         body.textColor = .secondaryLabel
         body.numberOfLines = 0
         body.textAlignment = .center

@@ -82,7 +82,7 @@ final class ForYouStoryCell: UICollectionViewCell {
         picture.isHidden = true
         monogram.addSubview(picture)
 
-        nameLabel.font = .preferredFont(forTextStyle: .caption1)
+        nameLabel.font = .appFont(forTextStyle: .caption1)
         nameLabel.adjustsFontForContentSizeCategory = false
         nameLabel.textAlignment = .center
         nameLabel.textColor = .label
@@ -136,10 +136,7 @@ final class ForYouStoryCell: UICollectionViewCell {
     func configure(with story: ForYouViewModel.FriendStory, imagePipeline: ImagePipeline) {
         shownAuthor = story.authorID
         nameLabel.text = story.name.split(separator: " ").first.map(String.init) ?? story.name
-        nameLabel.font = .systemFont(
-            ofSize: UIFont.preferredFont(forTextStyle: .caption1).pointSize,
-            weight: story.hasUnseen ? .semibold : .regular
-        )
+        nameLabel.font = .scaledFont(forTextStyle: .caption1, weight: story.hasUnseen ? .semibold : .regular)
         nameLabel.textColor = story.hasUnseen ? .label : .secondaryLabel
         ring.isHidden = !story.hasUnseen
         monogram.setMonogram(MonogramAvatarView.monogram(name: story.name, handle: story.handle))

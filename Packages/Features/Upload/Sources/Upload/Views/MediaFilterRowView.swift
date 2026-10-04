@@ -310,7 +310,7 @@ private final class FilterChip: UIView {
         picture.translatesAutoresizingMaskIntoConstraints = false
 
         caption.text = filter.name
-        caption.font = .preferredFont(forTextStyle: .caption2)
+        caption.font = .appFont(forTextStyle: .caption2)
         caption.adjustsFontForContentSizeCategory = true
         caption.textAlignment = .center
         caption.textColor = .secondaryLabel

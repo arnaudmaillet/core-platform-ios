@@ -107,9 +107,7 @@ final class BadgedAvatarView: UIView {
 
         // `.caption1` rather than `.caption2`: the pill grew, and a number in
         // it should look deliberate rather than lost.
-        label.font = UIFont.systemFont(
-            ofSize: UIFont.preferredFont(forTextStyle: .caption1).pointSize, weight: .semibold
-        )
+        label.font = UIFont.scaledFont(forTextStyle: .caption1, weight: .semibold)
         label.adjustsFontForContentSizeCategory = true
         label.textAlignment = .center
         // The same trap `PagedTabBar.BadgeView` documents: a semantic colour

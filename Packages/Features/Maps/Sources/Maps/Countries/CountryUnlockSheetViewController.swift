@@ -76,11 +76,11 @@ final class CountryUnlockSheetViewController: UIViewController {
         flag.font = .systemFont(ofSize: 56) // a picture, not text (#482)
         let name = UILabel()
         name.text = country.name
-        name.font = UIFont.systemFont(ofSize: UIFont.preferredFont(forTextStyle: .title2).pointSize, weight: .bold)
+        name.font = UIFont.scaledFont(forTextStyle: .title2, weight: .bold)
         name.adjustsFontForContentSizeCategory = true
         let continent = UILabel()
         continent.text = country.continent
-        continent.font = .preferredFont(forTextStyle: .subheadline)
+        continent.font = .appFont(forTextStyle: .subheadline)
         continent.textColor = .secondaryLabel
 
         let metrics = UIStackView(arrangedSubviews: [
@@ -93,7 +93,7 @@ final class CountryUnlockSheetViewController: UIViewController {
 
         let pitch = UILabel()
         pitch.text = "Unlock \(country.name) to see its posts on your map."
-        pitch.font = .preferredFont(forTextStyle: .subheadline)
+        pitch.font = .appFont(forTextStyle: .subheadline)
         pitch.textColor = .secondaryLabel
         pitch.textAlignment = .center
         pitch.numberOfLines = 0
@@ -112,7 +112,7 @@ final class CountryUnlockSheetViewController: UIViewController {
         }, for: .primaryActionTriggered)
         unlockButton.heightAnchor.constraint(equalToConstant: 50).isActive = true
 
-        balanceLabel.font = .preferredFont(forTextStyle: .footnote)
+        balanceLabel.font = .appFont(forTextStyle: .footnote)
         balanceLabel.textColor = .secondaryLabel
         balanceLabel.textAlignment = .center
         refreshBalance(price: price)
@@ -264,7 +264,7 @@ final class CountryUnlockSheetViewController: UIViewController {
         }
         let captionLabel = UILabel()
         captionLabel.text = caption
-        captionLabel.font = .preferredFont(forTextStyle: .caption1)
+        captionLabel.font = .appFont(forTextStyle: .caption1)
         captionLabel.textColor = .secondaryLabel
         captionLabel.textAlignment = .center
         let column = UIStackView(arrangedSubviews: [valueView, captionLabel])

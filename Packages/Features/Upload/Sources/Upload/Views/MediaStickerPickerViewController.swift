@@ -1,3 +1,4 @@
+import DesignSystem
 import MediaPlayback
 import StickerKit
 import UIKit
@@ -247,7 +248,7 @@ final class MediaStickerPickerViewController: UIViewController {
 
         override init(frame: CGRect) {
             super.init(frame: frame)
-            label.font = .preferredFont(forTextStyle: .footnote)
+            label.font = .appFont(forTextStyle: .footnote)
             label.textColor = .secondaryLabel
             label.frame = bounds
             label.autoresizingMask = [.flexibleWidth, .flexibleHeight]

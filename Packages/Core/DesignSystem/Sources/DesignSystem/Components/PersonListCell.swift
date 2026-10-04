@@ -70,8 +70,8 @@ public final class PersonListCell: UICollectionViewListCell {
     }
 
     private static var twoLineTextHeight: CGFloat {
-        UIFont.preferredFont(forTextStyle: .headline).lineHeight
-            + UIFont.preferredFont(forTextStyle: .subheadline).lineHeight
+        UIFont.appFont(forTextStyle: .headline).lineHeight
+            + UIFont.appFont(forTextStyle: .subheadline).lineHeight
     }
 
     /// Fires when the trailing ✕ is tapped. Passed to `configure` rather than
@@ -150,16 +150,16 @@ public final class PersonListCell: UICollectionViewListCell {
     private var bottomPin: NSLayoutConstraint?
 
     private func buildTextColumn() {
-        nameLabel.font = .preferredFont(forTextStyle: .headline)
+        nameLabel.font = .appFont(forTextStyle: .headline)
         nameLabel.textColor = .label
-        handleLabel.font = .preferredFont(forTextStyle: .subheadline)
+        handleLabel.font = .appFont(forTextStyle: .subheadline)
         handleLabel.textColor = .secondaryLabel
         // Same size and weight as the handle, one step quieter in colour: the
         // context is a peer of the handle, not a second subtitle competing
         // with it, and not something the eye should land on first.
-        contextLabel.font = .preferredFont(forTextStyle: .subheadline)
+        contextLabel.font = .appFont(forTextStyle: .subheadline)
         contextLabel.textColor = .tertiaryLabel
-        separatorLabel.font = .preferredFont(forTextStyle: .subheadline)
+        separatorLabel.font = .appFont(forTextStyle: .subheadline)
         separatorLabel.textColor = .tertiaryLabel
         separatorLabel.text = "•"
 
@@ -285,7 +285,7 @@ public final class PersonListCell: UICollectionViewListCell {
         // more for a one-line row than a two-line one, which is exactly what
         // makes the two land on the same height.
         let columnHeight = subtitleRow.isHidden
-            ? UIFont.preferredFont(forTextStyle: .headline).lineHeight
+            ? UIFont.appFont(forTextStyle: .headline).lineHeight
             : Self.twoLineTextHeight + textColumn.spacing
         let margin = max(Metrics.verticalMargin, (Self.comfortableRowHeight - columnHeight) / 2)
         topPin?.constant = margin
@@ -318,7 +318,7 @@ public final class PersonListCell: UICollectionViewListCell {
     /// text wraps or scales — where a trailing accessory would pin it to the
     /// far edge of the row, next to the progress spinner.
     private static func nameText(for model: PersonRowContent) -> NSAttributedString {
-        let font = UIFont.preferredFont(forTextStyle: .headline)
+        let font = UIFont.appFont(forTextStyle: .headline)
         let name = NSMutableAttributedString(
             string: model.displayName,
             attributes: [.font: font, .foregroundColor: UIColor.label]

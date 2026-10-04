@@ -50,8 +50,9 @@ extension UIFont {
     }
 
     /// `font` (designed at the default text size) scaled like `style`.
-    /// `traits` nil reads the current text size (what a label wants); a test
-    /// passes one to pin it.
+    /// `traits` nil means the app's text size — the iPhone's, under the
+    /// app's ceiling and Care Mode's floor (`TextSizeCeiling.currentTraits`);
+    /// a test passes one to pin it.
     public static func scaled(
         _ font: UIFont,
         relativeTo style: TextStyle,
@@ -59,8 +60,32 @@ extension UIFont {
         compatibleWith traits: UITraitCollection? = nil
     ) -> UIFont {
         UIFontMetrics(forTextStyle: style).scaledFont(
-            for: font, maximumPointSize: maximumPointSize ?? 0, compatibleWith: traits
+            for: font, maximumPointSize: maximumPointSize ?? 0,
+            compatibleWith: traits ?? TextSizeCeiling.currentTraits
         )
+    }
+
+    /// A text style at the app's text size — USE THIS, not
+    /// `preferredFont(forTextStyle:)`, which reads the iPhone's setting and so
+    /// ignores the app's XXXL ceiling and Care Mode (#482) wherever the label
+    /// doesn't re-resolve its font from its own traits. A source scan in
+    /// `ScaledFontTests` keeps it that way.
+    public static func appFont(forTextStyle style: TextStyle) -> UIFont {
+        preferredFont(forTextStyle: style, compatibleWith: TextSizeCeiling.currentTraits)
+    }
+
+    /// A text style at another weight, scaled like the style.
+    ///
+    /// Replaces `systemFont(ofSize: preferredFont(forTextStyle:).pointSize,
+    /// weight:)` and `preferredFont(forTextStyle:).withWeight(_:)`: both froze
+    /// the size the iPhone asked for when the font was made, so they ignored
+    /// the app's ceiling (#482) and never followed a later change.
+    public static func scaledFont(
+        forTextStyle style: TextStyle,
+        weight: Weight,
+        maximumPointSize: CGFloat? = nil
+    ) -> UIFont {
+        scaledSystemFont(ofSize: defaultPointSize(for: style), weight: weight, relativeTo: style, maximumPointSize: maximumPointSize)
     }
 
     /// The text style's size at the default (Large) text size — the designed

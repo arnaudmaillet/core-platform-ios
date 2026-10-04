@@ -324,7 +324,7 @@ final class PullToSearchIndicatorView: UIView {
             glyph.contentMode = .center
         }
         for label in [pullLabel, releaseLabel] {
-            label.font = .preferredFont(forTextStyle: .subheadline)
+            label.font = .appFont(forTextStyle: .subheadline)
             label.adjustsFontForContentSizeCategory = true
         }
         pullLabel.text = Self.pullTitle

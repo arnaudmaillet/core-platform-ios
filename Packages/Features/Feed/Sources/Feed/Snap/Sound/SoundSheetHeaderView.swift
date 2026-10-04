@@ -90,14 +90,14 @@ final class SoundSheetHeaderView: UICollectionReusableView {
             playButton.heightAnchor.constraint(equalToConstant: 44),
         ])
 
-        titleLabel.font = .preferredFont(forTextStyle: .title3).withWeight(.semibold)
+        titleLabel.font = .scaledFont(forTextStyle: .title3, weight: .semibold)
         titleLabel.numberOfLines = 1
         titleLabel.adjustsFontForContentSizeCategory = true
-        subtitleLabel.font = .preferredFont(forTextStyle: .subheadline)
+        subtitleLabel.font = .appFont(forTextStyle: .subheadline)
         subtitleLabel.textColor = .secondaryLabel
         subtitleLabel.adjustsFontForContentSizeCategory = true
-        metaLabel.font = .monospacedDigitSystemFont(
-            ofSize: UIFont.preferredFont(forTextStyle: .footnote).pointSize, weight: .regular
+        metaLabel.font = .scaledMonospacedDigitSystemFont(
+            ofSize: UIFont.defaultPointSize(for: .footnote), relativeTo: .footnote
         )
         metaLabel.textColor = .tertiaryLabel
 

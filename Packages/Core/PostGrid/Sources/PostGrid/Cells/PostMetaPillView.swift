@@ -56,7 +56,7 @@ public class PostMetaPillView: UIVisualEffectView {
     /// caption2 for what you read, footnote for what you touch.
     public static var font: UIFont {
         UIFont.postGridSystemFont(
-            matching: .preferredFont(forTextStyle: .footnote), weight: .semibold
+            matching: .appFont(forTextStyle: .footnote), weight: .semibold
         )
     }
 

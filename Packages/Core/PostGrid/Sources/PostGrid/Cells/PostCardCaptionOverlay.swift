@@ -100,8 +100,8 @@ public final class PostCardCaptionOverlay: UIView {
     /// The fonts the overlay sets its words in.
     private static func captionFont(onMedia: Bool) -> UIFont {
         onMedia
-            ? .systemFont(ofSize: UIFont.preferredFont(forTextStyle: .footnote).pointSize, weight: .medium)
-            : .systemFont(ofSize: UIFont.preferredFont(forTextStyle: .headline).pointSize, weight: .semibold)
+            ? .scaledFont(forTextStyle: .footnote, weight: .medium)
+            : .scaledFont(forTextStyle: .headline, weight: .semibold)
     }
 
     /// The scrim, as a VIEW: a bare sublayer's frame does not ride a UIKit
@@ -221,7 +221,7 @@ public final class PostCardCaptionOverlay: UIView {
 
     /// The author line's type.
     public static var authorFont: UIFont {
-        .systemFont(ofSize: UIFont.preferredFont(forTextStyle: .caption1).pointSize, weight: .semibold)
+        .scaledFont(forTextStyle: .caption1, weight: .semibold)
     }
 
     /// The caption's type over a picture.

@@ -209,7 +209,7 @@ final class ProfileShareTargetsView: UIView {
     ) -> UIView {
         let name = UILabel()
         name.text = title
-        name.font = .preferredFont(forTextStyle: .caption1)
+        name.font = .appFont(forTextStyle: .caption1)
         name.adjustsFontForContentSizeCategory = true
         name.textColor = .label
         name.textAlignment = .center

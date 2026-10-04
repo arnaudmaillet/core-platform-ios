@@ -205,7 +205,7 @@ private final class LinkRowView: UIView {
 
     private func configure(_ field: UITextField, placeholder: String, keyboard: UIKeyboardType, autocap: UITextAutocapitalizationType) {
         field.placeholder = placeholder
-        field.font = .preferredFont(forTextStyle: .body)
+        field.font = .appFont(forTextStyle: .body)
         field.adjustsFontForContentSizeCategory = true
         field.keyboardType = keyboard
         field.autocapitalizationType = autocap
