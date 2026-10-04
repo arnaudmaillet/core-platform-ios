@@ -17,7 +17,7 @@ struct SecurityCheckupTests {
         let items = SecurityCheckup.items(account: account(), sessionCount: 1, appLockOn: true, lockMethod: "Face ID")
         #expect(items.map(\.id) == ["email", "phone", "sessions", "appLock", "password", "twoFactor"])
         #expect(SecurityCheckup.summary(items) == "4 of 4 done")
-        #expect(state("password", in: items) == .unavailable)
+        #expect(state("password", in: items) == .info)
         #expect(state("twoFactor", in: items) == .unavailable)
     }
 

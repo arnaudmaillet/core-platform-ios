@@ -52,6 +52,18 @@ private final class FakeAuthClient: Auth_V1_AuthServiceClientInterface, @uncheck
         response(from: .failure(.init(code: .unimplemented, message: nil)))
     }
 
+    func startGuestSession(request: Auth_V1_StartGuestSessionRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_StartGuestSessionResponse> {
+        response(from: .failure(.init(code: .unimplemented, message: nil)))
+    }
+
+    func changePassword(request: Auth_V1_ChangePasswordRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_ChangePasswordResponse> {
+        response(from: .failure(.init(code: .unimplemented, message: nil)))
+    }
+
+    func verifyCredentials(request: Auth_V1_VerifyCredentialsRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_VerifyCredentialsResponse> {
+        response(from: .failure(.init(code: .unimplemented, message: nil)))
+    }
+
     private func response<M>(from result: Result<M, ConnectError>) -> ResponseMessage<M> {
         switch result {
         case .success(let message):

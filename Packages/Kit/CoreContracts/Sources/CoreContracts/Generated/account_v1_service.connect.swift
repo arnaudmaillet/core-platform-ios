@@ -56,9 +56,18 @@ public protocol Account_V1_AccountServiceClientInterface: Sendable {
     @available(iOS 13, *)
     func `reactivateAccount`(request: Account_V1_ReactivateAccountRequest, headers: Connect.Headers) async -> ResponseMessage<Account_V1_CommandResponse>
 
-    /// User-initiated self-deactivation. Data is retained per retention policy.
+    /// User-initiated self-deactivation: the account's profiles are hidden until
+    /// the holder signs back in (see ResumeDeactivatedAccount). Data is retained
+    /// per retention policy. Refused on a suspended account.
     @available(iOS 13, *)
     func `deactivateAccount`(request: Account_V1_DeactivateAccountRequest, headers: Connect.Headers) async -> ResponseMessage<Account_V1_CommandResponse>
+
+    /// Return a self-deactivated account to Active because its holder signed
+    /// back in (called by auth on Login; mesh only). Succeeds as a no-op on an
+    /// account that is already Active; FAILED_PRECONDITION on any other status —
+    /// a suspension is lifted only by ReactivateAccount.
+    @available(iOS 13, *)
+    func `resumeDeactivatedAccount`(request: Account_V1_ResumeDeactivatedAccountRequest, headers: Connect.Headers) async -> ResponseMessage<Account_V1_CommandResponse>
 
     /// Record a successful login; resets failed_login_attempts and updates last_login_at.
     @available(iOS 13, *)
@@ -68,9 +77,24 @@ public protocol Account_V1_AccountServiceClientInterface: Sendable {
     @available(iOS 13, *)
     func `recordFailedLogin`(request: Account_V1_RecordFailedLoginRequest, headers: Connect.Headers) async -> ResponseMessage<Account_V1_CommandResponse>
 
-    /// Initiate an Art. 17 GDPR right-to-erasure request.
+    /// Record the holder's date of birth when none is on file (accounts created
+    /// before it was collected). On the client edge, the caller's own only.
+    @available(iOS 13, *)
+    func `setDateOfBirth`(request: Account_V1_SetDateOfBirthRequest, headers: Connect.Headers) async -> ResponseMessage<Account_V1_AccountView>
+
+    /// Initiate an Art. 17 GDPR right-to-erasure request. The account is erased
+    /// (anonymized, its audit PII crypto-shredded) 30 days later by the janitor;
+    /// meanwhile an active account is deactivated (profiles hidden, sessions end
+    /// at their next refresh) and signing back in cancels the request.
     @available(iOS 13, *)
     func `requestGdprDeletion`(request: Account_V1_RequestGdprDeletionRequest, headers: Connect.Headers) async -> ResponseMessage<Account_V1_CommandResponse>
+
+    /// Withdraw a pending erasure within its grace period (before
+    /// deletion_scheduled_at): ACC-7003 if none is pending, ACC-7004 once the
+    /// period is over. Signing back in also cancels it (it resumes the account
+    /// the request deactivated). On the client edge, the caller's own only.
+    @available(iOS 13, *)
+    func `cancelGdprDeletion`(request: Account_V1_CancelGdprDeletionRequest, headers: Connect.Headers) async -> ResponseMessage<Account_V1_CommandResponse>
 
     /// Anonymise all PII fields after the retention period has elapsed.
     @available(iOS 13, *)
@@ -100,9 +124,16 @@ public protocol Account_V1_AccountServiceClientInterface: Sendable {
     @available(iOS 13, *)
     func `getAccountStatus`(request: Account_V1_GetAccountStatusRequest, headers: Connect.Headers) async -> ResponseMessage<Account_V1_AccountStatusView>
 
-    /// Full GDPR compliance record (restricted endpoint).
+    /// The GDPR record: consents, deletion and export state. On the client edge
+    /// an account reads its own only (account_id = the caller).
     @available(iOS 13, *)
     func `getGdprRecord`(request: Account_V1_GetGdprRecordRequest, headers: Connect.Headers) async -> ResponseMessage<Account_V1_GdprRecordView>
+
+    /// Give or withdraw consents (GDPR Art. 7(3)); each effective change is
+    /// kept in a timestamped history. Returns the updated record. On the client
+    /// edge an account updates its own only.
+    @available(iOS 13, *)
+    func `updateConsents`(request: Account_V1_UpdateConsentsRequest, headers: Connect.Headers) async -> ResponseMessage<Account_V1_GdprRecordView>
 
     /// Paginated list of accounts filtered by lifecycle status (admin / ops).
     @available(iOS 13, *)
@@ -168,6 +199,11 @@ public final class Account_V1_AccountServiceClient: Account_V1_AccountServiceCli
     }
 
     @available(iOS 13, *)
+    public func `resumeDeactivatedAccount`(request: Account_V1_ResumeDeactivatedAccountRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Account_V1_CommandResponse> {
+        return await self.client.unary(path: "/account.v1.AccountService/ResumeDeactivatedAccount", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
     public func `recordLogin`(request: Account_V1_RecordLoginRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Account_V1_CommandResponse> {
         return await self.client.unary(path: "/account.v1.AccountService/RecordLogin", idempotencyLevel: .unknown, request: request, headers: headers)
     }
@@ -178,8 +214,18 @@ public final class Account_V1_AccountServiceClient: Account_V1_AccountServiceCli
     }
 
     @available(iOS 13, *)
+    public func `setDateOfBirth`(request: Account_V1_SetDateOfBirthRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Account_V1_AccountView> {
+        return await self.client.unary(path: "/account.v1.AccountService/SetDateOfBirth", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
     public func `requestGdprDeletion`(request: Account_V1_RequestGdprDeletionRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Account_V1_CommandResponse> {
         return await self.client.unary(path: "/account.v1.AccountService/RequestGdprDeletion", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `cancelGdprDeletion`(request: Account_V1_CancelGdprDeletionRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Account_V1_CommandResponse> {
+        return await self.client.unary(path: "/account.v1.AccountService/CancelGdprDeletion", idempotencyLevel: .unknown, request: request, headers: headers)
     }
 
     @available(iOS 13, *)
@@ -223,6 +269,11 @@ public final class Account_V1_AccountServiceClient: Account_V1_AccountServiceCli
     }
 
     @available(iOS 13, *)
+    public func `updateConsents`(request: Account_V1_UpdateConsentsRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Account_V1_GdprRecordView> {
+        return await self.client.unary(path: "/account.v1.AccountService/UpdateConsents", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
     public func `listAccountsByStatus`(request: Account_V1_ListAccountsByStatusRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Account_V1_ListAccountsByStatusResponse> {
         return await self.client.unary(path: "/account.v1.AccountService/ListAccountsByStatus", idempotencyLevel: .unknown, request: request, headers: headers)
     }
@@ -239,9 +290,12 @@ public final class Account_V1_AccountServiceClient: Account_V1_AccountServiceCli
             public static let suspendAccount = Connect.MethodSpec(name: "SuspendAccount", service: "account.v1.AccountService", type: .unary)
             public static let reactivateAccount = Connect.MethodSpec(name: "ReactivateAccount", service: "account.v1.AccountService", type: .unary)
             public static let deactivateAccount = Connect.MethodSpec(name: "DeactivateAccount", service: "account.v1.AccountService", type: .unary)
+            public static let resumeDeactivatedAccount = Connect.MethodSpec(name: "ResumeDeactivatedAccount", service: "account.v1.AccountService", type: .unary)
             public static let recordLogin = Connect.MethodSpec(name: "RecordLogin", service: "account.v1.AccountService", type: .unary)
             public static let recordFailedLogin = Connect.MethodSpec(name: "RecordFailedLogin", service: "account.v1.AccountService", type: .unary)
+            public static let setDateOfBirth = Connect.MethodSpec(name: "SetDateOfBirth", service: "account.v1.AccountService", type: .unary)
             public static let requestGdprDeletion = Connect.MethodSpec(name: "RequestGdprDeletion", service: "account.v1.AccountService", type: .unary)
+            public static let cancelGdprDeletion = Connect.MethodSpec(name: "CancelGdprDeletion", service: "account.v1.AccountService", type: .unary)
             public static let anonymizeAccount = Connect.MethodSpec(name: "AnonymizeAccount", service: "account.v1.AccountService", type: .unary)
             public static let requestDataExport = Connect.MethodSpec(name: "RequestDataExport", service: "account.v1.AccountService", type: .unary)
             public static let assignRole = Connect.MethodSpec(name: "AssignRole", service: "account.v1.AccountService", type: .unary)
@@ -250,6 +304,7 @@ public final class Account_V1_AccountServiceClient: Account_V1_AccountServiceCli
             public static let getAccountByIdentityID = Connect.MethodSpec(name: "GetAccountByIdentityId", service: "account.v1.AccountService", type: .unary)
             public static let getAccountStatus = Connect.MethodSpec(name: "GetAccountStatus", service: "account.v1.AccountService", type: .unary)
             public static let getGdprRecord = Connect.MethodSpec(name: "GetGdprRecord", service: "account.v1.AccountService", type: .unary)
+            public static let updateConsents = Connect.MethodSpec(name: "UpdateConsents", service: "account.v1.AccountService", type: .unary)
             public static let listAccountsByStatus = Connect.MethodSpec(name: "ListAccountsByStatus", service: "account.v1.AccountService", type: .unary)
         }
     }

@@ -34,6 +34,18 @@ public protocol Moderation_V1_ModerationServiceClientInterface: Sendable {
     @available(iOS 13, *)
     func `screen`(request: Moderation_V1_ScreenRequest, headers: Connect.Headers) async -> ResponseMessage<Moderation_V1_ScreenResponse>
 
+    /// Report content (DSA Art. 16: anyone may report, guests included). The
+    /// reporter is the caller's token, never a request field; the account behind
+    /// the content is resolved server-side. Rate-limited per reporter. Feeds the
+    /// subject's review case like any other report.
+    @available(iOS 13, *)
+    func `submitReport`(request: Moderation_V1_SubmitReportRequest, headers: Connect.Headers) async -> ResponseMessage<Moderation_V1_SubmitReportResponse>
+
+    /// The caller's own reports, newest first, each with what became of it
+    /// (DSA Art. 16(5)). The reporter is the caller's token (member or guest).
+    @available(iOS 13, *)
+    func `listMyReports`(request: Moderation_V1_ListMyReportsRequest, headers: Connect.Headers) async -> ResponseMessage<Moderation_V1_ListMyReportsResponse>
+
     /// Open (or idempotently return) a review case for a subject.
     @available(iOS 13, *)
     func `openCase`(request: Moderation_V1_OpenCaseRequest, headers: Connect.Headers) async -> ResponseMessage<Moderation_V1_OpenCaseResponse>
@@ -61,13 +73,16 @@ public protocol Moderation_V1_ModerationServiceClientInterface: Sendable {
     @available(iOS 13, *)
     func `resolveAppeal`(request: Moderation_V1_ResolveAppealRequest, headers: Connect.Headers) async -> ResponseMessage<Moderation_V1_ResolveAppealResponse>
 
-    /// Return the DSA machine-readable Statement of Reasons for a decision.
+    /// Return the DSA machine-readable Statement of Reasons for a decision. On the
+    /// client edge only the sanctioned account may read it (DSA Art. 17); any
+    /// other caller gets NOT_FOUND.
     @available(iOS 13, *)
     func `getStatementOfReasons`(request: Moderation_V1_GetStatementOfReasonsRequest, headers: Connect.Headers) async -> ResponseMessage<Moderation_V1_GetStatementOfReasonsResponse>
 
-    /// INTERNAL, discouraged on the hot path. Coarse enforcement state for an
-    /// actor, for back-office/cold reads only — the fleet reads enforcement via
-    /// Plane B (events + Redis projection), not this RPC.
+    /// Coarse enforcement state for an actor. Discouraged on the hot path — the
+    /// fleet reads enforcement via Plane B (events + Redis projection), not this
+    /// RPC. On the client edge an account reads its own state only (actor_id must
+    /// be the caller); each enforcement carries its decision_id.
     @available(iOS 13, *)
     func `getEnforcementState`(request: Moderation_V1_GetEnforcementStateRequest, headers: Connect.Headers) async -> ResponseMessage<Moderation_V1_GetEnforcementStateResponse>
 }
@@ -83,6 +98,16 @@ public final class Moderation_V1_ModerationServiceClient: Moderation_V1_Moderati
     @available(iOS 13, *)
     public func `screen`(request: Moderation_V1_ScreenRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Moderation_V1_ScreenResponse> {
         return await self.client.unary(path: "/moderation.v1.ModerationService/Screen", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `submitReport`(request: Moderation_V1_SubmitReportRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Moderation_V1_SubmitReportResponse> {
+        return await self.client.unary(path: "/moderation.v1.ModerationService/SubmitReport", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `listMyReports`(request: Moderation_V1_ListMyReportsRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Moderation_V1_ListMyReportsResponse> {
+        return await self.client.unary(path: "/moderation.v1.ModerationService/ListMyReports", idempotencyLevel: .unknown, request: request, headers: headers)
     }
 
     @available(iOS 13, *)
@@ -128,6 +153,8 @@ public final class Moderation_V1_ModerationServiceClient: Moderation_V1_Moderati
     public enum Metadata {
         public enum Methods {
             public static let screen = Connect.MethodSpec(name: "Screen", service: "moderation.v1.ModerationService", type: .unary)
+            public static let submitReport = Connect.MethodSpec(name: "SubmitReport", service: "moderation.v1.ModerationService", type: .unary)
+            public static let listMyReports = Connect.MethodSpec(name: "ListMyReports", service: "moderation.v1.ModerationService", type: .unary)
             public static let openCase = Connect.MethodSpec(name: "OpenCase", service: "moderation.v1.ModerationService", type: .unary)
             public static let assignCase = Connect.MethodSpec(name: "AssignCase", service: "moderation.v1.ModerationService", type: .unary)
             public static let decideCase = Connect.MethodSpec(name: "DecideCase", service: "moderation.v1.ModerationService", type: .unary)

@@ -53,7 +53,9 @@ public final class MockAuthService: @unchecked Sendable {
     public static let defaultCredentials = Credentials(username: "demo", password: "password123")
     public static let accountID = "acct-demo-0001"
 
-    private let credentials: Credentials
+    /// Mutable: `ChangePassword` replaces the password, and the next login
+    /// must use the new one, as it would against the IdP.
+    private var credentials: Credentials
     private let accessTokenLifetime: Int64
 
     private let lock = NSLock()
@@ -89,6 +91,9 @@ public final class MockAuthService: @unchecked Sendable {
         bff.register(path: "/auth.v1.AuthService/LogoutAllSessions") { [self] (_: Auth_V1_LogoutAllSessionsRequest) in
             logoutAllSessions()
         }
+        bff.register(path: "/auth.v1.AuthService/ChangePassword") { [self] (request: Auth_V1_ChangePasswordRequest, headers: Headers) in
+            changePassword(request, callerSession: callerSession(headers))
+        }
     }
 
     /// The session behind a request's bearer token, if any.
@@ -105,7 +110,8 @@ public final class MockAuthService: @unchecked Sendable {
               case .password(let grant) = request.credential else {
             return .failure(ConnectError(code: .invalidArgument, message: "expected password grant"))
         }
-        guard grant.username == credentials.username, grant.password == credentials.password else {
+        let expected = lock.withLock { credentials }
+        guard grant.username == expected.username, grant.password == expected.password else {
             return .failure(ConnectError(code: .unauthenticated, message: "invalid credentials"))
         }
 
@@ -195,6 +201,45 @@ public final class MockAuthService: @unchecked Sendable {
             response.success = true
             response.generation = generation
             response.sessionsRevoked = Int32(live.count)
+            return .success(response)
+        }
+    }
+
+    /// The contract's semantics (auth.v1 ChangePassword): a signed-in caller
+    /// only; a wrong current password is UNAUTHENTICATED (AUT-5002); a new
+    /// one outside 8…128 characters or equal to the current one is
+    /// FAILED_PRECONDITION (AUT-VAL-024/026). On success the caller's own
+    /// session stays, and the others end only when asked.
+    private func changePassword(
+        _ request: Auth_V1_ChangePasswordRequest, callerSession: String?
+    ) -> Result<Auth_V1_ChangePasswordResponse, ConnectError> {
+        lock.withLock {
+            guard let callerSession, sessions[callerSession]?.revoked == false else {
+                return .failure(ConnectError(code: .unauthenticated, message: "AUT-5001: sign in to change your password"))
+            }
+            guard request.currentPassword == credentials.password else {
+                return .failure(ConnectError(code: .unauthenticated, message: "AUT-5002: the current password is wrong"))
+            }
+            guard (8...128).contains(request.newPassword.count) else {
+                return .failure(ConnectError(
+                    code: .failedPrecondition, message: "AUT-VAL-024: the new password must be 8 to 128 characters"
+                ))
+            }
+            guard request.newPassword != request.currentPassword else {
+                return .failure(ConnectError(
+                    code: .failedPrecondition, message: "AUT-VAL-026: the new password must differ from the current one"
+                ))
+            }
+            credentials = Credentials(username: credentials.username, password: request.newPassword)
+            var revoked: Int32 = 0
+            if request.signOutOtherSessions {
+                for (id, record) in sessions where id != callerSession && !record.revoked {
+                    sessions[id]?.revoked = true
+                    revoked += 1
+                }
+            }
+            var response = Auth_V1_ChangePasswordResponse()
+            response.sessionsRevoked = revoked
             return .success(response)
         }
     }

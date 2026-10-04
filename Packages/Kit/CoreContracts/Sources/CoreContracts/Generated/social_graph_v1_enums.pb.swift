@@ -93,8 +93,61 @@ public nonisolated enum SocialGraph_V1_RelationStatus: SwiftProtobuf.Enum, Swift
 
 }
 
+/// What a reader may see of a profile's content (CheckAccess).
+public nonisolated enum SocialGraph_V1_ContentAccess: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+
+  /// Posts, comments and lists are visible.
+  case visible // = 1
+
+  /// A private profile the reader does not follow: its header only.
+  case headerOnly // = 2
+
+  /// Nothing: a block either way, or a hidden profile.
+  case hidden // = 3
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .visible
+    case 2: self = .headerOnly
+    case 3: self = .hidden
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .visible: return 1
+    case .headerOnly: return 2
+    case .hidden: return 3
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [SocialGraph_V1_ContentAccess] = [
+    .unspecified,
+    .visible,
+    .headerOnly,
+    .hidden,
+  ]
+
+}
+
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 nonisolated extension SocialGraph_V1_RelationStatus: SwiftProtobuf._ProtoNameProviding {
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0RELATION_STATUS_UNSPECIFIED\0\u{1}RELATION_STATUS_NONE\0\u{1}RELATION_STATUS_FOLLOWING\0\u{1}RELATION_STATUS_FOLLOWED_BY\0\u{1}RELATION_STATUS_MUTUAL\0\u{1}RELATION_STATUS_BLOCKING\0\u{1}RELATION_STATUS_BLOCKED_BY\0")
+}
+
+nonisolated extension SocialGraph_V1_ContentAccess: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0CONTENT_ACCESS_UNSPECIFIED\0\u{1}CONTENT_ACCESS_VISIBLE\0\u{1}CONTENT_ACCESS_HEADER_ONLY\0\u{1}CONTENT_ACCESS_HIDDEN\0")
 }

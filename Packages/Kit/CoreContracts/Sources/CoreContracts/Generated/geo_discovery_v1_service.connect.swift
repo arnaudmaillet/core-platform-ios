@@ -24,6 +24,16 @@ public protocol GeoDiscovery_V1_GeoDiscoveryServiceClientInterface: Sendable {
     /// path avoids.
     @available(iOS 13, *)
     func `getGeoTimeline`(request: GeoDiscovery_V1_GetGeoTimelineRequest, headers: Connect.Headers) async -> ResponseMessage<GeoDiscovery_V1_GetGeoTimelineResponse>
+
+    /// Country access from location: the device sends the country it derived
+    /// from its location (an ISO code, never a coordinate); the server grants it
+    /// only when the request's network (GeoIP) is in that country or a
+    /// neighbouring one. A guest session's map (QueryTile, GetGeoTimeline) shows
+    /// only its granted country, and nothing without one. Call it at launch and
+    /// at each foreground; an empty current_country (location off) closes it.
+    /// Members are not limited by it in v1.
+    @available(iOS 13, *)
+    func `getCountryAccess`(request: GeoDiscovery_V1_GetCountryAccessRequest, headers: Connect.Headers) async -> ResponseMessage<GeoDiscovery_V1_GetCountryAccessResponse>
 }
 
 /// Concrete implementation of `GeoDiscovery_V1_GeoDiscoveryServiceClientInterface`.
@@ -44,10 +54,16 @@ public final class GeoDiscovery_V1_GeoDiscoveryServiceClient: GeoDiscovery_V1_Ge
         return await self.client.unary(path: "/geo_discovery.v1.GeoDiscoveryService/GetGeoTimeline", idempotencyLevel: .unknown, request: request, headers: headers)
     }
 
+    @available(iOS 13, *)
+    public func `getCountryAccess`(request: GeoDiscovery_V1_GetCountryAccessRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<GeoDiscovery_V1_GetCountryAccessResponse> {
+        return await self.client.unary(path: "/geo_discovery.v1.GeoDiscoveryService/GetCountryAccess", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
     public enum Metadata {
         public enum Methods {
             public static let queryTile = Connect.MethodSpec(name: "QueryTile", service: "geo_discovery.v1.GeoDiscoveryService", type: .unary)
             public static let getGeoTimeline = Connect.MethodSpec(name: "GetGeoTimeline", service: "geo_discovery.v1.GeoDiscoveryService", type: .unary)
+            public static let getCountryAccess = Connect.MethodSpec(name: "GetCountryAccess", service: "geo_discovery.v1.GeoDiscoveryService", type: .unary)
         }
     }
 }

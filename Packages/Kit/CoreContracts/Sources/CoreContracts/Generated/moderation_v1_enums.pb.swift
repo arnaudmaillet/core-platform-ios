@@ -368,6 +368,51 @@ public nonisolated enum Moderation_V1_ScreenVerdict: SwiftProtobuf.Enum, Swift.C
 
 }
 
+/// What became of a report, as its reporter sees it (DSA Art. 16(5)). Coarse on
+/// purpose: the reporter learns whether action was taken, never which sanction
+/// hit the reported account.
+public nonisolated enum Moderation_V1_ReportStatus: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+  case underReview // = 1
+  case actionTaken // = 2
+  case noViolation // = 3
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .underReview
+    case 2: self = .actionTaken
+    case 3: self = .noViolation
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .underReview: return 1
+    case .actionTaken: return 2
+    case .noViolation: return 3
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [Moderation_V1_ReportStatus] = [
+    .unspecified,
+    .underReview,
+    .actionTaken,
+    .noViolation,
+  ]
+
+}
+
 /// Lifecycle of an Appeal against a decision.
 public nonisolated enum Moderation_V1_AppealStatus: SwiftProtobuf.Enum, Swift.CaseIterable {
   public typealias RawValue = Int
@@ -443,6 +488,10 @@ nonisolated extension Moderation_V1_EnforcementStatus: SwiftProtobuf._ProtoNameP
 
 nonisolated extension Moderation_V1_ScreenVerdict: SwiftProtobuf._ProtoNameProviding {
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0SCREEN_VERDICT_UNSPECIFIED\0\u{1}SCREEN_VERDICT_ALLOW\0\u{1}SCREEN_VERDICT_BLOCK\0\u{1}SCREEN_VERDICT_REVIEW\0")
+}
+
+nonisolated extension Moderation_V1_ReportStatus: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0REPORT_STATUS_UNSPECIFIED\0\u{1}REPORT_STATUS_UNDER_REVIEW\0\u{1}REPORT_STATUS_ACTION_TAKEN\0\u{1}REPORT_STATUS_NO_VIOLATION\0")
 }
 
 nonisolated extension Moderation_V1_AppealStatus: SwiftProtobuf._ProtoNameProviding {

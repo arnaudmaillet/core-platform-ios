@@ -96,59 +96,99 @@ public nonisolated struct Post_V1_MediaAttachmentView: Sendable {
   public init() {}
 }
 
-public nonisolated struct Post_V1_PostView: Sendable {
+public nonisolated struct Post_V1_PostView: @unchecked Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  public var postID: String = String()
+  public var postID: String {
+    get {_storage._postID}
+    set {_uniqueStorage()._postID = newValue}
+  }
 
-  public var profileID: String = String()
+  public var profileID: String {
+    get {_storage._profileID}
+    set {_uniqueStorage()._profileID = newValue}
+  }
 
-  public var kind: Post_V1_PostKind = .unspecified
+  public var kind: Post_V1_PostKind {
+    get {_storage._kind}
+    set {_uniqueStorage()._kind = newValue}
+  }
 
-  public var status: Post_V1_PostStatus = .unspecified
+  public var status: Post_V1_PostStatus {
+    get {_storage._status}
+    set {_uniqueStorage()._status = newValue}
+  }
 
-  public var caption: String = String()
+  public var caption: String {
+    get {_storage._caption}
+    set {_uniqueStorage()._caption = newValue}
+  }
 
-  public var attachments: [Post_V1_MediaAttachmentView] = []
+  public var attachments: [Post_V1_MediaAttachmentView] {
+    get {_storage._attachments}
+    set {_uniqueStorage()._attachments = newValue}
+  }
 
-  public var parentID: String = String()
+  public var parentID: String {
+    get {_storage._parentID}
+    set {_uniqueStorage()._parentID = newValue}
+  }
 
-  public var rootID: String = String()
+  public var rootID: String {
+    get {_storage._rootID}
+    set {_uniqueStorage()._rootID = newValue}
+  }
 
-  public var createdAtMs: Int64 = 0
+  public var createdAtMs: Int64 {
+    get {_storage._createdAtMs}
+    set {_uniqueStorage()._createdAtMs = newValue}
+  }
 
-  public var updatedAtMs: Int64 = 0
+  public var updatedAtMs: Int64 {
+    get {_storage._updatedAtMs}
+    set {_uniqueStorage()._updatedAtMs = newValue}
+  }
 
-  public var publishedAtMs: Int64 = 0
+  public var publishedAtMs: Int64 {
+    get {_storage._publishedAtMs}
+    set {_uniqueStorage()._publishedAtMs = newValue}
+  }
 
-  public var deletedAtMs: Int64 = 0
+  public var deletedAtMs: Int64 {
+    get {_storage._deletedAtMs}
+    set {_uniqueStorage()._deletedAtMs = newValue}
+  }
 
   public var audioRef: Post_V1_AudioReference {
-    get {_audioRef ?? Post_V1_AudioReference()}
-    set {_audioRef = newValue}
+    get {_storage._audioRef ?? Post_V1_AudioReference()}
+    set {_uniqueStorage()._audioRef = newValue}
   }
   /// Returns true if `audioRef` has been explicitly set.
-  public var hasAudioRef: Bool {self._audioRef != nil}
+  public var hasAudioRef: Bool {_storage._audioRef != nil}
   /// Clears the value of `audioRef`. Subsequent reads from it will return its default value.
-  public mutating func clearAudioRef() {self._audioRef = nil}
+  public mutating func clearAudioRef() {_uniqueStorage()._audioRef = nil}
 
   public var location: Post_V1_GeoPoint {
-    get {_location ?? Post_V1_GeoPoint()}
-    set {_location = newValue}
+    get {_storage._location ?? Post_V1_GeoPoint()}
+    set {_uniqueStorage()._location = newValue}
   }
   /// Returns true if `location` has been explicitly set.
-  public var hasLocation: Bool {self._location != nil}
+  public var hasLocation: Bool {_storage._location != nil}
   /// Clears the value of `location`. Subsequent reads from it will return its default value.
-  public mutating func clearLocation() {self._location = nil}
+  public mutating func clearLocation() {_uniqueStorage()._location = nil}
+
+  public var moderation: Post_V1_ModerationRestriction {
+    get {_storage._moderation}
+    set {_uniqueStorage()._moderation = newValue}
+  }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
-  fileprivate var _audioRef: Post_V1_AudioReference? = nil
-  fileprivate var _location: Post_V1_GeoPoint? = nil
+  fileprivate var _storage = _StorageClass.defaultInstance
 }
 
 public nonisolated struct Post_V1_PostSummary: Sendable {
@@ -163,6 +203,8 @@ public nonisolated struct Post_V1_PostSummary: Sendable {
   public var status: Post_V1_PostStatus = .unspecified
 
   public var createdAtMs: Int64 = 0
+
+  public var moderation: Post_V1_ModerationRestriction = .unspecified
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -514,98 +556,167 @@ nonisolated extension Post_V1_MediaAttachmentView: SwiftProtobuf.Message, SwiftP
 
 nonisolated extension Post_V1_PostView: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".PostView"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}post_id\0\u{3}profile_id\0\u{1}kind\0\u{1}status\0\u{1}caption\0\u{1}attachments\0\u{3}parent_id\0\u{3}root_id\0\u{3}created_at_ms\0\u{3}updated_at_ms\0\u{3}published_at_ms\0\u{3}deleted_at_ms\0\u{3}audio_ref\0\u{1}location\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}post_id\0\u{3}profile_id\0\u{1}kind\0\u{1}status\0\u{1}caption\0\u{1}attachments\0\u{3}parent_id\0\u{3}root_id\0\u{3}created_at_ms\0\u{3}updated_at_ms\0\u{3}published_at_ms\0\u{3}deleted_at_ms\0\u{3}audio_ref\0\u{1}location\0\u{1}moderation\0")
+
+  fileprivate class _StorageClass {
+    var _postID: String = String()
+    var _profileID: String = String()
+    var _kind: Post_V1_PostKind = .unspecified
+    var _status: Post_V1_PostStatus = .unspecified
+    var _caption: String = String()
+    var _attachments: [Post_V1_MediaAttachmentView] = []
+    var _parentID: String = String()
+    var _rootID: String = String()
+    var _createdAtMs: Int64 = 0
+    var _updatedAtMs: Int64 = 0
+    var _publishedAtMs: Int64 = 0
+    var _deletedAtMs: Int64 = 0
+    var _audioRef: Post_V1_AudioReference? = nil
+    var _location: Post_V1_GeoPoint? = nil
+    var _moderation: Post_V1_ModerationRestriction = .unspecified
+
+      // This property is used as the initial default value for new instances of the type.
+      // The type itself is protecting the reference to its storage via CoW semantics.
+      // This will force a copy to be made of this reference when the first mutation occurs;
+      // hence, it is safe to mark this as `nonisolated(unsafe)`.
+      static nonisolated(unsafe) let defaultInstance = _StorageClass()
+
+    private init() {}
+
+    init(copying source: _StorageClass) {
+      _postID = source._postID
+      _profileID = source._profileID
+      _kind = source._kind
+      _status = source._status
+      _caption = source._caption
+      _attachments = source._attachments
+      _parentID = source._parentID
+      _rootID = source._rootID
+      _createdAtMs = source._createdAtMs
+      _updatedAtMs = source._updatedAtMs
+      _publishedAtMs = source._publishedAtMs
+      _deletedAtMs = source._deletedAtMs
+      _audioRef = source._audioRef
+      _location = source._location
+      _moderation = source._moderation
+    }
+  }
+
+  fileprivate mutating func _uniqueStorage() -> _StorageClass {
+    if !isKnownUniquelyReferenced(&_storage) {
+      _storage = _StorageClass(copying: _storage)
+    }
+    return _storage
+  }
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    while let fieldNumber = try decoder.nextFieldNumber() {
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every case branch when no optimizations are
-      // enabled. https://github.com/apple/swift-protobuf/issues/1034
-      switch fieldNumber {
-      case 1: try { try decoder.decodeSingularStringField(value: &self.postID) }()
-      case 2: try { try decoder.decodeSingularStringField(value: &self.profileID) }()
-      case 3: try { try decoder.decodeSingularEnumField(value: &self.kind) }()
-      case 4: try { try decoder.decodeSingularEnumField(value: &self.status) }()
-      case 5: try { try decoder.decodeSingularStringField(value: &self.caption) }()
-      case 6: try { try decoder.decodeRepeatedMessageField(value: &self.attachments) }()
-      case 7: try { try decoder.decodeSingularStringField(value: &self.parentID) }()
-      case 8: try { try decoder.decodeSingularStringField(value: &self.rootID) }()
-      case 9: try { try decoder.decodeSingularInt64Field(value: &self.createdAtMs) }()
-      case 10: try { try decoder.decodeSingularInt64Field(value: &self.updatedAtMs) }()
-      case 11: try { try decoder.decodeSingularInt64Field(value: &self.publishedAtMs) }()
-      case 12: try { try decoder.decodeSingularInt64Field(value: &self.deletedAtMs) }()
-      case 13: try { try decoder.decodeSingularMessageField(value: &self._audioRef) }()
-      case 14: try { try decoder.decodeSingularMessageField(value: &self._location) }()
-      default: break
+    _ = _uniqueStorage()
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      while let fieldNumber = try decoder.nextFieldNumber() {
+        // The use of inline closures is to circumvent an issue where the compiler
+        // allocates stack space for every case branch when no optimizations are
+        // enabled. https://github.com/apple/swift-protobuf/issues/1034
+        switch fieldNumber {
+        case 1: try { try decoder.decodeSingularStringField(value: &_storage._postID) }()
+        case 2: try { try decoder.decodeSingularStringField(value: &_storage._profileID) }()
+        case 3: try { try decoder.decodeSingularEnumField(value: &_storage._kind) }()
+        case 4: try { try decoder.decodeSingularEnumField(value: &_storage._status) }()
+        case 5: try { try decoder.decodeSingularStringField(value: &_storage._caption) }()
+        case 6: try { try decoder.decodeRepeatedMessageField(value: &_storage._attachments) }()
+        case 7: try { try decoder.decodeSingularStringField(value: &_storage._parentID) }()
+        case 8: try { try decoder.decodeSingularStringField(value: &_storage._rootID) }()
+        case 9: try { try decoder.decodeSingularInt64Field(value: &_storage._createdAtMs) }()
+        case 10: try { try decoder.decodeSingularInt64Field(value: &_storage._updatedAtMs) }()
+        case 11: try { try decoder.decodeSingularInt64Field(value: &_storage._publishedAtMs) }()
+        case 12: try { try decoder.decodeSingularInt64Field(value: &_storage._deletedAtMs) }()
+        case 13: try { try decoder.decodeSingularMessageField(value: &_storage._audioRef) }()
+        case 14: try { try decoder.decodeSingularMessageField(value: &_storage._location) }()
+        case 15: try { try decoder.decodeSingularEnumField(value: &_storage._moderation) }()
+        default: break
+        }
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    // The use of inline closures is to circumvent an issue where the compiler
-    // allocates stack space for every if/case branch local when no optimizations
-    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
-    // https://github.com/apple/swift-protobuf/issues/1182
-    if !self.postID.isEmpty {
-      try visitor.visitSingularStringField(value: self.postID, fieldNumber: 1)
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every if/case branch local when no optimizations
+      // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+      // https://github.com/apple/swift-protobuf/issues/1182
+      if !_storage._postID.isEmpty {
+        try visitor.visitSingularStringField(value: _storage._postID, fieldNumber: 1)
+      }
+      if !_storage._profileID.isEmpty {
+        try visitor.visitSingularStringField(value: _storage._profileID, fieldNumber: 2)
+      }
+      if _storage._kind != .unspecified {
+        try visitor.visitSingularEnumField(value: _storage._kind, fieldNumber: 3)
+      }
+      if _storage._status != .unspecified {
+        try visitor.visitSingularEnumField(value: _storage._status, fieldNumber: 4)
+      }
+      if !_storage._caption.isEmpty {
+        try visitor.visitSingularStringField(value: _storage._caption, fieldNumber: 5)
+      }
+      if !_storage._attachments.isEmpty {
+        try visitor.visitRepeatedMessageField(value: _storage._attachments, fieldNumber: 6)
+      }
+      if !_storage._parentID.isEmpty {
+        try visitor.visitSingularStringField(value: _storage._parentID, fieldNumber: 7)
+      }
+      if !_storage._rootID.isEmpty {
+        try visitor.visitSingularStringField(value: _storage._rootID, fieldNumber: 8)
+      }
+      if _storage._createdAtMs != 0 {
+        try visitor.visitSingularInt64Field(value: _storage._createdAtMs, fieldNumber: 9)
+      }
+      if _storage._updatedAtMs != 0 {
+        try visitor.visitSingularInt64Field(value: _storage._updatedAtMs, fieldNumber: 10)
+      }
+      if _storage._publishedAtMs != 0 {
+        try visitor.visitSingularInt64Field(value: _storage._publishedAtMs, fieldNumber: 11)
+      }
+      if _storage._deletedAtMs != 0 {
+        try visitor.visitSingularInt64Field(value: _storage._deletedAtMs, fieldNumber: 12)
+      }
+      try { if let v = _storage._audioRef {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 13)
+      } }()
+      try { if let v = _storage._location {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 14)
+      } }()
+      if _storage._moderation != .unspecified {
+        try visitor.visitSingularEnumField(value: _storage._moderation, fieldNumber: 15)
+      }
     }
-    if !self.profileID.isEmpty {
-      try visitor.visitSingularStringField(value: self.profileID, fieldNumber: 2)
-    }
-    if self.kind != .unspecified {
-      try visitor.visitSingularEnumField(value: self.kind, fieldNumber: 3)
-    }
-    if self.status != .unspecified {
-      try visitor.visitSingularEnumField(value: self.status, fieldNumber: 4)
-    }
-    if !self.caption.isEmpty {
-      try visitor.visitSingularStringField(value: self.caption, fieldNumber: 5)
-    }
-    if !self.attachments.isEmpty {
-      try visitor.visitRepeatedMessageField(value: self.attachments, fieldNumber: 6)
-    }
-    if !self.parentID.isEmpty {
-      try visitor.visitSingularStringField(value: self.parentID, fieldNumber: 7)
-    }
-    if !self.rootID.isEmpty {
-      try visitor.visitSingularStringField(value: self.rootID, fieldNumber: 8)
-    }
-    if self.createdAtMs != 0 {
-      try visitor.visitSingularInt64Field(value: self.createdAtMs, fieldNumber: 9)
-    }
-    if self.updatedAtMs != 0 {
-      try visitor.visitSingularInt64Field(value: self.updatedAtMs, fieldNumber: 10)
-    }
-    if self.publishedAtMs != 0 {
-      try visitor.visitSingularInt64Field(value: self.publishedAtMs, fieldNumber: 11)
-    }
-    if self.deletedAtMs != 0 {
-      try visitor.visitSingularInt64Field(value: self.deletedAtMs, fieldNumber: 12)
-    }
-    try { if let v = self._audioRef {
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 13)
-    } }()
-    try { if let v = self._location {
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 14)
-    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Post_V1_PostView, rhs: Post_V1_PostView) -> Bool {
-    if lhs.postID != rhs.postID {return false}
-    if lhs.profileID != rhs.profileID {return false}
-    if lhs.kind != rhs.kind {return false}
-    if lhs.status != rhs.status {return false}
-    if lhs.caption != rhs.caption {return false}
-    if lhs.attachments != rhs.attachments {return false}
-    if lhs.parentID != rhs.parentID {return false}
-    if lhs.rootID != rhs.rootID {return false}
-    if lhs.createdAtMs != rhs.createdAtMs {return false}
-    if lhs.updatedAtMs != rhs.updatedAtMs {return false}
-    if lhs.publishedAtMs != rhs.publishedAtMs {return false}
-    if lhs.deletedAtMs != rhs.deletedAtMs {return false}
-    if lhs._audioRef != rhs._audioRef {return false}
-    if lhs._location != rhs._location {return false}
+    if lhs._storage !== rhs._storage {
+      let storagesAreEqual: Bool = withExtendedLifetime((lhs._storage, rhs._storage)) { (_args: (_StorageClass, _StorageClass)) in
+        let _storage = _args.0
+        let rhs_storage = _args.1
+        if _storage._postID != rhs_storage._postID {return false}
+        if _storage._profileID != rhs_storage._profileID {return false}
+        if _storage._kind != rhs_storage._kind {return false}
+        if _storage._status != rhs_storage._status {return false}
+        if _storage._caption != rhs_storage._caption {return false}
+        if _storage._attachments != rhs_storage._attachments {return false}
+        if _storage._parentID != rhs_storage._parentID {return false}
+        if _storage._rootID != rhs_storage._rootID {return false}
+        if _storage._createdAtMs != rhs_storage._createdAtMs {return false}
+        if _storage._updatedAtMs != rhs_storage._updatedAtMs {return false}
+        if _storage._publishedAtMs != rhs_storage._publishedAtMs {return false}
+        if _storage._deletedAtMs != rhs_storage._deletedAtMs {return false}
+        if _storage._audioRef != rhs_storage._audioRef {return false}
+        if _storage._location != rhs_storage._location {return false}
+        if _storage._moderation != rhs_storage._moderation {return false}
+        return true
+      }
+      if !storagesAreEqual {return false}
+    }
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -613,7 +724,7 @@ nonisolated extension Post_V1_PostView: SwiftProtobuf.Message, SwiftProtobuf._Me
 
 nonisolated extension Post_V1_PostSummary: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".PostSummary"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}post_id\0\u{1}kind\0\u{1}status\0\u{3}created_at_ms\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}post_id\0\u{1}kind\0\u{1}status\0\u{3}created_at_ms\0\u{1}moderation\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -625,6 +736,7 @@ nonisolated extension Post_V1_PostSummary: SwiftProtobuf.Message, SwiftProtobuf.
       case 2: try { try decoder.decodeSingularEnumField(value: &self.kind) }()
       case 3: try { try decoder.decodeSingularEnumField(value: &self.status) }()
       case 4: try { try decoder.decodeSingularInt64Field(value: &self.createdAtMs) }()
+      case 5: try { try decoder.decodeSingularEnumField(value: &self.moderation) }()
       default: break
       }
     }
@@ -643,6 +755,9 @@ nonisolated extension Post_V1_PostSummary: SwiftProtobuf.Message, SwiftProtobuf.
     if self.createdAtMs != 0 {
       try visitor.visitSingularInt64Field(value: self.createdAtMs, fieldNumber: 4)
     }
+    if self.moderation != .unspecified {
+      try visitor.visitSingularEnumField(value: self.moderation, fieldNumber: 5)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -651,6 +766,7 @@ nonisolated extension Post_V1_PostSummary: SwiftProtobuf.Message, SwiftProtobuf.
     if lhs.kind != rhs.kind {return false}
     if lhs.status != rhs.status {return false}
     if lhs.createdAtMs != rhs.createdAtMs {return false}
+    if lhs.moderation != rhs.moderation {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

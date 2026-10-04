@@ -63,6 +63,13 @@ public protocol SocialGraph_V1_SocialGraphServiceClientInterface: Sendable {
     /// Paginated list of profiles blocked by the given profile.
     @available(iOS 13, *)
     func `listBlocks`(request: SocialGraph_V1_ListBlocksRequest, headers: Connect.Headers) async -> ResponseMessage<SocialGraph_V1_ListBlocksResponse>
+
+    /// What a reader may see of each target profile's content: visible, header
+    /// only (a private profile the reader does not follow) or hidden (a block
+    /// either way, or a hidden profile). MESH-ONLY: services answering a client
+    /// read call it with the reader they took from the edge token.
+    @available(iOS 13, *)
+    func `checkAccess`(request: SocialGraph_V1_CheckAccessRequest, headers: Connect.Headers) async -> ResponseMessage<SocialGraph_V1_CheckAccessResponse>
 }
 
 /// Concrete implementation of `SocialGraph_V1_SocialGraphServiceClientInterface`.
@@ -113,6 +120,11 @@ public final class SocialGraph_V1_SocialGraphServiceClient: SocialGraph_V1_Socia
         return await self.client.unary(path: "/social_graph.v1.SocialGraphService/ListBlocks", idempotencyLevel: .unknown, request: request, headers: headers)
     }
 
+    @available(iOS 13, *)
+    public func `checkAccess`(request: SocialGraph_V1_CheckAccessRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<SocialGraph_V1_CheckAccessResponse> {
+        return await self.client.unary(path: "/social_graph.v1.SocialGraphService/CheckAccess", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
     public enum Metadata {
         public enum Methods {
             public static let follow = Connect.MethodSpec(name: "Follow", service: "social_graph.v1.SocialGraphService", type: .unary)
@@ -123,6 +135,7 @@ public final class SocialGraph_V1_SocialGraphServiceClient: SocialGraph_V1_Socia
             public static let listFollowers = Connect.MethodSpec(name: "ListFollowers", service: "social_graph.v1.SocialGraphService", type: .unary)
             public static let listFollowing = Connect.MethodSpec(name: "ListFollowing", service: "social_graph.v1.SocialGraphService", type: .unary)
             public static let listBlocks = Connect.MethodSpec(name: "ListBlocks", service: "social_graph.v1.SocialGraphService", type: .unary)
+            public static let checkAccess = Connect.MethodSpec(name: "CheckAccess", service: "social_graph.v1.SocialGraphService", type: .unary)
         }
     }
 }
