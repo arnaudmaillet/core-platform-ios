@@ -131,7 +131,8 @@ final class BandNoticeView: UIView {
         super.init(frame: .zero)
         backgroundColor = .clear
         caption.text = text
-        caption.font = .systemFont(ofSize: 13)
+        caption.font = .scaledSystemFont(ofSize: 13, relativeTo: .footnote, maximumPointSize: 17)
+        caption.adjustsFontForContentSizeCategory = true
         // The editor's ground follows the device's appearance, so the ink that
         // follows it too is the one that is never wrong. See the note in
         // `StraightenDialView` for the version of this that was measured.

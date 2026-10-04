@@ -267,7 +267,10 @@ final class MediaCropToolsView: UIView {
         init(ratio: CropRatio, height: CGFloat, padding: CGFloat) {
             super.init(frame: .zero)
             caption.text = ratio.name
-            caption.font = .systemFont(ofSize: 13, weight: .semibold)
+            caption.font = .scaledSystemFont(
+                ofSize: 13, weight: .semibold, relativeTo: .footnote, maximumPointSize: 15
+            )
+            caption.adjustsFontForContentSizeCategory = true
             caption.textAlignment = .center
             caption.isUserInteractionEnabled = false
             caption.constrain(in: self) { view in

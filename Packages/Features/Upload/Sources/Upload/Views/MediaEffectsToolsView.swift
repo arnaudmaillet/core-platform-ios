@@ -650,8 +650,14 @@ private final class EffectsPill: UIControl {
             iconView.clipsToBounds = true
         }
         captionLabel.text = caption
-        captionLabel.font = .systemFont(ofSize: 13, weight: .semibold)
-        readingLabel.font = .monospacedDigitSystemFont(ofSize: 13, weight: .semibold)
+        captionLabel.font = .scaledSystemFont(
+            ofSize: 13, weight: .semibold, relativeTo: .footnote, maximumPointSize: 16
+        )
+        captionLabel.adjustsFontForContentSizeCategory = true
+        readingLabel.font = .scaledMonospacedDigitSystemFont(
+            ofSize: 13, weight: .semibold, relativeTo: .footnote, maximumPointSize: 16
+        )
+        readingLabel.adjustsFontForContentSizeCategory = true
         readingLabel.isHidden = true
 
         stack.axis = .horizontal

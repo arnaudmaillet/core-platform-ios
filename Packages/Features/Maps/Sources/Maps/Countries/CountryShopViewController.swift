@@ -418,7 +418,9 @@ public final class CountryShopViewController: UIViewController {
         configuration.contentInsets = .init(top: 6, leading: 12, bottom: 6, trailing: 12)
         configuration.titleTextAttributesTransformer = .init { attributes in
             var attributes = attributes
-            attributes.font = .monospacedDigitSystemFont(ofSize: 15, weight: .semibold)
+            attributes.font = .scaledMonospacedDigitSystemFont(
+                ofSize: 15, weight: .semibold, relativeTo: .subheadline, maximumPointSize: 20
+            )
             return attributes
         }
         let button = UIButton(configuration: configuration)
@@ -565,7 +567,9 @@ public final class CountryShopViewController: UIViewController {
         diamond.tintColor = GemSymbol.tint
         let count = UILabel()
         count.text = access.gems.formatted()
-        count.font = .monospacedDigitSystemFont(ofSize: 15, weight: .semibold)
+        count.font = .scaledMonospacedDigitSystemFont(
+            ofSize: 15, weight: .semibold, relativeTo: .subheadline, maximumPointSize: 20
+        )
         count.textColor = .label
         let balance = UIStackView(arrangedSubviews: [diamond, count])
         balance.spacing = 6

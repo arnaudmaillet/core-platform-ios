@@ -552,6 +552,8 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
         // ⚠️ **MONOSPACED DIGITS, OR THE NUMBER JITTERS AS IT COUNTS.** A
         // proportional "1" is narrower than a "0", so a right-aligned readout
         // ticking through 0:11 → 0:10 shifts sideways while the author drags.
+        // Fixed size (#482), like the stamps below: drawn over the film strip
+        // and sized with it.
         keptLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
         keptLabel.textColor = .white
         keptLabel.textAlignment = .right

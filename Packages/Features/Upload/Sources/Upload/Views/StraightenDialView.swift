@@ -143,7 +143,8 @@ final class StraightenDialView: UIView {
         super.init(frame: .zero)
         backgroundColor = .clear
 
-        readout.font = .systemFont(ofSize: 13, weight: .semibold)
+        readout.font = .scaledSystemFont(ofSize: 13, weight: .semibold, relativeTo: .footnote, maximumPointSize: 17)
+        readout.adjustsFontForContentSizeCategory = true
         readout.textAlignment = .center
         // ⚠️ **`.label`, AND IT WAS LITERAL WHITE FOR ONE GOOD REASON THAT HAS
         // SINCE GONE.** While the editor's ground was always black, `.label`

@@ -159,7 +159,8 @@ final class MediaOverlayToolsView: UIView {
         ])
         let label = UILabel()
         label.text = caption
-        label.font = .systemFont(ofSize: 11, weight: .medium)
+        label.font = .scaledSystemFont(ofSize: 11, weight: .medium, relativeTo: .caption2, maximumPointSize: 13)
+        label.adjustsFontForContentSizeCategory = true
         // The editor's ground follows the appearance; so does this ink.
         label.textColor = .label
         label.textAlignment = .center
