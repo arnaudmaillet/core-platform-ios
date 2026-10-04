@@ -7,6 +7,8 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     private var appCoordinator: AppCoordinator?
     /// Settings → Security and Login → App Lock (#418).
     private var appLock: AppLockCoordinator?
+    /// Settings → Your Activity → Time Management (#489).
+    private var screenTime: ScreenTimeCoordinator?
 
     func scene(
         _ scene: UIScene,
@@ -34,6 +36,15 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         let lock = AppLockCoordinator(scene: windowScene, mainWindow: window)
         appLock = lock
         lock.sceneDidConnect()
+
+        #if DEBUG
+        ScreenTimeCoordinator.applyDebugSeed()
+        #endif
+        screenTime = ScreenTimeCoordinator(scene: windowScene, mainWindow: window)
+    }
+
+    func sceneWillResignActive(_ scene: UIScene) {
+        screenTime?.sceneWillResignActive()
     }
 
     func sceneDidEnterBackground(_ scene: UIScene) {
@@ -46,5 +57,6 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     func sceneDidBecomeActive(_ scene: UIScene) {
         appLock?.sceneDidBecomeActive()
+        screenTime?.sceneDidBecomeActive()
     }
 }
