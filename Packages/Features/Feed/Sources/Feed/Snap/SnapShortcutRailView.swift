@@ -657,6 +657,7 @@ final class SnapRailBoostButton: UIButton {
             // The receipt face: the compact count in points red, replacing
             // the glyph outright — the 36pt circle holds one or the other.
             var title = AttributedString(spentTotal.formattedCompact())
+            // Fixed size (#482): it lives inside the 36 pt circle.
             title.font = .monospacedDigitSystemFont(ofSize: 13, weight: .bold)
             title.foregroundColor = PointsSymbol.tint
             config.attributedTitle = title

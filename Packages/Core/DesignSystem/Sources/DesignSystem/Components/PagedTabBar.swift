@@ -2805,7 +2805,9 @@ private extension UIFont {
         maximumPointSize: CGFloat
     ) -> UIFont {
         let metrics = UIFontMetrics(forTextStyle: style)
-        let base = UIFont.systemFont(ofSize: UIFont.preferredFont(forTextStyle: style).pointSize, weight: weight)
+        // The DEFAULT-size baseline: `preferredFont(forTextStyle:)` is already
+        // scaled, and the metrics would scale it a second time (#482).
+        let base = UIFont.systemFont(ofSize: UIFont.defaultPointSize(for: style), weight: weight)
         return metrics.scaledFont(for: base, maximumPointSize: maximumPointSize)
     }
 }

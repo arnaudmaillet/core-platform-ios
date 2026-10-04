@@ -1241,7 +1241,9 @@ final class SnapChromeView: UIView {
 
         let label = UILabel()
         label.text = "+\(amount)"
-        label.font = .monospacedDigitSystemFont(ofSize: 17, weight: .heavy)
+        label.font = .scaledMonospacedDigitSystemFont(
+            ofSize: 17, weight: .heavy, relativeTo: .headline, maximumPointSize: 24
+        )
         label.textColor = .systemYellow
         // The scrim under it is a gradient, not a guarantee — the same
         // legibility shadow the nav glyphs wear over live media.
@@ -1291,7 +1293,9 @@ final class SnapChromeView: UIView {
         guard !boostButton.isHidden, boostButton.bounds.width > 0 else { return }
         let label = UILabel()
         label.text = "−\(amount)"
-        label.font = .monospacedDigitSystemFont(ofSize: 17, weight: .heavy)
+        label.font = .scaledMonospacedDigitSystemFont(
+            ofSize: 17, weight: .heavy, relativeTo: .headline, maximumPointSize: 24
+        )
         label.textColor = UIColor.white.withAlphaComponent(0.9)
         label.layer.shadowColor = UIColor.black.cgColor
         label.layer.shadowOpacity = 0.5

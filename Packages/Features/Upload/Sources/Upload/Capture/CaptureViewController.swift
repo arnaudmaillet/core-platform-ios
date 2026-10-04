@@ -454,7 +454,7 @@ final class CaptureViewController: UIViewController {
         flashView.isUserInteractionEnabled = false
         flashView.pin(to: previewContainer)
 
-        countdownLabel.font = .systemFont(ofSize: 132, weight: .heavy).rounded
+        countdownLabel.font = .systemFont(ofSize: 132, weight: .heavy).rounded // a full-screen numeral (#482)
         countdownLabel.textColor = .white
         countdownLabel.textAlignment = .center
         countdownLabel.alpha = 0
@@ -598,7 +598,10 @@ final class CaptureViewController: UIViewController {
         }
 
         timePill.cornerConfiguration = .capsule()
-        timeLabel.font = .monospacedDigitSystemFont(ofSize: 14, weight: .semibold)
+        timeLabel.font = .scaledMonospacedDigitSystemFont(
+            ofSize: 14, weight: .semibold, relativeTo: .subheadline, maximumPointSize: 19
+        )
+        timeLabel.adjustsFontForContentSizeCategory = true
         timeLabel.textColor = .white
         timeLabel.pin(to: timePill.contentView, insets: NSDirectionalEdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
         timePill.alpha = 0
@@ -608,7 +611,8 @@ final class CaptureViewController: UIViewController {
         }
 
         toast.cornerConfiguration = .capsule()
-        toastLabel.font = .systemFont(ofSize: 15, weight: .semibold)
+        toastLabel.font = .scaledSystemFont(ofSize: 15, weight: .semibold, relativeTo: .subheadline, maximumPointSize: 22)
+        toastLabel.adjustsFontForContentSizeCategory = true
         toastLabel.textColor = .white
         toastLabel.textAlignment = .center
         toastLabel.pin(to: toast.contentView, insets: NSDirectionalEdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))

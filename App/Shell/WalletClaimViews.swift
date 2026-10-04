@@ -84,7 +84,8 @@ final class WalletBalanceTile: UIView {
         iconView.image = icon
         iconView.contentMode = .scaleAspectFit
         nameLabel.text = name
-        nameLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        nameLabel.font = .scaledSystemFont(ofSize: 13, weight: .semibold, relativeTo: .footnote, maximumPointSize: 17)
+        nameLabel.adjustsFontForContentSizeCategory = true
         nameLabel.textColor = .secondaryLabel
         // Rounded and monospaced: a balance is a figure that changes under
         // the viewer's eyes, and its digits must not jostle when it does.
@@ -95,7 +96,8 @@ final class WalletBalanceTile: UIView {
         valueLabel.adjustsFontSizeToFitWidth = true
         valueLabel.minimumScaleFactor = 0.5
         noteLabel.text = note
-        noteLabel.font = .systemFont(ofSize: 12, weight: .regular)
+        noteLabel.font = .scaledSystemFont(ofSize: 12, relativeTo: .caption1, maximumPointSize: 16)
+        noteLabel.adjustsFontForContentSizeCategory = true
         noteLabel.textColor = .tertiaryLabel
         noteLabel.textAlignment = .center
 
@@ -191,9 +193,12 @@ final class WalletSummaryView: UIView {
         streakIcon.contentMode = .center
         streakIcon.translatesAutoresizingMaskIntoConstraints = false
         streakDisc.addSubview(streakIcon)
-        streakTitle.font = .systemFont(ofSize: 15, weight: .semibold)
+        // Capped: the streak and today's earnings share one row, half each.
+        streakTitle.font = .scaledSystemFont(ofSize: 15, weight: .semibold, relativeTo: .subheadline, maximumPointSize: 18)
+        streakTitle.adjustsFontForContentSizeCategory = true
         streakTitle.textColor = .label
-        streakSubtitle.font = .systemFont(ofSize: 12)
+        streakSubtitle.font = .scaledSystemFont(ofSize: 12, relativeTo: .caption1, maximumPointSize: 15)
+        streakSubtitle.adjustsFontForContentSizeCategory = true
         streakSubtitle.textColor = .secondaryLabel
         streakSubtitle.numberOfLines = 2
         let streakText = UIStackView(arrangedSubviews: [streakTitle, streakSubtitle])
@@ -205,9 +210,13 @@ final class WalletSummaryView: UIView {
 
         // — Today's earnings, right half —
         earnedTitle.text = "Earned today"
-        earnedTitle.font = .systemFont(ofSize: 12)
+        earnedTitle.font = .scaledSystemFont(ofSize: 12, relativeTo: .caption1, maximumPointSize: 15)
+        earnedTitle.adjustsFontForContentSizeCategory = true
         earnedTitle.textColor = .secondaryLabel
-        earnedValue.font = .monospacedDigitSystemFont(ofSize: 15, weight: .semibold)
+        earnedValue.font = .scaledMonospacedDigitSystemFont(
+            ofSize: 15, weight: .semibold, relativeTo: .subheadline, maximumPointSize: 18
+        )
+        earnedValue.adjustsFontForContentSizeCategory = true
         earnedValue.textColor = .label
         progressTrack.backgroundColor = .tertiarySystemFill
         progressTrack.layer.cornerRadius = 2
@@ -385,12 +394,15 @@ final class WalletStakeCell: UICollectionViewCell {
         thumbnail.backgroundColor = .tertiarySystemFill
         thumbnail.tintColor = .secondaryLabel
 
-        titleLabel.font = .systemFont(ofSize: 15, weight: .semibold)
+        titleLabel.font = .scaledSystemFont(ofSize: 15, weight: .semibold, relativeTo: .subheadline)
+        titleLabel.adjustsFontForContentSizeCategory = true
         titleLabel.textColor = .label
-        subtitleLabel.font = .systemFont(ofSize: 13)
+        subtitleLabel.font = .scaledSystemFont(ofSize: 13, relativeTo: .footnote)
+        subtitleLabel.adjustsFontForContentSizeCategory = true
         subtitleLabel.textColor = .secondaryLabel
         resultLabel.textAlignment = .right
-        detailLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+        detailLabel.font = .scaledMonospacedDigitSystemFont(ofSize: 12, relativeTo: .caption1)
+        detailLabel.adjustsFontForContentSizeCategory = true
         detailLabel.textColor = .secondaryLabel
         detailLabel.textAlignment = .right
         for label in [resultLabel, detailLabel] {
@@ -456,7 +468,7 @@ final class WalletStakeCell: UICollectionViewCell {
     /// The part that moves with the clock — rewritten every second for an
     /// active stake, without reconfiguring the rest.
     func applyStatus(stake: WalletStake, now: Date) {
-        let resultFont = UIFont.monospacedDigitSystemFont(ofSize: 15, weight: .semibold)
+        let resultFont = UIFont.scaledMonospacedDigitSystemFont(ofSize: 15, weight: .semibold, relativeTo: .subheadline)
         let result = NSMutableAttributedString()
         switch stake.outcome {
         case nil:
@@ -469,7 +481,8 @@ final class WalletStakeCell: UICollectionViewCell {
             detailLabel.text = "\(stake.amount) staked · \(walletAgoText(since: stake.settlesAt, now: now))"
         case .noReward:
             result.append(NSAttributedString(string: "No reward", attributes: [
-                .font: UIFont.systemFont(ofSize: 15, weight: .medium), .foregroundColor: UIColor.secondaryLabel,
+                .font: UIFont.scaledSystemFont(ofSize: 15, weight: .medium, relativeTo: .subheadline),
+                .foregroundColor: UIColor.secondaryLabel,
             ]))
             detailLabel.text = "\(stake.amount) staked · \(walletAgoText(since: stake.settlesAt, now: now))"
         }
@@ -550,11 +563,13 @@ final class WalletEmptyStakesCell: UICollectionViewCell {
         Surface.applyCardEdge(to: contentView)
         let title = UILabel()
         title.text = "No active stakes"
-        title.font = .systemFont(ofSize: 15, weight: .semibold)
+        title.font = .scaledSystemFont(ofSize: 15, weight: .semibold, relativeTo: .subheadline)
+        title.adjustsFontForContentSizeCategory = true
         let body = UILabel()
         let hours = Int(WalletStore.Policy.settlementDelay / 3600)
         body.text = "Stake points on a post you believe in. Each stake settles \(hours) hours later — and may earn gems."
-        body.font = .systemFont(ofSize: 13)
+        body.font = .scaledSystemFont(ofSize: 13, relativeTo: .footnote)
+        body.adjustsFontForContentSizeCategory = true
         body.textColor = .secondaryLabel
         body.numberOfLines = 0
         let column = UIStackView(arrangedSubviews: [title, body])
@@ -583,7 +598,8 @@ final class WalletSectionHeader: UICollectionReusableView {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        detailLabel.font = .monospacedDigitSystemFont(ofSize: 13, weight: .medium)
+        detailLabel.font = .scaledMonospacedDigitSystemFont(ofSize: 13, weight: .medium, relativeTo: .footnote, maximumPointSize: 16)
+        detailLabel.adjustsFontForContentSizeCategory = true
         detailLabel.textColor = .secondaryLabel
         titleView.trailingAccessory = detailLabel
         titleView.translatesAutoresizingMaskIntoConstraints = false

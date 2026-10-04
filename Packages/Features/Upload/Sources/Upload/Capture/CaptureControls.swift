@@ -53,7 +53,9 @@ final class CaptureChoiceRowView<Choice: Equatable>: UIView, PoppingTenant {
             }
             button.configuration?.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
                 var attributes = attributes
-                attributes.font = .systemFont(ofSize: 15, weight: .semibold)
+                attributes.font = .scaledSystemFont(
+                    ofSize: 15, weight: .semibold, relativeTo: .subheadline, maximumPointSize: 19
+                )
                 return attributes
             }
             button.configuration?.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16)
@@ -167,6 +169,8 @@ final class CaptureLensChipsView: UIView {
             configuration.baseForegroundColor = isActive ? .systemYellow : .white
             configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
                 var attributes = attributes
+                // Fixed size (#482): the mode strip snaps on measured title
+                // widths; growing them would move every detent.
                 attributes.font = .systemFont(ofSize: isActive ? 13 : 12, weight: .bold)
                 return attributes
             }

@@ -56,6 +56,7 @@ final class MediaSpeedRowView: UIView {
         chips = MediaTimelining.rates.map { rate in
             let chip = UIButton(type: .custom)
             chip.setTitle(MediaTimelining.rateLabel(rate), for: .normal)
+            // Fixed size (#482): the label fills a fixed circle.
             chip.titleLabel?.font = .monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
             chip.accessibilityLabel = "Play at \(MediaTimelining.rateLabel(rate))"
             chip.layer.cornerRadius = Metrics.chip / 2
