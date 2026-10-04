@@ -20,22 +20,26 @@ import Foundation
 /// pile rather than as a set: the thing you saved a minute ago is the thing you
 /// came back for.
 public final class PostBookmarkStore: @unchecked Sendable {
-    private static let key = "profile.savedPostIDs"
+    private static let baseKey = "profile.savedPostIDs"
     private let defaults: UserDefaults
+    /// Whose pile: the active profile's (`StorageScope`).
+    private let scope: StorageScope
+    private var key: String { scope.profileKey(Self.baseKey, adoptingLegacyIn: defaults) }
     private let lock = NSLock()
 
     /// Fires after every change, on whatever thread made it — the profile's
     /// Saved tab reloads from this rather than polling.
     public var onChange: (() -> Void)?
 
-    public init(defaults: UserDefaults = .standard) {
+    public init(defaults: UserDefaults = .standard, scope: StorageScope = .shared) {
         self.defaults = defaults
+        self.scope = scope
         #if DEBUG
         // `-reset-bookmarks`: deterministic QA, so a scripted launch always
         // starts from an empty pile. The map's favorites store carries the
         // same hook for the same reason.
         if ProcessInfo.processInfo.arguments.contains("-reset-bookmarks") {
-            defaults.removeObject(forKey: Self.key)
+            defaults.removeObject(forKey: key)
         }
         // `-seed-bookmarks a,b,c`: a pile without having to save three posts by
         // hand first. The Saved tab is otherwise empty on a fresh install,
@@ -45,14 +49,14 @@ public final class PostBookmarkStore: @unchecked Sendable {
             let ids = ProcessInfo.processInfo.arguments[index + 1]
                 .split(separator: ",")
                 .map(String.init)
-            defaults.set(ids, forKey: Self.key)
+            defaults.set(ids, forKey: key)
         }
         #endif
     }
 
     /// Most recently saved first.
     public var savedPostIDs: [String] {
-        lock.withLock { defaults.array(forKey: Self.key) as? [String] ?? [] }
+        lock.withLock { defaults.array(forKey: key) as? [String] ?? [] }
     }
 
     public func isSaved(_ id: String) -> Bool {
@@ -66,15 +70,15 @@ public final class PostBookmarkStore: @unchecked Sendable {
     @discardableResult
     public func toggle(_ id: String) -> Bool {
         let saved: Bool = lock.withLock {
-            var ids = defaults.array(forKey: Self.key) as? [String] ?? []
+            var ids = defaults.array(forKey: key) as? [String] ?? []
             if let existing = ids.firstIndex(of: id) {
                 ids.remove(at: existing)
-                defaults.set(ids, forKey: Self.key)
+                defaults.set(ids, forKey: key)
                 return false
             }
             // Front, not back: newest first is how the pile reads.
             ids.insert(id, at: 0)
-            defaults.set(ids, forKey: Self.key)
+            defaults.set(ids, forKey: key)
             return true
         }
         onChange?()

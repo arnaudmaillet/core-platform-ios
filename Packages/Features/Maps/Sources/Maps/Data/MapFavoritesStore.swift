@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import Foundation
 import MapsInterface
 
@@ -25,7 +26,7 @@ public final class MapFavoritesStore: @unchecked Sendable {
     /// install wrote there. Changing it would silently empty the dock of
     /// anyone who had curated it. The two sub-filter rows are new lists, so
     /// they get new keys.
-    private static func key(for category: MapFavoriteCategory) -> String {
+    private static func baseKey(for category: MapFavoriteCategory) -> String {
         switch category {
         case .dock: "maps.pinnedFavoriteProfileIDs"
         case .following: "maps.pinnedFavoriteProfileIDs.following"
@@ -35,15 +36,24 @@ public final class MapFavoritesStore: @unchecked Sendable {
 
     private let defaults: UserDefaults
     private let lock = NSLock()
+    /// Whose rails: the active profile's (`StorageScope`). The unscoped dock
+    /// key an install curated is adopted by the first member profile, so no
+    /// one's dock empties on upgrade.
+    private let scope: StorageScope
 
-    public init(defaults: UserDefaults = .standard) {
+    private func key(for category: MapFavoriteCategory) -> String {
+        scope.profileKey(Self.baseKey(for: category), adoptingLegacyIn: defaults)
+    }
+
+    public init(defaults: UserDefaults = .standard, scope: StorageScope = .shared) {
         self.defaults = defaults
+        self.scope = scope
         #if DEBUG
         // `-maps-reset-favorites`: deterministic QA — wipe the curated lists
         // so a scripted launch always starts from the graph fallback.
         if ProcessInfo.processInfo.arguments.contains("-maps-reset-favorites") {
             for category in MapFavoriteCategory.allCases {
-                defaults.removeObject(forKey: Self.key(for: category))
+                defaults.removeObject(forKey: key(for: category))
             }
         }
         #endif
@@ -74,7 +84,7 @@ public final class MapFavoritesStore: @unchecked Sendable {
     /// The curated list for one rail, in pin order; `nil` when never curated.
     public func pinnedProfileIDs(in category: MapFavoriteCategory) -> [ProfileID]? {
         lock.withLock {
-            (defaults.array(forKey: Self.key(for: category)) as? [String])
+            (defaults.array(forKey: key(for: category)) as? [String])
                 .map { $0.map { ProfileID($0) } }
         }
     }
@@ -82,7 +92,7 @@ public final class MapFavoritesStore: @unchecked Sendable {
     /// Replaces one rail's curated list (used to materialize the on-screen
     /// fallback before the first mutation).
     public func setPinned(_ ids: [ProfileID], in category: MapFavoriteCategory) {
-        lock.withLock { defaults.set(ids.map(\.rawValue), forKey: Self.key(for: category)) }
+        lock.withLock { defaults.set(ids.map(\.rawValue), forKey: key(for: category)) }
         // Outside the lock: an observer that re-entered this store while it
         // was held would deadlock on a non-recursive lock, and posting is not
         // part of the write.

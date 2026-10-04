@@ -207,6 +207,9 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         case .authenticated: isMember = true
         }
         container.memberGate.isMember = isMember
+        // Whose saves, drafts and wallet the stores hold — first, so the gift
+        // below lands in the arriving account's wallet.
+        container.enterStorageScope(for: state)
         // The welcome gift: a guest's opens (once per device), a member's
         // first arrival credits whatever it holds and closes it for good.
         if isMember {
