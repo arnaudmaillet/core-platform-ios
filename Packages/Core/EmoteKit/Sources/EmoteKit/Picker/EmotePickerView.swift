@@ -1,3 +1,4 @@
+import DesignSystem
 import UIKit
 
 /// The emote panel that takes the keyboard's place: every emote in sections,
@@ -340,7 +341,9 @@ extension EmotePickerView: UICollectionViewDataSource, UICollectionViewDelegate 
     public func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         collectionView.deselectItem(at: indexPath, animated: false)
         guard indexPath.section < sections.count, indexPath.item < sections[indexPath.section].emotes.count else { return }
-        UIDevice.current.playInputClick()
+        // iOS plays it only when keyboard clicks are on; the app's Interface
+        // Sounds switch (#471) can silence it too.
+        if InterfaceSoundPreference.isOn { UIDevice.current.playInputClick() }
         onSelect?(sections[indexPath.section].emotes[indexPath.item])
     }
 
