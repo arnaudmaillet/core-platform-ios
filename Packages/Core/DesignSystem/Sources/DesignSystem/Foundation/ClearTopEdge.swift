@@ -39,7 +39,10 @@ public extension UIScrollView {
     /// configured, and a NEW list under a header must too: one that does not
     /// gets the system's band back under its bar.
     ///
-    /// ## The exceptions: the notifications drawer, the sound sheet's gallery
+    /// ## The exceptions: Settings, the notifications drawer, the sound sheet's gallery
+    ///
+    /// Every Settings screen wears UIKit's soft top edge
+    /// (`prefersSoftTopEdge`, asked for on 2026-10-04).
     ///
     /// The notifications list keeps UIKit's soft top-edge blur on purpose
     /// (asked for on 2026-09-28): it is a panel of its own beside the app, not
@@ -73,5 +76,18 @@ public extension UIScrollView {
     /// package's test duration jumps by about a minute, look here first.
     func prefersClearTopEdge() {
         topEdgeEffect.isHidden = true
+    }
+
+    /// UIKit's own SOFT top-edge effect: a blur as tall as the header that
+    /// fades out below it, so rows read cleanly as they pass under the bar.
+    ///
+    /// The exception to `prefersClearTopEdge`, asked for on 2026-10-04 for
+    /// every Settings screen (a list of text rows under a large title, where
+    /// rows meeting the bar's pills with nothing between them read as
+    /// clutter). Native, not a hand-built frost: the 2026-09-22 lesson was
+    /// that a masked material reads as non-native, UIKit's effect does not.
+    func prefersSoftTopEdge() {
+        topEdgeEffect.isHidden = false
+        topEdgeEffect.style = .soft
     }
 }

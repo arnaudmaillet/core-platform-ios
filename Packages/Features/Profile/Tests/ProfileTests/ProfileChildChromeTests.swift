@@ -68,8 +68,9 @@ struct ProfileChildChromeTests {
         #expect(SettingsComingSoonViewController(section: .wallet).hidesBottomBarWhenPushed)
     }
 
-    /// ⚠️ Both lists run under their bar with no system effect drawn there —
-    /// neither iOS 26's fade nor iOS 27's hard band — see `prefersClearTopEdge`.
+    /// ⚠️ The profile editor runs under its bar with no system effect drawn
+    /// there — neither iOS 26's fade nor iOS 27's hard band — see
+    /// `prefersClearTopEdge`.
     @Test func theProfileEditorRunsUnderItsBarWithNoSystemEffect() throws {
         let editor = EditProfileViewController(
             viewModel: EditProfileViewModel(repository: StubProfiles(), onSaved: {}),
@@ -80,18 +81,22 @@ struct ProfileChildChromeTests {
         #expect(list.topEdgeEffect.isHidden)
     }
 
-    @Test func accountSettingsRunsUnderItsBarWithNoSystemEffect() throws {
+    /// Settings screens are the exception (2026-10-04): UIKit's SOFT top
+    /// edge under the bar — see `prefersSoftTopEdge`.
+    @Test func accountSettingsWearsTheSoftTopEdge() throws {
         let settings = AccountSettingsViewController(account: StubAccount())
         settings.loadViewIfNeeded()
         let list = try #require(settings.view.subviews.compactMap { $0 as? UICollectionView }.first)
-        #expect(list.topEdgeEffect.isHidden)
+        #expect(!list.topEdgeEffect.isHidden)
+        #expect(list.topEdgeEffect.style == .soft)
     }
 
-    @Test func settingsRunsUnderItsBarWithNoSystemEffect() throws {
+    @Test func settingsWearsTheSoftTopEdge() throws {
         let settings = SettingsViewController(switching: nil, switcher: nil, makeDestination: { _ in nil }, onLogout: {})
         settings.loadViewIfNeeded()
         let list = try #require(settings.view.subviews.compactMap { $0 as? UICollectionView }.first)
-        #expect(list.topEdgeEffect.isHidden)
+        #expect(!list.topEdgeEffect.isHidden)
+        #expect(list.topEdgeEffect.style == .soft)
     }
 
     /// A profile that was PUSHED owns the bottom of the screen, and the bar
