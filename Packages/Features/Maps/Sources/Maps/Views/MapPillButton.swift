@@ -315,7 +315,7 @@ final class MapPillButton: UIButton {
             config.attributedTitle = AttributedString(
                 Self.displayTitle(title),
                 attributes: AttributeContainer([
-                    .font: UIFont.preferredFont(forTextStyle: .footnote)
+                    .font: UIFont.appFont(forTextStyle: .footnote)
                         .withWeight(selected ? .semibold : .medium)
                 ])
             )

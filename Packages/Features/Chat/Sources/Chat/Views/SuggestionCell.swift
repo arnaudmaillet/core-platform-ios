@@ -69,7 +69,7 @@ final class SuggestionCell: UITableViewCell {
         configuration.attributedTitle = AttributedString(
             isFollowing ? "Following" : "Follow",
             attributes: AttributeContainer([
-                .font: UIFont.preferredFont(forTextStyle: .subheadline)
+                .font: UIFont.appFont(forTextStyle: .subheadline)
             ])
         )
         followButton.configuration = configuration
@@ -98,17 +98,17 @@ final class SuggestionCell: UITableViewCell {
     }
 
     private func configure() {
-        nameLabel.font = .preferredFont(forTextStyle: .headline)
+        nameLabel.font = .appFont(forTextStyle: .headline)
         nameLabel.textColor = .label
 
-        handleLabel.font = .preferredFont(forTextStyle: .subheadline)
+        handleLabel.font = .appFont(forTextStyle: .subheadline)
         handleLabel.textColor = .secondaryLabel
 
         // Same size as the handle, one colour step quieter — the reason is a
         // peer of the handle on the line they share, not a third tier of type.
-        reasonLabel.font = .preferredFont(forTextStyle: .subheadline)
+        reasonLabel.font = .appFont(forTextStyle: .subheadline)
         reasonLabel.textColor = .tertiaryLabel
-        separatorLabel.font = .preferredFont(forTextStyle: .subheadline)
+        separatorLabel.font = .appFont(forTextStyle: .subheadline)
         separatorLabel.textColor = .tertiaryLabel
         separatorLabel.text = "•"
 

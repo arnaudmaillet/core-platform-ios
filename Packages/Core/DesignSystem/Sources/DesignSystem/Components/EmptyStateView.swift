@@ -41,9 +41,9 @@ public final class EmptyStateView: UIView {
         )
         icon.setContentHuggingPriority(.required, for: .vertical)
 
-        titleLabel.font = .preferredFont(forTextStyle: .headline)
+        titleLabel.font = .appFont(forTextStyle: .headline)
         titleLabel.textColor = .label
-        subtitleLabel.font = .preferredFont(forTextStyle: .subheadline)
+        subtitleLabel.font = .appFont(forTextStyle: .subheadline)
         subtitleLabel.textColor = .secondaryLabel
         for label in [titleLabel, subtitleLabel] {
             label.adjustsFontForContentSizeCategory = true

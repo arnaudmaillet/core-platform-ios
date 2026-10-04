@@ -138,7 +138,7 @@ final class ThreadQuoteView: UIView {
         bar.backgroundColor = .tertiaryLabel
         bar.layer.cornerRadius = 1
         bar.translatesAutoresizingMaskIntoConstraints = false
-        label.font = .preferredFont(forTextStyle: .footnote)
+        label.font = .appFont(forTextStyle: .footnote)
         label.adjustsFontForContentSizeCategory = true
         label.textColor = .secondaryLabel
         label.numberOfLines = 1
@@ -174,7 +174,7 @@ final class ThreadQuoteView: UIView {
     func configure(author: String, snippet: String) {
         let text = NSMutableAttributedString(
             string: author,
-            attributes: [.font: UIFont.preferredFont(forTextStyle: .footnote).withWeight(.semibold)]
+            attributes: [.font: UIFont.scaledFont(forTextStyle: .footnote, weight: .semibold)]
         )
         text.append(NSAttributedString(string: "  \(snippet)"))
         label.attributedText = text

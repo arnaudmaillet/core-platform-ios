@@ -88,9 +88,9 @@ final class SnapMediaAttributionView: UIView {
         coverView.widthAnchor.constraint(equalToConstant: AvatarImageView.barDiameter).isActive = true
         coverView.heightAnchor.constraint(equalToConstant: AvatarImageView.barDiameter).isActive = true
 
-        titleLabel.font = UIFont.preferredFont(forTextStyle: .footnote).withWeight(.semibold)
+        titleLabel.font = UIFont.scaledFont(forTextStyle: .footnote, weight: .semibold)
         titleLabel.textColor = .label
-        trackLabel.font = .preferredFont(forTextStyle: .caption2)
+        trackLabel.font = .appFont(forTextStyle: .caption2)
         trackLabel.textColor = .secondaryLabel
 
         // The toolbar is transparent over arbitrary media; shadows keep the

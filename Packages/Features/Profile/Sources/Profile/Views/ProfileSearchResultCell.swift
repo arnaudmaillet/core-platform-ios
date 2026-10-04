@@ -45,7 +45,7 @@ final class ProfileSearchResultCell: UICollectionViewListCell {
         // The handle without its `@`: the sigil is decoration here, and the
         // row already reads as a person.
         content.secondaryText = target.handle
-        content.textProperties.font = .preferredFont(forTextStyle: .body)
+        content.textProperties.font = .appFont(forTextStyle: .body)
         content.secondaryTextProperties.color = .secondaryLabel
         content.image = avatar ?? Self.placeholder
         content.imageProperties.maximumSize = Self.avatarSize

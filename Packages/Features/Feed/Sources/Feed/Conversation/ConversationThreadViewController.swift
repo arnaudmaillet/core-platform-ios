@@ -420,7 +420,7 @@ final class ConversationThreadViewController: UIViewController {
     }
 
     private func configureStatusLabel() {
-        statusLabel.font = .preferredFont(forTextStyle: .body)
+        statusLabel.font = .appFont(forTextStyle: .body)
         statusLabel.textColor = .secondaryLabel
         statusLabel.textAlignment = .center
         statusLabel.numberOfLines = 0

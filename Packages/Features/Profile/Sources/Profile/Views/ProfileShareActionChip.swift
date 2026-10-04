@@ -50,7 +50,7 @@ final class ProfileShareActionChip: UIView {
 
         let label = UILabel()
         label.text = title
-        label.font = .preferredFont(forTextStyle: .caption1)
+        label.font = .appFont(forTextStyle: .caption1)
         label.adjustsFontForContentSizeCategory = true
         label.textColor = .label
         label.textAlignment = .center

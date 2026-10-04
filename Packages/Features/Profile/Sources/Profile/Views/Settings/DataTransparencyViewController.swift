@@ -174,7 +174,7 @@ final class DataTransparencyViewController: UIViewController {
             case .thirdParty(let text):
                 var content = UIListContentConfiguration.cell()
                 content.text = text
-                content.textProperties.font = .preferredFont(forTextStyle: .subheadline)
+                content.textProperties.font = .appFont(forTextStyle: .subheadline)
                 cell.contentConfiguration = content
             case .permission(let permission):
                 var content = UIListContentConfiguration.subtitleCell()
@@ -186,7 +186,7 @@ final class DataTransparencyViewController: UIViewController {
                 cell.contentConfiguration = content
                 let state = UILabel()
                 state.text = permission.state.label
-                state.font = .preferredFont(forTextStyle: .subheadline)
+                state.font = .appFont(forTextStyle: .subheadline)
                 state.textColor = permission.state == .allowed ? .systemGreen : .secondaryLabel
                 cell.accessories = [.customView(configuration: .init(customView: state, placement: .trailing(displayed: .always)))]
             case .openSettings:

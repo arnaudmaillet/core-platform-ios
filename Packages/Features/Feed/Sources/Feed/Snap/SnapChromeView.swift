@@ -655,7 +655,7 @@ final class SnapChromeView: UIView {
         shadow.shadowBlurRadius = 3
         shadow.shadowOffset = .zero
         return [
-            .font: UIFont.preferredFont(forTextStyle: secondary ? .footnote : .body),
+            .font: UIFont.appFont(forTextStyle: secondary ? .footnote : .body),
             .foregroundColor: secondary ? UIColor.white.withAlphaComponent(0.6) : UIColor.white,
             .shadow: shadow,
             // GEOMETRY LOCK: every line takes the PRIMARY (body) line height —
@@ -676,7 +676,7 @@ final class SnapChromeView: UIView {
     /// to two lines by construction, so the label needs no truncation of its
     /// own.
     private static var captionParagraphStyle: NSParagraphStyle {
-        let bodyLineHeight = UIFont.preferredFont(forTextStyle: .body).lineHeight
+        let bodyLineHeight = UIFont.appFont(forTextStyle: .body).lineHeight
         let paragraph = NSMutableParagraphStyle()
         paragraph.minimumLineHeight = bodyLineHeight
         paragraph.maximumLineHeight = bodyLineHeight
@@ -691,7 +691,7 @@ final class SnapChromeView: UIView {
     /// whether the caption is a real two-line media caption or a collapsed
     /// text-only placeholder.
     static var captionFloorHeight: CGFloat {
-        2 * UIFont.preferredFont(forTextStyle: .body).lineHeight
+        2 * UIFont.appFont(forTextStyle: .body).lineHeight
     }
 
     /// How many lines `string` occupies at `width` — the two-line contract's
@@ -708,7 +708,7 @@ final class SnapChromeView: UIView {
             options: [.usesLineFragmentOrigin],
             context: nil
         ).height
-        let lineHeight = UIFont.preferredFont(forTextStyle: .body).lineHeight
+        let lineHeight = UIFont.appFont(forTextStyle: .body).lineHeight
         return max(1, Int((height / lineHeight).rounded()))
     }
 

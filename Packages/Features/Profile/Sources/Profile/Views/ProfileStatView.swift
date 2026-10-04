@@ -36,8 +36,12 @@ final class ProfileStatView: UIControl {
         accessibilityTraits = .staticText
         accessibilityLabel = caption
 
-        valueLabel.font = .preferredFont(forTextStyle: .headline)
+        // Capped, then fitted (#482): four of these share one row, and at
+        // accessibility sizes an uncapped headline left "…" in every cell.
+        valueLabel.font = .scaledSystemFont(ofSize: 17, weight: .semibold, relativeTo: .headline, maximumPointSize: 24)
         valueLabel.adjustsFontForContentSizeCategory = true
+        valueLabel.adjustsFontSizeToFitWidth = true
+        valueLabel.minimumScaleFactor = 0.6
         valueLabel.textColor = .label
         valueLabel.textAlignment = .center
 
@@ -45,8 +49,10 @@ final class ProfileStatView: UIControl {
         // caption1, not footnote: several of these share one row, and
         // "Followers" must fit its cell without truncating. (Four did until
         // Views went on 2026-09-30; the type was kept, not re-tuned.)
-        captionLabel.font = .preferredFont(forTextStyle: .caption1)
+        captionLabel.font = .scaledSystemFont(ofSize: 12, relativeTo: .caption1, maximumPointSize: 16)
         captionLabel.adjustsFontForContentSizeCategory = true
+        captionLabel.adjustsFontSizeToFitWidth = true
+        captionLabel.minimumScaleFactor = 0.7
         captionLabel.textColor = .secondaryLabel
         captionLabel.textAlignment = .center
 

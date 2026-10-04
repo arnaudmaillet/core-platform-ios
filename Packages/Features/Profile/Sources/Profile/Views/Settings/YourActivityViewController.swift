@@ -269,7 +269,7 @@ final class ScreenTimeWeekView: UIView, UIContentView {
             bar.layer.cornerCurve = .continuous
             let label = UILabel()
             label.text = formatter.string(from: day.day)
-            label.font = .preferredFont(forTextStyle: .caption2)
+            label.font = .appFont(forTextStyle: .caption2)
             label.adjustsFontForContentSizeCategory = true
             label.textColor = isToday ? .label : .secondaryLabel
             label.textAlignment = .center

@@ -58,7 +58,7 @@ public final class DayPillHeaderView: UICollectionReusableView {
     /// than a public `UIFont` extension: Chat declares its own `withWeight`,
     /// and a public one here would make every call in Chat ambiguous.
     private static func semiboldCaption() -> UIFont {
-        let base = UIFont.preferredFont(forTextStyle: .caption1)
+        let base = UIFont.appFont(forTextStyle: .caption1)
         let descriptor = base.fontDescriptor.addingAttributes([
             .traits: [UIFontDescriptor.TraitKey.weight: UIFont.Weight.semibold]
         ])

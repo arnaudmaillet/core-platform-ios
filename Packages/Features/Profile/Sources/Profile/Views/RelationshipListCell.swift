@@ -122,7 +122,7 @@ final class RelationshipListCell: UICollectionViewListCell {
         content.attributedText = Self.nameText(for: row)
         content.secondaryText = row.handle
         content.secondaryTextProperties.color = .secondaryLabel
-        content.secondaryTextProperties.font = .preferredFont(forTextStyle: .subheadline)
+        content.secondaryTextProperties.font = .appFont(forTextStyle: .subheadline)
         // The same row height every other people list in the app uses, worked
         // back from the shared target rather than copied from another cell's
         // margin — see `PersonRowMetrics`.
@@ -187,7 +187,7 @@ final class RelationshipListCell: UICollectionViewListCell {
         configuration.cornerStyle = .capsule
         configuration.buttonSize = .small
         configuration.attributedTitle = AttributedString(title, attributes: AttributeContainer([
-            .font: UIFont.preferredFont(forTextStyle: .subheadline)
+            .font: UIFont.appFont(forTextStyle: .subheadline)
         ]))
         return configuration
     }
@@ -214,7 +214,7 @@ final class RelationshipListCell: UICollectionViewListCell {
     /// button. "(Me)" is set in the secondary colour and regular weight so it
     /// reads as an annotation on the name rather than part of it.
     private static func nameText(for row: ProfileRelationshipsViewModel.Row) -> NSAttributedString {
-        let font = UIFont.preferredFont(forTextStyle: .headline)
+        let font = UIFont.appFont(forTextStyle: .headline)
         let name = NSMutableAttributedString(
             string: row.displayName,
             attributes: [.font: font, .foregroundColor: UIColor.label]
@@ -232,7 +232,7 @@ final class RelationshipListCell: UICollectionViewListCell {
             name.append(NSAttributedString(
                 string: " (Me)",
                 attributes: [
-                    .font: UIFont.preferredFont(forTextStyle: .subheadline),
+                    .font: UIFont.appFont(forTextStyle: .subheadline),
                     .foregroundColor: UIColor.secondaryLabel
                 ]
             ))

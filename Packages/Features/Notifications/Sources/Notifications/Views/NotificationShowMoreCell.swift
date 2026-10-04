@@ -14,7 +14,7 @@ final class NotificationShowMoreCell: UICollectionViewListCell {
         capsule.layer.cornerCurve = .continuous
 
         label.font = UIFont(
-            descriptor: UIFont.preferredFont(forTextStyle: .subheadline).fontDescriptor.addingAttributes([
+            descriptor: UIFont.appFont(forTextStyle: .subheadline).fontDescriptor.addingAttributes([
                 .traits: [UIFontDescriptor.TraitKey.weight: UIFont.Weight.semibold]
             ]),
             size: 0

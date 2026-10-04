@@ -84,7 +84,7 @@ final class PhoneAuthViewController: BottomAnchoredTableViewController {
         field.leftViewMode = .always
         field.addAction(UIAction { [weak self] _ in self?.digitsChanged() }, for: .editingChanged)
 
-        prefixLabel.font = .preferredFont(forTextStyle: .body)
+        prefixLabel.font = .appFont(forTextStyle: .body)
         prefixLabel.adjustsFontForContentSizeCategory = true
 
         applyCountry(country)

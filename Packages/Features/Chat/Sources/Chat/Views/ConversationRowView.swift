@@ -99,10 +99,10 @@ final class ConversationRowView: UIView {
     private func applyUnreadStyle(_ isUnread: Bool) {
         titleLabel.font = isUnread
             ? .preferredFont(forTextStyle: .headline, weight: .bold)
-            : .preferredFont(forTextStyle: .headline)
+            : .appFont(forTextStyle: .headline)
         previewLabel.font = isUnread
             ? .preferredFont(forTextStyle: .subheadline, weight: .semibold)
-            : .preferredFont(forTextStyle: .subheadline)
+            : .appFont(forTextStyle: .subheadline)
         previewLabel.textColor = isUnread ? .label : .secondaryLabel
         timeLabel.textColor = isUnread ? .label : .secondaryLabel
     }
@@ -136,7 +136,7 @@ final class ConversationRowView: UIView {
         for label in [titleLabel, previewLabel, timeLabel] {
             label.adjustsFontForContentSizeCategory = true
         }
-        timeLabel.font = .preferredFont(forTextStyle: .footnote)
+        timeLabel.font = .appFont(forTextStyle: .footnote)
         applyUnreadStyle(false)
 
         // Status glyphs (all hidden by default). BOTH live in the trailing

@@ -277,7 +277,7 @@ final class SnapCommentTickerView: UIView {
     private static var laneBubbleHeight: CGFloat {
         max(
             TickerBubbleView.avatarDiameter,
-            ceil(UIFont.preferredFont(forTextStyle: .caption1).lineHeight)
+            ceil(UIFont.appFont(forTextStyle: .caption1).lineHeight)
                 + TickerBubbleView.textInsets.top + TickerBubbleView.textInsets.bottom
         )
     }
@@ -1057,7 +1057,7 @@ private final class TickerBubbleView: UIView {
     static let avatarDiameter: CGFloat = 20
     static let avatarGap: CGFloat = 6
     static let textInsets = UIEdgeInsets(top: 3, left: 0, bottom: 3, right: 0)
-    static let font = UIFont.preferredFont(forTextStyle: .caption1).withWeight(.semibold)
+    static let font = UIFont.scaledFont(forTextStyle: .caption1, weight: .semibold)
 
     private let avatarView = AvatarImageView()
     /// Emotes ride the band: the players are subviews of the label, so they

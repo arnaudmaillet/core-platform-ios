@@ -190,7 +190,7 @@ final class SearchFilterSheetViewController: UIViewController {
     private func dimensionView(for group: Group) -> UIView {
         let title = UILabel()
         title.text = group.title
-        title.font = .preferredFont(forTextStyle: .subheadline)
+        title.font = .appFont(forTextStyle: .subheadline)
         title.adjustsFontForContentSizeCategory = true
         title.textColor = .secondaryLabel
 
@@ -235,7 +235,7 @@ final class SearchFilterSheetViewController: UIViewController {
         guard let footerText = group.footer else { return column }
         let footer = UILabel()
         footer.text = footerText
-        footer.font = .preferredFont(forTextStyle: .caption1)
+        footer.font = .appFont(forTextStyle: .caption1)
         footer.adjustsFontForContentSizeCategory = true
         footer.textColor = .tertiaryLabel
         footer.numberOfLines = 0

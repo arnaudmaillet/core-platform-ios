@@ -616,7 +616,7 @@ final class SoundSheetViewController: UIViewController {
         configuration.baseForegroundColor = .white
         configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
             var attributes = attributes
-            attributes.font = UIFont.preferredFont(forTextStyle: .body).withWeight(.semibold)
+            attributes.font = UIFont.scaledFont(forTextStyle: .body, weight: .semibold)
             return attributes
         }
         let button = UIButton(configuration: configuration, primaryAction: UIAction { [weak self] _ in

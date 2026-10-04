@@ -56,11 +56,13 @@ final class AppearancePickerView: UIControl {
             let isSelected = option == selection
             var configuration = UIButton.Configuration.plain()
             configuration.image = UIImage(systemName: option.symbolName)
-            configuration.preferredSymbolConfigurationForImage = .init(textStyle: .title1)
+            configuration.preferredSymbolConfigurationForImage = .init(pointSize: 28)
             configuration.imagePlacement = .top
             configuration.imagePadding = 8
             var title = AttributedString(option.title)
-            title.font = .preferredFont(forTextStyle: .subheadline)
+            // Capped (#482): three columns share the row; at large sizes
+            // "System" broke across three lines.
+            title.font = .scaledFont(forTextStyle: .subheadline, weight: .regular, maximumPointSize: 19)
             configuration.attributedTitle = title
             configuration.titleAlignment = .center
             configuration.baseForegroundColor = isSelected ? .label : .secondaryLabel

@@ -54,7 +54,7 @@ final class MediaPickerGridCell: UICollectionViewCell {
         // A video's duration sits over the photo's own colours, so it carries a
         // shadow rather than a plate: a plate on every video tile turns a grid
         // of pictures into a grid of labels.
-        duration.font = .preferredFont(forTextStyle: .caption2)
+        duration.font = .appFont(forTextStyle: .caption2)
         duration.adjustsFontForContentSizeCategory = true
         duration.textColor = .white
         duration.layer.shadowColor = UIColor.black.cgColor
@@ -160,7 +160,7 @@ private final class SelectionBadgeView: UIView {
         layer.shadowRadius = 2
         layer.shadowOffset = .zero
 
-        label.font = .preferredFont(forTextStyle: .caption1)
+        label.font = .appFont(forTextStyle: .caption1)
         label.adjustsFontForContentSizeCategory = true
         label.textColor = .white
         label.textAlignment = .center
