@@ -133,7 +133,7 @@ struct CountryLayerTests {
     }
 
     private final class FakeAccess: CountryAccess {
-        let homeCountry = "FR"
+        let homeCountry: String? = "FR"
         let gems = 0
         var posted: Set<String> = ["BR", "ES"]
         func isUnlocked(_ code: String) -> Bool { code == "FR" || code == "BR" }
@@ -151,7 +151,7 @@ struct CountryLayerTests {
 
     /// Answers `hasPosts` with the protocol's default.
     private final class StandingsOnlyAccess: CountryAccess {
-        let homeCountry = "FR"
+        let homeCountry: String? = "FR"
         let gems = 0
         func isUnlocked(_ code: String) -> Bool { true }
         func standing(of code: String) -> CountryStanding? {

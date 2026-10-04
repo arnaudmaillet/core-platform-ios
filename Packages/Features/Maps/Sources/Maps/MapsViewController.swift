@@ -200,6 +200,9 @@ final class MapsViewController: UIViewController {
     /// the map. Nil: every country is open (the fleet, until the backend
     /// carries unlocks).
     private let countryAccess: (any CountryAccess)?
+    /// Where the device is: the locate button and the "See posts around you"
+    /// card (`MapLocationControls`). Nil shows neither.
+    private let locator: (any CurrentCountryLocating)?
     /// What the Shop's Boosts sells (the ×100 cartridge pack); nil sells none.
     private let stakePacks: (any StakePackSelling)?
     /// Whether the viewer has an account. A guest follows no one, so the
@@ -230,6 +233,11 @@ final class MapsViewController: UIViewController {
     /// subview animates as a smooth collapse, and the main bar keeps its seat
     /// above the tab bar (it's the stack's bottom edge that is pinned).
     private let barsStack = UIStackView()
+    /// The row above the filter bars: the locate button, or the "See posts
+    /// around you" card while nothing is open (guest mode §3.1).
+    private let locationControls = MapLocationControlsView()
+    /// A tap asked where the device is: fly to its country once it is known.
+    private var fliesToCurrentCountry = false
     /// The bars' offset from the view's raw bottom edge; see `syncBarsPosition`.
     private var barsBottomConstraint: NSLayoutConstraint!
     /// In-flight people fetch for the sub-filter row; superseded on every
@@ -362,9 +370,11 @@ final class MapsViewController: UIViewController {
         openConversation: @escaping (ProfileID) -> Void,
         countryAccess: (any CountryAccess)? = nil,
         stakePacks: (any StakePackSelling)? = nil,
-        isMember: @escaping @MainActor () -> Bool = { true }
+        isMember: @escaping @MainActor () -> Bool = { true },
+        locator: (any CurrentCountryLocating)? = nil
     ) {
         self.isMember = isMember
+        self.locator = locator
         self.countryAccess = countryAccess
         self.stakePacks = stakePacks
         self.viewModel = viewModel
@@ -978,6 +988,10 @@ final class MapsViewController: UIViewController {
         NotificationCenter.default.addObserver(
             self, selector: #selector(countryAccessChanged), name: .countryAccessDidChange, object: nil
         )
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(currentCountryChanged), name: .currentCountryDidChange, object: nil
+        )
+        updateLocationControls()
         #if DEBUG
         // `-open-country-shop` / `-offer-country XX` / `-show-country XX`: the
         // shop, a locked country's offer, or the shop's "go to" — once the map
@@ -1200,6 +1214,55 @@ final class MapsViewController: UIViewController {
     @objc private func countryAccessChanged() {
         countryLayer.refreshStyles()
         reconcileClusters()
+        updateLocationControls()
+    }
+
+    // MARK: - Location (guest mode §3.1)
+
+    /// The card while nothing is open and location isn't allowed — the one
+    /// thing that would open a country; the locate button otherwise.
+    private func updateLocationControls() {
+        guard let locator, let countryAccess else {
+            locationControls.apply(.none)
+            return
+        }
+        let permission = locator.permission
+        locationControls.apply(
+            countryAccess.hasNoOpenCountry && permission != .allowed ? .card(permission) : .button(permission)
+        )
+    }
+
+    /// Asks in context — the only place location is ever asked for — or, once
+    /// denied, sends the person to Settings, the only place it can change.
+    private func locationControlTapped(_ permission: LocationPermission) {
+        switch permission {
+        case .denied:
+            guard let settings = URL(string: UIApplication.openSettingsURLString) else { return }
+            UIApplication.shared.open(settings)
+        case .notAsked:
+            fliesToCurrentCountry = true
+            locator?.requestPermission()
+        case .allowed:
+            if let code = locator?.currentCountry {
+                showCountry(code)
+            } else {
+                fliesToCurrentCountry = true
+            }
+            locator?.requestPermission()
+        }
+    }
+
+    @objc private func currentCountryChanged() {
+        updateLocationControls()
+        // The country left behind closes again (decision 10): it no longer
+        // stands selected as if it were open — unless its offer is up.
+        if let selected = countryLayer.selectedCode, selected != locator?.currentCountry,
+           countryAccess?.isUnlocked(selected) == false, presentedViewController == nil {
+            countryLayer.select(nil)
+        }
+        guard fliesToCurrentCountry, let code = locator?.currentCountry else { return }
+        fliesToCurrentCountry = false
+        showCountry(code)
     }
 
     /// Whether `pin`'s post is OPEN to the viewer: its country is unlocked (or
@@ -1306,8 +1369,10 @@ final class MapsViewController: UIViewController {
             subFilterBar.heightAnchor.constraint(equalToConstant: MapSubFilterBarView.barHeight),
             filterBar.heightAnchor.constraint(equalToConstant: MapFilterBarView.barHeight)
         ])
+        barsStack.addArrangedSubview(locationControls)
         barsStack.addArrangedSubview(subFilterBar)
         barsStack.addArrangedSubview(filterBar)
+        locationControls.onTap = { [weak self] permission in self?.locationControlTapped(permission) }
         // Resting state: no refinement row until a primary that has one.
         subFilterBar.isHidden = true
         subFilterBar.alpha = 0

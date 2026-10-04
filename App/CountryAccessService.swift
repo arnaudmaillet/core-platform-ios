@@ -1,3 +1,4 @@
+import AuthInterface
 import CoreLocation
 import CoreNetworkingMocks
 import CoreStorage
@@ -8,7 +9,11 @@ import Maps
 /// with gems — the shell's answer to `CountryAccess`.
 ///
 /// - The UNLOCKS are the account's (`CountryUnlockStore`, keyed by account id,
-///   never by profile), plus the account's home country, always open.
+///   never by profile), plus the account's home country, always open — a
+///   MEMBER's: a guest has neither (guest mode decision 9).
+/// - The CURRENT country is the device's, while location is allowed
+///   (`CurrentCountryLocating`) — open for guests and members alike, for as
+///   long as the device is there, and never written to the unlocks.
 /// - The GEMS are the wallet's (`WalletStore.spendGems`) — points never buy a
 ///   country.
 /// - The STANDINGS (rank, likes, posts) are the backend's once it carries
@@ -18,8 +23,12 @@ import Maps
 ///   country has a plausible standing and the rank ladder is stable.
 @MainActor
 final class CountryAccessService: CountryAccess {
-    let homeCountry: String
+    /// The member's home country — what `homeCountry` answers for a member.
+    private let accountHomeCountry: String
     private let accountID: String
+    /// Whether a member is here: a guest has no home and no unlocks.
+    private let isMember: @MainActor () -> Bool
+    private let locator: (any CurrentCountryLocating)?
     private let wallet: WalletStore
     private let unlocks: CountryUnlockStore
     private let byCode: [String: CountryStanding]
@@ -31,10 +40,14 @@ final class CountryAccessService: CountryAccess {
 
     init(
         accountID: String, homeCountry: String, wallet: WalletStore, unlocks: CountryUnlockStore,
-        activity: [String: (likes: Int64, posts: Int)]
+        activity: [String: (likes: Int64, posts: Int)],
+        isMember: @escaping @MainActor () -> Bool = { true },
+        locator: (any CurrentCountryLocating)? = nil
     ) {
         self.accountID = accountID
-        self.homeCountry = homeCountry
+        self.accountHomeCountry = homeCountry
+        self.isMember = isMember
+        self.locator = locator
         self.wallet = wallet
         self.unlocks = unlocks
         let ordered = Self.standings(activity: activity, homeCountry: homeCountry)
@@ -43,18 +56,27 @@ final class CountryAccessService: CountryAccess {
         self.postedCountries = Set(activity.filter { $0.value.posts > 0 }.keys.map { $0.uppercased() })
         // Gems and unlocks change elsewhere too (a stake settling, another
         // screen): the map re-reads on either.
-        for name in [WalletStore.didChangeNotification, CountryUnlockStore.didChangeNotification] {
+        // So do the device's country and the viewer: a sign-in opens the
+        // account's countries, a sign-out closes them.
+        for name in [WalletStore.didChangeNotification, CountryUnlockStore.didChangeNotification,
+                     .currentCountryDidChange, .viewerDidChange] {
             observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { _ in
                 NotificationCenter.default.post(name: .countryAccessDidChange, object: nil)
             })
         }
     }
 
+    var homeCountry: String? { isMember() ? accountHomeCountry : nil }
+
+    var currentCountry: String? { locator?.currentCountry }
+
     var gems: Int { wallet.snapshot().gems }
 
     func isUnlocked(_ code: String) -> Bool {
         let code = code.uppercased()
-        return code == homeCountry || unlocks.unlocked(for: accountID).contains(code)
+        if code == currentCountry { return true }
+        guard isMember() else { return false }
+        return code == accountHomeCountry || unlocks.unlocked(for: accountID).contains(code)
     }
 
     func standing(of code: String) -> CountryStanding? { byCode[code.uppercased()] }
@@ -69,6 +91,9 @@ final class CountryAccessService: CountryAccess {
     func unlock(_ code: String) -> CountryUnlockOutcome {
         guard let standing = standing(of: code) else { return .unknownCountry }
         guard !isUnlocked(code) else { return .alreadyUnlocked }
+        // A guest's unlock is gated before it gets here (`.unlockCountry`);
+        // a guest has no account to keep the country in.
+        guard isMember() else { return .insufficientGems(needed: standing.price, have: 0) }
         switch wallet.spendGems(standing.price) {
         case .spent(let remaining):
             unlocks.unlock(standing.code, for: accountID)
