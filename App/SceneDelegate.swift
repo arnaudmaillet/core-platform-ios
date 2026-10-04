@@ -28,6 +28,9 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         // Applied before the first frame so the app never flashes the other
         // style.
         AppearancePreference.apply(to: [window])
+        // Settings → App and Device → Display → Care Mode: the larger text is
+        // in place before the first frame too.
+        CareModePreference.apply(to: [window])
 
         let coordinator = AppCoordinator(window: window, container: AppContainer.shared)
         appCoordinator = coordinator
