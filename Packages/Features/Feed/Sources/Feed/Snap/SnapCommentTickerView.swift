@@ -30,12 +30,16 @@ import UIKit
 /// drift (`v(t) = -vₖ + (V₀+vₖ)·e^(-t/τ)`), integrated by a `CADisplayLink`
 /// that lives only for the interaction transient; when the residual is
 /// imperceptible the bubbles are handed back to CA at exactly matched
-/// velocity. A kinetic blur (`systemThickMaterial`) behind the band tracks
-/// the touch's ACCUMULATED absolute travel — monotone non-decreasing while
-/// the finger is down, so a hold freezes at its peak — via a paused
-/// `UIViewPropertyAnimator`'s `fractionComplete`; release relaxes it on the
-/// coast's exponential clock, and at steady state the surface is hidden
-/// (zero cost).
+/// velocity. A kinetic backdrop — a black wash behind the band — tracks the
+/// touch's ACCUMULATED absolute travel in its opacity: monotone
+/// non-decreasing while the finger is down, so a hold freezes at its peak;
+/// release relaxes it on the coast's exponential clock back to the resting
+/// level. At rest the wash sits at the viewer's Background setting (Settings
+/// → App and Device → Comments on Media), 0 by default — and at 0 the
+/// surface is hidden (zero cost). It was a `systemThickMaterial` blur until
+/// 2026-10-04; a wash keeps the media's detail around the band instead of
+/// fogging it, costs nothing per frame, and lets the viewer set a resting
+/// level, which a blur's fraction can't express.
 ///
 /// # Lifecycle
 /// Hard stop/start, not a freeze: deactivation retires everything in flight,
@@ -55,6 +59,9 @@ final class SnapCommentTickerView: UIView {
     private(set) static var speedScale: CGFloat = 1
     /// The viewer's bubble opacity, read with the speed.
     private(set) static var bubbleOpacity: CGFloat = 1
+    /// The backdrop's resting opacity (0 = none, the default), read with the
+    /// speed. A scrub raises the wash from here and the release returns it.
+    private(set) static var restingBackdropOpacity: CGFloat = 0
     static var laneSpeeds: [CGFloat] { baseLaneSpeeds.map { $0 * speedScale } }
 
     /// Reads the band's appearance from the device preferences.
@@ -62,6 +69,7 @@ final class SnapCommentTickerView: UIView {
         let preferences = store.preferences
         speedScale = CGFloat(preferences.bandSpeed.scale)
         bubbleOpacity = CGFloat(preferences.bandOpacity)
+        restingBackdropOpacity = CGFloat(preferences.bandBackgroundOpacity)
     }
     /// Per-lane phase, in seconds of travel. The pre-fill shifts each lane's
     /// bubble train left by `phase × speed` points — as if that lane had
@@ -85,15 +93,15 @@ final class SnapCommentTickerView: UIView {
     /// Residual manual velocity (pt/s) under which the conveyor resumes CA —
     /// below perception, so the handover cannot be seen.
     static let restVelocityTolerance: CGFloat = 2
-    /// The blur animator's fraction ceiling: enough depth-of-field to read
-    /// as kinetic, not enough to obliterate the reactions being scrubbed.
-    static let maxBlurFraction: CGFloat = 0.65
+    /// The backdrop's opacity ceiling during a scrub: dark enough to read as
+    /// kinetic, light enough to keep the media visible around the band.
+    static let maxBackdropOpacity: CGFloat = 0.65
     /// The backdrop never disappears under a live touch: engagement starts
     /// here at touch-down, and the accumulator can only raise it.
     static let scrubEngagementFloor: CGFloat = 0.25
     /// Accumulated absolute travel (pt) at which the backdrop reaches its
     /// cap.
-    static let blurDistanceScale: CGFloat = 260
+    static let backdropDistanceScale: CGFloat = 260
 
     /// Accumulated |Δx| → backdrop fraction while the finger is down. A true
     /// accumulator: monotone non-decreasing over the touch lifecycle — it
@@ -102,7 +110,7 @@ final class SnapCommentTickerView: UIView {
     /// velocity plays no part until the gesture ends.
     static func scrubFraction(forAccumulatedDistance distance: CGFloat) -> CGFloat {
         scrubEngagementFloor
-            + (maxBlurFraction - scrubEngagementFloor) * min(1, distance / blurDistanceScale)
+            + (maxBackdropOpacity - scrubEngagementFloor) * min(1, distance / backdropDistanceScale)
     }
     /// How far past either edge a scrubbed bubble may sit before retiring.
     private static let scrubMargin: CGFloat = 48
@@ -190,21 +198,15 @@ final class SnapCommentTickerView: UIView {
     /// The accumulator: total absolute travel of the current touch. Only
     /// ever grows while scrubbing; reset by the next `beginScrub`.
     private var scrubAccumulatedDistance: CGFloat = 0
-    /// The kinetic depth-of-field surface behind the band — hidden (zero
-    /// render cost) except during manual interaction.
-    private let blurView = UIVisualEffectView(effect: nil)
-    /// Paused animator whose `fractionComplete` IS the blur intensity — the
-    /// standard variable-blur technique. `pauseAnimation()` is mandatory: an
-    /// `.inactive` animator silently ignores `fractionComplete` (the
-    /// invisible-blur field bug).
-    private var blurAnimator: UIViewPropertyAnimator?
-    /// A released surface's reversal run, kept separate so a re-grab can
-    /// stop it and take the surface back over.
-    private var blurDismissAnimator: UIViewPropertyAnimator?
-    /// Settles any animator still engaged when the ticker is released —
-    /// deallocating a paused/unfinished `UIViewPropertyAnimator` is a UIKit
-    /// exception, and a ticker can die mid-interaction.
-    private let animatorBag = KineticAnimatorBag()
+    /// The kinetic wash behind the band: a black view whose alpha is the
+    /// intensity. Hidden (zero render cost) whenever its alpha is 0.
+    private let backdropView = UIView()
+    /// Where the band reads its appearance when a stream starts — the app's
+    /// store; a test hands its own.
+    var appearanceStore: MediaCommentPreferencesStore = .standard
+    /// The interaction's own intensity (0 when no scrub or coast is running);
+    /// the wash shows the larger of this and the resting level.
+    private var kineticFraction: CGFloat = 0
 
     override init(frame: CGRect) {
         bubbleHeight = Self.laneBubbleHeight
@@ -227,10 +229,12 @@ final class SnapCommentTickerView: UIView {
         // capsule end nests inside its curvature, so no clipped bubble
         // sliver can peek out of the square zone's corner gaps.
 
-        blurView.isHidden = true
-        blurView.isUserInteractionEnabled = false
-        blurView.accessibilityIdentifier = "ticker-kinetic-backdrop"
-        insertSubview(blurView, at: 0)
+        backdropView.backgroundColor = .black
+        backdropView.alpha = 0
+        backdropView.isHidden = true
+        backdropView.isUserInteractionEnabled = false
+        backdropView.accessibilityIdentifier = "ticker-kinetic-backdrop"
+        insertSubview(backdropView, at: 0)
 
         // Horizontal-only pan for the scrub. The delegate declares the
         // band's priority over other pans (the timeline slide-to-pop, the
@@ -377,7 +381,7 @@ final class SnapCommentTickerView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         layer.cornerRadius = bounds.height / 2 // capsule end (see init)
-        blurView.frame = bounds
+        backdropView.frame = bounds
         // ⚠️ **A TRAIN LAID AT ONE WIDTH IS RE-LAID AT ANOTHER.** The pre-fill
         // spreads the bubbles across `bounds.width` once, when the stream
         // starts — and a page flying in, a cell being reused, a chrome
@@ -435,7 +439,8 @@ final class SnapCommentTickerView: UIView {
     }
 
     private func startIfNeeded(fadingIn: Bool = false) {
-        Self.refreshAppearance()
+        Self.refreshAppearance(from: appearanceStore)
+        showBackdrop(kineticFraction)
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-ticker-trace") {
             print(String(format: "[ticker] %.3f startIfNeeded active=%@ mode=%@ queue=%d width=%.0f held=%@ window=%@ alpha=%.2f hidden=%@", CACurrentMediaTime(), isActive ? "Y" : "N", "\(mode)", queue.count, bounds.width, isHeldForFlight ? "Y" : "N", window != nil ? "Y" : "N", alpha, isHidden ? "Y" : "N"))
@@ -500,7 +505,7 @@ final class SnapCommentTickerView: UIView {
         for timer in spawnTimers { timer?.invalidate() }
         spawnTimers = Array(repeating: nil, count: Self.laneCount)
         stopCoast()
-        setBlurIntensity(0)
+        setKineticIntensity(0)
         // Cancel any in-progress grab (a page can deactivate mid-touch).
         panRecognizer.isEnabled = false
         panRecognizer.isEnabled = true
@@ -662,14 +667,14 @@ final class SnapCommentTickerView: UIView {
             lastPanTranslation = 0
             beginScrub()
             // Feedback engages with the grab itself, before any movement.
-            setBlurIntensity(Self.scrubFraction(forAccumulatedDistance: 0))
+            setKineticIntensity(Self.scrubFraction(forAccumulatedDistance: 0))
         case .changed:
             let translation = pan.translation(in: self).x
             applyScrubTranslation(translation - lastPanTranslation)
             lastPanTranslation = translation
             // Accumulator only: no velocity term while the finger is down,
             // so the intensity can rise or hold but never drop mid-touch.
-            setBlurIntensity(Self.scrubFraction(forAccumulatedDistance: scrubAccumulatedDistance))
+            setKineticIntensity(Self.scrubFraction(forAccumulatedDistance: scrubAccumulatedDistance))
         case .ended, .cancelled, .failed:
             endScrub(releaseVelocity: pan.velocity(in: self).x)
         default:
@@ -777,7 +782,7 @@ final class SnapCommentTickerView: UIView {
         // The fade envelope starts at the value held at release (the
         // accumulator's peak) and relaxes on the same exponential clock as
         // the velocities — continuous at lift-off, zero at handover.
-        setBlurIntensity(coastReleaseFraction * CGFloat(exp(-elapsed / Self.decayTimeConstant)))
+        setKineticIntensity(coastReleaseFraction * CGFloat(exp(-elapsed / Self.decayTimeConstant)))
 
         if maxResidual < Self.restVelocityTolerance {
             stopCoast()
@@ -895,11 +900,15 @@ final class SnapCommentTickerView: UIView {
         }
     }
 
-    // MARK: - Kinetic blur
+    // MARK: - Kinetic backdrop
 
-    /// The engaged surface's current fraction (0 when disengaged) — the
-    /// deterministic observable for tests; actual rendering needs a window.
-    var currentKineticFraction: CGFloat { blurAnimator?.fractionComplete ?? 0 }
+    /// The interaction's current intensity (0 when disengaged) — the
+    /// deterministic observable for tests.
+    var currentKineticFraction: CGFloat { kineticFraction }
+
+    /// The wash's opacity on screen: the interaction's, or the resting level
+    /// when that is higher.
+    var currentBackdropOpacity: CGFloat { backdropView.isHidden ? 0 : backdropView.alpha }
 
     /// When the coast began, in `CACurrentMediaTime()`'s clock.
     ///
@@ -911,64 +920,36 @@ final class SnapCommentTickerView: UIView {
     /// a loaded CI runner. That is a decayed fraction, and it failed the build.
     var coastStartTime: CFTimeInterval { coastStart }
 
-    /// Drives the paused animator's `fractionComplete`. Zero is the hard
-    /// teardown (page deactivation); the graceful end of an interaction is
-    /// `dismissKineticBackdrop`.
-    private func setBlurIntensity(_ fraction: CGFloat) {
-        if fraction <= 0 {
-            if let animator = blurAnimator {
-                animator.stopAnimation(true) // → .inactive: safe to release
-                animatorBag.release(animator)
-                blurAnimator = nil
-            }
-            if let dismissing = blurDismissAnimator {
-                dismissing.stopAnimation(true)
-                animatorBag.release(dismissing)
-                blurDismissAnimator = nil
-            }
-            blurView.effect = nil
-            blurView.isHidden = true
-            return
-        }
-        // A re-grab mid-dismissal stops the reversal and takes back over.
-        if let dismissing = blurDismissAnimator {
-            dismissing.stopAnimation(true)
-            animatorBag.release(dismissing)
-            blurDismissAnimator = nil
-        }
-        if blurAnimator == nil {
-            blurView.isHidden = false
-            let animator = UIViewPropertyAnimator(duration: 1, curve: .linear) { [blurView] in
-                blurView.effect = UIBlurEffect(style: .systemThickMaterial)
-            }
-            // An animator left `.inactive` silently ignores
-            // `fractionComplete`; pausing activates it.
-            animator.pauseAnimation()
-            animatorBag.adopt(animator)
-            blurAnimator = animator
-        }
-        blurAnimator?.fractionComplete = fraction
+    /// Sets the interaction's intensity. Zero is the hard teardown (page
+    /// deactivation): straight back to the resting level. The graceful end of
+    /// an interaction is `dismissKineticBackdrop`.
+    private func setKineticIntensity(_ fraction: CGFloat) {
+        kineticFraction = max(0, fraction)
+        backdropView.layer.removeAllAnimations()
+        showBackdrop(kineticFraction)
     }
 
-    /// Ends the interaction's feedback by REVERSING the paused animator —
-    /// UIKit animates the material itself back to nothing (fading an effect
-    /// view's alpha breaks blur rendering). Releasing from a stationary hold
-    /// sits at the accumulator's peak, and popping that off reads as a
-    /// glitch; a dismissal from a fast coast is equally fine, the fraction
-    /// has already decayed to almost nothing.
+    private func showBackdrop(_ fraction: CGFloat) {
+        let opacity = max(fraction, Self.restingBackdropOpacity)
+        backdropView.alpha = opacity
+        backdropView.isHidden = opacity <= 0
+    }
+
+    /// Ends the interaction's feedback with a short fade back to the resting
+    /// level. Releasing from a stationary hold sits at the accumulator's
+    /// peak, and popping that off reads as a glitch; a dismissal from a fast
+    /// coast is equally fine, the intensity has already decayed to almost
+    /// nothing.
     private func dismissKineticBackdrop() {
-        guard let animator = blurAnimator else { return }
-        blurAnimator = nil
-        blurDismissAnimator = animator
-        animator.isReversed = true
-        animator.addCompletion { [weak self] _ in
-            guard let self, self.blurDismissAnimator === animator else { return }
-            self.blurDismissAnimator = nil
-            self.animatorBag.release(animator) // finished naturally: safe
-            self.blurView.effect = nil
-            self.blurView.isHidden = true
+        guard kineticFraction > 0 else { return }
+        kineticFraction = 0
+        let resting = Self.restingBackdropOpacity
+        UIView.animate(withDuration: 0.25, delay: 0, options: [.beginFromCurrentState, .curveEaseOut]) { [backdropView] in
+            backdropView.alpha = resting
+        } completion: { [weak self] finished in
+            guard finished, let self, self.kineticFraction == 0 else { return }
+            self.showBackdrop(0)
         }
-        animator.continueAnimation(withTimingParameters: nil, durationFactor: 0.25)
     }
 
     /// The bubble's on-screen center-x: the render server's truth when
@@ -1041,50 +1022,6 @@ extension SnapCommentTickerView: UIGestureRecognizerDelegate {
         shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer
     ) -> Bool {
         gestureRecognizer === panRecognizer && otherGestureRecognizer is UIPanGestureRecognizer
-    }
-}
-
-/// Settles the ticker's property animators when it is released: UIKit
-/// throws on deallocating a paused (or stopped-but-unfinished)
-/// `UIViewPropertyAnimator`, and a ticker can die while one is engaged
-/// (mid-interaction teardown, test teardown). `@unchecked Sendable` because
-/// its deinit may run off the main actor; the drain hops to the main queue,
-/// which also keeps the orphans alive until UIKit can finalize them there.
-private final class KineticAnimatorBag: @unchecked Sendable {
-    private struct Orphans: @unchecked Sendable {
-        let animators: [UIViewPropertyAnimator]
-    }
-
-    private var animators: [UIViewPropertyAnimator] = []
-
-    func adopt(_ animator: UIViewPropertyAnimator) {
-        animators.append(animator)
-    }
-
-    /// Call once an animator is safe to release (stopped-without-finishing →
-    /// `.inactive`, or finished naturally).
-    func release(_ animator: UIViewPropertyAnimator) {
-        animators.removeAll { $0 === animator }
-    }
-
-    deinit {
-        guard !animators.isEmpty else { return }
-        let orphans = Orphans(animators: animators)
-        DispatchQueue.main.async {
-            MainActor.assumeIsolated {
-                for animator in orphans.animators {
-                    switch animator.state {
-                    case .active:
-                        animator.stopAnimation(false)
-                        animator.finishAnimation(at: .current)
-                    case .stopped:
-                        animator.finishAnimation(at: .current)
-                    default:
-                        break
-                    }
-                }
-            }
-        }
     }
 }
 

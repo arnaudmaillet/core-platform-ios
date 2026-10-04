@@ -95,6 +95,56 @@ struct CommentPreferencesStreamTests {
         #expect(preferences.bandOpacity == 1)
     }
 
+    @Test func backgroundsDefaultToTodaysLookAndAreClamped() {
+        var preferences = MediaCommentPreferences()
+        #expect(preferences.bandBackgroundOpacity == 0)
+        #expect(preferences.subtitleBackgroundOpacity == 0.45)
+        #expect(preferences.commentsBackdropOpacity == 0.8)
+        preferences.bandBackgroundOpacity = 5
+        preferences.subtitleBackgroundOpacity = -1
+        preferences.commentsBackdropOpacity = 0.1
+        #expect(preferences.bandBackgroundOpacity == MediaCommentPreferences.bandBackgroundRange.upperBound)
+        #expect(preferences.subtitleBackgroundOpacity == 0)
+        #expect(preferences.commentsBackdropOpacity == MediaCommentPreferences.commentsBackdropRange.lowerBound)
+    }
+
+    /// Preferences saved before the background settings existed keep every
+    /// choice they had: the new fields default instead of the decode failing
+    /// and resetting everything.
+    @Test func preferencesFromAnOlderBuildStillDecode() throws {
+        let legacy = Data("""
+        {"showsReactionBand":false,"bandOpacity":0.5,"bandSpeed":"fast","showsSubtitles":true,"mutedKeywords":["spoiler"],"mutedHandles":["troll"]}
+        """.utf8)
+        let decoded = try JSONDecoder().decode(MediaCommentPreferences.self, from: legacy)
+        #expect(!decoded.showsReactionBand)
+        #expect(decoded.bandOpacity == 0.5)
+        #expect(decoded.bandSpeed == .fast)
+        #expect(decoded.mutedKeywords == ["spoiler"])
+        #expect(decoded.commentsBackdropOpacity == 0.8)
+        let roundTrip = try JSONDecoder().decode(MediaCommentPreferences.self, from: JSONEncoder().encode(decoded))
+        #expect(roundTrip == decoded)
+    }
+
+    @Test func theSubtitlePillAndTheCommentsWashReadTheStore() {
+        let store = MediaCommentPreferencesStore(defaults: UserDefaults(suiteName: "fills-\(UUID().uuidString)")!)
+        store.update {
+            $0.subtitleBackgroundOpacity = 0.2
+            $0.commentsBackdropOpacity = 0.95
+        }
+        let reset = MediaCommentPreferencesStore(defaults: UserDefaults(suiteName: "reset-\(UUID().uuidString)")!)
+        defer {
+            SubtitlePillLabel.refreshFill(from: reset)
+            SnapCommentsLayout.refreshBackdrop(from: reset)
+        }
+        SubtitlePillLabel.refreshFill(from: store)
+        SnapCommentsLayout.refreshBackdrop(from: store)
+        #expect(abs(SubtitlePillLabel.fillOpacity - 0.2) < 0.001)
+        #expect(abs(SnapCommentsLayout.backdropDimOpacity - 0.95) < 0.001)
+        let backdrop = SnapMediaBackdropView()
+        backdrop.setActive(true)
+        #expect(abs(backdrop.dimOpacity - 0.95) < 0.001)
+    }
+
     @Test func theStorePersistsAndAnnouncesOnlyRealChanges() {
         let defaults = UserDefaults(suiteName: "comment-prefs-\(UUID().uuidString)")!
         let store = MediaCommentPreferencesStore(defaults: defaults)

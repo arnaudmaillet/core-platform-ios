@@ -61,6 +61,15 @@ public enum AppearancePreference: String, CaseIterable, Sendable {
         }
     }
 
+    /// The SF Symbol drawn above the choice in Settings → Display.
+    public var symbolName: String {
+        switch self {
+        case .system: "circle.lefthalf.filled"
+        case .light: "sun.max.fill"
+        case .dark: "moon.fill"
+        }
+    }
+
     /// Stores the choice and applies it to every window of every connected
     /// scene, so the change shows at once.
     @MainActor
