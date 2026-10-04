@@ -57,6 +57,37 @@ struct AuthEndToEndTests {
         #expect(await manager.currentState() == .unauthenticated)
     }
 
+    /// #486: logging out revokes the session ON THE SERVER, through an edge
+    /// that — like the fleet's — refuses `Logout` without the session's
+    /// bearer. Proven by the server refusing the session's refresh token
+    /// afterwards; with a bare `Logout` the refresh still worked.
+    @Test(arguments: [900, 0] as [Int64])
+    func logoutRevokesTheSessionThroughTheEdge(accessTokenLifetimeSeconds: Int64) async throws {
+        let bff = makeBFF(accessTokenLifetimeSeconds: accessTokenLifetimeSeconds)
+        bff.enforcesEdgePolicy = true
+        let store = InMemorySessionStore()
+        let manager = makeManager(bff: bff, store: store)
+        try await manager.login(
+            username: MockAuthService.defaultCredentials.username,
+            password: MockAuthService.defaultCredentials.password
+        )
+        let session = try #require(try store.load())
+
+        await manager.logout()
+
+        let logout = try #require(bff.recordedRequests.last { $0.path == "/auth.v1.AuthService/Logout" })
+        #expect(logout.headers["Authorization"]?.first?.hasPrefix("Bearer at-") == true)
+        // Whichever refresh token the session last held, the server no
+        // longer honours it: the session is over there too.
+        let auth = Auth_V1_AuthServiceClient(
+            client: ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: bff)
+        )
+        var refresh = Auth_V1_RefreshRequest()
+        refresh.refreshToken = session.refreshToken
+        let response = await auth.refresh(request: refresh, headers: [:])
+        #expect(response.error?.code == .unauthenticated)
+    }
+
     @Test func wrongPasswordFailsWithInvalidCredentials() async {
         let (manager, _) = makeStack()
 

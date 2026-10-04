@@ -15,6 +15,7 @@ private final class FakeAuthClient: Auth_V1_AuthServiceClientInterface, @uncheck
     var refreshResult: Result<Auth_V1_RefreshResponse, ConnectError> = .failure(.init(code: .unimplemented, message: nil))
     var loginResult: Result<Auth_V1_LoginResponse, ConnectError> = .failure(.init(code: .unimplemented, message: nil))
     var lastRefreshToken: String?
+    var logoutHeaders: [Connect.Headers] = []
 
     func login(request: Auth_V1_LoginRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_LoginResponse> {
         response(from: lock.withLock { loginResult })
@@ -33,6 +34,7 @@ private final class FakeAuthClient: Auth_V1_AuthServiceClientInterface, @uncheck
     }
 
     func logout(request: Auth_V1_LogoutRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_LogoutResponse> {
+        lock.withLock { logoutHeaders.append(headers) }
         var body = Auth_V1_LogoutResponse()
         body.success = true
         return response(from: .success(body))
@@ -183,6 +185,72 @@ struct SessionManagerTests {
         #expect(await manager.currentState() == .unauthenticated)
         #expect(try store.load() == nil)
         #expect(try await manager.validAccessToken() == nil)
+    }
+
+    /// #486: the revocation carries the ending session's own bearer — the
+    /// edge refuses a bare `Logout`.
+    @Test func logoutSendsTheSessionsBearer() async throws {
+        let client = FakeAuthClient()
+        var body = Auth_V1_LoginResponse()
+        body.accountID = "acct-1"
+        body.tokens = makeTokens(access: "at-1", refresh: "rt-1")
+        client.loginResult = .success(body)
+        let manager = SessionManager(authClient: client, store: InMemorySessionStore(), configuration: Self.config)
+
+        try await manager.login(username: "demo", password: "pw")
+        await manager.logout()
+
+        #expect(client.logoutHeaders.map { $0["Authorization"] } == [["Bearer at-1"]])
+    }
+
+    @Test func anExpiredSessionIsRefreshedToBeRevoked() async throws {
+        let client = FakeAuthClient()
+        var refreshed = Auth_V1_RefreshResponse()
+        refreshed.tokens = makeTokens(access: "at-2", refresh: "rt-2")
+        client.refreshResult = .success(refreshed)
+        let store = InMemorySessionStore()
+        try store.save(expiredSession())
+        let manager = SessionManager(authClient: client, store: store, configuration: Self.config)
+
+        await manager.logout()
+
+        #expect(client.lastRefreshToken == "rt-1")
+        #expect(client.logoutHeaders.map { $0["Authorization"] } == [["Bearer at-2"]])
+        #expect(await manager.currentState() == .unauthenticated, "the refresh never signs the viewer back in")
+    }
+
+    @Test func aSessionTheServerForgotIsOnlyEndedLocally() async throws {
+        let client = FakeAuthClient()
+        client.refreshResult = .failure(ConnectError(code: .unauthenticated, message: "revoked"))
+        let store = InMemorySessionStore()
+        try store.save(expiredSession())
+        let manager = SessionManager(authClient: client, store: store, configuration: Self.config)
+
+        await manager.logout()
+
+        #expect(client.logoutHeaders.isEmpty, "nothing left to revoke")
+        #expect(await manager.currentState() == .unauthenticated)
+    }
+
+    /// A refresh still in flight when the viewer logs out must not hand them
+    /// their session back when it lands.
+    @Test func aRefreshLandingAfterLogoutDoesNotSignBackIn() async throws {
+        let client = FakeAuthClient()
+        client.refreshDelayNanoseconds = 100_000_000
+        var refreshed = Auth_V1_RefreshResponse()
+        refreshed.tokens = makeTokens(access: "at-2", refresh: "rt-2")
+        client.refreshResult = .success(refreshed)
+        let store = InMemorySessionStore()
+        try store.save(expiredSession())
+        let manager = SessionManager(authClient: client, store: store, configuration: Self.config)
+
+        async let token = manager.validAccessToken()
+        try await Task.sleep(nanoseconds: 20_000_000)
+        await manager.logout()
+        _ = try? await token
+
+        #expect(await manager.currentState() == .unauthenticated)
+        #expect(try store.load() == nil)
     }
 
     @Test func unauthenticatedManagerVendsNilToken() async throws {

@@ -36,12 +36,6 @@ public enum MockEdgePolicy {
     static let openPaths: Set<String> = [
         "/auth.v1.AuthService/Login",
         "/auth.v1.AuthService/Refresh",
-        // ⚠️ Open HERE, not at the fleet's edge (Login and Refresh only):
-        // `SessionManager.logout()` sends it from the unauthenticated client,
-        // after the local sign-out, naming the session by id — so against the
-        // fleet that best-effort revocation is refused today. Kept open so
-        // the mock's sessions list stays true; the client fix is its own issue.
-        "/auth.v1.AuthService/Logout",
     ]
 
     static let guestReadablePaths: Set<String> = [
