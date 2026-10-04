@@ -267,6 +267,17 @@ public final class WalletStore: @unchecked Sendable {
     private let defaults: UserDefaults
     private let lock = NSLock()
     private let now: @Sendable () -> Date
+    /// Whose wallet: the ACCOUNT's (`StorageScope`). A guest holds none —
+    /// their likes are the welcome gift's — so a guest's keys are never
+    /// seeded.
+    private let scope: StorageScope
+    /// The demo plan's posts (`seedDemoStakesIfNeeded`), kept for an account
+    /// that arrives after the plan was asked for.
+    private var demoStakeTargets: [String]?
+    private var scopeObserver: NSObjectProtocol?
+
+    /// `name`, in the scope's account.
+    private func k(_ name: String) -> String { scope.accountKey(name, adoptingLegacyIn: defaults) }
 
     /// UTC everywhere, matching the spec's "UTC day" accounting — a wallet
     /// that resets on the device's local midnight would disagree with the
@@ -277,18 +288,23 @@ public final class WalletStore: @unchecked Sendable {
         return calendar
     }()
 
-    public init(defaults: UserDefaults = .standard, now: @escaping @Sendable () -> Date = { Date() }) {
+    public init(
+        defaults: UserDefaults = .standard,
+        now: @escaping @Sendable () -> Date = { Date() },
+        scope: StorageScope = .shared
+    ) {
         self.defaults = defaults
         self.now = now
+        self.scope = scope
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
         // `-wallet-reset`: deterministic QA — a scripted launch always starts
         // from the seeded first-run wallet.
         if arguments.contains("-wallet-reset") {
-            for key in [Key.balance, Key.lifetimeEarned, Key.lifetimeSpent, Key.lastClaimAt,
-                        Key.claimedToday, Key.claimedTodayDay, Key.streakDays, Key.boostTotals,
-                        Key.stakedAt, Key.seeded, Key.demoStakesSeeded, Key.gemsGranted, Key.gemsSpent,
-                        Key.stakeShots] {
+            for key in [k(Key.balance), k(Key.lifetimeEarned), k(Key.lifetimeSpent), k(Key.lastClaimAt),
+                        k(Key.claimedToday), k(Key.claimedTodayDay), k(Key.streakDays), k(Key.boostTotals),
+                        k(Key.stakedAt), k(Key.seeded), k(Key.demoStakesSeeded), k(Key.gemsGranted), k(Key.gemsSpent),
+                        k(Key.stakeShots)] {
                 defaults.removeObject(forKey: key)
             }
         }
@@ -296,64 +312,92 @@ public final class WalletStore: @unchecked Sendable {
         // 0 shows the insufficient-funds path, 10000 shows wide layouts.
         if let index = arguments.firstIndex(of: "-wallet-balance"),
            index + 1 < arguments.count, let balance = Int(arguments[index + 1]) {
-            defaults.set(balance, forKey: Key.balance)
-            defaults.set(true, forKey: Key.seeded)
+            defaults.set(balance, forKey: k(Key.balance))
+            defaults.set(true, forKey: k(Key.seeded))
         }
         // `-wallet-claim-ready`: the claim is immediately available — the
         // pulse, the enabled button, and the payout are all reachable without
         // waiting out a real hour.
         if arguments.contains("-wallet-claim-ready") {
-            defaults.removeObject(forKey: Key.lastClaimAt)
-            defaults.removeObject(forKey: Key.claimedToday)
-            defaults.removeObject(forKey: Key.claimedTodayDay)
+            defaults.removeObject(forKey: k(Key.lastClaimAt))
+            defaults.removeObject(forKey: k(Key.claimedToday))
+            defaults.removeObject(forKey: k(Key.claimedTodayDay))
         }
         // `-wallet-streak N`: an established streak whose chain is alive
         // (last claim landed yesterday), so the next claim both continues it
         // and pays the multiplied amount.
         if let index = arguments.firstIndex(of: "-wallet-streak"),
            index + 1 < arguments.count, let streak = Int(arguments[index + 1]) {
-            defaults.set(streak, forKey: Key.streakDays)
+            defaults.set(streak, forKey: k(Key.streakDays))
             let yesterday = Self.utcCalendar.date(byAdding: .day, value: -1, to: now())!
-            defaults.set(yesterday.timeIntervalSince1970, forKey: Key.lastClaimAt)
+            defaults.set(yesterday.timeIntervalSince1970, forKey: k(Key.lastClaimAt))
         }
         // `-wallet-gems N`: exactly N gems to spend, whatever was earned.
         if let index = arguments.firstIndex(of: "-wallet-gems"),
            index + 1 < arguments.count, let gems = Int(arguments[index + 1]) {
-            defaults.set(0, forKey: Key.gemsSpent)
-            defaults.set(gems - stakesLocked(at: now()).reduce(0) { $0 + $1.gems }, forKey: Key.gemsGranted)
+            defaults.set(0, forKey: k(Key.gemsSpent))
+            defaults.set(gems - stakesLocked(at: now()).reduce(0) { $0 + $1.gems }, forKey: k(Key.gemsGranted))
         }
         // `-wallet-stake-shots N`: a ×100 cartridge pack with N shots left
         // (0 empties it) — the menu's loaded face without a trip to the shop.
         if let index = arguments.firstIndex(of: "-wallet-stake-shots"),
            index + 1 < arguments.count, let shots = Int(arguments[index + 1]) {
-            defaults.set(max(0, shots), forKey: Key.stakeShots)
+            defaults.set(max(0, shots), forKey: k(Key.stakeShots))
         }
         #endif
+        seedIfNeeded()
+        // A member arriving gets their own wallet, seeded the first time.
+        scopeObserver = NotificationCenter.default.addObserver(
+            forName: StorageScope.didChangeNotification, object: scope, queue: nil
+        ) { [weak self] _ in
+            guard let self else { return }
+            seedIfNeeded()
+            if let targets = lock.withLock({ demoStakeTargets }) { seedDemoStakesIfNeeded(targetIDs: targets) }
+            postDidChange()
+        }
+    }
+
+    /// The first-run wallet, once per account (and once for an unscoped
+    /// store): the starting balance and gems, and dates for undated boosts.
+    /// Never for a guest.
+    private func seedIfNeeded() {
+        guard scope.holdsWallet else { return }
+        lock.lock()
+        defer { lock.unlock() }
         // The seeded gems, once — also for an install that predates them.
-        if defaults.object(forKey: Key.gemsGranted) == nil {
-            defaults.set(Policy.seededGems, forKey: Key.gemsGranted)
+        if defaults.object(forKey: k(Key.gemsGranted)) == nil {
+            defaults.set(Policy.seededGems, forKey: k(Key.gemsGranted))
         }
         // First run: seed the spendable starting balance, exactly once.
-        if !defaults.bool(forKey: Key.seeded) {
-            defaults.set(Policy.seededBalance, forKey: Key.balance)
-            defaults.set(true, forKey: Key.seeded)
+        if !defaults.bool(forKey: k(Key.seeded)) {
+            defaults.set(Policy.seededBalance, forKey: k(Key.balance))
+            defaults.set(true, forKey: k(Key.seeded))
         }
         // Boosts recorded before stakes had a date are dated now, as already
         // settled — once, and then they keep that date.
-        let totals = defaults.dictionary(forKey: Key.boostTotals) as? [String: Int] ?? [:]
-        var dates = defaults.dictionary(forKey: Key.stakedAt) as? [String: Double] ?? [:]
+        let totals = defaults.dictionary(forKey: k(Key.boostTotals)) as? [String: Int] ?? [:]
+        var dates = defaults.dictionary(forKey: k(Key.stakedAt)) as? [String: Double] ?? [:]
         let undated = totals.keys.filter { dates[$0] == nil }
         if !undated.isEmpty {
             let settled = now().addingTimeInterval(-Policy.settlementDelay).timeIntervalSince1970
             for target in undated { dates[target] = settled }
-            defaults.set(dates, forKey: Key.stakedAt)
+            defaults.set(dates, forKey: k(Key.stakedAt))
         }
     }
 
     // MARK: - Reads
 
     public var balance: Int {
-        lock.withLock { defaults.integer(forKey: Key.balance) }
+        lock.withLock { defaults.integer(forKey: k(Key.balance)) }
+    }
+
+    /// What a stake control judges affordability against: the balance — and,
+    /// for a guest, no limit. A guest holds no wallet (their likes are the
+    /// welcome gift's), and their tap is the member gate's to answer: judged
+    /// against an empty wallet, every like control greyed out and the
+    /// sign-up sheet a like is meant to open never could.
+    public var stakeableBalance: Int {
+        scope.holdsWallet ? balance : .max
     }
 
     /// The wallet as of `now()` — claim availability, countdown target, next
@@ -364,7 +408,7 @@ public final class WalletStore: @unchecked Sendable {
 
     /// Shots left in the ×100 cartridge pack; 0 when none is active.
     public var stakeShots: Int {
-        lock.withLock { defaults.integer(forKey: Key.stakeShots) }
+        lock.withLock { defaults.integer(forKey: k(Key.stakeShots)) }
     }
 
     /// Total points ever boosted into one post or comment, this device.
@@ -388,10 +432,11 @@ public final class WalletStore: @unchecked Sendable {
     /// nothing.
     public func seedDemoStakesIfNeeded(targetIDs: [String]) {
         let seeded: Bool = lock.withLock {
-            guard !defaults.bool(forKey: Key.demoStakesSeeded) else { return false }
-            defaults.set(true, forKey: Key.demoStakesSeeded)
+            demoStakeTargets = targetIDs
+            guard scope.holdsWallet, !defaults.bool(forKey: k(Key.demoStakesSeeded)) else { return false }
+            defaults.set(true, forKey: k(Key.demoStakesSeeded))
             var totals = boostTotalsLocked()
-            var dates = defaults.dictionary(forKey: Key.stakedAt) as? [String: Double] ?? [:]
+            var dates = defaults.dictionary(forKey: k(Key.stakedAt)) as? [String: Double] ?? [:]
             // Hours ago, and amounts: three active, the rest settled.
             let plan: [(hours: Double, amount: Int)] = [
                 (0.5, 10), (2.5, 100), (4.75, 20), (7, 40), (20, 100), (30, 10), (52, 60), (75, 20),
@@ -401,8 +446,8 @@ public final class WalletStore: @unchecked Sendable {
                 totals[target] = stake.amount
                 dates[target] = moment.addingTimeInterval(-stake.hours * 3600).timeIntervalSince1970
             }
-            defaults.set(totals, forKey: Key.boostTotals)
-            defaults.set(dates, forKey: Key.stakedAt)
+            defaults.set(totals, forKey: k(Key.boostTotals))
+            defaults.set(dates, forKey: k(Key.stakedAt))
             return true
         }
         if seeded { postDidChange() }
@@ -416,8 +461,8 @@ public final class WalletStore: @unchecked Sendable {
     public func credit(_ amount: Int) {
         guard amount > 0 else { return }
         lock.withLock {
-            defaults.set(defaults.integer(forKey: Key.balance) + amount, forKey: Key.balance)
-            defaults.set(defaults.integer(forKey: Key.lifetimeEarned) + amount, forKey: Key.lifetimeEarned)
+            defaults.set(defaults.integer(forKey: k(Key.balance)) + amount, forKey: k(Key.balance))
+            defaults.set(defaults.integer(forKey: k(Key.lifetimeEarned)) + amount, forKey: k(Key.lifetimeEarned))
         }
         postDidChange()
     }
@@ -439,12 +484,12 @@ public final class WalletStore: @unchecked Sendable {
                 Int((Double(Policy.baseClaimAmount) * Policy.multiplier(forStreak: streak)).rounded()),
                 Policy.dailyClaimCap - claimedToday
             )
-            defaults.set(defaults.integer(forKey: Key.balance) + awarded, forKey: Key.balance)
-            defaults.set(defaults.integer(forKey: Key.lifetimeEarned) + awarded, forKey: Key.lifetimeEarned)
-            defaults.set(claimedToday + awarded, forKey: Key.claimedToday)
-            defaults.set(today, forKey: Key.claimedTodayDay)
-            defaults.set(streak, forKey: Key.streakDays)
-            defaults.set(moment.timeIntervalSince1970, forKey: Key.lastClaimAt)
+            defaults.set(defaults.integer(forKey: k(Key.balance)) + awarded, forKey: k(Key.balance))
+            defaults.set(defaults.integer(forKey: k(Key.lifetimeEarned)) + awarded, forKey: k(Key.lifetimeEarned))
+            defaults.set(claimedToday + awarded, forKey: k(Key.claimedToday))
+            defaults.set(today, forKey: k(Key.claimedTodayDay))
+            defaults.set(streak, forKey: k(Key.streakDays))
+            defaults.set(moment.timeIntervalSince1970, forKey: k(Key.lastClaimAt))
             return .claimed(awarded: awarded)
         }
         if case .claimed = outcome { postDidChange() }
@@ -477,7 +522,7 @@ public final class WalletStore: @unchecked Sendable {
                 precondition(amount > 0, "a boost spends something")
                 return boostLocked(targetID: targetID, amount: amount)
             case .shot:
-                let shots = defaults.integer(forKey: Key.stakeShots)
+                let shots = defaults.integer(forKey: k(Key.stakeShots))
                 guard shots > 0 else { return .noShotsLeft }
                 let held = boostTotalsLocked()[targetID] ?? 0
                 let room = Policy.perTargetBoostCap - held
@@ -485,7 +530,7 @@ public final class WalletStore: @unchecked Sendable {
                 guard room >= Policy.StakePack.pointsPerShot else { return .shotDoesNotFit(room: room) }
                 let outcome = boostLocked(targetID: targetID, amount: Policy.StakePack.pointsPerShot)
                 if case .boosted = outcome {
-                    defaults.set(shots - 1, forKey: Key.stakeShots)
+                    defaults.set(shots - 1, forKey: k(Key.stakeShots))
                 }
                 return outcome
             }
@@ -500,13 +545,13 @@ public final class WalletStore: @unchecked Sendable {
     @discardableResult
     public func buyStakePack() -> WalletStakePackPurchase {
         let outcome: WalletStakePackPurchase = lock.withLock {
-            let shots = defaults.integer(forKey: Key.stakeShots)
+            let shots = defaults.integer(forKey: k(Key.stakeShots))
             guard shots == 0 else { return .packStillActive(shotsLeft: shots) }
             let gems = gemsLocked(at: now())
             let price = Policy.StakePack.price
             guard gems >= price else { return .insufficientGems(needed: price, have: gems) }
-            defaults.set(defaults.integer(forKey: Key.gemsSpent) + price, forKey: Key.gemsSpent)
-            defaults.set(Policy.StakePack.shots, forKey: Key.stakeShots)
+            defaults.set(defaults.integer(forKey: k(Key.gemsSpent)) + price, forKey: k(Key.gemsSpent))
+            defaults.set(Policy.StakePack.shots, forKey: k(Key.stakeShots))
             return .bought(shots: Policy.StakePack.shots, remainingGems: gems - price)
         }
         if case .bought = outcome { postDidChange() }
@@ -523,20 +568,20 @@ public final class WalletStore: @unchecked Sendable {
         // of the cap taps 10 and spends 5 — a partial fill, not a
         // refusal.
         let spend = min(amount, remaining)
-        let balance = defaults.integer(forKey: Key.balance)
+        let balance = defaults.integer(forKey: k(Key.balance))
         guard balance >= spend else { return .insufficientBalance(balance: balance) }
         let newBalance = balance - spend
-        defaults.set(newBalance, forKey: Key.balance)
-        defaults.set(defaults.integer(forKey: Key.lifetimeSpent) + spend, forKey: Key.lifetimeSpent)
+        defaults.set(newBalance, forKey: k(Key.balance))
+        defaults.set(defaults.integer(forKey: k(Key.lifetimeSpent)) + spend, forKey: k(Key.lifetimeSpent))
         let targetTotal = held + spend
         totals[targetID] = targetTotal
-        defaults.set(totals, forKey: Key.boostTotals)
+        defaults.set(totals, forKey: k(Key.boostTotals))
         // The stake's clock starts with its FIRST points; adding to it
         // does not restart it.
-        var dates = defaults.dictionary(forKey: Key.stakedAt) as? [String: Double] ?? [:]
+        var dates = defaults.dictionary(forKey: k(Key.stakedAt)) as? [String: Double] ?? [:]
         if dates[targetID] == nil {
             dates[targetID] = now().timeIntervalSince1970
-            defaults.set(dates, forKey: Key.stakedAt)
+            defaults.set(dates, forKey: k(Key.stakedAt))
         }
         return .boosted(newBalance: newBalance, targetTotal: targetTotal, spent: spend)
     }
@@ -558,20 +603,20 @@ public final class WalletStore: @unchecked Sendable {
             let held = totals[targetID] ?? 0
             let refund = min(amount, held)
             guard refund > 0 else { return nil }
-            let newBalance = defaults.integer(forKey: Key.balance) + refund
-            defaults.set(newBalance, forKey: Key.balance)
-            defaults.set(max(0, defaults.integer(forKey: Key.lifetimeSpent) - refund), forKey: Key.lifetimeSpent)
+            let newBalance = defaults.integer(forKey: k(Key.balance)) + refund
+            defaults.set(newBalance, forKey: k(Key.balance))
+            defaults.set(max(0, defaults.integer(forKey: k(Key.lifetimeSpent)) - refund), forKey: k(Key.lifetimeSpent))
             let remaining = held - refund
             if remaining > 0 {
                 totals[targetID] = remaining
             } else {
                 totals.removeValue(forKey: targetID)
                 // Undone entirely: there is no stake left to settle.
-                var dates = defaults.dictionary(forKey: Key.stakedAt) as? [String: Double] ?? [:]
+                var dates = defaults.dictionary(forKey: k(Key.stakedAt)) as? [String: Double] ?? [:]
                 dates.removeValue(forKey: targetID)
-                defaults.set(dates, forKey: Key.stakedAt)
+                defaults.set(dates, forKey: k(Key.stakedAt))
             }
-            defaults.set(totals, forKey: Key.boostTotals)
+            defaults.set(totals, forKey: k(Key.boostTotals))
             return (newBalance, remaining)
         }
         if result != nil { postDidChange() }
@@ -606,7 +651,7 @@ public final class WalletStore: @unchecked Sendable {
             Policy.dailyClaimCap - claimedToday
         ))
         return WalletSnapshot(
-            balance: defaults.integer(forKey: Key.balance),
+            balance: defaults.integer(forKey: k(Key.balance)),
             claimAvailable: available,
             nextClaimAt: nextClaimAt,
             claimAmount: claimAmount,
@@ -614,14 +659,14 @@ public final class WalletStore: @unchecked Sendable {
             dailyClaimCap: Policy.dailyClaimCap,
             streakDays: displayStreakLocked(today: today),
             gems: gemsLocked(at: moment),
-            stakeShots: defaults.integer(forKey: Key.stakeShots)
+            stakeShots: defaults.integer(forKey: k(Key.stakeShots))
         )
     }
 
     /// Gems to spend: earned by settled stakes, plus granted, minus spent.
     private func gemsLocked(at moment: Date) -> Int {
         let earned = stakesLocked(at: moment).reduce(0) { $0 + $1.gems }
-        return max(0, earned + defaults.integer(forKey: Key.gemsGranted) - defaults.integer(forKey: Key.gemsSpent))
+        return max(0, earned + defaults.integer(forKey: k(Key.gemsGranted)) - defaults.integer(forKey: k(Key.gemsSpent)))
     }
 
     /// Spends `amount` gems, all or nothing.
@@ -629,7 +674,7 @@ public final class WalletStore: @unchecked Sendable {
         let outcome: WalletGemSpend = lock.withLock {
             let gems = gemsLocked(at: now())
             guard amount > 0, gems >= amount else { return .insufficient(gems: gems) }
-            defaults.set(defaults.integer(forKey: Key.gemsSpent) + amount, forKey: Key.gemsSpent)
+            defaults.set(defaults.integer(forKey: k(Key.gemsSpent)) + amount, forKey: k(Key.gemsSpent))
             return .spent(remaining: gems - amount)
         }
         if case .spent = outcome { postDidChange() }
@@ -637,7 +682,7 @@ public final class WalletStore: @unchecked Sendable {
     }
 
     private func stakesLocked(at moment: Date) -> [WalletStake] {
-        let dates = defaults.dictionary(forKey: Key.stakedAt) as? [String: Double] ?? [:]
+        let dates = defaults.dictionary(forKey: k(Key.stakedAt)) as? [String: Double] ?? [:]
         let stakes = boostTotalsLocked().compactMap { target, amount -> WalletStake? in
             guard amount > 0, let stamp = dates[target] else { return nil }
             let stakedAt = Date(timeIntervalSince1970: stamp)
@@ -655,12 +700,12 @@ public final class WalletStore: @unchecked Sendable {
     /// Today's claim earnings — a stored count that only counts if it was
     /// stored TODAY. The rollover is lazy (read-side), never a timer.
     private func claimedTodayLocked(today: String) -> Int {
-        guard defaults.string(forKey: Key.claimedTodayDay) == today else { return 0 }
-        return defaults.integer(forKey: Key.claimedToday)
+        guard defaults.string(forKey: k(Key.claimedTodayDay)) == today else { return 0 }
+        return defaults.integer(forKey: k(Key.claimedToday))
     }
 
     private func lastClaimAtLocked() -> Date? {
-        let stored = defaults.double(forKey: Key.lastClaimAt)
+        let stored = defaults.double(forKey: k(Key.lastClaimAt))
         return stored > 0 ? Date(timeIntervalSince1970: stored) : nil
     }
 
@@ -668,7 +713,7 @@ public final class WalletStore: @unchecked Sendable {
     /// holds within today, restarts at 1 after a missed day.
     private func prospectiveStreakLocked(today: String) -> Int {
         guard let last = lastClaimAtLocked() else { return 1 }
-        let stored = max(1, defaults.integer(forKey: Key.streakDays))
+        let stored = max(1, defaults.integer(forKey: k(Key.streakDays)))
         let lastDay = dayKey(for: last)
         if lastDay == today { return stored }
         if lastDay == dayKey(for: Self.utcCalendar.date(byAdding: .day, value: -1, to: dayStart(of: today))!) {
@@ -684,11 +729,11 @@ public final class WalletStore: @unchecked Sendable {
         let lastDay = dayKey(for: last)
         let yesterday = dayKey(for: Self.utcCalendar.date(byAdding: .day, value: -1, to: dayStart(of: today))!)
         guard lastDay == today || lastDay == yesterday else { return 0 }
-        return max(1, defaults.integer(forKey: Key.streakDays))
+        return max(1, defaults.integer(forKey: k(Key.streakDays)))
     }
 
     private func boostTotalsLocked() -> [String: Int] {
-        defaults.dictionary(forKey: Key.boostTotals) as? [String: Int] ?? [:]
+        defaults.dictionary(forKey: k(Key.boostTotals)) as? [String: Int] ?? [:]
     }
 
     /// "2026-08-14" in UTC — the ledger's day identity.

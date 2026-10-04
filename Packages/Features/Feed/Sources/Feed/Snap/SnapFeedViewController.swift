@@ -1446,7 +1446,7 @@ final class SnapFeedViewController: UIViewController {
                 if let wallet = self.wallet {
                     cell.setBoostTotal(wallet.boostTotal(forTarget: id.rawValue))
                     cell.setBoostContext(
-                        balance: wallet.balance,
+                        balance: wallet.stakeableBalance,
                         undoable: self.sessionBoostID == id ? self.sessionBoostAmount : 0,
                         stakeShots: wallet.stakeShots
                     )
@@ -2561,7 +2561,7 @@ final class SnapFeedViewController: UIViewController {
                 sessionBoostID = id
                 sessionBoostAmount = spent
             }
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            HapticImpact(style: .medium).impactOccurred()
             // Receipt before theatre: the anchor flips to (or grows) its
             // number face, then the "+N" float rises off it.
             feedbackCell?.setBoostTotal(targetTotal)
@@ -2573,7 +2573,7 @@ final class SnapFeedViewController: UIViewController {
             }
             #endif
         case .insufficientBalance(let balance):
-            UINotificationFeedbackGenerator().notificationOccurred(.error)
+            HapticNotification().notificationOccurred(.error)
             feedbackCell?.playBoostDenied()
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-wallet-log") {
@@ -2581,7 +2581,7 @@ final class SnapFeedViewController: UIViewController {
             }
             #endif
         case .targetCapReached(let targetTotal):
-            UINotificationFeedbackGenerator().notificationOccurred(.error)
+            HapticNotification().notificationOccurred(.error)
             feedbackCell?.playBoostDenied()
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-wallet-log") {
@@ -2592,7 +2592,7 @@ final class SnapFeedViewController: UIViewController {
             // The menu offers a shot only with a pack loaded and room on the
             // post for all of it; a stale menu (the pack emptied, the post
             // filled on another surface) or `-wallet-demo-shot` lands here.
-            UINotificationFeedbackGenerator().notificationOccurred(.error)
+            HapticNotification().notificationOccurred(.error)
             feedbackCell?.playBoostDenied()
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-wallet-log") {
@@ -2613,7 +2613,7 @@ final class SnapFeedViewController: UIViewController {
         let refunded = sessionBoostAmount
         sessionBoostID = nil
         sessionBoostAmount = 0
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        HapticImpact(style: .light).impactOccurred()
         feedbackCell?.setBoostTotal(result.targetTotal)
         feedbackCell?.playBoostRefund(amount: refunded)
         refreshVisibleBoostControls()
@@ -2655,7 +2655,7 @@ final class SnapFeedViewController: UIViewController {
     /// and updates the menu it will build on its next long-press.
     private func refreshVisibleBoostControls() {
         guard let wallet else { return }
-        let balance = wallet.balance
+        let balance = wallet.stakeableBalance
         let shots = wallet.stakeShots
         for indexPath in collectionView.indexPathsForVisibleItems {
             guard orderedIDs.indices.contains(indexPath.item),

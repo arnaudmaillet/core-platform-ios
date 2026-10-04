@@ -10,11 +10,12 @@ import UIKit
 /// the profile.
 final class AppPreferencesViewController: UIViewController {
     enum Section: Int, CaseIterable {
-        case playback, appearance, motion, band, muted, subtitles, language, storage
+        case playback, sounds, appearance, motion, band, muted, subtitles, language, storage
     }
 
     private enum Item: Hashable {
         case autoplay, startsWithSound, dataSaver
+        case interfaceSounds, haptics
         case appearance, reduceMotion
         case bandSwitch, opacity, speed
         case mutedWords, mutedAccounts
@@ -26,7 +27,7 @@ final class AppPreferencesViewController: UIViewController {
     /// The sections each App and Device page shows.
     static func sections(for page: SettingsSection) -> [Section] {
         switch page {
-        case .playback: [.playback]
+        case .playback: [.playback, .sounds]
         case .display: [.appearance, .motion]
         case .mediaComments: [.band, .muted, .subtitles]
         case .language: [.language]
@@ -145,6 +146,7 @@ final class AppPreferencesViewController: UIViewController {
         switch section {
         case .appearance: "Appearance"
         case .motion: "Motion"
+        case .sounds: "Sounds and Haptics"
         case .language: "Language"
         case .playback: "Playback"
         case .band: "Reaction Band"
@@ -157,6 +159,7 @@ final class AppPreferencesViewController: UIViewController {
     static func footer(_ section: Section) -> String {
         switch section {
         case .appearance: "System follows the iPhone's Light and Dark setting."
+        case .sounds: "Interface sounds are the small pops and clicks of the app's own controls; a video's sound is set above. A phone on silent stays silent, and iOS's System Haptics setting still applies."
         case .motion:
             MotionPreference.appReducesMotion
                 ? "Transitions and effects are kept to a minimum in the app."
@@ -233,6 +236,7 @@ final class AppPreferencesViewController: UIViewController {
     private static func items(in section: Section) -> [Item] {
         switch section {
         case .playback: [.autoplay, .startsWithSound, .dataSaver]
+        case .sounds: [.interfaceSounds, .haptics]
         case .appearance: [.appearance]
         case .motion: [.reduceMotion]
         case .band: [.bandSwitch, .opacity, .speed]
@@ -268,6 +272,16 @@ final class AppPreferencesViewController: UIViewController {
                 AppearancePreference.set(options[control.selectedSegmentIndex])
             }, for: .valueChanged)
             install(control, in: cell, title: nil)
+        case .interfaceSounds:
+            cell.contentConfiguration = Self.label("Interface Sounds", symbol: "speaker.wave.1")
+            cell.accessories = [switchAccessory(isOn: InterfaceSoundPreference.isOn) { isOn in
+                InterfaceSoundPreference.isOn = isOn
+            }]
+        case .haptics:
+            cell.contentConfiguration = Self.label("Haptics", symbol: "iphone.radiowaves.left.and.right")
+            cell.accessories = [switchAccessory(isOn: HapticPreference.isOn) { isOn in
+                HapticPreference.isOn = isOn
+            }]
         case .reduceMotion:
             cell.contentConfiguration = Self.label("Reduce Motion", symbol: "figure.walk.motion")
             cell.accessories = [switchAccessory(isOn: MotionPreference.appReducesMotion) { isOn in

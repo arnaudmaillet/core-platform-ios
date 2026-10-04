@@ -43,13 +43,17 @@ public struct RelationshipPrivacySettings: Codable, Equatable, Sendable {
 /// is already the app's store for viewer-local preferences.
 public final class RelationshipPrivacyStore: @unchecked Sendable {
     private let defaults: UserDefaults
-    private let key = "relationshipPrivacySettings"
+    /// Whose lists: the active profile's (`StorageScope`) — a profile's
+    /// followers are that profile's to hide.
+    private let scope: StorageScope
+    private var key: String { scope.profileKey("relationshipPrivacySettings", adoptingLegacyIn: defaults) }
     /// Guards the read-modify-write in `update` — `UserDefaults` is itself
     /// thread-safe per access, which is not the same as safe across the pair.
     private let lock = NSLock()
 
-    public init(defaults: UserDefaults = .standard) {
+    public init(defaults: UserDefaults = .standard, scope: StorageScope = .shared) {
         self.defaults = defaults
+        self.scope = scope
     }
 
     public var settings: RelationshipPrivacySettings {

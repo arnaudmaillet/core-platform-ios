@@ -122,9 +122,9 @@ final class StraightenDialView: UIView {
     private let ruler = RulerStrip()
 
     /// ⚠️ STORED, NOT MADE PER CLICK — the inbox's settle haptic is the precedent
-    /// (`private let selectionFeedback = UISelectionFeedbackGenerator()`), and a
+    /// (`private let selectionFeedback = HapticSelection()`), and a
     /// generator made inside the handler arrives cold and clicks late.
-    private let click = UISelectionFeedbackGenerator()
+    private let click = HapticSelection()
     private var lastDetent = 0
 
     /// The strip growing while a finger is on the dial — asked for as *"scale

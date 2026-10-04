@@ -37,7 +37,7 @@ struct SettingsCatalogTests {
 
     /// Each App and Device page shows its own sections and nothing else.
     @Test func eachDevicePageShowsItsSections() {
-        #expect(AppPreferencesViewController.sections(for: .playback) == [.playback])
+        #expect(AppPreferencesViewController.sections(for: .playback) == [.playback, .sounds])
         #expect(AppPreferencesViewController.sections(for: .display) == [.appearance, .motion])
         #expect(AppPreferencesViewController.sections(for: .mediaComments) == [.band, .muted, .subtitles])
         #expect(AppPreferencesViewController.sections(for: .language) == [.language])

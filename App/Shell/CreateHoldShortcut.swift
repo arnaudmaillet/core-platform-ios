@@ -89,8 +89,8 @@ final class CreateHoldShortcut: NSObject {
     private var hold = HoldToArm(firesWhenFull: true)
     private var disc: HoldRingDiscView?
     private var displayLink: CADisplayLink?
-    private let revealHaptic = UIImpactFeedbackGenerator(style: .light)
-    private let armHaptic = UIImpactFeedbackGenerator(style: .medium)
+    private let revealHaptic = HapticImpact(style: .light)
+    private let armHaptic = HapticImpact(style: .medium)
     private var lockoutWork: DispatchWorkItem?
 
     /// Set when a hold is recognised: the one selection of the "+" the bar

@@ -300,7 +300,7 @@ final class CaptureShutterView: UIView {
         holdTimer = nil
         guard press.state == .began || press.state == .changed else { return }
         isHolding = true
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        HapticImpact(style: .medium).impactOccurred()
         onHoldBegan?()
     }
 

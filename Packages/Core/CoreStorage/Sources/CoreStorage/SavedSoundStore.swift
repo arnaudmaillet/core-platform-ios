@@ -15,17 +15,21 @@ import Foundation
 ///
 /// Most recently saved first, like the post pile.
 public final class SavedSoundStore: @unchecked Sendable {
-    private static let key = "feed.savedSoundIDs"
+    private static let baseKey = "feed.savedSoundIDs"
     private let defaults: UserDefaults
+    /// Whose sounds: the active profile's (`StorageScope`).
+    private let scope: StorageScope
+    private var key: String { scope.profileKey(Self.baseKey, adoptingLegacyIn: defaults) }
     private let lock = NSLock()
 
-    public init(defaults: UserDefaults = .standard) {
+    public init(defaults: UserDefaults = .standard, scope: StorageScope = .shared) {
         self.defaults = defaults
+        self.scope = scope
     }
 
     /// Most recently saved first.
     public var savedSoundIDs: [String] {
-        lock.withLock { defaults.array(forKey: Self.key) as? [String] ?? [] }
+        lock.withLock { defaults.array(forKey: key) as? [String] ?? [] }
     }
 
     public func isSaved(_ id: String) -> Bool {
@@ -37,14 +41,14 @@ public final class SavedSoundStore: @unchecked Sendable {
     @discardableResult
     public func toggle(_ id: String) -> Bool {
         lock.withLock {
-            var ids = defaults.array(forKey: Self.key) as? [String] ?? []
+            var ids = defaults.array(forKey: key) as? [String] ?? []
             if let existing = ids.firstIndex(of: id) {
                 ids.remove(at: existing)
-                defaults.set(ids, forKey: Self.key)
+                defaults.set(ids, forKey: key)
                 return false
             }
             ids.insert(id, at: 0)
-            defaults.set(ids, forKey: Self.key)
+            defaults.set(ids, forKey: key)
             return true
         }
     }
