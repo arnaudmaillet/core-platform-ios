@@ -225,12 +225,12 @@ final class CountryUnlockSheetViewController: UIViewController {
     private func unlock() {
         switch access.unlock(country.code) {
         case .unlocked, .alreadyUnlocked:
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            HapticNotification().notificationOccurred(.success)
             let code = country.code
             let unlocked = onUnlocked
             dismiss(animated: true) { unlocked?(code) }
         case .insufficientGems(let needed, _):
-            UINotificationFeedbackGenerator().notificationOccurred(.error)
+            HapticNotification().notificationOccurred(.error)
             refreshBalance(price: needed)
         case .unknownCountry:
             dismiss(animated: true)

@@ -694,7 +694,7 @@ final class WalletClaimViewController: UIViewController {
         if let welcome, guestGift != nil {
             Task { @MainActor [weak self] in
                 guard await welcome.gate.requireMember(for: .claim), let self else { return }
-                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                HapticNotification().notificationOccurred(.success)
                 refresh()
                 summaryCell?.summary.pointsTile.pop()
             }
@@ -706,13 +706,13 @@ final class WalletClaimViewController: UIViewController {
     private func commitClaim() {
         switch wallet.claim() {
         case .claimed:
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            HapticNotification().notificationOccurred(.success)
             // Explicit refresh, not the observer's: its queue hop is UIKit's
             // business, and the pop below must scale the NEW number.
             refresh()
             summaryCell?.summary.pointsTile.pop()
         case .tooEarly, .dailyCapReached:
-            UINotificationFeedbackGenerator().notificationOccurred(.warning)
+            HapticNotification().notificationOccurred(.warning)
             refresh()
         }
     }

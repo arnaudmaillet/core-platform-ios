@@ -157,7 +157,7 @@ public final class ActionAffordance: NSObject {
             // menu is about to get the menu's own, and two in half a second
             // is one too many.
             if menuProvider == nil {
-                UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+                HapticImpact(style: .soft).impactOccurred()
             }
         case .changed:
             let inside = isInside(recognizer)

@@ -502,9 +502,9 @@ public final class CountryShopViewController: UIViewController {
         let outcome = stakePacks.buyPack()
         switch outcome {
         case .bought:
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            HapticNotification().notificationOccurred(.success)
         case .packStillActive, .insufficientGems:
-            UINotificationFeedbackGenerator().notificationOccurred(.error)
+            HapticNotification().notificationOccurred(.error)
         }
         return outcome
     }

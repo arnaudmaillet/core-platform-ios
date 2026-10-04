@@ -117,7 +117,7 @@ final class MediaValueRulerView: UIView {
 
     private let readout = UILabel()
     private let ruler = Strip()
-    private let click = UISelectionFeedbackGenerator()
+    private let click = HapticSelection()
     private var lastDetent = 0
     private lazy var pan = UIPanGestureRecognizer(target: self, action: #selector(dragged))
     /// The strip growing while a finger is on the ruler — `StraightenDialView`

@@ -75,7 +75,7 @@ final class CaptureChoiceRowView<Choice: Equatable>: UIView, PoppingTenant {
 
     private func pick(_ choice: Choice) {
         guard choice != chosen else { return }
-        UISelectionFeedbackGenerator().selectionChanged()
+        HapticSelection().selectionChanged()
         setChosen(choice)
         onPick?(choice)
     }
