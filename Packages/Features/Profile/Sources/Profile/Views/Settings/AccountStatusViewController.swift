@@ -48,7 +48,7 @@ final class AccountStatusViewController: UIViewController {
             collectionViewLayout: UICollectionViewCompositionalLayout.list(using: config)
         )
         collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        collectionView.prefersClearTopEdge()
+        collectionView.prefersSoftTopEdge()
         collectionView.delegate = self
         view.addSubview(collectionView)
         configureDataSource()

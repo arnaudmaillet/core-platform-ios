@@ -21,6 +21,16 @@ struct ClearTopEdgeTests {
         #expect(!scrollView.topEdgeEffect.isHidden)
     }
 
+    /// Settings' exception: UIKit's soft effect, shown, even over a scroll
+    /// view that had cleared it.
+    @Test func theSoftTopEdgeShowsTheSoftStyle() {
+        let scrollView = UIScrollView()
+        scrollView.prefersClearTopEdge()
+        scrollView.prefersSoftTopEdge()
+        #expect(!scrollView.topEdgeEffect.isHidden)
+        #expect(scrollView.topEdgeEffect.style == .soft)
+    }
+
     /// Only the top. The bottom edge — above a tab bar, a toolbar, a composer —
     /// is not what the call is about, and keeps the system's effect.
     @Test func theBottomEdgeKeepsTheSystemsEffect() {
