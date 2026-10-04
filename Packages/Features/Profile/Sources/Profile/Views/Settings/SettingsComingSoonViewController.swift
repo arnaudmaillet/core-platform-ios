@@ -35,7 +35,7 @@ final class SettingsComingSoonViewController: UIViewController {
             collectionViewLayout: UICollectionViewCompositionalLayout.list(using: configuration)
         )
         collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        collectionView.prefersClearTopEdge()
+        collectionView.prefersSoftTopEdge()
         collectionView.dataSource = self
         collectionView.allowsSelection = false
         collectionView.register(UICollectionViewListCell.self, forCellWithReuseIdentifier: "row")

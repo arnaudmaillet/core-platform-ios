@@ -57,7 +57,7 @@ final class MutedTermsViewController: UIViewController {
             collectionViewLayout: UICollectionViewCompositionalLayout.list(using: config)
         )
         collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        collectionView.prefersClearTopEdge()
+        collectionView.prefersSoftTopEdge()
         collectionView.keyboardDismissMode = .interactive
         view.addSubview(collectionView)
 
