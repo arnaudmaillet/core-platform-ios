@@ -192,7 +192,7 @@ final class SettingsViewController: UIViewController {
 
     private func footerText(at index: Int) -> String? {
         guard case .scope(let scope) = dataSource.sectionIdentifier(for: index) else { return nil }
-        return Self.footerText(for: scope, activeHandle: activeHandle)
+        return Self.footerText(for: scope, activeHandle: activeHandle, isGuest: onSignIn != nil)
     }
 
     /// What Settings shows. A guest has no account and no profile, so only
@@ -213,7 +213,9 @@ final class SettingsViewController: UIViewController {
         }
     }
 
-    static func footerText(for scope: SettingsScope, activeHandle: String?) -> String? {
+    /// `isGuest`: a guest has no profile, so the device footer can't speak of
+    /// "the active profile" to them.
+    static func footerText(for scope: SettingsScope, activeHandle: String?, isGuest: Bool = false) -> String? {
         switch scope {
         case .account:
             "Applies to every profile on this account."
@@ -221,7 +223,7 @@ final class SettingsViewController: UIViewController {
             activeHandle.map { "Applies to \($0) only. Switch profile to change another profile's settings." }
                 ?? "Applies to the active profile only."
         case .device:
-            "Applies to this iPhone, whichever profile is active."
+            isGuest ? "Applies to this iPhone." : "Applies to this iPhone, whichever profile is active."
         case .support:
             nil
         }
