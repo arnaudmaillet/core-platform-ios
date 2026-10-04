@@ -27,10 +27,13 @@ public struct MockBackend: Sendable {
     /// mode (semantic map clusters are the default experience, opt out with
     /// `-maps-mock-no-places`); the false default keeps tests and previews
     /// on the Paris-only scatter their fixtures are calibrated against.
+    /// `enforcesEdgePolicy` refuses a guest's call to a member route
+    /// (`MockEdgePolicy`); the app passes true, tests opt in.
     public init(
         conditions: SimulatedConditions = .none,
         mediaCatalog: MockSocialDataset.MediaCatalog = .synthetic,
-        seedsMapHierarchy: Bool = false
+        seedsMapHierarchy: Bool = false,
+        enforcesEdgePolicy: Bool = false
     ) {
         // The world beyond France (`MockWorldSeed`) rides the same decision
         // as the European seed: it is what the map's places are for.
@@ -48,6 +51,7 @@ public struct MockBackend: Sendable {
 
         let bff = MockBFF()
         bff.simulatedConditions = conditions
+        bff.enforcesEdgePolicy = enforcesEdgePolicy
         MockAuthService().register(on: bff)
         MockAccountService().register(on: bff)
         MockSocialServices(dataset: dataset, postStore: postStore).register(on: bff)

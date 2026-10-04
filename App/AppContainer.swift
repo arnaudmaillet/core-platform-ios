@@ -55,7 +55,11 @@ final class AppContainer {
     private lazy var mockBackend = MockBackend(
         conditions: .fromLaunchArguments(),
         mediaCatalog: Self.usesRichMedia ? .realAssets : .synthetic,
-        seedsMapHierarchy: Self.seedsMapPlaces
+        seedsMapHierarchy: Self.seedsMapPlaces,
+        // A guest's write is refused here as at the fleet's edge, so a missing
+        // gate shows up in mock mode (`[edge] REFUSED` in the console).
+        // `-mock-open-edge` turns it off for QA that predates guest mode.
+        enforcesEdgePolicy: !ProcessInfo.processInfo.arguments.contains("-mock-open-edge")
     )
 
     /// Semantic map clusters (city/country places on the mock pins, and the
@@ -121,6 +125,7 @@ final class AppContainer {
     }
 
     private var viewerTransitionsTask: Task<Void, Never>?
+    private var storageScopeTask: Task<Void, Never>?
 
     /// The question every write asks before it runs: is there an account? A
     /// guest is shown the sign-up sheet and the write carries on once they are
@@ -142,6 +147,39 @@ final class AppContainer {
                     await cache.viewerDidChange(state)
                 }
                 NotificationCenter.default.post(name: .viewerDidChange, object: nil)
+            }
+        }
+    }
+
+    /// Points the identity-bearing stores at whoever `state` says is here
+    /// (`StorageScope`). Synchronous on purpose: the app coordinator calls it
+    /// before anything writes for the new viewer. The ACCOUNT is known now;
+    /// its active profile arrives from the viewer session
+    /// (`observeStorageScope`), and the profile's keys use the account's
+    /// until then.
+    func enterStorageScope(for state: AuthState) {
+        let scope = StorageScope.shared
+        switch state {
+        case .unauthenticated:
+            scope.owner = .guest
+        case .authenticated(let account):
+            // The same account keeps the profile it already resolved.
+            if case .member(account.rawValue, _) = scope.owner { return }
+            scope.owner = .member(account: account.rawValue, profile: nil)
+        }
+        observeStorageScope()
+    }
+
+    /// The active profile, as the viewer session resolves it or a switch
+    /// changes it — the profile half of `StorageScope`.
+    private func observeStorageScope() {
+        guard storageScopeTask == nil else { return }
+        let viewer = viewerSession
+        storageScopeTask = Task { @MainActor in
+            for await state in await viewer.updates() {
+                guard case .member(let account, let profile?) = state,
+                      case .member(account.rawValue, _) = StorageScope.shared.owner else { continue }
+                StorageScope.shared.owner = .member(account: account.rawValue, profile: profile.rawValue)
             }
         }
     }
@@ -554,9 +592,15 @@ final class AppContainer {
             homeCountry: "FR",
             wallet: walletStore,
             unlocks: unlocks,
-            activity: CountryAccessService.mockActivity(in: mockBackend)
+            activity: CountryAccessService.mockActivity(in: mockBackend),
+            isMember: { [unowned self] in self.memberGate.isMember },
+            locator: currentCountry
         )
     }()
+
+    /// Where the device is, as a country — asked for in context from the map
+    /// (guest mode §3.1), never at launch. Opens that country for free.
+    private(set) lazy var currentCountry = CurrentCountryProvider()
 
     /// The Shop's Boosts: the ×100 cartridge pack, over the ONE wallet. Mock
     /// mode only, like the shop itself (no `countryAccess`, no shop door).
@@ -622,7 +666,8 @@ final class AppContainer {
         countryAccess: countryAccess,
         stakePacks: stakePacks,
         // A guest has no people: no favourites dock, no Friends / Following.
-        isMember: { [unowned self] in self.memberGate.isMember }
+        isMember: { [unowned self] in self.memberGate.isMember },
+        locator: currentCountry
     )
 
     #if DEBUG

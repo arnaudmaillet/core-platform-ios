@@ -31,14 +31,52 @@ public final class PostDraftStore {
     /// Posted after every change, with this store as the object.
     public static let didChangeNotification = Notification.Name("cn.wynn.core-platform-ios.PostDraftStore.didChange")
 
-    private let file: CodableFileStore<[PostDraft]>
+    private let name: String
+    /// Whose drafts: the active profile's (`StorageScope`), one file each.
+    private let scope: StorageScope
+    private var file: CodableFileStore<[PostDraft]>
     public private(set) var drafts: [PostDraft]
+    private var scopeObserver: NSObjectProtocol?
 
     /// `name` is the file the drafts live in; the default is the app's one
     /// list. A test passes its own, so it never reads the app's drafts.
-    public init(name: String = "post-drafts") {
-        file = CodableFileStore(name: name)
-        drafts = (try? file.load()) ?? []
+    public init(name: String = "post-drafts", scope: StorageScope = .shared) {
+        self.name = name
+        self.scope = scope
+        file = CodableFileStore(name: Self.fileName(name, scope: scope))
+        drafts = Self.load(file, adoptingLegacy: name, scope: scope)
+        // Another profile, another list: re-read when the viewer changes.
+        scopeObserver = NotificationCenter.default.addObserver(
+            forName: StorageScope.didChangeNotification, object: scope, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.reload() }
+        }
+    }
+
+    /// The scoped file name — `:` kept out of file names.
+    private static func fileName(_ name: String, scope: StorageScope) -> String {
+        scope.profileKey(name).replacingOccurrences(of: ":", with: "_")
+    }
+
+    /// The scope's drafts — and, the first time a member's profile reads
+    /// them, the unscoped file written before drafts were scoped
+    /// (`StorageScope`'s adoption rule).
+    private static func load(
+        _ file: CodableFileStore<[PostDraft]>, adoptingLegacy name: String, scope: StorageScope
+    ) -> [PostDraft] {
+        if let drafts = try? file.load() { return drafts }
+        guard case .member(_, _?) = scope.owner else { return [] }
+        let legacy = CodableFileStore<[PostDraft]>(name: name)
+        guard let drafts = try? legacy.load() else { return [] }
+        try? file.save(drafts)
+        try? legacy.clear()
+        return drafts
+    }
+
+    private func reload() {
+        file = CodableFileStore(name: Self.fileName(name, scope: scope))
+        drafts = Self.load(file, adoptingLegacy: name, scope: scope)
+        NotificationCenter.default.post(name: Self.didChangeNotification, object: self)
     }
 
     /// Saves `text` as a draft — as a NEW one, or in place of `id` when the

@@ -54,15 +54,24 @@ public enum CountryUnlockOutcome: Equatable, Sendable {
 ///
 /// The map shows the posts of unlocked countries only; a locked country is a
 /// shade, and an annotation at its centre with its rank and likes that sells
-/// it. The account's home country is always unlocked, for free.
+/// it. Two countries are open for free: the account's home country, and the
+/// country the device is in while location is allowed (guest mode §3.1). A
+/// guest has no home and no purchases — with location off, nothing is open
+/// (decision 9).
 ///
 /// Answered by the shell: the unlocks are the account's
 /// (`CoreStorage.CountryUnlockStore`), the gems the wallet's, and the
 /// standings the backend's — mock until it carries them.
 @MainActor
 public protocol CountryAccess: AnyObject {
-    /// The account's own country (ISO alpha-2), always unlocked.
-    var homeCountry: String { get }
+    /// The account's own country (ISO alpha-2), always unlocked. Nil for a
+    /// guest, who has no account to have a country.
+    var homeCountry: String? { get }
+    /// The country the device is in, while location is allowed — open for as
+    /// long as the device stays there, never stored as an unlock.
+    ///
+    /// ⚠️ Declared in the protocol body for the same reason as `hasPosts`.
+    var currentCountry: String? { get }
     /// Gems the account can spend.
     var gems: Int { get }
     func isUnlocked(_ code: String) -> Bool
@@ -81,6 +90,15 @@ public protocol CountryAccess: AnyObject {
 }
 
 public extension CountryAccess {
+    /// No location by default.
+    var currentCountry: String? { nil }
+
+    /// Whether nothing at all is open — a guest without location (decision
+    /// 9). The map's "See posts around you" card stands then.
+    var hasNoOpenCountry: Bool {
+        homeCountry == nil && currentCountry == nil && !standings().contains { isUnlocked($0.code) }
+    }
+
     /// The standing's post count — the backend's own.
     func hasPosts(in code: String) -> Bool { (standing(of: code)?.posts ?? 0) > 0 }
 }

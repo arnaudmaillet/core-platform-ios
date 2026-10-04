@@ -129,7 +129,7 @@ struct OfferCloseFlightTests {
     }
 
     private final class FakeAccess: CountryAccess {
-        let homeCountry = "FR"
+        let homeCountry: String? = "FR"
         let gems = 100
         func isUnlocked(_ code: String) -> Bool { code == "FR" }
         func standing(of code: String) -> CountryStanding? {

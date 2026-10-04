@@ -19,6 +19,7 @@ public final class MockBFF: HTTPClientInterface, @unchecked Sendable {
     private var routes: [String: RawHandler] = [:]
     private var recorded: [RecordedRequest] = []
     private var conditions: SimulatedConditions = .none
+    private var guardsEdge = false
 
     public init() {}
 
@@ -28,6 +29,21 @@ public final class MockBFF: HTTPClientInterface, @unchecked Sendable {
     public var simulatedConditions: SimulatedConditions {
         get { lock.withLock { conditions } }
         set { lock.withLock { conditions = newValue } }
+    }
+
+    /// Whether calls go through `MockEdgePolicy` first — a guest's call to a
+    /// member route is then refused with `unauthenticated`, as at the fleet's
+    /// edge. Off by default: package tests feed generated clients through the
+    /// unauthenticated client on purpose. The app turns it on in mock mode.
+    public var enforcesEdgePolicy: Bool {
+        get { lock.withLock { guardsEdge } }
+        set { lock.withLock { guardsEdge = newValue } }
+    }
+
+    /// Every path with a registered handler — for checking a route table
+    /// (`MockEdgePolicy`) against what is actually served.
+    public var routedPaths: Set<String> {
+        lock.withLock { Set(routes.keys) }
     }
 
     /// Every unary request received, in order — for asserting on paths and
@@ -81,13 +97,22 @@ public final class MockBFF: HTTPClientInterface, @unchecked Sendable {
         onResponse: @escaping @Sendable (HTTPResponse) -> Void
     ) -> Cancelable {
         let path = request.url.path
-        let (handler, conditions) = lock.withLock {
+        let (handler, conditions, guardsEdge) = lock.withLock {
             recorded.append(RecordedRequest(path: path, headers: request.headers))
-            return (routes[path], self.conditions)
+            return (routes[path], self.conditions, self.guardsEdge)
         }
 
         let response: HTTPResponse
-        if let failure = conditions.failure(matching: path) {
+        if guardsEdge, let refusal = MockEdgePolicy.refusal(path: path, headers: request.headers) {
+            response = HTTPResponse(
+                code: refusal.code,
+                headers: [:],
+                message: nil,
+                trailers: [:],
+                error: refusal,
+                tracingInfo: nil
+            )
+        } else if let failure = conditions.failure(matching: path) {
             response = HTTPResponse(
                 code: failure.code,
                 headers: [:],
