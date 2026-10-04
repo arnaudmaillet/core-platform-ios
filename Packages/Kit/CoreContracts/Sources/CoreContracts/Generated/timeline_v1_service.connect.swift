@@ -43,6 +43,18 @@ public protocol Timeline_V1_TimelineServiceClientInterface: Sendable {
     /// the last returned item.
     @available(iOS 13, *)
     func `getAudioFeed`(request: Timeline_V1_GetAudioFeedRequest, headers: Connect.Headers) async -> ResponseMessage<Timeline_V1_GetAudioFeedResponse>
+
+    /// Returns a page of the discovery feed: a non-personalised pool of recent
+    /// public posts that needs no follow graph (For You for guests and members).
+    ///
+    /// The pool holds posts published in the last TIMELINE_DISCOVERY_WINDOW_SECS
+    /// (Redis), fed by post.v1.events, counter.v1.popularity and
+    /// moderation.v1.events. Deleted, removed and visibility-limited posts are
+    /// never shown; age-gated ones only at CONTENT_LEVEL_STANDARD. The reader's
+    /// audience is checked with social-graph CheckAccess; when that check is
+    /// unavailable the read fails (UNAVAILABLE), it never shows unchecked posts.
+    @available(iOS 13, *)
+    func `getDiscoveryFeed`(request: Timeline_V1_GetDiscoveryFeedRequest, headers: Connect.Headers) async -> ResponseMessage<Timeline_V1_GetDiscoveryFeedResponse>
 }
 
 /// Concrete implementation of `Timeline_V1_TimelineServiceClientInterface`.
@@ -63,10 +75,16 @@ public final class Timeline_V1_TimelineServiceClient: Timeline_V1_TimelineServic
         return await self.client.unary(path: "/timeline.v1.TimelineService/GetAudioFeed", idempotencyLevel: .unknown, request: request, headers: headers)
     }
 
+    @available(iOS 13, *)
+    public func `getDiscoveryFeed`(request: Timeline_V1_GetDiscoveryFeedRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Timeline_V1_GetDiscoveryFeedResponse> {
+        return await self.client.unary(path: "/timeline.v1.TimelineService/GetDiscoveryFeed", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
     public enum Metadata {
         public enum Methods {
             public static let getFollowingFeed = Connect.MethodSpec(name: "GetFollowingFeed", service: "timeline.v1.TimelineService", type: .unary)
             public static let getAudioFeed = Connect.MethodSpec(name: "GetAudioFeed", service: "timeline.v1.TimelineService", type: .unary)
+            public static let getDiscoveryFeed = Connect.MethodSpec(name: "GetDiscoveryFeed", service: "timeline.v1.TimelineService", type: .unary)
         }
     }
 }

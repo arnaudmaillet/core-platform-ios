@@ -22,9 +22,11 @@ fileprivate nonisolated struct _GeneratedWithProtocGenSwiftVersion: SwiftProtobu
 
 /// The kind of media an asset holds. `kind` drives the validation policy (MIME
 /// allowlist, size ceiling), the rendition ladder generated for it, and the
-/// content-addressed storage path. v1 is IMAGES-FIRST; video transcoding is a
-/// planned fast-follow phase and will be added as a new, additive enum value
-/// (MEDIA_KIND_VIDEO) — never by renumbering these.
+/// content-addressed storage path. Images (AVATAR, POST_IMAGE) are fully served.
+/// VIDEO is contract-first: the enum value is defined so clients can model it and
+/// generate types, but the ingest/transcode pipeline is a staged fast-follow — the
+/// service rejects video upload tickets as UNIMPLEMENTED until it lands. Grow this
+/// enum additively; never renumber.
 public nonisolated enum Media_V1_MediaKind: SwiftProtobuf.Enum, Swift.CaseIterable {
   public typealias RawValue = Int
   case unspecified // = 0
@@ -34,6 +36,10 @@ public nonisolated enum Media_V1_MediaKind: SwiftProtobuf.Enum, Swift.CaseIterab
 
   /// An image attached to a post — feed-sized rendition ladder.
   case postImage // = 2
+
+  /// A video attached to a post — adaptive-streaming ladder (manifest + poster).
+  /// Contract-first: not yet accepted for upload (see the enum note above).
+  case video // = 3
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -45,6 +51,7 @@ public nonisolated enum Media_V1_MediaKind: SwiftProtobuf.Enum, Swift.CaseIterab
     case 0: self = .unspecified
     case 1: self = .avatar
     case 2: self = .postImage
+    case 3: self = .video
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -54,6 +61,7 @@ public nonisolated enum Media_V1_MediaKind: SwiftProtobuf.Enum, Swift.CaseIterab
     case .unspecified: return 0
     case .avatar: return 1
     case .postImage: return 2
+    case .video: return 3
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -63,6 +71,7 @@ public nonisolated enum Media_V1_MediaKind: SwiftProtobuf.Enum, Swift.CaseIterab
     .unspecified,
     .avatar,
     .postImage,
+    .video,
   ]
 
 }
@@ -147,8 +156,11 @@ public nonisolated enum Media_V1_AssetState: SwiftProtobuf.Enum, Swift.CaseItera
 
 /// A derivative of an asset. Each rendition is a separately-stored, content-
 /// addressed object; the caller receives a URL to it via the delivery plane, never
-/// the bytes. v1 renditions are image size buckets; the concrete format (WebP/AVIF/
-/// JPEG) is carried per-rendition by its mime_type, not by this enum.
+/// the bytes. Image renditions are size buckets; video renditions are the playback
+/// manifest and a poster. In both cases the concrete format (image WebP/AVIF/JPEG,
+/// or streaming HLS/DASH) is carried per-rendition by its mime_type, not by this
+/// enum. Video renditions are contract-first — populated once the transcode
+/// pipeline lands.
 public nonisolated enum Media_V1_RenditionKind: SwiftProtobuf.Enum, Swift.CaseIterable {
   public typealias RawValue = Int
   case mediaRenditionKindUnspecified // = 0
@@ -159,6 +171,13 @@ public nonisolated enum Media_V1_RenditionKind: SwiftProtobuf.Enum, Swift.CaseIt
   case mediaRenditionKindSmall // = 3
   case mediaRenditionKindMedium // = 4
   case mediaRenditionKindLarge // = 5
+
+  /// The adaptive-streaming playback manifest — a video's playback entry point.
+  /// Concrete packaging (HLS m3u8 / DASH mpd) rides in its mime_type.
+  case mediaRenditionKindManifest // = 6
+
+  /// A still poster frame for feed first-paint before playback starts.
+  case mediaRenditionKindPoster // = 7
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -173,6 +192,8 @@ public nonisolated enum Media_V1_RenditionKind: SwiftProtobuf.Enum, Swift.CaseIt
     case 3: self = .mediaRenditionKindSmall
     case 4: self = .mediaRenditionKindMedium
     case 5: self = .mediaRenditionKindLarge
+    case 6: self = .mediaRenditionKindManifest
+    case 7: self = .mediaRenditionKindPoster
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -185,6 +206,8 @@ public nonisolated enum Media_V1_RenditionKind: SwiftProtobuf.Enum, Swift.CaseIt
     case .mediaRenditionKindSmall: return 3
     case .mediaRenditionKindMedium: return 4
     case .mediaRenditionKindLarge: return 5
+    case .mediaRenditionKindManifest: return 6
+    case .mediaRenditionKindPoster: return 7
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -197,6 +220,8 @@ public nonisolated enum Media_V1_RenditionKind: SwiftProtobuf.Enum, Swift.CaseIt
     .mediaRenditionKindSmall,
     .mediaRenditionKindMedium,
     .mediaRenditionKindLarge,
+    .mediaRenditionKindManifest,
+    .mediaRenditionKindPoster,
   ]
 
 }
@@ -246,7 +271,7 @@ public nonisolated enum Media_V1_DeliveryVisibility: SwiftProtobuf.Enum, Swift.C
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 nonisolated extension Media_V1_MediaKind: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0MEDIA_KIND_UNSPECIFIED\0\u{1}MEDIA_KIND_AVATAR\0\u{1}MEDIA_KIND_POST_IMAGE\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0MEDIA_KIND_UNSPECIFIED\0\u{1}MEDIA_KIND_AVATAR\0\u{1}MEDIA_KIND_POST_IMAGE\0\u{1}MEDIA_KIND_VIDEO\0")
 }
 
 nonisolated extension Media_V1_AssetState: SwiftProtobuf._ProtoNameProviding {
@@ -254,7 +279,7 @@ nonisolated extension Media_V1_AssetState: SwiftProtobuf._ProtoNameProviding {
 }
 
 nonisolated extension Media_V1_RenditionKind: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0MEDIA_RENDITION_KIND_UNSPECIFIED\0\u{1}MEDIA_RENDITION_KIND_ORIGINAL\0\u{1}MEDIA_RENDITION_KIND_THUMBNAIL\0\u{1}MEDIA_RENDITION_KIND_SMALL\0\u{1}MEDIA_RENDITION_KIND_MEDIUM\0\u{1}MEDIA_RENDITION_KIND_LARGE\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0MEDIA_RENDITION_KIND_UNSPECIFIED\0\u{1}MEDIA_RENDITION_KIND_ORIGINAL\0\u{1}MEDIA_RENDITION_KIND_THUMBNAIL\0\u{1}MEDIA_RENDITION_KIND_SMALL\0\u{1}MEDIA_RENDITION_KIND_MEDIUM\0\u{1}MEDIA_RENDITION_KIND_LARGE\0\u{1}MEDIA_RENDITION_KIND_MANIFEST\0\u{1}MEDIA_RENDITION_KIND_POSTER\0")
 }
 
 nonisolated extension Media_V1_DeliveryVisibility: SwiftProtobuf._ProtoNameProviding {

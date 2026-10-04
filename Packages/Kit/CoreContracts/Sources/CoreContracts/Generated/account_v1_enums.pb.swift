@@ -209,6 +209,52 @@ public nonisolated enum Account_V1_AccountRole: SwiftProtobuf.Enum, Swift.CaseIt
 
 }
 
+/// The holder's age bracket, computed from the date of birth on the day it is
+/// read (minimum age 13; 16 where the country of residence requires it).
+public nonisolated enum Account_V1_AgeBracket: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+
+  /// No date of birth on file.
+  case unspecified // = 0
+  case ageBracket1315 // = 1
+  case ageBracket1617 // = 2
+  case adult // = 3
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .ageBracket1315
+    case 2: self = .ageBracket1617
+    case 3: self = .adult
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .ageBracket1315: return 1
+    case .ageBracket1617: return 2
+    case .adult: return 3
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [Account_V1_AgeBracket] = [
+    .unspecified,
+    .ageBracket1315,
+    .ageBracket1617,
+    .adult,
+  ]
+
+}
+
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 nonisolated extension Account_V1_AccountStatus: SwiftProtobuf._ProtoNameProviding {
@@ -221,4 +267,8 @@ nonisolated extension Account_V1_KycStatus: SwiftProtobuf._ProtoNameProviding {
 
 nonisolated extension Account_V1_AccountRole: SwiftProtobuf._ProtoNameProviding {
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0ACCOUNT_ROLE_UNSPECIFIED\0\u{1}USER\0\u{1}CONTENT_MODERATOR\0\u{1}SUPPORT_AGENT\0\u{1}FINANCE_OPERATOR\0\u{1}ADMIN\0\u{1}SUPER_ADMIN\0")
+}
+
+nonisolated extension Account_V1_AgeBracket: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0AGE_BRACKET_UNSPECIFIED\0\u{1}AGE_BRACKET_13_15\0\u{1}AGE_BRACKET_16_17\0\u{1}AGE_BRACKET_ADULT\0")
 }

@@ -272,6 +272,50 @@ public nonisolated struct SocialGraph_V1_ListBlocksResponse: Sendable {
   public init() {}
 }
 
+public nonisolated struct SocialGraph_V1_CheckAccessRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// The profiles the reader's account owns (the token's `pids`); empty for
+  /// an anonymous reader. At most 20.
+  public var viewerProfileIds: [String] = []
+
+  /// The profiles whose content is being read (authors). At most 100.
+  public var targetProfileIds: [String] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct SocialGraph_V1_TargetAccess: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var targetProfileID: String = String()
+
+  public var access: SocialGraph_V1_ContentAccess = .unspecified
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct SocialGraph_V1_CheckAccessResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// One entry per distinct target.
+  public var targets: [SocialGraph_V1_TargetAccess] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 fileprivate nonisolated let _protobuf_package = "social_graph.v1"
@@ -839,6 +883,106 @@ nonisolated extension SocialGraph_V1_ListBlocksResponse: SwiftProtobuf.Message, 
   public static func ==(lhs: SocialGraph_V1_ListBlocksResponse, rhs: SocialGraph_V1_ListBlocksResponse) -> Bool {
     if lhs.blocks != rhs.blocks {return false}
     if lhs.nextPageToken != rhs.nextPageToken {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension SocialGraph_V1_CheckAccessRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".CheckAccessRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}viewer_profile_ids\0\u{3}target_profile_ids\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedStringField(value: &self.viewerProfileIds) }()
+      case 2: try { try decoder.decodeRepeatedStringField(value: &self.targetProfileIds) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.viewerProfileIds.isEmpty {
+      try visitor.visitRepeatedStringField(value: self.viewerProfileIds, fieldNumber: 1)
+    }
+    if !self.targetProfileIds.isEmpty {
+      try visitor.visitRepeatedStringField(value: self.targetProfileIds, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: SocialGraph_V1_CheckAccessRequest, rhs: SocialGraph_V1_CheckAccessRequest) -> Bool {
+    if lhs.viewerProfileIds != rhs.viewerProfileIds {return false}
+    if lhs.targetProfileIds != rhs.targetProfileIds {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension SocialGraph_V1_TargetAccess: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".TargetAccess"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}target_profile_id\0\u{1}access\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.targetProfileID) }()
+      case 2: try { try decoder.decodeSingularEnumField(value: &self.access) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.targetProfileID.isEmpty {
+      try visitor.visitSingularStringField(value: self.targetProfileID, fieldNumber: 1)
+    }
+    if self.access != .unspecified {
+      try visitor.visitSingularEnumField(value: self.access, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: SocialGraph_V1_TargetAccess, rhs: SocialGraph_V1_TargetAccess) -> Bool {
+    if lhs.targetProfileID != rhs.targetProfileID {return false}
+    if lhs.access != rhs.access {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension SocialGraph_V1_CheckAccessResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".CheckAccessResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}targets\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.targets) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.targets.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.targets, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: SocialGraph_V1_CheckAccessResponse, rhs: SocialGraph_V1_CheckAccessResponse) -> Bool {
+    if lhs.targets != rhs.targets {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

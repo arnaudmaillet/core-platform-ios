@@ -40,6 +40,15 @@ public protocol Auth_V1_AuthServiceClientInterface: Sendable {
     @available(iOS 13, *)
     func `refresh`(request: Auth_V1_RefreshRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_RefreshResponse>
 
+    /// Start an anonymous GUEST session for an app installation (guest mode:
+    /// browse before sign-up). No account is created. The edge token carries
+    /// sub = "guest:<guest_id>", kind = "guest", perms = ["read:public"], no
+    /// profiles, and the installation's device id (`did`); it is refreshed with
+    /// Refresh. The client edge refuses a guest token on every `authenticated`
+    /// method: guests only read public content.
+    @available(iOS 13, *)
+    func `startGuestSession`(request: Auth_V1_StartGuestSessionRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_StartGuestSessionResponse>
+
     /// Revoke a single session (the caller's current one by default). Idempotent.
     @available(iOS 13, *)
     func `logout`(request: Auth_V1_LogoutRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_LogoutResponse>
@@ -48,6 +57,24 @@ public protocol Auth_V1_AuthServiceClientInterface: Sendable {
     /// minted edge token is rejected at the edge within one cache read.
     @available(iOS 13, *)
     func `logoutAllSessions`(request: Auth_V1_LogoutAllSessionsRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_LogoutAllSessionsResponse>
+
+    /// Change the password the holder signs in with: the current password is
+    /// proved with the IdP, then the new one is set there (it never crosses into
+    /// account or auth storage). Optionally signs every other session out; the
+    /// caller's own stays. A weak or refused new password fails with
+    /// FAILED_PRECONDITION: AUT-VAL-024/025/026 (length, unchanged) or AUT-5006
+    /// (the IdP's password policy, its rule in the message). A wrong current
+    /// password is UNAUTHENTICATED (AUT-5002).
+    @available(iOS 13, *)
+    func `changePassword`(request: Auth_V1_ChangePasswordRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_ChangePasswordResponse>
+
+    /// Step-up: re-prove a credential before a destructive action. Returns a
+    /// fresh access token for the caller's session whose `auth_time` claim is
+    /// now; step-up-gated RPCs (account deletion and deactivation, contact
+    /// changes…) accept it for step_up_expires_in seconds and otherwise answer
+    /// PERMISSION_DENIED "step_up_required…". The refresh token is unchanged.
+    @available(iOS 13, *)
+    func `verifyCredentials`(request: Auth_V1_VerifyCredentialsRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_VerifyCredentialsResponse>
 
     /// INTERNAL. Server-side token introspection returning the normalized
     /// principal, for callers that cannot verify edge tokens locally.
@@ -78,6 +105,11 @@ public final class Auth_V1_AuthServiceClient: Auth_V1_AuthServiceClientInterface
     }
 
     @available(iOS 13, *)
+    public func `startGuestSession`(request: Auth_V1_StartGuestSessionRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Auth_V1_StartGuestSessionResponse> {
+        return await self.client.unary(path: "/auth.v1.AuthService/StartGuestSession", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
     public func `logout`(request: Auth_V1_LogoutRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Auth_V1_LogoutResponse> {
         return await self.client.unary(path: "/auth.v1.AuthService/Logout", idempotencyLevel: .unknown, request: request, headers: headers)
     }
@@ -85,6 +117,16 @@ public final class Auth_V1_AuthServiceClient: Auth_V1_AuthServiceClientInterface
     @available(iOS 13, *)
     public func `logoutAllSessions`(request: Auth_V1_LogoutAllSessionsRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Auth_V1_LogoutAllSessionsResponse> {
         return await self.client.unary(path: "/auth.v1.AuthService/LogoutAllSessions", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `changePassword`(request: Auth_V1_ChangePasswordRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Auth_V1_ChangePasswordResponse> {
+        return await self.client.unary(path: "/auth.v1.AuthService/ChangePassword", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `verifyCredentials`(request: Auth_V1_VerifyCredentialsRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Auth_V1_VerifyCredentialsResponse> {
+        return await self.client.unary(path: "/auth.v1.AuthService/VerifyCredentials", idempotencyLevel: .unknown, request: request, headers: headers)
     }
 
     @available(iOS 13, *)
@@ -101,8 +143,11 @@ public final class Auth_V1_AuthServiceClient: Auth_V1_AuthServiceClientInterface
         public enum Methods {
             public static let login = Connect.MethodSpec(name: "Login", service: "auth.v1.AuthService", type: .unary)
             public static let refresh = Connect.MethodSpec(name: "Refresh", service: "auth.v1.AuthService", type: .unary)
+            public static let startGuestSession = Connect.MethodSpec(name: "StartGuestSession", service: "auth.v1.AuthService", type: .unary)
             public static let logout = Connect.MethodSpec(name: "Logout", service: "auth.v1.AuthService", type: .unary)
             public static let logoutAllSessions = Connect.MethodSpec(name: "LogoutAllSessions", service: "auth.v1.AuthService", type: .unary)
+            public static let changePassword = Connect.MethodSpec(name: "ChangePassword", service: "auth.v1.AuthService", type: .unary)
+            public static let verifyCredentials = Connect.MethodSpec(name: "VerifyCredentials", service: "auth.v1.AuthService", type: .unary)
             public static let introspect = Connect.MethodSpec(name: "Introspect", service: "auth.v1.AuthService", type: .unary)
             public static let listSessions = Connect.MethodSpec(name: "ListSessions", service: "auth.v1.AuthService", type: .unary)
         }

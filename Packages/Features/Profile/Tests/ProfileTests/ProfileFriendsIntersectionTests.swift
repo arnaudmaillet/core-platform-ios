@@ -197,6 +197,12 @@ private final class FakeSocialGraphClient: SocialGraph_V1_SocialGraphServiceClie
     ) async -> ResponseMessage<SocialGraph_V1_ListBlocksResponse> {
         ResponseMessage(result: .success(SocialGraph_V1_ListBlocksResponse()))
     }
+
+    func checkAccess(
+        request: SocialGraph_V1_CheckAccessRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<SocialGraph_V1_CheckAccessResponse> {
+        ResponseMessage(result: .success(SocialGraph_V1_CheckAccessResponse()))
+    }
 }
 
 private struct FakeViewer: ProfileViewerResolving {

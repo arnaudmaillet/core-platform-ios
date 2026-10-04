@@ -62,8 +62,122 @@ public nonisolated enum Timeline_V1_FanOutMode: SwiftProtobuf.Enum, Swift.CaseIt
 
 }
 
+/// How GetDiscoveryFeed orders its pool. v1 is non-personalised: the same
+/// request returns the same order for every viewer, before the audience filter.
+public nonisolated enum Timeline_V1_DiscoveryRanking: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+
+  /// Treated as FOR_YOU.
+  case unspecified // = 0
+
+  /// Three TRENDING items for one fresh item (a recent post nobody has
+  /// engaged with yet), so new posts get a chance to be seen.
+  case forYou // = 1
+
+  /// Time-decayed popularity ("hot"): log10(popularity) plus a gravity term on
+  /// the publication time. Only posts that have some popularity.
+  case trending // = 2
+
+  /// Newest first.
+  case recent // = 3
+
+  /// Posts geotagged near lat/lng (from geo-discovery), ordered by hot score.
+  case nearby // = 4
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .forYou
+    case 2: self = .trending
+    case 3: self = .recent
+    case 4: self = .nearby
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .forYou: return 1
+    case .trending: return 2
+    case .recent: return 3
+    case .nearby: return 4
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [Timeline_V1_DiscoveryRanking] = [
+    .unspecified,
+    .forYou,
+    .trending,
+    .recent,
+    .nearby,
+  ]
+
+}
+
+/// Which posts a discovery read may show.
+public nonisolated enum Timeline_V1_ContentLevel: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+
+  /// Treated as RESTRICTED.
+  case unspecified // = 0
+
+  /// No post moderation age-gated (mature content). Always applied to guest
+  /// sessions, whatever the request says.
+  case restricted // = 1
+
+  /// Age-gated posts included.
+  case standard // = 2
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .restricted
+    case 2: self = .standard
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .restricted: return 1
+    case .standard: return 2
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [Timeline_V1_ContentLevel] = [
+    .unspecified,
+    .restricted,
+    .standard,
+  ]
+
+}
+
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 nonisolated extension Timeline_V1_FanOutMode: SwiftProtobuf._ProtoNameProviding {
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0FAN_OUT_MODE_UNSPECIFIED\0\u{1}FAN_OUT_MODE_WRITE\0\u{1}FAN_OUT_MODE_READ\0")
+}
+
+nonisolated extension Timeline_V1_DiscoveryRanking: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0DISCOVERY_RANKING_UNSPECIFIED\0\u{1}DISCOVERY_RANKING_FOR_YOU\0\u{1}DISCOVERY_RANKING_TRENDING\0\u{1}DISCOVERY_RANKING_RECENT\0\u{1}DISCOVERY_RANKING_NEARBY\0")
+}
+
+nonisolated extension Timeline_V1_ContentLevel: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0CONTENT_LEVEL_UNSPECIFIED\0\u{1}CONTENT_LEVEL_RESTRICTED\0\u{1}CONTENT_LEVEL_STANDARD\0")
 }

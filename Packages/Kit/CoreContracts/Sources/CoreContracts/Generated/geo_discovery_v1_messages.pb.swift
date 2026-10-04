@@ -137,6 +137,11 @@ public nonisolated struct GeoDiscovery_V1_QueryTileRequest: Sendable {
   /// applies the corresponding H3 resolution and virality floor.
   public var zoomLevel: Int32 = 0
 
+  /// Mesh only (ignored on the client edge, where the caller's own token
+  /// decides): the guest principal (token sub) a mesh caller reads on behalf
+  /// of, so the guest's country limit applies (timeline's NEARBY feed).
+  public var guestPrincipal: String = String()
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -186,6 +191,35 @@ public nonisolated struct GeoDiscovery_V1_GetGeoTimelineResponse: Sendable {
   /// Cards for the post_ids that resolved, in arbitrary order. Unresolved ids
   /// (expired / never indexed) are simply absent.
   public var cards: [GeoDiscovery_V1_MapPostCard] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct GeoDiscovery_V1_GetCountryAccessRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// ISO 3166-1 alpha-2, derived on the device from its location. Empty when
+  /// location is off or unavailable.
+  public var currentCountry: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct GeoDiscovery_V1_GetCountryAccessResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// The current country, echoed only when granted; empty otherwise.
+  public var currentCountry: String = String()
+
+  public var outcome: GeoDiscovery_V1_CountryAccessOutcome = .unspecified
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -363,7 +397,7 @@ nonisolated extension GeoDiscovery_V1_MapPostCard: SwiftProtobuf.Message, SwiftP
 
 nonisolated extension GeoDiscovery_V1_QueryTileRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".QueryTileRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}viewport\0\u{3}zoom_level\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}viewport\0\u{3}zoom_level\0\u{3}guest_principal\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -373,6 +407,7 @@ nonisolated extension GeoDiscovery_V1_QueryTileRequest: SwiftProtobuf.Message, S
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularMessageField(value: &self._viewport) }()
       case 2: try { try decoder.decodeSingularInt32Field(value: &self.zoomLevel) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.guestPrincipal) }()
       default: break
       }
     }
@@ -389,12 +424,16 @@ nonisolated extension GeoDiscovery_V1_QueryTileRequest: SwiftProtobuf.Message, S
     if self.zoomLevel != 0 {
       try visitor.visitSingularInt32Field(value: self.zoomLevel, fieldNumber: 2)
     }
+    if !self.guestPrincipal.isEmpty {
+      try visitor.visitSingularStringField(value: self.guestPrincipal, fieldNumber: 3)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: GeoDiscovery_V1_QueryTileRequest, rhs: GeoDiscovery_V1_QueryTileRequest) -> Bool {
     if lhs._viewport != rhs._viewport {return false}
     if lhs.zoomLevel != rhs.zoomLevel {return false}
+    if lhs.guestPrincipal != rhs.guestPrincipal {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -490,6 +529,71 @@ nonisolated extension GeoDiscovery_V1_GetGeoTimelineResponse: SwiftProtobuf.Mess
 
   public static func ==(lhs: GeoDiscovery_V1_GetGeoTimelineResponse, rhs: GeoDiscovery_V1_GetGeoTimelineResponse) -> Bool {
     if lhs.cards != rhs.cards {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension GeoDiscovery_V1_GetCountryAccessRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".GetCountryAccessRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}current_country\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.currentCountry) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.currentCountry.isEmpty {
+      try visitor.visitSingularStringField(value: self.currentCountry, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: GeoDiscovery_V1_GetCountryAccessRequest, rhs: GeoDiscovery_V1_GetCountryAccessRequest) -> Bool {
+    if lhs.currentCountry != rhs.currentCountry {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension GeoDiscovery_V1_GetCountryAccessResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".GetCountryAccessResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}current_country\0\u{1}outcome\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.currentCountry) }()
+      case 2: try { try decoder.decodeSingularEnumField(value: &self.outcome) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.currentCountry.isEmpty {
+      try visitor.visitSingularStringField(value: self.currentCountry, fieldNumber: 1)
+    }
+    if self.outcome != .unspecified {
+      try visitor.visitSingularEnumField(value: self.outcome, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: GeoDiscovery_V1_GetCountryAccessResponse, rhs: GeoDiscovery_V1_GetCountryAccessResponse) -> Bool {
+    if lhs.currentCountry != rhs.currentCountry {return false}
+    if lhs.outcome != rhs.outcome {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

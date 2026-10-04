@@ -154,6 +154,84 @@ public nonisolated struct Timeline_V1_GetAudioFeedResponse: Sendable {
   public init() {}
 }
 
+/// Request for a page of the discovery feed (For You, Trending, Recent, Nearby).
+///
+/// The reader is the caller's token (a member, or a guest session), never a
+/// request field: posts by authors the reader may not see (private profile not
+/// followed, block, hidden profile) are left out.
+public nonisolated struct Timeline_V1_GetDiscoveryFeedRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var ranking: Timeline_V1_DiscoveryRanking = .unspecified
+
+  /// ISO 3166-1 alpha-2 country the client is browsing from. Accepted for
+  /// forward compatibility: v1 ranks one global pool (see region_applied).
+  public var region: String = String()
+
+  /// Required for NEARBY (WGS-84), ignored otherwise.
+  public var lat: Double {
+    get {_lat ?? 0}
+    set {_lat = newValue}
+  }
+  /// Returns true if `lat` has been explicitly set.
+  public var hasLat: Bool {self._lat != nil}
+  /// Clears the value of `lat`. Subsequent reads from it will return its default value.
+  public mutating func clearLat() {self._lat = nil}
+
+  public var lng: Double {
+    get {_lng ?? 0}
+    set {_lng = newValue}
+  }
+  /// Returns true if `lng` has been explicitly set.
+  public var hasLng: Bool {self._lng != nil}
+  /// Clears the value of `lng`. Subsequent reads from it will return its default value.
+  public mutating func clearLng() {self._lng = nil}
+
+  /// Guests always get RESTRICTED.
+  public var contentLevel: Timeline_V1_ContentLevel = .unspecified
+
+  /// Opaque cursor from the previous response's next_page_token, for the same
+  /// ranking. Omit or send empty for the first page.
+  public var pageToken: String = String()
+
+  /// Server clamps to TIMELINE_MAX_PAGE_SIZE; <= 0 means 20.
+  public var limit: Int32 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _lat: Double? = nil
+  fileprivate var _lng: Double? = nil
+}
+
+public nonisolated struct Timeline_V1_GetDiscoveryFeedResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Identifiers only, as for the following feed: the client hydrates through
+  /// post.GetPost. A post can come back on a later page when it moves between
+  /// rankings (a fresh post gaining popularity): de-duplicate by post_id.
+  public var items: [Timeline_V1_FeedItem] = []
+
+  /// Empty when the pool is exhausted. A page can hold fewer items than asked
+  /// (even none) with a non-empty token: keep paging.
+  public var nextPageToken: String = String()
+
+  /// The region the ranking was computed for; empty = global (v1 always).
+  public var regionApplied: String = String()
+
+  /// The content level actually applied.
+  public var contentLevelApplied: Timeline_V1_ContentLevel = .unspecified
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 fileprivate nonisolated let _protobuf_package = "timeline.v1"
@@ -423,6 +501,115 @@ nonisolated extension Timeline_V1_GetAudioFeedResponse: SwiftProtobuf.Message, S
   public static func ==(lhs: Timeline_V1_GetAudioFeedResponse, rhs: Timeline_V1_GetAudioFeedResponse) -> Bool {
     if lhs.items != rhs.items {return false}
     if lhs.nextToken != rhs.nextToken {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Timeline_V1_GetDiscoveryFeedRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".GetDiscoveryFeedRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}ranking\0\u{1}region\0\u{1}lat\0\u{1}lng\0\u{3}content_level\0\u{3}page_token\0\u{1}limit\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularEnumField(value: &self.ranking) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.region) }()
+      case 3: try { try decoder.decodeSingularDoubleField(value: &self._lat) }()
+      case 4: try { try decoder.decodeSingularDoubleField(value: &self._lng) }()
+      case 5: try { try decoder.decodeSingularEnumField(value: &self.contentLevel) }()
+      case 6: try { try decoder.decodeSingularStringField(value: &self.pageToken) }()
+      case 7: try { try decoder.decodeSingularInt32Field(value: &self.limit) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.ranking != .unspecified {
+      try visitor.visitSingularEnumField(value: self.ranking, fieldNumber: 1)
+    }
+    if !self.region.isEmpty {
+      try visitor.visitSingularStringField(value: self.region, fieldNumber: 2)
+    }
+    try { if let v = self._lat {
+      try visitor.visitSingularDoubleField(value: v, fieldNumber: 3)
+    } }()
+    try { if let v = self._lng {
+      try visitor.visitSingularDoubleField(value: v, fieldNumber: 4)
+    } }()
+    if self.contentLevel != .unspecified {
+      try visitor.visitSingularEnumField(value: self.contentLevel, fieldNumber: 5)
+    }
+    if !self.pageToken.isEmpty {
+      try visitor.visitSingularStringField(value: self.pageToken, fieldNumber: 6)
+    }
+    if self.limit != 0 {
+      try visitor.visitSingularInt32Field(value: self.limit, fieldNumber: 7)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Timeline_V1_GetDiscoveryFeedRequest, rhs: Timeline_V1_GetDiscoveryFeedRequest) -> Bool {
+    if lhs.ranking != rhs.ranking {return false}
+    if lhs.region != rhs.region {return false}
+    if lhs._lat != rhs._lat {return false}
+    if lhs._lng != rhs._lng {return false}
+    if lhs.contentLevel != rhs.contentLevel {return false}
+    if lhs.pageToken != rhs.pageToken {return false}
+    if lhs.limit != rhs.limit {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Timeline_V1_GetDiscoveryFeedResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".GetDiscoveryFeedResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}items\0\u{3}next_page_token\0\u{3}region_applied\0\u{3}content_level_applied\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.items) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.nextPageToken) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.regionApplied) }()
+      case 4: try { try decoder.decodeSingularEnumField(value: &self.contentLevelApplied) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.items.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.items, fieldNumber: 1)
+    }
+    if !self.nextPageToken.isEmpty {
+      try visitor.visitSingularStringField(value: self.nextPageToken, fieldNumber: 2)
+    }
+    if !self.regionApplied.isEmpty {
+      try visitor.visitSingularStringField(value: self.regionApplied, fieldNumber: 3)
+    }
+    if self.contentLevelApplied != .unspecified {
+      try visitor.visitSingularEnumField(value: self.contentLevelApplied, fieldNumber: 4)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Timeline_V1_GetDiscoveryFeedResponse, rhs: Timeline_V1_GetDiscoveryFeedResponse) -> Bool {
+    if lhs.items != rhs.items {return false}
+    if lhs.nextPageToken != rhs.nextPageToken {return false}
+    if lhs.regionApplied != rhs.regionApplied {return false}
+    if lhs.contentLevelApplied != rhs.contentLevelApplied {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

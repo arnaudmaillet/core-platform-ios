@@ -104,6 +104,60 @@ public nonisolated enum Post_V1_PostStatus: SwiftProtobuf.Enum, Swift.CaseIterab
 
 }
 
+/// What moderation currently imposes on a post. Only the author ever reads a
+/// REMOVED post; everyone else gets NOT_FOUND.
+public nonisolated enum Post_V1_ModerationRestriction: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+  case none // = 1
+
+  /// Reach reduced: readable, kept out of discovery.
+  case limited // = 2
+
+  /// Shown only to audiences cleared for mature content.
+  case ageGated // = 3
+
+  /// Taken down: visible to its author only.
+  case removed // = 4
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .none
+    case 2: self = .limited
+    case 3: self = .ageGated
+    case 4: self = .removed
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .none: return 1
+    case .limited: return 2
+    case .ageGated: return 3
+    case .removed: return 4
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [Post_V1_ModerationRestriction] = [
+    .unspecified,
+    .none,
+    .limited,
+    .ageGated,
+    .removed,
+  ]
+
+}
+
 public nonisolated enum Post_V1_AudioKind: SwiftProtobuf.Enum, Swift.CaseIterable {
   public typealias RawValue = Int
   case unspecified // = 0
@@ -150,6 +204,10 @@ nonisolated extension Post_V1_PostKind: SwiftProtobuf._ProtoNameProviding {
 
 nonisolated extension Post_V1_PostStatus: SwiftProtobuf._ProtoNameProviding {
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0POST_STATUS_UNSPECIFIED\0\u{1}POST_STATUS_DRAFT\0\u{1}POST_STATUS_PUBLISHED\0\u{1}POST_STATUS_DELETED\0")
+}
+
+nonisolated extension Post_V1_ModerationRestriction: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0MODERATION_RESTRICTION_UNSPECIFIED\0\u{1}MODERATION_RESTRICTION_NONE\0\u{1}MODERATION_RESTRICTION_LIMITED\0\u{1}MODERATION_RESTRICTION_AGE_GATED\0\u{1}MODERATION_RESTRICTION_REMOVED\0")
 }
 
 nonisolated extension Post_V1_AudioKind: SwiftProtobuf._ProtoNameProviding {
