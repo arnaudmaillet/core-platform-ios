@@ -214,14 +214,12 @@ public final class PostAuthorBandView: UIView {
         // when and where, quiet; what they said, in the caption's plain body
         // — and the name is the one that used to be smaller than the words
         // under it, which flattened the card into one grey block of type.
-        nameLabel.font = UIFont.systemFont(
-            ofSize: UIFont.preferredFont(forTextStyle: .body).pointSize, weight: .semibold
-        )
+        nameLabel.font = UIFont.scaledFont(forTextStyle: .body, weight: .semibold)
         nameLabel.adjustsFontForContentSizeCategory = true
         nameLabel.textColor = .label
         nameLabel.lineBreakMode = .byTruncatingTail
 
-        handleLabel.font = .preferredFont(forTextStyle: .footnote)
+        handleLabel.font = .appFont(forTextStyle: .footnote)
         handleLabel.adjustsFontForContentSizeCategory = true
         handleLabel.textColor = .secondaryLabel
         handleLabel.lineBreakMode = .byTruncatingTail

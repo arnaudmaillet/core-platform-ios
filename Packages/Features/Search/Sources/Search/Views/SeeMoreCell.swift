@@ -1,3 +1,4 @@
+import DesignSystem
 import UIKit
 
 /// The row that ends a truncated Recent section: "See more", and how many
@@ -26,7 +27,7 @@ final class SeeMoreCell: UICollectionViewListCell {
     func configure(hiddenCount: Int) {
         var content = UIListContentConfiguration.cell()
         content.text = "See \(hiddenCount) more"
-        content.textProperties.font = .preferredFont(forTextStyle: .subheadline)
+        content.textProperties.font = .appFont(forTextStyle: .subheadline)
         // Tinted, not label-coloured: this row is a control, and the rows
         // above it are content. Same weight of type, different job.
         content.textProperties.color = .tintColor

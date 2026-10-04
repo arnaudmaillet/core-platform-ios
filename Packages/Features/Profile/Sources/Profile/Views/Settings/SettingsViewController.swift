@@ -349,7 +349,7 @@ private final class SettingsMenuButtonCell: UICollectionViewListCell {
         configuration.contentInsets = .zero
         configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
             var attributes = attributes
-            attributes.font = UIFont.preferredFont(forTextStyle: .body)
+            attributes.font = UIFont.appFont(forTextStyle: .body)
             return attributes
         }
         button.configuration = configuration

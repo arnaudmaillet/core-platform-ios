@@ -68,7 +68,7 @@ final class LoginFlowCoordinator {
         configuration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(textStyle: .footnote)
         configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
             var attributes = attributes
-            attributes.font = UIFont.preferredFont(forTextStyle: .footnote)
+            attributes.font = UIFont.appFont(forTextStyle: .footnote)
             return attributes
         }
         let button = UIButton(configuration: configuration)
@@ -90,7 +90,7 @@ final class LoginFlowCoordinator {
         let item = UIBarButtonItem(primaryAction: UIAction(title: title) { _ in handler() })
         item.tintColor = .secondaryLabel
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: UIFont.preferredFont(forTextStyle: .footnote)
+            .font: UIFont.appFont(forTextStyle: .footnote)
         ]
         item.setTitleTextAttributes(attributes, for: .normal)
         item.setTitleTextAttributes(attributes, for: .highlighted)

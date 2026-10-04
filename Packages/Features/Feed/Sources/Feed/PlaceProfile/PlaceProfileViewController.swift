@@ -2670,14 +2670,14 @@ private final class PlaceMetricView: UIView {
         // ⚠️ THE PROFILE'S COUNTER TYPE (headline over caption1), since the
         // row is the profile's row now: cells across the column, the same
         // shape as Followers / Following / Likes.
-        valueLabel.font = .preferredFont(forTextStyle: .headline)
+        valueLabel.font = .appFont(forTextStyle: .headline)
         valueLabel.adjustsFontForContentSizeCategory = true
         valueLabel.textColor = .label
         valueLabel.textAlignment = .center
         valueLabel.text = "—"
         // footnote, not caption1: the profile's counters are caption1 because
         // three of them share one row. Two on a full banner can afford a step.
-        titleLabel.font = .preferredFont(forTextStyle: .caption1)
+        titleLabel.font = .appFont(forTextStyle: .caption1)
         titleLabel.adjustsFontForContentSizeCategory = true
         titleLabel.textColor = .secondaryLabel
         titleLabel.textAlignment = .center

@@ -110,13 +110,13 @@ final class ProfileQRCardView: UIView {
         monogramLabel.adjustsFontSizeToFitWidth = true
         monogramLabel.minimumScaleFactor = 0.5
 
-        nameLabel.font = .preferredFont(forTextStyle: .headline)
+        nameLabel.font = .appFont(forTextStyle: .headline)
         nameLabel.adjustsFontForContentSizeCategory = true
         nameLabel.textColor = .label
         nameLabel.textAlignment = .center
         nameLabel.numberOfLines = 1
 
-        handleLabel.font = .preferredFont(forTextStyle: .subheadline)
+        handleLabel.font = .appFont(forTextStyle: .subheadline)
         handleLabel.adjustsFontForContentSizeCategory = true
         handleLabel.textColor = .secondaryLabel
         handleLabel.textAlignment = .center

@@ -1,3 +1,4 @@
+import DesignSystem
 import MediaCore
 import UIKit
 
@@ -90,7 +91,7 @@ open class EmoteLabel: UILabel {
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = textAlignment
         attributedText = EmoteText.attributedString(text, attributes: [
-            .font: font ?? UIFont.preferredFont(forTextStyle: .body),
+            .font: font ?? UIFont.appFont(forTextStyle: .body),
             .foregroundColor: textColor ?? UIColor.label,
             .paragraphStyle: paragraph
         ], catalog: engine.catalog)

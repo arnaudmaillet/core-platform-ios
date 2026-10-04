@@ -367,7 +367,7 @@ public final class CountryShopViewController: UIViewController {
         let trailing: UIView
         if access.isUnlocked(code) {
             let label = UILabel()
-            label.font = .preferredFont(forTextStyle: .subheadline)
+            label.font = .appFont(forTextStyle: .subheadline)
             if code == access.homeCountry {
                 label.text = "Home"
                 label.textColor = .secondaryLabel
@@ -452,7 +452,7 @@ public final class CountryShopViewController: UIViewController {
         let trailing: UIView
         if offer.isActive {
             let label = UILabel()
-            label.font = .preferredFont(forTextStyle: .subheadline)
+            label.font = .appFont(forTextStyle: .subheadline)
             label.textColor = .secondaryLabel
             label.text = Self.activeText(offer)
             trailing = label
@@ -677,10 +677,10 @@ final class CountryShopRowCell: UICollectionViewListCell {
     override init(frame: CGRect) {
         super.init(frame: frame)
         flagView.contentMode = .center
-        nameLabel.font = .preferredFont(forTextStyle: .body)
+        nameLabel.font = .appFont(forTextStyle: .body)
         nameLabel.adjustsFontForContentSizeCategory = true
-        let detailFont = UIFont.monospacedDigitSystemFont(
-            ofSize: UIFont.preferredFont(forTextStyle: .footnote).pointSize, weight: .regular
+        let detailFont = UIFont.scaledMonospacedDigitSystemFont(
+            ofSize: UIFont.defaultPointSize(for: .footnote), relativeTo: .footnote
         )
         for label in [rankLabel, statsLabel] {
             label.font = detailFont
@@ -748,9 +748,9 @@ final class CountryShopProgressCell: UICollectionViewListCell {
         super.init(frame: frame)
         backgroundConfiguration = .clear()
         summaryLabel.text = "Your map"
-        summaryLabel.font = .preferredFont(forTextStyle: .headline)
+        summaryLabel.font = .appFont(forTextStyle: .headline)
         summaryLabel.adjustsFontForContentSizeCategory = true
-        countLabel.font = .preferredFont(forTextStyle: .subheadline)
+        countLabel.font = .appFont(forTextStyle: .subheadline)
         countLabel.adjustsFontForContentSizeCategory = true
         countLabel.textColor = .secondaryLabel
         countLabel.textAlignment = .right
@@ -812,9 +812,9 @@ final class StakePackRowCell: UICollectionViewListCell {
         badge.backgroundColor = PointsSymbol.tint
         badge.layer.cornerRadius = 17
         badge.layer.cornerCurve = .circular
-        titleLabel.font = .preferredFont(forTextStyle: .body)
+        titleLabel.font = .appFont(forTextStyle: .body)
         titleLabel.adjustsFontForContentSizeCategory = true
-        detailLabel.font = .preferredFont(forTextStyle: .footnote)
+        detailLabel.font = .appFont(forTextStyle: .footnote)
         detailLabel.adjustsFontForContentSizeCategory = true
         detailLabel.textColor = .secondaryLabel
 

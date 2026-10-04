@@ -224,7 +224,7 @@ final class CommentRowView: UIView {
         config?.baseForegroundColor = .secondaryLabel
         if let count {
             var title = AttributedString(SnapSubtitleView.countText(Int(count)))
-            title.font = UIFont.preferredFont(forTextStyle: .caption1)
+            title.font = UIFont.appFont(forTextStyle: .caption1)
             config?.attributedTitle = title
         } else {
             config?.attributedTitle = nil
@@ -306,7 +306,7 @@ final class CommentRowView: UIView {
         config?.baseForegroundColor = liked ? .systemPink : .secondaryLabel
         if count > 0 {
             var title = AttributedString(SnapSubtitleView.countText(count))
-            title.font = UIFont.preferredFont(forTextStyle: .caption1)
+            title.font = UIFont.appFont(forTextStyle: .caption1)
             config?.attributedTitle = title
         } else {
             config?.attributedTitle = nil
@@ -323,12 +323,12 @@ final class CommentRowView: UIView {
         // failed image is simply the disc, never a hole.
         avatarImageView.pin(to: avatarView)
 
-        headerLabel.font = .preferredFont(forTextStyle: .footnote)
+        headerLabel.font = .appFont(forTextStyle: .footnote)
         headerLabel.adjustsFontForContentSizeCategory = true
         headerLabel.textColor = .secondaryLabel
         headerLabel.numberOfLines = 1
 
-        bodyLabel.font = .preferredFont(forTextStyle: .body)
+        bodyLabel.font = .appFont(forTextStyle: .body)
         bodyLabel.adjustsFontForContentSizeCategory = true
         bodyLabel.textColor = .label
         bodyLabel.numberOfLines = 0
@@ -618,7 +618,7 @@ final class CommentThreadToggleRow: UIView {
             label.text = "Hide replies"
             chevronName = "chevron.up"
         }
-        label.font = .preferredFont(forTextStyle: .footnote)
+        label.font = .appFont(forTextStyle: .footnote)
         label.adjustsFontForContentSizeCategory = true
         label.textColor = .secondaryLabel
         let chevron = UIImageView(image: UIImage(

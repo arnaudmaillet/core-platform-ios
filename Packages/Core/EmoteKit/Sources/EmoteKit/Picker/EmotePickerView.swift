@@ -382,7 +382,7 @@ final class EmoteSectionHeader: UICollectionReusableView {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        label.font = .preferredFont(forTextStyle: .caption2).withSymbolicTraits(.traitBold)
+        label.font = .appFont(forTextStyle: .caption2).withSymbolicTraits(.traitBold)
         label.textColor = .secondaryLabel
         label.translatesAutoresizingMaskIntoConstraints = false
         addSubview(label)

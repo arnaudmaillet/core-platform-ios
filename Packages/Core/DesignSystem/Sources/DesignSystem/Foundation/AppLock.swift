@@ -108,12 +108,12 @@ public final class AppLockViewController: UIViewController {
         let title = UILabel()
         title.text = (Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
             ?? (Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String) ?? "App"
-        title.font = .preferredFont(forTextStyle: .title2).withTraits(.traitBold)
+        title.font = .appFont(forTextStyle: .title2).withTraits(.traitBold)
         title.adjustsFontForContentSizeCategory = true
 
         let subtitle = UILabel()
         subtitle.text = "Locked"
-        subtitle.font = .preferredFont(forTextStyle: .subheadline)
+        subtitle.font = .appFont(forTextStyle: .subheadline)
         subtitle.textColor = .secondaryLabel
 
         let method = authenticator.availableMethod() ?? "Passcode"

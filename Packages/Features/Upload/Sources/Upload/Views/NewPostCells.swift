@@ -743,7 +743,7 @@ private final class CoverBadgeHost: UIView {
         isUserInteractionEnabled = false
 
         label.text = text
-        label.font = .preferredFont(forTextStyle: .caption2)
+        label.font = .appFont(forTextStyle: .caption2)
         label.adjustsFontForContentSizeCategory = true
         label.textColor = .white
 
@@ -882,7 +882,7 @@ final class NewPostTitleCell: UICollectionViewListCell {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        field.font = .preferredFont(forTextStyle: .headline)
+        field.font = .appFont(forTextStyle: .headline)
         field.adjustsFontForContentSizeCategory = true
         field.placeholder = "Add a title"
         field.returnKeyType = .next
@@ -940,7 +940,7 @@ final class NewPostCaptionCell: UICollectionViewListCell {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        field.font = .preferredFont(forTextStyle: .body)
+        field.font = .appFont(forTextStyle: .body)
         field.adjustsFontForContentSizeCategory = true
         field.backgroundColor = .clear
         field.textContainerInset = .zero
@@ -955,7 +955,7 @@ final class NewPostCaptionCell: UICollectionViewListCell {
         field.delegate = self
 
         placeholder.text = "Write a caption…"
-        placeholder.font = .preferredFont(forTextStyle: .body)
+        placeholder.font = .appFont(forTextStyle: .body)
         placeholder.adjustsFontForContentSizeCategory = true
         placeholder.textColor = .placeholderText
         placeholder.numberOfLines = 0

@@ -335,7 +335,7 @@ final class CommentsInputBar: UIView {
     override init(frame: CGRect) {
         super.init(frame: frame)
 
-        textView.font = .preferredFont(forTextStyle: .body)
+        textView.font = .appFont(forTextStyle: .body)
         textView.adjustsFontForContentSizeCategory = true
         textView.backgroundColor = .clear
         textView.isScrollEnabled = false
@@ -1482,7 +1482,7 @@ final class CommentsInputBar: UIView {
         let textWidth = field.bounds.width - Metrics.emoteToggleWidth - Metrics.fieldActionSide
         guard textWidth > 0 else { return false }
         let insets = textView.textContainerInset
-        let lineHeight = textView.font?.lineHeight ?? UIFont.preferredFont(forTextStyle: .body).lineHeight
+        let lineHeight = textView.font?.lineHeight ?? UIFont.appFont(forTextStyle: .body).lineHeight
         let maxHeight = ceil(lineHeight * Metrics.maxLines) + insets.top + insets.bottom
         let fitting = textView.sizeThatFits(
             CGSize(width: textWidth, height: .greatestFiniteMagnitude)

@@ -169,7 +169,7 @@ final class SnapSubtitleView: UIView {
         countBadge.layer.opacity = 0
         countBadge.isHidden = true
         countBadge.accessibilityIdentifier = "subtitle-count-badge"
-        countLabel.font = UIFont.preferredFont(forTextStyle: .caption2).withWeight(.semibold)
+        countLabel.font = UIFont.scaledFont(forTextStyle: .caption2, weight: .semibold)
         countLabel.textColor = .white
         countLabel.textAlignment = .center
         // The wrapper never clips, so the badge can bleed past the avatar's
@@ -253,7 +253,7 @@ final class SnapSubtitleView: UIView {
         let insets = SubtitlePillLabel.textInsets
         return CGSize(
             width: UIView.noIntrinsicMetric,
-            height: ceil(UIFont.preferredFont(forTextStyle: .footnote).lineHeight * 2)
+            height: ceil(UIFont.appFont(forTextStyle: .footnote).lineHeight * 2)
                 + insets.top + insets.bottom
         )
     }
@@ -482,7 +482,7 @@ final class SnapSubtitleView: UIView {
     /// smudge, not depth).
     private static func renderedCue(_ text: String) -> NSAttributedString {
         EmoteText.attributedString(text, attributes: [
-            .font: UIFont.preferredFont(forTextStyle: .footnote).withWeight(.medium),
+            .font: UIFont.scaledFont(forTextStyle: .footnote, weight: .medium),
             .foregroundColor: UIColor.white,
         ])
     }

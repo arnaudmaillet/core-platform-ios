@@ -2360,7 +2360,7 @@ final class SnapFeedViewController: UIViewController {
     }
 
     private func configureStatusLabel() {
-        statusLabel.font = .preferredFont(forTextStyle: .body)
+        statusLabel.font = .appFont(forTextStyle: .body)
         // ⚠️ NOT WHITE. It was, for a screen that was always black; a feed
         // whose corpus resolves to nothing now shows this over the tone of the
         // card that was tapped, and white on `.secondarySystemBackground` is

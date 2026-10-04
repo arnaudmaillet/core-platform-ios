@@ -929,7 +929,10 @@ final class ProfileHeaderView: UIView {
         )
         config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
             var attributes = attributes
-            attributes.font = UIFont.preferredFont(forTextStyle: .subheadline).withWeight(.semibold)
+            // Capped (#482): the capsule shares its row with three bubbles.
+            attributes.font = UIFont.scaledSystemFont(
+                ofSize: 15, weight: .semibold, relativeTo: .subheadline, maximumPointSize: 19
+            )
             return attributes
         }
         return config
@@ -1077,13 +1080,15 @@ final class ProfileHeaderView: UIView {
         // semibold display name (the block's anchor; SF applies its tighter
         // large-size tracking automatically), subheadline secondary @handle,
         // subheadline bio below — name > handle = body copy, one weight jump.
-        nameLabel.font = UIFont.preferredFont(forTextStyle: .title3).withWeight(.semibold)
+        nameLabel.font = UIFont.scaledFont(forTextStyle: .title3, weight: .semibold)
         nameLabel.adjustsFontForContentSizeCategory = true
         // Page ink until a banner says otherwise — see `applyIdentityInk`.
         nameLabel.textColor = Self.pageNameInk
-        nameLabel.numberOfLines = 1
+        // Two lines, not one (#482): at accessibility sizes a one-line name
+        // was cut to its first few letters.
+        nameLabel.numberOfLines = 2
 
-        handleLabel.font = .preferredFont(forTextStyle: .subheadline)
+        handleLabel.font = .appFont(forTextStyle: .subheadline)
         handleLabel.adjustsFontForContentSizeCategory = true
         handleLabel.textColor = Self.pageHandleInk
         handleLabel.numberOfLines = 1
@@ -1098,7 +1103,7 @@ final class ProfileHeaderView: UIView {
         verifiedBadge.contentMode = .scaleAspectFit
         verifiedBadge.setContentHuggingPriority(.required, for: .horizontal)
 
-        bioLabel.font = .preferredFont(forTextStyle: .subheadline)
+        bioLabel.font = .appFont(forTextStyle: .subheadline)
         bioLabel.adjustsFontForContentSizeCategory = true
         bioLabel.textColor = .label
         bioLabel.numberOfLines = 0
@@ -1289,7 +1294,7 @@ final class ProfileHeaderView: UIView {
         websiteConfig.contentInsets = .zero
         websiteConfig.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
             var attributes = attributes
-            attributes.font = UIFont.preferredFont(forTextStyle: .subheadline).withWeight(.semibold)
+            attributes.font = UIFont.scaledFont(forTextStyle: .subheadline, weight: .semibold)
             return attributes
         }
         websiteButton.configuration = websiteConfig

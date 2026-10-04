@@ -103,7 +103,7 @@ final class SnapCommentSortButton: UIButton {
             .map { option -> CGFloat in
                 var probe = configuration
                 var title = AttributedString(option.rawValue)
-                title.font = UIFont.preferredFont(forTextStyle: .footnote).withWeight(.semibold)
+                title.font = UIFont.scaledFont(forTextStyle: .footnote, weight: .semibold)
                 probe?.attributedTitle = title
                 let holder = UIButton(configuration: probe ?? .plain())
                 return holder.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
@@ -145,7 +145,7 @@ final class SnapCommentSortButton: UIButton {
             config?.attributedTitle = nil
         } else {
             var title = AttributedString(new.rawValue)
-            title.font = UIFont.preferredFont(forTextStyle: .footnote).withWeight(.semibold)
+            title.font = UIFont.scaledFont(forTextStyle: .footnote, weight: .semibold)
             config?.attributedTitle = title
         }
         configuration = config

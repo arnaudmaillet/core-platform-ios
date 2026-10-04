@@ -469,7 +469,7 @@ final class AppPreferencesViewController: UIViewController {
         if let title {
             let caption = UILabel()
             caption.text = title
-            caption.font = .preferredFont(forTextStyle: .body)
+            caption.font = .appFont(forTextStyle: .body)
             caption.textColor = control.isEnabled ? .label : .secondaryLabel
             arranged.insert(caption, at: 0)
         }

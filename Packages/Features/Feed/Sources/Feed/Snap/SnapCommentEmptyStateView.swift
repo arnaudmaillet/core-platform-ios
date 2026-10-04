@@ -241,7 +241,7 @@ final class SnapCommentEmptyStateView: UIView {
     /// this row speaks for the comment system rather than for a commenter.
     private func renderPrompt() {
         accessibilityLabel = Self.promptText
-        let font = UIFont.preferredFont(forTextStyle: .footnote).withWeight(.medium)
+        let font = UIFont.scaledFont(forTextStyle: .footnote, weight: .medium)
         label.font = font
         label.textColor = .white
         label.text = Self.promptText

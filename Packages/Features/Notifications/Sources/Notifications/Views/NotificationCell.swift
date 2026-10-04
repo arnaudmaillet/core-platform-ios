@@ -68,7 +68,7 @@ final class NotificationCell: UICollectionViewListCell {
     /// "**Ava Moreau and 3 others** liked your post. 2h" — the people bold,
     /// the time quieter, one paragraph so it wraps as a sentence.
     static func sentence(for model: NotificationDisplayModel) -> NSAttributedString {
-        let body = UIFont.preferredFont(forTextStyle: .subheadline)
+        let body = UIFont.appFont(forTextStyle: .subheadline)
         let semibold = UIFont(
             descriptor: body.fontDescriptor.addingAttributes([
                 .traits: [UIFontDescriptor.TraitKey.weight: UIFont.Weight.semibold]
@@ -124,7 +124,7 @@ final class NotificationCell: UICollectionViewListCell {
     private func build() {
         sentenceLabel.numberOfLines = 3
         sentenceLabel.adjustsFontForContentSizeCategory = true
-        excerptLabel.font = .preferredFont(forTextStyle: .subheadline)
+        excerptLabel.font = .appFont(forTextStyle: .subheadline)
         excerptLabel.adjustsFontForContentSizeCategory = true
         excerptLabel.textColor = .secondaryLabel
         excerptLabel.numberOfLines = 2

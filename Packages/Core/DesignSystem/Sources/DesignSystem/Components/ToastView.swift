@@ -114,7 +114,7 @@ public final class ToastView: UIView {
 
         let label = UILabel()
         label.text = message
-        label.font = .preferredFont(forTextStyle: .subheadline)
+        label.font = .appFont(forTextStyle: .subheadline)
         label.adjustsFontForContentSizeCategory = true
         // Adaptive colors over an adaptive material: `UIGlassEffect` resolves
         // its own luminance against whatever it sits over, so the label tracks

@@ -555,10 +555,10 @@ final class PostDetailViewController: UIViewController {
         avatarImageView.clipsToBounds = true
         avatarImageView.pin(to: avatarView) // overlays the monogram once loaded
 
-        nameLabel.font = .preferredFont(forTextStyle: .headline)
+        nameLabel.font = .appFont(forTextStyle: .headline)
         nameLabel.adjustsFontForContentSizeCategory = true
         nameLabel.textColor = .label
-        handleLabel.font = .preferredFont(forTextStyle: .subheadline)
+        handleLabel.font = .appFont(forTextStyle: .subheadline)
         handleLabel.adjustsFontForContentSizeCategory = true
         handleLabel.textColor = .secondaryLabel
 
@@ -572,7 +572,7 @@ final class PostDetailViewController: UIViewController {
         authorRow.isUserInteractionEnabled = true
         authorRow.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(authorTapped)))
 
-        captionLabel.font = .preferredFont(forTextStyle: .body)
+        captionLabel.font = .appFont(forTextStyle: .body)
         captionLabel.adjustsFontForContentSizeCategory = true
         captionLabel.textColor = .label
         captionLabel.numberOfLines = 0
@@ -582,7 +582,7 @@ final class PostDetailViewController: UIViewController {
         mediaView.backgroundColor = .tertiarySystemFill
         mediaView.contentMode = .scaleAspectFill
 
-        timestampLabel.font = .preferredFont(forTextStyle: .footnote)
+        timestampLabel.font = .appFont(forTextStyle: .footnote)
         timestampLabel.adjustsFontForContentSizeCategory = true
         timestampLabel.textColor = .secondaryLabel
 
@@ -594,7 +594,7 @@ final class PostDetailViewController: UIViewController {
             guard let self else { return }
             MemberGates.perform(.like, from: self) { [weak self] in self?.viewModel.toggleLike() }
         }, for: .primaryActionTriggered)
-        likeCountLabel.font = .preferredFont(forTextStyle: .subheadline)
+        likeCountLabel.font = .appFont(forTextStyle: .subheadline)
         likeCountLabel.textColor = .secondaryLabel
         let likeRow = UIStackView(arrangedSubviews: [likeButton, likeCountLabel, UIView()])
         likeRow.axis = .horizontal
@@ -602,7 +602,7 @@ final class PostDetailViewController: UIViewController {
         likeRow.spacing = Spacing.xs
 
         commentsHeaderLabel.text = "Comments"
-        commentsHeaderLabel.font = .preferredFont(forTextStyle: .headline)
+        commentsHeaderLabel.font = .appFont(forTextStyle: .headline)
         commentsHeaderLabel.adjustsFontForContentSizeCategory = true
         commentsHeaderLabel.textColor = .label
         commentsHeaderLabel.isHidden = true
@@ -636,7 +636,7 @@ final class PostDetailViewController: UIViewController {
             spinner.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
         }
 
-        statusLabel.font = .preferredFont(forTextStyle: .body)
+        statusLabel.font = .appFont(forTextStyle: .body)
         statusLabel.textColor = .secondaryLabel
         statusLabel.textAlignment = .center
         statusLabel.numberOfLines = 0
@@ -1539,7 +1539,7 @@ final class PostDetailViewController: UIViewController {
             cell.contentView.subviews.forEach { $0.removeFromSuperview() }
             let empty = UILabel()
             empty.text = "No comments yet. Be the first."
-            empty.font = .preferredFont(forTextStyle: .subheadline)
+            empty.font = .appFont(forTextStyle: .subheadline)
             empty.adjustsFontForContentSizeCategory = true
             empty.textColor = .secondaryLabel
             empty.translatesAutoresizingMaskIntoConstraints = false

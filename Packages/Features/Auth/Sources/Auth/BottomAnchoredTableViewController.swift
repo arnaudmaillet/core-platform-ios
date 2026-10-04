@@ -98,7 +98,7 @@ class BottomAnchoredTableViewController: UITableViewController {
         content.text = title
         content.textProperties.alignment = .center
         content.textProperties.color = .tintColor
-        content.textProperties.font = .preferredFont(forTextStyle: .subheadline)
+        content.textProperties.font = .appFont(forTextStyle: .subheadline)
         cell.contentConfiguration = content
         cell.accessibilityTraits = .button
         return cell
@@ -122,7 +122,7 @@ class BottomAnchoredTableViewController: UITableViewController {
 
         let subtitleLabel = UILabel()
         subtitleLabel.text = subtitle
-        subtitleLabel.font = .preferredFont(forTextStyle: .subheadline)
+        subtitleLabel.font = .appFont(forTextStyle: .subheadline)
         subtitleLabel.adjustsFontForContentSizeCategory = true
         subtitleLabel.textColor = .secondaryLabel
         subtitleLabel.textAlignment = .center
@@ -153,7 +153,7 @@ class BottomAnchoredTableViewController: UITableViewController {
     ) -> UITableViewHeaderFooterView {
         let label = UILabel()
         label.text = text
-        label.font = .preferredFont(forTextStyle: textStyle)
+        label.font = .appFont(forTextStyle: textStyle)
         label.adjustsFontForContentSizeCategory = true
         label.textColor = .secondaryLabel
         label.textAlignment = .center
