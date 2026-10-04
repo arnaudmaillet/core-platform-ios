@@ -152,7 +152,8 @@ final class RevealDismissInteractionController: NSObject,
         container.insertSubview(dim, belowSubview: fromView)
 
         let (host, mask) = RevealStage.makeHost(
-            around: fromView, in: container, pageFrame: pageFrame
+            around: fromView, in: container, pageFrame: pageFrame,
+            cornerCurve: geometry.sourceCornerCurve
         )
         let open = RevealStage.open(container: container)
         // See `RevealGeometry.makeDismissStandIn`: what a dismissal carries

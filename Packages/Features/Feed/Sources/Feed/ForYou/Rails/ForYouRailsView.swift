@@ -728,6 +728,13 @@ final class ForYouRailsView: UIView {
         return ForYouStoryCell.Metrics.faceDiameter(discSide: Metrics.storySize(forWidth: width).width)
     }
 
+    /// The face's corner as the row draws it — what a flight out of a face
+    /// leaves with and lands on. A face is NOT a disc
+    /// (`ForYouStoryCell.Metrics.faceShape`), so this is not half the side.
+    var storyFaceCornerRadius: CGFloat {
+        ForYouStoryCell.Metrics.faceShape.cornerRadius(side: storyFaceDiameter)
+    }
+
     func storyFace(for id: ProfileID) -> UIImage? {
         storyCell(for: id)?.renderedFace()
     }
@@ -1042,7 +1049,7 @@ final class ForYouRailsView: UIView {
         parameters.backgroundColor = .clear
         if let story = cell as? ForYouStoryCell {
             let face = story.faceView
-            parameters.visiblePath = UIBezierPath(ovalIn: face.bounds)
+            parameters.visiblePath = ForYouStoryCell.Metrics.faceShape.path(in: face.bounds)
             return UITargetedPreview(view: face, parameters: parameters)
         }
         let card = cell.contentView
