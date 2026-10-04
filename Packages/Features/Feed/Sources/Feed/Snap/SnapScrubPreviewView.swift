@@ -63,6 +63,7 @@ final class SnapScrubPreviewView: UIView {
         picture.clipsToBounds = true
         picture.backgroundColor = UIColor.white.withAlphaComponent(0.08)
 
+        // Fixed size (#482): a stamp on the preview frame, sized with it.
         time.font = .monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
         time.textColor = .white
         time.textAlignment = .center

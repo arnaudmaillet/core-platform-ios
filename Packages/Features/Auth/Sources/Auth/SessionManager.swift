@@ -89,9 +89,34 @@ public actor SessionManager {
         broadcast(.unauthenticated)
 
         // Best-effort server-side revocation; local sign-out already happened.
+        //
+        // ⚠️ WITH THE SESSION'S OWN BEARER (#486). `authClient` is the
+        // unauthenticated client (it must be, for Login and Refresh), and the
+        // edge exposes only those two publicly: a bare `Logout` was refused,
+        // and the session stayed live on the server until it expired. The
+        // token is the one being ended — refreshed first if it already
+        // expired, which the rotation contract allows since the session ends
+        // here anyway.
+        guard let accessToken = await revocationToken(for: session) else { return }
         var request = Auth_V1_LogoutRequest()
         request.sessionID = session.sessionID.rawValue
-        _ = await authClient.logout(request: request, headers: [:])
+        _ = await authClient.logout(request: request, headers: ["Authorization": ["Bearer \(accessToken)"]])
+    }
+
+    /// A token the server will accept for `ending`: its access token while
+    /// that is still good, else a refreshed one. Nil when the server no
+    /// longer knows the session — nothing is left to revoke.
+    private func revocationToken(for ending: AuthSession) async -> String? {
+        if ending.accessTokenExpiry.timeIntervalSince(now()) > configuration.expiryLeeway {
+            return ending.accessToken
+        }
+        var request = Auth_V1_RefreshRequest()
+        request.refreshToken = ending.refreshToken
+        request.device = deviceContext()
+        guard case .success(let body) = await authClient.refresh(request: request, headers: [:]).result else {
+            return nil
+        }
+        return body.tokens.accessToken
     }
 
     // MARK: - Token vending (AuthTokenProviding)
@@ -136,6 +161,10 @@ public actor SessionManager {
 
         do {
             let refreshed = try await task.value
+            // A logout (or another sign-in) landed while the refresh was in
+            // flight: its outcome belongs to a session that is over, and
+            // adopting it would sign the viewer back in.
+            guard session?.sessionID == current.sessionID else { return refreshed }
             session = refreshed
             try? store.save(refreshed)
             return refreshed

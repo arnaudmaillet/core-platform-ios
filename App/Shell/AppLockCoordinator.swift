@@ -66,6 +66,7 @@ final class AppLockCoordinator {
         let window = UIWindow(windowScene: scene)
         window.windowLevel = .alert + 1
         window.overrideUserInterfaceStyle = mainWindow.overrideUserInterfaceStyle
+        CareModePreference.apply(to: [window])
         window.rootViewController = AppLockViewController(authenticator: authenticator) { [weak self] in
             self?.hideLock()
         }

@@ -10,13 +10,13 @@ import UIKit
 /// the profile.
 final class AppPreferencesViewController: UIViewController {
     enum Section: Int, CaseIterable {
-        case playback, sounds, appearance, motion, band, subtitles, commentsScreen, muted, language, storage
+        case playback, sounds, appearance, care, motion, band, subtitles, commentsScreen, muted, language, storage
     }
 
     private enum Item: Hashable {
         case autoplay, startsWithSound, dataSaver
         case interfaceSounds, haptics
-        case appearance, reduceMotion
+        case appearance, careMode, reduceMotion
         case bandSwitch, opacity, bandBackground, speed
         case mutedWords, mutedAccounts
         case subtitlesSwitch, subtitleBackground
@@ -29,7 +29,7 @@ final class AppPreferencesViewController: UIViewController {
     static func sections(for page: SettingsSection) -> [Section] {
         switch page {
         case .playback: [.playback, .sounds]
-        case .display: [.appearance, .motion]
+        case .display: [.appearance, .care, .motion]
         case .mediaComments: [.band, .subtitles, .commentsScreen, .muted]
         case .language: [.language]
         case .storage: [.storage]
@@ -146,6 +146,7 @@ final class AppPreferencesViewController: UIViewController {
     private static func header(_ section: Section) -> String {
         switch section {
         case .appearance: "Appearance"
+        case .care: "Care Mode"
         case .motion: "Motion"
         case .sounds: "Sounds and Haptics"
         case .language: "Language"
@@ -161,6 +162,7 @@ final class AppPreferencesViewController: UIViewController {
     static func footer(_ section: Section) -> String {
         switch section {
         case .appearance: "System follows the iPhone's Light and Dark setting."
+        case .care: "Larger, bolder text everywhere in the app, and the reaction band switched off for a calmer screen. If your iPhone's own text size is larger, it is kept."
         case .sounds: "Interface sounds are the small pops and clicks of the app's own controls; a video's sound is set above. A phone on silent stays silent, and iOS's System Haptics setting still applies."
         case .motion:
             MotionPreference.appReducesMotion
@@ -241,6 +243,7 @@ final class AppPreferencesViewController: UIViewController {
         case .playback: [.autoplay, .startsWithSound, .dataSaver]
         case .sounds: [.interfaceSounds, .haptics]
         case .appearance: [.appearance]
+        case .care: [.careMode]
         case .motion: [.reduceMotion]
         case .band: [.bandSwitch, .opacity, .bandBackground, .speed]
         case .muted: [.mutedWords, .mutedAccounts]
@@ -282,6 +285,12 @@ final class AppPreferencesViewController: UIViewController {
             cell.contentConfiguration = Self.label("Haptics", symbol: "iphone.radiowaves.left.and.right")
             cell.accessories = [switchAccessory(isOn: HapticPreference.isOn) { isOn in
                 HapticPreference.isOn = isOn
+            }]
+        case .careMode:
+            cell.contentConfiguration = Self.label("Care Mode", symbol: "textformat.size")
+            cell.accessories = [switchAccessory(isOn: CareModePreference.isOn) { [weak self] isOn in
+                guard let self else { return }
+                Self.applyCareMode(isOn, store: store)
             }]
         case .reduceMotion:
             cell.contentConfiguration = Self.label("Reduce Motion", symbol: "figure.walk.motion")
@@ -385,6 +394,23 @@ final class AppPreferencesViewController: UIViewController {
     }
 
     private static let controlTag = 0x5E77
+
+    static let careModeBandWasOnKey = "careMode.reactionBandWasOn"
+
+    /// Care Mode on: larger, bolder text, and the reaction band off for a
+    /// calmer screen. Care Mode off: the band comes back if Care Mode is what
+    /// switched it off — a band the viewer had already turned off stays off.
+    static func applyCareMode(_ isOn: Bool, store: MediaCommentPreferencesStore, defaults: UserDefaults = .standard) {
+        if isOn {
+            let bandWasOn = store.preferences.showsReactionBand
+            defaults.set(bandWasOn, forKey: careModeBandWasOnKey)
+            store.update { $0.showsReactionBand = false }
+        } else if defaults.bool(forKey: careModeBandWasOnKey) {
+            store.update { $0.showsReactionBand = true }
+            defaults.removeObject(forKey: careModeBandWasOnKey)
+        }
+        CareModePreference.set(isOn)
+    }
 
     /// The language the app is showing, in that language ("English").
     static func currentLanguageName(bundle: Bundle = .main) -> String {

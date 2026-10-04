@@ -77,6 +77,7 @@ final class MediaTransitionDurationRowView: UIView {
         chips = MediaTimelining.transitionLengths.map { seconds in
             let chip = UIButton(type: .custom)
             chip.setTitle(MediaTimelining.transitionLengthLabel(seconds), for: .normal)
+            // Fixed size (#482): the label fills a fixed circle.
             chip.titleLabel?.font = .monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
             chip.accessibilityLabel = "Transition lasts \(Self.spoken(seconds))"
             chip.layer.cornerRadius = Metrics.chip / 2
