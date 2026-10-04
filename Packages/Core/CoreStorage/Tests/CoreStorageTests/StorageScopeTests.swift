@@ -76,6 +76,17 @@ struct StorageScopeTests {
         #expect(wallet.boostTotal(forTarget: "post-1") == 0, "no stakes shown on a guest's posts")
     }
 
+    /// A guest's like reaches the member gate: judged against an empty
+    /// wallet, every like control would grey out and never ask.
+    @Test func aGuestsStakeIsNeverUnaffordable() {
+        let scope = StorageScope(owner: .guest)
+        let wallet = WalletStore(defaults: defaults, scope: scope)
+        #expect(wallet.balance == 0)
+        #expect(wallet.stakeableBalance >= WalletStore.Policy.perTargetBoostCap)
+        scope.owner = .member(account: "A", profile: nil)
+        #expect(wallet.stakeableBalance == wallet.balance, "a member is judged against their wallet")
+    }
+
     @Test func eachAccountGetsItsOwnWallet() {
         let scope = StorageScope(owner: .guest)
         let wallet = WalletStore(defaults: defaults, scope: scope)

@@ -1446,7 +1446,7 @@ final class SnapFeedViewController: UIViewController {
                 if let wallet = self.wallet {
                     cell.setBoostTotal(wallet.boostTotal(forTarget: id.rawValue))
                     cell.setBoostContext(
-                        balance: wallet.balance,
+                        balance: wallet.stakeableBalance,
                         undoable: self.sessionBoostID == id ? self.sessionBoostAmount : 0,
                         stakeShots: wallet.stakeShots
                     )
@@ -2655,7 +2655,7 @@ final class SnapFeedViewController: UIViewController {
     /// and updates the menu it will build on its next long-press.
     private func refreshVisibleBoostControls() {
         guard let wallet else { return }
-        let balance = wallet.balance
+        let balance = wallet.stakeableBalance
         let shots = wallet.stakeShots
         for indexPath in collectionView.indexPathsForVisibleItems {
             guard orderedIDs.indices.contains(indexPath.item),

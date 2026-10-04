@@ -391,6 +391,15 @@ public final class WalletStore: @unchecked Sendable {
         lock.withLock { defaults.integer(forKey: k(Key.balance)) }
     }
 
+    /// What a stake control judges affordability against: the balance — and,
+    /// for a guest, no limit. A guest holds no wallet (their likes are the
+    /// welcome gift's), and their tap is the member gate's to answer: judged
+    /// against an empty wallet, every like control greyed out and the
+    /// sign-up sheet a like is meant to open never could.
+    public var stakeableBalance: Int {
+        scope.holdsWallet ? balance : .max
+    }
+
     /// The wallet as of `now()` — claim availability, countdown target, next
     /// payout, and the streak the UI should show.
     public func snapshot() -> WalletSnapshot {
