@@ -85,7 +85,7 @@ final class AccountSettingsViewController: UIViewController {
         collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         // No effect under the bar: the rows run up under the pills untouched — see
         // `prefersClearTopEdge`.
-        collectionView.prefersClearTopEdge()
+        collectionView.prefersSoftTopEdge()
         collectionView.delegate = self
         view.addSubview(collectionView)
     }

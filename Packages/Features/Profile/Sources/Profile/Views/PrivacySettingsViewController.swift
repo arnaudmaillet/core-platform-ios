@@ -82,7 +82,7 @@ final class PrivacySettingsViewController: UIViewController {
         collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: layout)
         // No effect under the bar: the rows run up under the pills untouched — see
         // `prefersClearTopEdge`.
-        collectionView.prefersClearTopEdge()
+        collectionView.prefersSoftTopEdge()
         collectionView.pin(to: view)
 
         let cellRegistration = UICollectionView.CellRegistration<
