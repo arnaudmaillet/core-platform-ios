@@ -80,8 +80,8 @@ final class PrivacySettingsViewController: UIViewController {
         let layout = UICollectionViewCompositionalLayout.list(using: configuration)
 
         collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: layout)
-        // No effect under the bar: the rows run up under the pills untouched — see
-        // `prefersClearTopEdge`.
+        // UIKit's soft blur under the bar, like every Settings screen — see
+        // `prefersSoftTopEdge`.
         collectionView.prefersSoftTopEdge()
         collectionView.pin(to: view)
 
