@@ -1204,6 +1204,8 @@ final class CommentsInputBar: UIView {
         boostSpentTotal = total
         if total > 0 {
             var title = AttributedString(total.formattedCompact())
+            // Fixed size (#482): the count replaces the glyph inside the
+            // 36 pt circle, which holds one or the other at any text size.
             title.font = .monospacedDigitSystemFont(ofSize: 13, weight: .bold)
             title.foregroundColor = PointsSymbol.tint
             boostButton.configuration?.attributedTitle = title
@@ -1286,7 +1288,9 @@ final class CommentsInputBar: UIView {
         guard boostButton.bounds.width > 0 else { return }
         let label = UILabel()
         label.text = "−\(amount)"
-        label.font = .monospacedDigitSystemFont(ofSize: 17, weight: .heavy)
+        label.font = .scaledMonospacedDigitSystemFont(
+            ofSize: 17, weight: .heavy, relativeTo: .headline, maximumPointSize: 24
+        )
         label.textColor = UIColor.white.withAlphaComponent(0.9)
         label.layer.shadowColor = UIColor.black.cgColor
         label.layer.shadowOpacity = 0.5
@@ -1322,7 +1326,9 @@ final class CommentsInputBar: UIView {
         guard boostButton.bounds.width > 0 else { return }
         let label = UILabel()
         label.text = "+\(amount)"
-        label.font = .monospacedDigitSystemFont(ofSize: 17, weight: .heavy)
+        label.font = .scaledMonospacedDigitSystemFont(
+            ofSize: 17, weight: .heavy, relativeTo: .headline, maximumPointSize: 24
+        )
         label.textColor = PointsSymbol.tint
         label.layer.shadowColor = UIColor.black.cgColor
         label.layer.shadowOpacity = 0.5

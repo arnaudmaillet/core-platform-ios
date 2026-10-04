@@ -1516,6 +1516,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             // so the boolean legs and the finger-driven ones can never
             // diverge. (Near-inert on a text page: its media surfaces are
             // hidden and the readability wash is skipped entirely.)
+            SnapCommentsLayout.refreshBackdrop()
             setCommentsEngagementProgress(0)
             // The band materializes on the same beat and the same supported
             // path (the `effect` property — alpha on an effect view is not,

@@ -10,16 +10,17 @@ import UIKit
 /// the profile.
 final class AppPreferencesViewController: UIViewController {
     enum Section: Int, CaseIterable {
-        case playback, sounds, appearance, motion, band, muted, subtitles, language, storage
+        case playback, sounds, appearance, motion, band, subtitles, commentsScreen, muted, language, storage
     }
 
     private enum Item: Hashable {
         case autoplay, startsWithSound, dataSaver
         case interfaceSounds, haptics
         case appearance, reduceMotion
-        case bandSwitch, opacity, speed
+        case bandSwitch, opacity, bandBackground, speed
         case mutedWords, mutedAccounts
-        case subtitlesSwitch
+        case subtitlesSwitch, subtitleBackground
+        case commentsBackdrop
         case appLanguage
         case cacheSize, clearCache
     }
@@ -29,7 +30,7 @@ final class AppPreferencesViewController: UIViewController {
         switch page {
         case .playback: [.playback, .sounds]
         case .display: [.appearance, .motion]
-        case .mediaComments: [.band, .muted, .subtitles]
+        case .mediaComments: [.band, .subtitles, .commentsScreen, .muted]
         case .language: [.language]
         case .storage: [.storage]
         default: []
@@ -152,6 +153,7 @@ final class AppPreferencesViewController: UIViewController {
         case .band: "Reaction Band"
         case .muted: "Muted on Media"
         case .subtitles: "Subtitles"
+        case .commentsScreen: "Comments Screen"
         case .storage: "Storage"
         }
     }
@@ -167,9 +169,10 @@ final class AppPreferencesViewController: UIViewController {
                     + (UIAccessibility.isReduceMotionEnabled ? "on" : "off") + ")."
         case .language: "The app is in English for now. When more languages arrive, you'll choose yours here and in iOS Settings."
         case .playback: "A video that doesn't start on its own shows its first frame with a play mark; tap it to play. Data Saver lowers stream quality and stops loading upcoming videos ahead while on cellular."
-        case .band: "The short reactions that scroll over videos and photos."
+        case .band: "The short reactions that scroll over videos and photos. Background darkens the strip behind them; it darkens more while you scrub through them."
         case .muted: "Comments with these words, or from these accounts, never appear in the reaction band or the subtitles. They still show in the comments."
-        case .subtitles: "Comments shown as captions above the reaction band."
+        case .subtitles: "Comments shown as captions above the reaction band. Background is the shade behind each caption."
+        case .commentsScreen: "How dark a video or photo gets behind its comments when you open them. Darker reads more easily; lighter keeps more of the post."
         case .storage: "Downloaded videos and animations, kept so they open instantly. Clearing them frees space; nothing you made is removed."
         }
     }
@@ -239,9 +242,10 @@ final class AppPreferencesViewController: UIViewController {
         case .sounds: [.interfaceSounds, .haptics]
         case .appearance: [.appearance]
         case .motion: [.reduceMotion]
-        case .band: [.bandSwitch, .opacity, .speed]
+        case .band: [.bandSwitch, .opacity, .bandBackground, .speed]
         case .muted: [.mutedWords, .mutedAccounts]
-        case .subtitles: [.subtitlesSwitch]
+        case .subtitles: [.subtitlesSwitch, .subtitleBackground]
+        case .commentsScreen: [.commentsBackdrop]
         case .language: [.appLanguage]
         case .storage: [.cacheSize, .clearCache]
         }
@@ -263,15 +267,12 @@ final class AppPreferencesViewController: UIViewController {
         switch item {
         case .appearance:
             cell.contentConfiguration = nil
-            let options = AppearancePreference.allCases
-            let control = UISegmentedControl(items: options.map(Self.appearanceTitle))
-            control.selectedSegmentIndex = options.firstIndex(of: AppearancePreference.current) ?? 0
-            control.accessibilityLabel = "Appearance"
-            control.addAction(UIAction { action in
-                guard let control = action.sender as? UISegmentedControl else { return }
-                AppearancePreference.set(options[control.selectedSegmentIndex])
+            let picker = AppearancePickerView(selection: AppearancePreference.current)
+            picker.addAction(UIAction { action in
+                guard let picker = action.sender as? AppearancePickerView else { return }
+                AppearancePreference.set(picker.selection)
             }, for: .valueChanged)
-            install(control, in: cell, title: nil)
+            install(picker, in: cell, title: nil)
         case .interfaceSounds:
             cell.contentConfiguration = Self.label("Interface Sounds", symbol: "speaker.wave.1")
             cell.accessories = [switchAccessory(isOn: InterfaceSoundPreference.isOn) { isOn in
@@ -326,23 +327,31 @@ final class AppPreferencesViewController: UIViewController {
             cell.contentConfiguration = Self.label("Show Reaction Band", symbol: "text.bubble")
             cell.accessories = [switchAccessory(isOn: preferences.showsReactionBand) { [weak self] isOn in
                 self?.store.update { $0.showsReactionBand = isOn }
-                self?.reconfigure([.opacity, .speed])
+                self?.reconfigure([.opacity, .bandBackground, .speed])
             }]
         case .opacity:
-            cell.contentConfiguration = nil
-            let slider = UISlider()
-            slider.minimumValue = Float(MediaCommentPreferences.opacityRange.lowerBound)
-            slider.maximumValue = Float(MediaCommentPreferences.opacityRange.upperBound)
-            slider.value = Float(preferences.bandOpacity)
-            slider.minimumValueImage = UIImage(systemName: "circle.dotted")
-            slider.maximumValueImage = UIImage(systemName: "circle.fill")
-            slider.isEnabled = preferences.showsReactionBand
-            slider.accessibilityLabel = "Opacity"
-            slider.addAction(UIAction { [weak self] action in
-                guard let slider = action.sender as? UISlider else { return }
-                self?.store.update { $0.bandOpacity = Double(slider.value) }
-            }, for: .valueChanged)
-            install(slider, in: cell, title: "Opacity")
+            installSlider(
+                in: cell, title: "Opacity", range: MediaCommentPreferences.opacityRange, value: preferences.bandOpacity,
+                isEnabled: preferences.showsReactionBand, symbols: ("circle.dotted", "circle.fill")
+            ) { $0.bandOpacity = $1 }
+        case .bandBackground:
+            installSlider(
+                in: cell, title: "Background", range: MediaCommentPreferences.bandBackgroundRange,
+                value: preferences.bandBackgroundOpacity, isEnabled: preferences.showsReactionBand,
+                symbols: ("checkerboard.rectangle", "rectangle.fill")
+            ) { $0.bandBackgroundOpacity = $1 }
+        case .subtitleBackground:
+            installSlider(
+                in: cell, title: "Background", range: MediaCommentPreferences.subtitleBackgroundRange,
+                value: preferences.subtitleBackgroundOpacity, isEnabled: preferences.showsSubtitles,
+                symbols: ("checkerboard.rectangle", "rectangle.fill")
+            ) { $0.subtitleBackgroundOpacity = $1 }
+        case .commentsBackdrop:
+            installSlider(
+                in: cell, title: "Background", range: MediaCommentPreferences.commentsBackdropRange,
+                value: preferences.commentsBackdropOpacity, isEnabled: true,
+                symbols: ("photo", "rectangle.fill")
+            ) { $0.commentsBackdropOpacity = $1 }
         case .speed:
             cell.contentConfiguration = nil
             let speeds = MediaCommentPreferences.BandSpeed.allCases
@@ -370,6 +379,7 @@ final class AppPreferencesViewController: UIViewController {
             cell.contentConfiguration = Self.label("Show Subtitles", symbol: "captions.bubble")
             cell.accessories = [switchAccessory(isOn: preferences.showsSubtitles) { [weak self] isOn in
                 self?.store.update { $0.showsSubtitles = isOn }
+                self?.reconfigure([.subtitleBackground])
             }]
         }
     }
@@ -398,6 +408,32 @@ final class AppPreferencesViewController: UIViewController {
             onChange(toggle.isOn)
         }, for: .valueChanged)
         return .customView(configuration: .init(customView: toggle, placement: .trailing(displayed: .always)))
+    }
+
+    /// A captioned slider writing one opacity of the comment preferences.
+    private func installSlider(
+        in cell: UICollectionViewListCell,
+        title: String,
+        range: ClosedRange<Double>,
+        value: Double,
+        isEnabled: Bool,
+        symbols: (min: String, max: String),
+        write: @escaping (inout MediaCommentPreferences, Double) -> Void
+    ) {
+        cell.contentConfiguration = nil
+        let slider = UISlider()
+        slider.minimumValue = Float(range.lowerBound)
+        slider.maximumValue = Float(range.upperBound)
+        slider.value = Float(value)
+        slider.minimumValueImage = UIImage(systemName: symbols.min)
+        slider.maximumValueImage = UIImage(systemName: symbols.max)
+        slider.isEnabled = isEnabled
+        slider.accessibilityLabel = title
+        slider.addAction(UIAction { [weak self] action in
+            guard let slider = action.sender as? UISlider else { return }
+            self?.store.update { write(&$0, Double(slider.value)) }
+        }, for: .valueChanged)
+        install(slider, in: cell, title: title)
     }
 
     /// A caption over a full-width control, inside the row's margins.

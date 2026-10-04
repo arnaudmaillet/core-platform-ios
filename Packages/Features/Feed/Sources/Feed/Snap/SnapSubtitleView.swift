@@ -1,3 +1,4 @@
+import CoreStorage
 import DesignSystem
 import EmoteKit
 import MediaCore
@@ -511,15 +512,37 @@ final class SubtitlePillLabel: EmoteLabel {
     /// geometry rather than the natural size.
     private static let unboundedBox = CGRect(x: 0, y: 0, width: 100_000, height: 100_000)
 
+    /// The viewer's pill fill (Settings → App and Device → Comments on
+    /// Media); 0.45 unless they changed it.
+    private(set) static var fillOpacity: CGFloat = 0.45
+
+    /// Reads the fill from the device preferences.
+    static func refreshFill(from store: MediaCommentPreferencesStore = .standard) {
+        fillOpacity = CGFloat(store.preferences.subtitleBackgroundOpacity)
+    }
+
     override init(frame: CGRect) {
         super.init(frame: frame)
-        layer.backgroundColor = UIColor.black.withAlphaComponent(0.45).cgColor
+        applyFill()
         layer.cornerRadius = Self.blockCornerRadius
         layer.cornerCurve = .continuous
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// A pill re-reads the fill each time it joins a window — coming back
+    /// from Settings puts the feed back on screen.
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        guard window != nil else { return }
+        Self.refreshFill()
+        applyFill()
+    }
+
+    private func applyFill() {
+        layer.backgroundColor = UIColor.black.withAlphaComponent(Self.fillOpacity).cgColor
+    }
 
     /// A pill is never narrower than it is tall. A one-grapheme cue ("W")
     /// otherwise renders as a sliver beside the 28pt avatar; at the floor it

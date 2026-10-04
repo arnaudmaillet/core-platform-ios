@@ -105,7 +105,8 @@ final class MediaSoundtrackToolsView: UIView {
         super.init(frame: .zero)
         backgroundColor = .clear
 
-        title.font = .systemFont(ofSize: 13, weight: .semibold)
+        title.font = .scaledSystemFont(ofSize: 13, weight: .semibold, relativeTo: .footnote, maximumPointSize: 17)
+        title.adjustsFontForContentSizeCategory = true
         title.textColor = .secondaryLabel
         title.textAlignment = .right
         title.lineBreakMode = .byTruncatingTail
@@ -150,7 +151,8 @@ final class MediaSoundtrackToolsView: UIView {
         }
         musicLevel.widthAnchor.constraint(equalTo: filmLevel.widthAnchor).isActive = true
 
-        message.font = .systemFont(ofSize: 13)
+        message.font = .scaledSystemFont(ofSize: 13, relativeTo: .footnote, maximumPointSize: 20)
+        message.adjustsFontForContentSizeCategory = true
         message.textColor = .secondaryLabel
         message.textAlignment = .center
         message.numberOfLines = 2
@@ -278,7 +280,9 @@ final class MediaSoundtrackToolsView: UIView {
         )
         configuration.imagePadding = Spacing.xs
         var attributes = AttributeContainer()
-        attributes.font = UIFont.systemFont(ofSize: 13, weight: .semibold)
+        attributes.font = UIFont.scaledSystemFont(
+            ofSize: 13, weight: .semibold, relativeTo: .footnote, maximumPointSize: 17
+        )
         configuration.attributedTitle = AttributedString(title, attributes: attributes)
         configuration.baseForegroundColor = .label
         configuration.background.backgroundColor = UIColor.label.withAlphaComponent(0.12)

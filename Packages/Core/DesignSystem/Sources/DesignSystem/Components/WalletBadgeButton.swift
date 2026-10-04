@@ -100,7 +100,11 @@ public final class WalletBadgeButton: UIButton {
         coinView.tintColor = PointsSymbol.tint
         coinView.isUserInteractionEnabled = false
 
-        countLabel.font = .monospacedDigitSystemFont(ofSize: 15, weight: .semibold)
+        // Scaled once, at creation, and capped: the badge is a bar item, and a
+        // custom-view item re-measured live drifts its wrapper's width.
+        countLabel.font = .scaledMonospacedDigitSystemFont(
+            ofSize: 15, weight: .semibold, relativeTo: .subheadline, maximumPointSize: 20
+        )
         countLabel.textColor = .label
         countLabel.isUserInteractionEnabled = false
 
