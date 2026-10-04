@@ -793,13 +793,13 @@ final class PostDetailViewController: UIViewController {
                 case .boosted(_, let targetTotal, let spent):
                     // `spent`, never the request — a near-cap boost is clamped.
                     self.sessionBoostAmount += spent
-                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    HapticImpact(style: .medium).impactOccurred()
                     // Receipt before theatre — the button flips to (or grows)
                     // its number face, then the "+N" float rises off it.
                     self.composeBar.setBoostTotal(targetTotal)
                     self.composeBar.playBoostConfirmation(amount: spent)
                 case .insufficientBalance, .targetCapReached, .noShotsLeft, .shotDoesNotFit:
-                    UINotificationFeedbackGenerator().notificationOccurred(.error)
+                    HapticNotification().notificationOccurred(.error)
                     self.composeBar.playBoostDenied()
                 }
                 self.refreshComposeBarBoostState()
@@ -817,7 +817,7 @@ final class PostDetailViewController: UIViewController {
             else { return }
             let refunded = self.sessionBoostAmount
             self.sessionBoostAmount = 0
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            HapticImpact(style: .light).impactOccurred()
             self.composeBar.setBoostTotal(result.targetTotal)
             self.composeBar.playBoostRefund(amount: refunded)
             self.refreshComposeBarBoostState()

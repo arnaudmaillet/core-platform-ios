@@ -1614,7 +1614,7 @@ final class SoundSheetViewController: UIViewController {
         refreshCover()
         header?.setPlaying(true)
         preview?.play()
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        HapticImpact(style: .light).impactOccurred()
     }
 
     private func stopPreview(rewinding: Bool = false) {

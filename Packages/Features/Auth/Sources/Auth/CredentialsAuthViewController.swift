@@ -12,7 +12,7 @@ final class CredentialsAuthViewController: BottomAnchoredTableViewController {
     private let viewModel: LoginViewModel
     private let emailCell = TextFieldCell()
     private let passwordCell = TextFieldCell()
-    private let feedback = UINotificationFeedbackGenerator()
+    private let feedback = HapticNotification()
     private var hasAutofocused = false
 
     private lazy var signInButton: UIButton = {

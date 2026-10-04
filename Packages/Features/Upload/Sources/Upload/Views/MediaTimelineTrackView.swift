@@ -316,7 +316,7 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
     /// a piece crossing another is; an impact is for a collision. One tick when
     /// the piece lifts and one per crossing — never on every beat of the drag,
     /// which the HIG calls decorative noise.
-    private let carryTicks = UISelectionFeedbackGenerator()
+    private let carryTicks = HapticSelection()
     /// One stamp per piece that is not playing as shot.
     private var rateStamps: [UILabel] = []
     /// What each stamp last said, so a scroll re-sets nothing.

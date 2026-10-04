@@ -1,3 +1,4 @@
+import DesignSystem
 import MediaPlayback
 import UIKit
 
@@ -112,7 +113,7 @@ final class MediaOverlayLayerView: UIView {
     /// ⚠️ STORED, NOT MADE PER CLICK — `StraightenDialView` records why: a
     /// generator built inside the handler "arrives cold and clicks late".
     /// `prepare()` runs when the fingers land.
-    private let click = UISelectionFeedbackGenerator()
+    private let click = HapticSelection()
     private var ticks = 0
 
     /// The picture's middle lines, drawn only while an overlay is resting on
@@ -257,7 +258,7 @@ final class MediaOverlayLayerView: UIView {
             // pan's own verdict and the overlay is gone either way; only the
             // placement is held back until the gesture is over.
             if drop {
-                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                HapticNotification().notificationOccurred(.success)
                 onEvent?(.delete(id: item.id))
             } else {
                 item.setPlacement(item.overlay.placement, redraw: true)

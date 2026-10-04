@@ -45,7 +45,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     /// vocabulary, not the bar's, so every call site maps one to the other
     /// through `surfaces`.
     private let categoryBar: PagedTabBar
-    private let selectionFeedback = UISelectionFeedbackGenerator()
+    private let selectionFeedback = HapticSelection()
 
     /// Built in `viewDidLoad`, once the surfaces are children — reading a
     /// child's `view` before containment would load it outside its parent.

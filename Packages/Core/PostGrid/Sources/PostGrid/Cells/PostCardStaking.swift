@@ -128,7 +128,7 @@ public final class PostCardStaking {
         switch wallet.stake(spend, on: key) {
         case .boosted(_, let targetTotal, let spent):
             session[key, default: 0] += spent
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            HapticImpact(style: .medium).impactOccurred()
             // Receipt before theatre, as on the rail: the heart's ink first,
             // then the "+N" rising off it.
             if isBound(cell, to: key) {
@@ -136,7 +136,7 @@ public final class PostCardStaking {
                 cell.playStakeConfirmation(amount: spent)
             }
         case .insufficientBalance, .targetCapReached, .noShotsLeft, .shotDoesNotFit:
-            UINotificationFeedbackGenerator().notificationOccurred(.error)
+            HapticNotification().notificationOccurred(.error)
             if isBound(cell, to: key) { cell.playStakeDenied() }
         }
     }
@@ -145,7 +145,7 @@ public final class PostCardStaking {
         guard let amount = session[key], amount > 0,
               let result = wallet.undoBoost(targetID: key, amount: amount) else { return }
         session[key] = nil
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        HapticImpact(style: .light).impactOccurred()
         if let cell, isBound(cell, to: key) {
             cell.setViewerStake(result.targetTotal)
             cell.playStakeRefund(amount: amount)
