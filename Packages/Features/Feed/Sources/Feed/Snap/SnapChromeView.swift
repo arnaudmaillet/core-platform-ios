@@ -600,6 +600,21 @@ final class SnapChromeView: UIView {
         // `updateCommentStreams`) and the flight replica shows it too; the
         // seeded payload keeps both instances identical.
         shortcutRail.setEmotes(SnapShortcutRailView.payload(for: model.id))
+        applyCareMode()
+    }
+
+    /// Care Mode (#482) keeps the page calmer: the emote shortcuts go. A
+    /// hidden view keeps its frame, so the subtitle slot that stops at the
+    /// rail's leading edge doesn't move. Re-read when the chrome joins a
+    /// window, which is how a change made in Settings reaches a feed that
+    /// was already on screen.
+    private func applyCareMode() {
+        shortcutRail.isHidden = CareModePreference.isOn
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window != nil { applyCareMode() }
     }
 
     /// The raw caption, kept so Dynamic Type changes can re-resolve the

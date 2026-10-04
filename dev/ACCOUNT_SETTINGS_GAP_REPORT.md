@@ -6,7 +6,7 @@ Updated 2026-10-04 (first version 2026-10-03) · Arnaud Maillet · this file is 
 
 Two days ago Settings had 7 rows and one working action (Log Out). It now has 17 sections in 4 groups, and every section the app can build without a backend change is live. A production social network ships roughly 80–120 options, about 25 of them legal or App Store requirements.
 
-What remains is mostly blocked on the backend. Change password, two-factor, notification preferences, date of birth, consents, follow requests, interaction settings, location privacy and the wallet ledger each need a client-facing contract that does not exist yet. They are tracked as issues in [arnaudmaillet/core-platform](https://github.com/arnaudmaillet/core-platform), epic #666.
+What remains is mostly blocked on the backend. Change password, two-factor, notification preferences, date of birth, consents, follow requests, interaction settings, location privacy and the wallet ledger each need a client-facing contract that does not exist yet. They are tracked as issues in [arnaudmaillet/core-platform-backend](https://github.com/arnaudmaillet/core-platform-backend), epic #666.
 
 The five launch blockers, where they stand:
 
@@ -14,14 +14,14 @@ The five launch blockers, where they stand:
 2. **Security**:
    - sessions and "log out everywhere": **shipped** (#384);
    - Security Checkup and App Lock: **shipped** (#418);
-   - change password and two-factor: **blocked** on backend (#382, #383 → core-platform#648, #649).
-3. **Blocked accounts list**: **shipped** (#389). Mute and restrict are **blocked** on backend (#403, #416 → core-platform#659).
-4. **Notification preferences**: **blocked**. No push-token registration and no preferences contract exist (#392 → core-platform#654).
+   - change password and two-factor: **blocked** on backend (#382, #383 → core-platform-backend#648, #649).
+3. **Blocked accounts list**: **shipped** (#389). Mute and restrict are **blocked** on backend (#403, #416 → core-platform-backend#659).
+4. **Notification preferences**: **blocked**. No push-token registration and no preferences contract exist (#392 → core-platform-backend#654).
 5. **Legal hub**:
    - **shipped**: the help and legal pages (#391), the data transparency screens (#414), data download (#387), and transparency reports (#418);
    - **waiting on final URLs**: every link is a provisional "Coming Soon" until the pages exist (#424, yours to provide);
-   - **partial**: account status and appeal, which need decision ids on enforcements (#390 → core-platform#658);
-   - **blocked**: consent management (#395 → core-platform#653).
+   - **partial**: account status and appeal, which need decision ids on enforcements (#390 → core-platform-backend#658);
+   - **blocked**: consent management (#395 → core-platform-backend#653).
 
 Decided 2026-10-03: minimum age **13**, with teen protections for 13–17.
 
@@ -99,75 +99,75 @@ Priority: **P0** = launch blocker (legal, store review or basic trust), **P1** =
 
 | Option | Benchmark | Priority | Status / contract |
 | --- | --- | --- | --- |
-| Change email (re-verify new address, alert old one) | All four | P0 | Blocked: only `VerifyEmail` (#393 → core-platform#651) |
-| Change phone (SMS code) | All four | P0 | Blocked: only `VerifyPhone` (#393 → core-platform#651) |
-| Change password (current password, then new) | All four | P0 | Blocked: `account.v1.ChangePassword` is internal (server-side hash) (#382 → core-platform#648) |
-| Date of birth (private, editable once or via support) | TikTok, Instagram, Snapchat | P0 | Blocked: no field on the account (#394 → core-platform#652) |
+| Change email (re-verify new address, alert old one) | All four | P0 | Blocked: only `VerifyEmail` (#393 → core-platform-backend#651) |
+| Change phone (SMS code) | All four | P0 | Blocked: only `VerifyPhone` (#393 → core-platform-backend#651) |
+| Change password (current password, then new) | All four | P0 | Blocked: `account.v1.ChangePassword` is internal (server-side hash) (#382 → core-platform-backend#648) |
+| Date of birth (private, editable once or via support) | TikTok, Instagram, Snapchat | P0 | Blocked: no field on the account (#394 → core-platform-backend#652) |
 | Country / region | TikTok, X | P1 | `countryOfResidence` exists, read-only |
 | Username change with cooldown | TikTok, Instagram | P1, partial | `ChangeHandle` (no cooldown shown) |
 | Profiles on this account: add, switch, remove | Instagram Accounts Center | P1, partial | Switch profile works; `ListProfilesByAccount`, `DeleteProfile` |
-| Account type: personal, creator, business | TikTok, Instagram, X | P2 | Blocked (#415 → core-platform#668) |
-| Request verification badge | Instagram, X, TikTok | P2 | Blocked: `VerifyProfile` is admin-only (#415 → core-platform#668) |
-| Deactivate (hidden until next login) | Instagram, X, TikTok | P0 | Blocked: a deactivated account can't log back in (#385 → core-platform#650) |
-| Delete account: 30-day grace, then permanent | All four | P0 | ✅ Shipped (#386); no cancel RPC yet (#402 → core-platform#653) |
+| Account type: personal, creator, business | TikTok, Instagram, X | P2 | Blocked (#415 → core-platform-backend#668) |
+| Request verification badge | Instagram, X, TikTok | P2 | Blocked: `VerifyProfile` is admin-only (#415 → core-platform-backend#668) |
+| Deactivate (hidden until next login) | Instagram, X, TikTok | P0 | Blocked: a deactivated account can't log back in (#385 → core-platform-backend#650) |
+| Delete account: 30-day grace, then permanent | All four | P0 | ✅ Shipped (#386); no cancel RPC yet (#402 → core-platform-backend#653) |
 | Download your data | All four | P0 | ✅ Shipped (#387) |
 
 ### 2. Security and login
 
 | Option | Benchmark | Priority | Status / contract |
 | --- | --- | --- | --- |
-| Two-factor authentication: authenticator app | All four | P0 | Blocked: `EnrollMfa` takes an encrypted seed (internal) (#383 → core-platform#649) |
-| Two-factor: SMS fallback + backup codes | All four | P0 | Blocked (#405 → core-platform#649) |
-| Passkeys | X, TikTok, Snapchat | P1 | Blocked (#405 → core-platform#649) |
+| Two-factor authentication: authenticator app | All four | P0 | Blocked: `EnrollMfa` takes an encrypted seed (internal) (#383 → core-platform-backend#649) |
+| Two-factor: SMS fallback + backup codes | All four | P0 | Blocked (#405 → core-platform-backend#649) |
+| Passkeys | X, TikTok, Snapchat | P1 | Blocked (#405 → core-platform-backend#649) |
 | Where you're logged in; log out one | All four | P0 | ✅ Shipped (#384) |
 | Log out of all other sessions | All four | P0 | ✅ Shipped (#384) |
-| New-login alerts (push + email) | All four | P1 | Blocked (#405 → core-platform#649) |
+| New-login alerts (push + email) | All four | P1 | Blocked (#405 → core-platform-backend#649) |
 | Login activity history | Instagram, X | P2 | Partial contract: `RecordLogin`, `RecordFailedLogin` |
 | Sign in with Apple (mandatory if any third-party login is offered) | All four | P0 if social login | Missing |
 | Face ID app lock | Snapchat, banking-style | P2 | ✅ Shipped: App Lock (#418) |
 | Security checkup | Instagram, Snapchat | P2 | ✅ Shipped (#418) |
-| Apps and websites (third-party authorisations) | WeChat, Douyin | P2 | Blocked (#485 → core-platform#667) |
+| Apps and websites (third-party authorisations) | WeChat, Douyin | P2 | Blocked (#485 → core-platform-backend#667) |
 
 ### 3. Privacy
 
 | Option | Benchmark | Priority | Status / contract |
 | --- | --- | --- | --- |
-| Private account (approve followers) | All four | P0 | ✅ Toggle shipped (#388); follow requests blocked (#396 → core-platform#655) |
-| Follow requests inbox (approve, decline) | Instagram, TikTok, X | P0 with private accounts | Blocked (#396 → core-platform#655) |
-| Remove a follower | Instagram, TikTok | P1 | Blocked (#403 → core-platform#659) |
-| Hide followers / following / friends lists | TikTok | P1, partial | Device-only today (#403 → core-platform#659) |
-| Who can comment: everyone, followers, friends, no one | All four | P0 | Blocked (#397 → core-platform#656) |
-| Who can mention or tag me | All four | P1 | Blocked (#397 → core-platform#656) |
-| Who can message me + message requests folder | All four | P0 | Blocked (#397 → core-platform#656) |
-| Who can remix or reuse my sound | TikTok, Instagram | P2 | Blocked (#416 → core-platform#669) |
-| Allow downloads of my posts | TikTok | P1 | Blocked (#416 → core-platform#656) |
-| Who can see my likes | TikTok, X | P1 | Blocked (#397 → core-platform#656) |
-| Activity status, read receipts | Instagram, TikTok, Snapchat | P1 | Blocked (#406 → core-platform#661) |
-| Suggest my account; find me by email or phone; contact sync | All four | P1 | Blocked (#406, #412 → core-platform#661) |
-| **Location: Ghost Mode, audience, precise vs city** | Snap Map | **P0 (map-first app)** | Blocked (#398 → core-platform#657) |
+| Private account (approve followers) | All four | P0 | ✅ Toggle shipped (#388); follow requests blocked (#396 → core-platform-backend#655) |
+| Follow requests inbox (approve, decline) | Instagram, TikTok, X | P0 with private accounts | Blocked (#396 → core-platform-backend#655) |
+| Remove a follower | Instagram, TikTok | P1 | Blocked (#403 → core-platform-backend#659) |
+| Hide followers / following / friends lists | TikTok | P1, partial | Device-only today (#403 → core-platform-backend#659) |
+| Who can comment: everyone, followers, friends, no one | All four | P0 | Blocked (#397 → core-platform-backend#656) |
+| Who can mention or tag me | All four | P1 | Blocked (#397 → core-platform-backend#656) |
+| Who can message me + message requests folder | All four | P0 | Blocked (#397 → core-platform-backend#656) |
+| Who can remix or reuse my sound | TikTok, Instagram | P2 | Blocked (#416 → core-platform-backend#669) |
+| Allow downloads of my posts | TikTok | P1 | Blocked (#416 → core-platform-backend#656) |
+| Who can see my likes | TikTok, X | P1 | Blocked (#397 → core-platform-backend#656) |
+| Activity status, read receipts | Instagram, TikTok, Snapchat | P1 | Blocked (#406 → core-platform-backend#661) |
+| Suggest my account; find me by email or phone; contact sync | All four | P1 | Blocked (#406, #412 → core-platform-backend#661) |
+| **Location: Ghost Mode, audience, precise vs city** | Snap Map | **P0 (map-first app)** | Blocked (#398 → core-platform-backend#657) |
 | Collected-data list, third-party sharing list, system permissions | PIPL-style | P1 | ✅ Shipped (#414) |
-| Post history window; per-tab profile visibility | WeChat, Weibo, Bilibili | P1 | Blocked (#411 → core-platform#664) |
+| Post history window; per-tab profile visibility | WeChat, Weibo, Bilibili | P1 | Blocked (#411 → core-platform-backend#664) |
 
 ### 4. Safety and interactions
 
 | Option | Benchmark | Priority | Status / contract |
 | --- | --- | --- | --- |
 | Blocked accounts list, unblock | All four | P0 | ✅ Shipped (#389) |
-| Muted accounts (posts, stories, messages) | Instagram, X, TikTok | P1 | Blocked (#403 → core-platform#659) |
-| Restrict an account | Instagram | P2 | Blocked (#416 → core-platform#659) |
-| Hidden words; offensive-comment filter | Instagram, TikTok, X | P1 | Blocked (#404 → core-platform#660) |
-| Limit interactions (temporary) | Instagram | P2 | Blocked (#416 → core-platform#669) |
-| Your reports: status and decision | Instagram, TikTok | P0 (DSA Art. 16–17) | Blocked (#399 → core-platform#658) |
-| Account status: strikes, statement of reasons, appeal | Instagram, TikTok | P0 (DSA Art. 17, 20) | ◐ Partial (#390): enforcements carry no decision id (core-platform#658) |
+| Muted accounts (posts, stories, messages) | Instagram, X, TikTok | P1 | Blocked (#403 → core-platform-backend#659) |
+| Restrict an account | Instagram | P2 | Blocked (#416 → core-platform-backend#659) |
+| Hidden words; offensive-comment filter | Instagram, TikTok, X | P1 | Blocked (#404 → core-platform-backend#660) |
+| Limit interactions (temporary) | Instagram | P2 | Blocked (#416 → core-platform-backend#669) |
+| Your reports: status and decision | Instagram, TikTok | P0 (DSA Art. 16–17) | Blocked (#399 → core-platform-backend#658) |
+| Account status: strikes, statement of reasons, appeal | Instagram, TikTok | P0 (DSA Art. 17, 20) | ◐ Partial (#390): enforcements carry no decision id (core-platform-backend#658) |
 
 ### 5. What you see, and App and Device
 
 | Option | Benchmark | Priority | Status / contract |
 | --- | --- | --- | --- |
-| Sensitive content control | Instagram, TikTok | P1 | Blocked (#407 → core-platform#662) |
-| Reset For You recommendations | TikTok, Instagram | P1 | Blocked (#407 → core-platform#662) |
-| Non-personalised / chronological feed | Instagram, X, TikTok (EU) | P1 (DSA Art. 27, 38) | Blocked (#407 → core-platform#662) |
-| Interest tags: view, delete, personalisation off | Douyin, RedNote | P1 | Blocked (#413 → core-platform#662) |
+| Sensitive content control | Instagram, TikTok | P1 | Blocked (#407 → core-platform-backend#662) |
+| Reset For You recommendations | TikTok, Instagram | P1 | Blocked (#407 → core-platform-backend#662) |
+| Non-personalised / chronological feed | Instagram, X, TikTok (EU) | P1 (DSA Art. 27, 38) | Blocked (#407 → core-platform-backend#662) |
+| Interest tags: view, delete, personalisation off | Douyin, RedNote | P1 | Blocked (#413 → core-platform-backend#662) |
 | Label AI-generated content | TikTok, Instagram | P1 (EU AI Act Art. 50) | Missing |
 | Autoplay, start with sound, data saver | All four | P1 | ✅ Shipped (#409) |
 | Upload quality | TikTok, Instagram | P2 | Missing |
@@ -185,19 +185,19 @@ Priority: **P0** = launch blocker (legal, store review or basic trust), **P1** =
 
 | Option | Benchmark | Priority | Status / contract |
 | --- | --- | --- | --- |
-| Pause all push | Instagram, TikTok | P1 | Blocked (#392 → core-platform#654) |
-| Push per category | All four | P0 | Blocked: no preferences RPC, no device-token registration (#392 → core-platform#654) |
-| Email per category + marketing opt-in | All four | P0 | Blocked (#392, #395 → core-platform#653, #654) |
-| Quiet hours (default on for minors) | TikTok, Instagram Teen | P1 (P0 for minors) | Blocked (#392 → core-platform#654) |
+| Pause all push | Instagram, TikTok | P1 | Blocked (#392 → core-platform-backend#654) |
+| Push per category | All four | P0 | Blocked: no preferences RPC, no device-token registration (#392 → core-platform-backend#654) |
+| Email per category + marketing opt-in | All four | P0 | Blocked (#392, #395 → core-platform-backend#653, #654) |
+| Quiet hours (default on for minors) | TikTok, Instagram Teen | P1 (P0 for minors) | Blocked (#392 → core-platform-backend#654) |
 | Sounds and vibration in app | Snapchat, TikTok | P2 | ✅ Shipped (#470, #471) |
 
 ### 7. Your activity
 
 | Option | Benchmark | Priority | Status / contract |
 | --- | --- | --- | --- |
-| Recently deleted (30-day trash for posts) | Instagram, TikTok | P1 | Blocked (#408 → core-platform#663) |
+| Recently deleted (30-day trash for posts) | Instagram, TikTok | P1 | Blocked (#408 → core-platform-backend#663) |
 | Archive posts | Instagram | P2 | Missing |
-| Likes, comments, watch and search history (view, clear) | All four | P1 | Blocked: no clear RPC (#408 → core-platform#663) |
+| Likes, comments, watch and search history (view, clear) | All four | P1 | Blocked: no clear RPC (#408 → core-platform-backend#663) |
 | Daily limit, break reminders, screen time | TikTok, Instagram | P1 (P0 for minors) | ✅ Shipped (#489) |
 | Sleep reminders | TikTok | P2 | Missing |
 
@@ -205,16 +205,16 @@ Priority: **P0** = launch blocker (legal, store review or basic trust), **P1** =
 
 | Option | Benchmark | Priority | Status / contract |
 | --- | --- | --- | --- |
-| Teen mode: private, no DMs from strangers, no location, daily limit, curfew, no purchases | Instagram Teen Accounts, Douyin | P0 (13+ decided) | Blocked on date of birth and quiet hours (#401 → core-platform#652, #654) |
-| Parental supervision | TikTok, Instagram, Snapchat | P2 | Blocked (#417 → core-platform#670) |
+| Teen mode: private, no DMs from strangers, no location, daily limit, curfew, no purchases | Instagram Teen Accounts, Douyin | P0 (13+ decided) | Blocked on date of birth and quiet hours (#401 → core-platform-backend#652, #654) |
+| Parental supervision | TikTok, Instagram, Snapchat | P2 | Blocked (#417 → core-platform-backend#670) |
 
 ### 9. Wallet and purchases (points and gems)
 
 | Option | Benchmark | Priority | Status / contract |
 | --- | --- | --- | --- |
-| Balance and transaction history | TikTok Coins, Snapchat Tokens | P0 once gems are sold | Blocked (#400 → core-platform#665) |
-| Restore purchases; refund link to Apple | All with IAP | P0 once gems are sold | Blocked (#400 → core-platform#665) |
-| Spending limit; purchases blocked for minors | TikTok | P1 | Blocked (core-platform#665) |
+| Balance and transaction history | TikTok Coins, Snapchat Tokens | P0 once gems are sold | Blocked (#400 → core-platform-backend#665) |
+| Restore purchases; refund link to Apple | All with IAP | P0 once gems are sold | Blocked (#400 → core-platform-backend#665) |
+| Spending limit; purchases blocked for minors | TikTok | P1 | Blocked (core-platform-backend#665) |
 | Creator payouts, tax info | TikTok, X | P2 | Later: needs the ledger first (#417) |
 
 ### 10. Ads and data (only once ads ship)
@@ -299,32 +299,32 @@ Apple's review rules and the GDPR set the floor everywhere; the DSA adds the mod
 
 ## Backend dependencies
 
-Everything left at P0 except the final URLs needs a backend contract. They are filed in arnaudmaillet/core-platform under epic #666, one issue per contract, each linking the iOS issue it unblocks.
+Everything left at P0 except the final URLs needs a backend contract. They are filed in arnaudmaillet/core-platform-backend under epic #666, one issue per contract, each linking the iOS issue it unblocks.
 
 | Capability | Unblocks (iOS) | Priority | Backend issue |
 | --- | --- | --- | --- |
-| Client-facing change password and credential step-up | #382 | P0 | core-platform#648 |
-| Two-factor enrolment, backup codes, passkeys, login alerts | #383, #405 | P0 | core-platform#649 |
-| Self-deactivated accounts can sign back in | #385 | P0 | core-platform#650 |
-| Change email and phone with verification | #393 | P0 | core-platform#651 |
-| Date of birth and age bracket | #394, #401 | P0 | core-platform#652 |
-| User-facing GDPR status, consents, deletion cancel, export delivery | #395, #402 | P0 | core-platform#653 |
-| APNs device registration and notification preferences | #392 | P0 | core-platform#654 |
-| Follow requests for private profiles | #396 | P0 | core-platform#655 |
-| Per-profile interaction settings enforced server-side | #397, #416 | P0 | core-platform#656 |
-| Location sharing settings | #398 | P0 | core-platform#657 |
-| Enforcements linked to decisions; list my reports | #390, #399 | P0 | core-platform#658 |
-| Economy ledger: history, restore, spending limits | #400 | P0 once gems are sold | core-platform#665 |
-| Mute, restrict, remove follower, list privacy | #403, #416 | P1 | core-platform#659 |
-| Hidden words and comment filter | #404 | P1 | core-platform#660 |
-| Presence and discoverability | #406, #412 | P1 | core-platform#661 |
-| Recommender controls, interest tags | #407, #413 | P1 | core-platform#662 |
-| Recently deleted posts, history clearing | #408 | P1 | core-platform#663 |
-| Post history window, per-tab visibility | #411 | P1 | core-platform#664 |
-| Third-party app authorisations | #485 | P2 | core-platform#667 |
-| Account types and verification requests | #415 | P2 | core-platform#668 |
-| Temporary interaction limits, remix and sound reuse | #416 | P2 | core-platform#669 |
-| Family supervision | #417 | P2 | core-platform#670 |
+| Client-facing change password and credential step-up | #382 | P0 | core-platform-backend#648 |
+| Two-factor enrolment, backup codes, passkeys, login alerts | #383, #405 | P0 | core-platform-backend#649 |
+| Self-deactivated accounts can sign back in | #385 | P0 | core-platform-backend#650 |
+| Change email and phone with verification | #393 | P0 | core-platform-backend#651 |
+| Date of birth and age bracket | #394, #401 | P0 | core-platform-backend#652 |
+| User-facing GDPR status, consents, deletion cancel, export delivery | #395, #402 | P0 | core-platform-backend#653 |
+| APNs device registration and notification preferences | #392 | P0 | core-platform-backend#654 |
+| Follow requests for private profiles | #396 | P0 | core-platform-backend#655 |
+| Per-profile interaction settings enforced server-side | #397, #416 | P0 | core-platform-backend#656 |
+| Location sharing settings | #398 | P0 | core-platform-backend#657 |
+| Enforcements linked to decisions; list my reports | #390, #399 | P0 | core-platform-backend#658 |
+| Economy ledger: history, restore, spending limits | #400 | P0 once gems are sold | core-platform-backend#665 |
+| Mute, restrict, remove follower, list privacy | #403, #416 | P1 | core-platform-backend#659 |
+| Hidden words and comment filter | #404 | P1 | core-platform-backend#660 |
+| Presence and discoverability | #406, #412 | P1 | core-platform-backend#661 |
+| Recommender controls, interest tags | #407, #413 | P1 | core-platform-backend#662 |
+| Recently deleted posts, history clearing | #408 | P1 | core-platform-backend#663 |
+| Post history window, per-tab visibility | #411 | P1 | core-platform-backend#664 |
+| Third-party app authorisations | #485 | P2 | core-platform-backend#667 |
+| Account types and verification requests | #415 | P2 | core-platform-backend#668 |
+| Temporary interaction limits, remix and sound reuse | #416 | P2 | core-platform-backend#669 |
+| Family supervision | #417 | P2 | core-platform-backend#670 |
 
 ## Roadmap
 
