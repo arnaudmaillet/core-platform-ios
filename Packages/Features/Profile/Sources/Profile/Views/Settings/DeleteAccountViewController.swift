@@ -37,17 +37,20 @@ final class DeleteAccountViewController: UIViewController {
     private let onAccountDeleted: () -> Void
     /// "Download your data first" — offered before the irreversible step.
     private let makeDataExport: () -> UIViewController?
+    private let stepUp: (any CredentialStepUp)?
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
 
     init(
         viewModel: DeleteAccountViewModel,
         onAccountDeleted: @escaping () -> Void,
-        makeDataExport: @escaping () -> UIViewController? = { nil }
+        makeDataExport: @escaping () -> UIViewController? = { nil },
+        stepUp: (any CredentialStepUp)? = nil
     ) {
         self.viewModel = viewModel
         self.onAccountDeleted = onAccountDeleted
         self.makeDataExport = makeDataExport
+        self.stepUp = stepUp
         super.init(nibName: nil, bundle: nil)
         title = "Delete Account"
         hidesBottomBarWhenPushed = true
@@ -192,9 +195,29 @@ final class DeleteAccountViewController: UIViewController {
         )
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         alert.addAction(UIAlertAction(title: "Delete", style: .destructive) { [weak self] _ in
-            self?.requestDeletion()
+            self?.verifyThenRequestDeletion()
         })
         present(alert, animated: true)
+    }
+
+    /// The server gates deletion behind a fresh step-up (#648): the password
+    /// first, then the request on the token it mints.
+    private func verifyThenRequestDeletion() {
+        guard let stepUp else { requestDeletion(); return }
+        StepUpPrompt.present(
+            on: self,
+            message: "To delete your account, confirm it's you.",
+            actionTitle: "Delete",
+            stepUp: stepUp,
+            onVerified: { [weak self] in self?.requestDeletion() },
+            onFailure: { [weak self] _ in
+                let failed = UIAlertController(
+                    title: nil, message: "Couldn't confirm your password. Check your connection and try again.", preferredStyle: .alert
+                )
+                failed.addAction(UIAlertAction(title: "OK", style: .default))
+                self?.present(failed, animated: true)
+            }
+        )
     }
 
     private func requestDeletion() {
@@ -211,6 +234,9 @@ final class DeleteAccountViewController: UIViewController {
                     self?.onAccountDeleted()
                 })
                 present(done, animated: true)
+            } catch AccountError.stepUpRequired where stepUp != nil {
+                // The proof expired between the two calls: ask again.
+                verifyThenRequestDeletion()
             } catch {
                 let failed = UIAlertController(title: nil, message: "Couldn't request deletion. Try again.", preferredStyle: .alert)
                 failed.addAction(UIAlertAction(title: "OK", style: .default))

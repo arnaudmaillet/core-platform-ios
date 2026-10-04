@@ -6,7 +6,17 @@ import Foundation
 
 public enum AccountError: Error, Equatable, Sendable {
     case notAuthenticated
+    /// A step-up-gated RPC refused a token that wasn't re-proved recently
+    /// (PERMISSION_DENIED "step_up_required"): ask for the password again.
+    case stepUpRequired
     case transport(message: String)
+}
+
+/// Settings → Account → Deactivate Account (#385): the account's profiles are
+/// hidden until the holder logs back in, which reactivates it. Step-up gated
+/// on the server: call it right after `CredentialStepUp.stepUp`.
+public protocol AccountDeactivating: Sendable {
+    func deactivate() async throws
 }
 
 /// The signed-in viewer's account-level details, as the settings screen shows
@@ -70,7 +80,7 @@ public enum AccountDeletionPolicy {
 
 /// Reads the viewer's account from `account.v1` (`GetAccountById`), resolving
 /// the account id from the auth session. Mirrors `ProfileRepository`'s shape.
-public actor AccountRepository: AccountProviding, AccountLifecycleManaging {
+public actor AccountRepository: AccountProviding, AccountLifecycleManaging, AccountDeactivating {
     private let accountClient: any Account_V1_AccountServiceClientInterface
     private let authSession: any AuthSessionProviding
 
@@ -109,7 +119,7 @@ public actor AccountRepository: AccountProviding, AccountLifecycleManaging {
         request.accountID = try await accountID()
         let response = await accountClient.requestGdprDeletion(request: request, headers: [:])
         if case .failure(let error) = response.result {
-            throw AccountError.transport(message: error.message ?? "code \(error.code)")
+            throw Self.accountError(error)
         }
     }
 
@@ -142,6 +152,24 @@ public actor AccountRepository: AccountProviding, AccountLifecycleManaging {
         case .failure(let error):
             throw AccountError.transport(message: error.message ?? "code \(error.code)")
         }
+    }
+
+    public func deactivate() async throws {
+        var request = Account_V1_DeactivateAccountRequest()
+        request.accountID = try await accountID()
+        let response = await accountClient.deactivateAccount(request: request, headers: [:])
+        if case .failure(let error) = response.result {
+            throw Self.accountError(error)
+        }
+    }
+
+    /// A step-up-gated RPC's refusal is a prompt for the password, not a
+    /// failure (PERMISSION_DENIED "step_up_required", #648).
+    static func accountError(_ error: ConnectError) -> AccountError {
+        if error.code == .permissionDenied, (error.message ?? "").contains("step_up") {
+            return .stepUpRequired
+        }
+        return .transport(message: error.message ?? "code \(error.code)")
     }
 
     private func accountID() async throws -> String {

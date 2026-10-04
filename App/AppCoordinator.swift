@@ -317,6 +317,19 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         return action?.signUpPrompt
     }
 
+    /// A login that resumed a self-deactivated account (#385, backend #650)
+    /// says so once: the profiles are visible again.
+    private func welcomeBackIfReactivated() {
+        Task { @MainActor [weak self] in
+            guard let self, await container.sessionManager.consumeReactivationNotice() else { return }
+            // After the shell has swapped in and the sign-in sheet (if any)
+            // has gone, over the screen on top of the active tab.
+            try? await Task.sleep(for: .milliseconds(600))
+            guard let host = mainTabCoordinator?.activeNavigationController?.topViewController?.view else { return }
+            ToastView.present("Welcome back. Your account is active again.", in: host)
+        }
+    }
+
     private func finishSignUp(signedIn: Bool) {
         let completions = signUpCompletions
         signUpCompletions = []
@@ -341,6 +354,7 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
             }
         }
         finishSignUp(signedIn: true)
+        welcomeBackIfReactivated()
         #if DEBUG
         // `-mock-likes-still`: no ticking like counts — so a refresh can
         // come back with exactly what it had (`-profile-stretch-sweep`'s
