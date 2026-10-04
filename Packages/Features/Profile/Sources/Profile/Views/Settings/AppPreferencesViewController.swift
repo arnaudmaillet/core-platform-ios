@@ -338,19 +338,19 @@ final class AppPreferencesViewController: UIViewController {
             installSlider(
                 in: cell, title: "Background", range: MediaCommentPreferences.bandBackgroundRange,
                 value: preferences.bandBackgroundOpacity, isEnabled: preferences.showsReactionBand,
-                symbols: ("capsule", "capsule.fill")
+                symbols: ("checkerboard.rectangle", "rectangle.fill")
             ) { $0.bandBackgroundOpacity = $1 }
         case .subtitleBackground:
             installSlider(
                 in: cell, title: "Background", range: MediaCommentPreferences.subtitleBackgroundRange,
                 value: preferences.subtitleBackgroundOpacity, isEnabled: preferences.showsSubtitles,
-                symbols: ("capsule", "capsule.fill")
+                symbols: ("checkerboard.rectangle", "rectangle.fill")
             ) { $0.subtitleBackgroundOpacity = $1 }
         case .commentsBackdrop:
             installSlider(
                 in: cell, title: "Background", range: MediaCommentPreferences.commentsBackdropRange,
                 value: preferences.commentsBackdropOpacity, isEnabled: true,
-                symbols: ("circle.lefthalf.filled", "circle.fill")
+                symbols: ("photo", "rectangle.fill")
             ) { $0.commentsBackdropOpacity = $1 }
         case .speed:
             cell.contentConfiguration = nil
