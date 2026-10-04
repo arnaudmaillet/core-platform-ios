@@ -135,6 +135,17 @@ struct ProfileRepositoryTests {
         }
     }
 
+    /// Guest mode: a guest follows no one, so another profile reads as "not
+    /// following" — the header offers Follow (gated), and the snap feed its
+    /// "+" — rather than failing into a header that never settles.
+    @Test func aGuestFollowsNoOne() async throws {
+        let repository = makeRepository(session: UnauthenticatedSessionStub())
+
+        #expect(try await repository.relationship(for: ProfileID("prof-0"))
+            == .other(isFollowing: false, isMutual: false, isBlocked: false))
+        #expect(try await repository.followRelation(to: ProfileID("prof-0")) == .notFollowing)
+    }
+
     // MARK: - Relationship / follow
 
     /// A repository whose social_graph is stubbed with a fixed relation status

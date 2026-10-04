@@ -188,6 +188,9 @@ final class MainTabCoordinator: NSObject, Coordinator {
         profileTab?.show(member: isMember)
         messagesTab?.show(member: isMember)
         forYouTab?.start()
+        for (_, tab) in orderedTabs {
+            (tab as? ExploreTabCoordinator)?.viewerDidChange()
+        }
         profileMenuOverlay.isContextMenuInteractionEnabled = isMember
         loadAvatar()
         refreshUnreadBadge()

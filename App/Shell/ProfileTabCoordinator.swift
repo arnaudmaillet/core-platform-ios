@@ -64,12 +64,20 @@ final class ProfileTabCoordinator: TabCoordinator {
     func show(member: Bool) {
         guard member else {
             walletBadge = nil
-            navigationController.viewControllers = [GuestSignInViewController(
+            let guest = GuestSignInViewController(
                 symbolName: "person.crop.circle",
                 title: "Your profile",
                 message: "Sign up to create your profile, post and keep what you like.",
                 onSignIn: onSignIn
-            )]
+            )
+            // Settings a guest can use (preferences, help, legal) — where the
+            // own profile wears its gear.
+            guest.navigationItem.rightBarButtonItem = UIBarButtonItem(
+                image: UIImage(systemName: "gearshape"),
+                primaryAction: UIAction { [weak self] _ in self?.openGuestSettings() }
+            )
+            guest.navigationItem.rightBarButtonItem?.accessibilityLabel = "Settings"
+            navigationController.viewControllers = [guest]
             return
         }
         // `.aboveBottomSafeArea` is the whole difference between a tab root and
@@ -108,6 +116,11 @@ final class ProfileTabCoordinator: TabCoordinator {
         ) { [weak profile] item in
             (profile as? (any HeaderAccessoryHosting))?.setTrailingAccessoryItem(item)
         }
+    }
+
+    private func openGuestSettings() {
+        let settings = container.profileFeature.makeGuestSettingsViewController(onSignIn: onSignIn)
+        navigationController.pushViewController(settings, animated: true)
     }
 
     /// The header's balance badge. Held for the coordinator's life, which is

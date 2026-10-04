@@ -739,7 +739,9 @@ public final class SearchViewModel {
     /// drawn and disabled, with the reason in each footer, because a
     /// segmented control showing two of four options makes the dimension
     /// itself unreadable. Asked for in `dev/BACKEND_GAPS.md` §19.
-    func filterGroups() -> [SearchFilterSheetViewController.Group] {
+    /// `isMember` false (a guest) disables Following: someone who follows
+    /// no one has nothing to narrow the results to.
+    func filterGroups(isMember: Bool = true) -> [SearchFilterSheetViewController.Group] {
         [
             .init(
                 id: Self.rankingGroupID,
@@ -782,7 +784,7 @@ public final class SearchViewModel {
                     .init(SearchScope.everyone.rawValue, "Everyone"),
                     .init("seen", "Seen", isEnabled: false),
                     .init("unseen", "Unseen", isEnabled: false),
-                    .init(SearchScope.following.rawValue, "Following")
+                    .init(SearchScope.following.rawValue, "Following", isEnabled: isMember)
                 ],
                 selectedID: scope.rawValue
             )

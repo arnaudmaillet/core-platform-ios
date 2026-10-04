@@ -202,6 +202,9 @@ final class MapsViewController: UIViewController {
     private let countryAccess: (any CountryAccess)?
     /// What the Shop's Boosts sells (the ×100 cartridge pack); nil sells none.
     private let stakePacks: (any StakePackSelling)?
+    /// Whether the viewer has an account. A guest follows no one, so the
+    /// favourites dock and the people rows stay empty for them.
+    private let isMember: @MainActor () -> Bool
     /// The country each pin stands in, looked up once per post: the atlas
     /// test is point-in-polygon, and the reconcile runs on every settle.
     private var pinCountries: [PostID: String] = [:]
@@ -358,8 +361,10 @@ final class MapsViewController: UIViewController {
         openProfile: @escaping (ProfileID, ProfileIdentityStub?) -> Void,
         openConversation: @escaping (ProfileID) -> Void,
         countryAccess: (any CountryAccess)? = nil,
-        stakePacks: (any StakePackSelling)? = nil
+        stakePacks: (any StakePackSelling)? = nil,
+        isMember: @escaping @MainActor () -> Bool = { true }
     ) {
+        self.isMember = isMember
         self.countryAccess = countryAccess
         self.stakePacks = stakePacks
         self.viewModel = viewModel
@@ -1348,6 +1353,7 @@ final class MapsViewController: UIViewController {
     /// Warms the people cache once at screen load (both lists in parallel),
     /// so the first Friends/Following tap already has its row in memory.
     private func prefetchPeople() {
+        guard isMember() else { return }
         let repository = favoritesRepository
         Task { [weak self] in
             async let friends = repository.friends()
@@ -1379,6 +1385,8 @@ final class MapsViewController: UIViewController {
             // inherit it. (It did inherit it: switching to an empty rail left
             // the previous primary's pills up.)
             applyPeopleRow(peopleCache[primary] ?? [], for: primary)
+            // A guest follows no one: the row stays empty, nothing is fetched.
+            guard isMember() else { return }
             // 2) Refresh behind it (also the cold path pre-prefetch, where
             // the row fills in when data lands).
             let repository = favoritesRepository
@@ -1743,6 +1751,11 @@ final class MapsViewController: UIViewController {
         }
         #endif
         favoritesTask?.cancel()
+        guard isMember() else {
+            currentFavorites = []
+            filterBar.setFavorites([])
+            return
+        }
         let repository = favoritesRepository
         let curated = pinService.curatedProfileIDs(in: .dock)
         favoritesTask = Task { [weak self] in
@@ -4052,3 +4065,13 @@ extension MapsViewController: ArrivalInvariantReporting {
     }
 }
 #endif
+
+extension MapsViewController: MapViewerRefreshing {
+    /// Signed in or out: the dock and the people rows were someone else's.
+    func viewerDidChange() {
+        catalogueCache.removeAll()
+        peopleCache.removeAll()
+        loadFavorites()
+        prefetchPeople()
+    }
+}

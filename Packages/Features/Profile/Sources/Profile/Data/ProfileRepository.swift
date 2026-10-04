@@ -339,6 +339,11 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
     // MARK: - Relationship
 
     public func relationship(for profileID: ProfileID) async throws -> ProfileRelationship {
+        // A guest follows no one: they see Follow (which asks them to sign up),
+        // not a header waiting on a relationship that can never resolve.
+        if await viewer.current() == .guest {
+            return .other(isFollowing: false, isMutual: false, isBlocked: false)
+        }
         let viewer = try await resolveViewerProfileID()
         // The viewer's own profile (whether reached via the tab or by routing to
         // your own id) offers Edit, never Follow.
@@ -362,6 +367,8 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
     /// them back makes a friend), which the profile header's relationship never
     /// needed and does not carry.
     public func followRelation(to profileID: ProfileID) async throws -> FollowRelation {
+        // A guest follows no one — and is followed by no one.
+        if await viewer.current() == .guest { return .notFollowing }
         let viewer = try await resolveViewerProfileID()
         guard viewer != profileID else { return .viewer }
         return switch try await relationStatus(from: viewer, to: profileID) {

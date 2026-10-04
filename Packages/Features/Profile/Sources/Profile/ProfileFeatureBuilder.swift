@@ -98,6 +98,25 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
         }
     }
 
+    public func makeGuestSettingsViewController(onSignIn: @escaping () -> Void) -> UIViewController {
+        SettingsViewController(
+            switching: nil,
+            switcher: nil,
+            makeDestination: { section in
+                switch section {
+                case .help:
+                    SettingsLinksViewController.help(links: .current)
+                case .legal:
+                    SettingsLinksViewController.legal(links: .current, version: SettingsLinksViewController.appVersion())
+                default:
+                    nil
+                }
+            },
+            onLogout: {},
+            onSignIn: onSignIn
+        )
+    }
+
     public func makeProfileSwitcher() -> ProfileSwitcherPresenting? {
         makeSwitcherFactory()
     }

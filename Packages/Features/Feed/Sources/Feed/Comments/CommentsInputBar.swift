@@ -809,6 +809,7 @@ final class CommentsInputBar: UIView {
     override func didMoveToWindow() {
         super.didMoveToWindow()
         guard window != nil else { return }
+        applyPlaceholder()
         #if DEBUG
         runEmoteKeyboardQAIfAsked()
         runComposerDraftQAIfAsked()
@@ -1006,7 +1007,12 @@ final class CommentsInputBar: UIView {
     /// still wins the slot — the target of a reply is the more urgent fact,
     /// and the avatar keeps answering the other question.
     private func applyPlaceholder() {
-        if let replyName {
+        // A guest cannot write here: the field says so before they tap it (the
+        // tap opens the sign-up sheet). The gate is only reachable once the bar
+        // is in a window, so this is re-run on the way in.
+        if defaultPlaceholder == nil, let gate = MemberGates.gate(from: self), !gate.isMember {
+            placeholderLabel.text = "Sign up to comment"
+        } else if let replyName {
             placeholderLabel.text = "Reply to \(replyName)…"
         } else if let defaultPlaceholder {
             placeholderLabel.text = defaultPlaceholder

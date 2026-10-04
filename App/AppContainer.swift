@@ -455,8 +455,19 @@ final class AppContainer {
         soundProvider: postSoundProvider,
         // "Use this sound": the shell opens its camera with it. Read at the
         // tap, because the shell sets it after this builder exists.
-        useSound: { [unowned self] sound in self.onUseSound?(sound) }
+        useSound: { [unowned self] sound in self.onUseSound?(sound) },
+        isMember: { [unowned self] in self.memberGate.isMember },
+        guestDiscoveryPostIDs: { [unowned self] in try await self.guestDiscoveryPostIDs() }
     )
+
+    /// A guest's For You, until the backend has a discovery feed (#448): the
+    /// posts the map knows worldwide, most liked first. `QueryTile` is the one
+    /// viewer-free list both the fleet and the mock serve today.
+    private func guestDiscoveryPostIDs() async throws -> [PostID] {
+        let world = MapViewport(swLat: -85, swLng: -180, neLat: 85, neLng: 180, zoomLevel: 2)
+        let pins = try await mapsRepository.queryTile(world, filter: nil).pins
+        return pins.sorted { $0.likeCount > $1.likeCount }.prefix(60).map(\.postID)
+    }
 
     /// Set by the shell, which owns the presentation of the camera.
     var onUseSound: (@MainActor (PostSound) -> Void)?
@@ -597,7 +608,9 @@ final class AppContainer {
         iconCatalog: Self.mapIconProvider,
         previewCatalog: Self.previewsUnavailable ? Self.unavailableIconCatalog : Self.mapPreviewCatalog,
         countryAccess: countryAccess,
-        stakePacks: stakePacks
+        stakePacks: stakePacks,
+        // A guest has no people: no favourites dock, no Friends / Following.
+        isMember: { [unowned self] in self.memberGate.isMember }
     )
 
     #if DEBUG

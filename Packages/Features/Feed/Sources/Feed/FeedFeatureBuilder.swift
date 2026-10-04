@@ -90,8 +90,17 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         counterClient: (any Counter_V1_CounterServiceClientInterface)? = nil,
         postDrafts: PostDraftStore? = nil,
         soundProvider: (any PostSoundProviding)? = nil,
-        useSound: (@MainActor (PostSound) -> Void)? = nil
+        useSound: (@MainActor (PostSound) -> Void)? = nil,
+        /// Whether the viewer has an account — read each time For You is
+        /// built, which the shell does again on every sign-in and sign-out.
+        /// Nil reads as a member.
+        isMember: (@MainActor () -> Bool)? = nil,
+        /// For You's posts for a guest, who has no following timeline — see
+        /// `GuestDiscoveryFeedProvider`. Nil leaves a guest on the timeline.
+        guestDiscoveryPostIDs: (@Sendable () async throws -> [PostID])? = nil
     ) {
+        self.isMember = isMember
+        self.guestDiscoveryPostIDs = guestDiscoveryPostIDs
         self.postDrafts = postDrafts
         self.soundProvider = soundProvider
         self.useSound = useSound
@@ -195,14 +204,22 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     #endif
 
     private let counterClient: (any Counter_V1_CounterServiceClientInterface)?
+    private let isMember: (@MainActor () -> Bool)?
+    private let guestDiscoveryPostIDs: (@Sendable () async throws -> [PostID])?
 
     public func makeForYouViewController(
         onTabPresentationChange: ((ForYouTabPresentation) -> Void)?
     ) -> UIViewController {
         let repository = repository
+        // A guest has no following timeline: For You reads the guest corpus.
+        let corpus: any FeedProviding = if isMember?() == false, let guestDiscoveryPostIDs {
+            GuestDiscoveryFeedProvider(base: repository, postIDs: guestDiscoveryPostIDs)
+        } else {
+            repository
+        }
         let forYou = ForYouViewController(
             viewModel: ForYouViewModel(
-                repository: ForYouRepository(feed: repository, counterClient: counterClient),
+                repository: ForYouRepository(feed: corpus, counterClient: counterClient),
                 contextStore: ContentContextStore(),
                 // The rows split the people the viewer follows into FRIENDS
                 // (mutual) and the rest: asked of the graph as pages land, and

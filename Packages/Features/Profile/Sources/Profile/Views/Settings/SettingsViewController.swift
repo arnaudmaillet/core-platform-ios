@@ -27,12 +27,16 @@ final class SettingsViewController: UIViewController {
         case section(SettingsSection)
         case switchProfile
         case logOut
+        case signIn
     }
 
     private let switching: (any ProfileSwitching)?
     private let switcher: ProfileSwitcherMenuFactory?
     private let makeDestination: (SettingsSection) -> UIViewController?
     private let onLogout: () -> Void
+    /// Set for a guest (guest mode): only what works without an account — the
+    /// app-wide section — and "Log in or sign up" where Log Out would be.
+    private let onSignIn: (() -> Void)?
 
     /// "@handle" of the active profile once known; the header reads "Profile"
     /// until then rather than guessing.
@@ -47,12 +51,14 @@ final class SettingsViewController: UIViewController {
         switching: (any ProfileSwitching)?,
         switcher: ProfileSwitcherMenuFactory?,
         makeDestination: @escaping (SettingsSection) -> UIViewController?,
-        onLogout: @escaping () -> Void
+        onLogout: @escaping () -> Void,
+        onSignIn: (() -> Void)? = nil
     ) {
         self.switching = switching
         self.switcher = switcher
         self.makeDestination = makeDestination
         self.onLogout = onLogout
+        self.onSignIn = onSignIn
         super.init(nibName: nil, bundle: nil)
         // Settings is somewhere you go and come back from, not a fifth tab.
         // Declared here rather than at the push site so it holds wherever this
@@ -116,6 +122,13 @@ final class SettingsViewController: UIViewController {
             cell.contentConfiguration = content
             cell.accessories = []
         }
+        let signInRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { cell, _, _ in
+            var content = UIListContentConfiguration.cell()
+            content.text = "Log in or sign up"
+            content.textProperties.color = .tintColor
+            cell.contentConfiguration = content
+            cell.accessories = []
+        }
 
         dataSource = UICollectionViewDiffableDataSource<Section, Item>(collectionView: collectionView) { collectionView, indexPath, item in
             switch item {
@@ -125,6 +138,8 @@ final class SettingsViewController: UIViewController {
                 collectionView.dequeueConfiguredReusableCell(using: switchRegistration, for: indexPath, item: item)
             case .logOut:
                 collectionView.dequeueConfiguredReusableCell(using: logOutRegistration, for: indexPath, item: item)
+            case .signIn:
+                collectionView.dequeueConfiguredReusableCell(using: signInRegistration, for: indexPath, item: item)
             }
         }
 
@@ -153,15 +168,22 @@ final class SettingsViewController: UIViewController {
 
     private func applySnapshot() {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
-        for scope in SettingsScope.allCases {
+        // A guest has no account and no profile: the app-wide section is the
+        // whole of Settings for them.
+        let scopes: [SettingsScope] = onSignIn == nil ? SettingsScope.allCases : [.app]
+        for scope in scopes {
             snapshot.appendSections([.scope(scope)])
             snapshot.appendItems(SettingsSection.sections(in: scope).map(Item.section), toSection: .scope(scope))
         }
         snapshot.appendSections([.session])
-        if canSwitchProfile {
-            snapshot.appendItems([.switchProfile], toSection: .session)
+        if onSignIn != nil {
+            snapshot.appendItems([.signIn], toSection: .session)
+        } else {
+            if canSwitchProfile {
+                snapshot.appendItems([.switchProfile], toSection: .session)
+            }
+            snapshot.appendItems([.logOut], toSection: .session)
         }
-        snapshot.appendItems([.logOut], toSection: .session)
         dataSource.apply(snapshot, animatingDifferences: false)
     }
 
@@ -273,6 +295,8 @@ extension SettingsViewController: UICollectionViewDelegate {
             open(section)
         case .logOut:
             confirmLogout()
+        case .signIn:
+            onSignIn?()
         case .switchProfile, nil:
             // The row's own button opens the menu; selection never reaches here.
             break
