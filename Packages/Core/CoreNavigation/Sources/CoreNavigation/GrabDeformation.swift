@@ -1,3 +1,4 @@
+import DesignSystem
 import QuartzCore
 import UIKit
 
@@ -57,7 +58,7 @@ final class GrabDeformation {
 
     private static let key = "coreNavigation.grabDeformation"
 
-    init(layer: CALayer, reducesMotion: @escaping () -> Bool = { UIAccessibility.isReduceMotionEnabled }) {
+    init(layer: CALayer, reducesMotion: @escaping () -> Bool = { MotionPreference.reducesMotion }) {
         self.layer = layer
         self.reducesMotion = reducesMotion
     }

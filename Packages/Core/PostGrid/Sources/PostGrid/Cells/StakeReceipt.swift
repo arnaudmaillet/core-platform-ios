@@ -1,3 +1,4 @@
+import DesignSystem
 import UIKit
 
 /// The receipts the list's card plays for a stake (`PostGridListRowCell`) —
@@ -19,7 +20,7 @@ enum StakeReceipt {
         label.isUserInteractionEnabled = false
         host.addSubview(label)
         let step: CGFloat = rising ? -1 : 1
-        let moves = !UIAccessibility.isReduceMotionEnabled
+        let moves = !MotionPreference.reducesMotion
         UIView.animateKeyframes(withDuration: 0.9, delay: 0, options: [.calculationModeCubic]) {
             UIView.addKeyframe(withRelativeStartTime: 0, relativeDuration: 0.2) {
                 label.alpha = 1
@@ -39,7 +40,7 @@ enum StakeReceipt {
 
     /// The heart pops: the rail's confirmation, on a card.
     static func pop(_ icon: UIView) {
-        guard !UIAccessibility.isReduceMotionEnabled else { return }
+        guard !MotionPreference.reducesMotion else { return }
         icon.transform = CGAffineTransform(scaleX: 1.35, y: 1.35)
         UIView.animate(
             withDuration: 0.45, delay: 0, usingSpringWithDamping: 0.5, initialSpringVelocity: 0,

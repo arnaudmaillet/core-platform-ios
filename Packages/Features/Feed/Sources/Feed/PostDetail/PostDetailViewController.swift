@@ -1430,7 +1430,7 @@ final class PostDetailViewController: UIViewController {
     private func revealLoadedRow(_ target: UIView) {
         guard revealsLoadedRows else { return }
         target.alpha = 0
-        if !UIAccessibility.isReduceMotionEnabled {
+        if !MotionPreference.reducesMotion {
             target.transform = CGAffineTransform(translationX: 0, y: Self.revealRise)
                 .scaledBy(x: Self.revealScale, y: Self.revealScale)
         }

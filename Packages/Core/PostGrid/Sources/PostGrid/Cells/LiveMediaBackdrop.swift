@@ -1,4 +1,5 @@
 import CoreVideo
+import DesignSystem
 import MediaPlayback
 import UIKit
 import VideoToolbox
@@ -110,7 +111,7 @@ public final class LiveMediaBackdrop: VideoFrameCompanion {
     /// Whether the system forbids motion here: Reduce Motion or Low Power.
     /// Injectable so the fallback can be pinned without flipping a setting.
     public var isSuppressedBySystem: () -> Bool = {
-        UIAccessibility.isReduceMotionEnabled || ProcessInfo.processInfo.isLowPowerModeEnabled
+        MotionPreference.reducesMotion || ProcessInfo.processInfo.isLowPowerModeEnabled
     }
 
     /// The frame reducer, off the main thread. Injectable for tests.

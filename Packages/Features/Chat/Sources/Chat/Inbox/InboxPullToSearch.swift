@@ -1,3 +1,4 @@
+import DesignSystem
 import UIKit
 
 /// Pull the inbox down past a line and let go: search opens — the Mail and
@@ -279,7 +280,7 @@ final class PullToSearchIndicatorView: UIView {
 
     /// Read on every change, so a Reduce Motion toggled mid-session is
     /// honoured on the next pull. Injected by the tests.
-    var reducesMotion: @MainActor () -> Bool = { UIAccessibility.isReduceMotionEnabled }
+    var reducesMotion: @MainActor () -> Bool = { MotionPreference.reducesMotion }
 
     private(set) var isArmed = false
 

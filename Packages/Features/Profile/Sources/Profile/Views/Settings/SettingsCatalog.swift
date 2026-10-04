@@ -8,11 +8,14 @@ enum SettingsScope: Int, CaseIterable, Sendable {
     case account
     /// Belongs to the active profile only; switching profile switches it.
     case profile
-    /// This install and the legal pages — neither account nor profile.
-    case app
+    /// This install: playback, display, language, storage (#468). Follows
+    /// the iPhone, neither the account nor the profile.
+    case device
+    /// Help and the legal pages.
+    case support
 }
 
-/// The thirteen sections of Settings, in on-screen order, grouped by scope.
+/// The sections of Settings, in on-screen order, grouped by scope.
 ///
 /// The tree is the one in `dev/ACCOUNT_SETTINGS_GAP_REPORT.md` (*Target
 /// structure*). A section with no live row yet still appears: its child is an
@@ -32,8 +35,13 @@ enum SettingsSection: String, CaseIterable, Sendable {
     case notifications
     case whatYouSee
     case activity
-    // This device and legal
-    case appPreferences
+    // App and device (#468)
+    case playback
+    case display
+    case mediaComments
+    case language
+    case storage
+    // Support and legal
     case help
     case legal
 
@@ -41,7 +49,8 @@ enum SettingsSection: String, CaseIterable, Sendable {
         switch self {
         case .account, .security, .familyAndTeens, .wallet, .adsAndData: .account
         case .privacy, .safety, .notifications, .whatYouSee, .activity: .profile
-        case .appPreferences, .help, .legal: .app
+        case .playback, .display, .mediaComments, .language, .storage: .device
+        case .help, .legal: .support
         }
     }
 
@@ -57,7 +66,11 @@ enum SettingsSection: String, CaseIterable, Sendable {
         case .notifications: "Notifications"
         case .whatYouSee: "What You See"
         case .activity: "Your Activity"
-        case .appPreferences: "App Preferences"
+        case .playback: "Playback and Sound"
+        case .display: "Display"
+        case .mediaComments: "Comments on Media"
+        case .language: "Language"
+        case .storage: "Storage"
         case .help: "Help and Support"
         case .legal: "Legal and About"
         }
@@ -76,7 +89,11 @@ enum SettingsSection: String, CaseIterable, Sendable {
         case .notifications: "bell.badge"
         case .whatYouSee: "eye"
         case .activity: "clock.arrow.circlepath"
-        case .appPreferences: "slider.horizontal.3"
+        case .playback: "play.rectangle"
+        case .display: "circle.lefthalf.filled"
+        case .mediaComments: "text.bubble"
+        case .language: "globe"
+        case .storage: "internaldrive"
         case .help: "questionmark.circle"
         case .legal: "doc.text"
         }
@@ -96,7 +113,11 @@ enum SettingsSection: String, CaseIterable, Sendable {
         case .notifications: ["Push notifications by category", "Email notifications", "Pause and quiet hours"]
         case .whatYouSee: ["Sensitive content", "Reset For You", "Chronological feed"]
         case .activity: ["Recently deleted", "Likes and history", "Time limits and breaks"]
-        case .appPreferences: ["Autoplay and data saver", "Captions and comment ticker", "Language and cache"]
+        case .playback: ["Autoplay", "Start with sound", "Data saver"]
+        case .display: ["Light, dark or system appearance", "Reduce motion"]
+        case .mediaComments: ["Reaction band", "Muted words and accounts", "Subtitles"]
+        case .language: ["App language"]
+        case .storage: ["Media cache"]
         case .help: ["Help Center", "Contact support", "Report a problem"]
         case .legal: ["Terms of Service and Privacy Policy", "Community Guidelines", "Legal notice and licences"]
         }

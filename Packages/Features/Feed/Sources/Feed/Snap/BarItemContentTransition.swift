@@ -1,4 +1,5 @@
 import Accelerate
+import DesignSystem
 import UIKit
 
 /// Changes what a bar item's custom view DRAWS through a blur — the old
@@ -346,7 +347,7 @@ final class BarItemContentTransition {
     /// item's width glides under it while it shows, and everything in these pills is
     /// leading-aligned, so the still stays over what it pictures.
     private func still(of view: UIView) -> UIView? {
-        guard let host, !UIAccessibility.isReduceMotionEnabled else { return nil }
+        guard let host, !MotionPreference.reducesMotion else { return nil }
         #if DEBUG
         let started = CACurrentMediaTime()
         defer {

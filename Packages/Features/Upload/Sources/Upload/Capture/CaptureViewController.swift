@@ -197,7 +197,7 @@ final class CaptureViewController: UIViewController {
         captures: CapturedMediaLibrary,
         libraryFace: (@MainActor () async -> UIImage?)?,
         takeLimit: TimeInterval = CaptureTake.maximum,
-        reducesMotion: @escaping () -> Bool = { UIAccessibility.isReduceMotionEnabled },
+        reducesMotion: @escaping () -> Bool = { MotionPreference.reducesMotion },
         makeLibraryPicker: (() -> UIViewController)?,
         makeEditor: @escaping MakeEditor
     ) {

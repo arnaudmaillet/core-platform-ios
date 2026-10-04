@@ -55,7 +55,11 @@ final class AppContainer {
     private lazy var mockBackend = MockBackend(
         conditions: .fromLaunchArguments(),
         mediaCatalog: Self.usesRichMedia ? .realAssets : .synthetic,
-        seedsMapHierarchy: Self.seedsMapPlaces
+        seedsMapHierarchy: Self.seedsMapPlaces,
+        // A guest's write is refused here as at the fleet's edge, so a missing
+        // gate shows up in mock mode (`[edge] REFUSED` in the console).
+        // `-mock-open-edge` turns it off for QA that predates guest mode.
+        enforcesEdgePolicy: !ProcessInfo.processInfo.arguments.contains("-mock-open-edge")
     )
 
     /// Semantic map clusters (city/country places on the mock pins, and the

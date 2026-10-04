@@ -276,7 +276,7 @@ final class NewPostViewController: UIViewController {
         preview: any MediaVideoPreviewing = MediaPreviewPlayer(),
         draft: PostDraft = PostDraft(),
         photoLibrary: any PhotoLibrarySaving = PhotoLibrarySaver(),
-        reducesMotion: @escaping () -> Bool = { UIAccessibility.isReduceMotionEnabled },
+        reducesMotion: @escaping () -> Bool = { MotionPreference.reducesMotion },
         onPublished: @escaping (FeedEntry) -> Void
     ) {
         self.photoLibrary = photoLibrary

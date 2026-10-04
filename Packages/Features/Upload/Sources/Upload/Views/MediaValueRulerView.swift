@@ -416,7 +416,7 @@ extension MediaValueRulerView {
 
 extension MediaValueRulerView: RevealingSurface {
     func reveal(after delay: TimeInterval) {
-        guard !UIAccessibility.isReduceMotionEnabled else {
+        guard !MotionPreference.reducesMotion else {
             revealDriver.stop()
             return
         }

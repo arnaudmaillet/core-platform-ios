@@ -44,7 +44,7 @@ final class SelectorPillMotion {
     /// Whether a move may animate at all: not off-window, not under Reduce
     /// Motion. A test overrides it to run the spring in a bare host.
     lazy var mayAnimate: () -> Bool = { [weak self] in
-        self?.body.window != nil && !UIAccessibility.isReduceMotionEnabled
+        self?.body.window != nil && !MotionPreference.reducesMotion
     }
 
     private var centre: CGPoint = .zero

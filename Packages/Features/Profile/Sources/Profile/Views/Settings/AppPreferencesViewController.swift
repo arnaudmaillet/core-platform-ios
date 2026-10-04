@@ -2,22 +2,40 @@ import CoreStorage
 import DesignSystem
 import UIKit
 
-/// Settings → App Preferences: how this device plays and shows media (#409,
-/// #410). Everything here is stored on the device
-/// (`MediaPlaybackPreferencesStore`, `MediaCommentPreferencesStore`) and
-/// follows the iPhone, not the profile.
+/// The screens of Settings → App and Device (#468): Playback and Sound,
+/// Display, Comments on Media, Language and Storage — one controller, one
+/// page per section (#409, #410). Everything here is stored on the device
+/// (`MediaPlaybackPreferencesStore`, `MediaCommentPreferencesStore`,
+/// `AppearancePreference`, `MotionPreference`) and follows the iPhone, not
+/// the profile.
 final class AppPreferencesViewController: UIViewController {
-    private enum Section: Int, CaseIterable {
-        case playback, band, muted, subtitles, storage
+    enum Section: Int, CaseIterable {
+        case playback, appearance, motion, band, muted, subtitles, language, storage
     }
 
     private enum Item: Hashable {
         case autoplay, startsWithSound, dataSaver
+        case appearance, reduceMotion
         case bandSwitch, opacity, speed
         case mutedWords, mutedAccounts
         case subtitlesSwitch
+        case appLanguage
         case cacheSize, clearCache
     }
+
+    /// The sections each App and Device page shows.
+    static func sections(for page: SettingsSection) -> [Section] {
+        switch page {
+        case .playback: [.playback]
+        case .display: [.appearance, .motion]
+        case .mediaComments: [.band, .muted, .subtitles]
+        case .language: [.language]
+        case .storage: [.storage]
+        default: []
+        }
+    }
+
+    private let page: SettingsSection
 
     private let store: MediaCommentPreferencesStore
     private let playback: MediaPlaybackPreferencesStore
@@ -28,15 +46,17 @@ final class AppPreferencesViewController: UIViewController {
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
 
     init(
+        page: SettingsSection,
         store: MediaCommentPreferencesStore = .standard,
         playback: MediaPlaybackPreferencesStore = .standard,
         cache: MediaCacheInventory = .standard
     ) {
+        self.page = page
         self.store = store
         self.playback = playback
         self.cache = cache
         super.init(nibName: nil, bundle: nil)
-        title = SettingsSection.appPreferences.title
+        title = page.title
         hidesBottomBarWhenPushed = true
     }
 
@@ -59,7 +79,24 @@ final class AppPreferencesViewController: UIViewController {
         view.addSubview(collectionView)
         configureDataSource()
         applySnapshot()
-        measureCache()
+        if page == .storage { measureCache() }
+        // The footer quotes the iOS setting; keep it true when iOS changes.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(motionSettingChanged),
+            name: UIAccessibility.reduceMotionStatusDidChangeNotification, object: nil
+        )
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    @objc private func motionSettingChanged() {
+        guard page == .display else { return }
+        var snapshot = dataSource.snapshot()
+        snapshot.reconfigureItems([.reduceMotion])
+        snapshot.reloadSections([.motion])
+        dataSource.apply(snapshot, animatingDifferences: false)
     }
 
     private func measureCache() {
@@ -106,6 +143,9 @@ final class AppPreferencesViewController: UIViewController {
 
     private static func header(_ section: Section) -> String {
         switch section {
+        case .appearance: "Appearance"
+        case .motion: "Motion"
+        case .language: "Language"
         case .playback: "Playback"
         case .band: "Reaction Band"
         case .muted: "Muted on Media"
@@ -114,14 +154,25 @@ final class AppPreferencesViewController: UIViewController {
         }
     }
 
-    private static func footer(_ section: Section) -> String {
+    static func footer(_ section: Section) -> String {
         switch section {
+        case .appearance: "System follows the iPhone's Light and Dark setting."
+        case .motion:
+            MotionPreference.appReducesMotion
+                ? "Transitions and effects are kept to a minimum in the app."
+                : "Off, the app follows iOS (Accessibility → Motion → Reduce Motion is currently "
+                    + (UIAccessibility.isReduceMotionEnabled ? "on" : "off") + ")."
+        case .language: "The app is in English for now. When more languages arrive, you'll choose yours here and in iOS Settings."
         case .playback: "A video that doesn't start on its own shows its first frame with a play mark; tap it to play. Data Saver lowers stream quality and stops loading upcoming videos ahead while on cellular."
         case .band: "The short reactions that scroll over videos and photos."
         case .muted: "Comments with these words, or from these accounts, never appear in the reaction band or the subtitles. They still show in the comments."
         case .subtitles: "Comments shown as captions above the reaction band."
         case .storage: "Downloaded videos and animations, kept so they open instantly. Clearing them frees space; nothing you made is removed."
         }
+    }
+
+    static func appearanceTitle(_ appearance: AppearancePreference) -> String {
+        appearance.title
     }
 
     static func autoplayTitle(_ autoplay: MediaPlaybackPreferences.Autoplay) -> String {
@@ -151,16 +202,16 @@ final class AppPreferencesViewController: UIViewController {
         }
         let header = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
             elementKind: UICollectionView.elementKindSectionHeader
-        ) { view, _, indexPath in
+        ) { [weak self] view, _, indexPath in
             var content = UIListContentConfiguration.header()
-            content.text = Section(rawValue: indexPath.section).map(Self.header)
+            content.text = self?.dataSource.sectionIdentifier(for: indexPath.section).map(Self.header)
             view.contentConfiguration = content
         }
         let footer = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
             elementKind: UICollectionView.elementKindSectionFooter
-        ) { view, _, indexPath in
+        ) { [weak self] view, _, indexPath in
             var content = UIListContentConfiguration.footer()
-            content.text = Section(rawValue: indexPath.section).map(Self.footer)
+            content.text = self?.dataSource.sectionIdentifier(for: indexPath.section).map(Self.footer)
             view.contentConfiguration = content
         }
         dataSource.supplementaryViewProvider = { collectionView, kind, indexPath in
@@ -172,18 +223,32 @@ final class AppPreferencesViewController: UIViewController {
 
     private func applySnapshot() {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
-        snapshot.appendSections(Section.allCases)
-        snapshot.appendItems([.autoplay, .startsWithSound, .dataSaver], toSection: .playback)
-        snapshot.appendItems([.bandSwitch, .opacity, .speed], toSection: .band)
-        snapshot.appendItems([.mutedWords, .mutedAccounts], toSection: .muted)
-        snapshot.appendItems([.subtitlesSwitch], toSection: .subtitles)
-        snapshot.appendItems([.cacheSize, .clearCache], toSection: .storage)
+        for section in Self.sections(for: page) {
+            snapshot.appendSections([section])
+            snapshot.appendItems(Self.items(in: section), toSection: section)
+        }
         dataSource.apply(snapshot, animatingDifferences: false)
+    }
+
+    private static func items(in section: Section) -> [Item] {
+        switch section {
+        case .playback: [.autoplay, .startsWithSound, .dataSaver]
+        case .appearance: [.appearance]
+        case .motion: [.reduceMotion]
+        case .band: [.bandSwitch, .opacity, .speed]
+        case .muted: [.mutedWords, .mutedAccounts]
+        case .subtitles: [.subtitlesSwitch]
+        case .language: [.appLanguage]
+        case .storage: [.cacheSize, .clearCache]
+        }
     }
 
     private func reconfigure(_ items: [Item]) {
         var snapshot = dataSource.snapshot()
-        snapshot.reconfigureItems(items)
+        // Only what this page shows: reconfiguring an absent item traps.
+        let present = items.filter { snapshot.indexOfItem($0) != nil }
+        guard !present.isEmpty else { return }
+        snapshot.reconfigureItems(present)
         dataSource.apply(snapshot, animatingDifferences: false)
     }
 
@@ -192,6 +257,26 @@ final class AppPreferencesViewController: UIViewController {
         cell.accessories = []
         cell.contentView.subviews.filter { $0.tag == Self.controlTag }.forEach { $0.removeFromSuperview() }
         switch item {
+        case .appearance:
+            cell.contentConfiguration = nil
+            let options = AppearancePreference.allCases
+            let control = UISegmentedControl(items: options.map(Self.appearanceTitle))
+            control.selectedSegmentIndex = options.firstIndex(of: AppearancePreference.current) ?? 0
+            control.accessibilityLabel = "Appearance"
+            control.addAction(UIAction { action in
+                guard let control = action.sender as? UISegmentedControl else { return }
+                AppearancePreference.set(options[control.selectedSegmentIndex])
+            }, for: .valueChanged)
+            install(control, in: cell, title: nil)
+        case .reduceMotion:
+            cell.contentConfiguration = Self.label("Reduce Motion", symbol: "figure.walk.motion")
+            cell.accessories = [switchAccessory(isOn: MotionPreference.appReducesMotion) { isOn in
+                MotionPreference.appReducesMotion = isOn
+            }]
+        case .appLanguage:
+            var content = Self.label("App Language", symbol: "globe")
+            content.secondaryText = Self.currentLanguageName()
+            cell.contentConfiguration = content
         case .autoplay:
             cell.contentConfiguration = nil
             let options = MediaPlaybackPreferences.Autoplay.allCases
@@ -277,6 +362,12 @@ final class AppPreferencesViewController: UIViewController {
 
     private static let controlTag = 0x5E77
 
+    /// The language the app is showing, in that language ("English").
+    static func currentLanguageName(bundle: Bundle = .main) -> String {
+        let code = bundle.preferredLocalizations.first ?? "en"
+        return Locale(identifier: code).localizedString(forLanguageCode: code)?.capitalized ?? code
+    }
+
     private static func label(_ text: String, symbol: String) -> UIListContentConfiguration {
         var content = UIListContentConfiguration.valueCell()
         content.text = text
@@ -296,12 +387,17 @@ final class AppPreferencesViewController: UIViewController {
     }
 
     /// A caption over a full-width control, inside the row's margins.
-    private func install(_ control: UIControl, in cell: UICollectionViewListCell, title: String) {
-        let caption = UILabel()
-        caption.text = title
-        caption.font = .preferredFont(forTextStyle: .body)
-        caption.textColor = control.isEnabled ? .label : .secondaryLabel
-        let stack = UIStackView(arrangedSubviews: [caption, control])
+    /// `title` nil when the section header already names the control.
+    private func install(_ control: UIControl, in cell: UICollectionViewListCell, title: String?) {
+        var arranged: [UIView] = [control]
+        if let title {
+            let caption = UILabel()
+            caption.text = title
+            caption.font = .preferredFont(forTextStyle: .body)
+            caption.textColor = control.isEnabled ? .label : .secondaryLabel
+            arranged.insert(caption, at: 0)
+        }
+        let stack = UIStackView(arrangedSubviews: arranged)
         stack.axis = .vertical
         stack.spacing = 8
         stack.tag = Self.controlTag
