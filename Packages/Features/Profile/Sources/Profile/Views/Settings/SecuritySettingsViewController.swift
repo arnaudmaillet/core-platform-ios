@@ -1,20 +1,20 @@
 import DesignSystem
 import UIKit
 
-/// Settings → Security and Login: where the account is signed in, and the
-/// two ways out — one other device, or every device at once (#384).
+/// Settings → Security and Login: the Security Checkup, Change Password
+/// (#382), where the account is signed in and the two ways out — one other
+/// device, or every device at once (#384) — and App Lock (#418).
 ///
-/// Change password and two-factor are listed under Coming Soon rather than
-/// offered: their `account.v1` RPCs take a server-side hash and an encrypted
-/// seed, internal calls for an edge service the app cannot stand in for
-/// (#382, #383).
+/// Two-factor, backup codes and passkeys are listed under Coming Soon: they
+/// wait on backend arnaudmaillet/core-platform-backend#649.
 final class SecuritySettingsViewController: UIViewController {
     private enum Section: Hashable {
-        case checkup, sessions, global, appLock, comingSoon
+        case checkup, password, sessions, global, appLock, comingSoon
     }
 
     private enum Item: Hashable {
         case checkup
+        case changePassword
         case requireLock
         case lockDelay
         case session(AccountSession)
@@ -24,12 +24,13 @@ final class SecuritySettingsViewController: UIViewController {
         case planned(String)
     }
 
-    private static let planned = ["Change password", "Two-factor authentication", "Backup codes and passkeys"]
+    private static let planned = ["Two-factor authentication", "Backup codes and passkeys"]
 
     private let viewModel: SecuritySettingsViewModel
     private let onSignedOutEverywhere: () -> Void
     private let authenticator: any DeviceAuthenticating
     private let makeCheckup: (() -> UIViewController)?
+    private let makeChangePassword: (() -> UIViewController)?
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
 
@@ -37,12 +38,14 @@ final class SecuritySettingsViewController: UIViewController {
         viewModel: SecuritySettingsViewModel,
         onSignedOutEverywhere: @escaping () -> Void,
         authenticator: any DeviceAuthenticating = DeviceAuthenticator(),
-        makeCheckup: (() -> UIViewController)? = nil
+        makeCheckup: (() -> UIViewController)? = nil,
+        makeChangePassword: (() -> UIViewController)? = nil
     ) {
         self.viewModel = viewModel
         self.onSignedOutEverywhere = onSignedOutEverywhere
         self.authenticator = authenticator
         self.makeCheckup = makeCheckup
+        self.makeChangePassword = makeChangePassword
         super.init(nibName: nil, bundle: nil)
         title = SettingsSection.security.title
         hidesBottomBarWhenPushed = true
@@ -60,6 +63,17 @@ final class SecuritySettingsViewController: UIViewController {
         applySnapshot()
         Task { await viewModel.load() }
     }
+
+    /// Coming back (from Change Password, which can log the other devices
+    /// out, or from the checkup) re-reads the sessions. The list on screen
+    /// stays until the new one arrives, so nothing flashes.
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        if hasAppeared { Task { await viewModel.load() } }
+        hasAppeared = true
+    }
+
+    private var hasAppeared = false
 
     // MARK: - Setup
 
@@ -112,6 +126,7 @@ final class SecuritySettingsViewController: UIViewController {
     private static func headerText(_ section: Section) -> String? {
         switch section {
         case .checkup: nil
+        case .password: nil
         case .sessions: "Where You're Logged In"
         case .global: nil
         case .appLock: "App Lock"
@@ -122,6 +137,7 @@ final class SecuritySettingsViewController: UIViewController {
     private static func footerText(_ section: Section) -> String? {
         switch section {
         case .checkup: nil
+        case .password: nil
         case .sessions: "Tap another device to log it out."
         case .global: "Ends every session, including this one. You'll need to log in again."
         case .appLock: "Applies to this iPhone. When it's on, opening the app asks for Face ID or your passcode, and the app is hidden in the app switcher."
@@ -136,6 +152,10 @@ final class SecuritySettingsViewController: UIViewController {
         if makeCheckup != nil {
             snapshot.appendSections([.checkup])
             snapshot.appendItems([.checkup], toSection: .checkup)
+        }
+        if makeChangePassword != nil {
+            snapshot.appendSections([.password])
+            snapshot.appendItems([.changePassword], toSection: .password)
         }
         snapshot.appendSections([.sessions, .global, .appLock, .comingSoon])
         switch viewModel.phase {
@@ -189,6 +209,13 @@ final class SecuritySettingsViewController: UIViewController {
         switch item {
         case .checkup, .requireLock, .lockDelay:
             break
+        case .changePassword:
+            var content = UIListContentConfiguration.cell()
+            content.text = "Change Password"
+            content.image = UIImage(systemName: "key")
+            content.imageProperties.tintColor = .label
+            cell.contentConfiguration = content
+            cell.accessories = [.disclosureIndicator()]
         case .session(let session):
             var content = UIListContentConfiguration.subtitleCell()
             content.text = session.device.title
@@ -378,7 +405,7 @@ extension SecuritySettingsViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         switch dataSource.itemIdentifier(for: indexPath) {
         case .session(let session): !session.isCurrent
-        case .failed, .logOutEverywhere, .checkup: true
+        case .failed, .logOutEverywhere, .checkup, .changePassword: true
         case .loading, .planned, .requireLock, .lockDelay, nil: false
         }
     }
@@ -395,6 +422,10 @@ extension SecuritySettingsViewController: UICollectionViewDelegate {
         case .checkup:
             if let checkup = makeCheckup?() {
                 navigationController?.pushViewController(checkup, animated: true)
+            }
+        case .changePassword:
+            if let screen = makeChangePassword?() {
+                navigationController?.pushViewController(screen, animated: true)
             }
         default:
             break

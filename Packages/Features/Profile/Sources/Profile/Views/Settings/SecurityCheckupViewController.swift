@@ -8,6 +8,8 @@ struct SecurityCheckupItem: Hashable, Sendable {
         case recommended
         /// The app can't do this yet (needs a backend contract).
         case unavailable
+        /// Advice with nothing to tick: not counted, it points somewhere.
+        case info
     }
 
     let id: String
@@ -18,7 +20,8 @@ struct SecurityCheckupItem: Hashable, Sendable {
 }
 
 /// What the checkup recommends, from what the app knows. Pure, so the rules
-/// are pinned by tests. Password and two-factor are listed as unavailable
+/// are pinned by tests. The password is advice (it can be changed, but the
+/// app can't judge how strong it is); two-factor is listed as unavailable
 /// rather than hidden: their contracts are internal today (#382, #383), and a
 /// checkup that skipped them would look complete when it isn't.
 enum SecurityCheckup {
@@ -67,9 +70,9 @@ enum SecurityCheckup {
             state: appLockOn ? .done : (lockMethod == nil ? .unavailable : .recommended)
         ))
         items.append(SecurityCheckupItem(
-            id: "password", title: "Strong password",
-            detail: "Changing your password isn't available in the app yet.",
-            symbolName: "key", state: .unavailable
+            id: "password", title: "Password",
+            detail: "Change it from Security and Login if you think someone else knows it.",
+            symbolName: "key", state: .info
         ))
         items.append(SecurityCheckupItem(
             id: "twoFactor", title: "Two-factor authentication",
@@ -81,7 +84,7 @@ enum SecurityCheckup {
 
     /// "2 of 4 done" over what the viewer can act on.
     static func summary(_ items: [SecurityCheckupItem]) -> String {
-        let actionable = items.filter { $0.state != .unavailable }
+        let actionable = items.filter { $0.state != .unavailable && $0.state != .info }
         let done = actionable.filter { $0.state == .done }.count
         return "\(done) of \(actionable.count) done"
     }
@@ -186,6 +189,7 @@ final class SecurityCheckupViewController: UIViewController {
         case .done: "checkmark.circle.fill"
         case .recommended: "exclamationmark.circle.fill"
         case .unavailable: "minus.circle"
+        case .info: "info.circle"
         }
     }
 
@@ -194,6 +198,7 @@ final class SecurityCheckupViewController: UIViewController {
         case .done: .systemGreen
         case .recommended: .systemOrange
         case .unavailable: .tertiaryLabel
+        case .info: .secondaryLabel
         }
     }
 }
@@ -201,10 +206,11 @@ final class SecurityCheckupViewController: UIViewController {
 extension SecurityCheckupViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         guard let item = dataSource.itemIdentifier(for: indexPath) else { return false }
-        return item.state == .recommended && (item.id == "sessions" || item.id == "appLock")
+        return (item.state == .recommended && (item.id == "sessions" || item.id == "appLock")) || item.id == "password"
     }
 
-    /// Devices and App Lock live on the Security page this was pushed from.
+    /// Devices, App Lock and Change Password live on the Security page this
+    /// was pushed from.
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         collectionView.deselectItem(at: indexPath, animated: true)
         navigationController?.popViewController(animated: true)
