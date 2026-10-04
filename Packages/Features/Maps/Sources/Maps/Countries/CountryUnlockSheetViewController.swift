@@ -73,7 +73,7 @@ final class CountryUnlockSheetViewController: UIViewController {
 
         let flag = UILabel()
         flag.text = country.flag
-        flag.font = .systemFont(ofSize: 56)
+        flag.font = .systemFont(ofSize: 56) // a picture, not text (#482)
         let name = UILabel()
         name.text = country.name
         name.font = UIFont.systemFont(ofSize: UIFont.preferredFont(forTextStyle: .title2).pointSize, weight: .bold)
@@ -239,7 +239,10 @@ final class CountryUnlockSheetViewController: UIViewController {
 
     private static func metric(value: String, caption: String, heart: Bool = false) -> UIView {
         let valueLabel = UILabel()
-        valueLabel.font = .monospacedDigitSystemFont(ofSize: 20, weight: .bold)
+        valueLabel.font = .scaledMonospacedDigitSystemFont(
+            ofSize: 20, weight: .bold, relativeTo: .title3, maximumPointSize: 28
+        )
+        valueLabel.adjustsFontForContentSizeCategory = true
         valueLabel.textAlignment = .center
         valueLabel.text = value
         var valueView: UIView = valueLabel

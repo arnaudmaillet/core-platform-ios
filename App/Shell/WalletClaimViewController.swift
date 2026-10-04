@@ -391,7 +391,7 @@ final class WalletClaimViewController: UIViewController {
     }
 
     private func configure(_ header: WalletSectionHeader, for section: Section) {
-        let font = UIFont.monospacedDigitSystemFont(ofSize: 13, weight: .medium)
+        let font = UIFont.scaledMonospacedDigitSystemFont(ofSize: 13, weight: .medium, relativeTo: .footnote, maximumPointSize: 16)
         switch section {
         case .summary:
             break
@@ -556,7 +556,9 @@ final class WalletClaimViewController: UIViewController {
         configuration.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 12)
         configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
             var attributes = attributes
-            attributes.font = UIFont.systemFont(ofSize: 17, weight: .semibold)
+            attributes.font = UIFont.scaledSystemFont(
+                ofSize: 17, weight: .semibold, relativeTo: .headline, maximumPointSize: 22
+            )
             return attributes
         }
         let button = UIButton(configuration: configuration)
@@ -660,7 +662,9 @@ final class WalletClaimViewController: UIViewController {
         if let guestGift {
             claimButton.isEnabled = true
             var title = AttributedString("Claim \(guestGift) likes")
-            title.font = .monospacedDigitSystemFont(ofSize: 17, weight: .semibold)
+            title.font = .scaledMonospacedDigitSystemFont(
+                ofSize: 17, weight: .semibold, relativeTo: .headline, maximumPointSize: 24
+            )
             claimButton.configuration?.attributedTitle = title
             claimButton.configuration?.image = UIImage(
                 systemName: "lock.fill",
@@ -683,7 +687,9 @@ final class WalletClaimViewController: UIViewController {
         } else {
             title = AttributedString("Claim")
         }
-        title.font = .monospacedDigitSystemFont(ofSize: 17, weight: .semibold)
+        title.font = .scaledMonospacedDigitSystemFont(
+            ofSize: 17, weight: .semibold, relativeTo: .headline, maximumPointSize: 24
+        )
         claimButton.configuration?.attributedTitle = title
     }
 
