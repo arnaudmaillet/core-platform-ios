@@ -89,10 +89,39 @@ public enum AccountSessionsError: Error, Equatable {
     case transport(message: String)
 }
 
+/// Settings → Security and Login → Change Password (#382), on
+/// `auth.v1.ChangePassword`: the current password is proved with the IdP and
+/// the new one set there; neither is stored by the app.
+public protocol AccountPasswordChanging: Sendable {
+    /// Returns how many OTHER sessions were signed out (0 unless asked).
+    func changePassword(current: String, new: String, signOutOtherSessions: Bool) async throws -> Int
+}
+
+public enum PasswordChangeError: Error, Equatable {
+    /// The current password didn't match (UNAUTHENTICATED, AUT-5002).
+    case wrongCurrentPassword
+    /// The new password was refused — too short or long, unchanged, or the
+    /// IdP's policy (FAILED_PRECONDITION). `reason` is the server's rule,
+    /// without its error code, ready to show.
+    case rejected(reason: String)
+    case transport(message: String)
+
+    /// "AUT-VAL-024: the new password must be…" → "The new password must be…".
+    static func readable(_ message: String?) -> String {
+        guard var text = message?.trimmingCharacters(in: .whitespaces), !text.isEmpty else {
+            return "Choose a different password."
+        }
+        if let colon = text.firstIndex(of: ":"), text[..<colon].allSatisfy({ $0.isUppercase || $0.isNumber || $0 == "-" }) {
+            text = text[text.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+        }
+        return text.prefix(1).uppercased() + text.dropFirst() + (text.hasSuffix(".") ? "" : ".")
+    }
+}
+
 /// `auth.v1` session management on the AUTHENTICATED client: the RPCs act on
 /// the calling principal's account (empty `account_id`), so the bearer token
 /// is what says whose sessions these are.
-public actor AccountSessionsRepository: AccountSessionsManaging {
+public actor AccountSessionsRepository: AccountSessionsManaging, AccountPasswordChanging {
     private let authClient: any Auth_V1_AuthServiceClientInterface
 
     public init(authClient: any Auth_V1_AuthServiceClientInterface) {
@@ -122,6 +151,27 @@ public actor AccountSessionsRepository: AccountSessionsManaging {
         let response = await authClient.logoutAllSessions(request: Auth_V1_LogoutAllSessionsRequest(), headers: [:])
         if case .failure(let error) = response.result {
             throw AccountSessionsError.transport(message: error.message ?? "code \(error.code)")
+        }
+    }
+
+    public func changePassword(current: String, new: String, signOutOtherSessions: Bool) async throws -> Int {
+        var request = Auth_V1_ChangePasswordRequest()
+        request.currentPassword = current
+        request.newPassword = new
+        request.signOutOtherSessions = signOutOtherSessions
+        let response = await authClient.changePassword(request: request, headers: [:])
+        switch response.result {
+        case .success(let body):
+            return Int(body.sessionsRevoked)
+        case .failure(let error):
+            switch error.code {
+            // AUT-5002 is the wrong current password; another AUT code under
+            // UNAUTHENTICATED (an expired session) is not the viewer's typo.
+            case .unauthenticated where (error.message ?? "").contains("AUT-5002") || !(error.message ?? "").contains("AUT-"):
+                throw PasswordChangeError.wrongCurrentPassword
+            case .failedPrecondition, .invalidArgument: throw PasswordChangeError.rejected(reason: PasswordChangeError.readable(error.message))
+            default: throw PasswordChangeError.transport(message: error.message ?? "code \(error.code)")
+            }
         }
     }
 

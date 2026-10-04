@@ -117,6 +117,20 @@ public nonisolated struct Account_V1_AccountView: @unchecked Sendable {
     set {_uniqueStorage()._permissions = newValue}
   }
 
+  /// From the date of birth, today. 13–17 ⇒ teen protections (auth mints it
+  /// into the edge token's `age` claim).
+  public var ageBracket: Account_V1_AgeBracket {
+    get {_storage._ageBracket}
+    set {_uniqueStorage()._ageBracket = newValue}
+  }
+
+  /// ISO 8601 (YYYY-MM-DD); empty when none is on file. Private: the holder's
+  /// own view (edge) or the mesh.
+  public var dateOfBirth: String {
+    get {_storage._dateOfBirth}
+    set {_uniqueStorage()._dateOfBirth = newValue}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -124,62 +138,118 @@ public nonisolated struct Account_V1_AccountView: @unchecked Sendable {
   fileprivate var _storage = _StorageClass.defaultInstance
 }
 
-/// GDPR compliance record — returned only to authorised compliance officers.
-public nonisolated struct Account_V1_GdprRecordView: Sendable {
+/// GDPR record: the holder's own (client edge, account_id = the caller) or any
+/// account's (mesh, compliance). A consent is given while its `_consented_at`
+/// is set.
+public nonisolated struct Account_V1_GdprRecordView: @unchecked Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  public var accountID: String = String()
+  public var accountID: String {
+    get {_storage._accountID}
+    set {_uniqueStorage()._accountID = newValue}
+  }
 
-  public var dataProcessingConsented: Bool = false
+  public var dataProcessingConsented: Bool {
+    get {_storage._dataProcessingConsented}
+    set {_uniqueStorage()._dataProcessingConsented = newValue}
+  }
 
-  public var marketingConsented: Bool = false
+  public var marketingConsented: Bool {
+    get {_storage._marketingConsented}
+    set {_uniqueStorage()._marketingConsented = newValue}
+  }
 
   public var deletionRequestedAt: SwiftProtobuf.Google_Protobuf_Timestamp {
-    get {_deletionRequestedAt ?? SwiftProtobuf.Google_Protobuf_Timestamp()}
-    set {_deletionRequestedAt = newValue}
+    get {_storage._deletionRequestedAt ?? SwiftProtobuf.Google_Protobuf_Timestamp()}
+    set {_uniqueStorage()._deletionRequestedAt = newValue}
   }
   /// Returns true if `deletionRequestedAt` has been explicitly set.
-  public var hasDeletionRequestedAt: Bool {self._deletionRequestedAt != nil}
+  public var hasDeletionRequestedAt: Bool {_storage._deletionRequestedAt != nil}
   /// Clears the value of `deletionRequestedAt`. Subsequent reads from it will return its default value.
-  public mutating func clearDeletionRequestedAt() {self._deletionRequestedAt = nil}
+  public mutating func clearDeletionRequestedAt() {_uniqueStorage()._deletionRequestedAt = nil}
 
   public var anonymizedAt: SwiftProtobuf.Google_Protobuf_Timestamp {
-    get {_anonymizedAt ?? SwiftProtobuf.Google_Protobuf_Timestamp()}
-    set {_anonymizedAt = newValue}
+    get {_storage._anonymizedAt ?? SwiftProtobuf.Google_Protobuf_Timestamp()}
+    set {_uniqueStorage()._anonymizedAt = newValue}
   }
   /// Returns true if `anonymizedAt` has been explicitly set.
-  public var hasAnonymizedAt: Bool {self._anonymizedAt != nil}
+  public var hasAnonymizedAt: Bool {_storage._anonymizedAt != nil}
   /// Clears the value of `anonymizedAt`. Subsequent reads from it will return its default value.
-  public mutating func clearAnonymizedAt() {self._anonymizedAt = nil}
+  public mutating func clearAnonymizedAt() {_uniqueStorage()._anonymizedAt = nil}
 
   public var dataExportRequestedAt: SwiftProtobuf.Google_Protobuf_Timestamp {
-    get {_dataExportRequestedAt ?? SwiftProtobuf.Google_Protobuf_Timestamp()}
-    set {_dataExportRequestedAt = newValue}
+    get {_storage._dataExportRequestedAt ?? SwiftProtobuf.Google_Protobuf_Timestamp()}
+    set {_uniqueStorage()._dataExportRequestedAt = newValue}
   }
   /// Returns true if `dataExportRequestedAt` has been explicitly set.
-  public var hasDataExportRequestedAt: Bool {self._dataExportRequestedAt != nil}
+  public var hasDataExportRequestedAt: Bool {_storage._dataExportRequestedAt != nil}
   /// Clears the value of `dataExportRequestedAt`. Subsequent reads from it will return its default value.
-  public mutating func clearDataExportRequestedAt() {self._dataExportRequestedAt = nil}
+  public mutating func clearDataExportRequestedAt() {_uniqueStorage()._dataExportRequestedAt = nil}
 
   public var dataExportCompletedAt: SwiftProtobuf.Google_Protobuf_Timestamp {
-    get {_dataExportCompletedAt ?? SwiftProtobuf.Google_Protobuf_Timestamp()}
-    set {_dataExportCompletedAt = newValue}
+    get {_storage._dataExportCompletedAt ?? SwiftProtobuf.Google_Protobuf_Timestamp()}
+    set {_uniqueStorage()._dataExportCompletedAt = newValue}
   }
   /// Returns true if `dataExportCompletedAt` has been explicitly set.
-  public var hasDataExportCompletedAt: Bool {self._dataExportCompletedAt != nil}
+  public var hasDataExportCompletedAt: Bool {_storage._dataExportCompletedAt != nil}
   /// Clears the value of `dataExportCompletedAt`. Subsequent reads from it will return its default value.
-  public mutating func clearDataExportCompletedAt() {self._dataExportCompletedAt = nil}
+  public mutating func clearDataExportCompletedAt() {_uniqueStorage()._dataExportCompletedAt = nil}
+
+  /// When a requested deletion becomes permanent (the end of the grace period).
+  public var deletionScheduledAt: SwiftProtobuf.Google_Protobuf_Timestamp {
+    get {_storage._deletionScheduledAt ?? SwiftProtobuf.Google_Protobuf_Timestamp()}
+    set {_uniqueStorage()._deletionScheduledAt = newValue}
+  }
+  /// Returns true if `deletionScheduledAt` has been explicitly set.
+  public var hasDeletionScheduledAt: Bool {_storage._deletionScheduledAt != nil}
+  /// Clears the value of `deletionScheduledAt`. Subsequent reads from it will return its default value.
+  public mutating func clearDeletionScheduledAt() {_uniqueStorage()._deletionScheduledAt = nil}
+
+  public var analyticsConsented: Bool {
+    get {_storage._analyticsConsented}
+    set {_uniqueStorage()._analyticsConsented = newValue}
+  }
+
+  /// The privacy-policy version the holder last consented under.
+  public var consentPolicyVersion: String {
+    get {_storage._consentPolicyVersion}
+    set {_uniqueStorage()._consentPolicyVersion = newValue}
+  }
+
+  public var dataProcessingConsentedAt: SwiftProtobuf.Google_Protobuf_Timestamp {
+    get {_storage._dataProcessingConsentedAt ?? SwiftProtobuf.Google_Protobuf_Timestamp()}
+    set {_uniqueStorage()._dataProcessingConsentedAt = newValue}
+  }
+  /// Returns true if `dataProcessingConsentedAt` has been explicitly set.
+  public var hasDataProcessingConsentedAt: Bool {_storage._dataProcessingConsentedAt != nil}
+  /// Clears the value of `dataProcessingConsentedAt`. Subsequent reads from it will return its default value.
+  public mutating func clearDataProcessingConsentedAt() {_uniqueStorage()._dataProcessingConsentedAt = nil}
+
+  public var marketingConsentedAt: SwiftProtobuf.Google_Protobuf_Timestamp {
+    get {_storage._marketingConsentedAt ?? SwiftProtobuf.Google_Protobuf_Timestamp()}
+    set {_uniqueStorage()._marketingConsentedAt = newValue}
+  }
+  /// Returns true if `marketingConsentedAt` has been explicitly set.
+  public var hasMarketingConsentedAt: Bool {_storage._marketingConsentedAt != nil}
+  /// Clears the value of `marketingConsentedAt`. Subsequent reads from it will return its default value.
+  public mutating func clearMarketingConsentedAt() {_uniqueStorage()._marketingConsentedAt = nil}
+
+  public var analyticsConsentedAt: SwiftProtobuf.Google_Protobuf_Timestamp {
+    get {_storage._analyticsConsentedAt ?? SwiftProtobuf.Google_Protobuf_Timestamp()}
+    set {_uniqueStorage()._analyticsConsentedAt = newValue}
+  }
+  /// Returns true if `analyticsConsentedAt` has been explicitly set.
+  public var hasAnalyticsConsentedAt: Bool {_storage._analyticsConsentedAt != nil}
+  /// Clears the value of `analyticsConsentedAt`. Subsequent reads from it will return its default value.
+  public mutating func clearAnalyticsConsentedAt() {_uniqueStorage()._analyticsConsentedAt = nil}
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
-  fileprivate var _deletionRequestedAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
-  fileprivate var _anonymizedAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
-  fileprivate var _dataExportRequestedAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
-  fileprivate var _dataExportCompletedAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
+  fileprivate var _storage = _StorageClass.defaultInstance
 }
 
 /// Minimal status-only view used by auth and gateway services.
@@ -232,6 +302,26 @@ public nonisolated struct Account_V1_CreateAccountRequest: Sendable {
 
   /// UUID of the admin account that created this account; empty for self-registration.
   public var createdBy: String = String()
+
+  /// ISO 8601 (YYYY-MM-DD). Under the minimum age (13; 16 where the country of
+  /// residence requires it) the account is refused (ACC-2004).
+  public var dateOfBirth: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// Record the holder's date of birth when none is on file (once; afterwards
+/// only support can change it). Under the minimum age: ACC-2004, nothing stored.
+public nonisolated struct Account_V1_SetDateOfBirthRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var accountID: String = String()
+
+  public var dateOfBirth: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -359,6 +449,18 @@ public nonisolated struct Account_V1_DeactivateAccountRequest: Sendable {
   public init() {}
 }
 
+public nonisolated struct Account_V1_ResumeDeactivatedAccountRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var accountID: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
 public nonisolated struct Account_V1_RecordLoginRequest: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -384,6 +486,18 @@ public nonisolated struct Account_V1_RecordFailedLoginRequest: Sendable {
 }
 
 public nonisolated struct Account_V1_RequestGdprDeletionRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var accountID: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Account_V1_CancelGdprDeletionRequest: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -495,6 +609,53 @@ public nonisolated struct Account_V1_GetGdprRecordRequest: Sendable {
   public init() {}
 }
 
+/// Give or withdraw consents. An unset field leaves that purpose unchanged.
+public nonisolated struct Account_V1_UpdateConsentsRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var accountID: String = String()
+
+  public var dataProcessing: Bool {
+    get {_dataProcessing ?? false}
+    set {_dataProcessing = newValue}
+  }
+  /// Returns true if `dataProcessing` has been explicitly set.
+  public var hasDataProcessing: Bool {self._dataProcessing != nil}
+  /// Clears the value of `dataProcessing`. Subsequent reads from it will return its default value.
+  public mutating func clearDataProcessing() {self._dataProcessing = nil}
+
+  public var marketing: Bool {
+    get {_marketing ?? false}
+    set {_marketing = newValue}
+  }
+  /// Returns true if `marketing` has been explicitly set.
+  public var hasMarketing: Bool {self._marketing != nil}
+  /// Clears the value of `marketing`. Subsequent reads from it will return its default value.
+  public mutating func clearMarketing() {self._marketing = nil}
+
+  public var analytics: Bool {
+    get {_analytics ?? false}
+    set {_analytics = newValue}
+  }
+  /// Returns true if `analytics` has been explicitly set.
+  public var hasAnalytics: Bool {self._analytics != nil}
+  /// Clears the value of `analytics`. Subsequent reads from it will return its default value.
+  public mutating func clearAnalytics() {self._analytics = nil}
+
+  /// The privacy-policy version shown to the holder (≤ 64 chars), if any.
+  public var policyVersion: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _dataProcessing: Bool? = nil
+  fileprivate var _marketing: Bool? = nil
+  fileprivate var _analytics: Bool? = nil
+}
+
 public nonisolated struct Account_V1_ListAccountsByStatusRequest: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -531,7 +692,7 @@ fileprivate nonisolated let _protobuf_package = "account.v1"
 
 nonisolated extension Account_V1_AccountView: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".AccountView"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}identity_id\0\u{1}status\0\u{3}suspension_reason\0\u{1}email\0\u{3}email_verified\0\u{1}phone\0\u{3}phone_verified\0\u{3}kyc_status\0\u{3}country_of_residence\0\u{1}roles\0\u{1}version\0\u{3}created_at\0\u{3}updated_at\0\u{1}permissions\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}identity_id\0\u{1}status\0\u{3}suspension_reason\0\u{1}email\0\u{3}email_verified\0\u{1}phone\0\u{3}phone_verified\0\u{3}kyc_status\0\u{3}country_of_residence\0\u{1}roles\0\u{1}version\0\u{3}created_at\0\u{3}updated_at\0\u{1}permissions\0\u{3}age_bracket\0\u{3}date_of_birth\0")
 
   fileprivate class _StorageClass {
     var _id: String = String()
@@ -549,6 +710,8 @@ nonisolated extension Account_V1_AccountView: SwiftProtobuf.Message, SwiftProtob
     var _createdAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
     var _updatedAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
     var _permissions: [String] = []
+    var _ageBracket: Account_V1_AgeBracket = .unspecified
+    var _dateOfBirth: String = String()
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -574,6 +737,8 @@ nonisolated extension Account_V1_AccountView: SwiftProtobuf.Message, SwiftProtob
       _createdAt = source._createdAt
       _updatedAt = source._updatedAt
       _permissions = source._permissions
+      _ageBracket = source._ageBracket
+      _dateOfBirth = source._dateOfBirth
     }
   }
 
@@ -607,6 +772,8 @@ nonisolated extension Account_V1_AccountView: SwiftProtobuf.Message, SwiftProtob
         case 13: try { try decoder.decodeSingularMessageField(value: &_storage._createdAt) }()
         case 14: try { try decoder.decodeSingularMessageField(value: &_storage._updatedAt) }()
         case 15: try { try decoder.decodeRepeatedStringField(value: &_storage._permissions) }()
+        case 16: try { try decoder.decodeSingularEnumField(value: &_storage._ageBracket) }()
+        case 17: try { try decoder.decodeSingularStringField(value: &_storage._dateOfBirth) }()
         default: break
         }
       }
@@ -664,6 +831,12 @@ nonisolated extension Account_V1_AccountView: SwiftProtobuf.Message, SwiftProtob
       if !_storage._permissions.isEmpty {
         try visitor.visitRepeatedStringField(value: _storage._permissions, fieldNumber: 15)
       }
+      if _storage._ageBracket != .unspecified {
+        try visitor.visitSingularEnumField(value: _storage._ageBracket, fieldNumber: 16)
+      }
+      if !_storage._dateOfBirth.isEmpty {
+        try visitor.visitSingularStringField(value: _storage._dateOfBirth, fieldNumber: 17)
+      }
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -688,6 +861,8 @@ nonisolated extension Account_V1_AccountView: SwiftProtobuf.Message, SwiftProtob
         if _storage._createdAt != rhs_storage._createdAt {return false}
         if _storage._updatedAt != rhs_storage._updatedAt {return false}
         if _storage._permissions != rhs_storage._permissions {return false}
+        if _storage._ageBracket != rhs_storage._ageBracket {return false}
+        if _storage._dateOfBirth != rhs_storage._dateOfBirth {return false}
         return true
       }
       if !storagesAreEqual {return false}
@@ -699,63 +874,153 @@ nonisolated extension Account_V1_AccountView: SwiftProtobuf.Message, SwiftProtob
 
 nonisolated extension Account_V1_GdprRecordView: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".GdprRecordView"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}account_id\0\u{3}data_processing_consented\0\u{3}marketing_consented\0\u{3}deletion_requested_at\0\u{3}anonymized_at\0\u{3}data_export_requested_at\0\u{3}data_export_completed_at\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}account_id\0\u{3}data_processing_consented\0\u{3}marketing_consented\0\u{3}deletion_requested_at\0\u{3}anonymized_at\0\u{3}data_export_requested_at\0\u{3}data_export_completed_at\0\u{3}deletion_scheduled_at\0\u{3}analytics_consented\0\u{3}consent_policy_version\0\u{3}data_processing_consented_at\0\u{3}marketing_consented_at\0\u{3}analytics_consented_at\0")
+
+  fileprivate class _StorageClass {
+    var _accountID: String = String()
+    var _dataProcessingConsented: Bool = false
+    var _marketingConsented: Bool = false
+    var _deletionRequestedAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
+    var _anonymizedAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
+    var _dataExportRequestedAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
+    var _dataExportCompletedAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
+    var _deletionScheduledAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
+    var _analyticsConsented: Bool = false
+    var _consentPolicyVersion: String = String()
+    var _dataProcessingConsentedAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
+    var _marketingConsentedAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
+    var _analyticsConsentedAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
+
+      // This property is used as the initial default value for new instances of the type.
+      // The type itself is protecting the reference to its storage via CoW semantics.
+      // This will force a copy to be made of this reference when the first mutation occurs;
+      // hence, it is safe to mark this as `nonisolated(unsafe)`.
+      static nonisolated(unsafe) let defaultInstance = _StorageClass()
+
+    private init() {}
+
+    init(copying source: _StorageClass) {
+      _accountID = source._accountID
+      _dataProcessingConsented = source._dataProcessingConsented
+      _marketingConsented = source._marketingConsented
+      _deletionRequestedAt = source._deletionRequestedAt
+      _anonymizedAt = source._anonymizedAt
+      _dataExportRequestedAt = source._dataExportRequestedAt
+      _dataExportCompletedAt = source._dataExportCompletedAt
+      _deletionScheduledAt = source._deletionScheduledAt
+      _analyticsConsented = source._analyticsConsented
+      _consentPolicyVersion = source._consentPolicyVersion
+      _dataProcessingConsentedAt = source._dataProcessingConsentedAt
+      _marketingConsentedAt = source._marketingConsentedAt
+      _analyticsConsentedAt = source._analyticsConsentedAt
+    }
+  }
+
+  fileprivate mutating func _uniqueStorage() -> _StorageClass {
+    if !isKnownUniquelyReferenced(&_storage) {
+      _storage = _StorageClass(copying: _storage)
+    }
+    return _storage
+  }
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    while let fieldNumber = try decoder.nextFieldNumber() {
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every case branch when no optimizations are
-      // enabled. https://github.com/apple/swift-protobuf/issues/1034
-      switch fieldNumber {
-      case 1: try { try decoder.decodeSingularStringField(value: &self.accountID) }()
-      case 2: try { try decoder.decodeSingularBoolField(value: &self.dataProcessingConsented) }()
-      case 3: try { try decoder.decodeSingularBoolField(value: &self.marketingConsented) }()
-      case 4: try { try decoder.decodeSingularMessageField(value: &self._deletionRequestedAt) }()
-      case 5: try { try decoder.decodeSingularMessageField(value: &self._anonymizedAt) }()
-      case 6: try { try decoder.decodeSingularMessageField(value: &self._dataExportRequestedAt) }()
-      case 7: try { try decoder.decodeSingularMessageField(value: &self._dataExportCompletedAt) }()
-      default: break
+    _ = _uniqueStorage()
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      while let fieldNumber = try decoder.nextFieldNumber() {
+        // The use of inline closures is to circumvent an issue where the compiler
+        // allocates stack space for every case branch when no optimizations are
+        // enabled. https://github.com/apple/swift-protobuf/issues/1034
+        switch fieldNumber {
+        case 1: try { try decoder.decodeSingularStringField(value: &_storage._accountID) }()
+        case 2: try { try decoder.decodeSingularBoolField(value: &_storage._dataProcessingConsented) }()
+        case 3: try { try decoder.decodeSingularBoolField(value: &_storage._marketingConsented) }()
+        case 4: try { try decoder.decodeSingularMessageField(value: &_storage._deletionRequestedAt) }()
+        case 5: try { try decoder.decodeSingularMessageField(value: &_storage._anonymizedAt) }()
+        case 6: try { try decoder.decodeSingularMessageField(value: &_storage._dataExportRequestedAt) }()
+        case 7: try { try decoder.decodeSingularMessageField(value: &_storage._dataExportCompletedAt) }()
+        case 8: try { try decoder.decodeSingularMessageField(value: &_storage._deletionScheduledAt) }()
+        case 9: try { try decoder.decodeSingularBoolField(value: &_storage._analyticsConsented) }()
+        case 10: try { try decoder.decodeSingularStringField(value: &_storage._consentPolicyVersion) }()
+        case 11: try { try decoder.decodeSingularMessageField(value: &_storage._dataProcessingConsentedAt) }()
+        case 12: try { try decoder.decodeSingularMessageField(value: &_storage._marketingConsentedAt) }()
+        case 13: try { try decoder.decodeSingularMessageField(value: &_storage._analyticsConsentedAt) }()
+        default: break
+        }
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    // The use of inline closures is to circumvent an issue where the compiler
-    // allocates stack space for every if/case branch local when no optimizations
-    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
-    // https://github.com/apple/swift-protobuf/issues/1182
-    if !self.accountID.isEmpty {
-      try visitor.visitSingularStringField(value: self.accountID, fieldNumber: 1)
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every if/case branch local when no optimizations
+      // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+      // https://github.com/apple/swift-protobuf/issues/1182
+      if !_storage._accountID.isEmpty {
+        try visitor.visitSingularStringField(value: _storage._accountID, fieldNumber: 1)
+      }
+      if _storage._dataProcessingConsented != false {
+        try visitor.visitSingularBoolField(value: _storage._dataProcessingConsented, fieldNumber: 2)
+      }
+      if _storage._marketingConsented != false {
+        try visitor.visitSingularBoolField(value: _storage._marketingConsented, fieldNumber: 3)
+      }
+      try { if let v = _storage._deletionRequestedAt {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
+      } }()
+      try { if let v = _storage._anonymizedAt {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
+      } }()
+      try { if let v = _storage._dataExportRequestedAt {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
+      } }()
+      try { if let v = _storage._dataExportCompletedAt {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
+      } }()
+      try { if let v = _storage._deletionScheduledAt {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 8)
+      } }()
+      if _storage._analyticsConsented != false {
+        try visitor.visitSingularBoolField(value: _storage._analyticsConsented, fieldNumber: 9)
+      }
+      if !_storage._consentPolicyVersion.isEmpty {
+        try visitor.visitSingularStringField(value: _storage._consentPolicyVersion, fieldNumber: 10)
+      }
+      try { if let v = _storage._dataProcessingConsentedAt {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 11)
+      } }()
+      try { if let v = _storage._marketingConsentedAt {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 12)
+      } }()
+      try { if let v = _storage._analyticsConsentedAt {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 13)
+      } }()
     }
-    if self.dataProcessingConsented != false {
-      try visitor.visitSingularBoolField(value: self.dataProcessingConsented, fieldNumber: 2)
-    }
-    if self.marketingConsented != false {
-      try visitor.visitSingularBoolField(value: self.marketingConsented, fieldNumber: 3)
-    }
-    try { if let v = self._deletionRequestedAt {
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
-    } }()
-    try { if let v = self._anonymizedAt {
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
-    } }()
-    try { if let v = self._dataExportRequestedAt {
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
-    } }()
-    try { if let v = self._dataExportCompletedAt {
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
-    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Account_V1_GdprRecordView, rhs: Account_V1_GdprRecordView) -> Bool {
-    if lhs.accountID != rhs.accountID {return false}
-    if lhs.dataProcessingConsented != rhs.dataProcessingConsented {return false}
-    if lhs.marketingConsented != rhs.marketingConsented {return false}
-    if lhs._deletionRequestedAt != rhs._deletionRequestedAt {return false}
-    if lhs._anonymizedAt != rhs._anonymizedAt {return false}
-    if lhs._dataExportRequestedAt != rhs._dataExportRequestedAt {return false}
-    if lhs._dataExportCompletedAt != rhs._dataExportCompletedAt {return false}
+    if lhs._storage !== rhs._storage {
+      let storagesAreEqual: Bool = withExtendedLifetime((lhs._storage, rhs._storage)) { (_args: (_StorageClass, _StorageClass)) in
+        let _storage = _args.0
+        let rhs_storage = _args.1
+        if _storage._accountID != rhs_storage._accountID {return false}
+        if _storage._dataProcessingConsented != rhs_storage._dataProcessingConsented {return false}
+        if _storage._marketingConsented != rhs_storage._marketingConsented {return false}
+        if _storage._deletionRequestedAt != rhs_storage._deletionRequestedAt {return false}
+        if _storage._anonymizedAt != rhs_storage._anonymizedAt {return false}
+        if _storage._dataExportRequestedAt != rhs_storage._dataExportRequestedAt {return false}
+        if _storage._dataExportCompletedAt != rhs_storage._dataExportCompletedAt {return false}
+        if _storage._deletionScheduledAt != rhs_storage._deletionScheduledAt {return false}
+        if _storage._analyticsConsented != rhs_storage._analyticsConsented {return false}
+        if _storage._consentPolicyVersion != rhs_storage._consentPolicyVersion {return false}
+        if _storage._dataProcessingConsentedAt != rhs_storage._dataProcessingConsentedAt {return false}
+        if _storage._marketingConsentedAt != rhs_storage._marketingConsentedAt {return false}
+        if _storage._analyticsConsentedAt != rhs_storage._analyticsConsentedAt {return false}
+        return true
+      }
+      if !storagesAreEqual {return false}
+    }
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -838,7 +1103,7 @@ nonisolated extension Account_V1_CommandResponse: SwiftProtobuf.Message, SwiftPr
 
 nonisolated extension Account_V1_CreateAccountRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".CreateAccountRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}identity_id\0\u{1}email\0\u{1}phone\0\u{3}password_hash\0\u{3}country_of_residence\0\u{3}created_by\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}identity_id\0\u{1}email\0\u{1}phone\0\u{3}password_hash\0\u{3}country_of_residence\0\u{3}created_by\0\u{3}date_of_birth\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -852,6 +1117,7 @@ nonisolated extension Account_V1_CreateAccountRequest: SwiftProtobuf.Message, Sw
       case 4: try { try decoder.decodeSingularStringField(value: &self.passwordHash) }()
       case 5: try { try decoder.decodeSingularStringField(value: &self.countryOfResidence) }()
       case 6: try { try decoder.decodeSingularStringField(value: &self.createdBy) }()
+      case 7: try { try decoder.decodeSingularStringField(value: &self.dateOfBirth) }()
       default: break
       }
     }
@@ -876,6 +1142,9 @@ nonisolated extension Account_V1_CreateAccountRequest: SwiftProtobuf.Message, Sw
     if !self.createdBy.isEmpty {
       try visitor.visitSingularStringField(value: self.createdBy, fieldNumber: 6)
     }
+    if !self.dateOfBirth.isEmpty {
+      try visitor.visitSingularStringField(value: self.dateOfBirth, fieldNumber: 7)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -886,6 +1155,42 @@ nonisolated extension Account_V1_CreateAccountRequest: SwiftProtobuf.Message, Sw
     if lhs.passwordHash != rhs.passwordHash {return false}
     if lhs.countryOfResidence != rhs.countryOfResidence {return false}
     if lhs.createdBy != rhs.createdBy {return false}
+    if lhs.dateOfBirth != rhs.dateOfBirth {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Account_V1_SetDateOfBirthRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".SetDateOfBirthRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}account_id\0\u{3}date_of_birth\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.accountID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.dateOfBirth) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.accountID.isEmpty {
+      try visitor.visitSingularStringField(value: self.accountID, fieldNumber: 1)
+    }
+    if !self.dateOfBirth.isEmpty {
+      try visitor.visitSingularStringField(value: self.dateOfBirth, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Account_V1_SetDateOfBirthRequest, rhs: Account_V1_SetDateOfBirthRequest) -> Bool {
+    if lhs.accountID != rhs.accountID {return false}
+    if lhs.dateOfBirth != rhs.dateOfBirth {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -1186,6 +1491,36 @@ nonisolated extension Account_V1_DeactivateAccountRequest: SwiftProtobuf.Message
   }
 }
 
+nonisolated extension Account_V1_ResumeDeactivatedAccountRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ResumeDeactivatedAccountRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}account_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.accountID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.accountID.isEmpty {
+      try visitor.visitSingularStringField(value: self.accountID, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Account_V1_ResumeDeactivatedAccountRequest, rhs: Account_V1_ResumeDeactivatedAccountRequest) -> Bool {
+    if lhs.accountID != rhs.accountID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
 nonisolated extension Account_V1_RecordLoginRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".RecordLoginRequest"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}account_id\0")
@@ -1270,6 +1605,36 @@ nonisolated extension Account_V1_RequestGdprDeletionRequest: SwiftProtobuf.Messa
   }
 
   public static func ==(lhs: Account_V1_RequestGdprDeletionRequest, rhs: Account_V1_RequestGdprDeletionRequest) -> Bool {
+    if lhs.accountID != rhs.accountID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Account_V1_CancelGdprDeletionRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".CancelGdprDeletionRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}account_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.accountID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.accountID.isEmpty {
+      try visitor.visitSingularStringField(value: self.accountID, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Account_V1_CancelGdprDeletionRequest, rhs: Account_V1_CancelGdprDeletionRequest) -> Bool {
     if lhs.accountID != rhs.accountID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
@@ -1521,6 +1886,60 @@ nonisolated extension Account_V1_GetGdprRecordRequest: SwiftProtobuf.Message, Sw
 
   public static func ==(lhs: Account_V1_GetGdprRecordRequest, rhs: Account_V1_GetGdprRecordRequest) -> Bool {
     if lhs.accountID != rhs.accountID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Account_V1_UpdateConsentsRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".UpdateConsentsRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}account_id\0\u{3}data_processing\0\u{1}marketing\0\u{1}analytics\0\u{3}policy_version\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.accountID) }()
+      case 2: try { try decoder.decodeSingularBoolField(value: &self._dataProcessing) }()
+      case 3: try { try decoder.decodeSingularBoolField(value: &self._marketing) }()
+      case 4: try { try decoder.decodeSingularBoolField(value: &self._analytics) }()
+      case 5: try { try decoder.decodeSingularStringField(value: &self.policyVersion) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.accountID.isEmpty {
+      try visitor.visitSingularStringField(value: self.accountID, fieldNumber: 1)
+    }
+    try { if let v = self._dataProcessing {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 2)
+    } }()
+    try { if let v = self._marketing {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 3)
+    } }()
+    try { if let v = self._analytics {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 4)
+    } }()
+    if !self.policyVersion.isEmpty {
+      try visitor.visitSingularStringField(value: self.policyVersion, fieldNumber: 5)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Account_V1_UpdateConsentsRequest, rhs: Account_V1_UpdateConsentsRequest) -> Bool {
+    if lhs.accountID != rhs.accountID {return false}
+    if lhs._dataProcessing != rhs._dataProcessing {return false}
+    if lhs._marketing != rhs._marketing {return false}
+    if lhs._analytics != rhs._analytics {return false}
+    if lhs.policyVersion != rhs.policyVersion {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

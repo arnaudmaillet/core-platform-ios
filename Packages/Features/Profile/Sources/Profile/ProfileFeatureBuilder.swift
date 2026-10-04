@@ -194,6 +194,9 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                                 SecurityCheckupViewController(
                                                     account: account, sessions: sessions, authenticator: DeviceAuthenticator()
                                                 )
+                                            },
+                                            makeChangePassword: (sessions as? any AccountPasswordChanging).map { changer in
+                                                { ChangePasswordViewController(changer: changer) }
                                             }
                                         )
                                     }

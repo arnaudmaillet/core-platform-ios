@@ -139,6 +139,61 @@ public nonisolated enum GeoDiscovery_V1_AuthorTier: SwiftProtobuf.Enum, Swift.Ca
 
 }
 
+/// What became of a device's current country.
+public nonisolated enum GeoDiscovery_V1_CountryAccessOutcome: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+
+  /// The network is in that country, or a neighbouring one: open.
+  case granted // = 1
+
+  /// No current country was sent: nothing opens from location.
+  case notSent // = 2
+
+  /// The network is in another, non-neighbouring country.
+  case mismatch // = 3
+
+  /// The network's country is unknown: nothing could be verified.
+  case unverifiable // = 4
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .granted
+    case 2: self = .notSent
+    case 3: self = .mismatch
+    case 4: self = .unverifiable
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .granted: return 1
+    case .notSent: return 2
+    case .mismatch: return 3
+    case .unverifiable: return 4
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [GeoDiscovery_V1_CountryAccessOutcome] = [
+    .unspecified,
+    .granted,
+    .notSent,
+    .mismatch,
+    .unverifiable,
+  ]
+
+}
+
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 nonisolated extension GeoDiscovery_V1_ZoomBand: SwiftProtobuf._ProtoNameProviding {
@@ -147,4 +202,8 @@ nonisolated extension GeoDiscovery_V1_ZoomBand: SwiftProtobuf._ProtoNameProvidin
 
 nonisolated extension GeoDiscovery_V1_AuthorTier: SwiftProtobuf._ProtoNameProviding {
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0AUTHOR_TIER_UNSPECIFIED\0\u{1}AUTHOR_TIER_STANDARD\0\u{1}AUTHOR_TIER_PREMIUM\0\u{1}AUTHOR_TIER_VIP\0")
+}
+
+nonisolated extension GeoDiscovery_V1_CountryAccessOutcome: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0COUNTRY_ACCESS_OUTCOME_UNSPECIFIED\0\u{1}COUNTRY_ACCESS_OUTCOME_GRANTED\0\u{1}COUNTRY_ACCESS_OUTCOME_NOT_SENT\0\u{1}COUNTRY_ACCESS_OUTCOME_MISMATCH\0\u{1}COUNTRY_ACCESS_OUTCOME_UNVERIFIABLE\0")
 }

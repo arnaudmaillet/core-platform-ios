@@ -232,6 +232,10 @@ public nonisolated struct Moderation_V1_EnforcementView: Sendable {
   /// Clears the value of `expiresAt`. Subsequent reads from it will return its default value.
   public mutating func clearExpiresAt() {self._expiresAt = nil}
 
+  /// The decision that imposed it: the key for GetStatementOfReasons and
+  /// FileAppeal.
+  public var decisionID: String = String()
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -700,6 +704,110 @@ public nonisolated struct Moderation_V1_GetEnforcementStateResponse: Sendable {
   public init() {}
 }
 
+public nonisolated struct Moderation_V1_SubmitReportRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// POST, COMMENT or PROFILE.
+  public var entityType: Moderation_V1_EntityType = .unspecified
+
+  public var entityID: String = String()
+
+  public var category: Moderation_V1_PolicyCategory = .unspecified
+
+  /// Free text from the reporter (optional).
+  public var reason: String = String()
+
+  /// Where in the app the report was made, e.g. "post_menu", "profile_menu".
+  public var surface: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Moderation_V1_SubmitReportResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Deterministic per reporter and subject: reporting the same content twice
+  /// returns the same id.
+  public var reportID: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Moderation_V1_ListMyReportsRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Default 20, capped at 50.
+  public var pageSize: Int32 = 0
+
+  /// Opaque cursor from a previous response; empty for the first page.
+  public var pageToken: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// One of the caller's own reports and what became of it.
+public nonisolated struct Moderation_V1_ReportView: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var reportID: String = String()
+
+  public var entityType: Moderation_V1_EntityType = .unspecified
+
+  public var entityID: String = String()
+
+  public var category: Moderation_V1_PolicyCategory = .unspecified
+
+  /// The reporter's own free text.
+  public var reason: String = String()
+
+  public var status: Moderation_V1_ReportStatus = .unspecified
+
+  public var reportedAt: SwiftProtobuf.Google_Protobuf_Timestamp {
+    get {_reportedAt ?? SwiftProtobuf.Google_Protobuf_Timestamp()}
+    set {_reportedAt = newValue}
+  }
+  /// Returns true if `reportedAt` has been explicitly set.
+  public var hasReportedAt: Bool {self._reportedAt != nil}
+  /// Clears the value of `reportedAt`. Subsequent reads from it will return its default value.
+  public mutating func clearReportedAt() {self._reportedAt = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _reportedAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
+}
+
+public nonisolated struct Moderation_V1_ListMyReportsResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Newest first.
+  public var reports: [Moderation_V1_ReportView] = []
+
+  /// Empty on the last page.
+  public var nextPageToken: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 fileprivate nonisolated let _protobuf_package = "moderation.v1"
@@ -988,7 +1096,7 @@ nonisolated extension Moderation_V1_Decision: SwiftProtobuf.Message, SwiftProtob
 
 nonisolated extension Moderation_V1_EnforcementView: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".EnforcementView"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}enforcement_id\0\u{1}subject\0\u{1}action\0\u{1}status\0\u{1}version\0\u{3}applied_at\0\u{3}expires_at\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}enforcement_id\0\u{1}subject\0\u{1}action\0\u{1}status\0\u{1}version\0\u{3}applied_at\0\u{3}expires_at\0\u{3}decision_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1003,6 +1111,7 @@ nonisolated extension Moderation_V1_EnforcementView: SwiftProtobuf.Message, Swif
       case 5: try { try decoder.decodeSingularInt64Field(value: &self.version) }()
       case 6: try { try decoder.decodeSingularMessageField(value: &self._appliedAt) }()
       case 7: try { try decoder.decodeSingularMessageField(value: &self._expiresAt) }()
+      case 8: try { try decoder.decodeSingularStringField(value: &self.decisionID) }()
       default: break
       }
     }
@@ -1034,6 +1143,9 @@ nonisolated extension Moderation_V1_EnforcementView: SwiftProtobuf.Message, Swif
     try { if let v = self._expiresAt {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
     } }()
+    if !self.decisionID.isEmpty {
+      try visitor.visitSingularStringField(value: self.decisionID, fieldNumber: 8)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -1045,6 +1157,7 @@ nonisolated extension Moderation_V1_EnforcementView: SwiftProtobuf.Message, Swif
     if lhs.version != rhs.version {return false}
     if lhs._appliedAt != rhs._appliedAt {return false}
     if lhs._expiresAt != rhs._expiresAt {return false}
+    if lhs.decisionID != rhs.decisionID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -1961,6 +2074,220 @@ nonisolated extension Moderation_V1_GetEnforcementStateResponse: SwiftProtobuf.M
   public static func ==(lhs: Moderation_V1_GetEnforcementStateResponse, rhs: Moderation_V1_GetEnforcementStateResponse) -> Bool {
     if lhs.actorRestricted != rhs.actorRestricted {return false}
     if lhs.activeEnforcements != rhs.activeEnforcements {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Moderation_V1_SubmitReportRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".SubmitReportRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}entity_type\0\u{3}entity_id\0\u{1}category\0\u{1}reason\0\u{1}surface\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularEnumField(value: &self.entityType) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.entityID) }()
+      case 3: try { try decoder.decodeSingularEnumField(value: &self.category) }()
+      case 4: try { try decoder.decodeSingularStringField(value: &self.reason) }()
+      case 5: try { try decoder.decodeSingularStringField(value: &self.surface) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.entityType != .unspecified {
+      try visitor.visitSingularEnumField(value: self.entityType, fieldNumber: 1)
+    }
+    if !self.entityID.isEmpty {
+      try visitor.visitSingularStringField(value: self.entityID, fieldNumber: 2)
+    }
+    if self.category != .unspecified {
+      try visitor.visitSingularEnumField(value: self.category, fieldNumber: 3)
+    }
+    if !self.reason.isEmpty {
+      try visitor.visitSingularStringField(value: self.reason, fieldNumber: 4)
+    }
+    if !self.surface.isEmpty {
+      try visitor.visitSingularStringField(value: self.surface, fieldNumber: 5)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Moderation_V1_SubmitReportRequest, rhs: Moderation_V1_SubmitReportRequest) -> Bool {
+    if lhs.entityType != rhs.entityType {return false}
+    if lhs.entityID != rhs.entityID {return false}
+    if lhs.category != rhs.category {return false}
+    if lhs.reason != rhs.reason {return false}
+    if lhs.surface != rhs.surface {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Moderation_V1_SubmitReportResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".SubmitReportResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}report_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.reportID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.reportID.isEmpty {
+      try visitor.visitSingularStringField(value: self.reportID, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Moderation_V1_SubmitReportResponse, rhs: Moderation_V1_SubmitReportResponse) -> Bool {
+    if lhs.reportID != rhs.reportID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Moderation_V1_ListMyReportsRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ListMyReportsRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}page_size\0\u{3}page_token\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt32Field(value: &self.pageSize) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.pageToken) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.pageSize != 0 {
+      try visitor.visitSingularInt32Field(value: self.pageSize, fieldNumber: 1)
+    }
+    if !self.pageToken.isEmpty {
+      try visitor.visitSingularStringField(value: self.pageToken, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Moderation_V1_ListMyReportsRequest, rhs: Moderation_V1_ListMyReportsRequest) -> Bool {
+    if lhs.pageSize != rhs.pageSize {return false}
+    if lhs.pageToken != rhs.pageToken {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Moderation_V1_ReportView: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ReportView"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}report_id\0\u{3}entity_type\0\u{3}entity_id\0\u{1}category\0\u{1}reason\0\u{1}status\0\u{3}reported_at\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.reportID) }()
+      case 2: try { try decoder.decodeSingularEnumField(value: &self.entityType) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.entityID) }()
+      case 4: try { try decoder.decodeSingularEnumField(value: &self.category) }()
+      case 5: try { try decoder.decodeSingularStringField(value: &self.reason) }()
+      case 6: try { try decoder.decodeSingularEnumField(value: &self.status) }()
+      case 7: try { try decoder.decodeSingularMessageField(value: &self._reportedAt) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.reportID.isEmpty {
+      try visitor.visitSingularStringField(value: self.reportID, fieldNumber: 1)
+    }
+    if self.entityType != .unspecified {
+      try visitor.visitSingularEnumField(value: self.entityType, fieldNumber: 2)
+    }
+    if !self.entityID.isEmpty {
+      try visitor.visitSingularStringField(value: self.entityID, fieldNumber: 3)
+    }
+    if self.category != .unspecified {
+      try visitor.visitSingularEnumField(value: self.category, fieldNumber: 4)
+    }
+    if !self.reason.isEmpty {
+      try visitor.visitSingularStringField(value: self.reason, fieldNumber: 5)
+    }
+    if self.status != .unspecified {
+      try visitor.visitSingularEnumField(value: self.status, fieldNumber: 6)
+    }
+    try { if let v = self._reportedAt {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Moderation_V1_ReportView, rhs: Moderation_V1_ReportView) -> Bool {
+    if lhs.reportID != rhs.reportID {return false}
+    if lhs.entityType != rhs.entityType {return false}
+    if lhs.entityID != rhs.entityID {return false}
+    if lhs.category != rhs.category {return false}
+    if lhs.reason != rhs.reason {return false}
+    if lhs.status != rhs.status {return false}
+    if lhs._reportedAt != rhs._reportedAt {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Moderation_V1_ListMyReportsResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ListMyReportsResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}reports\0\u{3}next_page_token\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.reports) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.nextPageToken) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.reports.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.reports, fieldNumber: 1)
+    }
+    if !self.nextPageToken.isEmpty {
+      try visitor.visitSingularStringField(value: self.nextPageToken, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Moderation_V1_ListMyReportsResponse, rhs: Moderation_V1_ListMyReportsResponse) -> Bool {
+    if lhs.reports != rhs.reports {return false}
+    if lhs.nextPageToken != rhs.nextPageToken {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
