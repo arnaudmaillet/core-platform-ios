@@ -28,13 +28,21 @@ public struct AccountDetails: Equatable, Sendable {
     public let phone: String
     public let phoneVerified: Bool
     public let country: String
+    /// Private: the holder's own view. Nil when none is on file (#394).
+    public let dateOfBirth: BirthDate?
+    public let ageBracket: AgeBracket
 
-    public init(email: String, emailVerified: Bool, phone: String, phoneVerified: Bool, country: String) {
+    public init(
+        email: String, emailVerified: Bool, phone: String, phoneVerified: Bool, country: String,
+        dateOfBirth: BirthDate? = nil, ageBracket: AgeBracket = .unknown
+    ) {
         self.email = email
         self.emailVerified = emailVerified
         self.phone = phone
         self.phoneVerified = phoneVerified
         self.country = country
+        self.dateOfBirth = dateOfBirth
+        self.ageBracket = ageBracket
     }
 }
 
@@ -81,7 +89,7 @@ public enum AccountDeletionPolicy {
 /// Reads the viewer's account from `account.v1` (`GetAccountById`), resolving
 /// the account id from the auth session. Mirrors `ProfileRepository`'s shape.
 public actor AccountRepository: AccountProviding, AccountLifecycleManaging, AccountDeactivating {
-    private let accountClient: any Account_V1_AccountServiceClientInterface
+    let accountClient: any Account_V1_AccountServiceClientInterface
     private let authSession: any AuthSessionProviding
 
     public init(
@@ -107,7 +115,9 @@ public actor AccountRepository: AccountProviding, AccountLifecycleManaging, Acco
                 emailVerified: view.emailVerified,
                 phone: view.phone,
                 phoneVerified: view.phoneVerified,
-                country: view.countryOfResidence
+                country: view.countryOfResidence,
+                dateOfBirth: BirthDate(iso: view.dateOfBirth),
+                ageBracket: AgeBracket(view.ageBracket)
             )
         case .failure(let error):
             throw AccountError.transport(message: error.message ?? "code \(error.code)")
@@ -172,7 +182,7 @@ public actor AccountRepository: AccountProviding, AccountLifecycleManaging, Acco
         return .transport(message: error.message ?? "code \(error.code)")
     }
 
-    private func accountID() async throws -> String {
+    func accountID() async throws -> String {
         guard case .authenticated(let accountID) = await authSession.currentState() else {
             throw AccountError.notAuthenticated
         }

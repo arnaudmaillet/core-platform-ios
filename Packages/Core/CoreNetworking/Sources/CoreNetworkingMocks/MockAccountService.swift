@@ -13,6 +13,13 @@ public final class MockAccountService: @unchecked Sendable {
     private let lock = NSLock()
     private var deletionRequestedAt: Date?
     private var exportRequestedAt: Date?
+    /// None on file at launch, like an account created before it was
+    /// collected; `-mock-birthdate YYYY-MM-DD` seeds one.
+    private var dateOfBirth: String? = {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "-mock-birthdate"), index + 1 < arguments.count else { return nil }
+        return arguments[index + 1]
+    }()
     /// How long the fake export takes to "prepare", so the screen can be seen
     /// in both states within one session.
     private static let exportPreparation: TimeInterval = 8
@@ -38,6 +45,9 @@ public final class MockAccountService: @unchecked Sendable {
         }
         bff.register(path: "/account.v1.AccountService/DeactivateAccount") { [self] (request: Account_V1_DeactivateAccountRequest, headers: Headers) in
             deactivate(request, headers: headers)
+        }
+        bff.register(path: "/account.v1.AccountService/SetDateOfBirth") { [self] (request: Account_V1_SetDateOfBirthRequest) in
+            setDateOfBirth(request)
         }
     }
 
@@ -113,10 +123,52 @@ public final class MockAccountService: @unchecked Sendable {
         guard request.accountID == MockAuthService.accountID else {
             return .failure(ConnectError(code: .notFound, message: "account \(request.accountID) not found"))
         }
-        return .success(Self.viewerAccount)
+        return .success(viewerAccount)
     }
 
-    private static var viewerAccount: Account_V1_AccountView {
+    /// The contract (backend #652): once, when none is on file; ISO 8601;
+    /// under 13 is ACC-2004 and nothing is stored.
+    private func setDateOfBirth(_ request: Account_V1_SetDateOfBirthRequest) -> Result<Account_V1_AccountView, ConnectError> {
+        guard request.accountID == MockAuthService.accountID else {
+            return .failure(ConnectError(code: .notFound, message: "account \(request.accountID) not found"))
+        }
+        guard let age = Self.age(of: request.dateOfBirth) else {
+            return .failure(ConnectError(code: .invalidArgument, message: "ACC-VAL-010: date_of_birth must be YYYY-MM-DD"))
+        }
+        let stored: Bool = lock.withLock {
+            guard dateOfBirth == nil else { return false }
+            if age >= 13 { dateOfBirth = request.dateOfBirth }
+            return true
+        }
+        guard stored else {
+            return .failure(ConnectError(code: .failedPrecondition, message: "ACC-2005: a date of birth is already on file"))
+        }
+        guard age >= 13 else {
+            return .failure(ConnectError(code: .failedPrecondition, message: "ACC-2004: under the minimum age (13)"))
+        }
+        return .success(viewerAccount)
+    }
+
+    /// Whole years old today, or nil for a malformed date.
+    private static func age(of iso: String) -> Int? {
+        let parts = iso.split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 3 else { return nil }
+        let now = Calendar.current.dateComponents([.year, .month, .day], from: Date())
+        var age = (now.year ?? 0) - parts[0]
+        if (now.month ?? 0, now.day ?? 0) < (parts[1], parts[2]) { age -= 1 }
+        return age
+    }
+
+    private var viewerAccount: Account_V1_AccountView {
+        var view = Self.baseAccount
+        if let dateOfBirth = lock.withLock({ dateOfBirth }), let age = Self.age(of: dateOfBirth) {
+            view.dateOfBirth = dateOfBirth
+            view.ageBracket = age >= 18 ? .adult : (age >= 16 ? .ageBracket1617 : .ageBracket1315)
+        }
+        return view
+    }
+
+    private static var baseAccount: Account_V1_AccountView {
         var view = Account_V1_AccountView()
         view.id = MockAuthService.accountID
         view.status = .active
