@@ -64,7 +64,7 @@ final class InboxPullToSearch: NSObject {
     private weak var scrollView: UIScrollView?
     private var offsetObservation: NSKeyValueObservation?
     private(set) var isArmed = false
-    private let haptic = UIImpactFeedbackGenerator(style: .light)
+    private let haptic = HapticImpact(style: .light)
 
     #if DEBUG
     /// Stands in for `isTracking` while the QA hook drives the offset — a

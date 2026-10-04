@@ -17,7 +17,7 @@ final class MediaOverlayTrashView: UIView {
 
     private let glass = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterialDark))
     private let icon = UIImageView(image: UIImage(systemName: "trash"))
-    private let feedback = UIImpactFeedbackGenerator(style: .medium)
+    private let feedback = HapticImpact(style: .medium)
 
     /// Whether a finger holding an overlay is over the bin.
     private(set) var isArmed = false

@@ -175,7 +175,7 @@ final class CountryFlagAnnotationView: MKAnnotationView {
     #endif
 
     @objc private func tapped() {
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        HapticImpact(style: .light).impactOccurred()
         onSelect?()
     }
 }
