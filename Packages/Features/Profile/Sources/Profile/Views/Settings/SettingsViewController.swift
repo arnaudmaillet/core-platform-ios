@@ -168,9 +168,7 @@ final class SettingsViewController: UIViewController {
 
     private func applySnapshot() {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
-        // A guest has no account and no profile: the app-wide section is the
-        // whole of Settings for them.
-        let scopes: [SettingsScope] = onSignIn == nil ? SettingsScope.allCases : [.app]
+        let scopes = Self.scopes(isGuest: onSignIn != nil)
         for scope in scopes {
             snapshot.appendSections([.scope(scope)])
             snapshot.appendItems(SettingsSection.sections(in: scope).map(Item.section), toSection: .scope(scope))
@@ -195,6 +193,13 @@ final class SettingsViewController: UIViewController {
     private func footerText(at index: Int) -> String? {
         guard case .scope(let scope) = dataSource.sectionIdentifier(for: index) else { return nil }
         return Self.footerText(for: scope, activeHandle: activeHandle)
+    }
+
+    /// What Settings shows. A guest has no account and no profile, so only
+    /// what works without one: this device's settings, and help and the
+    /// legal pages (#469 on top of the guest mode, #472).
+    static func scopes(isGuest: Bool) -> [SettingsScope] {
+        isGuest ? [.device, .support] : SettingsScope.allCases
     }
 
     /// The scope as the viewer reads it. Static and pure so the wording is

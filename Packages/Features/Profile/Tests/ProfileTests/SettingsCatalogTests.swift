@@ -22,6 +22,13 @@ struct SettingsCatalogTests {
         #expect(SettingsViewController.headerText(for: .support, activeHandle: nil) == "Support and Legal")
     }
 
+    /// A guest (no account, #472) sees this device's settings and Support
+    /// and Legal — never the account or profile groups.
+    @Test func aGuestSeesDeviceAndSupportOnly() {
+        #expect(SettingsViewController.scopes(isGuest: true) == [.device, .support])
+        #expect(SettingsViewController.scopes(isGuest: false) == SettingsScope.allCases)
+    }
+
     /// Each App and Device page shows its own sections and nothing else.
     @Test func eachDevicePageShowsItsSections() {
         #expect(AppPreferencesViewController.sections(for: .playback) == [.playback])
