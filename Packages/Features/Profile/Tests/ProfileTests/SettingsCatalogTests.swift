@@ -29,6 +29,12 @@ struct SettingsCatalogTests {
         #expect(SettingsViewController.scopes(isGuest: false) == SettingsScope.allCases)
     }
 
+    /// A guest has no profile: the device footer doesn't mention one.
+    @Test func theDeviceFooterSpeaksToGuestsWithoutProfiles() {
+        #expect(SettingsViewController.footerText(for: .device, activeHandle: nil, isGuest: true) == "Applies to this iPhone.")
+        #expect(SettingsViewController.footerText(for: .device, activeHandle: "@maya")?.contains("whichever profile") == true)
+    }
+
     /// Each App and Device page shows its own sections and nothing else.
     @Test func eachDevicePageShowsItsSections() {
         #expect(AppPreferencesViewController.sections(for: .playback) == [.playback])
