@@ -219,6 +219,8 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                                 + ["Statements of reasons and appeals"]
                                         )
                                     }
+                                case .activity:
+                                    YourActivityViewController()
                                 case .playback, .display, .mediaComments, .language, .storage:
                                     AppPreferencesViewController(page: section)
                                 case .help:
