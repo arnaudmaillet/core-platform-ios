@@ -67,6 +67,12 @@ struct MockEdgePolicyTests {
         #expect(MockEdgePolicy.access(for: "/auth.v1.AuthService/Refresh") == .open)
     }
 
+    /// As at the fleet's edge: ending a session takes that session's bearer
+    /// (`SessionManager.logout`, #486).
+    @Test func loggingOutNeedsTheSession() {
+        #expect(MockEdgePolicy.access(for: "/auth.v1.AuthService/Logout") == .member)
+    }
+
     @Test func anUnlistedRouteIsMembersOnly() {
         #expect(MockEdgePolicy.access(for: "/future.v1.FutureService/DoSomething") == .member)
     }
@@ -82,7 +88,7 @@ struct MockEdgePolicyTests {
                      "/geo_discovery.v1.GeoDiscoveryService/QueryTile", "/search.v1.SearchService/Search",
                      "/search.v1.SearchService/Suggest", "/media.v1.MediaService/ResolveDelivery",
                      "/moderation.v1.ModerationService/OpenCase", "/auth.v1.AuthService/Login",
-                     "/auth.v1.AuthService/Refresh", "/auth.v1.AuthService/Logout"] {
+                     "/auth.v1.AuthService/Refresh"] {
             #expect(served.contains(path), "\(path) is in the policy but not served")
             #expect(MockEdgePolicy.access(for: path) != .member, "\(path) should be open to guests")
         }
