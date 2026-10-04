@@ -104,7 +104,7 @@ public final class PostCardStaking {
     /// menu cannot be read back from a cell).
     func menuState(for key: String) -> StakeMenu.State {
         StakeMenu.State(
-            balance: wallet.balance,
+            balance: wallet.stakeableBalance,
             stakedOnTarget: wallet.boostTotal(forTarget: key),
             undoable: session[key] ?? 0,
             perTargetCap: WalletStore.Policy.perTargetBoostCap,

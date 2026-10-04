@@ -658,7 +658,7 @@ final class PostDetailViewController: UIViewController {
     private func refreshComposeBarBoostState() {
         guard let wallet else { return }
         composeBar.setBoostContext(
-            balance: wallet.balance, undoableAmount: sessionBoostAmount, stakeShots: wallet.stakeShots
+            balance: wallet.stakeableBalance, undoableAmount: sessionBoostAmount, stakeShots: wallet.stakeShots
         )
     }
 
