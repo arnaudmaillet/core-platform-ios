@@ -53,7 +53,7 @@ struct DeleteAccountTests {
         let permanent = AccountDeletionPolicy.permanentDate(requestedAt: Self.today)
         let ready = DeleteAccountViewController.footer(for: .ready(permanentOn: permanent)) ?? ""
         #expect(ready.contains("30 days"))
-        #expect(ready.contains("contact support"))
+        #expect(ready.contains("logging back in cancels it"))
         let requested = DeleteAccountViewController.footer(for: .requested(on: Self.today, permanentOn: permanent)) ?? ""
         #expect(requested.contains("You asked to delete this account"))
         #expect(DeleteAccountViewController.footer(for: .loading) == nil)

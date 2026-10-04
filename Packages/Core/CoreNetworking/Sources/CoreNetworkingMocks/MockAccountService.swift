@@ -11,8 +11,14 @@ import SwiftProtobuf
 /// back through `GetGdprRecord`.
 public final class MockAccountService: @unchecked Sendable {
     private let lock = NSLock()
-    private var deletionRequestedAt: Date?
     private var exportRequestedAt: Date?
+    /// Consents as `UpdateConsents` left them, each with when it last changed.
+    /// Data processing is given at sign-up.
+    private var consents = (
+        dataProcessing: (on: true, at: Date(timeIntervalSinceNow: -86_400 * 90)),
+        marketing: (on: false, at: Date?.none),
+        analytics: (on: true, at: Date(timeIntervalSinceNow: -86_400 * 90) as Date?)
+    )
     /// None on file at launch, like an account created before it was
     /// collected; `-mock-birthdate YYYY-MM-DD` seeds one.
     private var dateOfBirth: String? = {
@@ -46,6 +52,12 @@ public final class MockAccountService: @unchecked Sendable {
         bff.register(path: "/account.v1.AccountService/DeactivateAccount") { [self] (request: Account_V1_DeactivateAccountRequest, headers: Headers) in
             deactivate(request, headers: headers)
         }
+        bff.register(path: "/account.v1.AccountService/CancelGdprDeletion") { [self] (request: Account_V1_CancelGdprDeletionRequest) in
+            cancelDeletion(request)
+        }
+        bff.register(path: "/account.v1.AccountService/UpdateConsents") { [self] (request: Account_V1_UpdateConsentsRequest) in
+            updateConsents(request)
+        }
         bff.register(path: "/account.v1.AccountService/SetDateOfBirth") { [self] (request: Account_V1_SetDateOfBirthRequest) in
             setDateOfBirth(request)
         }
@@ -72,13 +84,49 @@ public final class MockAccountService: @unchecked Sendable {
             return .failure(ConnectError(code: .notFound, message: "account \(request.accountID) not found"))
         }
         if let refusal = stepUpRefusal(headers) { return .failure(refusal) }
-        lock.withLock {
-            if deletionRequestedAt == nil { deletionRequestedAt = Date() }
+        // The backend also deactivates the account; the next login cancels.
+        lifecycle.requestDeletion()
+        var response = Account_V1_CommandResponse()
+        response.success = true
+        response.accountID = request.accountID
+        return .success(response)
+    }
+
+    /// ACC-7003 when nothing is pending (the mock's grace period never ends).
+    private func cancelDeletion(_ request: Account_V1_CancelGdprDeletionRequest) -> Result<Account_V1_CommandResponse, ConnectError> {
+        guard request.accountID == MockAuthService.accountID else {
+            return .failure(ConnectError(code: .notFound, message: "account \(request.accountID) not found"))
+        }
+        guard lifecycle.cancelDeletion() else {
+            return .failure(ConnectError(code: .failedPrecondition, message: "ACC-7003: no deletion is pending"))
         }
         var response = Account_V1_CommandResponse()
         response.success = true
         response.accountID = request.accountID
         return .success(response)
+    }
+
+    /// Each field present changes that consent and stamps it; absent ones
+    /// stay. Returns the updated record (backend #653).
+    private func updateConsents(_ request: Account_V1_UpdateConsentsRequest) -> Result<Account_V1_GdprRecordView, ConnectError> {
+        guard request.accountID == MockAuthService.accountID else {
+            return .failure(ConnectError(code: .notFound, message: "account \(request.accountID) not found"))
+        }
+        let now = Date()
+        lock.withLock {
+            if request.hasDataProcessing, request.dataProcessing != consents.dataProcessing.on {
+                consents.dataProcessing = (request.dataProcessing, now)
+            }
+            if request.hasMarketing, request.marketing != consents.marketing.on {
+                consents.marketing = (request.marketing, now)
+            }
+            if request.hasAnalytics, request.analytics != consents.analytics.on {
+                consents.analytics = (request.analytics, now)
+            }
+        }
+        var read = Account_V1_GetGdprRecordRequest()
+        read.accountID = request.accountID
+        return gdprRecord(read)
     }
 
     /// PERMISSION_DENIED "step_up_required" unless the bearer was stepped up
@@ -107,9 +155,17 @@ public final class MockAccountService: @unchecked Sendable {
         }
         var view = Account_V1_GdprRecordView()
         view.accountID = request.accountID
-        view.dataProcessingConsented = true
+        if let deletionRequestedAt = lifecycle.deletionRequestedAt {
+            view.deletionRequestedAt = .init(date: deletionRequestedAt)
+            view.deletionScheduledAt = .init(date: deletionRequestedAt.addingTimeInterval(30 * 86_400))
+        }
         lock.withLock {
-            if let deletionRequestedAt { view.deletionRequestedAt = .init(date: deletionRequestedAt) }
+            view.dataProcessingConsented = consents.dataProcessing.on
+            view.dataProcessingConsentedAt = .init(date: consents.dataProcessing.at)
+            view.marketingConsented = consents.marketing.on
+            if let at = consents.marketing.at { view.marketingConsentedAt = .init(date: at) }
+            view.analyticsConsented = consents.analytics.on
+            if let at = consents.analytics.at { view.analyticsConsentedAt = .init(date: at) }
             if let exportRequestedAt {
                 view.dataExportRequestedAt = .init(date: exportRequestedAt)
                 let ready = exportRequestedAt.addingTimeInterval(Self.exportPreparation)

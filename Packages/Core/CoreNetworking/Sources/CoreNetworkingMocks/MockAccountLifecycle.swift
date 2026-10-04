@@ -8,7 +8,10 @@ import Foundation
 ///   stepped up within the last `stepUpWindow` seconds;
 /// - **deactivation**: `DeactivateAccount` (account) marks the account
 ///   deactivated, and the next `Login` (auth) resumes it and says so with
-///   `LoginResponse.reactivated`.
+///   `LoginResponse.reactivated`;
+/// - **erasure grace period** (backend #653): `RequestGdprDeletion` records
+///   the request and deactivates the account; the next `Login` resumes it
+///   and withdraws the request, as `CancelGdprDeletion` does.
 ///
 /// `MockBackend` hands the same instance to both services.
 public final class MockAccountLifecycle: @unchecked Sendable {
@@ -19,6 +22,7 @@ public final class MockAccountLifecycle: @unchecked Sendable {
     private let lock = NSLock()
     private var steppedUp: [String: Date] = [:]
     private var deactivated = false
+    private var deletionRequested: Date?
 
     public init() {}
 
@@ -37,13 +41,37 @@ public final class MockAccountLifecycle: @unchecked Sendable {
         lock.withLock { deactivated = true }
     }
 
-    /// Resumes a deactivated account; true when it was deactivated.
+    /// Resumes a deactivated account, withdrawing a pending deletion with it;
+    /// true when it was deactivated.
     func resumeIfDeactivated() -> Bool {
         lock.withLock {
-            defer { deactivated = false }
+            defer {
+                deactivated = false
+                deletionRequested = nil
+            }
             return deactivated
         }
     }
+
+    /// Records an erasure request (the first one stands) and deactivates the
+    /// account, as the backend does for an active account.
+    func requestDeletion(at date: Date = Date()) {
+        lock.withLock {
+            if deletionRequested == nil { deletionRequested = date }
+            deactivated = true
+        }
+    }
+
+    /// Withdraws a pending erasure; false when none was pending.
+    func cancelDeletion() -> Bool {
+        lock.withLock {
+            guard deletionRequested != nil else { return false }
+            deletionRequested = nil
+            return true
+        }
+    }
+
+    var deletionRequestedAt: Date? { lock.withLock { deletionRequested } }
 
     public var isDeactivated: Bool { lock.withLock { deactivated } }
 }
