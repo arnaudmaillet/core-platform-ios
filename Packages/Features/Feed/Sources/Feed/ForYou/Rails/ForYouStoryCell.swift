@@ -46,8 +46,9 @@ final class ForYouStoryCell: UICollectionViewCell {
         /// the circular badges every person row wears. One outline for the
         /// face, its ring, the long-press lift and the hand-clipped snapshot; a
         /// flight, which can only wear a corner, takes the matching circular
-        /// radius (`ForYouRailsView.storyFaceCornerRadius`).
-        static let faceShape = AvatarShape.superellipse(exponent: 2.6)
+        /// radius (`ForYouRailsView.storyFaceCornerRadius`). The map's media
+        /// markers wear the same tile (`AvatarShape.roundedTile`).
+        static let faceShape = AvatarShape.roundedTile
 
         /// The cell for a disc `discSide` across: exactly the disc's width —
         /// so a snap lining the cell up on a margin lines up the ring — and

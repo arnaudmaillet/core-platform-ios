@@ -273,10 +273,16 @@ final class MapMarkerBadgeView: UIView {
     /// icon's badge hugs its mark instead (`PinCardView.iconBadgeCenter`).
     nonisolated static func center(in size: CGSize, cornerRadius radius: CGFloat, inside: Bool) -> CGPoint {
         if inside {
-            // The badge is wider than the corner's inner curve (its radius
-            // `side / 2` ≥ the card's radius less the border), so standing
-            // clear of both straight edges keeps it clear of the curve too.
-            let inset = MapFlagBorderView.lineWidth + insideGap + side / 2
+            // Clear of both straight edges by the border and the gap…
+            let edge = MapFlagBorderView.lineWidth + insideGap + side / 2
+            // …and of the corner's ARC, which a large corner brings inside
+            // that: with the arc's centre `radius` in from each edge, the
+            // badge stands within `radius - edge` of it, on the diagonal.
+            // At the old 12pt corner this is smaller than `edge` and changes
+            // nothing; at the rounded tile's (~22pt) it is what keeps the
+            // badge off the ring.
+            let arc = radius - (radius - edge) / 2.squareRoot()
+            let inset = max(edge, arc)
             return CGPoint(x: size.width - inset, y: size.height - inset)
         }
         // The 45° point of the arc, measured in from the bounding corner. A

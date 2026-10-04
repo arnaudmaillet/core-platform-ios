@@ -17,6 +17,10 @@ public enum AvatarShape: Equatable, Sendable {
     /// Friends row (2026-10-04) and read as "a square" or "a circle".
     case superellipse(exponent: CGFloat)
 
+    /// THE app's rounded tile: For You's friend faces and the map's media
+    /// markers wear this one value, so the two read as the same object.
+    public static let roundedTile = AvatarShape.superellipse(exponent: 2.6)
+
     /// The corner radius for an avatar `side` points across — for a layer that
     /// can only wear a corner (a flight's card, a stand-in).
     ///

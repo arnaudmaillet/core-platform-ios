@@ -1,4 +1,5 @@
 import CoreNavigation
+import DesignSystem
 import MediaCore
 import MediaPlayback
 import UIKit
@@ -24,10 +25,22 @@ import UIKit
 /// when a departure picture was handed in — the blend alphas; everything else
 /// tracks via autoresizing.
 final class PinCardView: UIView {
+    /// The outline a MEDIA marker rests in: the app's rounded tile, the same
+    /// super-ellipse For You's friend faces wear (2026-10-04). Worn as a MASK by
+    /// a resting marker (`applyRestingShape`); see `cornerRadius` for flights.
+    nonisolated static let mediaShape = AvatarShape.roundedTile
     /// The radius a MEDIA card renders at pin size (and flies from/to). A text
     /// card is a circle instead — see `Face.cornerRadius`, which reads this and
     /// so must be able to from outside the main actor.
-    nonisolated static let cornerRadius: CGFloat = 12
+    ///
+    /// A corner cannot draw a super-ellipse, so this is the CIRCULAR radius
+    /// that meets `mediaShape` on the diagonal — never inside it, at most
+    /// 0.32pt outside at 56pt, which the resting mask trims. It was a
+    /// continuous 12pt: a rounded square, not the tile.
+    nonisolated static let cornerRadius: CGFloat = mediaShape.cornerRadius(side: 56)
+    /// The curve every media corner — card, content, ring, flag border — is
+    /// drawn on. Circular, because that is what `cornerRadius` is matched as.
+    nonisolated static let cornerCurve: CALayerCornerCurve = mediaShape.cornerCurve
     /// Every marker border's width: the neutral ring's, and the flag border's
     /// too (`MapFlagBorderView.lineWidth`), which only changes the colours.
     ///
@@ -130,9 +143,15 @@ final class PinCardView: UIView {
     private var isCensusedTransitionCard = false
     #endif
 
+    /// A flight's or a reveal's card, not a marker's: its corner is animated
+    /// every frame, so it never wears the resting mask (`applyRestingShape`).
+    private(set) var isTransitionCard = false
+
     /// Says this card is a flight's, not a marker's, so the census can watch it
-    /// disappear. Idempotent.
+    /// disappear — and so it flies on its corner alone. Idempotent.
     func markAsTransitionCard() {
+        isTransitionCard = true
+        applyRestingShape()
         #if DEBUG
         guard !isCensusedTransitionCard else { return }
         isCensusedTransitionCard = true
@@ -211,10 +230,10 @@ final class PinCardView: UIView {
         clipsToBounds = false
         backgroundColor = .black
         layer.cornerRadius = Self.cornerRadius
-        layer.cornerCurve = .continuous
+        layer.cornerCurve = Self.cornerCurve
         contentView.clipsToBounds = true
         contentView.layer.cornerRadius = Self.cornerRadius
-        contentView.layer.cornerCurve = .continuous
+        contentView.layer.cornerCurve = Self.cornerCurve
         contentView.frame = bounds
         contentView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         addSubview(contentView)
@@ -356,7 +375,7 @@ final class PinCardView: UIView {
         ringView.layer.borderWidth = Self.ringWidth
         ringView.layer.borderColor = ringColor.cgColor
         ringView.layer.cornerRadius = Self.cornerRadius
-        ringView.layer.cornerCurve = .continuous
+        ringView.layer.cornerCurve = Self.cornerCurve
         // Same register fix as the covers above — and the ring is the view the
         // defect was measured on: mid-flight its top border sat 4.7pt below the
         // card's edge and its bottom border was pushed past the card's and
@@ -376,7 +395,7 @@ final class PinCardView: UIView {
         flagBorder.layer.anchorPoint = .zero
         flagBorder.frame = bounds
         flagBorder.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        flagBorder.setShape(radius: Self.cornerRadius, curve: .continuous)
+        flagBorder.setShape(radius: Self.cornerRadius, curve: Self.cornerCurve)
         flagBorder.isHidden = true
         chromeView.addSubview(flagBorder)
         // Kept at its distance from the card's bottom-right corner as the card
@@ -596,6 +615,8 @@ final class PinCardView: UIView {
         // somebody's footage.
         if face != .media { setPreviewSheet(nil) }
         setCornerRadius(face.cornerRadius)
+        // A recycled card changes face without a layout pass.
+        applyRestingShape()
         positionBadge()
         layoutIconFace()
         // ⚠️ AFTER `setCornerRadius`, which writes the ring's radius from the
@@ -721,7 +742,9 @@ final class PinCardView: UIView {
             // window that is the mask's, and asserting the face's would undo
             // what `setCornerRadius` wrote one line earlier. At rest the two
             // are the same value, so the dressed icon still goes back to 0.
-            applyRingShape(radius: cardRadius, curve: face == .text ? .circular : .continuous)
+            // Circular for every face now: a disc's, and the media tile's
+            // matched corner (`PinCardView.cornerCurve`).
+            applyRingShape(radius: cardRadius, curve: face == .text ? .circular : Self.cornerCurve)
         }
     }
 
@@ -956,6 +979,36 @@ final class PinCardView: UIView {
         super.layoutSubviews()
         layoutDepartureCover()
         layoutIconFace()
+        applyRestingShape()
+    }
+
+    /// A resting MEDIA marker is clipped to the tile itself (`mediaShape`):
+    /// ground, picture, ring, flag border and the badge inside its corner,
+    /// all in one mask on the card. The annotation's shadow is pathless, so it
+    /// takes the same outline from the composited alpha.
+    ///
+    /// ⚠️ NEVER ON A TRANSITION CARD. A flight and a reveal animate the card's
+    /// bounds and corner every frame, and a shape-layer mask does neither —
+    /// it would clip the flight to a 56pt tile. Those cards fly on the matched
+    /// circular corner (`cornerRadius`), which meets this outline on the
+    /// diagonal, so the hand-back at either end moves no corner by more than
+    /// a third of a point.
+    ///
+    /// Text and icon faces keep theirs: a disc, and no shape at all.
+    private func applyRestingShape() {
+        guard face == .media, !isTransitionCard, bounds.width > 0, bounds.height > 0 else {
+            if layer.mask != nil { layer.mask = nil }
+            return
+        }
+        let mask = (layer.mask as? CAShapeLayer) ?? CAShapeLayer()
+        let path = Self.mediaShape.path(in: bounds).cgPath
+        guard mask.path != path || layer.mask !== mask else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        mask.frame = bounds
+        mask.path = path
+        layer.mask = mask
+        CATransaction.commit()
     }
 
     /// The mark keeps its authored size and stays centred; only the CONTAINER

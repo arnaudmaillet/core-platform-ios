@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import Foundation
 import MediaCore
 import Testing
@@ -44,6 +45,35 @@ struct PinMarkerGeometryTests {
         #expect(PinCardView.Face.text.cornerRadius == PinCardView.Face.text.side / 2)
         #expect(PinCardView.Face.media.cornerRadius == PinCardView.cornerRadius)
         #expect(PinCardView.Face.media.cornerRadius < PinCardView.Face.media.side / 2)
+    }
+
+    /// A resting media marker is clipped to the app's rounded tile — the
+    /// super-ellipse For You's friend faces wear — while a flight's card,
+    /// whose corner is animated every frame, flies on the matched circular
+    /// corner and no mask; a text marker stays a disc, unmasked.
+    @Test("A resting media marker wears the rounded tile; a flight card does not")
+    func restingMediaMarkerWearsTheTile() throws {
+        #expect(PinCardView.mediaShape == AvatarShape.roundedTile)
+        #expect(PinCardView.cornerRadius == AvatarShape.roundedTile.cornerRadius(side: 56))
+        #expect(PinCardView.cornerCurve == .circular)
+
+        let marker = PinCardView(frame: CGRect(x: 0, y: 0, width: 56, height: 56))
+        marker.setFace(.media)
+        marker.layoutIfNeeded()
+        let mask = try #require(marker.layer.mask as? CAShapeLayer)
+        #expect(mask.path == AvatarShape.roundedTile.path(in: marker.bounds).cgPath)
+        #expect(marker.layer.cornerCurve == .circular)
+
+        let flying = PinCardView(frame: CGRect(x: 0, y: 0, width: 56, height: 56))
+        flying.markAsTransitionCard()
+        flying.setFace(.media)
+        flying.layoutIfNeeded()
+        #expect(flying.layer.mask == nil)
+        #expect(flying.layer.cornerRadius == PinCardView.cornerRadius)
+
+        // A marker re-faced as text drops the tile.
+        marker.setFace(.text)
+        #expect(marker.layer.mask == nil)
     }
 
     /// The cluster grid's collision cell and the no-overlap guarantee are both

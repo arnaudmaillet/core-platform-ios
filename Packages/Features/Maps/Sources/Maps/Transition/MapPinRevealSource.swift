@@ -120,6 +120,8 @@ enum MapPinRevealSource {
             alignsPageToSource: false,
             pageFit: .covering,
             cornerRadius: face.cornerRadius,
+            // A disc's, and the media tile's matched corner: circular both.
+            cornerCurve: PinCardView.cornerCurve,
             // ⚠️ THE WINDOW WEARS THE MARKER'S GROUND, AND A DRESSED ICON HAS
             // NONE.
             //
