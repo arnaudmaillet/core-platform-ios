@@ -20,6 +20,10 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
         let window = UIWindow(windowScene: windowScene)
         self.window = window
+        // Settings → App and Device → Display: light, dark or following iOS.
+        // Applied before the first frame so the app never flashes the other
+        // style.
+        AppearancePreference.apply(to: [window])
 
         let coordinator = AppCoordinator(window: window, container: AppContainer.shared)
         appCoordinator = coordinator

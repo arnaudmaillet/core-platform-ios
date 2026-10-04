@@ -224,7 +224,7 @@ public final class PressFeedback {
         sound: UISound? = .tap,
         scales: Bool = true,
         dims: Bool = false,
-        reducesMotion: @escaping @MainActor () -> Bool = { UIAccessibility.isReduceMotionEnabled }
+        reducesMotion: @escaping @MainActor () -> Bool = { MotionPreference.reducesMotion }
     ) -> PressFeedback {
         let feedback = PressFeedback(
             target: target ?? control, style: .press, sound: sound, scales: scales, dims: dims,
@@ -255,7 +255,7 @@ public final class PressFeedback {
         moving target: UIView? = nil,
         sound: UISound? = .tap,
         dims: Bool = false,
-        reducesMotion: @escaping @MainActor () -> Bool = { UIAccessibility.isReduceMotionEnabled }
+        reducesMotion: @escaping @MainActor () -> Bool = { MotionPreference.reducesMotion }
     ) -> PressFeedback {
         let feedback = PressFeedback(
             target: target ?? view, style: style, sound: sound, scales: true,
@@ -278,7 +278,7 @@ public final class PressFeedback {
         by view: UIView,
         sound: UISound? = nil,
         dims: Bool = false,
-        reducesMotion: @escaping @MainActor () -> Bool = { UIAccessibility.isReduceMotionEnabled }
+        reducesMotion: @escaping @MainActor () -> Bool = { MotionPreference.reducesMotion }
     ) -> PressFeedback {
         let feedback = PressFeedback(
             target: view, style: .press, sound: sound, scales: true, dims: dims,

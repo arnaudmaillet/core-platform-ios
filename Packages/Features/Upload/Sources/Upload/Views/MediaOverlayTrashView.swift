@@ -1,3 +1,4 @@
+import DesignSystem
 import UIKit
 
 /// The bin an overlay is dropped in to delete it. It shows only while an
@@ -49,7 +50,7 @@ final class MediaOverlayTrashView: UIView {
             feedback.prepare()
             isHidden = false
         }
-        let reduce = UIAccessibility.isReduceMotionEnabled
+        let reduce = MotionPreference.reducesMotion
         UIView.animate(withDuration: reduce ? 0 : 0.18, delay: 0, options: [.beginFromCurrentState]) {
             self.alpha = isShowing ? 1 : 0
         } completion: { _ in
@@ -69,7 +70,7 @@ final class MediaOverlayTrashView: UIView {
         isArmed = armed
         if armed { feedback.impactOccurred() }
         glass.backgroundColor = armed ? UIColor.systemRed.withAlphaComponent(0.8) : .clear
-        let scale: CGFloat = armed && !UIAccessibility.isReduceMotionEnabled ? 1.2 : 1
+        let scale: CGFloat = armed && !MotionPreference.reducesMotion ? 1.2 : 1
         UIView.animate(withDuration: 0.15, delay: 0, options: [.beginFromCurrentState]) {
             self.transform = CGAffineTransform(scaleX: scale, y: scale)
         }

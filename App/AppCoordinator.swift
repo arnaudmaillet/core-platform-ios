@@ -219,7 +219,14 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         }
         guard let tabCoordinator = mainTabCoordinator else {
             showShell(isMember: isMember)
-            if isMember { didSignIn() }
+            if isMember {
+                didSignIn()
+            } else if Self.launchedAsGuest, let tabCoordinator = mainTabCoordinator {
+                // A `-guest` run takes its deep links as the guest it is — the
+                // way a guest smoke test reaches a profile or a post. Once
+                // only: a sign-in later in the run does not replay them.
+                applyLaunchArguments(to: tabCoordinator)
+            }
             return
         }
         tabCoordinator.viewerDidChange(isMember: isMember)
@@ -345,6 +352,15 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         #endif
         guard let tabCoordinator = mainTabCoordinator else { return }
         applyLaunchArguments(to: tabCoordinator)
+    }
+
+    /// `-guest`: the run starts signed out (see `start()`).
+    private static var launchedAsGuest: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-guest")
+        #else
+        false
+        #endif
     }
 
     private func applyLaunchArguments(to tabCoordinator: MainTabCoordinator) {

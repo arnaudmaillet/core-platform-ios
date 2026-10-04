@@ -1,3 +1,4 @@
+import DesignSystem
 import QuartzCore
 import UIKit
 
@@ -167,7 +168,7 @@ final class CaptureShutterView: UIView {
         case .locked: "Recording, hands-free. Tap to stop."
         case .busy: "Working"
         }
-        applyCore(animated: animated && !UIAccessibility.isReduceMotionEnabled)
+        applyCore(animated: animated && !MotionPreference.reducesMotion)
     }
 
     private func applyCore(animated: Bool) {
@@ -209,7 +210,7 @@ final class CaptureShutterView: UIView {
             // ⚠️ YELLOW AND BREATHING, NOT WHITE: the ring under the segments is
             // white, and a white segment on it is no segment at all.
             segment.strokeColor = (armed ? UIColor.systemYellow : UIColor.systemRed).cgColor
-            if armed, !UIAccessibility.isReduceMotionEnabled {
+            if armed, !MotionPreference.reducesMotion {
                 let breath = CABasicAnimation(keyPath: "opacity")
                 breath.fromValue = 1
                 breath.toValue = 0.35

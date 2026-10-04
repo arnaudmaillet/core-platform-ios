@@ -55,7 +55,11 @@ final class AppContainer {
     private lazy var mockBackend = MockBackend(
         conditions: .fromLaunchArguments(),
         mediaCatalog: Self.usesRichMedia ? .realAssets : .synthetic,
-        seedsMapHierarchy: Self.seedsMapPlaces
+        seedsMapHierarchy: Self.seedsMapPlaces,
+        // A guest's write is refused here as at the fleet's edge, so a missing
+        // gate shows up in mock mode (`[edge] REFUSED` in the console).
+        // `-mock-open-edge` turns it off for QA that predates guest mode.
+        enforcesEdgePolicy: !ProcessInfo.processInfo.arguments.contains("-mock-open-edge")
     )
 
     /// Semantic map clusters (city/country places on the mock pins, and the
@@ -588,9 +592,15 @@ final class AppContainer {
             homeCountry: "FR",
             wallet: walletStore,
             unlocks: unlocks,
-            activity: CountryAccessService.mockActivity(in: mockBackend)
+            activity: CountryAccessService.mockActivity(in: mockBackend),
+            isMember: { [unowned self] in self.memberGate.isMember },
+            locator: currentCountry
         )
     }()
+
+    /// Where the device is, as a country — asked for in context from the map
+    /// (guest mode §3.1), never at launch. Opens that country for free.
+    private(set) lazy var currentCountry = CurrentCountryProvider()
 
     /// The Shop's Boosts: the ×100 cartridge pack, over the ONE wallet. Mock
     /// mode only, like the shop itself (no `countryAccess`, no shop door).
@@ -656,7 +666,8 @@ final class AppContainer {
         countryAccess: countryAccess,
         stakePacks: stakePacks,
         // A guest has no people: no favourites dock, no Friends / Following.
-        isMember: { [unowned self] in self.memberGate.isMember }
+        isMember: { [unowned self] in self.memberGate.isMember },
+        locator: currentCountry
     )
 
     #if DEBUG

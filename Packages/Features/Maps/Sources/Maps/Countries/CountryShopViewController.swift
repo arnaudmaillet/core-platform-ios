@@ -262,8 +262,11 @@ public final class CountryShopViewController: UIViewController {
                 locked.append(standing.code)
             }
         }
-        if let home = unlocked.firstIndex(of: access.homeCountry) {
-            unlocked.insert(unlocked.remove(at: home), at: 0)
+        // Home first, then where the device is.
+        for code in [access.currentCountry, access.homeCountry].compactMap({ $0 }) {
+            if let index = unlocked.firstIndex(of: code) {
+                unlocked.insert(unlocked.remove(at: index), at: 0)
+            }
         }
         return (unlocked, locked)
     }
@@ -367,6 +370,10 @@ public final class CountryShopViewController: UIViewController {
             label.font = .preferredFont(forTextStyle: .subheadline)
             if code == access.homeCountry {
                 label.text = "Home"
+                label.textColor = .secondaryLabel
+            } else if code == access.currentCountry {
+                // Open because the device is there, for as long as it is.
+                label.text = "You're here"
                 label.textColor = .secondaryLabel
             } else {
                 let text = NSMutableAttributedString(attachment: NSTextAttachment(

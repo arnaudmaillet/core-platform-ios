@@ -41,7 +41,7 @@ final class MediaPlaybackFlashView: UIView {
 
     /// Whether the device asks for less motion — a seam, so a test can state it
     /// rather than inherit the setting of the machine that runs it.
-    var reducesMotion: () -> Bool = { UIAccessibility.isReduceMotionEnabled }
+    var reducesMotion: () -> Bool = { MotionPreference.reducesMotion }
 
     init() {
         super.init(frame: CGRect(x: 0, y: 0, width: Metrics.side, height: Metrics.side))

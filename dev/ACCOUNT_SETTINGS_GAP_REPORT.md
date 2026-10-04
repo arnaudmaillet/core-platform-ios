@@ -40,7 +40,7 @@ The account model is one account with several profiles (aliases, switcher). Sett
 
 ## Target structure
 
-The target replaces today's 4 sections with 13, grouped by scope the way Instagram's Accounts Center separates account-wide settings from per-profile ones. Because one account here owns several profiles, the scope must be visible on screen, not just in the code.
+The target replaces the original 4 sections with 17, grouped by scope the way Instagram's Accounts Center separates account-wide settings from per-profile ones. Because one account here owns several profiles, the scope must be visible on screen, not just in the code. Since #468 (2026-10-04) the app and device settings have their own group instead of sharing one "App Preferences" row with the legal pages.
 
 ```
 Settings
@@ -56,13 +56,25 @@ Settings
 │   ├── Notifications .......... push per category · email and marketing · pause, quiet hours
 │   ├── What you see ........... sensitive content · reset For You feed · chronological option
 │   └── Your activity .......... recently deleted, archive · likes, history, search · time limits, breaks
-└── This device and legal
-    ├── App preferences ........ autoplay, data saver · captions, comment ticker · language, cache
-    ├── Help and support ....... Help Center · contact, report a problem · app version
-    └── Legal and about ........ Terms, Privacy Policy · Community Guidelines · legal notice, licences
+├── App and device (follows the iPhone)
+│   ├── Playback and sound ..... autoplay always / Wi-Fi / never · start with sound · data saver (#409)
+│   ├── Display ................ appearance system / light / dark · reduce motion (#468)
+│   ├── Comments on media ...... reaction band on/off, opacity, speed · muted words and accounts · subtitles (#410)
+│   ├── Language ............... app language (English only for now)
+│   └── Storage ................ media cache size · clear cache (#409)
+└── Support and legal
+    ├── Help and support ....... Help Center · contact, report a problem
+    └── Legal and about ........ Terms, Privacy Policy · Community Guidelines · legal notice, licences · version
 ```
 
-The gap list below follows the same sections; App preferences and What you see share its section 5, Help and Legal share section 11.
+The gap list below follows the same sections; the App and device screens and What you see share its section 5, Help and Legal share section 11.
+
+Decisions recorded with the user (2026-10-03/04):
+- App and device settings are device-scoped, stored on the iPhone, never per profile.
+- Comments on media: no text size, lane count or display area (they don't fit the fixed 3-lane band); muted words and accounts hide comments in **both** the reaction band and the subtitles.
+- Autoplay and data saver govern the full-screen feed only; For You tiles and map previews keep their muted live previews.
+- Reduce Motion: the app switch adds to the iOS setting (`MotionPreference.reducesMotion`), read by every animation that honoured the iOS one.
+- Haptics on/off is left for later: it needs the 41 feedback-generator call sites centralised first.
 
 ## Gap list by section
 
