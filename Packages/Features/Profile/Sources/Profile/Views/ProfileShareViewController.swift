@@ -781,7 +781,7 @@ final class ProfileShareViewController: UIViewController {
 
     private func configureResultsList() {
         emptyResultsLabel.text = "No profiles found"
-        emptyResultsLabel.font = .preferredFont(forTextStyle: .subheadline)
+        emptyResultsLabel.font = .appFont(forTextStyle: .subheadline)
         emptyResultsLabel.adjustsFontForContentSizeCategory = true
         emptyResultsLabel.textColor = .secondaryLabel
         emptyResultsLabel.textAlignment = .center

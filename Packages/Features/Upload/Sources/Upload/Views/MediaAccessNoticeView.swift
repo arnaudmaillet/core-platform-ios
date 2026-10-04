@@ -60,12 +60,12 @@ final class MediaAccessNoticeView: UIView {
 
     override init(frame: CGRect) {
         label.text = "You've shared some of your photos."
-        label.font = .preferredFont(forTextStyle: .footnote)
+        label.font = .appFont(forTextStyle: .footnote)
         label.adjustsFontForContentSizeCategory = true
         label.numberOfLines = 2
 
         affordance.text = "Manage"
-        affordance.font = .preferredFont(forTextStyle: .footnote)
+        affordance.font = .appFont(forTextStyle: .footnote)
         affordance.adjustsFontForContentSizeCategory = true
         affordance.textColor = .tintColor
         affordance.setContentHuggingPriority(.required, for: .horizontal)

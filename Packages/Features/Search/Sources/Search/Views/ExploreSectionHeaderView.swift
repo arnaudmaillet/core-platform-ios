@@ -68,7 +68,7 @@ final class ExploreSectionHeaderView: UICollectionReusableView {
         actionButton.isHidden = actionTitle == nil
         guard let actionTitle else { return }
         var attributes = AttributeContainer()
-        attributes.font = .preferredFont(forTextStyle: .subheadline)
+        attributes.font = .appFont(forTextStyle: .subheadline)
         actionButton.configuration?.attributedTitle = AttributedString(actionTitle, attributes: attributes)
     }
 }

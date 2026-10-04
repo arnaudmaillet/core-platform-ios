@@ -44,7 +44,7 @@ final class DiscoverViewAllFooterView: UICollectionReusableView {
             top: Self.titleTopInset, leading: Spacing.md, bottom: 0, trailing: 0
         )
         var text = AttributedString(Self.title)
-        text.font = UIFont.preferredFont(forTextStyle: .subheadline).withWeight(.semibold)
+        text.font = UIFont.scaledFont(forTextStyle: .subheadline, weight: .semibold)
         configuration.attributedTitle = text
         button.configuration = configuration
         button.contentHorizontalAlignment = .trailing

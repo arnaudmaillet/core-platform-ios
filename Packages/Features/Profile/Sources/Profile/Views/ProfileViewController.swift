@@ -2167,7 +2167,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         }
         view.bringSubviewToFront(pullIndicator)
 
-        statusLabel.font = .preferredFont(forTextStyle: .body)
+        statusLabel.font = .appFont(forTextStyle: .body)
         statusLabel.adjustsFontForContentSizeCategory = true
         statusLabel.textColor = .secondaryLabel
         statusLabel.textAlignment = .center

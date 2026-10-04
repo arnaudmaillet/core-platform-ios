@@ -112,7 +112,7 @@ final class MessageRequestCell: UITableViewCell {
     /// the same statement. Only the font and colour change, so a row settling
     /// from unread to read cannot move the rows around it.
     private func applyUnreadStyle(_ isUnread: Bool) {
-        let plain = UIFont.preferredFont(forTextStyle: .subheadline)
+        let plain = UIFont.appFont(forTextStyle: .subheadline)
         previewLabel.font = isUnread
             ? UIFont.systemFont(ofSize: plain.pointSize, weight: .semibold)
             : plain
@@ -144,13 +144,13 @@ final class MessageRequestCell: UITableViewCell {
         // and a third trailing glyph would crowd them.
         selectionStyle = .default
 
-        nameLabel.font = .preferredFont(forTextStyle: .headline)
+        nameLabel.font = .appFont(forTextStyle: .headline)
         nameLabel.textColor = .label
 
-        previewLabel.font = .preferredFont(forTextStyle: .subheadline)
+        previewLabel.font = .appFont(forTextStyle: .subheadline)
         previewLabel.textColor = .secondaryLabel
 
-        timeLabel.font = .preferredFont(forTextStyle: .footnote)
+        timeLabel.font = .appFont(forTextStyle: .footnote)
         timeLabel.textColor = .secondaryLabel
 
         for label in [nameLabel, previewLabel, timeLabel] {
@@ -236,7 +236,7 @@ final class MessageRequestCell: UITableViewCell {
         configuration.attributedTitle = AttributedString(
             "Accept",
             attributes: AttributeContainer([
-                .font: UIFont.preferredFont(forTextStyle: .subheadline)
+                .font: UIFont.appFont(forTextStyle: .subheadline)
             ])
         )
         acceptButton.configuration = configuration

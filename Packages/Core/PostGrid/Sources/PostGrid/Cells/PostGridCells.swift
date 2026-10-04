@@ -691,7 +691,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// last line — which is what makes the affordance read as part of the
     /// sentence it interrupts.
     private func composeCaption(atWidth width: CGFloat) {
-        let font = captionLabel.font ?? .preferredFont(forTextStyle: .body)
+        let font = captionLabel.font ?? .appFont(forTextStyle: .body)
         let available = width - Self.captionInset * 2
         // A card of a FIXED height (`fixedCaptionLines`) offers no "Show more":
         // the label cuts its own tail with an ellipsis, and the whole card
@@ -729,7 +729,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
 
     private static func attributes(font: UIFont?) -> [NSAttributedString.Key: Any] {
         [
-            .font: font ?? UIFont.preferredFont(forTextStyle: .body),
+            .font: font ?? UIFont.appFont(forTextStyle: .body),
             .foregroundColor: UIColor.label
         ]
     }
@@ -1472,9 +1472,14 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// sized to. Cached per width, line count and text size.
     public static func fixedTextCardHeight(width: CGFloat, captionLines: Int) -> CGFloat {
         guard width > 0 else { return 0 }
-        let key = "\(width)|\(captionLines)|\(UIFont.preferredFont(forTextStyle: .body).pointSize)"
+        // The app's text size, not the iPhone's: above the ceiling they differ
+        // (#482), and a card measured at the iPhone's size came out taller
+        // than the one drawn.
+        let size = TextSizeCeiling.current ?? UIApplication.shared.preferredContentSizeCategory
+        let key = "\(width)|\(captionLines)|\(size.rawValue)"
         if let cached = fixedHeights[key] { return cached }
         let card = PostGridListRowCell(frame: CGRect(x: 0, y: 0, width: width, height: 200))
+        card.traitOverrides.preferredContentSizeCategory = size
         // Words enough to fill any cap at any width, and a name and handle on
         // the band, as every text card in a lane wears.
         let post = GalleryPost(
@@ -1771,7 +1776,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// `captionTapped`.
     private var showMoreRange: NSRange?
     private let mediaView = UIImageView()
-    private static let metaFont = UIFont.preferredFont(forTextStyle: .footnote)
+    private static let metaFont = UIFont.appFont(forTextStyle: .footnote)
     /// The closing line's counters — the card's PRIMARY actions, ranked by
     /// carrying a count and holding the line's end rather than by a darker
     /// ink: glyph and count in the line's one ink (`PostCardPillView.ink`).
@@ -1866,7 +1871,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         Surface.applyCardEdge(to: card)
         card.pin(to: contentView)
 
-        captionLabel.font = .preferredFont(forTextStyle: .body)
+        captionLabel.font = .appFont(forTextStyle: .body)
         captionLabel.adjustsFontForContentSizeCategory = true
         captionLabel.textColor = .label
         captionLabel.numberOfLines = Self.captionLineLimit
@@ -1986,7 +1991,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         bookmarkButton.addTarget(self, action: #selector(bookmarkPressed), for: .touchUpInside)
         repostPill.isHidden = true
         bookmarkPill.isHidden = true
-        closingAgeLabel.font = .preferredFont(forTextStyle: .footnote)
+        closingAgeLabel.font = .appFont(forTextStyle: .footnote)
         closingAgeLabel.adjustsFontForContentSizeCategory = true
         closingAgeLabel.textColor = .secondaryLabel
         closingAgeLabel.setContentCompressionResistancePriority(.init(999), for: .horizontal)
@@ -2585,7 +2590,7 @@ public final class PostGridTileCell: UICollectionViewCell {
 
     private let imageView = UIImageView()
     private static let metaFont = UIFont.postGridSystemFont(
-        matching: .preferredFont(forTextStyle: .caption2), weight: .semibold
+        matching: .appFont(forTextStyle: .caption2), weight: .semibold
     )
     /// ⚠️ ONE NUMBER, and it is the LIKES (product call, 2026-09-30).
     ///

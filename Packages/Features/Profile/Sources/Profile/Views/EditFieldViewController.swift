@@ -90,7 +90,7 @@ final class EditFieldViewController: UIViewController {
         card.layer.cornerRadius = 12
 
         if config.multiline {
-            multiLineView.font = .preferredFont(forTextStyle: .body)
+            multiLineView.font = .appFont(forTextStyle: .body)
             multiLineView.adjustsFontForContentSizeCategory = true
             multiLineView.backgroundColor = .clear
             multiLineView.textContainerInset = UIEdgeInsets(
@@ -101,7 +101,7 @@ final class EditFieldViewController: UIViewController {
             multiLineView.autocorrectionType = config.autocorrection
             multiLineView.delegate = self
         } else {
-            singleLineField.font = .preferredFont(forTextStyle: .body)
+            singleLineField.font = .appFont(forTextStyle: .body)
             singleLineField.adjustsFontForContentSizeCategory = true
             singleLineField.placeholder = config.placeholder
             singleLineField.keyboardType = config.keyboardType
@@ -114,7 +114,7 @@ final class EditFieldViewController: UIViewController {
             if let prefix = config.prefix {
                 let label = UILabel()
                 label.text = prefix
-                label.font = .preferredFont(forTextStyle: .body)
+                label.font = .appFont(forTextStyle: .body)
                 label.textColor = .secondaryLabel
                 label.sizeToFit()
                 // Pad the glyph off the card's leading edge.
@@ -130,13 +130,13 @@ final class EditFieldViewController: UIViewController {
     }
 
     private func configureFooter() {
-        footerLabel.font = .preferredFont(forTextStyle: .footnote)
+        footerLabel.font = .appFont(forTextStyle: .footnote)
         footerLabel.adjustsFontForContentSizeCategory = true
         footerLabel.textColor = .secondaryLabel
         footerLabel.numberOfLines = 0
         footerLabel.text = config.helperText
 
-        counterLabel.font = .preferredFont(forTextStyle: .footnote)
+        counterLabel.font = .appFont(forTextStyle: .footnote)
         counterLabel.adjustsFontForContentSizeCategory = true
         counterLabel.textColor = .secondaryLabel
         counterLabel.textAlignment = .right

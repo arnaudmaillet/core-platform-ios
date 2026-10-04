@@ -92,7 +92,7 @@ final class MapLocationControlsView: UIView {
             card.isEnabled = true
             locateButton.isEnabled = false
             var title = AttributedString("See posts around you")
-            title.font = .preferredFont(forTextStyle: .headline)
+            title.font = .appFont(forTextStyle: .headline)
             card.configuration?.attributedTitle = title
             card.configuration?.subtitle = permission == .denied
                 ? "Location is off. Turn it on in Settings to open the country you're in."

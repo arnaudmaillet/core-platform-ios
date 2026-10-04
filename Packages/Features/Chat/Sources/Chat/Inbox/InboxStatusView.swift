@@ -21,10 +21,10 @@ final class InboxStatusView: UIView {
             pointSize: 44, weight: .light
         )
 
-        titleLabel.font = .preferredFont(forTextStyle: .headline)
+        titleLabel.font = .appFont(forTextStyle: .headline)
         titleLabel.textColor = .label
 
-        messageLabel.font = .preferredFont(forTextStyle: .subheadline)
+        messageLabel.font = .appFont(forTextStyle: .subheadline)
         messageLabel.textColor = .secondaryLabel
 
         for label in [titleLabel, messageLabel] {

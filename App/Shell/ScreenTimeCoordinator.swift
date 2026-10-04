@@ -130,6 +130,8 @@ final class ScreenTimeCoordinator {
         // Above the app's sheets and alerts, below App Lock's `.alert + 1`.
         window.windowLevel = .alert
         window.overrideUserInterfaceStyle = mainWindow.overrideUserInterfaceStyle
+        // The app's text size and Care Mode's bold text, like every window.
+        CareModePreference.apply(to: [window])
         window.rootViewController = controller
         window.makeKeyAndVisible()
         reminderWindow = window
@@ -223,14 +225,14 @@ final class ScreenTimeReminderViewController: UIViewController {
 
         let title = UILabel()
         title.text = titleText
-        title.font = UIFontMetrics(forTextStyle: .title1).scaledFont(for: .systemFont(ofSize: 28, weight: .bold))
+        title.font = .scaledFont(forTextStyle: .title1, weight: .bold)
         title.adjustsFontForContentSizeCategory = true
         title.textAlignment = .center
         title.numberOfLines = 0
 
         let body = UILabel()
         body.text = bodyText
-        body.font = .preferredFont(forTextStyle: .body)
+        body.font = .appFont(forTextStyle: .body)
         body.adjustsFontForContentSizeCategory = true
         body.textColor = .secondaryLabel
         body.textAlignment = .center

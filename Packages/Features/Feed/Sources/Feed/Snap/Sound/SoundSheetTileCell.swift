@@ -92,7 +92,7 @@ final class SoundSheetTileCell: UICollectionViewCell {
 
         // A text post has no picture: its words are its tile, read from the
         // top like the page they open into.
-        captionLabel.font = .preferredFont(forTextStyle: .caption1).withWeight(.semibold)
+        captionLabel.font = .scaledFont(forTextStyle: .caption1, weight: .semibold)
         captionLabel.textColor = .label
         captionLabel.numberOfLines = 5
         captionLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -402,7 +402,7 @@ private final class TileBadge: UIView {
         layer.cornerRadius = 9
         layer.cornerCurve = .continuous
         let label = UILabel()
-        let font = UIFont.preferredFont(forTextStyle: .caption2).withWeight(.semibold)
+        let font = UIFont.scaledFont(forTextStyle: .caption2, weight: .semibold)
         let title = NSMutableAttributedString()
         if let symbol, let glyph = UIImage(
             systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(font: font, scale: .small)
