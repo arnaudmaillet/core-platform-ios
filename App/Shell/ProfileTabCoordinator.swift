@@ -112,6 +112,7 @@ final class ProfileTabCoordinator: TabCoordinator {
         walletBadge = WalletBadgeInstaller(
             wallet: container.walletStore,
             presenter: navigationController,
+            welcome: container.welcomeGiftFace,
             makeSheet: { [unowned container] in container.makeWalletSheet() }
         ) { [weak profile] item in
             (profile as? (any HeaderAccessoryHosting))?.setTrailingAccessoryItem(item)
