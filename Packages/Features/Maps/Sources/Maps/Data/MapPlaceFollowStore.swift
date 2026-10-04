@@ -1,3 +1,4 @@
+import CoreStorage
 import Foundation
 
 /// Client-side persistence for FOLLOWED PLACES — the cities/regions/countries
@@ -14,18 +15,22 @@ import Foundation
 /// sub-filter shows matching places wherever they are on the map), so there is
 /// nothing for insertion order to mean.
 public final class MapPlaceFollowStore: @unchecked Sendable {
-    private static let key = "maps.followedPlaceIDs"
+    private static let baseKey = "maps.followedPlaceIDs"
 
     private let defaults: UserDefaults
+    /// Whose follows: the active profile's (`StorageScope`).
+    private let scope: StorageScope
+    private var key: String { scope.profileKey(Self.baseKey, adoptingLegacyIn: defaults) }
     private let lock = NSLock()
 
-    public init(defaults: UserDefaults = .standard) {
+    public init(defaults: UserDefaults = .standard, scope: StorageScope = .shared) {
         self.defaults = defaults
+        self.scope = scope
         #if DEBUG
         // `-maps-reset-followed-places`: deterministic QA — every scripted
         // launch starts unfollowed.
         if ProcessInfo.processInfo.arguments.contains("-maps-reset-followed-places") {
-            defaults.removeObject(forKey: Self.key)
+            defaults.removeObject(forKey: key)
         }
         // `-maps-follow-place <placeID>`: start with one place followed, so a
         // launch can land straight on the Favorites sub-filter's filtered map
@@ -33,9 +38,9 @@ public final class MapPlaceFollowStore: @unchecked Sendable {
         if let position = ProcessInfo.processInfo.arguments.firstIndex(of: "-maps-follow-place"),
            position + 1 < ProcessInfo.processInfo.arguments.count {
             let seeded = ProcessInfo.processInfo.arguments[position + 1]
-            var ids = Set(defaults.stringArray(forKey: Self.key) ?? [])
+            var ids = Set(defaults.stringArray(forKey: key) ?? [])
             ids.insert(seeded)
-            defaults.set(ids.sorted(), forKey: Self.key)
+            defaults.set(ids.sorted(), forKey: key)
         }
         #endif
     }
@@ -47,11 +52,11 @@ public final class MapPlaceFollowStore: @unchecked Sendable {
     public static let didChangeNotification = Notification.Name("maps.placeFollows.didChange")
 
     public var followedPlaceIDs: Set<String> {
-        lock.withLock { Set(defaults.stringArray(forKey: Self.key) ?? []) }
+        lock.withLock { Set(defaults.stringArray(forKey: key) ?? []) }
     }
 
     public func isFollowed(_ placeID: String) -> Bool {
-        lock.withLock { (defaults.stringArray(forKey: Self.key) ?? []).contains(placeID) }
+        lock.withLock { (defaults.stringArray(forKey: key) ?? []).contains(placeID) }
     }
 
     /// Follows an unfollowed place and unfollows a followed one.
@@ -59,12 +64,12 @@ public final class MapPlaceFollowStore: @unchecked Sendable {
     @discardableResult
     public func toggle(_ placeID: String) -> Bool {
         let nowFollowed: Bool = lock.withLock {
-            var ids = Set(defaults.stringArray(forKey: Self.key) ?? [])
+            var ids = Set(defaults.stringArray(forKey: key) ?? [])
             let inserted = ids.insert(placeID).inserted
             if !inserted { ids.remove(placeID) }
             // Sorted so the persisted array is deterministic — sets have no
             // order and defaults round-trip arrays.
-            defaults.set(ids.sorted(), forKey: Self.key)
+            defaults.set(ids.sorted(), forKey: key)
             return inserted
         }
         // Outside the lock, like every store here: an observer re-entering
