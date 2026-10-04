@@ -11,7 +11,7 @@ struct CountryShopViewControllerTests {
     /// Seven real countries, busiest first. France is home; the US and Spain
     /// were bought.
     private final class FakeAccess: CountryAccess {
-        let homeCountry = "FR"
+        let homeCountry: String? = "FR"
         var gems = 40
         var unlocked: Set<String> = ["FR", "US", "ES"]
         let all: [CountryStanding] = ["US", "CN", "IN", "ES", "FR", "DE", "IT"].enumerated().map { index, code in

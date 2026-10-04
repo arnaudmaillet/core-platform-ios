@@ -554,9 +554,15 @@ final class AppContainer {
             homeCountry: "FR",
             wallet: walletStore,
             unlocks: unlocks,
-            activity: CountryAccessService.mockActivity(in: mockBackend)
+            activity: CountryAccessService.mockActivity(in: mockBackend),
+            isMember: { [unowned self] in self.memberGate.isMember },
+            locator: currentCountry
         )
     }()
+
+    /// Where the device is, as a country — asked for in context from the map
+    /// (guest mode §3.1), never at launch. Opens that country for free.
+    private(set) lazy var currentCountry = CurrentCountryProvider()
 
     /// The Shop's Boosts: the ×100 cartridge pack, over the ONE wallet. Mock
     /// mode only, like the shop itself (no `countryAccess`, no shop door).
@@ -622,7 +628,8 @@ final class AppContainer {
         countryAccess: countryAccess,
         stakePacks: stakePacks,
         // A guest has no people: no favourites dock, no Friends / Following.
-        isMember: { [unowned self] in self.memberGate.isMember }
+        isMember: { [unowned self] in self.memberGate.isMember },
+        locator: currentCountry
     )
 
     #if DEBUG

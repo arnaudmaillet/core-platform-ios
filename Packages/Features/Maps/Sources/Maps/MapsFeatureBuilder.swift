@@ -54,6 +54,10 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
     ///   the false default keeps any other construction identity-clean.
     ///   Release builds ignore it — the catalog does not exist there.
     private let countryAccess: (any CountryAccess)?
+    /// Where the device is, for the locate button and the "See posts around
+    /// you" card. Nil hides both (a map that sells no country has no use for
+    /// the device's).
+    private let locator: (any CurrentCountryLocating)?
     private let stakePacks: (any StakePackSelling)?
     private let isMember: @MainActor () -> Bool
 
@@ -86,9 +90,11 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
         stakePacks: (any StakePackSelling)? = nil,
         /// Whether the viewer has an account. A guest has no people: no
         /// favourites dock, no Friends / Following rows.
-        isMember: @escaping @MainActor () -> Bool = { true }
+        isMember: @escaping @MainActor () -> Bool = { true },
+        locator: (any CurrentCountryLocating)? = nil
     ) {
         self.isMember = isMember
+        self.locator = locator
         self.countryAccess = countryAccess
         self.stakePacks = stakePacks
         self.iconCatalog = iconCatalog
@@ -245,7 +251,8 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
             openConversation: openConversation,
             countryAccess: countryAccess,
             stakePacks: stakePacks,
-            isMember: isMember
+            isMember: isMember,
+            locator: countryAccess == nil ? nil : locator
         )
     }
 }
