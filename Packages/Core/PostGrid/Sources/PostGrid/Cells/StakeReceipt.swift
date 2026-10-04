@@ -11,7 +11,9 @@ enum StakeReceipt {
     static func float(_ text: String, color: UIColor, rising: Bool, from chip: UIView, in host: UIView) {
         let label = UILabel()
         label.text = text
-        label.font = .monospacedDigitSystemFont(ofSize: 15, weight: .heavy)
+        label.font = .scaledMonospacedDigitSystemFont(
+            ofSize: 15, weight: .heavy, relativeTo: .subheadline, maximumPointSize: 22
+        )
         label.textColor = color
         label.sizeToFit()
         let frame = chip.convert(chip.bounds, to: host)

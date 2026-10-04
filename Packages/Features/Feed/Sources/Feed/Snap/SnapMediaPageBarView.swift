@@ -177,6 +177,7 @@ final class SnapMediaPageBarView: UIView {
     /// the width of a word.
     private let counter: UILabel = {
         let label = UILabel()
+        // Fixed size (#482): part of the page bar's pill over the media.
         label.font = .monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
         label.textColor = .white
         label.textAlignment = .center

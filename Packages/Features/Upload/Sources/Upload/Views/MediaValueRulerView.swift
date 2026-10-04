@@ -129,7 +129,10 @@ final class MediaValueRulerView: UIView {
         super.init(frame: .zero)
         backgroundColor = .clear
 
-        readout.font = .monospacedDigitSystemFont(ofSize: 13, weight: .semibold)
+        readout.font = .scaledMonospacedDigitSystemFont(
+            ofSize: 13, weight: .semibold, relativeTo: .footnote, maximumPointSize: 17
+        )
+        readout.adjustsFontForContentSizeCategory = true
         readout.textAlignment = .center
         readout.textColor = .label
         readout.isAccessibilityElement = false
