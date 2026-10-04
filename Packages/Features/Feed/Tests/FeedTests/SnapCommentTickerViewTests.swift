@@ -1,3 +1,4 @@
+import CoreStorage
 import Testing
 import UIKit
 @testable import Feed
@@ -257,11 +258,10 @@ struct SnapCommentTickerViewTests {
         #expect(SnapCommentTickerView.entryDeferral(lastRightEdge: 100, bandWidth: 400, speed: 22) == 0)
     }
 
-    /// Bug 3: the kinetic blur must engage during manual control — a live,
-    /// fraction-driven animator while the coast is fast (an `.inactive`
-    /// animator silently ignores `fractionComplete`), disengaged at
-    /// handover, where the reversal run owns the fade-out.
-    @Test func kineticBlurEngagesDuringCoastAndDisengagesAtHandover() throws {
+    /// Bug 3: the kinetic backdrop must engage during manual control — a
+    /// visible wash while the coast is fast, disengaged at handover, where
+    /// the dismissal fade owns the return to the resting level.
+    @Test func kineticBackdropEngagesDuringCoastAndDisengagesAtHandover() throws {
         try hosting { window in
             let ticker = makeTicker(in: window)
             ticker.setActive(true)
@@ -279,6 +279,7 @@ struct SnapCommentTickerViewTests {
             ticker.coastStep(now: start + 0.016) // one fast frame into the decay
             #expect(!blur.isHidden)
             #expect(ticker.currentKineticFraction > 0)
+            #expect(abs(ticker.currentBackdropOpacity - ticker.currentKineticFraction) < 0.001)
 
             ticker.coastStep(now: start + 30) // decay long settled → handover
             #expect(ticker.currentKineticFraction == 0) // disengaged; reversal fades out
@@ -288,12 +289,40 @@ struct SnapCommentTickerViewTests {
         }
     }
 
+    /// At rest the wash sits at the viewer's Background setting — none by
+    /// default — and a scrub raises it from there, never below it.
+    @Test func theBackdropRestsAtTheViewersSettingAndScrubsRaiseIt() {
+        hosting { window in
+            let store = MediaCommentPreferencesStore(defaults: UserDefaults(suiteName: "ticker-rest-\(UUID().uuidString)")!)
+            defer { SnapCommentTickerView.refreshAppearance(from: MediaCommentPreferencesStore(defaults: UserDefaults(suiteName: "reset-\(UUID().uuidString)")!)) }
+
+            let bare = makeTicker(in: window)
+            bare.appearanceStore = store
+            bare.setActive(true)
+            #expect(bare.currentBackdropOpacity == 0)
+
+            store.update { $0.bandBackgroundOpacity = 0.3 }
+            let ticker = makeTicker(in: window)
+            ticker.appearanceStore = store
+            ticker.setActive(true)
+            #expect(abs(ticker.currentBackdropOpacity - 0.3) < 0.001)
+
+            ticker.beginScrub()
+            ticker.applyScrubTranslation(-400)
+            ticker.endScrub(releaseVelocity: 1200)
+            ticker.coastStep(now: ticker.coastStartTime + 0.001)
+            #expect(ticker.currentBackdropOpacity > 0.6)
+            ticker.coastStep(now: ticker.coastStartTime + 30) // handover
+            #expect(ticker.currentKineticFraction == 0)
+        }
+    }
+
     /// The backdrop is a true accumulator during a touch: monotone
     /// non-decreasing in accumulated absolute travel — floor at touch-down,
     /// cap at full travel, and NO velocity term anywhere in the mapping.
     @Test func scrubFractionIsAMonotoneNonDecayingAccumulator() {
         #expect(SnapCommentTickerView.scrubFraction(forAccumulatedDistance: 0) == SnapCommentTickerView.scrubEngagementFloor)
-        #expect(SnapCommentTickerView.scrubFraction(forAccumulatedDistance: 10_000) == SnapCommentTickerView.maxBlurFraction)
+        #expect(SnapCommentTickerView.scrubFraction(forAccumulatedDistance: 10_000) == SnapCommentTickerView.maxBackdropOpacity)
 
         var previous: CGFloat = -1
         for distance in stride(from: CGFloat(0), through: 600, by: 20) {
@@ -320,8 +349,8 @@ struct SnapCommentTickerViewTests {
             // decay out of the assertion. This test is about the accumulator
             // summing |Δx|, not about how fast the machine got here.
             ticker.coastStep(now: ticker.coastStartTime + 0.001)
-            // 400pt of absolute travel ≥ blurDistanceScale → released at the cap.
-            #expect(ticker.currentKineticFraction > SnapCommentTickerView.maxBlurFraction - 0.05)
+            // 400pt of absolute travel ≥ backdropDistanceScale → released at the cap.
+            #expect(ticker.currentKineticFraction > SnapCommentTickerView.maxBackdropOpacity - 0.05)
         }
     }
 

@@ -1,3 +1,4 @@
+import CoreStorage
 import DesignSystem
 import UIKit
 
@@ -225,7 +226,16 @@ enum SnapCommentsLayout {
     /// comments still did not stand out enough over the post. Raising it
     /// buys contrast and costs visibility of the post, which is the trade
     /// this constant exists to express; the post keeps a fifth of its light.
-    static let backdropDimOpacity: CGFloat = 0.8
+    ///
+    /// Since 2026-10-04 the viewer can move it (Settings → App and Device →
+    /// Comments on Media → Comments Screen, 0.5…1): 0.8 is the default, read
+    /// again each time the comments open.
+    nonisolated(unsafe) private(set) static var backdropDimOpacity: CGFloat = 0.8
+
+    /// Reads the wash from the device preferences.
+    static func refreshBackdrop(from store: MediaCommentPreferencesStore = .standard) {
+        backdropDimOpacity = CGFloat(store.preferences.commentsBackdropOpacity)
+    }
 
     // MARK: The chrome's frost bands
     //

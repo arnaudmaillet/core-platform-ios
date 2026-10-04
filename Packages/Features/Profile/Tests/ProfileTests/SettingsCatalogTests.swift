@@ -39,7 +39,7 @@ struct SettingsCatalogTests {
     @Test func eachDevicePageShowsItsSections() {
         #expect(AppPreferencesViewController.sections(for: .playback) == [.playback, .sounds])
         #expect(AppPreferencesViewController.sections(for: .display) == [.appearance, .motion])
-        #expect(AppPreferencesViewController.sections(for: .mediaComments) == [.band, .muted, .subtitles])
+        #expect(AppPreferencesViewController.sections(for: .mediaComments) == [.band, .subtitles, .commentsScreen, .muted])
         #expect(AppPreferencesViewController.sections(for: .language) == [.language])
         #expect(AppPreferencesViewController.sections(for: .storage) == [.storage])
         for section in SettingsSection.sections(in: .device) {
