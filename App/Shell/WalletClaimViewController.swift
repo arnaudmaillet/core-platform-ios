@@ -1,3 +1,4 @@
+import AuthInterface
 import CoreModels
 import CoreNavigation
 import CoreStorage
@@ -70,6 +71,9 @@ final class WalletClaimViewController: UIViewController {
     typealias OpenFeedHero = @MainActor ([PostID], UIViewController, SnapFeedHeroOrigin) -> Void
 
     private let wallet: WalletStore
+    /// A guest's sheet shows the welcome gift instead of the device's wallet
+    /// (guest mode decision 11); nil shows the wallet to everyone.
+    private let welcome: WalletBadgeInstaller.WelcomeGiftFace?
     private let lookUpPosts: PostLookup?
     private let imagePipeline: ImagePipeline?
     private let openFeedHero: OpenFeedHero?
@@ -131,8 +135,10 @@ final class WalletClaimViewController: UIViewController {
         imagePipeline: ImagePipeline? = nil,
         openFeedHero: OpenFeedHero? = nil,
         countries: (any CountryAccess)? = nil,
-        stakePacks: (any StakePackSelling)? = nil
+        stakePacks: (any StakePackSelling)? = nil,
+        welcome: WalletBadgeInstaller.WelcomeGiftFace? = nil
     ) {
+        self.welcome = welcome
         self.openFeedHero = openFeedHero
         self.countries = countries
         self.stakePacks = stakePacks
@@ -197,7 +203,22 @@ final class WalletClaimViewController: UIViewController {
             ) { [weak self] _ in
                 MainActor.assumeIsolated { self?.refresh() }
             },
-        ]
+        ] + (welcome.map { welcome in
+            // A guest's sheet follows the gift and the viewer: signing up from
+            // here turns it into the member's wallet, the gift credited.
+            [
+                NotificationCenter.default.addObserver(
+                    forName: WelcomeGift.didChangeNotification, object: welcome.gift, queue: .main
+                ) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.refresh() }
+                },
+                NotificationCenter.default.addObserver(
+                    forName: .viewerDidChange, object: nil, queue: .main
+                ) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.refresh() }
+                },
+            ]
+        } ?? [])
         refresh()
 
         // Measured NOW, before the sheet asks its first detent: a guess here
@@ -338,7 +359,7 @@ final class WalletClaimViewController: UIViewController {
 
         let summaryRegistration = UICollectionView.CellRegistration<WalletSummaryCell, Item> { [weak self] cell, _, _ in
             guard let self else { return }
-            cell.summary.configure(with: snapshot)
+            configureSummary(cell.summary)
             summaryCell = cell
         }
         let stakeRegistration = UICollectionView.CellRegistration<WalletStakeCell, Item> { [weak self] cell, _, item in
@@ -559,12 +580,29 @@ final class WalletClaimViewController: UIViewController {
 
     // MARK: - State
 
+    /// The welcome gift a guest is looking at — nil for a member (or a sheet
+    /// built without one). `lockedAmount` is nil once this device's gift is
+    /// spent, and a guest then sees 0: never a wallet that isn't theirs.
+    private var guestGift: Int? {
+        guard let welcome, !welcome.gate.isMember else { return nil }
+        return welcome.gift.lockedAmount ?? 0
+    }
+
+    private func configureSummary(_ summary: WalletSummaryView) {
+        if let guestGift {
+            summary.configure(guestGift: guestGift, dailyClaimCap: snapshot.dailyClaimCap)
+        } else {
+            summary.configure(with: snapshot)
+        }
+    }
+
     private func refresh() {
         snapshot = wallet.snapshot()
-        stakes = wallet.stakes()
+        // A guest has no stakes: the device's are someone else's.
+        stakes = guestGift == nil ? wallet.stakes() : []
         stakesByID = Dictionary(uniqueKeysWithValues: stakes.map { ($0.targetID, $0) })
 
-        summaryCell?.summary.configure(with: snapshot)
+        summaryCell.map { configureSummary($0.summary) }
         applyClaimButtonState()
 
         var list = NSDiffableDataSourceSnapshot<Section, Item>()
@@ -617,6 +655,23 @@ final class WalletClaimViewController: UIViewController {
     }
 
     private func applyClaimButtonState() {
+        // A guest's Claim is the lock: always pressable, and pressing it asks
+        // them to sign up for the gift it names.
+        if let guestGift {
+            claimButton.isEnabled = true
+            var title = AttributedString("Claim \(guestGift) likes")
+            title.font = .monospacedDigitSystemFont(ofSize: 17, weight: .semibold)
+            claimButton.configuration?.attributedTitle = title
+            claimButton.configuration?.image = UIImage(
+                systemName: "lock.fill",
+                withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
+            )
+            claimButton.configuration?.imagePadding = Spacing.sm
+            claimButton.accessibilityHint = "Sign up to claim them"
+            return
+        }
+        claimButton.configuration?.image = nil
+        claimButton.accessibilityHint = nil
         claimButton.isEnabled = snapshot.claimAvailable
         var title: AttributedString
         if snapshot.claimAvailable {
@@ -633,6 +688,18 @@ final class WalletClaimViewController: UIViewController {
     }
 
     private func claimTapped() {
+        // A guest claims the gift by signing up: the sign-in itself credits it
+        // (`AppCoordinator.render`), so there is no claim to commit after —
+        // committing one would pay the hourly claim on top.
+        if let welcome, guestGift != nil {
+            Task { @MainActor [weak self] in
+                guard await welcome.gate.requireMember(for: .claim), let self else { return }
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                refresh()
+                summaryCell?.summary.pointsTile.pop()
+            }
+            return
+        }
         MemberGates.perform(.claim, from: self) { [weak self] in self?.commitClaim() }
     }
 

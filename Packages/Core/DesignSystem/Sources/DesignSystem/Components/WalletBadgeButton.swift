@@ -194,6 +194,15 @@ public final class WalletBadgeButton: UIButton {
         applyRing()
     }
 
+    /// The guest face: the welcome gift's likes, which a guest can't spend
+    /// until they sign up. The count with the claim-ready pulse — a claim IS
+    /// waiting; the lock is on the sheet's Claim button, where the claiming
+    /// happens, not here.
+    public func update(guestGift amount: Int) {
+        update(balance: amount, claimAvailable: amount > 0)
+        accessibilityLabel = "Wallet, \(amount) likes waiting for you"
+    }
+
     override public func didMoveToWindow() {
         super.didMoveToWindow()
         guard window != nil else { return }

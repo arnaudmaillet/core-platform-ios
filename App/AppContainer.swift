@@ -336,6 +336,17 @@ final class AppContainer {
         return store
     }()
 
+    /// The likes a guest is handed before they have an account, locked in
+    /// the balance badge until they sign up (guest mode decision 11). The app
+    /// coordinator opens it for a guest and settles it into `walletStore` for
+    /// a member.
+    private(set) lazy var welcomeGift = WelcomeGift()
+
+    /// What every balance badge shows a guest instead of the wallet.
+    var welcomeGiftFace: WalletBadgeInstaller.WelcomeGiftFace {
+        .init(gift: welcomeGift, gate: memberGate)
+    }
+
     /// The wallet sheet every balance badge presents: the store, plus the
     /// Feed feature's post lookup so each stake row shows its post.
     func makeWalletSheet() -> UIViewController {
@@ -349,7 +360,8 @@ final class AppContainer {
                 self.feedFeature.presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)
             },
             countries: countryAccess,
-            stakePacks: stakePacks
+            stakePacks: stakePacks,
+            welcome: welcomeGiftFace
         ).wrappedInSheet()
     }
 
@@ -984,6 +996,7 @@ final class AppContainer {
             WalletBadgeInstaller.attach(
                 to: screen,
                 wallet: self.walletStore,
+                welcome: self.welcomeGiftFace,
                 makeSheet: { [unowned self] in self.makeWalletSheet() }
             )
         }

@@ -410,6 +410,18 @@ public final class WalletStore: @unchecked Sendable {
 
     // MARK: - Mutations
 
+    /// Credits `amount` earned outside the claim — the welcome gift a guest
+    /// redeems by signing up (`WelcomeGift`). Counts as earned; touches neither
+    /// the claim clock nor the day's cap, which only the claim spends.
+    public func credit(_ amount: Int) {
+        guard amount > 0 else { return }
+        lock.withLock {
+            defaults.set(defaults.integer(forKey: Key.balance) + amount, forKey: Key.balance)
+            defaults.set(defaults.integer(forKey: Key.lifetimeEarned) + amount, forKey: Key.lifetimeEarned)
+        }
+        postDidChange()
+    }
+
     /// Attempts the periodic claim. `.claimed` credits the balance and
     /// advances the streak; the other outcomes change nothing.
     @discardableResult

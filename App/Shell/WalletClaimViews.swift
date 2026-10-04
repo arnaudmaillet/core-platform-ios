@@ -300,6 +300,24 @@ final class WalletSummaryView: UIView {
         progressWidth = progressFill.widthAnchor.constraint(equalTo: progressTrack.widthAnchor, multiplier: fraction)
         progressWidth?.isActive = true
     }
+
+    /// A guest's summary: the welcome gift's likes as the points, and the
+    /// rest as an account would start — no gems, no streak, nothing earned.
+    func configure(guestGift amount: Int, dailyClaimCap: Int) {
+        pointsTile.setValue(amount)
+        gemsTile.setValue(0)
+        streakIcon.image = UIImage(
+            systemName: "flame",
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
+        )?.withTintColor(.secondaryLabel, renderingMode: .alwaysOriginal)
+        streakDisc.backgroundColor = .quaternarySystemFill
+        streakTitle.text = "No streak yet"
+        streakSubtitle.text = "Sign up, then claim daily for up to ×2"
+        earnedValue.text = "0 / \(dailyClaimCap)"
+        progressWidth?.isActive = false
+        progressWidth = progressFill.widthAnchor.constraint(equalTo: progressTrack.widthAnchor, multiplier: 0)
+        progressWidth?.isActive = true
+    }
 }
 
 final class WalletSummaryCell: UICollectionViewCell {
