@@ -18,6 +18,15 @@ struct YourActivityTests {
         #expect(YourActivityViewController.planned == ["Recently deleted", "Likes and history"])
     }
 
+    /// Like every Settings screen: UIKit's soft blur under the bar.
+    @Test func itWearsTheSoftTopEdge() throws {
+        let controller = YourActivityViewController()
+        controller.loadViewIfNeeded()
+        let list = try #require(controller.view.subviews.compactMap { $0 as? UICollectionView }.first)
+        #expect(!list.topEdgeEffect.isHidden)
+        #expect(list.topEdgeEffect.style == .soft)
+    }
+
     @Test func thePageShowsTheStoresTime() throws {
         let store = ScreenTimeStore(defaults: UserDefaults(suiteName: "activity-\(UUID().uuidString)")!)
         let now = Date()

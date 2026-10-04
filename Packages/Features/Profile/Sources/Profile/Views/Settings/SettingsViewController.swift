@@ -96,8 +96,8 @@ final class SettingsViewController: UIViewController {
 
         collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: layout)
         collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        // No effect under the bar: the rows run up under the pills untouched — see
-        // `prefersClearTopEdge`.
+        // UIKit's soft blur under the bar, like every Settings screen — see
+        // `prefersSoftTopEdge`.
         collectionView.prefersSoftTopEdge()
         collectionView.delegate = self
         view.addSubview(collectionView)
