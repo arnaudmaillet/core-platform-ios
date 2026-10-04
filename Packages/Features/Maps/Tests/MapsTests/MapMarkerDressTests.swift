@@ -135,31 +135,41 @@ struct MapMarkerDressTests {
         #expect(card.debugBadge.debugImageFrame == card.debugBadge.bounds, "the flag fills the badge's disc")
     }
 
-    /// On a TILE card (a media marker) the badge sits INSIDE the bottom-right
-    /// corner, clear of the border all round — the corner's curve included,
-    /// which on the rounded tile comes well inside the straight edges.
-    @Test func onATileCardTheBadgeSitsInsideTheCorner() {
+    /// On a TILE card (a media marker) the badge straddles the tile's own
+    /// outline on the corner's diagonal — level with a round marker's — and
+    /// nothing clips it: the tile's mask is on the picture, the ring and the
+    /// flag border, never on the card.
+    @Test func onATileCardTheBadgeStraddlesTheOutline() {
         for dress in [MapMarkerDress.resolve(kind: .country, countryCode: "FR", isLocked: false),
                       .resolve(kind: .city, countryCode: "FR", isLocked: false),
                       .resolve(kind: .country, countryCode: "MX", isLocked: true)] {
             let card = card(.media, dress: dress)
-            let badge = card.debugBadge.frame
-            let clear = MapFlagBorderView.lineWidth + MapMarkerBadgeView.insideGap
-            // The badge's disc grown by the border and the gap stays inside
-            // the tile's own outline — sampled all the way round.
-            let outline = PinCardView.mediaShape.path(in: card.bounds).cgPath
-            let reach = badge.width / 2 + clear - 0.05
-            for step in 0..<72 {
-                let angle = CGFloat(step) * .pi / 36
-                let point = CGPoint(x: badge.midX + reach * cos(angle), y: badge.midY + reach * sin(angle))
-                #expect(outline.contains(point), "\(String(describing: dress.badge)): \(point) off the tile")
-            }
-            // In the bottom-right corner: past the middle both ways, on the
-            // diagonal.
-            #expect(badge.minX > card.bounds.midX && badge.minY > card.bounds.midY)
-            #expect(abs(badge.midX - badge.midY) < 0.01)
-            #expect(!card.revealStandInOverhangsWindow, "nothing overhangs a window it becomes")
+            card.layoutIfNeeded()
+            let center = card.debugBadge.center
+            // The tile's diagonal point: `side/2 · 2^(-1/n)` from the centre
+            // on each axis.
+            let half = card.bounds.width / 2
+            let outline = half + half * pow(2, -1 / 2.6)
+            #expect(abs(center.x - outline) < 0.05 && abs(center.y - outline) < 0.05,
+                    "\(String(describing: dress.badge)): \(center), outline at \(outline)")
+            #expect(card.layer.mask == nil, "the card itself is unmasked")
+            #expect(card.debugChromeView.layer.mask == nil)
+            #expect(card.debugContentView.layer.mask != nil, "the picture is the tile")
+            #expect(card.revealStandInOverhangsWindow, "a window must not clip the overhang off")
         }
+    }
+
+    /// A tile's badge sits at the same depth as a disc's: the distance from
+    /// the bounding corner to the badge's centre is the arc's 45° point for
+    /// both — `radius · (1 - 1/√2)` — the tile's matched corner landing within
+    /// a quarter point of a 44pt disc's.
+    @Test func aTilesBadgeIsLevelWithADiscs() {
+        let tile = card(.media, dress: .resolve(kind: .country, countryCode: "FR", isLocked: false))
+        let disc = card(.text, dress: .resolve(kind: .country, countryCode: "FR", isLocked: false))
+        let tileInset = tile.bounds.maxX - tile.debugBadge.center.x
+        let discInset = disc.bounds.maxX - disc.debugBadge.center.x
+        #expect(abs(tileInset - PinCardView.cornerRadius * (1 - 1 / 2.squareRoot())) < 0.01)
+        #expect(abs(tileInset - discInset) < 0.25, "tile \(tileInset), disc \(discInset)")
     }
 
     /// A DISC (a text marker) has no corner to sit in: the badge overlaps its
@@ -271,30 +281,6 @@ struct MapMarkerDressTests {
             var alpha: CGFloat = 0
             color.getWhite(nil, alpha: &alpha)
             #expect(alpha > 0.1, "\(style.rawValue): \(color)")
-        }
-    }
-
-    /// The inside-corner badge follows the border's width AND the corner: on
-    /// the diagonal, border + gap + half the badge in from the corner's arc —
-    /// the matched circular corner, which meets the tile there. Below a
-    /// corner that small (the old 12pt) it falls back to border + gap + half
-    /// the badge from each edge, 2 + 2 + 10 = 14pt.
-    @Test func theInsideBadgeInsetFollowsTheWidthAndTheCorner() {
-        let edge = PinCardView.ringWidth + MapMarkerBadgeView.insideGap + MapMarkerBadgeView.side / 2
-        #expect(edge == 14)
-        let size = CGSize(width: 56, height: 56)
-        #expect(MapMarkerBadgeView.center(in: size, cornerRadius: 12, inside: true) == CGPoint(x: 42, y: 42))
-        for dress in [MapMarkerDress.resolve(kind: .country, countryCode: "FR", isLocked: false),
-                      .resolve(kind: .city, countryCode: "FR", isLocked: false),
-                      .resolve(kind: .country, countryCode: "MX", isLocked: true)] {
-            let card = card(.media, dress: dress)
-            let radius = PinCardView.cornerRadius
-            // The arc's centre, and the badge exactly `radius - edge` from it.
-            let arcCenter = CGPoint(x: card.bounds.maxX - radius, y: card.bounds.maxY - radius)
-            let center = card.debugBadge.center
-            let distance = hypot(center.x - arcCenter.x, center.y - arcCenter.y)
-            #expect(abs(distance - (radius - edge)) < 0.01, "\(center) in \(card.bounds)")
-            #expect(center.x < card.bounds.maxX - edge, "pulled in past the straight-edge seat")
         }
     }
 

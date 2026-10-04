@@ -437,22 +437,20 @@ final class PinCardView: UIView {
         applyBlend()
     }
 
-    /// Whether the badge sits INSIDE the card's corner: only a media card is a
-    /// square with a corner to sit in. A text marker's disc and a bare icon
-    /// wear it overlapping their edge — see `MapMarkerBadgeView.center`.
-    var badgeSitsInside: Bool { face == .media }
-
     /// Seats the badge on the RESTING card's corner — the face's radius, not
     /// the live one, which mid-flight is the page's. From there autoresizing
     /// keeps it at the same distance from the corner as the card grows.
+    ///
+    /// Every face with a shape wears it overlapping its edge — the disc and,
+    /// since 2026-10-04, the media tile too, level with the round markers'
+    /// (`MapMarkerBadgeView.center`). That is why the resting mask is NOT on
+    /// the card (`applyRestingShape`).
     private func positionBadge() {
         let center: CGPoint
         if face == .icon {
             center = iconBadgeCenter()
         } else {
-            center = MapMarkerBadgeView.center(
-                in: bounds.size, cornerRadius: face.cornerRadius, inside: badgeSitsInside
-            )
+            center = MapMarkerBadgeView.center(in: bounds.size, cornerRadius: face.cornerRadius)
         }
         let side = MapMarkerBadgeView.side
         badgeView.frame = CGRect(x: center.x - side / 2, y: center.y - side / 2, width: side, height: side)
@@ -983,9 +981,15 @@ final class PinCardView: UIView {
     }
 
     /// A resting MEDIA marker is clipped to the tile itself (`mediaShape`):
-    /// ground, picture, ring, flag border and the badge inside its corner,
-    /// all in one mask on the card. The annotation's shadow is pathless, so it
-    /// takes the same outline from the composited alpha.
+    /// the picture, the ring and the flag border each wear the tile as a mask.
+    /// The annotation's shadow is pathless, so it takes the same outline from
+    /// the composited alpha.
+    ///
+    /// ⚠️ NOT ONE MASK ON THE CARD: the badge overhangs the tile's edge
+    /// (`positionBadge`) and would be cut in half. So the card's own black
+    /// ground — drawn by its corner, which is up to 0.32pt OUTSIDE the tile —
+    /// is cleared at rest, or it shows as a dark hairline past the ring; the
+    /// picture's own black ground (`imageView`) is inside the mask.
     ///
     /// ⚠️ NEVER ON A TRANSITION CARD. A flight and a reveal animate the card's
     /// bounds and corner every frame, and a shape-layer mask does neither —
@@ -996,18 +1000,25 @@ final class PinCardView: UIView {
     ///
     /// Text and icon faces keep theirs: a disc, and no shape at all.
     private func applyRestingShape() {
+        let shaped: [UIView] = [contentView, ringView, flagBorder]
         guard face == .media, !isTransitionCard, bounds.width > 0, bounds.height > 0 else {
-            if layer.mask != nil { layer.mask = nil }
+            for view in shaped where view.layer.mask != nil { view.layer.mask = nil }
+            if face == .media { backgroundColor = .black }
             return
         }
-        let mask = (layer.mask as? CAShapeLayer) ?? CAShapeLayer()
+        backgroundColor = .clear
         let path = Self.mediaShape.path(in: bounds).cgPath
-        guard mask.path != path || layer.mask !== mask else { return }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        mask.frame = bounds
-        mask.path = path
-        layer.mask = mask
+        // All three are full-bleed and top-left anchored, so the card's
+        // bounds ARE their bounds.
+        for view in shaped {
+            let mask = (view.layer.mask as? CAShapeLayer) ?? CAShapeLayer()
+            guard mask.path != path || view.layer.mask !== mask else { continue }
+            mask.frame = CGRect(origin: .zero, size: bounds.size)
+            mask.path = path
+            view.layer.mask = mask
+        }
         CATransaction.commit()
     }
 
@@ -1372,11 +1383,11 @@ extension PinCardView: RevealStandInShaping {
         if departureCoverView.image != nil { setBlend(alpha) }
     }
 
-    /// A disc's or an icon's badge overlaps the edge, half outside the card: a
-    /// window that clipped it would close onto a marker missing a piece and
-    /// hand the landing the rest of the disc in one frame. A media card's
-    /// badge sits inside its corner and rides inside the window's mask.
-    var revealStandInOverhangsWindow: Bool { !badgeView.isHidden && !badgeSitsInside }
+    /// Every badge overlaps the edge, half outside the card: a window that
+    /// clipped it would close onto a marker missing a piece and hand the
+    /// landing the rest of the disc in one frame. (A media card's badge used
+    /// to sit inside its corner and ride inside the window's mask.)
+    var revealStandInOverhangsWindow: Bool { !badgeView.isHidden }
 
     /// The flag border and the badge go with the ring: furniture of a marker,
     /// an outline around the screen at full size.

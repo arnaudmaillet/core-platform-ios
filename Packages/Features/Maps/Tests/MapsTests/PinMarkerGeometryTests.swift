@@ -60,20 +60,31 @@ struct PinMarkerGeometryTests {
         let marker = PinCardView(frame: CGRect(x: 0, y: 0, width: 56, height: 56))
         marker.setFace(.media)
         marker.layoutIfNeeded()
-        let mask = try #require(marker.layer.mask as? CAShapeLayer)
-        #expect(mask.path == AvatarShape.roundedTile.path(in: marker.bounds).cgPath)
+        let tile = AvatarShape.roundedTile.path(in: marker.bounds).cgPath
+        // The picture, the ring and the flag border wear the tile; the card
+        // does not (its badge overhangs the edge), and its own ground — drawn
+        // by a corner a hair outside the tile — is cleared.
+        for view in [marker.debugContentView, marker.ringView, marker.debugFlagBorder] as [UIView] {
+            let mask = try #require(view.layer.mask as? CAShapeLayer, "\(view) is not masked")
+            #expect(mask.path == tile)
+        }
+        #expect(marker.layer.mask == nil)
+        #expect(marker.backgroundColor == .clear)
         #expect(marker.layer.cornerCurve == .circular)
 
         let flying = PinCardView(frame: CGRect(x: 0, y: 0, width: 56, height: 56))
         flying.markAsTransitionCard()
         flying.setFace(.media)
         flying.layoutIfNeeded()
-        #expect(flying.layer.mask == nil)
+        #expect(flying.debugContentView.layer.mask == nil)
+        #expect(flying.ringView.layer.mask == nil)
+        #expect(flying.backgroundColor == .black, "a flight keeps its ground")
         #expect(flying.layer.cornerRadius == PinCardView.cornerRadius)
 
         // A marker re-faced as text drops the tile.
         marker.setFace(.text)
-        #expect(marker.layer.mask == nil)
+        #expect(marker.debugContentView.layer.mask == nil)
+        #expect(marker.ringView.layer.mask == nil)
     }
 
     /// The cluster grid's collision cell and the no-overlap guarantee are both
