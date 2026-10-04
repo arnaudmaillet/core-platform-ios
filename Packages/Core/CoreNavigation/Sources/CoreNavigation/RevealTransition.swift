@@ -60,6 +60,12 @@ public struct RevealGeometry {
     public let sourceFrame: (UICoordinateSpace) -> CGRect?
     /// The source's own rounding, so the mask starts as the row's twin.
     public let sourceCornerRadius: CGFloat
+    /// The curve that rounding is drawn on, worn by the mask for the whole
+    /// reveal. `.continuous` is every card; a source on circular arcs (For
+    /// You's nearly-round friend faces) says so, or a window landing on it
+    /// as a squircle of that radius is a DISC and its corners jump at the
+    /// hand-back.
+    public let sourceCornerCurve: CALayerCornerCurve
     /// The source's own FILL, worn by the destination for the length of the
     /// reveal and cross-faded back to the page's own ground.
     ///
@@ -212,6 +218,7 @@ public struct RevealGeometry {
     public init(
         sourceFrame: @escaping (UICoordinateSpace) -> CGRect?,
         sourceCornerRadius: CGFloat,
+        sourceCornerCurve: CALayerCornerCurve = .continuous,
         sourceFill: UIColor? = nil,
         sourceCaptionEnd: CGFloat? = nil,
         installDestinationVeil: @escaping (CGFloat?, UIColor?) -> Void = { _, _ in },
@@ -233,6 +240,7 @@ public struct RevealGeometry {
     ) {
         self.sourceFrame = sourceFrame
         self.sourceCornerRadius = sourceCornerRadius
+        self.sourceCornerCurve = sourceCornerCurve
         self.sourceFill = sourceFill
         self.sourceCaptionEnd = sourceCaptionEnd
         self.installDestinationVeil = installDestinationVeil
@@ -984,7 +992,8 @@ enum RevealStage {
     /// The static full-screen host and its mask. The page keeps the frame the
     /// transition context gave it; only the mask and the transform ever move.
     static func makeHost(
-        around page: UIView, in container: UIView, pageFrame: CGRect
+        around page: UIView, in container: UIView, pageFrame: CGRect,
+        cornerCurve: CALayerCornerCurve = .continuous
     ) -> (host: UIView, mask: UIView) {
         let host = UIView(frame: container.bounds)
         // ⚠️ THE HOST SWALLOWS TOUCHES FOR THE LENGTH OF THE TRANSITION, and
@@ -1015,7 +1024,7 @@ enum RevealStage {
         // everything away, which is a blank screen rather than a clipped one.
         let mask = UIView()
         mask.backgroundColor = .black
-        mask.layer.cornerCurve = .continuous
+        mask.layer.cornerCurve = cornerCurve
         host.mask = mask
         return (host, mask)
     }
@@ -1266,7 +1275,8 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
         container.insertSubview(dim, belowSubview: toView)
 
         let (host, mask) = RevealStage.makeHost(
-            around: toView, in: container, pageFrame: pageFrame
+            around: toView, in: container, pageFrame: pageFrame,
+            cornerCurve: geometry.sourceCornerCurve
         )
         var open = RevealStage.open(container: container)
         // The window opens AS THE SOURCE when the source's content is not the
@@ -1647,7 +1657,8 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         container.insertSubview(dim, belowSubview: fromView)
 
         let (host, mask) = RevealStage.makeHost(
-            around: fromView, in: container, pageFrame: pageFrame
+            around: fromView, in: container, pageFrame: pageFrame,
+            cornerCurve: geometry.sourceCornerCurve
         )
         let open = RevealStage.open(container: container)
         // The stand-in: the card, drawn fresh, above the page inside the same

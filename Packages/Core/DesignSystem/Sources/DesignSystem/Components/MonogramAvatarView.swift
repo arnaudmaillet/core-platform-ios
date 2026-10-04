@@ -19,7 +19,7 @@ public final class MonogramAvatarView: UIView {
     public static let rowDiameter: CGFloat = 48
 
     private let label = UILabel()
-    /// The plate: an OVAL shape filled with a RESOLVED colour — see
+    /// The plate: the avatar's `shape` (an oval by default) filled with a RESOLVED colour — see
     /// `drawPlate` for why it is not the view's background.
     let plate = CAShapeLayer()
     private var widthConstraint: NSLayoutConstraint!
@@ -64,7 +64,7 @@ public final class MonogramAvatarView: UIView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         plate.frame = rect
-        plate.path = UIBezierPath(ovalIn: CGRect(origin: .zero, size: rect.size)).cgPath
+        plate.path = shape.path(in: CGRect(origin: .zero, size: rect.size)).cgPath
         plate.fillColor = Self.plateColor.resolvedColor(with: traitCollection).cgColor
         CATransaction.commit()
     }
@@ -76,8 +76,19 @@ public final class MonogramAvatarView: UIView {
     /// of square" in the feed's author pill, where every other avatar was
     /// round.
     private func setRound(_ diameter: CGFloat) {
-        layer.cornerRadius = diameter / 2
-        layer.cornerCurve = .circular
+        AvatarShapeMask.round(self, as: shape, side: diameter)
+    }
+
+    /// The outline — a disc unless a surface asks for its rounded square
+    /// (`AvatarShape`). The corner, the mask and the plate all follow it.
+    public var shape: AvatarShape = .circle {
+        didSet {
+            guard shape != oldValue else { return }
+            let side = heightConstraint.constant
+            setRound(side)
+            drawPlate(in: bounds.width > 0 ? bounds : CGRect(x: 0, y: 0, width: side, height: side))
+            setNeedsLayout()
+        }
     }
 
     /// Resizes the disc, initials included — for a row whose disc is sized
@@ -102,8 +113,8 @@ public final class MonogramAvatarView: UIView {
         // Still refreshed from the bounds, for a host that sizes the disc
         // itself — never to zero, which is how the square got drawn.
         let side = min(bounds.width, bounds.height)
-        if side > 0 { layer.cornerRadius = side / 2 }
-        CircleMask.apply(to: self)
+        AvatarShapeMask.round(self, as: shape, side: side)
+        AvatarShapeMask.apply(shape, to: self)
         if plate.frame != bounds { drawPlate(in: bounds) }
     }
 

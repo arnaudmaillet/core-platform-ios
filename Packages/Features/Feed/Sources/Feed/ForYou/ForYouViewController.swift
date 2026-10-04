@@ -2105,8 +2105,8 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     ///
     /// ⚠️ THE CARD LEAVES AS THE FACE AND ARRIVES AS THE POST. A disc is not a
     /// post's picture, so the flight cross-dissolves from one to the other as
-    /// it grows (`SnapFeedHeroOrigin.pagePicture`), round at the disc
-    /// (`cornerRadius`), and a close lands back on the face, dissolving from
+    /// it grows (`SnapFeedHeroOrigin.pagePicture`), in the face's own outline
+    /// at the row (`cornerRadius` + `cornerCurve`), and a close lands back on the face, dissolving from
     /// whatever post the viewer ended on — the map marker's arrangement, the
     /// app's other small source. A friend whose first post is TEXT has no
     /// picture to fly: it opens as a window out of the disc instead, the

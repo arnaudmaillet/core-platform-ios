@@ -90,6 +90,10 @@ public struct TextRevealOrigin {
     /// The source's own rounding. `nil` means the card's, which is what every
     /// row is; a marker supplies its own, and for a disc that is half its side.
     public let cornerRadius: CGFloat?
+    /// The curve of that rounding — `nil` is the card's squircle. A source on
+    /// circular arcs (For You's nearly-round friend faces) passes `.circular`
+    /// — see `RevealGeometry.sourceCornerCurve`.
+    public let cornerCurve: CALayerCornerCurve?
     /// The source's own fill, worn by the page for the length of the reveal and
     /// cross-faded back to its real ground. **`nil` means the source HAS NO
     /// GROUND** — a dressed icon, which is a mark on the map and nothing else.
@@ -149,6 +153,7 @@ public struct TextRevealOrigin {
         alignsPageToSource: Bool = true,
         pageFit: RevealPageFit = .clipped,
         cornerRadius: CGFloat? = nil,
+        cornerCurve: CALayerCornerCurve? = nil,
         fill: UIColor? = PostGridListRowCell.cardFillColor,
         setConcealed: @escaping (Bool) -> Void = { _ in },
         presentationDidEnd: @escaping (Bool) -> Void = { _ in },
@@ -165,6 +170,7 @@ public struct TextRevealOrigin {
         self.alignsPageToSource = alignsPageToSource
         self.pageFit = pageFit
         self.cornerRadius = cornerRadius
+        self.cornerCurve = cornerCurve
         self.fill = fill
         self.setConcealed = setConcealed
         self.presentationDidEnd = presentationDidEnd
@@ -208,6 +214,7 @@ public struct TextRevealOrigin {
             alignsPageToSource: alignsPageToSource,
             pageFit: pageFit,
             cornerRadius: cornerRadius,
+            cornerCurve: cornerCurve,
             fill: fill,
             setConcealed: setConcealed,
             presentationDidEnd: presentationDidEnd,
