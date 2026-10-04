@@ -39,7 +39,7 @@ final class AccountSettingsViewController: UIViewController {
     }
 
     private enum Row: Hashable {
-        case email, phone
+        case email, phone, birthDate
         case deactivate, delete, dataExport
     }
 
@@ -137,9 +137,9 @@ final class AccountSettingsViewController: UIViewController {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
         snapshot.appendSections([.accountInfo, .management])
         if loaded {
-            snapshot.appendItems([.row(.email), .row(.phone)], toSection: .accountInfo)
+            snapshot.appendItems([.row(.email), .row(.phone), .row(.birthDate)], toSection: .accountInfo)
         } else {
-            snapshot.appendItems([.skeleton(0), .skeleton(1)], toSection: .accountInfo)
+            snapshot.appendItems([.skeleton(0), .skeleton(1), .skeleton(2)], toSection: .accountInfo)
         }
         snapshot.appendItems([.row(.dataExport), .row(.deactivate)], toSection: .management)
         if lifecycle != nil {
@@ -153,6 +153,17 @@ final class AccountSettingsViewController: UIViewController {
             guard let self else { return }
             self.details = try? await self.account.currentAccount()
             self.reveal()
+        }
+    }
+
+    /// After the date of birth is saved: re-read the account, redraw its rows.
+    private func reloadAccount() {
+        Task { [weak self] in
+            guard let self else { return }
+            self.details = try? await self.account.currentAccount()
+            var snapshot = self.dataSource.snapshot()
+            snapshot.reconfigureItems([.row(.birthDate)].filter { snapshot.indexOfItem($0) != nil })
+            await self.dataSource.apply(snapshot, animatingDifferences: false)
         }
     }
 
@@ -174,6 +185,10 @@ final class AccountSettingsViewController: UIViewController {
             valueCell(cell, label: "Email", value: details?.email, verified: details?.emailVerified)
         case .phone:
             valueCell(cell, label: "Phone", value: details?.phone.isEmpty == false ? details?.phone : "Not set", verified: details?.phoneVerified)
+        case .birthDate:
+            valueCell(cell, label: "Date of Birth", value: Self.birthDateText(details?.dateOfBirth), verified: nil)
+            // Set once; afterwards a tap only explains how to correct it.
+            if details?.dateOfBirth != nil { cell.accessories = [] }
         case .deactivate:
             actionCell(cell, label: "Deactivate Account", destructive: true)
         case .delete:
@@ -186,6 +201,12 @@ final class AccountSettingsViewController: UIViewController {
     }
 
     /// `[Label]  [value] (✓) ›` — a value row that pushes an editor.
+    /// "12 March 2001", or "Add" while none is on file.
+    static func birthDateText(_ birthDate: BirthDate?) -> String {
+        guard let date = birthDate?.date() else { return "Add" }
+        return DateFormatter.localizedString(from: date, dateStyle: .long, timeStyle: .none)
+    }
+
     private func valueCell(_ cell: UICollectionViewListCell, label: String, value: String?, verified: Bool?) {
         var content = UIListContentConfiguration.valueCell()
         content.text = label
@@ -221,6 +242,14 @@ final class AccountSettingsViewController: UIViewController {
         switch row {
         case .email:
             pushEmailEditor()
+        case .birthDate:
+            if details?.dateOfBirth != nil {
+                presentInfo("Only you can see your date of birth. To correct it, contact support.")
+            } else if let setter = account as? any AccountBirthDateSetting {
+                push(BirthDateViewController(setter: setter, onSaved: { [weak self] in self?.reloadAccount() }))
+            } else {
+                presentInfo("Adding your date of birth isn't available yet.")
+            }
         case .phone:
             pushPhoneEditor()
         case .deactivate:
