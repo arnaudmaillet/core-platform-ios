@@ -132,11 +132,13 @@ struct ProfileBannerFormatTests {
     /// the page is whole behind the tray's foot. Under the name the page's
     /// tone is already half there (the shoulder), and the counters are
     /// still on the picture.
-    @Test func aPosterRunsToTheTraysFoot() throws {
+    @Test func aPosterRunsPastTheTraysFoot() throws {
         let header = header(format: .poster)
         let banner = header.debugBannerFrame
         let tray = header.debugTrayFrame
-        #expect(abs(banner.maxY - tray.maxY) < 0.5)
+        // Since 5 October 2026 the picture runs to 80% of the screen and the
+        // block starts at 40%, over it: the tray stands on the picture too.
+        #expect(banner.maxY > tray.maxY)
         let fade = try #require(header.debugBannerFade)
         #expect(abs(fade.rampEnd - banner.maxY) < 0.5)
         let underName = HeroBannerFade.rampAlpha(at: header.debugNameFrame.minY, geometry: fade)

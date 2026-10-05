@@ -724,18 +724,27 @@ final class PlaceProfileViewController: UIViewController {
                 verticalFittingPriority: .fittingSizeLevel
             ).height ?? 0
         }
-        // At least the chrome, the poster's stage and the identity; as tall
-        // as `coverScreenFraction` of the screen whenever that is taller —
-        // the profile poster's own height.
-        let content = view.safeAreaInsets.top + HeroBannerMetrics.posterStage
-            + height(of: identityView) + Self.identityClearance
+        // `coverScreenFraction` of the screen — or, should the identity
+        // outgrow it (Dynamic Type), down to the identity's clearance.
+        let content = contentTop + height(of: identityView) + Self.identityClearance
         return max(content, (view.bounds.height * Self.coverScreenFraction).rounded())
     }
 
     /// How much of the screen's height the banner — a COVER, the profile
     /// poster's shape — runs down: 80% (user, 5 October 2026), as a
-    /// profile's poster does; the identity stands at its foot.
+    /// profile's poster does.
     static let coverScreenFraction: CGFloat = 0.8
+    /// Where the CONTENT starts — the identity row, then the posts: 40% of
+    /// the screen, OVER the picture, which runs on under it to 80% — the
+    /// two dissociated, as on a profile's poster (user, 5 October 2026).
+    static let contentScreenFraction: CGFloat = 0.4
+
+    /// The identity row's top, from the header's: 40% of the screen, never
+    /// under the chrome.
+    private var contentTop: CGFloat {
+        max((view.bounds.height * Self.contentScreenFraction).rounded(), view.safeAreaInsets.top + Spacing.md)
+    }
+    private var contentTopConstraint: NSLayoutConstraint?
 
     /// How much taller than its viewport the image is cut. The parallax slides
     /// the image by at most this, so the overshoot is what guarantees no edge
@@ -987,7 +996,13 @@ final class PlaceProfileViewController: UIViewController {
         bannerBox.clipsToBounds = true
         bannerBox.backgroundColor = Surface.card
         bannerBox.translatesAutoresizingMaskIntoConstraints = false
-        headerHost.addSubview(bannerBox)
+        // ⚠️ BEHIND THE PAGES, not in the floating header: the cover runs to
+        // 80% of the screen while the identity row and the posts start at
+        // 40%, OVER its lower part (user, 5 October 2026). The pages are
+        // clear; only their cards cover it. It still rests on the header's
+        // top and travels with it (`bannerRestingTop`), so the fade, the ink
+        // and the stretch are read in its space as before.
+        view.insertSubview(bannerBox, belowSubview: pager)
 
         // Both fill the box; the picture slides INSIDE its view for the
         // parallax (`applyBannerParallax`), under a blur and a ramp that stay
@@ -1025,7 +1040,7 @@ final class PlaceProfileViewController: UIViewController {
         // September 2026).
         applyHeroLegibility()
         identityView.translatesAutoresizingMaskIntoConstraints = false
-        bannerBox.addSubview(identityView)
+        headerHost.addSubview(identityView)
 
         // ⚠️ Stretchy banner, the profile's own mechanism: the host is moved
         // by its TOP CONSTRAINT rather than a transform precisely so this
@@ -1040,6 +1055,8 @@ final class PlaceProfileViewController: UIViewController {
             equalTo: headerHost.topAnchor, constant: bannerHeight
         )
         bannerHeightConstraint = bannerBottom
+        let contentTop = identityView.topAnchor.constraint(equalTo: headerHost.topAnchor, constant: self.contentTop)
+        contentTopConstraint = contentTop
         NSLayoutConstraint.activate([
             top,
             headerHost.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -1049,29 +1066,26 @@ final class PlaceProfileViewController: UIViewController {
             bannerBox.leadingAnchor.constraint(equalTo: headerHost.leadingAnchor),
             bannerBox.trailingAnchor.constraint(equalTo: headerHost.trailingAnchor),
             // The BOTTOM is the fixed edge (host.top + bannerHeight), so a
-            // stretched banner grows upward while the title holds still.
+            // stretched banner grows upward while the identity holds still.
             bannerBottom,
-            // The identity rides the banner's FIXED bottom edge (see the
-            // stretch note above), so a pull-down stretches the image behind
-            // it while the identity holds its seat over the blur. On the
-            // profile's column.
+            // The identity at `contentTop` of the header — 40% of the screen,
+            // on the cover — on the profile's column.
+            contentTop,
             identityView.leadingAnchor.constraint(
-                equalTo: bannerBox.leadingAnchor, constant: HeroBannerMetrics.identityInset
+                equalTo: headerHost.leadingAnchor, constant: HeroBannerMetrics.identityInset
             ),
             identityView.trailingAnchor.constraint(
-                equalTo: bannerBox.trailingAnchor, constant: -HeroBannerMetrics.identityInset
+                equalTo: headerHost.trailingAnchor, constant: -HeroBannerMetrics.identityInset
             ),
-            // ⚠️ DERIVED FROM THE BAR, not typed: the identity's foot keeps
-            // the old selector slot's clearance — see `debugIdentityClearance`.
-            identityView.bottomAnchor.constraint(
-                equalTo: bannerBox.bottomAnchor, constant: -Self.identityClearance
+            // ⚠️ **THE IDENTITY'S FOOT IS WHAT GIVES THE HOST A HEIGHT NOW** —
+            // the banner's used to, until the two were dissociated: the pages
+            // are inset by the host, so the posts start right under the
+            // identity, over the picture's lower part. The foot keeps the old
+            // selector slot's clearance, derived from the bar, not typed (see
+            // `debugIdentityClearance`).
+            headerHost.bottomAnchor.constraint(
+                equalTo: identityView.bottomAnchor, constant: Self.identityClearance
             ),
-            // ⚠️ **THE BANNER'S BOTTOM IS WHAT GIVES THE HOST A HEIGHT NOW.**
-            // It used to be the selector slot's, which was a sibling pinned to
-            // `headerHost.bottomAnchor` — delete the slot without this and
-            // `headerHeight` goes ambiguous, taking the pages' inset and every
-            // number derived from it with it.
-            bannerBox.bottomAnchor.constraint(equalTo: headerHost.bottomAnchor),
         ])
     }
 
@@ -1254,6 +1268,8 @@ final class PlaceProfileViewController: UIViewController {
     /// halo over the photograph, the scrim a black veil. `HeroBannerFade` is
     /// the profile banner's run-out too, so the two screens cannot drift.
     private func placeHeroFade() {
+        // The identity stands in the floating header, over the box.
+        headerHost.layoutIfNeeded()
         bannerBox.layoutIfNeeded()
         // In the box's space AT REST: a pull-down stretches the box above,
         // and must not move the fade — see `HeroBannerPictureView`.
@@ -1390,6 +1406,7 @@ final class PlaceProfileViewController: UIViewController {
         // Idempotent per value — the pages guard their own writes.
         // The banner is re-derived rather than fixed: the chrome, the name and
         // the counters all change with the device and with Dynamic Type.
+        contentTopConstraint?.constant = contentTop
         bannerHeightConstraint?.constant = bannerHeight
         placeHeroFade()
         let header = headerHeight
@@ -1419,10 +1436,12 @@ final class PlaceProfileViewController: UIViewController {
         headerTopConstraint?.constant = -min(travelled, headerTravel)
         applyBannerParallax(travelled: travelled)
         let alpha = Self.identityAlpha(travelled: travelled, dockLine: headerTravel)
-        // The BOX, so the picture, its blur, the name and the counters fade as
-        // one identity rather than the image sliding out from under its own
-        // caption.
+        // The box AND the identity row — apart since the cover was dissociated
+        // from its content — so the picture, its blur, the name and the
+        // counters fade as one identity rather than the image sliding out
+        // from under its own caption.
         bannerBox.alpha = alpha
+        identityView.alpha = alpha
     }
 
     /// The identity fade's ramp: opaque until the last stretch of travel,
@@ -2514,7 +2533,10 @@ extension PlaceProfileViewController {
     func debugApplyHeaderOffset(_ travelled: CGFloat) { applyHeaderOffset(travelled) }
     /// Whether the name and the counters are drawn ON the banner.
     var debugIdentityRidesTheBanner: Bool {
-        identityView.isDescendant(of: bannerBox)
+        // Over the picture, inside its frame — no longer inside its view
+        // since the cover and its content were dissociated.
+        let banner = bannerBox.convert(bannerBox.bounds, to: view)
+        return banner.contains(identityView.convert(identityView.bounds, to: view))
     }
     /// The name's and the counter row's frames, in the view's space.
     var debugNameFrame: CGRect { identityView.titleLabel.convert(identityView.titleLabel.bounds, to: view) }
@@ -2576,7 +2598,7 @@ extension PlaceProfileViewController {
     /// but its stated reason is history: the selector is at the foot of the
     /// screen. Re-decide it rather than inheriting it.
     var debugIdentityClearance: CGFloat {
-        bannerBox.bounds.height - identityView.frame.maxY
+        headerHost.bounds.height - identityView.frame.maxY
     }
     /// Drives the active page to a travel offset through the same path a
     /// finger's scroll reports through.

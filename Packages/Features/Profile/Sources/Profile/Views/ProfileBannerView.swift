@@ -194,10 +194,26 @@ final class ProfileBannerView: UIView {
     private func setVisibility(_ value: CGFloat) {
         guard value != visibility else { return }
         visibility = value
-        alpha = value > 0 ? 1 : 0
+        applyAlpha()
         veil.alpha = 1 - value
         veil.isHidden = value >= 1 || value <= 0
     }
+
+    /// The header's own alpha, when the banner stands OUTSIDE the header —
+    /// behind the screen's content (`ProfileHeaderView.moveBanner`) — and so
+    /// no longer fades with it as the identity docks.
+    var hostAlpha: CGFloat = 1 {
+        didSet { if hostAlpha != oldValue { applyAlpha() } }
+    }
+
+    private func applyAlpha() {
+        alpha = (visibility > 0 ? 1 : 0) * hostAlpha
+    }
+
+    /// The view whose top the banner rests on — the header — wherever the
+    /// banner itself stands: a pull-down's stretch is how far above it the
+    /// banner reaches. Nil: its own superview.
+    weak var restingTopReference: UIView?
 
     /// Touches as the view's alpha gave them: a banner all but gone is not
     /// there to be touched.
@@ -271,7 +287,10 @@ final class ProfileBannerView: UIView {
         // rests (`ProfileHeaderView.anchorBanner`): the picture and the ramp
         // keep their resting layout and only zoom — see
         // `HeroBannerPictureView`. Set here, before they lay out in this pass.
-        let stretch = max(0, -frame.minY)
+        let restingTop = restingTopReference.flatMap { reference in
+            superview.map { reference.convert(CGPoint.zero, to: $0).y }
+        } ?? 0
+        let stretch = max(0, restingTop - frame.minY)
         picture.stretch = stretch
         ramp.stretch = stretch
         // Sublayer frames don't follow Auto Layout; keep them in step without

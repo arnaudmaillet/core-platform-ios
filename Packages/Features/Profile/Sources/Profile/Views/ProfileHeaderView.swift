@@ -12,7 +12,8 @@ import UIKit
 ///
 /// Identity anatomy:
 /// - a banner-viewing window under the chrome (a poster's stage — its foot at
-///   80% of the screen, `posterFoot` — or just air on a band);
+///   80% of the screen, the identity starting at 40% over it — or just air
+///   on a band);
 /// - then the identity row: the circular avatar left, and beside it two
 ///   halves of the avatar's height — the display name (+ verified badge)
 ///   over the @handle in the TOP half, standing on the picture in its ink
@@ -47,10 +48,14 @@ final class ProfileHeaderView: UIView {
         /// so it gets more. A band's is only air: the disc's top sits just
         /// under the chrome's bottom edge, and the strip is the picture
         /// behind the chrome plus the top half of the identity row.
-        /// How much of the screen's height a poster runs down: its foot —
-        /// the tray's — at 80% of the screen (user, 5 October 2026), the
-        /// stage above the identity block whatever the block holds.
+        /// How much of the screen's height a poster runs down: its foot at
+        /// 80% of the screen (user, 5 October 2026).
         static let posterScreenFraction: CGFloat = 0.8
+        /// Where a poster's identity block — the content — starts: 40% of
+        /// the screen, OVER the picture, which runs on under it and under the
+        /// first posts (user, 5 October 2026: "dissocier le contenu de la
+        /// bannière").
+        static let posterContentFraction: CGFloat = 0.4
         /// The air between the chrome's bottom edge and the avatar, on a band
         /// and on a header with no picture.
         static let bandGap: CGFloat = Spacing.md
@@ -142,37 +147,59 @@ final class ProfileHeaderView: UIView {
         chromeTopInset + Metrics.bandGap
     }
 
-    /// A POSTER'S FOOT — the tray's, where a poster ends (`bannerEndsAtTray`)
-    /// — at `posterScreenFraction` of the screen's height, whatever the
-    /// identity block holds (the bio, the link, Dynamic Type): the column is
-    /// pushed down to it, its stage the room left above. A CONSTRAINT, not a
-    /// measure: the screen's fitting pass and every layout solve it alike
-    /// (a measure taken as the content landed still saw the loading bones,
-    /// and put the foot 40pt short). Just under required: a block taller
-    /// than the room keeps the column on its floor (`columnTopFloor`).
-    private var posterFoot: NSLayoutConstraint?
-    /// The column never starts higher than a band's: the floor a poster's
-    /// foot pushes down from.
+    /// A POSTER'S CONTENT starts at `posterContentFraction` of the screen,
+    /// and its PICTURE runs to `posterScreenFraction` — the two DISSOCIATED
+    /// (user, 5 October 2026): the identity block and the posts after it
+    /// ride over the picture's lower part rather than waiting under it. Two
+    /// constraints, not a measure, so the screen's fitting pass and every
+    /// layout solve them alike. The column's start is just under required: a
+    /// chrome taller than the room keeps it on its floor (`columnTopFloor`).
+    private var posterColumnTop: NSLayoutConstraint?
+    /// A poster's picture's foot, from the header's top.
+    private var posterBannerFoot: NSLayoutConstraint?
+    /// The column never starts higher than a band's.
     private var columnTopFloor: NSLayoutConstraint?
 
-    private var posterFootConstant: CGFloat {
-        ((window?.screen.bounds.height ?? UIScreen.main.bounds.height) * Metrics.posterScreenFraction).rounded()
-    }
+    private var screenHeight: CGFloat { window?.screen.bounds.height ?? UIScreen.main.bounds.height }
+    private var posterColumnTopConstant: CGFloat { (screenHeight * Metrics.posterContentFraction).rounded() }
+    private var posterBannerFootConstant: CGFloat { (screenHeight * Metrics.posterScreenFraction).rounded() }
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        guard let posterFoot, posterFoot.constant != posterFootConstant else { return }
-        posterFoot.constant = posterFootConstant
+        guard let posterColumnTop, posterColumnTop.constant != posterColumnTopConstant
+            || posterBannerFoot?.constant != posterBannerFootConstant else { return }
+        posterColumnTop.constant = posterColumnTopConstant
+        posterBannerFoot?.constant = posterBannerFootConstant
         layoutRevision += 1
     }
 
     /// A poster's stage: the air between the chrome and the identity
-    /// column, as laid out — the room its foot at 80% of the screen leaves.
+    /// column, as laid out — up to where the content starts.
     var posterClearance: CGFloat {
         guard bannerFormat == .poster, let identityBlock, identityBlock.frame.height > 0 else {
             return HeroBannerMetrics.posterStage
         }
         return max(Metrics.bandGap, identityBlock.frame.minY - chromeTopInset)
+    }
+
+    /// The header's alpha — the identity's fade at the dock — reaches the
+    /// banner too when it stands outside the header (`moveBanner`).
+    override var alpha: CGFloat {
+        didSet { if bannerView.superview !== self { bannerView.hostAlpha = alpha } }
+    }
+
+    /// Moves the banner OUT of the header, into `container` below `sibling` —
+    /// behind the screen's scrolling content, so that content can pass over
+    /// a poster's lower part. It keeps resting on the header's top (its
+    /// constraints are the header's own, `constrainBanner`), so everything
+    /// read off it — the fade, the ink, the stretch — stays in the header's
+    /// space. Call before `anchorBanner(toViewportTop:)`.
+    func moveBanner(into container: UIView, below sibling: UIView) {
+        bannerView.removeFromSuperview()
+        container.insertSubview(bannerView, belowSubview: sibling)
+        bannerView.restingTopReference = self
+        bannerView.hostAlpha = alpha
+        constrainBanner()
     }
 
     /// Adopts a banner shape: the column's start, whether there is a banner,
@@ -189,10 +216,9 @@ final class ProfileHeaderView: UIView {
         // A poster's column is pushed down to its foot; a band's sits on
         // its floor.
         columnTopConstraint?.isActive = format != .poster
-        posterFoot?.isActive = format == .poster
+        posterColumnTop?.isActive = format == .poster
         bannerView.isHidden = format == .none
-        bannerEndsAtTray?.isActive = format == .poster
-        bannerEndsInAvatar?.isActive = format != .poster
+        activateBannerFoot()
         bannerView.setFormat(format)
         applyIdentityInk()
         setNeedsLayout()
@@ -336,7 +362,44 @@ final class ProfileHeaderView: UIView {
 
     private var hasAppliedBannerFormat = false
     private var bannerEndsInAvatar: NSLayoutConstraint?
-    private var bannerEndsAtTray: NSLayoutConstraint?
+
+    /// Exactly one foot for the banner, by its shape: a band's on the
+    /// avatar's midline, a poster's at 80% of the screen.
+    private func activateBannerFoot() {
+        bannerEndsInAvatar?.isActive = bannerFormat != .poster
+        posterBannerFoot?.isActive = bannerFormat == .poster
+    }
+
+    /// The banner's place, from the header's own anchors wherever the banner
+    /// stands: its top resting on the header's (soft — a pull-down's
+    /// `anchorBanner` stretches it above), edge to edge, and its foot by
+    /// its shape. Built again after a move: a view leaving its superview
+    /// takes its constraints with it.
+    private func constrainBanner() {
+        let bannerTop = bannerView.topAnchor.constraint(equalTo: topAnchor)
+        bannerTop.priority = .defaultHigh
+        bannerView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            bannerTop,
+            bannerView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            bannerView.trailingAnchor.constraint(equalTo: trailingAnchor),
+        ])
+        // ⚠️ A BAND ENDS ON THE AVATAR'S MIDLINE — the line between the
+        // name's half and the counters' half, so the name stands on the strip
+        // and the counters on the page. The banner's own edge sits a few
+        // points lower (`bandFootBelowMidline`), in the air above the
+        // counters, where `HeroBannerFade`'s ramp is all but the page.
+        //
+        // ⚠️ A POSTER RUNS TO 80% OF THE SCREEN, its identity block starting
+        // at 40% over it and the posts after the block over its foot (user,
+        // 5 October 2026). It used to run to the tray's foot, the block
+        // waiting under it.
+        bannerEndsInAvatar = bannerView.bottomAnchor.constraint(
+            equalTo: avatarView.centerYAnchor, constant: Metrics.bandFootBelowMidline
+        )
+        posterBannerFoot = bannerView.bottomAnchor.constraint(equalTo: topAnchor, constant: posterBannerFootConstant)
+        activateBannerFoot()
+    }
     private let topRow = UIStackView()
     /// The identity block — avatar row to tray — whose height sets a
     /// poster's stage (`posterClearance`).
@@ -356,7 +419,7 @@ final class ProfileHeaderView: UIView {
     /// header's space.
     var debugBannerPictureCover: CGRect { bannerView.convert(bannerView.debugPictureCover, to: self) }
     var debugBannerRampFrame: CGRect { bannerView.convert(bannerView.debugRampFrame, to: self) }
-    var debugBannerFrame: CGRect { bannerView.frame }
+    var debugBannerFrame: CGRect { bannerView.convert(bannerView.bounds, to: self) }
     var debugAvatarFrame: CGRect { avatarView.convert(avatarView.bounds, to: self) }
     var debugTrayFrame: CGRect { actionRowForDebug?.convert(actionRowForDebug!.bounds, to: self) ?? .zero }
     var debugStatsFrame: CGRect { statsRow.convert(statsRow.bounds, to: self) }
@@ -1379,23 +1442,17 @@ final class ProfileHeaderView: UIView {
         actionRow.directionalLayoutMargins.top = Metrics.trayGap
         actionRow.heightAnchor.constraint(equalToConstant: Metrics.bubbleSize + Metrics.trayGap).isActive = true
 
-        // Layering: banner first (back), identity column on top of it. The
-        // banner bleeds to the header's very top — the column starts below the
-        // navigation chrome via `chromeTopInset` — and its bottom edge is tied
-        // to the avatar's midline (see below).
+        // Layering: banner first (back), identity column on top of it — the
+        // screen may move the banner further back, behind its content
+        // (`moveBanner`). The banner bleeds to the header's very top — the
+        // column starts below the navigation chrome via `chromeTopInset`.
         //
         // The top attachment is deliberately soft (high, not required): the
         // owning controller adds a required ≤-viewport-top constraint via
         // `anchorBanner(toViewportTop:)`, and downward overscroll must be able
         // to break this equality so the banner stretches instead of sliding
         // down with the content and exposing the scroll view's background.
-        let bannerTop = bannerView.topAnchor.constraint(equalTo: topAnchor)
-        bannerTop.priority = .defaultHigh
-        bannerView.constrain(in: self) { parent in
-            bannerTop
-            bannerView.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
-            bannerView.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
-        }
+        addSubview(bannerView)
 
         let columnTop = column.topAnchor.constraint(
             equalTo: topAnchor, constant: columnTopConstant
@@ -1403,9 +1460,9 @@ final class ProfileHeaderView: UIView {
         columnTopConstraint = columnTop
         let floor = column.topAnchor.constraint(greaterThanOrEqualTo: topAnchor, constant: columnTopConstant)
         columnTopFloor = floor
-        let foot = column.bottomAnchor.constraint(equalTo: topAnchor, constant: posterFootConstant)
-        foot.priority = .init(999)
-        posterFoot = foot
+        let posterTop = column.topAnchor.constraint(equalTo: topAnchor, constant: posterColumnTopConstant)
+        posterTop.priority = .init(999)
+        posterColumnTop = posterTop
         column.constrain(in: self) { parent in
             columnTop
             floor
@@ -1425,27 +1482,8 @@ final class ProfileHeaderView: UIView {
         avatarSide.priority = .defaultHigh
         let columnSpansAvatar = identityColumn.heightAnchor.constraint(equalTo: avatarView.heightAnchor)
         columnSpansAvatar.priority = UILayoutPriority(999)
-        // Where the banner ENDS is the shape's — see `setBannerFormat`, which
-        // activates exactly one of these.
-        //
-        // ⚠️ A BAND ENDS ON THE AVATAR'S MIDLINE — the line between the
-        // name's half and the counters' half, so the name stands on the strip
-        // and the counters on the page. The banner's own edge sits a few
-        // points lower (`bandFootBelowMidline`), in the air above the
-        // counters, where `HeroBannerFade`'s ramp is all but the page. (It
-        // used to end a quarter of the way down the avatar, the name below it
-        // on the page.)
-        //
-        // ⚠️ A POSTER RUNS TO THE TRAY'S FOOT, the whole identity block on the
-        // picture — cut at the midline, it read as a band with a tall stage
-        // (user, 30 September 2026). `HeroBannerFade` carries the block: the
-        // blur climbs from just above the avatar, barely there under the
-        // name, and the page's tone is half there already (shouldered), both
-        // whole at the tray's foot.
-        bannerEndsInAvatar = bannerView.bottomAnchor.constraint(
-            equalTo: avatarView.centerYAnchor, constant: Metrics.bandFootBelowMidline
-        )
-        bannerEndsAtTray = bannerView.bottomAnchor.constraint(equalTo: actionRow.bottomAnchor)
+        // Where the banner ENDS is the shape's — see `constrainBanner`.
+        constrainBanner()
         NSLayoutConstraint.activate([
             avatarView.widthAnchor.constraint(equalTo: avatarView.heightAnchor),
             avatarSide,
@@ -1482,7 +1520,8 @@ final class ProfileHeaderView: UIView {
         // rests on the header's, and a pull-down that stretches it above
         // must not move the fade (see `HeroBannerPictureView`).
         let avatar = avatarView.convert(avatarView.bounds, to: self)
-        let foot = bannerView.frame.maxY
+        // In the header's space wherever the banner stands (`moveBanner`).
+        let foot = bannerView.convert(bannerView.bounds, to: self).maxY
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-hero-blur-trace") {
             print("HERO-BLUR header fade format=\(bannerFormat) avatar=\(avatar) foot=\(foot)")

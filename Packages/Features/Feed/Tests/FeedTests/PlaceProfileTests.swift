@@ -83,17 +83,21 @@ struct PlaceProfileTests {
         let screen = profile.view.bounds.height
         #expect(abs(profile.debugBannerHeight - (screen * 0.8).rounded()) < 1,
                 "banner \(profile.debugBannerHeight) of \(screen)")
-        let oldStage = profile.view.safeAreaInsets.top + HeroBannerMetrics.posterStage
-        #expect(profile.debugIdentityFrame.minY > oldStage, "the identity still stands on the old stage")
+        // The content — the identity row, then the posts — starts at 40%,
+        // over the picture's lower part.
+        #expect(abs(profile.debugIdentityFrame.minY - (screen * 0.4).rounded()) < 1,
+                "identity at \(profile.debugIdentityFrame.minY)")
+        #expect(profile.debugHeaderBottom < profile.debugBannerHeight, "the posts wait under the picture")
     }
 
-    /// The banner ends under the identity row by the clearance, and nowhere
-    /// else — derived from its content, so Dynamic Type cannot put type off
-    /// it. The counters stand inside the row, above its foot.
-    @Test func theBannerEndsJustUnderTheIdentity() {
+    /// The HEADER — what the pages are inset by — ends under the identity row
+    /// by the clearance, and nowhere else: derived from its content, so
+    /// Dynamic Type cannot put type off it. The counters stand inside the
+    /// row, above its foot. (The picture runs on below, under the posts.)
+    @Test func theHeaderEndsJustUnderTheIdentity() {
         let profile = makeProfile()
         laidOut(profile)
-        #expect(abs(profile.debugIdentityClearance - (profile.debugBannerHeight - profile.debugIdentityFrame.maxY)) < 1)
+        #expect(abs(profile.debugIdentityClearance - (profile.debugHeaderBottom - profile.debugIdentityFrame.maxY)) < 1)
         #expect(profile.debugMetricsFrame.maxY <= profile.debugIdentityFrame.maxY + 0.5)
     }
 
@@ -155,15 +159,17 @@ struct PlaceProfileTests {
     /// its whole height from `slot.bottom == host.bottom`, so anchoring the BAR
     /// to the picture would make every number derived from the header — the
     /// pages' inset, the dock line, the content floor — hostage to a control
-    /// ⚠️ THE HEADER IS THE BANNER, FULL STOP. It used to be the banner plus
-    /// a fixed-height slot holding the inline selector, and this test pinned
-    /// the selector's foot to the banner's. With the strip at the foot of the
-    /// screen the slot is gone and the banner's own bottom is what gives the
-    /// header its height — which is the constraint that replaced it.
-    @Test func theHeaderIsExactlyTheBanner() {
+    /// ⚠️ THE HEADER IS NO LONGER THE BANNER (5 October 2026). It was —
+    /// the banner's bottom gave the header its height — until the cover and
+    /// its content were dissociated: the header ends with the identity row,
+    /// the pages are inset by it, and the picture runs on below, BEHIND the
+    /// first posts, to 80% of the screen.
+    @Test func theBannerRunsOnBehindThePosts() {
         let profile = makeProfile()
         laidOut(profile)
-        #expect(abs(profile.debugHeaderBottom - profile.debugBannerHeight) < 0.5)
+        #expect(profile.debugBannerHeight > profile.debugHeaderBottom + 50,
+                "banner \(profile.debugBannerHeight), header \(profile.debugHeaderBottom)")
+        #expect(profile.debugIdentityRidesTheBanner)
     }
 
     /// ⚠️ THE COUNTERS MUST CLEAR THE CAPSULE THAT NOW OVERLAPS THEM. The old
