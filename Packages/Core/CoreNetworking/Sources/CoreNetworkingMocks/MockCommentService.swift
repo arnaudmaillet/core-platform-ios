@@ -19,17 +19,32 @@ public final class MockCommentService: @unchecked Sendable {
     /// Whether a commenter may comment on a post owner's posts (backend
     /// #714's `CheckInteraction(COMMENT)`): (commenter, owner) → allowed.
     private let mayComment: @Sendable (String, String) -> Bool
+    /// Whether the viewer's first three posts carry comments held for their
+    /// review (a temporary interaction limit, backend #669).
+    private let seedsHeldComments: Bool
 
     public init(
         dataset: MockSocialDataset,
         postStore: MockPostStore? = nil,
         hiddenWords: @escaping @Sendable (String) -> [String] = { _ in [] },
-        mayComment: @escaping @Sendable (String, String) -> Bool = { _, _ in true }
+        mayComment: @escaping @Sendable (String, String) -> Bool = { _, _ in true },
+        seedsHeldComments: Bool = false
     ) {
         self.dataset = dataset
         self.postStore = postStore
         self.hiddenWords = hiddenWords
         self.mayComment = mayComment
+        self.seedsHeldComments = seedsHeldComments
+    }
+
+    /// The post a seeded held comment ("<post>-held-<n>") sits under.
+    static func heldCommentPost(_ commentID: String) -> String? {
+        guard let range = commentID.range(of: "-held-", options: .backwards) else { return nil }
+        return String(commentID[..<range.lowerBound])
+    }
+
+    private func owner(of postID: String) -> String? {
+        postStore?.record(for: postID)?.profileID ?? dataset.post(for: postID)?.authorProfileID
     }
 
     /// Drops comments matching the post owner's hidden words, for every
@@ -63,6 +78,20 @@ public final class MockCommentService: @unchecked Sendable {
             var response = Comment_V1_ListCommentsResponse()
             response.comments = filtered(store.comments(for: request.postID, seed: seedComments(for: request.postID)), postID: request.postID)
             return .success(response)
+        }
+        // The post's owner approves (it shows to everyone) or declines (it is
+        // removed) a held comment. Not found for anyone else, and once
+        // reviewed — comment.v1's rules, so a held comment's existence
+        // doesn't leak.
+        bff.register(path: "/comment.v1.CommentService/ReviewHeldComment") { [self] (request: Comment_V1_ReviewHeldCommentRequest) -> Result<Comment_V1_CommandResponse, ConnectError> in
+            guard let postID = Self.heldCommentPost(request.commentID),
+                  owner(of: postID) == request.ownerID,
+                  seedComments(for: postID).contains(where: { $0.commentID == request.commentID && $0.held }),
+                  store.review(request.commentID, approve: request.approve)
+            else {
+                return .failure(ConnectError(code: .notFound, message: "CMT-1001: comment not found"))
+            }
+            return .success(Comment_V1_CommandResponse())
         }
         bff.register(path: "/comment.v1.CommentService/ListReplies") { [self] (request: Comment_V1_ListRepliesRequest) in
             var response = Comment_V1_ListCommentsResponse()
@@ -306,11 +335,29 @@ public final class MockCommentService: @unchecked Sendable {
             raw = [
                 makeComment(id: "\(postID)-c0", postID: postID, author: authors[1].profileID, body: pair.0, ageMs: 20 * 60_000),
                 makeComment(id: "\(postID)-c1", postID: postID, author: authors[2].profileID, body: pair.1, ageMs: 5 * 60_000)
-            ]
+            ] + heldSeed(for: postID, authors: authors)
         }
         return raw.map {
             var view = $0
             view.createdAtMs = nowMs - view.createdAtMs
+            return view
+        }
+    }
+
+    /// Two comments held for the owner's review, newest first, on the
+    /// viewer's first three posts (video, image, text) — only with `seedsHeldComments`.
+    private func heldSeed(for postID: String, authors: [MockSocialDataset.Author]) -> [Comment_V1_CommentView] {
+        guard seedsHeldComments, ["post-me-00", "post-me-01", "post-me-02"].contains(postID) else { return [] }
+        let bodies = ["Is this for real? Send me the link", "First! Check out my page"]
+        return bodies.indices.map { position in
+            var view = makeComment(
+                id: "\(postID)-held-\(position)",
+                postID: postID,
+                author: authors[(3 + position) % authors.count].profileID,
+                body: bodies[position],
+                ageMs: Int64(position + 1) * 2 * 60_000
+            )
+            view.held = true
             return view
         }
     }
@@ -337,11 +384,30 @@ public final class MockCommentService: @unchecked Sendable {
     private final class Store: @unchecked Sendable {
         private let lock = NSLock()
         private var created: [String: [Comment_V1_CommentView]] = [:]
+        /// Held comments the owner reviewed: true approved, false declined.
+        private var reviewed: [String: Bool] = [:]
 
         func comments(for postID: String, seed: [Comment_V1_CommentView]) -> [Comment_V1_CommentView] {
             // Top-level only, faithfully: created replies surface through
             // ListReplies, never in the top-level page.
-            lock.withLock { (created[postID] ?? []).filter { $0.parentID.isEmpty } + seed }
+            lock.withLock {
+                ((created[postID] ?? []).filter { $0.parentID.isEmpty } + seed).compactMap { comment in
+                    guard comment.held, let approved = reviewed[comment.commentID] else { return comment }
+                    guard approved else { return nil }
+                    var released = comment
+                    released.held = false
+                    return released
+                }
+            }
+        }
+
+        /// Records a review; false when the comment was already reviewed.
+        func review(_ commentID: String, approve: Bool) -> Bool {
+            lock.withLock {
+                guard reviewed[commentID] == nil else { return false }
+                reviewed[commentID] = approve
+                return true
+            }
         }
 
         func replies(for commentID: String, postID: String, seed: [Comment_V1_CommentView]) -> [Comment_V1_CommentView] {
