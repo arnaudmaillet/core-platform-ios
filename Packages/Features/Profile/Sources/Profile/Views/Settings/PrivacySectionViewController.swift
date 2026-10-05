@@ -3,8 +3,8 @@ import MediaCore
 import UIKit
 
 /// Settings → Privacy, for the active profile: Private Account (server-side,
-/// `profile.v1.SetVisibility`, #388), the device-only list visibility screen,
-/// and what is still coming.
+/// `profile.v1.SetVisibility`, #388), follow requests (#396), who can see the
+/// relationship lists (server-side, #403), and what is still coming.
 final class PrivacySectionViewController: UIViewController {
     private enum Section: Hashable {
         case visibility, lists, comingSoon
@@ -29,7 +29,8 @@ final class PrivacySectionViewController: UIViewController {
     }
 
     private let viewModel: PrivacySectionViewModel
-    private let makeListPrivacy: () -> UIViewController
+    /// Who can see the followers and following lists; nil hides the row.
+    private let makeListPrivacy: (() -> UIViewController)?
     /// "Your Data and Permissions" (#414); nil hides the row.
     private let makeDataTransparency: (() -> UIViewController)?
     private let imagePipeline: ImagePipeline?
@@ -38,7 +39,7 @@ final class PrivacySectionViewController: UIViewController {
 
     init(
         viewModel: PrivacySectionViewModel,
-        makeListPrivacy: @escaping () -> UIViewController,
+        makeListPrivacy: (() -> UIViewController)?,
         makeDataTransparency: (() -> UIViewController)? = nil,
         imagePipeline: ImagePipeline? = nil
     ) {
@@ -185,7 +186,10 @@ final class PrivacySectionViewController: UIViewController {
         // Pending requests stay answerable after going public (backend #655
         // doesn't auto-approve them), so the row shows whenever there's an inbox.
         if viewModel.requests != nil { snapshot.appendItems([.followRequests], toSection: .visibility) }
-        snapshot.appendItems([.hideLists] + (makeDataTransparency == nil ? [] : [.dataTransparency]), toSection: .lists)
+        snapshot.appendItems(
+            (makeListPrivacy == nil ? [] : [.hideLists]) + (makeDataTransparency == nil ? [] : [.dataTransparency]),
+            toSection: .lists
+        )
         snapshot.appendItems(Self.planned.map(Item.planned), toSection: .comingSoon)
         // The switch reads the phase and the saving flag at configuration.
         if case .loaded = viewModel.phase { snapshot.reconfigureItems([.privateAccount]) }
@@ -227,7 +231,9 @@ extension PrivacySectionViewController: UICollectionViewDelegate {
                 animated: true
             )
         case .hideLists:
-            navigationController?.pushViewController(makeListPrivacy(), animated: true)
+            if let screen = makeListPrivacy?() {
+                navigationController?.pushViewController(screen, animated: true)
+            }
         case .dataTransparency:
             if let screen = makeDataTransparency?() {
                 navigationController?.pushViewController(screen, animated: true)

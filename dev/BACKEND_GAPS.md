@@ -20,7 +20,7 @@ full functionality.
 | 10 | No seeded conversations | Messages list shows empty against the fleet | Low |
 | 11 | `moderation.v1` unrouted + upstream port unknown | Report, Your Reports and Account Status against the fleet | Medium |
 | 12 | No account-level block RPC; alias enumeration is client-side | Profile "Block Account & All Profiles" is best-effort | Medium |
-| 13 | Relationship lists: no privacy contract, no `RemoveFollower`, id-only edges | Followers/Following screen — privacy is client-inferred, Remove is mock-only, hydration is N+1 | **High** (privacy) |
+| 13 | Relationship lists: id-only edges, no mutuals RPC (privacy and `RemoveFollower` resolved by backend #720) | Followers/Following screen — hydration is N+1, Friends is intersected client-side | Medium |
 | 14 | No discovery / recommendation feed for the "For You" tab | For You is three client-side orderings of the following feed | Medium |
 | 15 | No lightweight-preview rendition, and `RadarPin` can't express video | Map pin live previews (**blocked**); gallery-grid autoplay at scale | **High** (map) |
 | 16 | No topic/category on a post | For You's `ContentContext` lens filters by caption keywords | Medium |
@@ -364,106 +364,29 @@ is the one that matters.
 
 Full contract proposal: **`BACKEND_RELATIONSHIP_LISTS.md`** (repo root).
 
-### 13a. Nothing in the contracts describes relationship-list privacy
+### 13a. Relationship-list privacy — RESOLVED (backend #720, iOS #403)
 
-**Symptom.** `social_graph.v1.ListFollowers` / `ListFollowing` take
-`(subject_id, limit, page_token)` and return edges. There is no permission
-field on the request, no access field on the response, and no documented
-`PERMISSION_DENIED` — so a client cannot tell "this person has no followers"
-from "you may not see them", and the service appears to serve any list to any
-caller.
+`social_graph.v1` now has `GetListPrivacy` / `SetListPrivacy`: per list
+(followers, following), Everyone, Followers, Mutuals or Only Me. Both list
+RPCs enforce it, along with the existing access rule (no block, and following
+a private profile), and flag a refused page `hidden = 3`.
 
-Nor is the flag anywhere else:
+- **Settings → Privacy → Followers and Following Lists**
+  (`ListPrivacyViewController`) sets it. It replaced the device-only
+  `RelationshipPrivacyStore`, which is deleted.
+- `ProfileRelationshipsRepository` maps `hidden` to the private state.
+  Friends, made from both lists, follows the stricter one.
+- `RelationshipListAccess` still skips the request for a private profile the
+  viewer doesn't follow. That is an optimisation now, not the enforcement
+  point.
+- There is no friends-list RPC, so no friends-list audience either (see §13d).
 
-| Where we looked | What is there |
-|---|---|
-| `profile.v1.ProfileView` | `visibility: {UNSPECIFIED, PUBLIC, PRIVATE}` — **whole-profile**, not per-surface |
-| `profile.v1` RPCs | `SetVisibility` (same whole-profile flag) |
-| `account.v1` (22 RPCs) | no settings or privacy surface of any kind |
-| `chat.v1` | `ToggleVisibility` — conversation archiving, unrelated |
-| `social_graph.v1` | follow/block edges only |
+### 13b. `RemoveFollower` — RESOLVED (backend #720, iOS #403)
 
-**What the client does today.** `RelationshipListAccess` infers the rule the
-platforms converge on, from the one signal that exists:
-
-```
-self                                    → visible
-subject.visibility != PRIVATE           → visible
-subject.visibility == PRIVATE
-    and viewer follows subject          → visible
-    otherwise                           → PRIVATE state, and no RPC is issued
-```
-
-It is deliberately one-directional: it can hide a list the backend would have
-served, never show one it refuses. A `PERMISSION_DENIED` from either list RPC
-is also mapped to the private state rather than a retryable error, so the day
-the fleet enforces this the client already behaves correctly.
-
-**Why this is the high-severity item.** The inference is *approximate*, and it
-is approximating a privacy boundary. A profile that is PUBLIC but wants its
-follower list private cannot express that, and the client will show the list.
-Right now the fleet will serve those edges to anyone who asks — the client's
-restraint is the only thing in the way, and a client is not an enforcement
-point.
-
-**Required.** Enforce server-side, and say so on the wire:
-
-```proto
-// social_graph.v1 — on both list responses
-enum ListAccess { LIST_ACCESS_UNSPECIFIED = 0; ALLOWED = 1; RESTRICTED = 2; }
-message ListFollowersResponse {
-  repeated EdgeSummary followers = 1;
-  string next_page_token = 2;
-  ListAccess access = 3;   // RESTRICTED ⇒ `followers` is empty by policy, not by fact
-}
-```
-
-plus per-surface flags the user can actually set, and an account-level settings
-surface to set them through:
-
-```proto
-// profile.v1.ProfileView
-enum AudienceScope { AUDIENCE_UNSPECIFIED = 0; EVERYONE = 1; FOLLOWERS = 2; NOBODY = 3; }
-AudienceScope follower_list_visibility  = 20;
-AudienceScope following_list_visibility = 21;
-
-// account.v1 — does not exist at all today
-rpc GetPrivacySettings(GetPrivacySettingsRequest) returns (PrivacySettingsView);
-rpc UpdatePrivacySettings(UpdatePrivacySettingsRequest) returns (CommandResponse);
-```
-
-Until then the client keeps inferring, and the inference is documented in
-`RelationshipListAccess` so it is not mistaken for a contract.
-
-**A settings screen now exists, and it is local-only.** Edit Profile → Privacy
-(`PrivacySettingsViewController`) offers one switch per list, persisted through
-`RelationshipPrivacyStore` in `UserDefaults`. It is shaped for the
-`follower_list_visibility` / `following_list_visibility` fields proposed above,
-so the day they land it gains a sync path instead of a rewrite. Until then the
-flags govern nothing: the screen's own footer tells the viewer in plain words
-that hiding a list here does not remove it from anyone else's app, because a
-privacy control that overstates its reach is worse than none.
-
-### 13b. No `RemoveFollower` RPC
-
-**Symptom.** A user cannot drop someone from their own follower list.
-`social_graph.v1` offers `Follow`, `Unfollow`, `Block`, `Unblock` — and
-`Unfollow(actor, target)` is authorized *as the actor*, which the viewer is not
-in this case. The action cannot be spelled with what exists.
-
-Block-then-unblock would sever the edge as a side effect, and is **not** done:
-it drops the reverse edge too, and writes a moderation event for something that
-is not a moderation action.
-
-**Client behaviour.** `ProfileRelationshipsProviding.supportsFollowerRemoval`
-is a deployment capability. The mock implements removal (it owns its graph), so
-the flow is verifiable in the simulator; against the fleet the row does not
-offer the action at all, rather than offering a button that cannot work. Adding
-the RPC lights it up with no client UI change.
-
-**Required.** `rpc RemoveFollower(RemoveFollowerRequest) returns (CommandResponse)`
-with `{actor_id, follower_id}`, authorized as the *followee*. Semantics: drop
-the follower→actor edge, do not notify, do not prevent re-following.
+`social_graph.v1.RemoveFollower(profile_id, follower_id)` undoes the
+follower's follow. The follower isn't told; on a private profile they have to
+ask again. The followers list's **Remove** uses it in every deployment
+(`supportsFollowerRemoval: true`), not only in the mock.
 
 ### 13c. `EdgeSummary` is id-only and there is no batch profile read
 

@@ -574,7 +574,13 @@ public final class ProfileRelationshipsViewModel {
         // true whichever side was withheld.
         case .friends: "friends list"
         }
-        return "@\(subject.handle)'s \(list) is private. Follow them to see it."
+        // Following only helps on a private profile the viewer doesn't follow
+        // yet; a list hidden by its owner's list privacy (#403) may stay
+        // hidden from followers too.
+        let asksToFollow = subject.visibility.isPrivate && !subject.viewerFollowsSubject
+        return asksToFollow
+            ? "@\(subject.handle)'s \(list) is private. Follow them to see it."
+            : "@\(subject.handle) keeps their \(list) private."
     }
 
     private static func emptyTitle(for direction: RelationshipDirection) -> String {

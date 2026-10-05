@@ -26,10 +26,9 @@ public final class MockSocialGraphService: @unchecked Sendable {
     /// Follow/unfollow used to be accepted and forgotten, which was enough
     /// while the only reader was a button that flipped its own label. The
     /// relationship lists read the graph back — a follow toggled in a row must
-    /// survive to the next page, and the followers list's **Remove** is
-    /// nothing *but* a graph edit whose whole proof is the row not returning.
-    /// The fleet has no `RemoveFollower` RPC (`dev/BACKEND_GAPS.md` §13), so
-    /// the mock is the only deployment where that flow can be exercised.
+    /// survive to the next page, and the followers list's **Remove**
+    /// (`RemoveFollower`) is nothing *but* a graph edit whose whole proof is
+    /// the row not returning.
     private var addedEdges: Set<Edge> = []
     private var removedEdges: Set<Edge> = []
     /// Pending follow requests, requester → private target, with when they
@@ -38,6 +37,11 @@ public final class MockSocialGraphService: @unchecked Sendable {
     private var requests: [Edge: Date] = [:]
     /// Whether a profile is private right now; profile.v1 owns that flag.
     private let isPrivate: @Sendable (String) -> Bool
+    /// Who else may see each profile's followers / following lists
+    /// (backend #720). Absent means Everyone.
+    private var listPrivacy: [String: SocialGraph_V1_ListPrivacy] = [:]
+    /// The viewer's account's profiles: their own lists are always theirs.
+    private let viewerProfileIDs: Set<String>
 
     private struct Edge: Hashable {
         let follower: String
@@ -58,6 +62,18 @@ public final class MockSocialGraphService: @unchecked Sendable {
         self.dataset = dataset
         self.pageSizeCap = pageSizeCap
         self.isPrivate = isPrivate
+        self.viewerProfileIDs = Set(dataset.profileIDs(inAccount: MockAuthService.accountID))
+        // One public author the viewer doesn't follow keeps their following
+        // list to themself, so a hidden list can be seen without setup.
+        let viewerFollowsSeed = dataset.followingByProfileID[MockSocialDataset.viewerProfileID] ?? []
+        if let hider = dataset.authors.map(\.profileID).first(where: { id in
+            !dataset.isRelationshipsPrivate(id) && !viewerFollowsSeed.contains(id) && id != "prof-4"
+        }) {
+            var privacy = SocialGraph_V1_ListPrivacy()
+            privacy.followers = .everyone
+            privacy.following = .onlyMe
+            listPrivacy[hider] = privacy
+        }
         if seedsFollowRequests {
             let viewer = MockSocialDataset.viewerProfileID
             let strangers = dataset.authors.map(\.profileID).filter { id in
@@ -182,7 +198,38 @@ public final class MockSocialGraphService: @unchecked Sendable {
         // Both honor `limit` + `page_token`: the follower / following screen
         // pages, and a mock that served the whole graph at once would leave
         // its cursor handling — and its paging spinner — unexercised.
+        bff.register(path: "/social_graph.v1.SocialGraphService/RemoveFollower") { [self] (request: SocialGraph_V1_RemoveFollowerRequest) -> Result<SocialGraph_V1_CommandResponse, ConnectError> in
+            guard follows(request.followerID, request.profileID) else {
+                return .failure(ConnectError(code: .notFound, message: "SGR-1002: not a follower"))
+            }
+            // The follower's own unfollow, as on the fleet; they aren't told.
+            setEdge(false, follower: request.followerID, followee: request.profileID)
+            var response = SocialGraph_V1_CommandResponse()
+            response.success = true
+            response.actorID = request.profileID
+            response.targetID = request.followerID
+            return .success(response)
+        }
+        bff.register(path: "/social_graph.v1.SocialGraphService/GetListPrivacy") { [self] (request: SocialGraph_V1_GetListPrivacyRequest) in
+            .success(storedListPrivacy(for: request.profileID))
+        }
+        bff.register(path: "/social_graph.v1.SocialGraphService/SetListPrivacy") { [self] (request: SocialGraph_V1_SetListPrivacyRequest) in
+            // Unspecified keeps that list's audience.
+            let privacy = lock.withLock {
+                var privacy = listPrivacy[request.profileID] ?? Self.everyone
+                if request.followers != .unspecified { privacy.followers = request.followers }
+                if request.following != .unspecified { privacy.following = request.following }
+                listPrivacy[request.profileID] = privacy
+                return privacy
+            }
+            return .success(privacy)
+        }
         bff.register(path: "/social_graph.v1.SocialGraphService/ListFollowers") { [self] (request: SocialGraph_V1_ListFollowersRequest) in
+            guard mayRead(\.followers, of: subject(request.followeeID)) else {
+                var response = SocialGraph_V1_ListFollowersResponse()
+                response.hidden = true
+                return .success(response)
+            }
             let all = edges(for: followers(of: subject(request.followeeID)))
             return page(all, limit: request.limit, token: request.pageToken).map { slice, next in
                 var response = SocialGraph_V1_ListFollowersResponse()
@@ -195,6 +242,11 @@ public final class MockSocialGraphService: @unchecked Sendable {
         // through other authors' follow lists, which a viewer-only answer
         // would collapse to nothing.
         bff.register(path: "/social_graph.v1.SocialGraphService/ListFollowing") { [self] (request: SocialGraph_V1_ListFollowingRequest) in
+            guard mayRead(\.following, of: subject(request.followerID)) else {
+                var response = SocialGraph_V1_ListFollowingResponse()
+                response.hidden = true
+                return .success(response)
+            }
             let all = edges(for: following(of: subject(request.followerID)))
             return page(all, limit: request.limit, token: request.pageToken).map { slice, next in
                 var response = SocialGraph_V1_ListFollowingResponse()
@@ -230,6 +282,34 @@ public final class MockSocialGraphService: @unchecked Sendable {
     /// that away.
     private func subject(_ profileID: String) -> String {
         profileID.isEmpty ? MockSocialDataset.viewerProfileID : profileID
+    }
+
+    private static let everyone: SocialGraph_V1_ListPrivacy = {
+        var privacy = SocialGraph_V1_ListPrivacy()
+        privacy.followers = .everyone
+        privacy.following = .everyone
+        return privacy
+    }()
+
+    private func storedListPrivacy(for profileID: String) -> SocialGraph_V1_ListPrivacy {
+        lock.withLock { listPrivacy[profileID] } ?? Self.everyone
+    }
+
+    /// The list gate (backend #720), for the viewer as reader: the owner's
+    /// account always reads; anyone else needs content access (no block, and
+    /// following a private profile) and a place in the list's audience.
+    private func mayRead(_ list: KeyPath<SocialGraph_V1_ListPrivacy, SocialGraph_V1_ListAudience>, of owner: String) -> Bool {
+        if viewerProfileIDs.contains(owner) { return true }
+        let reader = MockSocialDataset.viewerProfileID
+        if isBlocking(actorID: owner, targetID: reader) || isBlocking(actorID: reader, targetID: owner) { return false }
+        let readerFollows = follows(reader, owner)
+        if isPrivate(owner), !readerFollows { return false }
+        switch storedListPrivacy(for: owner)[keyPath: list] {
+        case .everyone, .unspecified, .UNRECOGNIZED: return true
+        case .followers: return readerFollows
+        case .mutuals: return readerFollows && follows(owner, reader)
+        case .onlyMe: return false
+        }
     }
 
     /// Approve makes the edge; decline drops the request and tells no one.

@@ -160,10 +160,12 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                     viewModel: EditProfileViewModel(repository: repository, seed: profile, onSaved: onSaved),
                     imagePipeline: imagePipeline
                 )
-                editor.onOpenPrivacy = { [weak editor] in
-                    editor?.navigationController?.pushViewController(
-                        PrivacySettingsViewController(store: RelationshipPrivacyStore()), animated: true
-                    )
+                if let lists = repository as? any ListPrivacyManaging {
+                    editor.onOpenPrivacy = { [weak editor] in
+                        editor?.navigationController?.pushViewController(
+                            ListPrivacyViewController(manager: lists), animated: true
+                        )
+                    }
                 }
                 return editor
             },
@@ -257,18 +259,18 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                 case .legal:
                                     SettingsLinksViewController.legal(links: .current, version: SettingsLinksViewController.appVersion())
                                 case .privacy:
-                                    if let visibility = repository as? any ProfileVisibilityManaging {
+                                    (repository as? any ProfileVisibilityManaging).map { visibility in
                                         PrivacySectionViewController(
                                             viewModel: PrivacySectionViewModel(
                                                 visibility: visibility,
                                                 requests: repository as? any FollowRequestsManaging
                                             ),
-                                            makeListPrivacy: { PrivacySettingsViewController(store: RelationshipPrivacyStore()) },
+                                            makeListPrivacy: (repository as? any ListPrivacyManaging).map { lists in
+                                                { ListPrivacyViewController(manager: lists) }
+                                            },
                                             makeDataTransparency: { DataTransparencyViewController() },
                                             imagePipeline: imagePipeline
                                         )
-                                    } else {
-                                        PrivacySettingsViewController(store: RelationshipPrivacyStore())
                                     }
                                 default: nil
                                 }

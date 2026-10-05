@@ -131,10 +131,9 @@ public protocol ProfileRelationshipsProviding: Sendable {
     /// Follow (`true`) or unfollow (`false`) a row's profile as the viewer.
     func setFollowing(_ following: Bool, for profileID: ProfileID) async throws
 
-    /// Whether `removeFollower` has a backend behind it. False on the fleet
-    /// today — `social_graph.v1` has no such RPC — and the UI omits the action
-    /// entirely rather than offering a button that cannot work. See
-    /// `dev/BACKEND_GAPS.md` §13.
+    /// Whether `removeFollower` has a backend behind it. `social_graph.v1`
+    /// has `RemoveFollower` since backend #720; a composition without it
+    /// omits the action rather than offering a button that cannot work.
     var supportsFollowerRemoval: Bool { get }
 
     /// Drops `profileID` from the viewer's own follower list. Only meaningful
@@ -189,9 +188,9 @@ public actor ProfileRelationshipsRepository: ProfileRelationshipsProviding {
     private var followerSets: [ProfileID: Set<String>] = [:]
 
     /// `supportsFollowerRemoval` is injected by the composition root rather
-    /// than probed: whether the RPC exists is a property of the *deployment*
-    /// (the mock implements it, the fleet does not yet), and discovering that
-    /// by calling and failing would burn a request to learn a constant.
+    /// than probed: whether the RPC exists is a property of the deployment,
+    /// and discovering that by calling and failing would burn a request to
+    /// learn a constant.
     public init(
         socialGraphClient: any SocialGraph_V1_SocialGraphServiceClientInterface,
         profileClient: any Profile_V1_ProfileServiceClientInterface,
@@ -262,6 +261,9 @@ public actor ProfileRelationshipsRepository: ProfileRelationshipsProviding {
             let response = await socialGraphClient.listFollowers(request: request, headers: [:])
             switch response.result {
             case .success(let body):
+                // The owner's list privacy, a private profile, a block: the
+                // server says the reader may not see it (backend #720).
+                if body.hidden { throw RelationshipsError.forbidden }
                 return (body.followers.map(\.profileID), body.nextPageToken)
             case .failure(let error):
                 throw Self.mapped(error)
@@ -285,6 +287,7 @@ public actor ProfileRelationshipsRepository: ProfileRelationshipsProviding {
         let response = await socialGraphClient.listFollowing(request: request, headers: [:])
         switch response.result {
         case .success(let body):
+            if body.hidden { throw RelationshipsError.forbidden }
             return (body.following.map(\.profileID), body.nextPageToken)
         case .failure(let error):
             throw Self.mapped(error)
@@ -353,9 +356,10 @@ public actor ProfileRelationshipsRepository: ProfileRelationshipsProviding {
     private static let followerSetLimit = 2_000
     private static let edgePageSize: Int32 = 100
 
-    /// A refusal is an answer, not an outage: the day the fleet enforces
-    /// relationship-list privacy it will land here as `permissionDenied`, and
-    /// the screen must show the private state rather than "pull to retry".
+    /// A refusal is an answer, not an outage: the screen shows the private
+    /// state rather than "pull to retry". The fleet answers list privacy with
+    /// an empty page flagged `hidden` (backend #720); `permissionDenied` is
+    /// kept for any refusal spelled as an error.
     private static func mapped(_ error: ConnectError) -> RelationshipsError {
         if error.code == .permissionDenied { return .forbidden }
         return .transport(message: error.message ?? "code \(error.code)")
@@ -477,10 +481,12 @@ public actor ProfileRelationshipsRepository: ProfileRelationshipsProviding {
         guard let viewerID = await viewer.viewerProfileID() else {
             throw RelationshipsError.transport(message: "no viewer profile")
         }
-        var request = SocialGraph_V1_UnfollowRequest()
-        request.actorID = profileID.rawValue
-        request.targetID = viewerID.rawValue
-        try Self.ensureAccepted(await socialGraphClient.unfollow(request: request, headers: [:]))
+        // The owner's own command (backend #720): the follower isn't told,
+        // and on a private profile has to ask again.
+        var request = SocialGraph_V1_RemoveFollowerRequest()
+        request.profileID = viewerID.rawValue
+        request.followerID = profileID.rawValue
+        try Self.ensureAccepted(await socialGraphClient.removeFollower(request: request, headers: [:]))
     }
 
     private static func ensureAccepted(_ response: ResponseMessage<SocialGraph_V1_CommandResponse>) throws {
