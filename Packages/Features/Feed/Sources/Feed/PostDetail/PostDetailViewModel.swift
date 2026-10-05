@@ -450,6 +450,12 @@ public final class PostDetailViewModel {
         }
     }
 
+    /// The viewer became someone else (a guest signed in, an account
+    /// signed out): the composer's face is re-read from the new viewer.
+    public func reloadViewerIdentity() {
+        loadViewerIdentity()
+    }
+
     /// The viewer switched which of their profiles is active (from this
     /// screen's composer menu, or anywhere else while it is open).
     ///
