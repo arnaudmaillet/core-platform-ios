@@ -287,6 +287,16 @@ user.
 
 ## 11. `moderation.v1` is unrouted and its upstream port is unknown
 
+> **RESOLVED (2026-10-06, #453).** The cluster now targets
+> `moderation-server:50061` (mesh). The client RPCs take the principal from
+> the bearer, so they answer in **edge mode**: start the fleet with
+> `local-dev/docker-compose.edge.yml` (backend #678) and the gateway with
+> `dev/fleet-gateway.sh up --edge`. Every upstream then points at its
+> service's `:9443` client edge, plaintext h2c like the mesh, and the
+> gateway forwards the app's `Authorization` header. The same change routes
+> `geo_discovery.v1` (`geo-discovery-server:50054`), which had no route. The
+> text below records how it was.
+
 **Symptom.** Report (`SubmitReport`), Your Reports (`ListMyReports`) and
 Account Status (`GetEnforcementState`, `GetStatementOfReasons`, `FileAppeal`)
 all call `moderation.v1`. The Envoy gateway had no route for it (it was
