@@ -61,6 +61,10 @@ public final class LoginViewModel {
             "Your session has expired. Sign in again."
         case .transport:
             "Can't reach the server. Check your connection and try again."
+        case .invalidCode:
+            "That code didn\u{2019}t work. Check it, or ask for a new one."
+        case .underMinimumAge:
+            "You\u{2019}re not old enough to create an account."
         }
     }
 }

@@ -92,6 +92,12 @@ public final class MockAuthService: @unchecked Sendable {
         bff.register(path: "/auth.v1.AuthService/StartGuestSession") { [self] (request: Auth_V1_StartGuestSessionRequest) in
             startGuestSession(request)
         }
+        bff.register(path: "/auth.v1.AuthService/StartVerification") { [self] (request: Auth_V1_StartVerificationRequest) in
+            startVerification(request)
+        }
+        bff.register(path: "/auth.v1.AuthService/SignUp") { [self] (request: Auth_V1_SignUpRequest) in
+            signUp(request)
+        }
         bff.register(path: "/auth.v1.AuthService/Refresh") { [self] (request: Auth_V1_RefreshRequest) in
             refresh(request)
         }
@@ -122,6 +128,9 @@ public final class MockAuthService: @unchecked Sendable {
     // MARK: - Handlers
 
     private func login(_ request: Auth_V1_LoginRequest) -> Result<Auth_V1_LoginResponse, ConnectError> {
+        if case .verificationCode(let grant) = request.credential {
+            return loginWithCode(grant, request: request)
+        }
         guard request.grantType == .password,
               case .password(let grant) = request.credential else {
             return .failure(ConnectError(code: .invalidArgument, message: "expected password grant"))
@@ -148,6 +157,126 @@ public final class MockAuthService: @unchecked Sendable {
             response.tokens = makeTokenPair(sessionID: sessionID, refreshToken: refreshToken)
             return .success(response)
         }
+    }
+
+    // MARK: - Codes and sign-up (B4)
+
+    /// Every code the mock sends is this one — what a QA run or a test
+    /// types. The fleet's are random.
+    public static let verificationCode = "123456"
+    /// The address the demo account signs in with by code.
+    public static let demoEmail = "demo@example.com"
+    /// An address whose account signs in with Apple — SignUp's "you already
+    /// have an account".
+    public static let appleEmail = "apple@example.com"
+
+    private struct Challenge {
+        let destination: String
+        var used = false
+    }
+    private var challenges: [String: Challenge] = [:]
+
+    private func startVerification(
+        _ request: Auth_V1_StartVerificationRequest
+    ) -> Result<Auth_V1_StartVerificationResponse, ConnectError> {
+        guard request.channel != .unspecified, !request.destination.isEmpty else {
+            return .failure(ConnectError(code: .invalidArgument, message: "a channel and a destination are required"))
+        }
+        return lock.withLock {
+            tokenCounter += 1
+            let id = "vc-\(tokenCounter)"
+            challenges[id] = Challenge(destination: request.destination.lowercased())
+            var response = Auth_V1_StartVerificationResponse()
+            response.challengeID = id
+            response.expiresInSecs = 600
+            response.resendAfterSecs = 30
+            return .success(response)
+        }
+    }
+
+    /// The challenge's address when `grant` proves it; nil otherwise.
+    private func provenDestinationLocked(_ grant: Auth_V1_VerificationCodeGrant) -> String? {
+        guard let challenge = challenges[grant.challengeID], !challenge.used,
+              grant.code == Self.verificationCode else { return nil }
+        return challenge.destination
+    }
+
+    /// A member session for the demo account, the guest's (if sent) ended.
+    private func memberSessionLocked(
+        device: Auth_V1_DeviceContext, guestRefreshToken: String
+    ) -> Auth_V1_TokenPair {
+        if !guestRefreshToken.isEmpty,
+           let guest = sessions.first(where: { $0.value.isGuest && $0.value.issuedRefreshTokens.contains(guestRefreshToken) }) {
+            sessions[guest.key]?.revoked = true
+        }
+        tokenCounter += 1
+        let sessionID = "sess-\(UUID().uuidString.prefix(8))"
+        let refreshToken = "rt-\(tokenCounter)"
+        sessions[sessionID] = SessionRecord(
+            currentRefreshToken: refreshToken, issuedRefreshTokens: [refreshToken], device: device
+        )
+        return makeTokenPair(sessionID: sessionID, refreshToken: refreshToken)
+    }
+
+    private func loginWithCode(
+        _ grant: Auth_V1_VerificationCodeGrant, request: Auth_V1_LoginRequest
+    ) -> Result<Auth_V1_LoginResponse, ConnectError> {
+        lock.withLock {
+            guard let destination = provenDestinationLocked(grant) else {
+                return .failure(ConnectError(code: .invalidArgument, message: "AUT-6002: wrong or expired code"))
+            }
+            guard destination == Self.demoEmail else {
+                return .failure(ConnectError(code: .notFound, message: "AUT-6004: no account for this address"))
+            }
+            challenges[grant.challengeID]?.used = true
+            var response = Auth_V1_LoginResponse()
+            response.accountID = Self.accountID
+            response.tokens = memberSessionLocked(device: request.device, guestRefreshToken: request.guestRefreshToken)
+            return .success(response)
+        }
+    }
+
+    /// The mock is one world with one viewer: a new account lands on the
+    /// demo account (`accountID`), whose profile `CreateProfile` then names.
+    private func signUp(_ request: Auth_V1_SignUpRequest) -> Result<Auth_V1_SignUpResponse, ConnectError> {
+        lock.withLock {
+            guard let destination = provenDestinationLocked(request.verificationCode) else {
+                return .failure(ConnectError(code: .invalidArgument, message: "AUT-6002: wrong or expired code"))
+            }
+            var response = Auth_V1_SignUpResponse()
+            if destination == Self.appleEmail || destination == Self.demoEmail {
+                var existing = Auth_V1_ExistingAccount()
+                existing.method = destination == Self.appleEmail ? .apple : .emailCode
+                response.existingAccount = existing
+                return .success(response)
+            }
+            guard Self.isAtLeast13(request.dateOfBirth) else {
+                return .failure(ConnectError(code: .failedPrecondition, message: "AUT-6005: under the minimum age"))
+            }
+            guard request.consent.dataProcessing, !request.consent.policyVersion.isEmpty else {
+                return .failure(ConnectError(code: .invalidArgument, message: "consent to data processing is required"))
+            }
+            challenges[request.verificationCode.challengeID]?.used = true
+            lastSignUp = request
+            var created = Auth_V1_SignedUp()
+            created.accountID = Self.accountID
+            created.tokens = memberSessionLocked(device: request.device, guestRefreshToken: request.guestRefreshToken)
+            response.signedUp = created
+            return .success(response)
+        }
+    }
+
+    /// The last accepted `SignUp` — what the steps collected. For tests.
+    public var lastSignUpRequest: Auth_V1_SignUpRequest? { lock.withLock { lastSignUp } }
+    private var lastSignUp: Auth_V1_SignUpRequest?
+
+    private static func isAtLeast13(_ iso: String) -> Bool {
+        let parts = iso.split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 3,
+              let birth = Calendar(identifier: .gregorian).date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2])),
+              let age = Calendar(identifier: .gregorian).dateComponents([.year], from: birth, to: Date()).year
+        else { return false }
+        return age >= 13
     }
 
     /// A single-use challenge, as the fleet's (#523). The mock accepts any
