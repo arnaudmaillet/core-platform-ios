@@ -62,8 +62,8 @@ static_resources:
                           route: { cluster: comment, timeout: 30s }
                         - match: { prefix: "/search.v1.SearchService/" }
                           route: { cluster: search, timeout: 30s }
-                        # Profile "Report User" calls moderation.v1/OpenCase.
-                        # NOTE: the upstream port below is UNCONFIRMED — see
+                        # Report, Your Reports and Account Status call moderation.v1.
+                        # NOTE: the upstream port below is WRONG — see
                         # dev/BACKEND_GAPS.md §11. Verify it against the fleet's
                         # compose file before relying on this route.
                         - match: { prefix: "/moderation.v1.ModerationService/" }
@@ -249,10 +249,9 @@ static_resources:
         endpoints:
           - lb_endpoints:
               - endpoint: { address: { socket_address: { address: search-server, port_value: 50062 } } }
-    # UNCONFIRMED upstream: no moderation-server port is documented anywhere in
-    # this repo, and the fleet's port assignments are not contiguous (50051-50070
-    # with gaps), so this is a placeholder to be verified — not a working route.
-    # See dev/BACKEND_GAPS.md §11.
+    # WRONG upstream: moderation listens on :50061 (mesh) and :9443 (edge)
+    # (backend #703). The client RPCs need the edge listener and the bearer
+    # token; its transport is unconfirmed. See dev/BACKEND_GAPS.md §11.
     - name: moderation
       type: STRICT_DNS
       lb_policy: ROUND_ROBIN

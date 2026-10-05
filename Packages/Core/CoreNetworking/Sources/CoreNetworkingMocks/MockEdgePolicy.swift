@@ -51,8 +51,10 @@ public enum MockEdgePolicy {
         "/search.v1.SearchService/Search",
         "/search.v1.SearchService/Suggest",
         "/media.v1.MediaService/ResolveDelivery",
-        // The one write open to guests: reporting content.
-        "/moderation.v1.ModerationService/OpenCase",
+        // The one write open to guests: reporting content (DSA Art. 16), and
+        // what became of those reports (`member_or_guest` on the edge).
+        "/moderation.v1.ModerationService/SubmitReport",
+        "/moderation.v1.ModerationService/ListMyReports",
     ]
 
     public static func access(for path: String) -> Access {

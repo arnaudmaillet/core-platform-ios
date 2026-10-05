@@ -791,8 +791,9 @@ final class AppContainer {
         followEvents: followGraphEvents
     )
 
-    /// Files profile reports through `moderation.v1.OpenCase` (the profile's
-    /// "..." menu). Mock mode answers it; against the local fleet the service
+    /// Files reports through `moderation.v1.SubmitReport` (the "..." menus)
+    /// and lists them back (Safety → Your Reports, `ListMyReports`). Mock mode
+    /// answers both; against the local fleet the service
     /// needs the gateway route added in `dev/envoy/envoy.yaml` — see
     /// `dev/BACKEND_GAPS.md` §11.
     private lazy var profileReportRepository = ProfileReportRepository(
@@ -817,7 +818,7 @@ final class AppContainer {
     )
 
     /// Settings → Account Status: `moderation.v1.GetEnforcementState` for the
-    /// account. Mock mode answers it (`-mock-account-restricted` seeds one
+    /// account, and each restriction's statement of reasons and appeal. Mock mode answers it (`-mock-account-restricted` seeds one
     /// restriction); against the local fleet `moderation.v1` still needs its
     /// gateway route — `dev/BACKEND_GAPS.md` §11.
     private lazy var accountStatusRepository = AccountStatusRepository(

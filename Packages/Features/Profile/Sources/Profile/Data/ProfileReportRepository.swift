@@ -4,14 +4,19 @@ import CoreContracts
 import CoreModels
 import Foundation
 
-/// Files reports through `moderation.v1.OpenCase`, for any subject the app
-/// can raise a case about.
+/// Files reports through `moderation.v1.SubmitReport` and lists them back
+/// with what became of each (`ListMyReports`, DSA Art. 16(5)).
 ///
 /// ⚠️ It is named for a profile and lives in the Profile package for one
 /// reason only: this package already holds the moderation client's wiring and
 /// the auth session it needs. Its CALLERS reach it through `ContentReporting`
 /// in CoreModels, so nothing outside the composition root knows where the
 /// class lives, and moving it is a move rather than a refactor.
+///
+/// **The reporter is the token.** Neither RPC takes a reporter field: the edge
+/// reads the caller from the bearer (backend #677), and the account behind
+/// the reported content is resolved server-side. `OpenCase`, which the app
+/// used before, is the reviewer console's and mesh-only.
 ///
 /// **Fleet routing.** `moderation.v1` is not yet exposed through the dev
 /// gateway's upstream (see `dev/BACKEND_GAPS.md` §11) — a route and cluster
@@ -20,7 +25,7 @@ import Foundation
 /// answers it exactly (`MockModerationService`), which is where the flow is
 /// verified.
 public actor ProfileReportRepository: ContentReporting {
-    private let moderationClient: any Moderation_V1_ModerationServiceClientInterface
+    let moderationClient: any Moderation_V1_ModerationServiceClientInterface
     private let authSession: any AuthSessionProviding
 
     public init(
@@ -32,38 +37,32 @@ public actor ProfileReportRepository: ContentReporting {
     }
 
     public func report(_ subject: ReportSubject, reason: ReportReason, surface: String) async throws {
-        guard case .authenticated(let accountID) = await authSession.currentState() else {
+        // Guests may report on the fleet (backend #677); the app has no guest
+        // token yet, so a report still needs a signed-in account here.
+        guard case .authenticated = await authSession.currentState() else {
             throw ProfileError.notAuthenticated
         }
 
-        var subjectRef = Moderation_V1_SubjectRef()
+        var request = Moderation_V1_SubmitReportRequest()
         switch subject {
         case .profile(let id):
-            subjectRef.entityType = .profile
-            subjectRef.entityID = id.rawValue
+            request.entityType = .profile
+            request.entityID = id.rawValue
         case .post(let id):
-            subjectRef.entityType = .post
-            subjectRef.entityID = id.rawValue
+            request.entityType = .post
+            request.entityID = id.rawValue
         }
-        // The *reporter*, not the reported: `SubjectRef.actorID` identifies who
-        // raised the case, which is what the queue needs for rate-limiting and
-        // abuse-of-reporting signals.
-        subjectRef.actorID = accountID.rawValue
-        subjectRef.surface = surface
-
-        var request = Moderation_V1_OpenCaseRequest()
-        request.subject = subjectRef
         request.category = Self.category(for: reason)
-        request.reason = reason.title
+        request.surface = surface
 
-        let response = await moderationClient.openCase(request: request, headers: [:])
+        let response = await moderationClient.submitReport(request: request, headers: [:])
         if let error = response.error {
             throw ProfileError.transport(message: error.message ?? "code \(error.code)")
         }
-        // `created == false` is still success — the contract documents it as an
-        // idempotent open that returns the EXISTING case for this subject. Only
-        // a missing case id means nothing was filed.
-        guard let body = response.message, !body.case.caseID.isEmpty else {
+        // Reporting the same content again is still success: the id is
+        // deterministic per reporter and subject. Only a missing id means
+        // nothing was filed.
+        guard let body = response.message, !body.reportID.isEmpty else {
             throw ProfileError.transport(message: "report rejected")
         }
     }

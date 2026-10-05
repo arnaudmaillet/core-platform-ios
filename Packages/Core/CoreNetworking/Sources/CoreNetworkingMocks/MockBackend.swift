@@ -44,9 +44,11 @@ public struct MockBackend: Sendable {
         let blobStore = MockBlobStore()
         let postStore = MockPostStore()
         // `-mock-account-restricted` puts one active restriction on the viewer's
-        // account, so Settings → Account Status can be seen in both states.
+        // account, so Settings → Account Status can be seen in both states;
+        // `-mock-report-history` gives the viewer past reports, one per outcome.
         let moderationService = MockModerationService(
-            seedsViewerRestriction: ProcessInfo.processInfo.arguments.contains("-mock-account-restricted")
+            seedsViewerRestriction: ProcessInfo.processInfo.arguments.contains("-mock-account-restricted"),
+            seedsReportHistory: ProcessInfo.processInfo.arguments.contains("-mock-report-history")
         )
 
         let bff = MockBFF()
