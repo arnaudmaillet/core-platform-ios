@@ -55,14 +55,19 @@ struct FollowRequestsTests {
         return ProfileID(id)
     }
 
-    /// Waits on STATE, not time: polls until `condition` holds, for up to
-    /// 10 s, and returns at once when it does. The bound is generous because
-    /// a starved CI runner took over two minutes on this suite; a short
-    /// budget that gave up silently made the next step a no-op (#521).
+    /// Waits on STATE, not time: polls until `condition` holds and returns at
+    /// once when it does, giving up after 2,000 looks (about 10 s on a free
+    /// main actor).
+    ///
+    /// ⚠️ LOOKS, NOT A WALL-CLOCK DEADLINE. On CI the whole test process has
+    /// frozen for two minutes (run 37318287644, #525): a 10 s deadline
+    /// expired while this wait could not even run, and the one look left at
+    /// the end came before the profile load had had its turn. A frozen
+    /// process now costs no budget. A short budget that gave up silently made
+    /// the next step a no-op (#521); the waits that matter are `#require`d.
     @discardableResult
     private func settle(until condition: () -> Bool) async -> Bool {
-        let deadline = ContinuousClock.now + .seconds(10)
-        while ContinuousClock.now < deadline {
+        for _ in 0..<2_000 {
             await Task.yield()
             if condition() { return true }
             try? await Task.sleep(for: .milliseconds(5))
