@@ -3,9 +3,9 @@ import UIKit
 @testable import Maps
 
 /// The offer's header, laid out as the profile's identity row: the large
-/// round flag with the rank in a bubble over it, beside two halves — the name
-/// (the continent after it, or under it when the two do not fit) over the
-/// counters, each a figure over its word.
+/// round flag with the rank in a bubble over it, and beside it, centred on
+/// it, the name (the continent after it, or under it when the two do not
+/// fit) over the counters, each a figure over its word.
 @MainActor
 struct CountryUnlockHeaderTests {
     private static let width: CGFloat = 370
@@ -63,16 +63,17 @@ struct CountryUnlockHeaderTests {
         #expect(flag.minX == 0 && flag.minY == 0)
     }
 
-    /// The profile's halves: the name level with the flag's top, the counters
-    /// level with its foot.
-    @Test func theNameTopsTheFlagAndTheCountersFootIt() throws {
-        let header = try layOut("ES")
+    /// On two lines the block is the flag's height: the name level with the
+    /// disc's top, the counters with its foot, as on the profile.
+    @Test func aTwoLineTitleAndItsCountersSpanTheFlag() throws {
+        let header = try layOut("CF")
         let flag = frame(of: try view("country.unlock.flag", in: header), in: header)
         let title = frame(of: try title(in: header), in: header)
         let likes = frame(of: try stat("Likes", in: header), in: header)
         let posts = frame(of: try stat("Posts", in: header), in: header)
-        #expect(abs(title.minY - flag.minY) < 0.5, "the name is not level with the flag's top")
-        #expect(abs(likes.maxY - flag.maxY) < 0.5, "the counters are not level with the flag's foot")
+        #expect(abs((title.minY + likes.maxY) / 2 - flag.midY) < 0.5, "the block is not centred on the flag")
+        #expect(abs(title.minY - flag.minY) < 4, "the name is not level with the flag's top")
+        #expect(abs(likes.maxY - flag.maxY) < 4, "the counters are not level with the flag's foot")
         #expect(likes.maxX < posts.minX)
     }
 
@@ -125,22 +126,23 @@ struct CountryUnlockHeaderTests {
         #expect(label.attributedText?.string == "Spain  Europe")
     }
 
-    /// A title that fits one line stands centred between where its two lines
-    /// would be: its box is a two-line title's, and its one line sits in the
-    /// middle of it.
-    @Test func aOneLineTitleStandsBetweenTheTwoLinesItWouldTake() throws {
+    /// A title on one line stands where the middle of a two-line one does,
+    /// and its counters come up by half the line it does not take.
+    @Test func aOneLineTitleKeepsItsMiddleAndRaisesTheCounters() throws {
         let oneLine = try layOut("ES")
         let twoLines = try layOut("CF")
         let short = try title(in: oneLine)
         let wrapped = try title(in: twoLines)
         #expect(short.continentFollowsName && !wrapped.continentFollowsName)
-        #expect(abs(short.bounds.height - wrapped.bounds.height) < 0.5, "the one-line box is not a two-line box")
-        #expect(abs(short.bounds.height - short.twoLineHeight) < 0.5)
-        let text = short.textRect(forBounds: short.bounds, limitedToNumberOfLines: short.numberOfLines)
-        #expect(text.height < short.bounds.height * 0.75, "the text is not one line")
-        // UILabel centres its text vertically in its height; the box is what
-        // places it.
-        #expect(abs(frame(of: short, in: oneLine).minY - frame(of: wrapped, in: twoLines).minY) < 0.5)
+        let shortFrame = frame(of: short, in: oneLine)
+        let wrappedFrame = frame(of: wrapped, in: twoLines)
+        #expect(abs(shortFrame.midY - wrappedFrame.midY) < 0.5, "the title's middle moved with its length")
+        let lineSaved = wrappedFrame.height - shortFrame.height
+        #expect(lineSaved > 10, "the one-line title is not shorter")
+        let shortCounters = frame(of: try stat("Likes", in: oneLine), in: oneLine)
+        let wrappedCounters = frame(of: try stat("Likes", in: twoLines), in: twoLines)
+        #expect(abs((wrappedCounters.minY - shortCounters.minY) - lineSaved / 2) < 0.5,
+                "the counters did not come up by half a line")
     }
 
     @Test func aNameTooWideForTheContinentPutsItOnTheNextLine() throws {

@@ -20,8 +20,8 @@ import CoreNavigation
 ///
 /// The header is the profile's identity row (`ProfileHeaderView`): the
 /// country's ROUND flag where the avatar stands — the map's own artwork,
-/// drawn large (`FlagPalette.largeRoundFlag`) — and beside it two halves of
-/// its height: the name over the counters. The continent follows the name on
+/// drawn large (`FlagPalette.largeRoundFlag`) — and beside it the name over
+/// the counters, centred on the flag. The continent follows the name on
 /// its line, or takes the next one when the two do not fit
 /// (`CountryTitleLabel`); the counters are the profile's columns, the figure
 /// over its word ("Likes", "Posts"). The RANK is not a counter: it rides the
@@ -230,12 +230,13 @@ final class CountryUnlockSheetViewController: UIViewController {
     /// The equal parts the counters' row is cut into; the counters fill the
     /// first ones, in order.
     static let counterParts = 4
+    /// The air between the title and the counters: on two lines, the block
+    /// is then as tall as the flag.
+    static let titleToCounters: CGFloat = Spacing.sm
 
     /// The profile's identity row (`ProfileHeaderView`): the flag where the
     /// avatar stands, with the rank in a bubble over its bottom-trailing edge,
-    /// and beside it two halves of its height — the name (and its continent)
-    /// pushed to the top of the upper one, the counters to the foot of the
-    /// lower one.
+    /// and beside it the title over the counters, centred on the flag.
     static func header(country: CountryAtlas.Country, standing: CountryStanding?) -> UIView {
         // The round flag the map wears, at its LARGE size (an emoji drawn and
         // trimmed for a code the catalog lacks — never an atlas country).
@@ -285,49 +286,38 @@ final class CountryUnlockSheetViewController: UIViewController {
         counters.alignment = .fill
         counters.distribution = .fillEqually
 
-        // Two halves, pushed apart — the profile's.
-        let titleHalf = UIView()
-        let countersHalf = UIView()
-        for (view, half) in [(title as UIView, titleHalf), (counters, countersHalf)] {
-            view.translatesAutoresizingMaskIntoConstraints = false
-            half.addSubview(view)
-            NSLayoutConstraint.activate([
-                view.leadingAnchor.constraint(equalTo: half.leadingAnchor),
-                view.trailingAnchor.constraint(equalTo: half.trailingAnchor),
-            ])
-        }
-        NSLayoutConstraint.activate([
-            title.topAnchor.constraint(equalTo: titleHalf.topAnchor),
-            title.bottomAnchor.constraint(lessThanOrEqualTo: titleHalf.bottomAnchor),
-            counters.topAnchor.constraint(greaterThanOrEqualTo: countersHalf.topAnchor),
-            counters.bottomAnchor.constraint(equalTo: countersHalf.bottomAnchor),
-        ])
-        let column = UIStackView(arrangedSubviews: [titleHalf, countersHalf])
+        // The title over the counters at a fixed gap, the block CENTRED on
+        // the flag. No case for the title's length, and two follow from the
+        // centring alone: the title's middle stands at the same height
+        // whether it takes one line or two (a line less takes half a line off
+        // each side), and the counters come up by half a line when it takes
+        // one. On two lines the block is the flag's height — the profile's
+        // name level with the disc's top, counters level with its foot.
+        let column = UIStackView(arrangedSubviews: [title, counters])
         column.axis = .vertical
         column.alignment = .fill
-        column.distribution = .fillEqually
+        column.spacing = Self.titleToCounters
 
         let row = UIStackView(arrangedSubviews: [flagBox, column])
-        row.alignment = .top
+        row.alignment = .center
         row.spacing = Spacing.md
-        // The side is high, the column's tie to it 999: a name that needs
-        // more than half the disc grows the column, the flag follows it up to
-        // its cap, and past the cap the column outgrows it rather than
+        // The side is high and the flag at least the column's height at 999:
+        // a Dynamic-Type title that outgrows the disc grows the flag with it
+        // up to its cap, and past the cap the column outgrows it rather than
         // clipping a label — the profile's avatar rule.
         let side = flag.heightAnchor.constraint(equalToConstant: flagSide)
         side.priority = .defaultHigh
-        let spans = column.heightAnchor.constraint(equalTo: flag.heightAnchor)
+        let spans = flag.heightAnchor.constraint(greaterThanOrEqualTo: column.heightAnchor)
         spans.priority = .init(999)
         NSLayoutConstraint.activate([
             flag.topAnchor.constraint(equalTo: flagBox.topAnchor),
             flag.leadingAnchor.constraint(equalTo: flagBox.leadingAnchor),
             flag.trailingAnchor.constraint(equalTo: flagBox.trailingAnchor),
-            flag.bottomAnchor.constraint(lessThanOrEqualTo: flagBox.bottomAnchor),
+            flag.bottomAnchor.constraint(equalTo: flagBox.bottomAnchor),
             flag.widthAnchor.constraint(equalTo: flag.heightAnchor),
             side,
             flag.heightAnchor.constraint(lessThanOrEqualToConstant: flagMaxSide),
             spans,
-            column.heightAnchor.constraint(greaterThanOrEqualTo: flag.heightAnchor),
             // The bubble straddles the disc's rim at its bottom-trailing
             // corner, as a badge does: it may overhang into the gap beside it,
             // never into the column.
@@ -427,22 +417,6 @@ final class CountryTitleLabel: UILabel {
             options: [.usesLineFragmentOrigin, .usesFontLeading], context: nil
         )
         return line.width.rounded(.up) <= width
-    }
-
-    /// The height of the title on TWO lines — the name's and the continent's.
-    var twoLineHeight: CGFloat {
-        composed(fits: false).boundingRect(
-            with: CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude),
-            options: [.usesLineFragmentOrigin, .usesFontLeading], context: nil
-        ).height.rounded(.up)
-    }
-
-    /// Always as tall as two lines: a title that fits ONE stands centred
-    /// between where the two would be — a label draws its text centred in its
-    /// height — so the name's place does not jump with its length.
-    override var intrinsicContentSize: CGSize {
-        let size = super.intrinsicContentSize
-        return CGSize(width: size.width, height: max(size.height, twoLineHeight))
     }
 
     override func textRect(forBounds bounds: CGRect, limitedToNumberOfLines numberOfLines: Int) -> CGRect {
