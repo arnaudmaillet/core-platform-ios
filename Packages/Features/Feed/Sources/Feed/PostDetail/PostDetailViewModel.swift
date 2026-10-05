@@ -60,6 +60,8 @@ public final class PostDetailViewModel {
     /// A comment the server didn't take: its text, and whether it was
     /// refused by the author's setting (rather than failed).
     var onCommentFailed: ((_ text: String, _ refused: Bool) -> Void)?
+    /// Approving or declining a held comment failed; the comment stays held.
+    var onReviewFailed: ((_ approve: Bool) -> Void)?
 
     /// Internal, not private: the compose bar's boost button spends against
     /// this identity, and the view controller is the one holding the wallet.
@@ -86,6 +88,8 @@ public final class PostDetailViewModel {
     /// the VIEW MODEL, likes are part of the data pipeline: Trending
     /// weighs them, and every consumer reads one truth.
     private var likedComments: Set<String> = []
+    /// Held comments whose review is on its way to the server.
+    private var reviewing: Set<String> = []
     private var isComposing = false
 
     private var phase: Phase = .loading {
@@ -108,8 +112,17 @@ public final class PostDetailViewModel {
     /// over a picture already on screen.
     private func show(_ identity: ViewerIdentity) {
         guard identity != shownIdentity else { return }
+        let couldReview = isViewerPostOwner
         shownIdentity = identity
         onViewerIdentityChange?(identity)
+        // Who may review held comments follows the viewer.
+        if isViewerPostOwner != couldReview, comments.contains(where: \.isHeld) { emitComments() }
+    }
+
+    /// The viewer is the post's author — the one who reviews its held comments.
+    private var isViewerPostOwner: Bool {
+        guard let authorID, let viewer = shownIdentity?.profileID else { return false }
+        return authorID == viewer
     }
 
     public init(
@@ -367,7 +380,9 @@ public final class PostDetailViewModel {
     }
 
     private func show(_ entry: FeedEntry) {
+        let couldReview = isViewerPostOwner
         authorID = entry.author.id
+        if isViewerPostOwner != couldReview, comments.contains(where: \.isHeld) { emitComments() }
         authorStub = ProfileIdentityStub(
             handle: entry.author.handle,
             displayName: entry.author.displayName
@@ -454,7 +469,45 @@ public final class PostDetailViewModel {
     private func emitComments() {
         let now = now()
         let ordered = Self.sortedForDisplay(comments, order: commentSort, liked: likedComments)
-        onCommentsChange?(.loaded(ordered.map { CommentDisplayModel(entry: $0, now: now) }))
+        let canReview = isViewerPostOwner && commentsProvider is any HeldCommentReviewing
+        onCommentsChange?(.loaded(ordered.map {
+            CommentDisplayModel(entry: $0, now: now, canReview: canReview && !reviewing.contains($0.id))
+        }))
+    }
+
+    // MARK: - Held comments
+
+    /// The post's owner approves (`approve`) or declines a comment held for
+    /// their review (#416). Not optimistic: the comment stays as it is until
+    /// the server answers, then shows to everyone or goes; a failure leaves
+    /// it held and says so.
+    public func reviewHeldComment(_ commentID: String, approve: Bool) {
+        guard let reviewer = commentsProvider as? any HeldCommentReviewing, let postID,
+              isViewerPostOwner, !reviewing.contains(commentID),
+              comments.contains(where: { $0.id == commentID && $0.isHeld })
+        else { return }
+        reviewing.insert(commentID)
+        emitComments()
+        Task { [weak self] in
+            do {
+                try await reviewer.reviewHeldComment(commentID, approve: approve)
+                guard let self else { return }
+                self.reviewing.remove(commentID)
+                self.comments = approve
+                    ? self.comments.map { $0.id == commentID ? $0.released() : $0 }
+                    : self.comments.filter { $0.id != commentID && $0.parentID != commentID }
+                self.commentsProvider?.seedTopComments(self.comments, for: postID)
+                self.emitComments()
+                // The server has the last word — another device may have
+                // reviewed it the other way first.
+                self.loadComments(showing: self.comments)
+            } catch {
+                guard let self else { return }
+                self.reviewing.remove(commentID)
+                self.emitComments()
+                self.onReviewFailed?(approve)
+            }
+        }
     }
 
     // MARK: - Comment sorting & likes

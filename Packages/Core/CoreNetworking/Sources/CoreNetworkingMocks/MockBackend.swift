@@ -60,7 +60,13 @@ public struct MockBackend: Sendable {
         let accountLifecycle = MockAccountLifecycle()
         MockAuthService(lifecycle: accountLifecycle).register(on: bff)
         MockAccountService(lifecycle: accountLifecycle).register(on: bff)
-        let socialServices = MockSocialServices(dataset: dataset, postStore: postStore)
+        // `-mock-verification pending|rejected|approved` gives the viewer a
+        // verification request in that state (#415).
+        let arguments = ProcessInfo.processInfo.arguments
+        let verificationSeed = arguments.firstIndex(of: "-mock-verification").flatMap { index in
+            index + 1 < arguments.count ? arguments[index + 1] : nil
+        }
+        let socialServices = MockSocialServices(dataset: dataset, postStore: postStore, verificationSeed: verificationSeed)
         socialServices.register(on: bff)
         // Following a private profile asks (backend #655); profile.v1 owns
         // who is private. `-mock-follow-requests` seeds the viewer's inbox.
@@ -93,7 +99,10 @@ public struct MockBackend: Sendable {
                 case .mutuals: socialGraph.isFollowing(commenter, owner) && socialGraph.isFollowing(owner, commenter)
                 default: true
                 }
-            }
+            },
+            // `-mock-held-comments` holds two comments on each of the viewer's first
+            // three posts for their review (#416).
+            seedsHeldComments: ProcessInfo.processInfo.arguments.contains("-mock-held-comments")
         ).register(on: bff)
         MockChatService(dataset: dataset).register(on: bff)
         socialGraph.register(on: bff)
