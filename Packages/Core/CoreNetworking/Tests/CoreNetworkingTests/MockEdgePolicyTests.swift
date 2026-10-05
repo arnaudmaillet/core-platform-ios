@@ -10,8 +10,9 @@ private struct StubTokenProvider: AuthTokenProviding {
     func validAccessToken() async throws -> String? { token }
 }
 
-/// The mock edge refuses what the fleet's edge will: a guest (no bearer) may
-/// read public content and report it, and nothing else.
+/// The mock edge refuses what the fleet's edge will: a guest (a `gt-…` guest
+/// token) may read public content and report it, and nothing else; a caller
+/// with no token at all may only sign in or start a guest session.
 struct MockEdgePolicyTests {
     private let backend = MockBackend(enforcesEdgePolicy: true)
 
@@ -36,18 +37,31 @@ struct MockEdgePolicyTests {
     @Test func aGuestReadsPublicContent() async {
         var request = Post_V1_GetPostRequest()
         request.postID = somePostID
-        let response = await Post_V1_PostServiceClient(client: client(token: nil)).getPost(request: request, headers: [:])
+        let response = await Post_V1_PostServiceClient(client: client(token: "gt-1")).getPost(request: request, headers: [:])
         #expect(response.error == nil)
     }
 
+    /// B1: every read needs `read:public` — a guest token at least.
+    @Test func anAnonymousReadIsRefused() async {
+        var request = Post_V1_GetPostRequest()
+        request.postID = somePostID
+        let response = await Post_V1_PostServiceClient(client: client(token: nil)).getPost(request: request, headers: [:])
+        #expect(response.error?.code == .unauthenticated)
+    }
+
+    @Test func anyoneMayStartAGuestSession() {
+        #expect(MockEdgePolicy.access(for: "/auth.v1.AuthService/StartGuestSession") == .open)
+        #expect(MockEdgePolicy.access(for: "/auth.v1.AuthService/StartDeviceAttestation") == .open)
+    }
+
     @Test func aGuestsWriteIsRefusedUnauthenticated() async {
-        let response = await Engagement_V1_EngagementServiceClient(client: client(token: nil))
+        let response = await Engagement_V1_EngagementServiceClient(client: client(token: "gt-1"))
             .upsertReaction(request: reaction(on: somePostID), headers: [:])
         #expect(response.error?.code == .unauthenticated)
     }
 
     @Test func aGuestsViewerReadIsRefused() async {
-        let response = await Notification_V1_NotificationServiceClient(client: client(token: nil))
+        let response = await Notification_V1_NotificationServiceClient(client: client(token: "gt-1"))
             .getUnreadCount(request: Notification_V1_GetUnreadCountRequest(), headers: [:])
         #expect(response.error?.code == .unauthenticated)
     }
@@ -92,7 +106,8 @@ struct MockEdgePolicyTests {
                      "/search.v1.SearchService/Suggest", "/media.v1.MediaService/ResolveDelivery",
                      "/moderation.v1.ModerationService/SubmitReport",
                      "/moderation.v1.ModerationService/ListMyReports", "/auth.v1.AuthService/Login",
-                     "/auth.v1.AuthService/Refresh"] {
+                     "/auth.v1.AuthService/Refresh", "/auth.v1.AuthService/StartGuestSession",
+                     "/auth.v1.AuthService/StartDeviceAttestation"] {
             #expect(served.contains(path), "\(path) is in the policy but not served")
             #expect(MockEdgePolicy.access(for: path) != .member, "\(path) should be open to guests")
         }

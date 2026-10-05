@@ -27,6 +27,10 @@ public final class MockAuthService: @unchecked Sendable {
         /// What the client said it was at login, for device-management lists.
         var device = Auth_V1_DeviceContext()
         var issuedAt = Date()
+        /// A guest's read pass (`StartGuestSession`): never listed among the
+        /// account's sessions, and its access tokens are `gt-…` so the mock
+        /// edge tells a guest from a member (`MockEdgePolicy`).
+        var isGuest = false
     }
 
     /// Two sessions on other devices, so "Where you're logged in" has more
@@ -81,6 +85,12 @@ public final class MockAuthService: @unchecked Sendable {
     public func register(on bff: MockBFF) {
         bff.register(path: "/auth.v1.AuthService/Login") { [self] (request: Auth_V1_LoginRequest) in
             login(request)
+        }
+        bff.register(path: "/auth.v1.AuthService/StartDeviceAttestation") { [self] (_: Auth_V1_StartDeviceAttestationRequest) in
+            startDeviceAttestation()
+        }
+        bff.register(path: "/auth.v1.AuthService/StartGuestSession") { [self] (request: Auth_V1_StartGuestSessionRequest) in
+            startGuestSession(request)
         }
         bff.register(path: "/auth.v1.AuthService/Refresh") { [self] (request: Auth_V1_RefreshRequest) in
             refresh(request)
@@ -140,6 +150,51 @@ public final class MockAuthService: @unchecked Sendable {
         }
     }
 
+    /// A single-use challenge, as the fleet's (#523). The mock accepts any
+    /// attestation; it only remembers what it was sent, for tests.
+    private func startDeviceAttestation() -> Result<Auth_V1_StartDeviceAttestationResponse, ConnectError> {
+        lock.withLock {
+            tokenCounter += 1
+            var response = Auth_V1_StartDeviceAttestationResponse()
+            response.challenge = "challenge-\(tokenCounter)"
+            response.expiresInSecs = 300
+            return .success(response)
+        }
+    }
+
+    /// The last `StartGuestSession` request — what a guest's app sent
+    /// (attestation, country). For tests.
+    public var lastGuestSessionRequest: Auth_V1_StartGuestSessionRequest? {
+        lock.withLock { lastGuestRequest }
+    }
+    private var lastGuestRequest: Auth_V1_StartGuestSessionRequest?
+
+    /// A guest's read pass (guest mode B1): `gt-…` tokens, refreshed like any
+    /// session, never listed among the account's.
+    private func startGuestSession(
+        _ request: Auth_V1_StartGuestSessionRequest
+    ) -> Result<Auth_V1_StartGuestSessionResponse, ConnectError> {
+        guard !request.device.deviceID.isEmpty else {
+            return .failure(ConnectError(code: .invalidArgument, message: "device_id is required"))
+        }
+        return lock.withLock {
+            lastGuestRequest = request
+            tokenCounter += 1
+            let sessionID = "guest-sess-\(tokenCounter)"
+            let refreshToken = "rt-\(tokenCounter)"
+            sessions[sessionID] = SessionRecord(
+                currentRefreshToken: refreshToken,
+                issuedRefreshTokens: [refreshToken],
+                device: request.device,
+                isGuest: true
+            )
+            var response = Auth_V1_StartGuestSessionResponse()
+            response.guestID = "guest-\(tokenCounter)"
+            response.tokens = makeTokenPair(sessionID: sessionID, refreshToken: refreshToken)
+            return .success(response)
+        }
+    }
+
     private func refresh(_ request: Auth_V1_RefreshRequest) -> Result<Auth_V1_RefreshResponse, ConnectError> {
         lock.withLock {
             guard let (sessionID, record) = sessions.first(where: { _, record in
@@ -182,7 +237,7 @@ public final class MockAuthService: @unchecked Sendable {
         lock.withLock {
             var response = Auth_V1_ListSessionsResponse()
             response.sessions = sessions
-                .filter { !$0.value.revoked }
+                .filter { !$0.value.revoked && !$0.value.isGuest }
                 .sorted { $0.value.issuedAt > $1.value.issuedAt }
                 .map { id, record in
                     var view = Auth_V1_SessionView()
@@ -200,7 +255,7 @@ public final class MockAuthService: @unchecked Sendable {
 
     private func logoutAllSessions() -> Result<Auth_V1_LogoutAllSessionsResponse, ConnectError> {
         lock.withLock {
-            let live = sessions.filter { !$0.value.revoked }.keys
+            let live = sessions.filter { !$0.value.revoked && !$0.value.isGuest }.keys
             for id in live {
                 sessions[id]?.revoked = true
             }
@@ -283,7 +338,7 @@ public final class MockAuthService: @unchecked Sendable {
 
     private func makeTokenPair(sessionID: String, refreshToken: String) -> Auth_V1_TokenPair {
         var tokens = Auth_V1_TokenPair()
-        tokens.accessToken = "at-\(tokenCounter)"
+        tokens.accessToken = (sessions[sessionID]?.isGuest == true ? "gt-" : "at-") + "\(tokenCounter)"
         sessionByAccessToken[tokens.accessToken] = sessionID
         tokens.refreshToken = refreshToken
         tokens.tokenType = "Bearer"

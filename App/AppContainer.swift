@@ -110,7 +110,17 @@ final class AppContainer {
     private(set) lazy var sessionManager = SessionManager(
         authClient: Auth_V1_AuthServiceClient(client: unauthenticatedRPCClient),
         store: KeychainSessionStore(store: KeychainStore(service: "cn.wynn.core-platform-ios")),
-        configuration: .init(deviceID: Self.persistentDeviceID(), userAgent: Self.userAgent())
+        configuration: .init(deviceID: Self.persistentDeviceID(), userAgent: Self.userAgent()),
+        // A guest reads with a token of their own (guest mode B1), started on
+        // the first read, with an App Attest proof where the device has one
+        // (#523) and the country location says it's in (B10).
+        guest: GuestSessionContext(
+            store: KeychainSessionStore(
+                store: KeychainStore(service: "cn.wynn.core-platform-ios"), key: "auth.guestSession"
+            ),
+            currentCountry: { [weak self] in await self?.currentCountry.currentCountry },
+            attestor: AppAttestGuestAttestor(keyStore: KeychainStore(service: "cn.wynn.core-platform-ios"))
+        )
     )
 
     /// Who is signed in and as which profile, for the whole app: every
