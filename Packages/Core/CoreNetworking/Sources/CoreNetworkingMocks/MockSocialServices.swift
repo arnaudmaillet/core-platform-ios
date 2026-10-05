@@ -23,6 +23,11 @@ public final class MockSocialServices: @unchecked Sendable {
     /// `SetVisibility` writes, by profile. Only the viewer's account's
     /// profiles can be changed; others keep their seeded flag.
     private var visibilityOverrides: [String: Profile_V1_ProfileVisibility] = [:]
+    /// Posts deleted this session, with when (backend #663: a tombstone,
+    /// restorable for 30 days). Guarded by `lock`.
+    private var deletedPosts: [String: Date] = [:]
+    /// How long a deleted post can be restored.
+    public static let restoreWindow: TimeInterval = 30 * 86_400
     private var viewerDisplayName = MockPostStore.viewer.displayName
     private var viewerBio = MockPostStore.viewer.bio
     private var viewerWebsite = MockPostStore.viewer.websiteURL
@@ -62,6 +67,36 @@ public final class MockSocialServices: @unchecked Sendable {
         }
         bff.register(path: "/post.v1.PostService/ListPostsByProfile") { [self] (request: Post_V1_ListPostsByProfileRequest) in
             listPostsByProfile(request)
+        }
+        bff.register(path: "/post.v1.PostService/DeletePost") { [self] (request: Post_V1_DeletePostRequest) -> Result<Post_V1_CommandResponse, ConnectError> in
+            guard let author = author(ofPost: request.postID) else {
+                return .failure(ConnectError(code: .notFound, message: "post \(request.postID) not found"))
+            }
+            guard author == request.profileID else {
+                return .failure(ConnectError(code: .permissionDenied, message: "PST-1005: not the author"))
+            }
+            lock.withLock { if deletedPosts[request.postID] == nil { deletedPosts[request.postID] = Date() } }
+            var response = Post_V1_CommandResponse()
+            response.success = true
+            return .success(response)
+        }
+        bff.register(path: "/post.v1.PostService/ListRecentlyDeleted") { [self] (request: Post_V1_ListRecentlyDeletedRequest) in
+            listRecentlyDeleted(request)
+        }
+        bff.register(path: "/post.v1.PostService/RestorePost") { [self] (request: Post_V1_RestorePostRequest) -> Result<Post_V1_CommandResponse, ConnectError> in
+            guard author(ofPost: request.postID) == request.profileID else {
+                return .failure(ConnectError(code: .permissionDenied, message: "PST-1005: not the author"))
+            }
+            guard let deletedAt = lock.withLock({ deletedPosts[request.postID] }) else {
+                return .failure(ConnectError(code: .failedPrecondition, message: "PST-1006: post is not deleted"))
+            }
+            guard Date().timeIntervalSince(deletedAt) <= Self.restoreWindow else {
+                return .failure(ConnectError(code: .failedPrecondition, message: "PST-1007: restore window has passed"))
+            }
+            lock.withLock { deletedPosts[request.postID] = nil }
+            var response = Post_V1_CommandResponse()
+            response.success = true
+            return .success(response)
         }
         bff.register(path: "/profile.v1.ProfileService/GetProfileById") { [self] (request: Profile_V1_GetProfileByIdRequest) in
             getProfileByID(request)
@@ -118,7 +153,44 @@ public final class MockSocialServices: @unchecked Sendable {
 
     // MARK: - post.v1
 
+    /// Who wrote a post, client-authored or seeded; nil if unknown.
+    private func author(ofPost postID: String) -> String? {
+        postStore?.record(for: postID)?.profileID ?? dataset.post(for: postID)?.authorProfileID
+    }
+
+    /// Test seam: back-dates a deletion, to reach the end of the window.
+    public func backdateDeletion(of postID: String, by interval: TimeInterval) {
+        lock.withLock { deletedPosts[postID] = deletedPosts[postID]?.addingTimeInterval(-interval) }
+    }
+
+    /// The author's restorable posts, newest deletion first (backend #663).
+    private func listRecentlyDeleted(_ request: Post_V1_ListRecentlyDeletedRequest) -> Result<Post_V1_ListRecentlyDeletedResponse, ConnectError> {
+        let now = Date()
+        let entries = lock.withLock { deletedPosts }
+            .filter { now.timeIntervalSince($0.value) <= Self.restoreWindow }
+            .filter { author(ofPost: $0.key) == request.profileID }
+            .sorted { $0.value > $1.value }
+        var response = Post_V1_ListRecentlyDeletedResponse()
+        response.posts = entries.compactMap { postID, _ in
+            var get = Post_V1_GetPostRequest()
+            get.postID = postID
+            return try? getPost(get).get()
+        }
+        return .success(response)
+    }
+
     private func getPost(_ request: Post_V1_GetPostRequest) -> Result<Post_V1_PostView, ConnectError> {
+        var result = undeletedPost(request)
+        // A deleted post still reads, as the tombstone it is.
+        if case .success(var view) = result, let deletedAt = lock.withLock({ deletedPosts[request.postID] }) {
+            view.status = .deleted
+            view.deletedAtMs = Int64(deletedAt.timeIntervalSince1970 * 1_000)
+            result = .success(view)
+        }
+        return result
+    }
+
+    private func undeletedPost(_ request: Post_V1_GetPostRequest) -> Result<Post_V1_PostView, ConnectError> {
         // Client-authored posts first, then the seeded dataset.
         if let draft = postStore?.record(for: request.postID) {
             var view = Post_V1_PostView()
@@ -167,7 +239,10 @@ public final class MockSocialServices: @unchecked Sendable {
         let seeded = dataset.posts
             .filter { $0.authorProfileID == request.profileID }
             .map { (postID: $0.postID, mediaURL: $0.media?.url, createdAtMS: $0.publishedAtMS) }
-        let all = (authored + seeded).sorted { $0.createdAtMS > $1.createdAtMS }
+        let deleted = lock.withLock { Set(deletedPosts.keys) }
+        let all = (authored + seeded)
+            .filter { !deleted.contains($0.postID) }
+            .sorted { $0.createdAtMS > $1.createdAtMS }
 
         let start = Int(request.pageToken) ?? 0
         let limit = Int(min(max(request.limit, 1), pageSizeCap))

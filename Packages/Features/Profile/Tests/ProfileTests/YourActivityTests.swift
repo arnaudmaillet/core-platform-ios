@@ -15,7 +15,8 @@ struct YourActivityTests {
 
     /// Only what needs a server stays "coming soon"; time limits are live.
     @Test func onlyServerFeaturesArePlanned() {
-        #expect(YourActivityViewController.planned == ["Recently deleted", "Likes and history"])
+        #expect(YourActivityViewController().planned == ["Recently deleted", "Likes and history"])
+        #expect(YourActivityViewController(makeRecentlyDeleted: { UIViewController() }).planned == ["Likes and history"])
     }
 
     /// Like every Settings screen: UIKit's soft blur under the bar.

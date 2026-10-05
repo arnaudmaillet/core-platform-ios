@@ -2,24 +2,33 @@ import CoreStorage
 import DesignSystem
 import UIKit
 
-/// Settings → Your Activity (#489): Time Management (a daily limit and break
-/// reminders) and this iPhone's screen time for the last seven days.
-/// Recently deleted and history clearing wait on the backend (#408).
+/// Settings → Your Activity: Time Management (a daily limit and break
+/// reminders, #489), this iPhone's screen time for the last seven days, and
+/// Recently Deleted (#408). History clearing waits on the backend: no search
+/// or watch history is stored server-side yet (backend #663).
 ///
 /// Everything here is measured and stored on the device; the reminders are
 /// raised by the app shell's `ScreenTimeCoordinator`.
 final class YourActivityViewController: UIViewController {
     private enum Section: Hashable {
-        case limits, usage, comingSoon
+        case limits, usage, content, comingSoon
     }
 
     private enum Item: Hashable {
         case dailyLimit, breakReminder
         case today, week
+        case recentlyDeleted
         case planned(String)
     }
 
-    static let planned = ["Recently deleted", "Likes and history"]
+    /// What still needs the server; Recently deleted joins when this
+    /// composition can't open it.
+    var planned: [String] {
+        (makeRecentlyDeleted == nil ? ["Recently deleted"] : []) + ["Likes and history"]
+    }
+
+    /// Recently Deleted (#408); nil keeps it under Coming Soon.
+    private let makeRecentlyDeleted: (() -> UIViewController)?
 
     private let store: ScreenTimeStore
     private let calendar: Calendar
@@ -27,7 +36,13 @@ final class YourActivityViewController: UIViewController {
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
 
-    init(store: ScreenTimeStore = .standard, calendar: Calendar = .current, now: @escaping () -> Date = Date.init) {
+    init(
+        store: ScreenTimeStore = .standard,
+        calendar: Calendar = .current,
+        now: @escaping () -> Date = Date.init,
+        makeRecentlyDeleted: (() -> UIViewController)? = nil
+    ) {
+        self.makeRecentlyDeleted = makeRecentlyDeleted
         self.store = store
         self.calendar = calendar
         self.now = now
@@ -67,6 +82,7 @@ final class YourActivityViewController: UIViewController {
         switch section {
         case .limits: "Time Management"
         case .usage: "Screen Time"
+        case .content: "Content"
         case .comingSoon: "Coming Soon"
         }
     }
@@ -75,6 +91,7 @@ final class YourActivityViewController: UIViewController {
         switch section {
         case .limits: "A reminder appears when you reach your daily limit, or after this long without a break. Applies to this iPhone."
         case .usage: "Time with the app open, measured on this iPhone. It is never sent anywhere."
+        case .content: "Posts you delete can be restored for 30 days."
         case .comingSoon: "These need a server update and aren't available yet."
         }
     }
@@ -118,10 +135,15 @@ final class YourActivityViewController: UIViewController {
 
     private func applySnapshot() {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
-        snapshot.appendSections([.limits, .usage, .comingSoon])
+        snapshot.appendSections([.limits, .usage])
         snapshot.appendItems([.dailyLimit, .breakReminder], toSection: .limits)
         snapshot.appendItems([.today, .week], toSection: .usage)
-        snapshot.appendItems(Self.planned.map(Item.planned), toSection: .comingSoon)
+        if makeRecentlyDeleted != nil {
+            snapshot.appendSections([.content])
+            snapshot.appendItems([.recentlyDeleted], toSection: .content)
+        }
+        snapshot.appendSections([.comingSoon])
+        snapshot.appendItems(planned.map(Item.planned), toSection: .comingSoon)
         dataSource.apply(snapshot, animatingDifferences: false)
     }
 
@@ -164,6 +186,13 @@ final class YourActivityViewController: UIViewController {
         case .week:
             let days = store.ledger.lastDays(7, endingOn: now(), calendar: calendar)
             cell.contentConfiguration = ScreenTimeWeekConfiguration(days: days, calendar: calendar)
+        case .recentlyDeleted:
+            var content = UIListContentConfiguration.cell()
+            content.text = "Recently Deleted"
+            content.image = UIImage(systemName: "trash")
+            content.imageProperties.tintColor = .label
+            cell.contentConfiguration = content
+            cell.accessories = [.disclosureIndicator()]
         case .planned(let title):
             var content = UIListContentConfiguration.cell()
             content.text = title
@@ -195,8 +224,16 @@ final class YourActivityViewController: UIViewController {
 extension YourActivityViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         switch dataSource.itemIdentifier(for: indexPath) {
-        case .dailyLimit, .breakReminder: true
+        case .dailyLimit, .breakReminder, .recentlyDeleted: true
         default: false
+        }
+    }
+
+    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        guard dataSource.itemIdentifier(for: indexPath) == .recentlyDeleted else { return }
+        collectionView.deselectItem(at: indexPath, animated: true)
+        if let screen = makeRecentlyDeleted?() {
+            navigationController?.pushViewController(screen, animated: true)
         }
     }
 }

@@ -31,7 +31,7 @@ public protocol ProfileGalleryProviding: Sendable {
 /// page is hydrated through `GetPost` — the same summary→view pattern the feed
 /// uses. Hydration failures drop the single post rather than failing the grid.
 public actor ProfileGalleryRepository: ProfileGalleryProviding {
-    private let postClient: any Post_V1_PostServiceClientInterface
+    let postClient: any Post_V1_PostServiceClientInterface
     private let searchClient: any Search_V1_SearchServiceClientInterface
     private let counterClient: any Counter_V1_CounterServiceClientInterface
     /// Resolves the people whose posts these are. Optional so a composition
@@ -118,7 +118,7 @@ public actor ProfileGalleryRepository: ProfileGalleryProviding {
     /// `profile_id` on a post view, so this cannot be folded into hydration —
     /// see `dev/BACKEND_GAPS.md`; a `GetPost` that embedded its author would
     /// remove this hop entirely.
-    private func withAuthors(_ hydrated: [HydratedPost]) async -> [GalleryPost] {
+    func withAuthors(_ hydrated: [HydratedPost]) async -> [GalleryPost] {
         guard profileClient != nil else { return hydrated.map(\.post) }
         let wanted = Set(hydrated.map(\.authorProfileID)).filter { authors[$0] == nil }
         if !wanted.isEmpty {
@@ -204,7 +204,7 @@ private struct GalleryAuthor: Sendable {
 
 /// A gallery post plus the author id (needed for the tagged self-mention
 /// filter, but not part of the public tile model).
-private struct HydratedPost {
+struct HydratedPost {
     let post: GalleryPost
     let authorProfileID: ProfileID
 
