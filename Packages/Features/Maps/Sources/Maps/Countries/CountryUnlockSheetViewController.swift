@@ -8,8 +8,9 @@ import CoreNavigation
 /// ```
 ///  ┌──────────────────────────────────────┐
 ///  │ ▔▔                                   │
-///  │ ╭───╮ Spain  Europe                  │
-///  │ ╰─#4╯ ♥ 12K  86 posts                │
+///  │ ╭────╮  Spain                       │
+///  │ │ 🇪🇸 │  Europe                      │
+///  │ ╰──#4╯  ♥ 12K · 86 posts            │
 ///  │  Unlock Spain to see its posts on    │
 ///  │  your map.                           │
 ///  │ [ ◆ Unlock · 50 ]                    │
@@ -17,10 +18,12 @@ import CoreNavigation
 ///  └──────────────────────────────────────┘
 /// ```
 ///
-/// The header is two lines beside the country's ROUND flag (the map's own
-/// picture, `FlagPalette`), which stands as tall as both: the name and its
-/// continent on the first, the likes and posts on the second. The RANK is not
-/// a counter: it rides the flag as a bubble on its bottom-trailing edge.
+/// The header is the sound sheet's (`SoundSheetHeaderView`), the app's one
+/// "picture and what it is" block: a large ROUND picture — the country's
+/// round flag, the map's own artwork drawn at 96pt (`FlagPalette`) — beside
+/// three one-line rows: the name, the continent, and the counters as a small
+/// meta line. The RANK is not a counter: it rides the flag as a bubble on its
+/// bottom-trailing edge.
 ///
 /// One detent, the content's own height; the map stays visible and the
 /// country stays lifted above the sheet. Gems only — points (likes) never buy
@@ -217,13 +220,19 @@ final class CountryUnlockSheetViewController: UIViewController {
 
     // MARK: - Header
 
-    /// The flag, standing as tall as the two lines beside it — the name and
-    /// its continent, then the counters — with the rank in a bubble over its
-    /// bottom-trailing edge.
+    /// The flag's side: the sound sheet's artwork's, so the two "picture and
+    /// what it is" blocks of the app read as one.
+    static let flagSide: CGFloat = 96
+
+    /// The flag, with the rank in a bubble over its bottom-trailing edge,
+    /// beside the name, the continent and the counters — the sound sheet's
+    /// header (`SoundSheetHeaderView`): the same picture size, the same three
+    /// fonts, the same rhythm.
     static func header(country: CountryAtlas.Country, standing: CountryStanding?) -> UIView {
-        // The round flag the map wears (an emoji drawn and trimmed for a code
-        // the catalog lacks — never an atlas country).
-        let flag = UIImageView(image: FlagPalette.image(for: country.code))
+        // The round flag the map wears, at its LARGE size (an emoji drawn and
+        // trimmed for a code the catalog lacks — never an atlas country).
+        let flag = UIImageView(image: FlagPalette.largeRoundFlag(for: country.code)
+            ?? FlagPalette.image(for: country.code))
         flag.contentMode = .scaleAspectFit
         flag.accessibilityIdentifier = "country.unlock.flag"
         let rank = RankBubble(text: standing.map { "#\($0.rank)" } ?? "#—")
@@ -234,40 +243,32 @@ final class CountryUnlockSheetViewController: UIViewController {
             flagBox.addSubview(view)
         }
 
+        // ONE line each, truncated: the header's height never depends on how
+        // long the name is.
         let name = UILabel()
         name.text = country.name
-        name.font = UIFont.scaledFont(forTextStyle: .title2, weight: .bold)
+        name.font = .scaledFont(forTextStyle: .title3, weight: .semibold)
         name.adjustsFontForContentSizeCategory = true
-        // The longest names ("South Georgia and the South Sandwich Islands")
-        // shrink, then truncate — but only once the continent has given way:
-        // the name is what the sheet is about.
-        name.adjustsFontSizeToFitWidth = true
-        name.minimumScaleFactor = 0.75
-        name.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
         let continent = UILabel()
         continent.text = country.continent
-        continent.font = .appFont(forTextStyle: .body)
+        continent.font = .appFont(forTextStyle: .subheadline)
         continent.adjustsFontForContentSizeCategory = true
         continent.textColor = .secondaryLabel
-        continent.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        continent.setContentHuggingPriority(.required, for: .horizontal)
-        let title = UIStackView(arrangedSubviews: [name, continent, Self.spacer()])
-        title.alignment = .firstBaseline
-        title.spacing = Spacing.sm
 
         let counters = UIStackView(arrangedSubviews: [
-            Self.counter(value: standing.map { CountryStanding.compact($0.likes) } ?? "—",
-                         caption: nil, heart: true),
-            Self.counter(value: standing.map { "\($0.posts)" } ?? "—",
-                         caption: standing?.posts == 1 ? "post" : "posts"),
+            Self.counterHeart(),
+            Self.meta(likes: standing.map { CountryStanding.compact($0.likes) } ?? "—",
+                      posts: standing.map { "\($0.posts)" } ?? "—",
+                      postsWord: standing?.posts == 1 ? "post" : "posts"),
             Self.spacer(),
         ])
         counters.alignment = .center
-        counters.spacing = Spacing.lg
+        counters.spacing = 3
 
-        let lines = UIStackView(arrangedSubviews: [title, counters])
+        let lines = UIStackView(arrangedSubviews: [name, continent, counters])
         lines.axis = .vertical
         lines.spacing = 2
+        lines.setCustomSpacing(Spacing.xs, after: continent)
 
         let row = UIStackView(arrangedSubviews: [flagBox, lines])
         row.alignment = .center
@@ -277,57 +278,59 @@ final class CountryUnlockSheetViewController: UIViewController {
             flag.leadingAnchor.constraint(equalTo: flagBox.leadingAnchor),
             flag.trailingAnchor.constraint(equalTo: flagBox.trailingAnchor),
             flag.bottomAnchor.constraint(equalTo: flagBox.bottomAnchor),
-            // "On two lines": the disc is exactly as tall as the text column.
-            flag.heightAnchor.constraint(equalTo: lines.heightAnchor),
-            flag.widthAnchor.constraint(equalTo: flag.heightAnchor),
+            flag.widthAnchor.constraint(equalToConstant: flagSide),
+            flag.heightAnchor.constraint(equalToConstant: flagSide),
             // The bubble straddles the disc's rim at its bottom-trailing
             // corner, as a badge does: it may overhang into the gap beside it,
-            // never into the name.
-            rank.bottomAnchor.constraint(equalTo: flag.bottomAnchor, constant: 2),
+            // never into the lines.
+            rank.bottomAnchor.constraint(equalTo: flag.bottomAnchor, constant: -2),
             rank.trailingAnchor.constraint(lessThanOrEqualTo: flag.trailingAnchor, constant: Spacing.lg - 4),
         ])
         // A wide rank ("#126") slides LEFT over the disc rather than being
         // truncated against the cap above.
-        let anchor = rank.centerXAnchor.constraint(equalTo: flag.trailingAnchor, constant: -8)
+        let anchor = rank.centerXAnchor.constraint(equalTo: flag.trailingAnchor, constant: -14)
         anchor.priority = .defaultHigh
         anchor.isActive = true
         return row
     }
 
-    /// One counter: its figure, and the word that says what it counts.
-    private static func counter(value: String, caption: String?, heart: Bool = false) -> UIView {
-        let label = UILabel()
-        label.adjustsFontForContentSizeCategory = true
-        let figure = NSMutableAttributedString(string: value, attributes: [
-            .font: UIFont.scaledMonospacedDigitSystemFont(
-                ofSize: 20, weight: .bold, relativeTo: .title3, maximumPointSize: 28
-            ),
+    /// The meta line — the sound sheet's: footnote, figures that do not
+    /// dance, the figures in the ink and their words a step back. "12K · 86
+    /// posts".
+    private static func meta(likes: String, posts: String, postsWord: String) -> UILabel {
+        let size = UIFont.defaultPointSize(for: .footnote)
+        let figure: [NSAttributedString.Key: Any] = [
+            .font: UIFont.scaledMonospacedDigitSystemFont(ofSize: size, weight: .semibold, relativeTo: .footnote),
             .foregroundColor: UIColor.label,
-        ])
-        if let caption {
-            figure.append(NSAttributedString(string: " \(caption)", attributes: [
-                .font: UIFont.appFont(forTextStyle: .body),
-                .foregroundColor: UIColor.secondaryLabel,
-            ]))
-        }
-        label.attributedText = figure
-        label.setContentHuggingPriority(.required, for: .horizontal)
-        label.setContentCompressionResistancePriority(.required, for: .horizontal)
-        guard heart else { return label }
-        // ⚠️ AN IMAGE VIEW, NOT A TEXT ATTACHMENT: the sheet's glass draws
-        // its labels vibrant, attachments included, and the red heart
-        // came out black.
-        // Its red baked in (`.alwaysOriginal`), as the shop row's: a tinted
-        // template came out pink over the dark glass.
+        ]
+        let word: [NSAttributedString.Key: Any] = [
+            .font: UIFont.scaledMonospacedDigitSystemFont(ofSize: size, relativeTo: .footnote),
+            .foregroundColor: UIColor.secondaryLabel,
+        ]
+        let text = NSMutableAttributedString(string: likes, attributes: figure)
+        text.append(NSAttributedString(string: " · ", attributes: word))
+        text.append(NSAttributedString(string: posts, attributes: figure))
+        text.append(NSAttributedString(string: " \(postsWord)", attributes: word))
+        let label = UILabel()
+        label.attributedText = text
+        label.adjustsFontForContentSizeCategory = true
+        label.accessibilityLabel = "\(likes) likes, \(posts) \(postsWord)"
+        return label
+    }
+
+    /// The likes' heart.
+    ///
+    /// ⚠️ AN IMAGE VIEW, NOT A TEXT ATTACHMENT: the sheet's glass draws its
+    /// labels vibrant, attachments included, and the red heart came out black.
+    /// Its red is baked in (`.alwaysOriginal`), as the shop row's: a tinted
+    /// template came out pink over the dark glass.
+    private static func counterHeart() -> UIImageView {
         let icon = UIImageView(image: UIImage(systemName: "heart.fill")?
-            .applyingSymbolConfiguration(.init(pointSize: 16, weight: .bold))?
+            .applyingSymbolConfiguration(.init(textStyle: .footnote, scale: .small))?
             .withTintColor(.systemRed, renderingMode: .alwaysOriginal))
         icon.contentMode = .center
         icon.setContentHuggingPriority(.required, for: .horizontal)
-        let row = UIStackView(arrangedSubviews: [icon, label])
-        row.spacing = 4
-        row.alignment = .center
-        return row
+        return icon
     }
 
     /// Takes the line's slack, so what it sits beside hugs its own edge.
@@ -356,7 +359,7 @@ final class RankBubble: UIView {
         layer.cornerCurve = .continuous
         label.text = text
         label.font = .scaledMonospacedDigitSystemFont(
-            ofSize: 12, weight: .heavy, relativeTo: .caption1, maximumPointSize: 18
+            ofSize: 13, weight: .heavy, relativeTo: .caption1, maximumPointSize: 19
         )
         label.adjustsFontForContentSizeCategory = true
         label.textColor = .white

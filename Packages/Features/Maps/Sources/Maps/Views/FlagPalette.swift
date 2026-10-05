@@ -5,8 +5,7 @@ import UIKit
 /// is painted with.
 ///
 /// The picture comes from `Resources/Flags/Flags.xcassets` — circle-flags
-/// (MIT, `Resources/Flags/LICENSE`), pre-rendered to PNG at the largest size
-/// the app draws one (56pt, the unlock offer's header) by
+/// (MIT, `Resources/Flags/LICENSE`), pre-rendered to PNG at the disc's size by
 /// `Scripts/import-circle-flags.py`, so no SVG is ever rasterised at run time.
 /// Every `CountryAtlas` country has one. A code the catalog lacks (a post's
 /// country outside the atlas) falls back to its EMOJI, drawn and trimmed;
@@ -113,6 +112,14 @@ enum FlagPalette {
     /// nil traits pick the main screen's scale.
     static func roundFlag(for code: String) -> UIImage? {
         UIImage(named: code.uppercased(), in: .module, compatibleWith: nil)
+    }
+
+    /// The round flag of `code` drawn LARGE (96pt, the unlock offer's
+    /// header), or nil. A separate image set, so the map — which holds every
+    /// country's flag decoded at world zoom — never decodes this one; read it
+    /// for one flag on screen, not for a layer of them.
+    static func largeRoundFlag(for code: String) -> UIImage? {
+        UIImage(named: code.uppercased() + "-large", in: .module, compatibleWith: nil)
     }
 
     /// The regional-indicator flag ("🇫🇷").

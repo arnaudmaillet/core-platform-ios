@@ -8,11 +8,14 @@ pinned at tag `TAG` (commit `COMMIT`). Only the flags of the countries in
 `Packages/Features/Maps/Sources/Maps/Resources/countries.json` are fetched.
 
 Writes `Packages/Features/Maps/Sources/Maps/Resources/Flags/Flags.xcassets`:
-one image set per country, named by its ISO 3166-1 alpha-2 code ("FR"), with
-the SVG rasterised by `rsvg-convert` (librsvg) at @2x and @3x of `POINT_SIZE`
-— the largest size the app draws a flag (the unlock offer's header, two lines
-tall); the map's empty-country disc draws it at 40 and the corner badge at
-half that. Pre-rendered, so the app never
+two image sets per country, named by its ISO 3166-1 alpha-2 code, with the
+SVG rasterised by `rsvg-convert` (librsvg) at @2x and @3x of each of `SIZES`:
+- "FR", at `POINT_SIZE` — the largest size the map draws a flag (an empty
+  country's disc); the corner badge draws the same picture at half that;
+- "FR-large", at `LARGE_POINT_SIZE` — the unlock offer's header, one flag at
+  a time. Kept apart so the map, which holds every country's flag decoded at
+  world zoom, never decodes the large one.
+Pre-rendered, so the app never
 rasterises an SVG at run time, and an asset catalog, so App Thinning ships one
 scale per device.
 
@@ -39,7 +42,10 @@ CATALOG = OUT / "Flags.xcassets"
 TAG = "v2.8.0"
 COMMIT = "66333d058b553461223de5ec3b6e21ff846bcd5a"
 RAW = f"https://raw.githubusercontent.com/HatScripts/circle-flags/{COMMIT}"
-POINT_SIZE = 56
+POINT_SIZE = 40
+LARGE_POINT_SIZE = 96
+# Image set name suffix -> point size.
+SIZES = {"": POINT_SIZE, "-large": LARGE_POINT_SIZE}
 SCALES = (2, 3)
 
 LICENSE_HEADER = f"""The round flags in Flags.xcassets are from circle-flags by HatScripts,
@@ -82,20 +88,21 @@ def main():
                 continue
             source = Path(scratch) / f"{code}.svg"
             source.write_bytes(svg)
-            imageset = CATALOG / f"{code}.imageset"
-            imageset.mkdir()
-            images = [{"idiom": "universal", "scale": "1x"}]
-            for scale in SCALES:
-                name = f"{code}@{scale}x.png"
-                side = str(POINT_SIZE * scale)
-                subprocess.run(
-                    ["rsvg-convert", "-w", side, "-h", side, "-o", str(imageset / name), str(source)],
-                    check=True,
+            for suffix, points in SIZES.items():
+                imageset = CATALOG / f"{code}{suffix}.imageset"
+                imageset.mkdir()
+                images = [{"idiom": "universal", "scale": "1x"}]
+                for scale in SCALES:
+                    name = f"{code}{suffix}@{scale}x.png"
+                    side = str(points * scale)
+                    subprocess.run(
+                        ["rsvg-convert", "-w", side, "-h", side, "-o", str(imageset / name), str(source)],
+                        check=True,
+                    )
+                    images.append({"filename": name, "idiom": "universal", "scale": f"{scale}x"})
+                (imageset / "Contents.json").write_text(
+                    json.dumps({"images": images, "info": {"author": "xcode", "version": 1}}, indent=2) + "\n"
                 )
-                images.append({"filename": name, "idiom": "universal", "scale": f"{scale}x"})
-            (imageset / "Contents.json").write_text(
-                json.dumps({"images": images, "info": {"author": "xcode", "version": 1}}, indent=2) + "\n"
-            )
     print(f"{len(codes) - len(missing)} flags written to {CATALOG.relative_to(ROOT)}")
     if missing:
         print("no flag (emoji fallback): " + " ".join(missing))
