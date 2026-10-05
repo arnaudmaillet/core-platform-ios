@@ -10,8 +10,9 @@ pinned at tag `TAG` (commit `COMMIT`). Only the flags of the countries in
 Writes `Packages/Features/Maps/Sources/Maps/Resources/Flags/Flags.xcassets`:
 one image set per country, named by its ISO 3166-1 alpha-2 code ("FR"), with
 the SVG rasterised by `rsvg-convert` (librsvg) at @2x and @3x of `POINT_SIZE`
-— the largest size the map draws a flag (an empty country's disc); the corner
-badge draws the same picture at half that. Pre-rendered, so the app never
+— the largest size the app draws a flag (the unlock offer's header, two lines
+tall); the map's empty-country disc draws it at 40 and the corner badge at
+half that. Pre-rendered, so the app never
 rasterises an SVG at run time, and an asset catalog, so App Thinning ships one
 scale per device.
 
@@ -38,7 +39,7 @@ CATALOG = OUT / "Flags.xcassets"
 TAG = "v2.8.0"
 COMMIT = "66333d058b553461223de5ec3b6e21ff846bcd5a"
 RAW = f"https://raw.githubusercontent.com/HatScripts/circle-flags/{COMMIT}"
-POINT_SIZE = 40
+POINT_SIZE = 56
 SCALES = (2, 3)
 
 LICENSE_HEADER = f"""The round flags in Flags.xcassets are from circle-flags by HatScripts,

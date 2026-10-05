@@ -780,7 +780,7 @@ struct FlagPaletteTests {
             #expect(entry.image != nil, "\(country.code)")
             #expect(entry.isRound, "\(country.code) has no round flag in Flags.xcassets")
             if let image = entry.image {
-                #expect(image.size == CGSize(width: 40, height: 40), "\(country.code): rendered for the 40pt disc")
+                #expect(image.size == CGSize(width: 56, height: 56), "\(country.code): rendered for the offer header's 56pt disc")
             }
         }
     }

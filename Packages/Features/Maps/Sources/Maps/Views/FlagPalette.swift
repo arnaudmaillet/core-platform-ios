@@ -5,7 +5,8 @@ import UIKit
 /// is painted with.
 ///
 /// The picture comes from `Resources/Flags/Flags.xcassets` — circle-flags
-/// (MIT, `Resources/Flags/LICENSE`), pre-rendered to PNG at the disc's size by
+/// (MIT, `Resources/Flags/LICENSE`), pre-rendered to PNG at the largest size
+/// the app draws one (56pt, the unlock offer's header) by
 /// `Scripts/import-circle-flags.py`, so no SVG is ever rasterised at run time.
 /// Every `CountryAtlas` country has one. A code the catalog lacks (a post's
 /// country outside the atlas) falls back to its EMOJI, drawn and trimmed;
