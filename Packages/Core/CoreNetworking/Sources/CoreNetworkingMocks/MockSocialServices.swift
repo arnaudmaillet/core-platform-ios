@@ -11,6 +11,8 @@ public final class MockSocialServices: @unchecked Sendable {
     private let dataset: MockSocialDataset
     private let postStore: MockPostStore?
     private let pageSizeCap: Int32
+    /// Ranks the discovery pool by likes. Nil ranks it by publication.
+    private let counters: MockCounterStore?
 
     private let lock = NSLock()
     private var servedWarmRequest = false
@@ -76,11 +78,13 @@ public final class MockSocialServices: @unchecked Sendable {
         dataset: MockSocialDataset = MockSocialDataset(),
         postStore: MockPostStore? = nil,
         pageSizeCap: Int32 = 50,
-        verificationSeed: String? = nil
+        verificationSeed: String? = nil,
+        counters: MockCounterStore? = nil
     ) {
         self.dataset = dataset
         self.postStore = postStore
         self.pageSizeCap = pageSizeCap
+        self.counters = counters
         if let seeded = Self.verificationRequest(seed: verificationSeed) {
             verificationRequests[MockPostStore.viewer.profileID] = seeded
         }
@@ -122,6 +126,9 @@ public final class MockSocialServices: @unchecked Sendable {
     public func register(on bff: MockBFF) {
         bff.register(path: "/timeline.v1.TimelineService/GetFollowingFeed") { [self] (request: Timeline_V1_GetFollowingFeedRequest) in
             getFollowingFeed(request)
+        }
+        bff.register(path: "/timeline.v1.TimelineService/GetDiscoveryFeed") { [self] (request: Timeline_V1_GetDiscoveryFeedRequest) in
+            getDiscoveryFeed(request)
         }
         bff.register(path: "/post.v1.PostService/GetPost") { [self] (request: Post_V1_GetPostRequest) in
             getPost(request)
@@ -336,6 +343,38 @@ public final class MockSocialServices: @unchecked Sendable {
     }
 
     // MARK: - timeline.v1
+
+    /// The discovery pool (backend B3): every post, everyone's, viewer-free.
+    /// RECENT is newest first; FOR_YOU, TRENDING and NEARBY rank by likes,
+    /// then recency. The mock has no age-gated posts, so `content_level` is
+    /// echoed and filters nothing (a guest always gets RESTRICTED).
+    private func getDiscoveryFeed(
+        _ request: Timeline_V1_GetDiscoveryFeedRequest
+    ) -> Result<Timeline_V1_GetDiscoveryFeedResponse, ConnectError> {
+        var pool = timelineFeed
+        if request.ranking != .recent, let counters {
+            let likes = Dictionary(pool.map { ($0.postID, counters.likeCount(for: $0.postID)) },
+                                   uniquingKeysWith: { first, _ in first })
+            pool.sort { (likes[$0.postID] ?? 0, $0.publishedAtMS) > (likes[$1.postID] ?? 0, $1.publishedAtMS) }
+        }
+        let start = Int(request.pageToken) ?? 0
+        let limit = Int(request.limit <= 0 ? 20 : min(request.limit, pageSizeCap))
+        let end = min(start + limit, pool.count)
+        guard start <= end else {
+            return .failure(ConnectError(code: .invalidArgument, message: "bad page token"))
+        }
+        var response = Timeline_V1_GetDiscoveryFeedResponse()
+        response.items = pool[start..<end].map { record in
+            var item = Timeline_V1_FeedItem()
+            item.postID = record.postID
+            item.authorID = record.authorID
+            item.publishedAtMs = record.publishedAtMS
+            return item
+        }
+        response.nextPageToken = end < pool.count ? String(end) : ""
+        response.contentLevelApplied = request.contentLevel == .standard ? .standard : .restricted
+        return .success(response)
+    }
 
     private func getFollowingFeed(_ request: Timeline_V1_GetFollowingFeedRequest) -> Result<Timeline_V1_GetFollowingFeedResponse, ConnectError> {
         guard request.profileID == MockSocialDataset.viewerProfileID else {

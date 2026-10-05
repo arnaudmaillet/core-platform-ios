@@ -66,7 +66,9 @@ public struct MockBackend: Sendable {
         let verificationSeed = arguments.firstIndex(of: "-mock-verification").flatMap { index in
             index + 1 < arguments.count ? arguments[index + 1] : nil
         }
-        let socialServices = MockSocialServices(dataset: dataset, postStore: postStore, verificationSeed: verificationSeed)
+        let socialServices = MockSocialServices(
+            dataset: dataset, postStore: postStore, verificationSeed: verificationSeed, counters: counterStore
+        )
         socialServices.register(on: bff)
         // Following a private profile asks (backend #655); profile.v1 owns
         // who is private. `-mock-follow-requests` seeds the viewer's inbox.

@@ -516,17 +516,29 @@ final class AppContainer {
         // "Use this sound": the shell opens its camera with it. Read at the
         // tap, because the shell sets it after this builder exists.
         useSound: { [unowned self] sound in self.onUseSound?(sound) },
-        isMember: { [unowned self] in self.memberGate.isMember },
-        guestDiscoveryPostIDs: { [unowned self] in try await self.guestDiscoveryPostIDs() }
+        discovery: discoveryRepository
     )
 
-    /// A guest's For You, until the backend has a discovery feed (#448): the
-    /// posts the map knows worldwide, most liked first. `QueryTile` is the one
-    /// viewer-free list both the fleet and the mock serve today.
-    private func guestDiscoveryPostIDs() async throws -> [PostID] {
-        let world = MapViewport(swLat: -85, swLng: -180, neLat: 85, neLng: 180, zoomLevel: 2)
-        let pins = try await mapsRepository.queryTile(world, filter: nil).pins
-        return pins.sorted { $0.likeCount > $1.likeCount }.prefix(60).map(\.postID)
+    /// Discover's pool (`timeline.v1.GetDiscoveryFeed`, backend B3 / #512):
+    /// the same for guests and members, hydrated through the one feed
+    /// repository. Also the search screen's trending corpus.
+    private lazy var discoveryRepository = DiscoveryFeedRepository(
+        timelineClient: Timeline_V1_TimelineServiceClient(client: authenticatedRPCClient),
+        base: feedRepository,
+        contentLevel: { [weak self] in await self?.discoveryContentLevel() ?? .restricted }
+    )
+
+    /// The active profile's Sensitive Content setting (#407) as Discover's
+    /// content level. A guest — and anything that can't be read — is
+    /// restricted; the server clamps teens and guests to it anyway.
+    private func discoveryContentLevel() async -> DiscoveryContentLevel {
+        guard memberGate.isMember,
+              let profileID = try? await viewerSession.activeProfileID() else { return .restricted }
+        var request = Profile_V1_GetProfileByIdRequest()
+        request.profileID = profileID.rawValue
+        let view = await Profile_V1_ProfileServiceClient(client: authenticatedRPCClient)
+            .getProfileByID(request: request, headers: [:]).message
+        return view?.feedSettings.sensitiveContent == .standard ? .standard : .restricted
     }
 
     /// Set by the shell, which owns the presentation of the camera.
@@ -937,7 +949,8 @@ final class AppContainer {
     private lazy var exploreRepository = ForYouExploreAdapter(
         forYou: ForYouRepository(
             feed: feedRepository,
-            counterClient: Counter_V1_CounterServiceClient(client: authenticatedRPCClient)
+            counterClient: Counter_V1_CounterServiceClient(client: authenticatedRPCClient),
+            discovery: discoveryRepository
         )
     )
 
