@@ -7,6 +7,7 @@ public protocol SignUpPerforming: Sendable {
     func startFederatedSignIn() async throws -> String
     func signIn(_ credential: SignInCredential) async throws -> CodeSignIn
     func signUp(_ credential: SignInCredential, details: SignUpDetails) async throws -> SignUpOutcome
+    func completeSignIn(_ account: PendingAccount) async
     func completeSignUp(_ pending: PendingAccount) async throws
 }
 
@@ -50,6 +51,10 @@ public enum HandleCheck: Equatable, Sendable {
 /// The profile a new account needs before it is the app's member — answered
 /// by the app (`profile.v1`), which the Auth feature does not import.
 public protocol AccountProfileSetup: Sendable {
+    /// Whether the account holds a profile — false for one a sign-up left
+    /// before its profile (the app closed at the username step). Unknown
+    /// (offline) answers true: signing in is not held back on a guess.
+    func hasProfile(_ account: PendingAccount) async -> Bool
     func checkHandle(_ handle: String) async -> HandleCheck
     /// `profile.v1.CreateProfile`, with the PENDING account's own token: the
     /// app's session is still the guest's until `completeSignUp`.

@@ -12,6 +12,16 @@ struct AccountProfileSetupService: AccountProfileSetup {
     /// guest token.
     let profileClient: any Profile_V1_ProfileServiceClientInterface
 
+    func hasProfile(_ account: PendingAccount) async -> Bool {
+        var request = Profile_V1_ListProfilesByAccountRequest()
+        request.accountID = account.accountID.rawValue
+        let response = await profileClient.listProfilesByAccount(
+            request: request, headers: ["Authorization": ["Bearer \(account.accessToken)"]]
+        )
+        guard let answer = response.message else { return true }
+        return !answer.profiles.isEmpty
+    }
+
     func checkHandle(_ handle: String) async -> HandleCheck {
         var request = Profile_V1_CheckHandleAvailabilityRequest()
         request.handle = handle

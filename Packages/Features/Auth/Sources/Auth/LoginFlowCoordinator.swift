@@ -296,8 +296,8 @@ final class LoginFlowCoordinator {
             do {
                 let credential = SignInCredential.code(challengeID: challenge.id, code: code)
                 switch try await signUp.signIn(credential) {
-                case .signedIn:
-                    break // the presenter dismisses on the new session
+                case .existing(let account):
+                    await self?.finishSignIn(account, from: step)
                 case .needsSignUp:
                     step?.setWorking(false)
                     self?.credential = credential
@@ -325,8 +325,9 @@ final class LoginFlowCoordinator {
                 let result = try await federated.signIn(with: provider, nonce: nonce)
                 let credential = SignInCredential.idToken(provider, token: result.idToken, nonce: nonce)
                 switch try await signUp.signIn(credential) {
-                case .signedIn:
-                    break // the presenter dismisses on the new session
+                case .existing(let account):
+                    self?.suggestedName = result.displayName
+                    await self?.finishSignIn(account, from: nil)
                 case .needsSignUp:
                     self?.credential = credential
                     self?.suggestedName = result.displayName
@@ -338,6 +339,19 @@ final class LoginFlowCoordinator {
                 self?.presentFlowError(error, on: nil)
             }
         }
+    }
+
+    /// An account that has its profile becomes the session, and the shell
+    /// puts the flow away. One a sign-up left before its profile — the app
+    /// closed at the username step — picks up there ("Finish setting up").
+    private func finishSignIn(_ account: PendingAccount, from step: SignUpStepViewController?) async {
+        guard let signUp else { return }
+        if let profileSetup, await !profileSetup.hasProfile(account) {
+            step?.setWorking(false)
+            showProfileSetup(for: account, setup: profileSetup, finishing: true)
+            return
+        }
+        await signUp.completeSignIn(account)
     }
 
     private func showBirthday() {
@@ -392,8 +406,8 @@ final class LoginFlowCoordinator {
         }
     }
 
-    private func showProfileSetup(for pending: PendingAccount, setup: any AccountProfileSetup) {
-        let step = ProfileSetupViewController(setup: setup, suggestedName: suggestedName)
+    private func showProfileSetup(for pending: PendingAccount, setup: any AccountProfileSetup, finishing: Bool = false) {
+        let step = ProfileSetupViewController(setup: setup, suggestedName: suggestedName, finishing: finishing)
         step.onCreate = { [weak self, weak step] handle, name in
             guard let signUp = self?.signUp else { return }
             step?.setWorking(true)
