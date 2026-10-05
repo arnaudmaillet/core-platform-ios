@@ -104,7 +104,7 @@ public final class EmoteTileView: UIView {
         glyphLabel.isHidden = false
         accessibilityLabel = emote.name
 
-        let policy = AnimatedIconView.policy
+        let policy = EmoteMotion.policy
         let motion: EmoteEngine.Motion = policy == .still ? .still : .loop
         if motion == .still && emote.isUnicodeEmoji { return }
         if let art = engine.cachedArt(for: emote, pixelSide: Self.pixelSide, motion: motion) {

@@ -38,6 +38,7 @@ enum SettingsSection: String, CaseIterable, Sendable {
     // App and device (#468)
     case playback
     case display
+    case emojis
     case mediaComments
     case language
     case storage
@@ -49,7 +50,7 @@ enum SettingsSection: String, CaseIterable, Sendable {
         switch self {
         case .account, .security, .familyAndTeens, .wallet, .adsAndData: .account
         case .privacy, .safety, .notifications, .whatYouSee, .activity: .profile
-        case .playback, .display, .mediaComments, .language, .storage: .device
+        case .playback, .display, .emojis, .mediaComments, .language, .storage: .device
         case .help, .legal: .support
         }
     }
@@ -68,6 +69,7 @@ enum SettingsSection: String, CaseIterable, Sendable {
         case .activity: "Your Activity"
         case .playback: "Playback and Sound"
         case .display: "Display"
+        case .emojis: "Emojis"
         case .mediaComments: "Comments on Media"
         case .language: "Language"
         case .storage: "Storage"
@@ -91,6 +93,7 @@ enum SettingsSection: String, CaseIterable, Sendable {
         case .activity: "clock.arrow.circlepath"
         case .playback: "play.rectangle"
         case .display: "circle.lefthalf.filled"
+        case .emojis: "face.smiling"
         case .mediaComments: "text.bubble"
         case .language: "globe"
         case .storage: "internaldrive"
@@ -115,6 +118,7 @@ enum SettingsSection: String, CaseIterable, Sendable {
         case .activity: ["Recently deleted", "Likes and history", "Time limits and breaks"]
         case .playback: ["Autoplay", "Start with sound", "Data saver"]
         case .display: ["Light, dark or system appearance", "Reduce motion"]
+        case .emojis: ["Animated emojis"]
         case .mediaComments: ["Reaction band", "Muted words and accounts", "Subtitles"]
         case .language: ["App language"]
         case .storage: ["Media cache"]

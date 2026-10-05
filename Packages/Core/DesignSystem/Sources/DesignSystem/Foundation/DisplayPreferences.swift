@@ -24,10 +24,67 @@ public enum MotionPreference {
         }
     }
 
-    /// What every animation asks.
+    /// What every animation asks: iOS, the app's switch, or Power Saving.
     public static var reducesMotion: Bool {
-        UIAccessibility.isReduceMotionEnabled || appReducesMotion
+        UIAccessibility.isReduceMotionEnabled || appReducesMotion || PowerSavingPreference.isOn
     }
+}
+
+/// Settings → App and Device → Power Saving: one switch that stills animated
+/// emojis, turns on Reduce Motion and stops videos from playing on their own.
+///
+/// It overrides rather than rewrites: the viewer's own Reduce Motion,
+/// Autoplay and Animate Emojis choices are left as they were, and every
+/// reader combines them with this (`MotionPreference.reducesMotion`,
+/// `EmoteAnimationPreference.animatesEmotes`, the feed's autoplay policy).
+/// Turning it off brings their choices back untouched.
+public enum PowerSavingPreference {
+    static let key = "device.powerSaving"
+    /// Swappable for tests.
+    nonisolated(unsafe) static var defaults: UserDefaults = .standard
+
+    public static var isOn: Bool {
+        get { defaults.bool(forKey: key) }
+        set {
+            guard newValue != isOn else { return }
+            defaults.set(newValue, forKey: key)
+            let center = NotificationCenter.default
+            // Everything that honours Reduce Motion already listens for this.
+            center.post(name: UIAccessibility.reduceMotionStatusDidChangeNotification, object: nil)
+            center.post(name: .emoteAnimationPreferenceDidChange, object: nil)
+            center.post(name: .powerSavingPreferenceDidChange, object: nil)
+        }
+    }
+}
+
+/// Settings → App and Device → Emojis: whether emojis and stickers in text
+/// play their animation. Off, they stay on their still frame.
+public enum EmoteAnimationPreference {
+    static let key = "display.animatesEmotes"
+    /// Swappable for tests.
+    nonisolated(unsafe) static var defaults: UserDefaults = .standard
+
+    /// The viewer's own switch; on until they turn it off.
+    public static var isOn: Bool {
+        get { defaults.object(forKey: key) as? Bool ?? true }
+        set {
+            guard newValue != isOn else { return }
+            defaults.set(newValue, forKey: key)
+            NotificationCenter.default.post(name: .emoteAnimationPreferenceDidChange, object: nil)
+        }
+    }
+
+    /// What an emote asks: the viewer's switch, unless Power Saving is on.
+    public static var animatesEmotes: Bool {
+        isOn && !PowerSavingPreference.isOn
+    }
+}
+
+extension Notification.Name {
+    /// Posted when `EmoteAnimationPreference.animatesEmotes` may have changed.
+    public static let emoteAnimationPreferenceDidChange = Notification.Name("cn.wynn.core-platform-ios.emoteAnimationPreferenceDidChange")
+    /// Posted when Power Saving is switched on or off.
+    public static let powerSavingPreferenceDidChange = Notification.Name("cn.wynn.core-platform-ios.powerSavingPreferenceDidChange")
 }
 
 /// Light, dark, or following iOS — for the whole app (Settings → App and
