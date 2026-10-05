@@ -5,8 +5,10 @@ import SwiftProtobuf
 
 /// Fake of social_graph.v1 over the shared dataset. Enough to make the profile
 /// surface work offline: a relation status (so Follow/Message buttons appear),
-/// follow/unfollow commands, and follower/following edges (so counts render as
-/// numbers rather than "—").
+/// follow/unfollow commands, follower/following edges (so counts render as
+/// numbers rather than "—"), and follow requests for private profiles
+/// (backend #655: following a private profile asks, and only the owner's
+/// approval makes the edge).
 public final class MockSocialGraphService: @unchecked Sendable {
     private let dataset: MockSocialDataset
     /// Blocks the viewer has placed this session, keyed actor → targets. The
@@ -30,6 +32,12 @@ public final class MockSocialGraphService: @unchecked Sendable {
     /// the mock is the only deployment where that flow can be exercised.
     private var addedEdges: Set<Edge> = []
     private var removedEdges: Set<Edge> = []
+    /// Pending follow requests, requester → private target, with when they
+    /// were asked. A request is not an edge: no list, count or relation
+    /// status other than `.requested` sees it.
+    private var requests: [Edge: Date] = [:]
+    /// Whether a profile is private right now; profile.v1 owns that flag.
+    private let isPrivate: @Sendable (String) -> Bool
 
     private struct Edge: Hashable {
         let follower: String
@@ -39,9 +47,28 @@ public final class MockSocialGraphService: @unchecked Sendable {
     /// Page size cap for the edge lists, matching the other mocks' ceiling.
     private let pageSizeCap: Int32
 
-    public init(dataset: MockSocialDataset, pageSizeCap: Int32 = 50) {
+    /// `seedsFollowRequests` gives the viewer three pending requests from
+    /// authors who don't follow them, so the requests inbox can be seen filled.
+    public init(
+        dataset: MockSocialDataset,
+        pageSizeCap: Int32 = 50,
+        isPrivate: @escaping @Sendable (String) -> Bool = { _ in false },
+        seedsFollowRequests: Bool = false
+    ) {
         self.dataset = dataset
         self.pageSizeCap = pageSizeCap
+        self.isPrivate = isPrivate
+        if seedsFollowRequests {
+            let viewer = MockSocialDataset.viewerProfileID
+            let strangers = dataset.authors.map(\.profileID).filter { id in
+                !dataset.followerProfileIDs.contains(id)
+                    && !(dataset.followingByProfileID[viewer]?.contains(id) ?? false)
+            }
+            for (index, requester) in strangers.prefix(3).enumerated() {
+                let hoursAgo = [1.0, 26, 74][index]
+                requests[Edge(follower: requester, followee: viewer)] = Date().addingTimeInterval(-hoursAgo * 3_600)
+            }
+        }
     }
 
     public func register(on bff: MockBFF) {
@@ -64,8 +91,58 @@ public final class MockSocialGraphService: @unchecked Sendable {
             view.targetFollowingCount = Int64(following(of: request.targetID).count)
             return .success(view)
         }
-        bff.register(path: "/social_graph.v1.SocialGraphService/Follow") { [self] (request: SocialGraph_V1_FollowRequest) in
+        bff.register(path: "/social_graph.v1.SocialGraphService/Follow") { [self] (request: SocialGraph_V1_FollowRequest) -> Result<SocialGraph_V1_CommandResponse, ConnectError> in
+            var response = SocialGraph_V1_CommandResponse()
+            response.success = true
+            response.actorID = request.actorID
+            response.targetID = request.targetID
+            let edge = Edge(follower: request.actorID, followee: request.targetID)
+            // A private profile is asked, not followed — unless the edge
+            // already exists. Following a now-public profile clears an old
+            // request, as on the fleet.
+            if isPrivate(request.targetID), !follows(request.actorID, request.targetID) {
+                let pending = lock.withLock { requests[edge] != nil }
+                if pending {
+                    return .failure(ConnectError(code: .alreadyExists, message: "SGR-1005: follow request already pending"))
+                }
+                lock.withLock { requests[edge] = Date() }
+                response.requested = true
+                return .success(response)
+            }
+            lock.withLock { requests[edge] = nil }
             setEdge(true, follower: request.actorID, followee: request.targetID)
+            return .success(response)
+        }
+        bff.register(path: "/social_graph.v1.SocialGraphService/ListFollowRequests") { [self] (request: SocialGraph_V1_ListFollowRequestsRequest) in
+            let inbox = lock.withLock {
+                requests.filter { $0.key.followee == request.ownerID }
+                    .sorted { $0.value > $1.value }
+                    .map { edge, date in
+                        var summary = SocialGraph_V1_EdgeSummary()
+                        summary.profileID = edge.follower
+                        summary.followedAt = .init(date: date)
+                        return summary
+                    }
+            }
+            return page(inbox, limit: request.limit == 0 ? 20 : request.limit, token: request.pageToken).map { slice, next in
+                var response = SocialGraph_V1_ListFollowRequestsResponse()
+                response.requests = slice
+                response.nextPageToken = next
+                return response
+            }
+        }
+        bff.register(path: "/social_graph.v1.SocialGraphService/ApproveFollowRequest") { [self] (request: SocialGraph_V1_AnswerFollowRequestRequest) in
+            answer(request, approve: true)
+        }
+        bff.register(path: "/social_graph.v1.SocialGraphService/DeclineFollowRequest") { [self] (request: SocialGraph_V1_AnswerFollowRequestRequest) in
+            answer(request, approve: false)
+        }
+        bff.register(path: "/social_graph.v1.SocialGraphService/CancelFollowRequest") { [self] (request: SocialGraph_V1_CancelFollowRequestRequest) -> Result<SocialGraph_V1_CommandResponse, ConnectError> in
+            let edge = Edge(follower: request.actorID, followee: request.targetID)
+            let removed = lock.withLock { requests.removeValue(forKey: edge) != nil }
+            guard removed else {
+                return .failure(ConnectError(code: .failedPrecondition, message: "SGR-1006: no follow request pending"))
+            }
             var response = SocialGraph_V1_CommandResponse()
             response.success = true
             return .success(response)
@@ -155,9 +232,29 @@ public final class MockSocialGraphService: @unchecked Sendable {
         profileID.isEmpty ? MockSocialDataset.viewerProfileID : profileID
     }
 
+    /// Approve makes the edge; decline drops the request and tells no one.
+    private func answer(
+        _ request: SocialGraph_V1_AnswerFollowRequestRequest, approve: Bool
+    ) -> Result<SocialGraph_V1_CommandResponse, ConnectError> {
+        let edge = Edge(follower: request.requesterID, followee: request.ownerID)
+        let removed = lock.withLock { requests.removeValue(forKey: edge) != nil }
+        guard removed else {
+            return .failure(ConnectError(code: .failedPrecondition, message: "SGR-1006: no follow request pending"))
+        }
+        if approve { setEdge(true, follower: request.requesterID, followee: request.ownerID) }
+        var response = SocialGraph_V1_CommandResponse()
+        response.success = true
+        response.actorID = request.ownerID
+        response.targetID = request.requesterID
+        return .success(response)
+    }
+
     private func setBlocked(_ blocked: Bool, actorID: String, targetID: String) {
         lock.withLock {
             if blocked {
+                // A block drops pending requests both ways.
+                requests[Edge(follower: actorID, followee: targetID)] = nil
+                requests[Edge(follower: targetID, followee: actorID)] = nil
                 blocksByActorID[actorID, default: []].insert(targetID)
                 blockDates["\(actorID)|\(targetID)"] = Date()
             } else {
@@ -225,7 +322,9 @@ public final class MockSocialGraphService: @unchecked Sendable {
         case (true, true): return .mutual
         case (true, false): return .following
         case (false, true): return .followedBy
-        case (false, false): return .none
+        case (false, false):
+            let pending = lock.withLock { requests[Edge(follower: actorID, followee: targetID)] != nil }
+            return pending ? .requested : .none
         }
     }
 

@@ -1836,7 +1836,8 @@ final class SnapFeedViewController: UIViewController {
         case .notFollowing, .followedBy: .follow
         case .following: .following
         case .mutual: .friends
-        case .viewer, .blocked: .none
+        // A pending request is the profile screen's to withdraw.
+        case .viewer, .blocked, .requested: .none
         }
     }
 

@@ -60,7 +60,8 @@ public struct MockBackend: Sendable {
         let accountLifecycle = MockAccountLifecycle()
         MockAuthService(lifecycle: accountLifecycle).register(on: bff)
         MockAccountService(lifecycle: accountLifecycle).register(on: bff)
-        MockSocialServices(dataset: dataset, postStore: postStore).register(on: bff)
+        let socialServices = MockSocialServices(dataset: dataset, postStore: postStore)
+        socialServices.register(on: bff)
         MockEngagementService(store: counterStore).register(on: bff)
         MockCounterService(store: counterStore).register(on: bff)
         MockMediaService(store: blobStore).register(on: bff)
@@ -69,7 +70,13 @@ public struct MockBackend: Sendable {
         MockNotificationService(dataset: dataset).register(on: bff)
         MockCommentService(dataset: dataset, postStore: postStore).register(on: bff)
         MockChatService(dataset: dataset).register(on: bff)
-        MockSocialGraphService(dataset: dataset).register(on: bff)
+        // Following a private profile asks (backend #655); profile.v1 owns
+        // who is private. `-mock-follow-requests` seeds the viewer's inbox.
+        MockSocialGraphService(
+            dataset: dataset,
+            isPrivate: { socialServices.isPrivate($0) },
+            seedsFollowRequests: ProcessInfo.processInfo.arguments.contains("-mock-follow-requests")
+        ).register(on: bff)
         let geoDiscovery = MockGeoDiscoveryService(dataset: dataset, spreadsHierarchy: seedsMapHierarchy)
         geoDiscovery.register(on: bff)
         moderationService.register(on: bff)

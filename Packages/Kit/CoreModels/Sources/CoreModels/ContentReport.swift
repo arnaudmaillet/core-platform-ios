@@ -92,6 +92,10 @@ public enum FollowRelation: Equatable, Sendable {
     /// The viewer blocks them. Following is not on offer until the block is
     /// lifted, which is the profile screen's business.
     case blocked
+    /// They're private and the viewer asked to follow them; the request is
+    /// pending (social_graph.v1 `REQUESTED`). Following isn't on offer again:
+    /// the profile screen withdraws the request.
+    case requested
 
     /// Whether a follow affordance should be drawn for this person.
     public var offersFollow: Bool { self == .notFollowing || self == .followedBy }
@@ -107,6 +111,7 @@ public enum FollowRelation: Equatable, Sendable {
     public func settingFollow(_ follows: Bool) -> FollowRelation {
         switch self {
         case .viewer, .blocked: self
+        case .requested: follows ? .requested : .notFollowing
         case .following, .notFollowing: follows ? .following : .notFollowing
         case .mutual, .followedBy: follows ? .mutual : .followedBy
         }

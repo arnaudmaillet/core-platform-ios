@@ -26,6 +26,12 @@ public final class ProfileViewModel {
         case edit
         case follow
         case following
+        /// A private profile the viewer asked to follow (#396); tapping it
+        /// withdraws the request.
+        case requested
+
+        /// Someone else's profile, whatever the follow state.
+        var isOtherProfile: Bool { self == .follow || self == .following || self == .requested }
     }
 
     /// The map-favorite star beside Message.
@@ -313,12 +319,12 @@ public final class ProfileViewModel {
     }
 
     /// Whether the "Message" action applies (another user's profile).
-    public var canMessage: Bool { followButton == .follow || followButton == .following }
+    public var canMessage: Bool { followButton.isOtherProfile }
 
     /// Whether the moderation actions (Block / Report) apply. False for the
     /// viewer's own profile, and false until the relationship is known — a
     /// menu opened mid-load offers sharing only rather than guessing.
-    public var canModerate: Bool { followButton == .follow || followButton == .following }
+    public var canModerate: Bool { followButton.isOtherProfile }
 
     /// Everything the share sheet renders, resolved together so the QR code,
     /// the card, and the system share sheet's link preview cannot disagree
@@ -548,9 +554,21 @@ public final class ProfileViewModel {
     /// Follow-button tapped. No-op for the viewer's own profile ("Edit"); an
     /// optimistic toggle otherwise — flip immediately, roll back if the server
     /// rejects. One mutation in flight at a time.
+    ///
+    /// A private profile is asked rather than followed (#396): Follow turns
+    /// into Requested (no follower count moves), and Requested withdraws the
+    /// request. The server has the last word: a profile that turned public
+    /// meanwhile is followed, one that turned private is asked.
     public func toggleFollow() {
         guard let profile, !followInFlight else { return }
-        guard followButton == .follow || followButton == .following else { return }
+        guard followButton.isOtherProfile else { return }
+        if let requests = repository as? any FollowRequestSending {
+            switch followButton {
+            case .requested: return withdrawRequest(on: profile, through: requests)
+            case .follow: return follow(profile, through: requests)
+            default: break
+            }
+        }
 
         let target = !isFollowing
         applyFollow(target, on: profile)
@@ -568,6 +586,55 @@ public final class ProfileViewModel {
             }
             self.followInFlight = false
         }
+    }
+
+    private func follow(_ profile: UserProfile, through requests: any FollowRequestSending) {
+        let asks = profile.visibility == .private
+        if asks { showRequested(true) } else { applyFollow(true, on: profile) }
+        followInFlight = true
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let outcome = try await requests.follow(profile.id)
+                switch (outcome, asks) {
+                case (.requested, false):
+                    if let current = self.profile { self.applyFollow(false, on: current) }
+                    self.showRequested(true)
+                case (.following, true):
+                    if let current = self.profile { self.applyFollow(true, on: current) }
+                default:
+                    break
+                }
+            } catch {
+                if asks {
+                    self.showRequested(false)
+                } else if let current = self.profile {
+                    self.applyFollow(false, on: current)
+                }
+            }
+            self.followInFlight = false
+        }
+    }
+
+    private func withdrawRequest(on profile: UserProfile, through requests: any FollowRequestSending) {
+        showRequested(false)
+        followInFlight = true
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await requests.cancelFollowRequest(to: profile.id)
+            } catch {
+                self.showRequested(true)
+            }
+            self.followInFlight = false
+        }
+    }
+
+    /// Requested ⇄ Follow. Neither follows, so no count moves.
+    private func showRequested(_ requested: Bool) {
+        isFollowing = false
+        followButton = requested ? .requested : .follow
+        rememberRelationship()
     }
 
     /// "Message" tapped — open a DM with this profile via routing. Profile never
@@ -1026,6 +1093,11 @@ public final class ProfileViewModel {
             isMutual = mutual
             isBlocked = blocked
             followButton = following ? .following : .follow
+        case .requested:
+            isFollowing = false
+            isMutual = false
+            isBlocked = false
+            followButton = .requested
         }
         isRelationshipSettled = true
     }
@@ -1034,8 +1106,11 @@ public final class ProfileViewModel {
     /// next visit opens on what the viewer last saw here, including a follow
     /// they just made.
     private func rememberRelationship() {
-        guard let id = profile?.id, followButton == .follow || followButton == .following else { return }
-        cache?.store(.other(isFollowing: isFollowing, isMutual: isMutual, isBlocked: isBlocked), for: id)
+        guard let id = profile?.id, followButton.isOtherProfile else { return }
+        cache?.store(
+            followButton == .requested ? .requested : .other(isFollowing: isFollowing, isMutual: isMutual, isBlocked: isBlocked),
+            for: id
+        )
     }
 
     /// Applies a follow state everywhere it shows: the button and the

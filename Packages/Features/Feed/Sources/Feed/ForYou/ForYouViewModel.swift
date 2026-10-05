@@ -313,7 +313,7 @@ public final class ForYouViewModel {
             case .viewer: .viewer
             case .mutual: .friend
             case .following: .following
-            case .notFollowing, .followedBy, .blocked: .other
+            case .notFollowing, .followedBy, .blocked, .requested: .other
             }
         }
     }

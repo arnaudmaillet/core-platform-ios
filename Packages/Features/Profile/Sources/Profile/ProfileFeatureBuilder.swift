@@ -259,9 +259,13 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                 case .privacy:
                                     if let visibility = repository as? any ProfileVisibilityManaging {
                                         PrivacySectionViewController(
-                                            viewModel: PrivacySectionViewModel(visibility: visibility),
+                                            viewModel: PrivacySectionViewModel(
+                                                visibility: visibility,
+                                                requests: repository as? any FollowRequestsManaging
+                                            ),
                                             makeListPrivacy: { PrivacySettingsViewController(store: RelationshipPrivacyStore()) },
-                                            makeDataTransparency: { DataTransparencyViewController() }
+                                            makeDataTransparency: { DataTransparencyViewController() },
+                                            imagePipeline: imagePipeline
                                         )
                                     } else {
                                         PrivacySettingsViewController(store: RelationshipPrivacyStore())
