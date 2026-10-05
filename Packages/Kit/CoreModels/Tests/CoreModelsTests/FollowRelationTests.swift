@@ -35,4 +35,13 @@ struct FollowRelationTests {
         #expect(FollowRelation.mutual.isFollowing)
         #expect(!FollowRelation.followedBy.isFollowing)
     }
+
+    /// A pending request (#396) is neither a follow nor an offer to follow;
+    /// following again keeps it pending, an unfollow (a withdrawal) clears it.
+    @Test func aPendingRequestIsNotAFollow() {
+        #expect(!FollowRelation.requested.offersFollow)
+        #expect(!FollowRelation.requested.isFollowing)
+        #expect(FollowRelation.requested.settingFollow(true) == .requested)
+        #expect(FollowRelation.requested.settingFollow(false) == .notFollowing)
+    }
 }

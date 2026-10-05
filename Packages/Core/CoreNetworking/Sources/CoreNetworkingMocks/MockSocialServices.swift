@@ -343,6 +343,15 @@ public final class MockSocialServices: @unchecked Sendable {
         return .success(Self.accepted(profileID: request.profileID))
     }
 
+    /// Whether a profile is private right now: a `SetVisibility` write, else
+    /// the seed (the viewer's profiles start public). The social graph reads
+    /// it to turn a follow into a request.
+    public func isPrivate(_ profileID: String) -> Bool {
+        if let override = lock.withLock({ visibilityOverrides[profileID] }) { return override == .private }
+        guard dataset.author(for: profileID) != nil else { return false }
+        return dataset.isRelationshipsPrivate(profileID)
+    }
+
     private func setVisibility(_ request: Profile_V1_SetVisibilityRequest) -> Result<Profile_V1_CommandResponse, ConnectError> {
         let viewerAccount = dataset.accountID(for: MockPostStore.viewer.profileID)
         guard request.profileID == MockPostStore.viewer.profileID

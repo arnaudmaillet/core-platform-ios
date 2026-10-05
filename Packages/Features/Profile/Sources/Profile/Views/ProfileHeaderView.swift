@@ -645,12 +645,18 @@ final class ProfileHeaderView: UIView {
     func configureAction(_ state: ProfileViewModel.FollowButton) {
         layoutRevision += 1
         switch state {
-        case .follow, .following:
+        case .follow, .following, .requested:
             followButton.isHidden = false
             var config = Self.capsule(prominent: state == .follow)
-            config.title = state == .follow ? "Follow" : "Following"
+            config.title = switch state {
+            case .follow: "Follow"
+            case .requested: "Requested"
+            default: "Following"
+            }
             followButton.configuration = config
             followButton.accessibilityLabel = config.title
+            // Tapping Requested withdraws it; say so to VoiceOver.
+            followButton.accessibilityHint = state == .requested ? "Withdraws your follow request." : nil
             followButton.isUserInteractionEnabled = true
             followButton.isAccessibilityElement = true
             messageButton.isHidden = false

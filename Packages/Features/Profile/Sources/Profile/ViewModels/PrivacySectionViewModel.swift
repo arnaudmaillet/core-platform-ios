@@ -20,16 +20,30 @@ final class PrivacySectionViewModel {
     private(set) var isSaving = false {
         didSet { onChange?() }
     }
+    /// Pending follow requests (#396); nil until read, or when the screen
+    /// has no requests inbox.
+    private(set) var pendingRequestCount: Int? {
+        didSet { onChange?() }
+    }
     var onChange: (() -> Void)?
 
     private let visibility: any ProfileVisibilityManaging
+    let requests: (any FollowRequestsManaging)?
 
-    init(visibility: any ProfileVisibilityManaging) {
+    init(visibility: any ProfileVisibilityManaging, requests: (any FollowRequestsManaging)? = nil) {
         self.visibility = visibility
+        self.requests = requests
+    }
+
+    /// Re-read when the screen comes back from the inbox.
+    func refreshRequestCount() async {
+        guard let requests else { return }
+        pendingRequestCount = (try? await requests.pendingFollowRequestCount()) ?? pendingRequestCount
     }
 
     func load() async {
         if case .failed = phase { phase = .loading }
+        Task { await refreshRequestCount() }
         do {
             phase = .loaded(isPrivate: try await visibility.activeProfileIsPrivate())
         } catch {

@@ -1,4 +1,5 @@
 import DesignSystem
+import MediaCore
 import UIKit
 
 /// Settings → Privacy, for the active profile: Private Account (server-side,
@@ -11,6 +12,7 @@ final class PrivacySectionViewController: UIViewController {
 
     private enum Item: Hashable {
         case privateAccount
+        case followRequests
         case loading
         case failed
         case hideLists
@@ -18,23 +20,32 @@ final class PrivacySectionViewController: UIViewController {
         case planned(String)
     }
 
-    private static let planned = ["Follow requests", "Who can comment, mention and message you", "Location sharing"]
+    private static let planned = ["Who can comment, mention and message you", "Location sharing"]
+
+    /// "3", or nothing while unread or when none are pending.
+    static func requestCountText(_ count: Int?) -> String? {
+        guard let count, count > 0 else { return nil }
+        return String(count)
+    }
 
     private let viewModel: PrivacySectionViewModel
     private let makeListPrivacy: () -> UIViewController
     /// "Your Data and Permissions" (#414); nil hides the row.
     private let makeDataTransparency: (() -> UIViewController)?
+    private let imagePipeline: ImagePipeline?
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
 
     init(
         viewModel: PrivacySectionViewModel,
         makeListPrivacy: @escaping () -> UIViewController,
-        makeDataTransparency: (() -> UIViewController)? = nil
+        makeDataTransparency: (() -> UIViewController)? = nil,
+        imagePipeline: ImagePipeline? = nil
     ) {
         self.viewModel = viewModel
         self.makeListPrivacy = makeListPrivacy
         self.makeDataTransparency = makeDataTransparency
+        self.imagePipeline = imagePipeline
         super.init(nibName: nil, bundle: nil)
         title = SettingsSection.privacy.title
         hidesBottomBarWhenPushed = true
@@ -51,6 +62,12 @@ final class PrivacySectionViewController: UIViewController {
         viewModel.onChange = { [weak self] in self?.applySnapshot() }
         applySnapshot()
         Task { await viewModel.load() }
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        // Back from the inbox: the count may have dropped.
+        if isMovingToParent == false { Task { await viewModel.refreshRequestCount() } }
     }
 
     private static func footerText(_ section: Section) -> String? {
@@ -133,6 +150,13 @@ final class PrivacySectionViewController: UIViewController {
         case .failed:
             content.text = "Couldn't load your privacy setting. Tap to try again."
             content.textProperties.color = .secondaryLabel
+        case .followRequests:
+            content = .valueCell()
+            content.text = "Follow Requests"
+            content.secondaryText = Self.requestCountText(viewModel.pendingRequestCount)
+            content.image = UIImage(systemName: "person.badge.clock")
+            content.imageProperties.tintColor = .label
+            cell.accessories = [.disclosureIndicator()]
         case .hideLists:
             content.text = "Followers and Following Lists"
             content.image = UIImage(systemName: "person.2")
@@ -158,10 +182,14 @@ final class PrivacySectionViewController: UIViewController {
         case .loaded: snapshot.appendItems([.privateAccount], toSection: .visibility)
         case .failed: snapshot.appendItems([.failed], toSection: .visibility)
         }
+        // Pending requests stay answerable after going public (backend #655
+        // doesn't auto-approve them), so the row shows whenever there's an inbox.
+        if viewModel.requests != nil { snapshot.appendItems([.followRequests], toSection: .visibility) }
         snapshot.appendItems([.hideLists] + (makeDataTransparency == nil ? [] : [.dataTransparency]), toSection: .lists)
         snapshot.appendItems(Self.planned.map(Item.planned), toSection: .comingSoon)
         // The switch reads the phase and the saving flag at configuration.
         if case .loaded = viewModel.phase { snapshot.reconfigureItems([.privateAccount]) }
+        if viewModel.requests != nil { snapshot.reconfigureItems([.followRequests]) }
         dataSource.apply(snapshot, animatingDifferences: false)
     }
 
@@ -184,7 +212,7 @@ final class PrivacySectionViewController: UIViewController {
 extension PrivacySectionViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         switch dataSource.itemIdentifier(for: indexPath) {
-        case .hideLists, .dataTransparency, .failed: true
+        case .followRequests, .hideLists, .dataTransparency, .failed: true
         default: false
         }
     }
@@ -192,6 +220,12 @@ extension PrivacySectionViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         collectionView.deselectItem(at: indexPath, animated: true)
         switch dataSource.itemIdentifier(for: indexPath) {
+        case .followRequests:
+            guard let requests = viewModel.requests else { return }
+            navigationController?.pushViewController(
+                FollowRequestsViewController(viewModel: FollowRequestsViewModel(requests: requests), imagePipeline: imagePipeline),
+                animated: true
+            )
         case .hideLists:
             navigationController?.pushViewController(makeListPrivacy(), animated: true)
         case .dataTransparency:

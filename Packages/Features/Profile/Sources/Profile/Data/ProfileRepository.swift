@@ -80,6 +80,10 @@ public enum ProfileRelationship: Equatable, Sendable {
     /// distinction had to be recovered here before the map could offer a
     /// friends-or-following choice.
     case other(isFollowing: Bool, isMutual: Bool = false, isBlocked: Bool)
+    /// Someone else's PRIVATE profile the viewer asked to follow; the request
+    /// is pending (social_graph.v1 `REQUESTED`, backend #655) → "Requested",
+    /// which withdraws it. Never blocked: a block drops pending requests.
+    case requested
 }
 
 /// How widely a profile is exposed, mirroring `profile.v1.ProfileVisibility`.
@@ -288,14 +292,14 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
     SocialGraphWriting, SocialGraphReading {
     private let profileClient: any Profile_V1_ProfileServiceClientInterface
     private let counterClient: any Counter_V1_CounterServiceClientInterface
-    private let socialGraphClient: any SocialGraph_V1_SocialGraphServiceClientInterface
+    let socialGraphClient: any SocialGraph_V1_SocialGraphServiceClientInterface
     private let authSession: any AuthSessionProviding
     /// Upper bound on edges sampled for the fallback count; beyond it the count
     /// is reported as `atLeast(limit)` rather than paginating the whole graph.
     private let edgeSampleLimit: Int32
     /// Where an accepted follow or unfollow is announced — see
     /// `FollowGraphEvents`. Nil announces nothing.
-    private let followEvents: FollowGraphEvents?
+    let followEvents: FollowGraphEvents?
     private let logger = Logger(subsystem: "cn.wynn.core-platform-ios", category: "profile")
 
     /// Who is signed in, and as which profile — shared with every other
@@ -350,6 +354,7 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
         guard viewer != profileID else { return .me }
 
         let status = try await relationStatus(from: viewer, to: profileID)
+        if status == .requested { return .requested }
         // `.mutual` also means the viewer follows the target. `.blocking`
         // is exclusive with the follow states on the wire (blocking tears
         // the edges down), so a blocked profile reports isFollowing false —
@@ -376,6 +381,7 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
         case .mutual: .mutual
         case .following: .following
         case .followedBy: .followedBy
+        case .requested: .requested
         // `.blockedBy` is not surfaced (platforms don't tell you), and an
         // unknown status is no edge at all.
         default: .notFollowing
@@ -405,7 +411,11 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
             var request = SocialGraph_V1_FollowRequest()
             request.actorID = viewer.rawValue
             request.targetID = profileID.rawValue
-            try Self.ensureAccepted(await socialGraphClient.follow(request: request, headers: [:]))
+            let response = await socialGraphClient.follow(request: request, headers: [:])
+            try Self.ensureAccepted(response)
+            // A private profile was asked, not followed: no edge to announce.
+            // The profile screen reads the outcome through `follow(_:)`.
+            if response.message?.requested == true { return }
         } else {
             var request = SocialGraph_V1_UnfollowRequest()
             request.actorID = viewer.rawValue
@@ -492,11 +502,12 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
     }
 
     /// Throws unless the command round-tripped and the server accepted it.
-    private static func ensureAccepted(_ response: ResponseMessage<SocialGraph_V1_CommandResponse>) throws {
+    static func ensureAccepted(_ response: ResponseMessage<SocialGraph_V1_CommandResponse>) throws {
         if let error = response.error {
             throw ProfileError.transport(message: error.message ?? "code \(error.code)")
         }
-        guard response.message?.success == true else {
+        // A follow of a private profile answers with a pending request.
+        guard response.message?.success == true || response.message?.requested == true else {
             throw ProfileError.transport(message: "command rejected")
         }
     }
@@ -562,7 +573,7 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
 
     // MARK: - Profile view
 
-    private func fetchProfileView(id: ProfileID) async throws -> Profile_V1_ProfileView {
+    func fetchProfileView(id: ProfileID) async throws -> Profile_V1_ProfileView {
         var request = Profile_V1_GetProfileByIdRequest()
         request.profileID = id.rawValue
         let response = await profileClient.getProfileByID(request: request, headers: [:])
@@ -576,7 +587,7 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
 
     /// `write` names the caller when it is a write, so a guest reaching it is
     /// reported (`GateAudit`): the member gate should have stopped them first.
-    private func resolveViewerProfileID(forWrite write: String? = nil) async throws -> ProfileID {
+    func resolveViewerProfileID(forWrite write: String? = nil) async throws -> ProfileID {
         do {
             return try await viewer.activeProfileID()
         } catch ViewerError.requiresMember {
