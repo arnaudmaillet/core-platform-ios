@@ -68,7 +68,12 @@ public struct MockBackend: Sendable {
         MockPostAuthoringService(store: postStore).register(on: bff)
         MockSearchService(dataset: dataset, counters: counterStore).register(on: bff)
         MockNotificationService(dataset: dataset).register(on: bff)
-        MockCommentService(dataset: dataset, postStore: postStore).register(on: bff)
+        // Comments matching a post owner's hidden words are dropped (#404).
+        MockCommentService(
+            dataset: dataset,
+            postStore: postStore,
+            hiddenWords: { socialServices.hiddenWords(of: $0) }
+        ).register(on: bff)
         MockChatService(dataset: dataset).register(on: bff)
         // Following a private profile asks (backend #655); profile.v1 owns
         // who is private. `-mock-follow-requests` seeds the viewer's inbox.

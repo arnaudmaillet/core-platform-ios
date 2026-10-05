@@ -14,25 +14,58 @@ public final class MockCommentService: @unchecked Sendable {
     /// comments, the way a post you have just published does on the fleet.
     private let postStore: MockPostStore?
     private let store = Store()
+    /// The words a post's owner hides from their comments (backend #728).
+    private let hiddenWords: @Sendable (String) -> [String]
 
-    public init(dataset: MockSocialDataset, postStore: MockPostStore? = nil) {
+    public init(
+        dataset: MockSocialDataset,
+        postStore: MockPostStore? = nil,
+        hiddenWords: @escaping @Sendable (String) -> [String] = { _ in [] }
+    ) {
         self.dataset = dataset
         self.postStore = postStore
+        self.hiddenWords = hiddenWords
+    }
+
+    /// Drops comments matching the post owner's hidden words, for every
+    /// reader but the commenter (the viewer, here). Whole words, case-
+    /// insensitive; an entry with no letters or digits (an emoji) matches
+    /// anywhere — comment.v1's rules.
+    private func filtered(_ comments: [Comment_V1_CommentView], postID: String) -> [Comment_V1_CommentView] {
+        guard let owner = postStore?.record(for: postID)?.profileID ?? dataset.post(for: postID)?.authorProfileID else {
+            return comments
+        }
+        let words = hiddenWords(owner)
+        guard !words.isEmpty else { return comments }
+        return comments.filter { comment in
+            comment.authorID == MockSocialDataset.viewerProfileID || !Self.matches(comment.body, any: words)
+        }
+    }
+
+    static func matches(_ body: String, any words: [String]) -> Bool {
+        let text = body.lowercased()
+        let tokens = text.split { !$0.isLetter && !$0.isNumber }.map(String.init)
+        return words.contains { word in
+            guard word.contains(where: { $0.isLetter || $0.isNumber }) else { return text.contains(word) }
+            let phrase = word.split { !$0.isLetter && !$0.isNumber }.map(String.init)
+            guard !phrase.isEmpty, phrase.count <= tokens.count else { return false }
+            return (0...(tokens.count - phrase.count)).contains { Array(tokens[$0..<($0 + phrase.count)]) == phrase }
+        }
     }
 
     public func register(on bff: MockBFF) {
         bff.register(path: "/comment.v1.CommentService/ListTopLevel") { [self] (request: Comment_V1_ListTopLevelRequest) in
             var response = Comment_V1_ListCommentsResponse()
-            response.comments = store.comments(for: request.postID, seed: seedComments(for: request.postID))
+            response.comments = filtered(store.comments(for: request.postID, seed: seedComments(for: request.postID)), postID: request.postID)
             return .success(response)
         }
         bff.register(path: "/comment.v1.CommentService/ListReplies") { [self] (request: Comment_V1_ListRepliesRequest) in
             var response = Comment_V1_ListCommentsResponse()
-            response.comments = store.replies(
+            response.comments = filtered(store.replies(
                 for: request.commentID,
                 postID: request.postID,
                 seed: seedReplies(for: request.postID)[request.commentID] ?? []
-            )
+            ), postID: request.postID)
             return .success(response)
         }
         bff.register(path: "/comment.v1.CommentService/CreateComment") { [self] (request: Comment_V1_CreateCommentRequest) in
