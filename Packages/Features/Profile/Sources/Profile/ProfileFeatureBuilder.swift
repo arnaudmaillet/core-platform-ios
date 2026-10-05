@@ -289,7 +289,8 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                             viewModel: PrivacySectionViewModel(
                                                 visibility: visibility,
                                                 requests: repository as? any FollowRequestsManaging,
-                                                windows: repository as? any PostWindowManaging
+                                                windows: repository as? any PostWindowManaging,
+                                                comments: repository as? any CommentAudienceManaging
                                             ),
                                             makeListPrivacy: (repository as? any ListPrivacyManaging).map { lists in
                                                 { ListPrivacyViewController(manager: lists) }

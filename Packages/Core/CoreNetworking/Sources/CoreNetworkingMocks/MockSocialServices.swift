@@ -23,6 +23,16 @@ public final class MockSocialServices: @unchecked Sendable {
     /// `SetVisibility` writes, by profile. Only the viewer's account's
     /// profiles can be changed; others keep their seeded flag.
     private var visibilityOverrides: [String: Profile_V1_ProfileVisibility] = [:]
+    /// `SetInteractionSettings` writes, by profile (backend #714). prof-13 —
+    /// public, and not followed by the viewer — takes comments from its
+    /// followers only, so a refused comment can be seen without setup.
+    private var interactionSettings: [String: Profile_V1_InteractionSettings] = [
+        "prof-13": {
+            var settings = MockSocialServices.defaultInteractionSettings
+            settings.comments = .followers
+            return settings
+        }()
+    ]
     /// Posts deleted this session, with when (backend #663: a tombstone,
     /// restorable for 30 days). Guarded by `lock`.
     private var deletedPosts: [String: Date] = [:]
@@ -152,6 +162,17 @@ public final class MockSocialServices: @unchecked Sendable {
             response.success = true
             return .success(response)
         }
+        bff.register(path: "/profile.v1.ProfileService/SetInteractionSettings") { [self] (request: Profile_V1_SetInteractionSettingsRequest) -> Result<Profile_V1_CommandResponse, ConnectError> in
+            let settings = request.settings
+            // The whole set at once; an unspecified audience is refused.
+            guard settings.comments != .unspecified, settings.mentions != .unspecified, settings.messages != .unspecified else {
+                return .failure(ConnectError(code: .invalidArgument, message: "PRF-9001: every audience must be set"))
+            }
+            lock.withLock { interactionSettings[request.profileID] = settings }
+            var response = Profile_V1_CommandResponse()
+            response.success = true
+            return .success(response)
+        }
         bff.register(path: "/profile.v1.ProfileService/SetVisibility") { [self] (request: Profile_V1_SetVisibilityRequest) in
             setVisibility(request)
         }
@@ -262,6 +283,25 @@ public final class MockSocialServices: @unchecked Sendable {
         default: nil
         }
         return days.map { Int64((Date().timeIntervalSince1970 - $0 * 86_400) * 1_000) }
+    }
+
+    static let defaultInteractionSettings: Profile_V1_InteractionSettings = {
+        var settings = Profile_V1_InteractionSettings()
+        settings.comments = .everyone
+        settings.mentions = .everyone
+        settings.messages = .everyone
+        settings.allowDownloads = true
+        settings.showLikeCounts = true
+        return settings
+    }()
+
+    private func storedInteractionSettings(for profileID: String) -> Profile_V1_InteractionSettings {
+        lock.withLock { interactionSettings[profileID] } ?? Self.defaultInteractionSettings
+    }
+
+    /// Who may comment on `profileID`'s posts; the comment mock asks it.
+    public func commentAudience(of profileID: String) -> Profile_V1_InteractionAudience {
+        storedInteractionSettings(for: profileID).comments
     }
 
     /// A post older than its author's window reads as not found to visitors;
@@ -424,6 +464,7 @@ public final class MockSocialServices: @unchecked Sendable {
                 return proto
             }
             view.visibility = lock.withLock { visibilityOverrides[view.profileID] } ?? .public
+            view.interactionSettings = storedInteractionSettings(for: view.profileID)
             // Owner-only on the fleet; the viewer's own view here.
             view.feedSettings = lock.withLock { feedSettings[view.profileID] } ?? {
                 var settings = Profile_V1_FeedSettings()
@@ -452,6 +493,8 @@ public final class MockSocialServices: @unchecked Sendable {
         // is standing in for.
         view.visibility = lock.withLock { visibilityOverrides[author.profileID] }
             ?? (dataset.isRelationshipsPrivate(author.profileID) ? .private : .public)
+        // Public on the view, so others can show "comments limited".
+        view.interactionSettings = storedInteractionSettings(for: author.profileID)
         // The viewer's other profiles answer here too.
         if let settings = lock.withLock({ feedSettings[author.profileID] }) { view.feedSettings = settings }
         return .success(view)

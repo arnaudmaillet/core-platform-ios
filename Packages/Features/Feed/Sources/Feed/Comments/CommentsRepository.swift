@@ -7,6 +7,9 @@ import Foundation
 public enum CommentsError: Error, Equatable, Sendable {
     case notAuthenticated
     case noProfileForAccount
+    /// CMT-1005: the post's author doesn't take comments from this viewer
+    /// (their "Who Can Comment" setting, #397).
+    case notAllowed
     case transport(message: String)
 }
 
@@ -256,6 +259,9 @@ public actor CommentsRepository: CommentsProviding {
                 parentID: parentID
             )
         case .failure(let error):
+            if error.code == .permissionDenied, (error.message ?? "").contains("CMT-1005") {
+                throw CommentsError.notAllowed
+            }
             throw CommentsError.transport(message: error.message ?? "code \(error.code)")
         }
     }

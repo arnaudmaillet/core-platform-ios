@@ -433,6 +433,12 @@ public final class MockSocialGraphService: @unchecked Sendable {
     /// amended by this session's follows and unfollows. Every read below goes
     /// through here, so the relation status, both edge lists, and the map's
     /// filters can never disagree about an edge the viewer just changed.
+    /// Whether `follower` follows `followee` now, for the other mocks'
+    /// interaction checks (backend `CheckInteraction`).
+    public func isFollowing(_ follower: String, _ followee: String) -> Bool {
+        follows(follower, followee)
+    }
+
     private func follows(_ follower: String, _ followee: String) -> Bool {
         let edge = Edge(follower: follower, followee: followee)
         let (added, removed) = lock.withLock { (addedEdges.contains(edge), removedEdges.contains(edge)) }

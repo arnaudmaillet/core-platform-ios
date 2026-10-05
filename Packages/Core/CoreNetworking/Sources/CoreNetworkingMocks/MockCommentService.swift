@@ -16,15 +16,20 @@ public final class MockCommentService: @unchecked Sendable {
     private let store = Store()
     /// The words a post's owner hides from their comments (backend #728).
     private let hiddenWords: @Sendable (String) -> [String]
+    /// Whether a commenter may comment on a post owner's posts (backend
+    /// #714's `CheckInteraction(COMMENT)`): (commenter, owner) → allowed.
+    private let mayComment: @Sendable (String, String) -> Bool
 
     public init(
         dataset: MockSocialDataset,
         postStore: MockPostStore? = nil,
-        hiddenWords: @escaping @Sendable (String) -> [String] = { _ in [] }
+        hiddenWords: @escaping @Sendable (String) -> [String] = { _ in [] },
+        mayComment: @escaping @Sendable (String, String) -> Bool = { _, _ in true }
     ) {
         self.dataset = dataset
         self.postStore = postStore
         self.hiddenWords = hiddenWords
+        self.mayComment = mayComment
     }
 
     /// Drops comments matching the post owner's hidden words, for every
@@ -68,7 +73,13 @@ public final class MockCommentService: @unchecked Sendable {
             ), postID: request.postID)
             return .success(response)
         }
-        bff.register(path: "/comment.v1.CommentService/CreateComment") { [self] (request: Comment_V1_CreateCommentRequest) in
+        bff.register(path: "/comment.v1.CommentService/CreateComment") { [self] (request: Comment_V1_CreateCommentRequest) -> Result<Comment_V1_CreateCommentResponse, ConnectError> in
+            // Your own post always takes your comments; anyone else's
+            // follows its owner's "Who Can Comment".
+            if let owner = postStore?.record(for: request.postID)?.profileID ?? dataset.post(for: request.postID)?.authorProfileID,
+               owner != request.authorID, !mayComment(request.authorID, owner) {
+                return .failure(ConnectError(code: .permissionDenied, message: "CMT-1005: the author doesn't take comments from you"))
+            }
             let created = store.append(request)
             var response = Comment_V1_CreateCommentResponse()
             response.commentID = created.commentID
