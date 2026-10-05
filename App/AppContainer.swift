@@ -821,6 +821,14 @@ final class AppContainer {
     /// account, and each restriction's statement of reasons and appeal. Mock mode answers it (`-mock-account-restricted` seeds one
     /// restriction); against the local fleet `moderation.v1` still needs its
     /// gateway route — `dev/BACKEND_GAPS.md` §11.
+    /// Settings → Notifications: `notification.v1` push preferences for the
+    /// active profile (#392). Nothing sends a push yet: the server's sender
+    /// waits on APNs credentials, and this app doesn't register a device.
+    private lazy var notificationPreferencesRepository = NotificationPreferencesRepository(
+        notificationClient: Notification_V1_NotificationServiceClient(client: authenticatedRPCClient),
+        viewer: profileRepository
+    )
+
     private lazy var accountStatusRepository = AccountStatusRepository(
         moderationClient: Moderation_V1_ModerationServiceClient(client: authenticatedRPCClient),
         authSession: sessionManager
@@ -876,7 +884,8 @@ final class AppContainer {
             account: accountRepository,
             switching: profileRepository,
             accountSessions: accountSessionsRepository,
-            accountStatus: accountStatusRepository
+            accountStatus: accountStatusRepository,
+            notificationPreferences: notificationPreferencesRepository
         )
         // The one place that can see both features, which is the whole reason
         // this is injected rather than reached for: Profile describes where a

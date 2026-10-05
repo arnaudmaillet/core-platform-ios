@@ -58,6 +58,25 @@ public final class MockNotificationService: @unchecked Sendable {
         self.dataset = dataset
     }
 
+    /// Push preferences by profile (backend #725): every push on, every
+    /// email off, no pause, no quiet hours until set.
+    private let preferencesLock = NSLock()
+    private var preferences: [String: Notification_V1_NotificationPreferences] = [:]
+
+    private static func defaultPreferences() -> Notification_V1_NotificationPreferences {
+        var preferences = Notification_V1_NotificationPreferences()
+        preferences.categories = Notification_V1_PushCategory.allCases
+            .filter { if case .UNRECOGNIZED = $0 { false } else { $0 != .unspecified } }
+            .map { category in
+                var channels = Notification_V1_CategoryChannels()
+                channels.category = category
+                channels.push = true
+                channels.email = false
+                return channels
+            }
+        return preferences
+    }
+
     public func register(on bff: MockBFF) {
         bff.register(path: "/notification.v1.NotificationService/ListNotifications") { [self] (request: Notification_V1_ListNotificationsRequest) in
             list(request)
@@ -67,6 +86,32 @@ public final class MockNotificationService: @unchecked Sendable {
             var response = Notification_V1_CommandResponse()
             response.success = true
             return .success(response)
+        }
+        bff.register(path: "/notification.v1.NotificationService/GetNotificationPreferences") { [self] (request: Notification_V1_GetNotificationPreferencesRequest) in
+            .success(preferencesLock.withLock { preferences[request.profileID] } ?? Self.defaultPreferences())
+        }
+        bff.register(path: "/notification.v1.NotificationService/UpdateNotificationPreferences") { [self] (request: Notification_V1_UpdateNotificationPreferencesRequest) -> Result<Notification_V1_NotificationPreferences, ConnectError> in
+            let nowMS = Int64(Date().timeIntervalSince1970 * 1_000)
+            if request.hasPausedUntilMs, request.pausedUntilMs > nowMS + 8 * 3_600_000 + 60_000 {
+                return .failure(ConnectError(code: .invalidArgument, message: "NTF-9001: a pause lasts at most 8 hours"))
+            }
+            // Partial: only what's sent changes.
+            let updated = preferencesLock.withLock {
+                var current = preferences[request.profileID] ?? Self.defaultPreferences()
+                for change in request.categories {
+                    if let index = current.categories.firstIndex(where: { $0.category == change.category }) {
+                        current.categories[index] = change
+                    } else {
+                        current.categories.append(change)
+                    }
+                }
+                if request.hasPausedUntilMs { current.pausedUntilMs = request.pausedUntilMs }
+                if request.hasQuietHours { current.quietHours = request.quietHours }
+                if !request.timezone.isEmpty { current.timezone = request.timezone }
+                preferences[request.profileID] = current
+                return current
+            }
+            return .success(updated)
         }
         bff.register(path: "/notification.v1.NotificationService/GetUnreadCount") { [self] (_: Notification_V1_GetUnreadCountRequest) in
             var response = Notification_V1_GetUnreadCountResponse()
