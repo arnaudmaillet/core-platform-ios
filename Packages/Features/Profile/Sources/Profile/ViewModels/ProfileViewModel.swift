@@ -128,6 +128,8 @@ public final class ProfileViewModel {
         case unblocked(handle: String)
         /// The mute now in force; none means unmuted.
         case muteChanged(handle: String, scopes: MuteScopes)
+        /// Restricted (#416) or no longer.
+        case restrictChanged(handle: String, restricted: Bool)
         /// One of the viewer's posts went to Recently Deleted (#408).
         case postDeleted
         case reported
@@ -255,6 +257,10 @@ public final class ProfileViewModel {
     private var muteInFlight = false
     /// Whether this composition can mute at all.
     public var canMute: Bool { repository is any ProfileMuting }
+    /// Whether the viewer restricts this profile (#416), read beside the mute.
+    public private(set) var isRestricted = false
+    private var restrictInFlight = false
+    public var canRestrict: Bool { repository is any ProfileRestricting }
 
     private var load: Task<Void, Never>?
     private var relationshipLoad: Task<Void, Never>?
@@ -748,6 +754,25 @@ public final class ProfileViewModel {
         }
     }
 
+    /// Restrict or unrestrict. Optimistic, like mute: the target never sees it.
+    public func toggleRestrict() {
+        guard let profile, canModerate, !restrictInFlight, let restricting = repository as? any ProfileRestricting else { return }
+        let target = !isRestricted
+        isRestricted = target
+        restrictInFlight = true
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await restricting.setRestricted(target, for: profile.id)
+                self.onActionResult?(.restrictChanged(handle: "@" + profile.handle, restricted: target))
+            } catch {
+                self.isRestricted = !target
+                self.onActionResult?(.failed(message: target ? "Couldn't restrict this profile." : "Couldn't unrestrict this profile."))
+            }
+            self.restrictInFlight = false
+        }
+    }
+
     /// "Muted @ada's posts and messages", "Unmuted @ada".
     public nonisolated static func muteMessage(handle: String, scopes: MuteScopes) -> String {
         guard !scopes.isEmpty else { return "Unmuted \(handle)" }
@@ -1145,6 +1170,10 @@ public final class ProfileViewModel {
             if relationship != .me, let muting = self.repository as? any ProfileMuting,
                let scopes = try? await muting.muteScopes(for: id), !self.muteInFlight {
                 self.muteScopes = scopes
+            }
+            if relationship != .me, let restricting = self.repository as? any ProfileRestricting,
+               let restricted = try? await restricting.isRestricted(id), !self.restrictInFlight {
+                self.isRestricted = restricted
             }
         }
     }

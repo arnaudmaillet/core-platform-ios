@@ -1502,11 +1502,21 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
             return groups
         }
 
-        if viewModel.canMute {
+        if viewModel.canMute || viewModel.canRestrict {
             let scopes = viewModel.muteScopes
+            var quiet: [UIMenuElement] = []
+            if viewModel.canRestrict {
+                let restricted = viewModel.isRestricted
+                // Restrict (#416): their comments on your posts are seen only
+                // by them and you.
+                quiet.append(UIAction(
+                    title: restricted ? "Unrestrict" : "Restrict",
+                    image: UIImage(systemName: restricted ? "person.crop.circle.badge.checkmark" : "person.crop.circle.badge.minus")
+                ) { [weak self] _ in self?.viewModel.toggleRestrict() })
+            }
             // One submenu, a toggle per scope: muting is a set of quiet
             // preferences, not one switch (backend #722).
-            groups.append(UIMenu(options: .displayInline, children: [
+            groups.append(UIMenu(options: .displayInline, children: quiet + (!viewModel.canMute ? [] : [
                 UIMenu(
                     title: scopes.isEmpty ? "Mute" : "Muted",
                     subtitle: scopes.isEmpty ? nil : scopes.summary,
@@ -1518,7 +1528,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
                         ) { [weak self] _ in self?.viewModel.toggleMute(scope) }
                     }
                 )
-            ]))
+            ])))
         }
 
         let blocked = viewModel.isBlocked
@@ -1746,6 +1756,12 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
             ToastView.present(
                 ProfileViewModel.muteMessage(handle: handle, scopes: scopes),
                 symbol: scopes.isEmpty ? "speaker.wave.2.fill" : "speaker.slash.fill",
+                in: view
+            )
+        case .restrictChanged(let handle, let restricted):
+            ToastView.present(
+                restricted ? "Restricted \(handle)" : "Unrestricted \(handle)",
+                symbol: restricted ? "person.crop.circle.badge.minus" : "person.crop.circle.badge.checkmark",
                 in: view
             )
         case .postDeleted:

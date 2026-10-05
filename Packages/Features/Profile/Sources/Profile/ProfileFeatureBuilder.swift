@@ -231,6 +231,19 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                                 )
                                             })
                                         }
+                                        if let restricting = repository as? any ProfileRestricting {
+                                            destinations.append(.init(title: "Restricted Accounts", symbolName: "person.crop.circle.badge.minus") {
+                                                RestrictedAccountsViewController(
+                                                    viewModel: RestrictedAccountsViewModel(restricting: restricting),
+                                                    imagePipeline: imagePipeline
+                                                )
+                                            })
+                                        }
+                                        if let limits = repository as? any InteractionLimitsManaging {
+                                            destinations.append(.init(title: "Limits", symbolName: "hand.raised") {
+                                                LimitInteractionsViewController(manager: limits)
+                                            })
+                                        }
                                         let filters = repository as? any CommentFiltersManaging
                                         if let filters {
                                             destinations.append(.init(title: "Hidden Words", symbolName: "text.badge.xmark") {
