@@ -557,6 +557,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         postIDs: [PostID],
         title: String,
         rank: PlaceRankBadge?,
+        identity: PlaceIdentity?,
         following: ClusterGalleryFollowing?,
         feed: UIViewController,
         mapReturn: @escaping (@escaping () -> UIImage?) -> (any ZoomTransitionSource)?,
@@ -567,6 +568,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             postIDs: postIDs,
             placeName: title,
             rank: rank,
+            identity: identity,
             imagePipeline: imagePipeline,
             videoPlayback: videoPlayback,
             following: following,
@@ -619,10 +621,9 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)
             }
         )
-        // No `gallery.title`: the place's name lives on the BANNER while the
-        // header is expanded and crossfades into the profile's own
-        // `navigationItem.titleView` as it docks — a bar title set here would
-        // sit at full strength over both.
+        // No `gallery.title`: the place's name lives on the BANNER, in its
+        // identity row, and does not dock — a bar title set here would sit at
+        // full strength over it.
         gallery.activePostID = { [weak feed] in
             (feed as? SnapFeedViewController)?.activePostID
         }
