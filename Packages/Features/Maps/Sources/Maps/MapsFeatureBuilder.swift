@@ -261,13 +261,27 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
 extension MapsFeatureBuilder {
     /// What a place's page wears beside its name: its country's round flag,
     /// LARGE (a city wears its country's, as its marker's border does), and
-    /// its subtitle — a country's continent, a city's country. Nil for a
-    /// place in no country (at sea).
+    /// its subtitle — a country's continent, a city's country; neither for a
+    /// place in no country (at sea) — and its share link, for its QR code.
     static func placeIdentity(of place: MapPlace, countryCode: String) -> PlaceIdentity? {
-        guard let country = CountryAtlas.shared.country(code: countryCode) else { return nil }
+        let country = CountryAtlas.shared.country(code: countryCode)
         return PlaceIdentity(
-            flag: FlagPalette.largeRoundFlag(for: country.code) ?? FlagPalette.image(for: country.code),
-            subtitle: place.kind == .country ? country.continent : country.name
+            flag: country.flatMap { FlagPalette.largeRoundFlag(for: $0.code) ?? FlagPalette.image(for: $0.code) },
+            subtitle: country.map { place.kind == .country ? $0.continent : $0.name },
+            shareURL: shareURL(of: place)
         )
+    }
+
+    /// A place's public web address: `https://wynn.cn/place/<id>`.
+    ///
+    /// Synthesized client-side from the place's identity, as a profile's is
+    /// from its handle (`ProfileShareLink`, same host): no service returns
+    /// one, and the place identity itself is mock-only today (`MapPlace`).
+    static func shareURL(of place: MapPlace) -> URL? {
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = "wynn.cn"
+        components.path = "/place/" + place.id
+        return components.url
     }
 }

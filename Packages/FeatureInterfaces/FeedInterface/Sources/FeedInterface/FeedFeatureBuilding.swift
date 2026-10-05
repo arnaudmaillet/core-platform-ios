@@ -314,10 +314,14 @@ public struct PlaceRankBadge: Equatable, Sendable {
 public struct PlaceIdentity {
     public let flag: UIImage?
     public let subtitle: String?
+    /// The place's public web address — what its QR code carries. Nil: the
+    /// page draws no QR button.
+    public let shareURL: URL?
 
-    public init(flag: UIImage?, subtitle: String?) {
+    public init(flag: UIImage?, subtitle: String?, shareURL: URL? = nil) {
         self.flag = flag
         self.subtitle = subtitle
+        self.shareURL = shareURL
     }
 }
 
