@@ -29,6 +29,10 @@ public struct CommentEntry: Equatable, Sendable, Identifiable {
     /// (comment.v1 carries exactly two levels: top-level and replies).
     /// Nil for top-level comments.
     public let parentID: String?
+    /// Held for the post owner's review (their temporary interaction limit,
+    /// #416): only its author and the post's owner see it until it is
+    /// approved.
+    public let isHeld: Bool
 
     public init(
         id: String,
@@ -38,7 +42,8 @@ public struct CommentEntry: Equatable, Sendable, Identifiable {
         authorAvatarURL: URL? = nil,
         body: String,
         createdAt: Date,
-        parentID: String? = nil
+        parentID: String? = nil,
+        isHeld: Bool = false
     ) {
         self.id = id
         self.authorID = authorID
@@ -48,7 +53,26 @@ public struct CommentEntry: Equatable, Sendable, Identifiable {
         self.body = body
         self.createdAt = createdAt
         self.parentID = parentID
+        self.isHeld = isHeld
     }
+
+    /// This comment once its post's owner approved it: shown to everyone.
+    func released() -> CommentEntry {
+        CommentEntry(
+            id: id, authorID: authorID, authorName: authorName, authorHandle: authorHandle,
+            authorAvatarURL: authorAvatarURL, body: body, createdAt: createdAt, parentID: parentID
+        )
+    }
+}
+
+/// The post owner's review of a comment held for them (#416): approving
+/// shows it to everyone, declining removes it. A separate capability rather
+/// than a `CommentsProviding` requirement, so read-only providers and test
+/// fakes need not answer it.
+public protocol HeldCommentReviewing: Sendable {
+    /// Throws on failure. A comment that is no longer held — already
+    /// reviewed, or deleted — is not an error: there is nothing left to do.
+    func reviewHeldComment(_ commentID: String, approve: Bool) async throws
 }
 
 /// The signed-in viewer's display identity — what the composer needs to
@@ -360,7 +384,8 @@ public actor CommentsRepository: CommentsProviding {
             authorAvatarURL: author.avatarURL,
             body: view.body,
             createdAt: Date(timeIntervalSince1970: TimeInterval(view.createdAtMs) / 1000),
-            parentID: view.parentID.isEmpty ? nil : view.parentID
+            parentID: view.parentID.isEmpty ? nil : view.parentID,
+            isHeld: view.held
         )
     }
 
@@ -417,6 +442,28 @@ private final class TopCommentsCache: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         pages[postID] = entries
+    }
+}
+
+extension CommentsRepository: HeldCommentReviewing {
+    public func reviewHeldComment(_ commentID: String, approve: Bool) async throws {
+        let owner = try await resolveViewerProfileID(forWrite: "reviewHeldComment")
+        var request = Comment_V1_ReviewHeldCommentRequest()
+        request.commentID = commentID
+        request.ownerID = owner.rawValue
+        request.approve = approve
+        let response = await commentClient.reviewHeldComment(request: request, headers: [:])
+        switch response.result {
+        case .success:
+            return
+        // Already reviewed (here or on another device) or deleted: the
+        // server answers not found, and the comment is gone from the held
+        // state either way.
+        case .failure(let error) where error.code == .notFound:
+            return
+        case .failure(let error):
+            throw CommentsError.transport(message: error.message ?? "code \(error.code)")
+        }
     }
 }
 

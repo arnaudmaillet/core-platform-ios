@@ -108,6 +108,10 @@ final class CommentRowView: UIView {
     var onShare: (() -> Void)?
     var onBlock: (() -> Void)?
     var onReport: (() -> Void)?
+    /// A held comment on the viewer's own post (#416): approve (true) or
+    /// decline (false). Nil hides the actions — anyone else's comment, or
+    /// a review already on its way.
+    var onReview: ((_ approve: Bool) -> Void)?
 
     /// `installsContextMenu: false` is `ThreadRowCell`'s row: the long press
     /// belongs to the stream there, which lifts the pressed row itself
@@ -165,8 +169,13 @@ final class CommentRowView: UIView {
     /// appears, and only the picture arrives later.
     func configure(with model: CommentDisplayModel, imagePipeline: ImagePipeline? = nil) {
         representedID = model.id
-        headerLabel.text = "\(model.authorName) · \(model.metaText)"
+        // A held comment says so — to its author, who is waiting, and to the
+        // post's owner, who decides.
+        headerLabel.text = model.isHeld
+            ? "\(model.authorName) · \(model.metaText) · \(Self.heldMarker)"
+            : "\(model.authorName) · \(model.metaText)"
         bodyLabel.text = model.body
+        bodyLabel.textColor = model.isHeld ? .secondaryLabel : .label
         avatarView.setMonogram(model.monogram)
         isReplyRow = model.isReply
         refreshTypeDrivenGeometry()
@@ -203,6 +212,7 @@ final class CommentRowView: UIView {
         imagePipeline: ImagePipeline?
     ) {
         representedID = nil
+        bodyLabel.textColor = .label
         headerLabel.text = timestamp.isEmpty ? authorName : "\(authorName) · \(timestamp)"
         bodyLabel.text = caption
         avatarView.setMonogram(monogram)
@@ -269,6 +279,20 @@ final class CommentRowView: UIView {
         onShare = nil
         onBlock = nil
         onReport = nil
+        onReview = nil
+    }
+
+    static let heldMarker = "Held for review"
+
+    /// Approve and Decline, as one inline group leading a held comment's
+    /// menu — shared by the row's own menu and the stream's.
+    static func reviewActions(_ review: @escaping (_ approve: Bool) -> Void) -> UIMenu {
+        UIMenu(options: .displayInline, children: [
+            UIAction(title: "Approve Comment", image: UIImage(systemName: "checkmark.circle")) { _ in review(true) },
+            UIAction(
+                title: "Decline Comment", image: UIImage(systemName: "xmark.circle"), attributes: .destructive
+            ) { _ in review(false) },
+        ])
     }
 
     /// Fetches the picture and draws it over the monogram — off the main
@@ -570,7 +594,8 @@ extension CommentRowView: UIContextMenuInteractionDelegate {
         configurationForMenuAtLocation location: CGPoint
     ) -> UIContextMenuConfiguration? {
         UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
-            UIMenu(children: [
+            let review: [UIMenuElement] = self?.onReview.map { review in [Self.reviewActions(review)] } ?? []
+            return UIMenu(children: review + [
                 UIAction(
                     title: "Share Comment",
                     image: UIImage(systemName: "square.and.arrow.up")

@@ -30,8 +30,13 @@ public struct CommentDisplayModel: Equatable, Sendable, Identifiable {
     /// Level-2 marker: replies render with the standard reply indentation
     /// (the stream carries exactly two depths — comment.v1's contract).
     public var isReply: Bool { parentID != nil }
+    /// Held for the post owner's review (#416): seen only by its author and
+    /// the owner, and marked so on the row.
+    public let isHeld: Bool
+    /// The viewer owns the post and may approve or decline this held comment.
+    public let canReview: Bool
 
-    public init(entry: CommentEntry, now: Date = Date()) {
+    public init(entry: CommentEntry, now: Date = Date(), canReview: Bool = false) {
         id = entry.id
         authorID = entry.authorID
         authorName = entry.authorName
@@ -41,6 +46,8 @@ public struct CommentDisplayModel: Equatable, Sendable, Identifiable {
         avatarURL = entry.authorAvatarURL
         metaText = Self.relativeShort(from: entry.createdAt, to: now)
         createdAt = entry.createdAt
+        isHeld = entry.isHeld
+        self.canReview = entry.isHeld && canReview
     }
 
     /// A row that is not a comment: a conversation's message, drawn in the
@@ -64,6 +71,8 @@ public struct CommentDisplayModel: Equatable, Sendable, Identifiable {
         self.avatarURL = avatarURL
         self.parentID = parentID
         self.createdAt = createdAt
+        isHeld = false
+        canReview = false
         monogram = Self.monogram(authorName)
     }
 
