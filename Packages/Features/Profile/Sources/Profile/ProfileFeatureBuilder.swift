@@ -175,7 +175,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             // profile action, and it is safe at any stack depth.
             makeSettingsViewController: onLogout.flatMap { onLogout in
                 account.map { account in
-                    { [switching, accountSessions, accountStatus, reporting, imagePipeline] in
+                    { [switching, accountSessions, accountStatus, reporting, gallery, imagePipeline] in
                         SettingsViewController(
                             switching: switching,
                             switcher: makeSwitcherFactory(),
@@ -247,7 +247,16 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                         )
                                     }
                                 case .activity:
-                                    YourActivityViewController()
+                                    YourActivityViewController(makeRecentlyDeleted: {
+                                        guard let trash = gallery as? any PostTrashManaging,
+                                              let viewer = repository as? any ProfileViewerResolving else { return nil }
+                                        return {
+                                            RecentlyDeletedViewController(
+                                                viewModel: RecentlyDeletedViewModel(trash: trash, viewer: viewer),
+                                                imagePipeline: imagePipeline
+                                            )
+                                        }
+                                    }())
                                 case .adsAndData:
                                     (account as? any AccountConsentManaging).map { manager in
                                         ConsentsViewController(manager: manager, makeDeleteAccount: {

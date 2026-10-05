@@ -1643,16 +1643,34 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     private func galleryMenuActions(
         for context: ProfileGalleryGridView.AuthorMenuContext
     ) -> [PostCardMenuAction] {
-        // The viewer's OWN post offers what a post of one's own is for. The
-        // rows are offered before either feature exists — the menu names
-        // them, and the handlers are empty until edit and delete land.
+        // The viewer's OWN post offers what a post of one's own is for. Edit
+        // is named before it exists (its handler is empty); Delete sends the
+        // post to Recently Deleted for 30 days (#408).
         if viewModel.isViewerPost(by: context.authorID) {
-            return [.edit {}, .delete {}]
+            return [.edit {}, .delete { [weak self] in
+                self?.confirmDeletePost(context)
+            }]
         }
         guard viewModel.canReportPost(by: context.authorID) else { return [] }
         return [.report { [weak self] in
             self?.presentPostReportReasons(for: context)
         }]
+    }
+
+    static let deletePostMessage = "You can restore it from Settings → Your Activity → Recently Deleted for 30 days."
+
+    private func confirmDeletePost(_ context: ProfileGalleryGridView.AuthorMenuContext) {
+        guard viewModel.canDeletePosts else { return }
+        let sheet = UIAlertController(title: "Delete this post?", message: Self.deletePostMessage, preferredStyle: .actionSheet)
+        sheet.addAction(UIAlertAction(title: "Delete", style: .destructive) { [weak self] _ in
+            self?.viewModel.deletePost(context.post.id)
+        })
+        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        if let popover = sheet.popoverPresentationController {
+            popover.sourceView = context.anchor
+            popover.sourceRect = context.anchor.bounds
+        }
+        present(sheet, animated: true)
     }
 
     #if DEBUG
@@ -1730,6 +1748,8 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
                 symbol: scopes.isEmpty ? "speaker.wave.2.fill" : "speaker.slash.fill",
                 in: view
             )
+        case .postDeleted:
+            ToastView.present("Post deleted", symbol: "trash.fill", in: view)
         case .reported:
             ToastView.present("Report sent", in: view)
         case .failed(let message):

@@ -128,6 +128,8 @@ public final class ProfileViewModel {
         case unblocked(handle: String)
         /// The mute now in force; none means unmuted.
         case muteChanged(handle: String, scopes: MuteScopes)
+        /// One of the viewer's posts went to Recently Deleted (#408).
+        case postDeleted
         case reported
         case failed(message: String)
     }
@@ -836,6 +838,28 @@ public final class ProfileViewModel {
     public func isViewerPost(by authorID: ProfileID?) -> Bool {
         guard let authorID, let profile else { return false }
         return followButton == .edit && authorID == profile.id
+    }
+
+    /// Whether the viewer's own posts can be deleted here (#408).
+    public var canDeletePosts: Bool { gallery is any PostTrashManaging }
+
+    /// Deletes one of the viewer's own posts. Not optimistic: the tile leaves
+    /// once the server has the tombstone, so a refused delete never shows a
+    /// post gone and back. It can be restored for 30 days from Settings →
+    /// Your Activity → Recently Deleted.
+    public func deletePost(_ postID: PostID) {
+        guard let profile, followButton == .edit, let trash = gallery as? any PostTrashManaging else { return }
+        Task { [weak self] in
+            do {
+                try await trash.deletePost(postID, author: profile.id)
+                guard let self else { return }
+                self.authoredCache?.removeAll { $0.id == postID }
+                self.renderGallery()
+                self.onActionResult?(.postDeleted)
+            } catch {
+                self?.onActionResult?(.failed(message: "Couldn't delete this post. Try again."))
+            }
+        }
     }
 
     public func canReportPost(by authorID: ProfileID?) -> Bool {
