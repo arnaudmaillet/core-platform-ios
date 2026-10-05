@@ -1,15 +1,40 @@
 import Foundation
 
 /// What the sign-up steps ask of the session — `SessionManager`'s, faked in
-/// tests (guest mode B4, #449).
-public protocol CodeSignUpPerforming: Sendable {
+/// tests (guest mode B4, #449; Apple and Google, #507).
+public protocol SignUpPerforming: Sendable {
     func startVerification(_ channel: VerificationChannel, to destination: String, locale: String) async throws -> VerificationChallenge
-    func signIn(challengeID: String, code: String) async throws -> CodeSignIn
-    func signUp(challengeID: String, code: String, details: SignUpDetails) async throws -> SignUpOutcome
+    func startFederatedSignIn() async throws -> String
+    func signIn(_ credential: SignInCredential) async throws -> CodeSignIn
+    func signUp(_ credential: SignInCredential, details: SignUpDetails) async throws -> SignUpOutcome
     func completeSignUp(_ pending: PendingAccount) async throws
 }
 
-extension SessionManager: CodeSignUpPerforming {}
+extension SessionManager: SignUpPerforming {}
+
+/// A native provider's sign-in sheet (Sign in with Apple): an id_token
+/// minted for `nonce`, and the name the person shared, if any.
+@MainActor
+public protocol FederatedSignInProviding {
+    func signIn(with provider: FederatedProvider, nonce: String) async throws -> FederatedSignInResult
+}
+
+public struct FederatedSignInResult: Equatable, Sendable {
+    public let idToken: String
+    /// Apple shares the name once, at the first sign-in: it seeds the
+    /// profile's name.
+    public let displayName: String?
+
+    public init(idToken: String, displayName: String?) {
+        self.idToken = idToken
+        self.displayName = displayName
+    }
+}
+
+/// The person closed the provider's sheet: nothing to say.
+public struct FederatedSignInCancelled: Error {
+    public init() {}
+}
 
 /// A handle, as the server would take it.
 public enum HandleCheck: Equatable, Sendable {

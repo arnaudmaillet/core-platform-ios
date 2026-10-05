@@ -95,6 +95,9 @@ public final class MockAuthService: @unchecked Sendable {
         bff.register(path: "/auth.v1.AuthService/StartVerification") { [self] (request: Auth_V1_StartVerificationRequest) in
             startVerification(request)
         }
+        bff.register(path: "/auth.v1.AuthService/StartFederatedSignIn") { [self] (_: Auth_V1_StartFederatedSignInRequest) in
+            startFederatedSignIn()
+        }
         bff.register(path: "/auth.v1.AuthService/SignUp") { [self] (request: Auth_V1_SignUpRequest) in
             signUp(request)
         }
@@ -130,6 +133,9 @@ public final class MockAuthService: @unchecked Sendable {
     private func login(_ request: Auth_V1_LoginRequest) -> Result<Auth_V1_LoginResponse, ConnectError> {
         if case .verificationCode(let grant) = request.credential {
             return loginWithCode(grant, request: request)
+        }
+        if case .idToken(let grant) = request.credential {
+            return loginWithIdToken(grant, request: request)
         }
         guard request.grantType == .password,
               case .password(let grant) = request.credential else {
@@ -239,7 +245,10 @@ public final class MockAuthService: @unchecked Sendable {
     /// The mock is one world with one viewer: a new account lands on the
     /// demo account (`accountID`), whose profile `CreateProfile` then names.
     private func signUp(_ request: Auth_V1_SignUpRequest) -> Result<Auth_V1_SignUpResponse, ConnectError> {
-        lock.withLock {
+        if request.hasIDToken {
+            return signUpWithIdToken(request)
+        }
+        return lock.withLock {
             guard let destination = provenDestinationLocked(request.verificationCode) else {
                 return .failure(ConnectError(code: .invalidArgument, message: "AUT-6002: wrong or expired code"))
             }
@@ -257,6 +266,93 @@ public final class MockAuthService: @unchecked Sendable {
                 return .failure(ConnectError(code: .invalidArgument, message: "consent to data processing is required"))
             }
             challenges[request.verificationCode.challengeID]?.used = true
+            lastSignUp = request
+            var created = Auth_V1_SignedUp()
+            created.accountID = Self.accountID
+            created.tokens = memberSessionLocked(device: request.device, guestRefreshToken: request.guestRefreshToken)
+            response.signedUp = created
+            return .success(response)
+        }
+    }
+
+    // MARK: - Native Apple / Google sign-in (#507)
+
+    private var federatedNonces: Set<String> = []
+    /// Provider identities (`sub`) linked to the demo account by a sign-up.
+    private var federatedSubjects: Set<String> = []
+
+    /// A random single-use nonce, as the fleet's.
+    private func startFederatedSignIn() -> Result<Auth_V1_StartFederatedSignInResponse, ConnectError> {
+        lock.withLock {
+            let nonce = Data((0..<32).map { _ in UInt8.random(in: .min ... .max) })
+                .base64EncodedString()
+                .replacingOccurrences(of: "+", with: "-")
+                .replacingOccurrences(of: "/", with: "_")
+                .replacingOccurrences(of: "=", with: "")
+            federatedNonces.insert(nonce)
+            var response = Auth_V1_StartFederatedSignInResponse()
+            response.nonce = nonce
+            response.expiresInSecs = 600
+            return .success(response)
+        }
+    }
+
+    /// The identity a grant proves: the token decodes (`MockIdToken`), its
+    /// `nonce` claim is the grant's nonce or its SHA-256 hex (Apple's), and
+    /// the mock issued that nonce and it is unused. Nil otherwise.
+    private func provenIdentityLocked(_ grant: Auth_V1_IdTokenGrant) -> MockIdToken.Claims? {
+        guard let claims = MockIdToken.claims(of: grant.idToken),
+              federatedNonces.contains(grant.nonce),
+              claims.nonce == grant.nonce || claims.nonce == MockIdToken.sha256Hex(grant.nonce)
+        else { return nil }
+        return claims
+    }
+
+    /// ⚠️ The nonce is redeemed only when the token signs in or signs up. The
+    /// fleet redeems it at Login even when the answer is NOT_FOUND, which
+    /// would refuse the SignUp that follows with the same token once
+    /// `AUTH_FEDERATED_NONCE_REQUIRED` is on — reported to the backend.
+    private func loginWithIdToken(
+        _ grant: Auth_V1_IdTokenGrant, request: Auth_V1_LoginRequest
+    ) -> Result<Auth_V1_LoginResponse, ConnectError> {
+        lock.withLock {
+            guard let claims = provenIdentityLocked(grant) else {
+                return .failure(ConnectError(code: .unauthenticated, message: "AUT-5008: id_token rejected"))
+            }
+            guard federatedSubjects.contains(claims.subject) || claims.email == Self.appleEmail else {
+                return .failure(ConnectError(code: .notFound, message: "AUT-6004: no account for this identity"))
+            }
+            federatedNonces.remove(grant.nonce)
+            var response = Auth_V1_LoginResponse()
+            response.accountID = Self.accountID
+            response.tokens = memberSessionLocked(device: request.device, guestRefreshToken: request.guestRefreshToken)
+            return .success(response)
+        }
+    }
+
+    private func signUpWithIdToken(_ request: Auth_V1_SignUpRequest) -> Result<Auth_V1_SignUpResponse, ConnectError> {
+        lock.withLock {
+            guard let claims = provenIdentityLocked(request.idToken) else {
+                return .failure(ConnectError(code: .unauthenticated, message: "AUT-5008: id_token rejected"))
+            }
+            var response = Auth_V1_SignUpResponse()
+            if federatedSubjects.contains(claims.subject) || claims.email == Self.appleEmail || claims.email == Self.demoEmail {
+                var existing = Auth_V1_ExistingAccount()
+                existing.method = claims.email == Self.demoEmail ? .emailCode : .apple
+                response.existingAccount = existing
+                return .success(response)
+            }
+            guard claims.email != nil else {
+                return .failure(ConnectError(code: .invalidArgument, message: "AUT-5010: the id_token carries no email"))
+            }
+            guard Self.isAtLeast13(request.dateOfBirth) else {
+                return .failure(ConnectError(code: .failedPrecondition, message: "AUT-6005: under the minimum age"))
+            }
+            guard request.consent.dataProcessing, !request.consent.policyVersion.isEmpty else {
+                return .failure(ConnectError(code: .invalidArgument, message: "consent to data processing is required"))
+            }
+            federatedNonces.remove(request.idToken.nonce)
+            federatedSubjects.insert(claims.subject)
             lastSignUp = request
             var created = Auth_V1_SignedUp()
             created.accountID = Self.accountID

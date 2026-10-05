@@ -65,6 +65,8 @@ public final class LoginViewModel {
             "That code didn\u{2019}t work. Check it, or ask for a new one."
         case .underMinimumAge:
             "You\u{2019}re not old enough to create an account."
+        case .identityRejected:
+            "We couldn\u{2019}t confirm it\u{2019}s you. Try signing in again."
         }
     }
 }

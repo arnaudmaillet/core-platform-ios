@@ -48,6 +48,8 @@ public enum MockEdgePolicy {
         // session to ask for — the guest token goes along if there is one.
         "/auth.v1.AuthService/StartVerification",
         "/auth.v1.AuthService/SignUp",
+        // The nonce of a native Apple / Google sign-in (#507).
+        "/auth.v1.AuthService/StartFederatedSignIn",
     ]
 
     static let guestReadablePaths: Set<String> = [

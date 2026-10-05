@@ -203,8 +203,18 @@ final class AppContainer {
         ),
         homeCountry: { [weak self] in
             await self?.currentCountry.currentCountry ?? Locale.current.region?.identifier ?? ""
-        }
+        },
+        federated: federatedSignIn()
     )
+
+    /// Sign in with Apple's sheet (#507); `-mock-apple-sign-in <email>` skips
+    /// it in DEBUG.
+    private func federatedSignIn() -> any FederatedSignInProviding {
+        #if DEBUG
+        if let mock = MockAppleSignIn.fromLaunchArguments() { return mock }
+        #endif
+        return AppleSignInProvider()
+    }
 
     // MARK: - Media
 

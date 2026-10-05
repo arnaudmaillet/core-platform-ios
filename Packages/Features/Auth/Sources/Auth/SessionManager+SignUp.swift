@@ -32,6 +32,20 @@ public enum CodeSignIn: Equatable, Sendable {
     case needsSignUp
 }
 
+/// A provider that signs people in natively and hands back an id_token.
+public enum FederatedProvider: Equatable, Sendable {
+    case apple, google
+}
+
+/// What proves who someone is, at sign-in and at sign-up.
+public enum SignInCredential: Equatable, Sendable {
+    /// The one-time code sent for a `VerificationChallenge`.
+    case code(challengeID: String, code: String)
+    /// A native Sign in with Apple / Google id_token, minted for the RAW
+    /// `nonce` from `startFederatedSignIn` (single use, #507).
+    case idToken(FederatedProvider, token: String, nonce: String)
+}
+
 /// How an existing account signs in — SignUp's "you already have an account".
 public enum ExistingSignInMethod: Equatable, Sendable {
     case apple, google, password, emailCode, phoneCode, unknown
@@ -99,19 +113,41 @@ extension SessionManager {
         }
     }
 
-    /// Signs in with a code. An address with no account answers
-    /// `.needsSignUp`; the same challenge and code then go to `signUp`.
+    /// A nonce for one native Sign in with Apple / Google (#507): Apple gets
+    /// its SHA-256 hex, Google the raw value, and the raw value goes back
+    /// with the id_token. Single use: a retry starts here again.
+    public func startFederatedSignIn() async throws -> String {
+        let response = await authClient.startFederatedSignIn(request: Auth_V1_StartFederatedSignInRequest(), headers: [:])
+        switch response.result {
+        case .success(let body): return body.nonce
+        case .failure(let error): throw AuthError.transport(message: error.message ?? "code \(error.code)")
+        }
+    }
+
+    /// Signs in with a code.
+    public func signIn(challengeID: String, code: String) async throws -> CodeSignIn {
+        try await signIn(.code(challengeID: challengeID, code: code))
+    }
+
+    /// Signs in with a code or an id_token. An identity with no account
+    /// answers `.needsSignUp`; the same credential then goes to `signUp`.
     ///
     /// The device's guest session goes along (`guest_refresh_token`): the
     /// server ends it, and the guest becomes the member.
-    public func signIn(challengeID: String, code: String) async throws -> CodeSignIn {
+    public func signIn(_ credential: SignInCredential) async throws -> CodeSignIn {
         bootstrapIfNeeded()
-        var grant = Auth_V1_VerificationCodeGrant()
-        grant.challengeID = challengeID
-        grant.code = code
         var request = Auth_V1_LoginRequest()
-        request.grantType = .verificationCode
-        request.credential = .verificationCode(grant)
+        switch credential {
+        case .code(let challengeID, let code):
+            var grant = Auth_V1_VerificationCodeGrant()
+            grant.challengeID = challengeID
+            grant.code = code
+            request.grantType = .verificationCode
+            request.credential = .verificationCode(grant)
+        case .idToken:
+            request.grantType = .idToken
+            request.credential = .idToken(Self.idTokenGrant(credential))
+        }
         request.device = deviceContext()
         request.guestRefreshToken = guestSession?.refreshToken ?? ""
         let response = await authClient.login(request: request, headers: [:])
@@ -123,21 +159,31 @@ extension SessionManager {
         case .failure(let error) where error.code == .notFound:
             return .needsSignUp
         case .failure(let error):
-            throw Self.codeFailure(error)
+            throw Self.failure(error, for: credential)
         }
     }
 
-    /// Creates the account the code proved an address for. It holds no
+    /// Creates the account a code proved an address for.
+    public func signUp(challengeID: String, code: String, details: SignUpDetails) async throws -> SignUpOutcome {
+        try await signUp(.code(challengeID: challengeID, code: code), details: details)
+    }
+
+    /// Creates the account `credential` proves an identity for. It holds no
     /// profile yet: create one with `PendingAccount.accessToken`, then
     /// `completeSignUp`.
-    public func signUp(challengeID: String, code: String, details: SignUpDetails) async throws -> SignUpOutcome {
+    public func signUp(_ credential: SignInCredential, details: SignUpDetails) async throws -> SignUpOutcome {
         bootstrapIfNeeded()
-        var grant = Auth_V1_VerificationCodeGrant()
-        grant.challengeID = challengeID
-        grant.code = code
         var request = Auth_V1_SignUpRequest()
         request.device = deviceContext()
-        request.verificationCode = grant
+        switch credential {
+        case .code(let challengeID, let code):
+            var grant = Auth_V1_VerificationCodeGrant()
+            grant.challengeID = challengeID
+            grant.code = code
+            request.verificationCode = grant
+        case .idToken:
+            request.idToken = Self.idTokenGrant(credential)
+        }
         request.dateOfBirth = Self.isoDate(details.dateOfBirth)
         request.consent.policyVersion = details.policyVersion
         request.consent.dataProcessing = true
@@ -160,7 +206,7 @@ extension SessionManager {
         case .failure(let error) where error.code == .failedPrecondition:
             throw AuthError.underMinimumAge
         case .failure(let error):
-            throw Self.codeFailure(error)
+            throw Self.failure(error, for: credential)
         }
     }
 
@@ -188,6 +234,26 @@ extension SessionManager {
         guestSession = nil
         try? guest?.store.clear()
         broadcast(.authenticated(member.accountID))
+    }
+
+    private static func idTokenGrant(_ credential: SignInCredential) -> Auth_V1_IdTokenGrant {
+        var grant = Auth_V1_IdTokenGrant()
+        if case .idToken(let provider, let token, let nonce) = credential {
+            grant.provider = provider == .apple ? .apple : .google
+            grant.idToken = token
+            grant.nonce = nonce
+        }
+        return grant
+    }
+
+    private static func failure(_ error: ConnectError, for credential: SignInCredential) -> AuthError {
+        guard case .idToken = credential else { return codeFailure(error) }
+        switch error.code {
+        case .invalidArgument, .unauthenticated, .permissionDenied:
+            return .identityRejected
+        default:
+            return .transport(message: error.message ?? "code \(error.code)")
+        }
     }
 
     private static func codeFailure(_ error: ConnectError) -> AuthError {

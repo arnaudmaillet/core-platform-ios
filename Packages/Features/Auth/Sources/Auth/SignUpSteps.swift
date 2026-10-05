@@ -257,8 +257,11 @@ final class ProfileSetupViewController: SignUpStepViewController {
     private var check: HandleCheck?
     private var checking: Task<Void, Never>?
 
-    init(setup: any AccountProfileSetup) {
+    private let suggestedName: String?
+
+    init(setup: any AccountProfileSetup, suggestedName: String? = nil) {
         self.setup = setup
+        self.suggestedName = suggestedName
         super.init(
             emoji: "\u{1F44B}", title: "Choose a Username",
             subtitle: "It\u{2019}s how people find you. You can change it later.",
@@ -284,6 +287,7 @@ final class ProfileSetupViewController: SignUpStepViewController {
         name.placeholder = "Name (optional)"
         name.textContentType = .name
         name.accessibilityIdentifier = "signup.name"
+        name.text = suggestedName
 
         statusCell.selectionStyle = .none
         statusCell.backgroundConfiguration = .clear()
