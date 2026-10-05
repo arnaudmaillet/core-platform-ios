@@ -89,9 +89,13 @@ final class SafetySettingsViewController: UIViewController {
         }
 
         var snapshot = NSDiffableDataSourceSnapshot<Int, Item>()
-        snapshot.appendSections([0, 1])
+        snapshot.appendSections([0])
         snapshot.appendItems(destinations.indices.map(Item.destination), toSection: 0)
-        snapshot.appendItems(planned.map(Item.planned), toSection: 1)
+        // Nothing left to announce: no empty Coming Soon section.
+        if !planned.isEmpty {
+            snapshot.appendSections([1])
+            snapshot.appendItems(planned.map(Item.planned), toSection: 1)
+        }
         dataSource.apply(snapshot, animatingDifferences: false)
     }
 }

@@ -181,7 +181,16 @@ public final class MockSocialServices: @unchecked Sendable {
             guard settings.comments != .unspecified, settings.mentions != .unspecified, settings.messages != .unspecified else {
                 return .failure(ConnectError(code: .invalidArgument, message: "PRF-9001: every audience must be set"))
             }
-            lock.withLock { interactionSettings[request.profileID] = settings }
+            lock.withLock {
+                let stored = interactionSettings[request.profileID] ?? Self.defaultInteractionSettings
+                var next = settings
+                // Remix and sound reuse: absent keeps the stored value; the
+                // limit is set only through its own RPCs.
+                if !settings.hasAllowRemix { next.allowRemix = stored.allowRemix }
+                if !settings.hasAllowSoundReuse { next.allowSoundReuse = stored.allowSoundReuse }
+                if stored.hasLimit { next.limit = stored.limit } else { next.clearLimit() }
+                interactionSettings[request.profileID] = next
+            }
             var response = Profile_V1_CommandResponse()
             response.success = true
             return .success(response)
@@ -221,6 +230,33 @@ public final class MockSocialServices: @unchecked Sendable {
             }
             // The card exists only for a brand; switching away drops it.
             lock.withLock { accountTypes[request.profileID] = (request.kind, request.kind == .brand ? request.business : nil) }
+            var response = Profile_V1_CommandResponse()
+            response.success = true
+            return .success(response)
+        }
+        bff.register(path: "/profile.v1.ProfileService/SetInteractionLimit") { [self] (request: Profile_V1_SetInteractionLimitRequest) -> Result<Profile_V1_CommandResponse, ConnectError> in
+            let nowMS = Int64(Date().timeIntervalSince1970 * 1_000)
+            // In the future, and at most four weeks ahead.
+            guard request.audience != .unspecified, request.untilMs > nowMS,
+                  request.untilMs <= nowMS + 28 * 86_400_000 + 60_000 else {
+                return .failure(ConnectError(code: .invalidArgument, message: "PRF-9001: a limit ends within four weeks"))
+            }
+            lock.withLock {
+                var settings = interactionSettings[request.profileID] ?? Self.defaultInteractionSettings
+                settings.limit.audience = request.audience
+                settings.limit.untilMs = request.untilMs
+                interactionSettings[request.profileID] = settings
+            }
+            var response = Profile_V1_CommandResponse()
+            response.success = true
+            return .success(response)
+        }
+        bff.register(path: "/profile.v1.ProfileService/ClearInteractionLimit") { [self] (request: Profile_V1_ClearInteractionLimitRequest) in
+            lock.withLock {
+                var settings = interactionSettings[request.profileID] ?? Self.defaultInteractionSettings
+                settings.clearLimit()
+                interactionSettings[request.profileID] = settings
+            }
             var response = Profile_V1_CommandResponse()
             response.success = true
             return .success(response)
@@ -368,6 +404,8 @@ public final class MockSocialServices: @unchecked Sendable {
         settings.messages = .everyone
         settings.allowDownloads = true
         settings.showLikeCounts = true
+        settings.allowRemix = true
+        settings.allowSoundReuse = true
         return settings
     }()
 

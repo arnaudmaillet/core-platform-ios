@@ -37,6 +37,8 @@ public final class MockSocialGraphService: @unchecked Sendable {
     private var requests: [Edge: Date] = [:]
     /// Whether a profile is private right now; profile.v1 owns that flag.
     private let isPrivate: @Sendable (String) -> Bool
+    /// Restrictions, owner → restricted, with when (backend #724).
+    private var restrictions: [Edge: Date] = [:]
     /// Mutes, muter → muted, with their scopes and when (backend #722).
     private var mutes: [Edge: (scopes: SocialGraph_V1_MuteScopes, at: Date)] = [:]
     /// Who else may see each profile's followers / following lists
@@ -103,6 +105,7 @@ public final class MockSocialGraphService: @unchecked Sendable {
             // How the actor mutes the target, so the profile can offer Unmute.
             view.muted = lock.withLock { mutes[Edge(follower: request.actorID, followee: request.targetID)]?.scopes }
                 ?? SocialGraph_V1_MuteScopes()
+            view.restricted = lock.withLock { restrictions[Edge(follower: request.actorID, followee: request.targetID)] != nil }
             // The counts the view carries, which used to be left at zero.
             // `counter.v1` does not project follower counts at all
             // (`dev/BACKEND_GAPS.md` §7), so this view is the only place they
@@ -203,6 +206,39 @@ public final class MockSocialGraphService: @unchecked Sendable {
         // Both honor `limit` + `page_token`: the follower / following screen
         // pages, and a mock that served the whole graph at once would leave
         // its cursor handling — and its paging spinner — unexercised.
+        bff.register(path: "/social_graph.v1.SocialGraphService/Restrict") { [self] (request: SocialGraph_V1_RestrictRequest) -> Result<SocialGraph_V1_CommandResponse, ConnectError> in
+            guard request.actorID != request.targetID else {
+                return .failure(ConnectError(code: .invalidArgument, message: "SGR-2001: cannot restrict oneself"))
+            }
+            lock.withLock {
+                let edge = Edge(follower: request.actorID, followee: request.targetID)
+                if restrictions[edge] == nil { restrictions[edge] = Date() }
+            }
+            var response = SocialGraph_V1_CommandResponse()
+            response.success = true
+            return .success(response)
+        }
+        bff.register(path: "/social_graph.v1.SocialGraphService/Unrestrict") { [self] (request: SocialGraph_V1_UnrestrictRequest) in
+            lock.withLock { restrictions[Edge(follower: request.actorID, followee: request.targetID)] = nil }
+            var response = SocialGraph_V1_CommandResponse()
+            response.success = true
+            return .success(response)
+        }
+        bff.register(path: "/social_graph.v1.SocialGraphService/ListRestricted") { [self] (request: SocialGraph_V1_ListRestrictedRequest) in
+            // Profile-id order, as on the fleet; one page.
+            var response = SocialGraph_V1_ListRestrictedResponse()
+            response.restricted = lock.withLock {
+                restrictions.filter { $0.key.follower == request.profileID }
+                    .sorted { $0.key.followee < $1.key.followee }
+                    .map { edge, date in
+                        var summary = SocialGraph_V1_RestrictedSummary()
+                        summary.profileID = edge.followee
+                        summary.restrictedAt = .init(date: date)
+                        return summary
+                    }
+            }
+            return .success(response)
+        }
         bff.register(path: "/social_graph.v1.SocialGraphService/Mute") { [self] (request: SocialGraph_V1_MuteRequest) -> Result<SocialGraph_V1_CommandResponse, ConnectError> in
             guard request.actorID != request.targetID else {
                 return .failure(ConnectError(code: .invalidArgument, message: "SGR-2001: cannot mute oneself"))
