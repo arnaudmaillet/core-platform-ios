@@ -778,7 +778,9 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
         request.followeeID = id.rawValue
         request.limit = edgeSampleLimit
         let response = await socialGraphClient.listFollowers(request: request, headers: [:])
-        guard let body = response.message else {
+        // A list hidden from this viewer (list privacy, backend #720) is an
+        // empty page that counts nothing: "—", not "0".
+        guard let body = response.message, !body.hidden else {
             logger.info("follower count unavailable for \(id.rawValue, privacy: .public)")
             return .unavailable
         }
@@ -790,7 +792,7 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
         request.followerID = id.rawValue
         request.limit = edgeSampleLimit
         let response = await socialGraphClient.listFollowing(request: request, headers: [:])
-        guard let body = response.message else {
+        guard let body = response.message, !body.hidden else {
             logger.info("following count unavailable for \(id.rawValue, privacy: .public)")
             return .unavailable
         }

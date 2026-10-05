@@ -126,6 +126,8 @@ public final class ProfileViewModel {
         /// confirmation can't overstate what happened.
         case blocked(handle: String, profileCount: Int)
         case unblocked(handle: String)
+        /// The mute now in force; none means unmuted.
+        case muteChanged(handle: String, scopes: MuteScopes)
         case reported
         case failed(message: String)
     }
@@ -245,6 +247,12 @@ public final class ProfileViewModel {
     public private(set) var isBlocked = false
     private var blockInFlight = false
     private var reportInFlight = false
+    /// What of this profile the viewer has muted (#403), read beside the
+    /// relationship; the "..." menu's Mute submenu shows and edits it.
+    public private(set) var muteScopes: MuteScopes = .none
+    private var muteInFlight = false
+    /// Whether this composition can mute at all.
+    public var canMute: Bool { repository is any ProfileMuting }
 
     private var load: Task<Void, Never>?
     private var relationshipLoad: Task<Void, Never>?
@@ -716,6 +724,36 @@ public final class ProfileViewModel {
         }
     }
 
+    /// Switches one mute scope. Optimistic, unlike block: a mute is a quiet
+    /// preference the target never sees, so a rollback costs nothing. The
+    /// toast says what is muted now.
+    public func toggleMute(_ scope: MuteScope) {
+        guard let profile, canModerate, !muteInFlight, let muting = repository as? any ProfileMuting else { return }
+        let before = muteScopes
+        let after = before.toggling(scope)
+        muteScopes = after
+        muteInFlight = true
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await muting.setMuteScopes(after, for: profile.id)
+                self.onActionResult?(.muteChanged(handle: "@" + profile.handle, scopes: after))
+            } catch {
+                self.muteScopes = before
+                self.onActionResult?(.failed(message: "Couldn't change what you mute from this profile."))
+            }
+            self.muteInFlight = false
+        }
+    }
+
+    /// "Muted @ada's posts and messages", "Unmuted @ada".
+    public nonisolated static func muteMessage(handle: String, scopes: MuteScopes) -> String {
+        guard !scopes.isEmpty else { return "Unmuted \(handle)" }
+        let names = MuteScope.allCases.filter(scopes.contains).map { $0.title.lowercased() }
+        let list = names.count > 1 ? names.dropLast().joined(separator: ", ") + " and " + names.last! : names[0]
+        return "Muted \(handle)'s \(list)"
+    }
+
     /// File a moderation report against this profile. Reports are fire-and-
     /// confirm: the result is reported either way, because a report the user
     /// believes was filed but wasn't is the worst outcome here.
@@ -1078,6 +1116,12 @@ public final class ProfileViewModel {
             self.apply(relationship)
             self.cache?.store(relationship, for: id)
             self.relationshipLoad = nil
+            // The mute rides beside the relationship; only someone else's
+            // profile can be muted.
+            if relationship != .me, let muting = self.repository as? any ProfileMuting,
+               let scopes = try? await muting.muteScopes(for: id), !self.muteInFlight {
+                self.muteScopes = scopes
+            }
         }
     }
 
