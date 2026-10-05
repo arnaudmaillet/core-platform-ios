@@ -18,6 +18,7 @@ final class PrivacySectionViewController: UIViewController {
         case loading
         case failed
         case hideLists
+        case activityDiscovery
         case dataTransparency
         case planned(String)
     }
@@ -36,6 +37,8 @@ final class PrivacySectionViewController: UIViewController {
     private let viewModel: PrivacySectionViewModel
     /// Who can see the followers and following lists; nil hides the row.
     private let makeListPrivacy: (() -> UIViewController)?
+    /// Activity status, read receipts and search (#406, #412); nil hides the row.
+    private let makeActivityDiscovery: (() -> UIViewController)?
     /// "Your Data and Permissions" (#414); nil hides the row.
     private let makeDataTransparency: (() -> UIViewController)?
     private let imagePipeline: ImagePipeline?
@@ -46,11 +49,13 @@ final class PrivacySectionViewController: UIViewController {
         viewModel: PrivacySectionViewModel,
         makeListPrivacy: (() -> UIViewController)?,
         makeDataTransparency: (() -> UIViewController)? = nil,
+        makeActivityDiscovery: (() -> UIViewController)? = nil,
         imagePipeline: ImagePipeline? = nil
     ) {
         self.viewModel = viewModel
         self.makeListPrivacy = makeListPrivacy
         self.makeDataTransparency = makeDataTransparency
+        self.makeActivityDiscovery = makeActivityDiscovery
         self.imagePipeline = imagePipeline
         super.init(nibName: nil, bundle: nil)
         title = SettingsSection.privacy.title
@@ -192,6 +197,11 @@ final class PrivacySectionViewController: UIViewController {
             content.image = UIImage(systemName: "person.2")
             content.imageProperties.tintColor = .label
             cell.accessories = [.disclosureIndicator()]
+        case .activityDiscovery:
+            content.text = "Activity and Discovery"
+            content.image = UIImage(systemName: "eye")
+            content.imageProperties.tintColor = .label
+            cell.accessories = [.disclosureIndicator()]
         case .dataTransparency:
             content.text = "Your Data and Permissions"
             content.image = UIImage(systemName: "doc.text.magnifyingglass")
@@ -224,7 +234,9 @@ final class PrivacySectionViewController: UIViewController {
             snapshot.reconfigureItems([.commentAudience])
         }
         snapshot.appendItems(
-            (makeListPrivacy == nil ? [] : [.hideLists]) + (makeDataTransparency == nil ? [] : [.dataTransparency]),
+            (makeListPrivacy == nil ? [] : [.hideLists])
+                + (makeActivityDiscovery == nil ? [] : [.activityDiscovery])
+                + (makeDataTransparency == nil ? [] : [.dataTransparency]),
             toSection: .lists
         )
         snapshot.appendItems(planned.map(Item.planned), toSection: .comingSoon)
@@ -281,7 +293,7 @@ final class PrivacySectionViewController: UIViewController {
 extension PrivacySectionViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         switch dataSource.itemIdentifier(for: indexPath) {
-        case .followRequests, .hideLists, .dataTransparency, .failed: true
+        case .followRequests, .hideLists, .activityDiscovery, .dataTransparency, .failed: true
         default: false
         }
     }
@@ -297,6 +309,10 @@ extension PrivacySectionViewController: UICollectionViewDelegate {
             )
         case .hideLists:
             if let screen = makeListPrivacy?() {
+                navigationController?.pushViewController(screen, animated: true)
+            }
+        case .activityDiscovery:
+            if let screen = makeActivityDiscovery?() {
                 navigationController?.pushViewController(screen, animated: true)
             }
         case .dataTransparency:

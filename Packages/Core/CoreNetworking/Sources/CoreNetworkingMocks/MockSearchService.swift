@@ -16,10 +16,18 @@ public final class MockSearchService: @unchecked Sendable {
     /// Read for POPULARITY only. Optional so a test can build this fake alone;
     /// without it, popularity falls back to how many posts an author has.
     private let counters: MockCounterStore?
+    /// Whether a profile may appear in results — its owner's "Show Up in
+    /// Search" (backend #726). Search and Suggest both honour it.
+    private let isFindable: @Sendable (String) -> Bool
 
-    public init(dataset: MockSocialDataset, counters: MockCounterStore? = nil) {
+    public init(
+        dataset: MockSocialDataset,
+        counters: MockCounterStore? = nil,
+        isFindable: @escaping @Sendable (String) -> Bool = { _ in true }
+    ) {
         self.dataset = dataset
         self.counters = counters
+        self.isFindable = isFindable
     }
 
     public func register(on bff: MockBFF) {
@@ -51,7 +59,7 @@ public final class MockSearchService: @unchecked Sendable {
         guard wantsProfiles else { return .success(response) }
 
         let matches = dataset.authors.filter { author in
-            author.handle.lowercased().hasPrefix(prefix)
+            isFindable(author.profileID) && author.handle.lowercased().hasPrefix(prefix)
                 || author.displayName.lowercased()
                     .split(separator: " ")
                     .contains { $0.hasPrefix(prefix) }
@@ -79,7 +87,8 @@ public final class MockSearchService: @unchecked Sendable {
         if wantsProfiles {
             let matches = sorted(
                 dataset.authors.filter {
-                    $0.handle.lowercased().contains(query) || $0.displayName.lowercased().contains(query)
+                    isFindable($0.profileID)
+                        && ($0.handle.lowercased().contains(query) || $0.displayName.lowercased().contains(query))
                 },
                 by: request.sort
             )
