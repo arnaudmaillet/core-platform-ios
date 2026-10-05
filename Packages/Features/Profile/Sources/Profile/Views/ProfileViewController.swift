@@ -7,6 +7,7 @@ import MapsInterface
 import MediaPlayback
 import DesignSystem
 import PostGrid
+import ShareSheet
 import UIKit
 
 final class ProfileViewController: UIViewController, HeaderAccessoryHosting {

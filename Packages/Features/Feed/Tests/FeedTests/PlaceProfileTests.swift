@@ -550,6 +550,13 @@ struct PlaceProfileTests {
         #expect(qr.maxX < 402 / 2, "the QR code drifted to the trailing edge")
         #expect(abs(qr.width - HeroTray.bubbleSize) < 0.5)
 
+        // The bubble opens the PROFILE'S share sheet, shared: the place's
+        // name, country and flag on its card, its link in the code, and no
+        // row of people (the page has no source of them).
+        let sheet = try #require(profile.debugMakeShareSheet())
+        sheet.loadViewIfNeeded()
+        #expect(!sheet.debugShowsTargetsRow, "a people row with nobody in it")
+
         let pinOnly = makeProfile(following: ClusterGalleryFollowing(isFollowing: { false }, toggle: { true }))
         laidOut(pinOnly)
         #expect(pinOnly.debugTrayButtons.count == 1, "a QR code with no link")

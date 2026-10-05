@@ -6,6 +6,7 @@ import FeedInterface
 import MediaCore
 import MediaPlayback
 import PostGrid
+import ShareSheet
 import UIKit
 
 /// The PLACE PROFILE that sits BENEATH a semantic-cluster feed (Case B of the
@@ -1158,14 +1159,41 @@ final class PlaceProfileViewController: UIViewController {
         }
     }
 
-    /// The place's QR code, on a sheet — the profile's QR bubble opens its
-    /// share card the same way.
+    /// The place's share sheet — the PROFILE'S OWN (`ShareSheet`, shared):
+    /// its QR card with the place's flag punched in, its name and country,
+    /// and the actions tray. No row of people to send it to: the page has no
+    /// source of them, and a row with nobody in it is not drawn.
     private func presentQRCode() {
-        guard let shareURL else { return }
-        let sheet = PlaceQRCodeViewController(
-            name: Self.heroTitleComponents(of: placeName).name, url: shareURL
-        )
+        guard let sheet = makeShareSheet() else { return }
+        // The system sheet opens once this one is gone — the profile's
+        // hand-off (presenting from a sheet would stack two).
+        sheet.onSystemShare = { [weak self] card, image in
+            guard let self else { return }
+            let activity = UIActivityViewController(
+                activityItems: [ShareItemSource(card: card, icon: image), image], applicationActivities: nil
+            )
+            activity.popoverPresentationController?.sourceView = self.qrCodeButton
+            self.present(activity, animated: true)
+        }
         present(sheet, animated: true)
+    }
+
+    private func makeShareSheet() -> ShareSheetViewController? {
+        guard let shareURL else { return nil }
+        let card = ShareCard(
+            displayName: identityView.titleLabel.name,
+            handle: identityView.titleLabel.subtitle,
+            avatarURL: nil,
+            avatarImage: identityView.flagView.image,
+            url: shareURL
+        )
+        return ShareSheetViewController(
+            card: card,
+            imagePipeline: imagePipeline,
+            targeting: nil,
+            deviceCornerRadius: ScreenGeometry.cornerRadius(behind: view),
+            fallbackWidth: view.bounds.width
+        )
     }
     /// The crossfade's length and the size the leaving copy shrinks to —
     /// the profile screen's measured pair, shared so the two screens that
@@ -2557,8 +2585,8 @@ extension PlaceProfileViewController {
         actionRow.arrangedSubviews.compactMap { $0 as? UIButton }
     }
     var debugTrayFrame: CGRect { actionRow.convert(actionRow.bounds, to: view) }
-    /// Opens the QR code as the bubble does.
-    func debugTapQRCode() { presentQRCode() }
+    /// The share sheet the QR bubble opens.
+    func debugMakeShareSheet() -> ShareSheetViewController? { makeShareSheet() }
     /// The banner's fade, in the view's space.
     var debugBannerFade: HeroBannerFade.Geometry? {
         bannerView.fade?.offset(by: headerHost.frame.minY)

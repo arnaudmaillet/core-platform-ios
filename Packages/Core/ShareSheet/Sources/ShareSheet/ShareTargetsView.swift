@@ -9,7 +9,7 @@ import UIKit
 /// A scroll view over a stack, not a collection view: the row is capped at a
 /// dozen items that are all built at once, so a collection view's recycling
 /// would be machinery with nothing to recycle.
-final class ProfileShareTargetsView: UIView {
+final class ShareTargetsView: UIView {
     private enum Metrics {
         static let avatarDiameter: CGFloat = 56
         static let itemWidth: CGFloat = 72
@@ -23,7 +23,7 @@ final class ProfileShareTargetsView: UIView {
         static let skeletonCount = 6
     }
 
-    var onSelect: ((ProfileShareTarget) -> Void)?
+    var onSelect: ((ShareTarget) -> Void)?
     /// The leading Search bubble. Always present — including while loading, so
     /// the one action that works without data is reachable immediately.
     var onSearch: (() -> Void)?
@@ -85,7 +85,7 @@ final class ProfileShareTargetsView: UIView {
         }
     }
 
-    func render(_ targets: [ProfileShareTarget], leadingSearch: Bool = true) {
+    func render(_ targets: [ShareTarget], leadingSearch: Bool = true) {
         reset()
         if leadingSearch { row.addArrangedSubview(makeSearchItem()) }
         for target in targets {
@@ -164,7 +164,7 @@ final class ProfileShareTargetsView: UIView {
         return container
     }
 
-    private func makeItem(for target: ProfileShareTarget) -> UIView {
+    private func makeItem(for target: ShareTarget) -> UIView {
         let avatar = AvatarImageView()
         avatar.backgroundColor = .tertiarySystemFill
         avatar.isUserInteractionEnabled = false

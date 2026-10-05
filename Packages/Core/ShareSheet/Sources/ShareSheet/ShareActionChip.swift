@@ -20,7 +20,7 @@ import UIKit
 /// The visible column is inert and a button sits over the whole thing, so the
 /// caption is as tappable as the circle — a 56pt target with a label under it
 /// that does nothing is a small trap.
-final class ProfileShareActionChip: UIView {
+final class ShareActionChip: UIView {
     private enum Metrics {
         static let diameter: CGFloat = 58
         /// Caption width cap. Wide enough for two short words, narrow enough
