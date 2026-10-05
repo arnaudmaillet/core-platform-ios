@@ -854,15 +854,13 @@ final class AppContainer {
     /// Reuses `profileRepository` as the viewer resolver, so identity (and a
     /// profile switch) is resolved in exactly one place.
     ///
-    /// `supportsFollowerRemoval` tracks the deployment, not a preference:
-    /// `social_graph.v1` has no `RemoveFollower` RPC, so only the mock — which
-    /// owns its own graph — can honor the action. Against the fleet the row
-    /// simply doesn't offer it. See `dev/BACKEND_GAPS.md` §13.
+    /// Followers can be removed everywhere: `social_graph.v1.RemoveFollower`
+    /// (backend #720), which the mock answers too.
     private lazy var profileRelationshipsRepository = ProfileRelationshipsRepository(
         socialGraphClient: SocialGraph_V1_SocialGraphServiceClient(client: authenticatedRPCClient),
         profileClient: Profile_V1_ProfileServiceClient(client: authenticatedRPCClient),
         viewer: profileRepository,
-        supportsFollowerRemoval: environment == .mock,
+        supportsFollowerRemoval: true,
         followEvents: followGraphEvents
     )
 
