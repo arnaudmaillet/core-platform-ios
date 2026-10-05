@@ -290,6 +290,12 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                             imagePipeline: imagePipeline
                                         )
                                     }
+                                case .whatYouSee:
+                                    (repository as? any FeedPreferencesManaging).map { preferences in
+                                        WhatYouSeeViewController(preferences: preferences, isTeen: {
+                                            (try? await account.currentAccount().ageBracket.isTeen) ?? false
+                                        })
+                                    }
                                 default: nil
                                 }
                             },

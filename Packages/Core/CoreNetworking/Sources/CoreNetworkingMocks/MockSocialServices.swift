@@ -28,6 +28,8 @@ public final class MockSocialServices: @unchecked Sendable {
     private var deletedPosts: [String: Date] = [:]
     /// How long a deleted post can be restored.
     public static let restoreWindow: TimeInterval = 30 * 86_400
+    /// `SetFeedSettings` writes, by profile (backend #731); absent is Less.
+    private var feedSettings: [String: Profile_V1_FeedSettings] = [:]
     private var viewerDisplayName = MockPostStore.viewer.displayName
     private var viewerBio = MockPostStore.viewer.bio
     private var viewerWebsite = MockPostStore.viewer.websiteURL
@@ -106,6 +108,12 @@ public final class MockSocialServices: @unchecked Sendable {
         }
         bff.register(path: "/profile.v1.ProfileService/UpdateProfile") { [self] (request: Profile_V1_UpdateProfileRequest) in
             updateProfile(request)
+        }
+        bff.register(path: "/profile.v1.ProfileService/SetFeedSettings") { [self] (request: Profile_V1_SetFeedSettingsRequest) in
+            lock.withLock { feedSettings[request.profileID] = request.settings }
+            var response = Profile_V1_CommandResponse()
+            response.success = true
+            return .success(response)
         }
         bff.register(path: "/profile.v1.ProfileService/SetVisibility") { [self] (request: Profile_V1_SetVisibilityRequest) in
             setVisibility(request)
@@ -333,6 +341,12 @@ public final class MockSocialServices: @unchecked Sendable {
                 return proto
             }
             view.visibility = lock.withLock { visibilityOverrides[view.profileID] } ?? .public
+            // Owner-only on the fleet; the viewer's own view here.
+            view.feedSettings = lock.withLock { feedSettings[view.profileID] } ?? {
+                var settings = Profile_V1_FeedSettings()
+                settings.sensitiveContent = .less
+                return settings
+            }()
             return .success(view)
         }
         guard let author = dataset.author(for: request.profileID) else {
@@ -353,6 +367,8 @@ public final class MockSocialServices: @unchecked Sendable {
         // is standing in for.
         view.visibility = lock.withLock { visibilityOverrides[author.profileID] }
             ?? (dataset.isRelationshipsPrivate(author.profileID) ? .private : .public)
+        // The viewer's other profiles answer here too.
+        if let settings = lock.withLock({ feedSettings[author.profileID] }) { view.feedSettings = settings }
         return .success(view)
     }
 
