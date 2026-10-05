@@ -1,3 +1,4 @@
+import AuthInterface
 import CoreModels
 import CoreNavigation
 import CoreStorage
@@ -421,6 +422,17 @@ final class PostDetailViewController: UIViewController {
             ) { [weak self] notification in
                 guard let id = ActiveProfileChange.profileID(from: notification) else { return }
                 MainActor.assumeIsolated { self?.viewModel.adoptActiveViewer(id) }
+            },
+            // Someone else is here now — most often a guest who just signed
+            // up from this composer's button: the face and the name re-read,
+            // and so does the menu of profiles to switch between.
+            NotificationCenter.default.addObserver(
+                forName: .viewerDidChange, object: nil, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.viewModel.reloadViewerIdentity()
+                    self?.refreshProfileMenu()
+                }
             },
         ]
 

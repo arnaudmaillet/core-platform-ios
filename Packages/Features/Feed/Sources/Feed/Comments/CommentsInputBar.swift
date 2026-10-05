@@ -260,6 +260,10 @@ final class CommentsInputBar: UIView {
     /// (asked 2026-10-02): the column never changes meaning under the thumb,
     /// and the send arrow sits where the eye already is, in the field.
     private let fieldActionButton = UIButton(configuration: .plain())
+    /// A guest's whole input row: one glass button over the avatar's and the
+    /// field's span, in their place — a guest has no one to post as and
+    /// nothing to type until they sign up (`applyGuestFace`).
+    private let signUpButton = UIButton(configuration: .glass())
     /// Whether the keyboard is up, driven by the keyboardWillShow/Hide
     /// notifications (the engaged bar is the screen's only text input, so
     /// the global signal is unambiguous). It gates the page-swipe drive, the
@@ -500,6 +504,7 @@ final class CommentsInputBar: UIView {
 
         addSubview(avatarBubble)
         addSubview(field)
+        addSubview(signUpButton)
         addSubview(railButton)
         addSubview(boostButton)
         addSubview(visibilityButton)
@@ -509,6 +514,7 @@ final class CommentsInputBar: UIView {
         visibilityButton.translatesAutoresizingMaskIntoConstraints = false
         field.translatesAutoresizingMaskIntoConstraints = false
         railButton.translatesAutoresizingMaskIntoConstraints = false
+        signUpButton.translatesAutoresizingMaskIntoConstraints = false
         fieldHeight = field.heightAnchor.constraint(equalToConstant: Metrics.controlSize)
         // The INPUT row, leading to trailing: the viewer's AVATAR, then the
         // field, which owns all the flexible width and, at rest, ends `sm`
@@ -560,7 +566,14 @@ final class CommentsInputBar: UIView {
             visibilityButton.centerYAnchor.constraint(equalTo: boostButton.centerYAnchor),
             visibilityButton.widthAnchor.constraint(equalTo: boostButton.widthAnchor),
             visibilityButton.heightAnchor.constraint(equalTo: boostButton.heightAnchor),
+            // The guest's button: from the avatar's leading edge to the
+            // field's trailing one, on the field's resting row.
+            signUpButton.leadingAnchor.constraint(equalTo: avatarBubble.leadingAnchor),
+            signUpButton.trailingAnchor.constraint(equalTo: field.trailingAnchor),
+            signUpButton.bottomAnchor.constraint(equalTo: restingInputRow.bottomAnchor),
+            signUpButton.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
         ])
+        configureSignUpButton()
         // The bar's TOP is the highest of what it holds AT REST: required
         // floors above, and hugs at DISTINCT priorities (equal ones would
         // leave the solver a choice it could make differently pass to pass) —
@@ -810,6 +823,7 @@ final class CommentsInputBar: UIView {
         super.didMoveToWindow()
         guard window != nil else { return }
         applyPlaceholder()
+        applyGuestFace()
         #if DEBUG
         runEmoteKeyboardQAIfAsked()
         runComposerDraftQAIfAsked()
@@ -1020,6 +1034,45 @@ final class CommentsInputBar: UIView {
             placeholderLabel.text = "Comment as \(viewerName)"
         } else {
             placeholderLabel.text = "Add a comment…"
+        }
+    }
+
+    // MARK: - Guest
+
+    private func configureSignUpButton() {
+        signUpButton.configuration?.cornerStyle = .capsule
+        var title = AttributedString("Sign up to comment")
+        title.font = .preferredFont(forTextStyle: .headline)
+        signUpButton.configuration?.attributedTitle = title
+        signUpButton.configuration?.baseForegroundColor = .label
+        signUpButton.accessibilityIdentifier = "comments.sign-up"
+        signUpButton.isHidden = true
+        signUpButton.addAction(UIAction { [weak self] _ in self?.signUpTapped() }, for: .primaryActionTriggered)
+    }
+
+    /// A guest sees the sign-up button where the avatar and the field stand;
+    /// a member, the composer. Decided from the member gate, which is only
+    /// reachable in a window — so this runs on the way in, and again once a
+    /// guest has signed up from the button.
+    private func applyGuestFace() {
+        let isGuest = MemberGates.gate(from: self)?.isMember == false
+        signUpButton.isHidden = !isGuest
+        avatarBubble.isHidden = isGuest
+        field.isHidden = isGuest
+    }
+
+    /// The sheet titled for commenting; once signed up, the composer takes
+    /// the button's place with the keyboard up — the comment they came for.
+    private func signUpTapped() {
+        guard let gate = MemberGates.gate(from: self), !gate.isMember else {
+            applyGuestFace()
+            return
+        }
+        Task { @MainActor [weak self] in
+            guard await gate.requireMember(for: .comment), let self else { return }
+            applyGuestFace()
+            applyPlaceholder()
+            textView.becomeFirstResponder()
         }
     }
 
