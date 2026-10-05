@@ -59,7 +59,10 @@ struct MockEdgePolicyTests {
     }
 
     @Test func aGuestMayReport() {
-        #expect(MockEdgePolicy.access(for: "/moderation.v1.ModerationService/OpenCase") == .guestReadable)
+        #expect(MockEdgePolicy.access(for: "/moderation.v1.ModerationService/SubmitReport") == .guestReadable)
+        #expect(MockEdgePolicy.access(for: "/moderation.v1.ModerationService/ListMyReports") == .guestReadable)
+        // Mesh-only on the fleet since backend #677: the reviewer console's.
+        #expect(MockEdgePolicy.access(for: "/moderation.v1.ModerationService/OpenCase") == .member)
     }
 
     @Test func signingInNeedsNoSession() {
@@ -87,7 +90,8 @@ struct MockEdgePolicyTests {
                      "/social_graph.v1.SocialGraphService/ListFollowing",
                      "/geo_discovery.v1.GeoDiscoveryService/QueryTile", "/search.v1.SearchService/Search",
                      "/search.v1.SearchService/Suggest", "/media.v1.MediaService/ResolveDelivery",
-                     "/moderation.v1.ModerationService/OpenCase", "/auth.v1.AuthService/Login",
+                     "/moderation.v1.ModerationService/SubmitReport",
+                     "/moderation.v1.ModerationService/ListMyReports", "/auth.v1.AuthService/Login",
                      "/auth.v1.AuthService/Refresh"] {
             #expect(served.contains(path), "\(path) is in the policy but not served")
             #expect(MockEdgePolicy.access(for: path) != .member, "\(path) should be open to guests")

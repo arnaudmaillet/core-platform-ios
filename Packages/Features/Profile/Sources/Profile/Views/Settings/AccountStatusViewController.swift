@@ -2,12 +2,9 @@ import DesignSystem
 import UIKit
 
 /// Settings → Safety and Interactions → Account Status (#390): whether the
-/// account is under any restriction, and which.
-///
-/// Reasons and appeals are listed as not yet available rather than offered:
-/// the enforcement view carries no decision id, and both the Statement of
-/// Reasons and an appeal are addressed by decision (see
-/// `AccountStatusRepository`).
+/// account is under any restriction, and which. A restriction that names its
+/// decision opens why it was applied, and an appeal
+/// (`DecisionDetailViewController`).
 final class AccountStatusViewController: UIViewController {
     enum Phase: Equatable {
         case loading
@@ -22,14 +19,16 @@ final class AccountStatusViewController: UIViewController {
     }
 
     private let status: any AccountStatusProviding
+    private let reviewer: (any ModerationDecisionReviewing)?
     private var phase: Phase = .loading {
         didSet { applySnapshot() }
     }
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Int, Item>!
 
-    init(status: any AccountStatusProviding) {
+    init(status: any AccountStatusProviding, reviewer: (any ModerationDecisionReviewing)? = nil) {
         self.status = status
+        self.reviewer = reviewer
         super.init(nibName: nil, bundle: nil)
         title = "Account Status"
         hidesBottomBarWhenPushed = true
@@ -97,6 +96,7 @@ final class AccountStatusViewController: UIViewController {
             guard let self else { return }
             switch item {
             case .summary:
+                cell.accessories = []
                 let summary = Self.summary(for: phase)
                 var content = UIListContentConfiguration.cell()
                 content.text = summary.title
@@ -109,7 +109,9 @@ final class AccountStatusViewController: UIViewController {
                 content.secondaryText = Self.period(of: restriction)
                 content.secondaryTextProperties.color = .secondaryLabel
                 cell.contentConfiguration = content
+                cell.accessories = canOpen(restriction) ? [.disclosureIndicator()] : []
             case .retry:
+                cell.accessories = []
                 var content = UIListContentConfiguration.cell()
                 content.text = "Try Again"
                 content.textProperties.color = .tintColor
@@ -123,8 +125,8 @@ final class AccountStatusViewController: UIViewController {
             elementKind: UICollectionView.elementKindSectionFooter
         ) { [weak self] view, _, indexPath in
             var content = UIListContentConfiguration.footer()
-            if indexPath.section == 0, case .loaded(let restrictions) = self?.phase, !restrictions.isEmpty {
-                content.text = "Why each decision was made, and a way to appeal it, aren't available in the app yet. Contact support to ask about a decision."
+            if indexPath.section == 0, let self, case .loaded(let restrictions) = phase, !restrictions.isEmpty {
+                content.text = Self.footer(canOpenAll: restrictions.allSatisfy(canOpen))
             } else {
                 content.text = nil
             }
@@ -133,6 +135,16 @@ final class AccountStatusViewController: UIViewController {
         dataSource.supplementaryViewProvider = { collectionView, _, indexPath in
             collectionView.dequeueConfiguredReusableSupplementary(using: footer, for: indexPath)
         }
+    }
+
+    private func canOpen(_ restriction: AccountRestriction) -> Bool {
+        reviewer != nil && restriction.decisionID != nil
+    }
+
+    static func footer(canOpenAll: Bool) -> String {
+        canOpenAll
+            ? "Tap a restriction to see why it was applied. If you think it's a mistake, you can appeal it."
+            : "Contact support to ask about a decision that doesn't show why it was made."
     }
 
     private func applySnapshot() {
@@ -153,11 +165,26 @@ final class AccountStatusViewController: UIViewController {
 
 extension AccountStatusViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
-        dataSource.itemIdentifier(for: indexPath) == .retry
+        switch dataSource.itemIdentifier(for: indexPath) {
+        case .retry: true
+        case .restriction(let restriction): canOpen(restriction)
+        default: false
+        }
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         collectionView.deselectItem(at: indexPath, animated: true)
-        if dataSource.itemIdentifier(for: indexPath) == .retry { load() }
+        switch dataSource.itemIdentifier(for: indexPath) {
+        case .retry:
+            load()
+        case .restriction(let restriction):
+            guard let reviewer, let decisionID = restriction.decisionID else { return }
+            navigationController?.pushViewController(
+                DecisionDetailViewController(restriction: restriction, decisionID: decisionID, reviewer: reviewer),
+                animated: true
+            )
+        default:
+            break
+        }
     }
 }

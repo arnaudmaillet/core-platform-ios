@@ -14,12 +14,16 @@ public struct AccountRestriction: Hashable, Sendable {
     public let since: Date?
     /// Nil for a permanent action.
     public let until: Date?
+    /// The decision that imposed it: the key for its statement of reasons and
+    /// its appeal. Nil when the server sent none.
+    public let decisionID: String?
 
-    public init(id: String, kind: Kind, since: Date?, until: Date?) {
+    public init(id: String, kind: Kind, since: Date?, until: Date?, decisionID: String? = nil) {
         self.id = id
         self.kind = kind
         self.since = since
         self.until = until
+        self.decisionID = decisionID
     }
 
     public var title: String {
@@ -46,14 +50,11 @@ public enum AccountStatusError: Error, Equatable {
 }
 
 /// `moderation.v1.GetEnforcementState` for the signed-in account. The actor
-/// is the ACCOUNT id — the same identity the Report flow files cases under.
-///
-/// ⚠️ `EnforcementView` carries no `decision_id`, so a restriction cannot be
-/// linked to its `GetStatementOfReasons` or to `FileAppeal` (both take a
-/// decision id). Account Status therefore lists restrictions without reasons
-/// or an appeal button until the contract links them (#390).
+/// is the ACCOUNT id. Each enforcement names its decision (backend #658), which
+/// is what `GetStatementOfReasons` and `FileAppeal` take
+/// (`ModerationDecisionReviewing`).
 public actor AccountStatusRepository: AccountStatusProviding {
-    private let moderationClient: any Moderation_V1_ModerationServiceClientInterface
+    let moderationClient: any Moderation_V1_ModerationServiceClientInterface
     private let authSession: any AuthSessionProviding
 
     public init(
@@ -88,24 +89,38 @@ public actor AccountStatusRepository: AccountStatusProviding {
         return views
             .filter { $0.status == .active || $0.status == .unspecified }
             .compactMap { view -> AccountRestriction? in
-                let kind: AccountRestriction.Kind
-                switch view.action {
-                case .warn: kind = .warning
-                case .removeContent: kind = .contentRemoved
-                case .ageGate: kind = .ageRestricted
-                case .visibilityLimit: kind = .reducedVisibility
-                case .restrictActor: kind = .featuresLimited
-                case .suspend: kind = .suspended
-                case .ban: kind = .banned
-                case .noAction, .unspecified, .UNRECOGNIZED: return nil
-                }
+                guard let kind = AccountRestriction.Kind(view.action) else { return nil }
                 return AccountRestriction(
                     id: view.enforcementID,
                     kind: kind,
                     since: view.hasAppliedAt ? date(view.appliedAt.seconds, view.appliedAt.nanos) : nil,
-                    until: view.hasExpiresAt ? date(view.expiresAt.seconds, view.expiresAt.nanos) : nil
+                    until: view.hasExpiresAt ? date(view.expiresAt.seconds, view.expiresAt.nanos) : nil,
+                    decisionID: view.decisionID.isEmpty ? nil : view.decisionID
                 )
             }
             .sorted { ($0.since ?? .distantPast) > ($1.since ?? .distantPast) }
+    }
+
+    func accountID() async throws -> String {
+        guard case .authenticated(let accountID) = await authSession.currentState() else {
+            throw AccountStatusError.notAuthenticated
+        }
+        return accountID.rawValue
+    }
+}
+
+extension AccountRestriction.Kind {
+    /// Nil for `noAction` and unknown actions: they restrict nothing.
+    init?(_ action: Moderation_V1_ActionType) {
+        switch action {
+        case .warn: self = .warning
+        case .removeContent: self = .contentRemoved
+        case .ageGate: self = .ageRestricted
+        case .visibilityLimit: self = .reducedVisibility
+        case .restrictActor: self = .featuresLimited
+        case .suspend: self = .suspended
+        case .ban: self = .banned
+        case .noAction, .unspecified, .UNRECOGNIZED: return nil
+        }
     }
 }

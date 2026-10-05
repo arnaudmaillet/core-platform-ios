@@ -173,7 +173,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             // profile action, and it is safe at any stack depth.
             makeSettingsViewController: onLogout.flatMap { onLogout in
                 account.map { account in
-                    { [switching, accountSessions, accountStatus, imagePipeline] in
+                    { [switching, accountSessions, accountStatus, reporting, imagePipeline] in
                         SettingsViewController(
                             switching: switching,
                             switcher: makeSwitcherFactory(),
@@ -215,14 +215,24 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                         ]
                                         if let accountStatus {
                                             destinations.append(.init(title: "Account Status", symbolName: "checkmark.shield") {
-                                                AccountStatusViewController(status: accountStatus)
+                                                AccountStatusViewController(
+                                                    status: accountStatus,
+                                                    reviewer: accountStatus as? any ModerationDecisionReviewing
+                                                )
+                                            })
+                                        }
+                                        // The repository that files reports lists them back.
+                                        let history = reporting as? any ReportHistoryProviding
+                                        if let history {
+                                            destinations.append(.init(title: "Your Reports", symbolName: "flag") {
+                                                YourReportsViewController(history: history)
                                             })
                                         }
                                         return SafetySettingsViewController(
                                             destinations: destinations,
-                                            planned: ["Muted accounts", "Hidden words and comment filters", "Your reports"]
+                                            planned: ["Muted accounts", "Hidden words and comment filters"]
+                                                + (history == nil ? ["Your reports"] : [])
                                                 + (accountStatus == nil ? ["Account status"] : [])
-                                                + ["Statements of reasons and appeals"]
                                         )
                                     }
                                 case .activity:

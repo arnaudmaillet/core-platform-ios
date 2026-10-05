@@ -18,7 +18,7 @@ full functionality.
 | 8 | Envoy gateway didn't route `search.v1` (fixed in-repo) | People search (fixed; needs a gateway restart) | Low |
 | 9 | No seeded notifications | Activity tab shows empty against the fleet | Low |
 | 10 | No seeded conversations | Messages list shows empty against the fleet | Low |
-| 11 | `moderation.v1` unrouted + upstream port unknown | Profile "Report User" against the fleet | Medium |
+| 11 | `moderation.v1` unrouted + upstream port unknown | Report, Your Reports and Account Status against the fleet | Medium |
 | 12 | No account-level block RPC; alias enumeration is client-side | Profile "Block Account & All Profiles" is best-effort | Medium |
 | 13 | Relationship lists: no privacy contract, no `RemoveFollower`, id-only edges | Followers/Following screen — privacy is client-inferred, Remove is mock-only, hydration is N+1 | **High** (privacy) |
 | 14 | No discovery / recommendation feed for the "For You" tab | For You is three client-side orderings of the following feed | Medium |
@@ -287,34 +287,37 @@ user.
 
 ## 11. `moderation.v1` is unrouted and its upstream port is unknown
 
-**Symptom.** The profile overflow menu's **Report User** calls
-`moderation.v1.ModerationService/OpenCase`. The Envoy gateway had no route for
-`moderation.v1` (it was already named as latent in §8's closing note), so the
-call 404s against the local fleet.
+**Symptom.** Report (`SubmitReport`), Your Reports (`ListMyReports`) and
+Account Status (`GetEnforcementState`, `GetStatementOfReasons`, `FileAppeal`)
+all call `moderation.v1`. The Envoy gateway had no route for it (it was
+already named as latent in §8's closing note), so the calls 404 against the
+local fleet.
 
 **What was done here.** A route + cluster were added to `dev/envoy/envoy.yaml`,
-mirroring the `search` fix from §8. **The upstream address is a placeholder and
-has not been verified**: no `moderation-server` port is documented anywhere in
-this repo, and the fleet's assignments are not contiguous (50051-50070 with
-several unused values), so `50054` is a guess, not a finding. The route will not
-work until someone confirms the real port against the fleet's compose file.
+mirroring the `search` fix from §8, with `moderation-server:50054` as a guess.
+**The guess is wrong** (backend #703): the service listens on `:50061` (mesh)
+and `:9443` (edge, `docker-compose.edge.yml`). The client RPCs need a principal
+(the reporter and the sanctioned account come from the bearer token), so the
+cluster must target the **edge** listener and forward the token. Until someone
+confirms that listener's transport (TLS or not) against the fleet, the route is
+left as it was.
 
 ```bash
-# Confirm the port, then update the cluster in dev/envoy/envoy.yaml:
+# Confirm the edge listener, then update the cluster in dev/envoy/envoy.yaml:
 docker ps --format '{{.Names}}\t{{.Ports}}' | grep -i moderation
-grpcurl -plaintext localhost:<port> list   # expect moderation.v1.ModerationService
 docker restart core-platform-gateway       # reload the gateway config
 ```
 
-**Client impact.** Report is fully implemented and verified against
-`MockModerationService` (which answers `OpenCase` with a deterministic case id
-and the contract's idempotent-reopen semantics). Against the fleet a report
-surfaces an honest "Couldn't send this report" until the route resolves —
-`ProfileViewModel.report` reports failures rather than pretending to succeed.
+**Client impact.** Everything is implemented and verified against
+`MockModerationService`. Against the fleet a report surfaces an honest
+"Couldn't send this report", and Account Status and Your Reports show their
+retry rows, until the route resolves.
 
-**Note on scope.** Only `OpenCase` is mocked. The rest of `moderation.v1` is a
-moderator console (`listQueue`, `assignCase`, `decideCase`, appeals) with no
-client in this app.
+**Note on scope.** The moderator console (`listQueue`, `assignCase`,
+`decideCase`, `resolveAppeal`) has no client in this app and isn't mocked.
+`OpenCase` is still mocked for its tests, but is mesh-only on the fleet since
+backend #677. There is no read for an appeal, so the app remembers on the
+device which decisions it appealed (`FiledAppeals`).
 
 ---
 
