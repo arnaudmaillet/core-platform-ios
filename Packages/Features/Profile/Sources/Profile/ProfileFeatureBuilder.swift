@@ -168,7 +168,8 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                 if let types = repository as? any AccountTypeManaging {
                     editor.onOpenAccountType = { [weak editor] in
                         editor?.navigationController?.pushViewController(
-                            AccountTypeViewController(manager: types), animated: true
+                            AccountTypeViewController(manager: types, verifier: repository as? any VerificationRequesting),
+                            animated: true
                         )
                     }
                 }

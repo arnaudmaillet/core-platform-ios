@@ -60,7 +60,13 @@ public struct MockBackend: Sendable {
         let accountLifecycle = MockAccountLifecycle()
         MockAuthService(lifecycle: accountLifecycle).register(on: bff)
         MockAccountService(lifecycle: accountLifecycle).register(on: bff)
-        let socialServices = MockSocialServices(dataset: dataset, postStore: postStore)
+        // `-mock-verification pending|rejected|approved` gives the viewer a
+        // verification request in that state (#415).
+        let arguments = ProcessInfo.processInfo.arguments
+        let verificationSeed = arguments.firstIndex(of: "-mock-verification").flatMap { index in
+            index + 1 < arguments.count ? arguments[index + 1] : nil
+        }
+        let socialServices = MockSocialServices(dataset: dataset, postStore: postStore, verificationSeed: verificationSeed)
         socialServices.register(on: bff)
         // Following a private profile asks (backend #655); profile.v1 owns
         // who is private. `-mock-follow-requests` seeds the viewer's inbox.

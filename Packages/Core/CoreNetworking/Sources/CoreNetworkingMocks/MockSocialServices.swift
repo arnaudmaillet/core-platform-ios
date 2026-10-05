@@ -66,14 +66,44 @@ public final class MockSocialServices: @unchecked Sendable {
         (label: "Portfolio", url: "https://www.example.com/demo/portfolio")
     ]
 
+    /// Verification requests, by profile (backend #668): the latest one.
+    /// Nobody decides them here — a seed stands for a staff decision.
+    private var verificationRequests: [String: Profile_V1_VerificationRequestView] = [:]
+
+    /// `verificationSeed` gives the viewer a request in that state
+    /// (`pending`, `rejected` or `approved`); anything else, none.
     public init(
         dataset: MockSocialDataset = MockSocialDataset(),
         postStore: MockPostStore? = nil,
-        pageSizeCap: Int32 = 50
+        pageSizeCap: Int32 = 50,
+        verificationSeed: String? = nil
     ) {
         self.dataset = dataset
         self.postStore = postStore
         self.pageSizeCap = pageSizeCap
+        if let seeded = Self.verificationRequest(seed: verificationSeed) {
+            verificationRequests[MockPostStore.viewer.profileID] = seeded
+        }
+    }
+
+    private static func verificationRequest(seed: String?) -> Profile_V1_VerificationRequestView? {
+        let status: Profile_V1_VerificationRequestStatus
+        switch seed {
+        case "pending": status = .pending
+        case "rejected": status = .rejected
+        case "approved": status = .approved
+        default: return nil
+        }
+        let nowMS = Int64(Date().timeIntervalSince1970 * 1_000)
+        var view = Profile_V1_VerificationRequestView()
+        view.profileID = MockPostStore.viewer.profileID
+        view.category = .notable
+        view.documents = ["https://example.com/press/interview"]
+        view.status = status
+        view.submittedAtMs = nowMS - 9 * 86_400_000
+        if status != .pending { view.decidedAtMs = nowMS - 2 * 86_400_000 }
+        if status == .rejected { view.reason = "The links don't show enough independent coverage of you." }
+        return view
     }
 
     /// Timeline = client-authored published posts (newest first) followed by
@@ -232,6 +262,42 @@ public final class MockSocialServices: @unchecked Sendable {
             lock.withLock { accountTypes[request.profileID] = (request.kind, request.kind == .brand ? request.business : nil) }
             var response = Profile_V1_CommandResponse()
             response.success = true
+            return .success(response)
+        }
+        // Ask for a badge with 1–5 supporting documents (backend #668):
+        // refused when already verified (PRF-5001) or while a request is
+        // pending (PRF-5002).
+        bff.register(path: "/profile.v1.ProfileService/RequestVerification") { [self] (request: Profile_V1_RequestVerificationRequest) -> Result<Profile_V1_CommandResponse, ConnectError> in
+            let documents = request.documents
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            guard request.category != .unspecified, (1...5).contains(documents.count), documents.allSatisfy({ $0.count <= 512 }) else {
+                return .failure(ConnectError(code: .invalidArgument, message: "PRF-9001: 1–5 supporting documents"))
+            }
+            return lock.withLock { () -> Result<Profile_V1_CommandResponse, ConnectError> in
+                switch verificationRequests[request.profileID]?.status {
+                case .approved:
+                    return .failure(ConnectError(code: .alreadyExists, message: "PRF-5001: the profile is already verified"))
+                case .pending:
+                    return .failure(ConnectError(code: .alreadyExists, message: "PRF-5002: a verification request is pending"))
+                default:
+                    var view = Profile_V1_VerificationRequestView()
+                    view.profileID = request.profileID
+                    view.category = request.category
+                    view.documents = documents
+                    view.status = .pending
+                    view.submittedAtMs = Int64(Date().timeIntervalSince1970 * 1_000)
+                    verificationRequests[request.profileID] = view
+                    var response = Profile_V1_CommandResponse()
+                    response.success = true
+                    return .success(response)
+                }
+            }
+        }
+        // `request` unset: the profile never asked.
+        bff.register(path: "/profile.v1.ProfileService/GetVerificationRequest") { [self] (request: Profile_V1_GetVerificationRequestRequest) in
+            var response = Profile_V1_GetVerificationRequestResponse()
+            if let stored = lock.withLock({ verificationRequests[request.profileID] }) { response.request = stored }
             return .success(response)
         }
         bff.register(path: "/profile.v1.ProfileService/SetInteractionLimit") { [self] (request: Profile_V1_SetInteractionLimitRequest) -> Result<Profile_V1_CommandResponse, ConnectError> in
@@ -579,6 +645,11 @@ public final class MockSocialServices: @unchecked Sendable {
             }
             view.visibility = lock.withLock { visibilityOverrides[view.profileID] } ?? .public
             applyAccountType(to: &view)
+            // An approved request is the badge.
+            if let approved = lock.withLock({ verificationRequests[view.profileID] }), approved.status == .approved {
+                view.verified = true
+                view.verificationKind = approved.category
+            }
             if let location = lock.withLock({ locationSettings[view.profileID] }) { view.locationSettings = location }
             // Owner-only on the fleet; the viewer's own view here.
             view.discoverySettings = lock.withLock { discoverySettings[view.profileID] } ?? Self.defaultDiscoverySettings
