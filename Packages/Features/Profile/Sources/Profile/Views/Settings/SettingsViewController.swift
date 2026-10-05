@@ -20,11 +20,15 @@ import UIKit
 final class SettingsViewController: UIViewController {
     private enum Section: Hashable {
         case scope(SettingsScope)
+        /// Power Saving, on its own right under App and Device: a switch that
+        /// acts here, with no page behind it.
+        case powerSaving
         case session
     }
 
     private enum Item: Hashable {
         case section(SettingsSection)
+        case powerSaving
         case switchProfile
         case logOut
         case signIn
@@ -112,6 +116,21 @@ final class SettingsViewController: UIViewController {
             cell.contentConfiguration = content
             cell.accessories = [.disclosureIndicator()]
         }
+        let powerSavingRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { cell, _, _ in
+            var content = UIListContentConfiguration.cell()
+            content.text = "Power Saving"
+            content.image = UIImage(systemName: "battery.50")
+            content.imageProperties.tintColor = .label
+            cell.contentConfiguration = content
+            let toggle = UISwitch()
+            toggle.isOn = PowerSavingPreference.isOn
+            toggle.accessibilityLabel = "Power Saving"
+            toggle.addAction(UIAction { action in
+                guard let toggle = action.sender as? UISwitch else { return }
+                PowerSavingPreference.isOn = toggle.isOn
+            }, for: .valueChanged)
+            cell.accessories = [.customView(configuration: .init(customView: toggle, placement: .trailing(displayed: .always)))]
+        }
         let switchRegistration = UICollectionView.CellRegistration<SettingsMenuButtonCell, Item> { [weak self] cell, _, _ in
             cell.configure(title: "Switch Profile", menu: self?.makeSwitcherMenu())
         }
@@ -134,6 +153,8 @@ final class SettingsViewController: UIViewController {
             switch item {
             case .section(let section):
                 collectionView.dequeueConfiguredReusableCell(using: sectionRegistration, for: indexPath, item: section)
+            case .powerSaving:
+                collectionView.dequeueConfiguredReusableCell(using: powerSavingRegistration, for: indexPath, item: item)
             case .switchProfile:
                 collectionView.dequeueConfiguredReusableCell(using: switchRegistration, for: indexPath, item: item)
             case .logOut:
@@ -172,6 +193,10 @@ final class SettingsViewController: UIViewController {
         for scope in scopes {
             snapshot.appendSections([.scope(scope)])
             snapshot.appendItems(SettingsSection.sections(in: scope).map(Item.section), toSection: .scope(scope))
+            if scope == .device {
+                snapshot.appendSections([.powerSaving])
+                snapshot.appendItems([.powerSaving], toSection: .powerSaving)
+            }
         }
         snapshot.appendSections([.session])
         if onSignIn != nil {
@@ -191,9 +216,12 @@ final class SettingsViewController: UIViewController {
     }
 
     private func footerText(at index: Int) -> String? {
+        if dataSource.sectionIdentifier(for: index) == .powerSaving { return Self.powerSavingFooter }
         guard case .scope(let scope) = dataSource.sectionIdentifier(for: index) else { return nil }
         return Self.footerText(for: scope, activeHandle: activeHandle, isGuest: onSignIn != nil)
     }
+
+    static let powerSavingFooter = "Stops animated emojis, turns on Reduce Motion and stops videos from playing on their own. Your own settings come back when you turn it off."
 
     /// What Settings shows. A guest has no account and no profile, so only
     /// what works without one: this device's settings, and help and the
@@ -294,8 +322,10 @@ final class SettingsViewController: UIViewController {
 extension SettingsViewController: UICollectionViewDelegate {
     /// ⚠️ The Switch Profile row must not highlight. A highlightable cell
     /// claims the touch for selection and its button's menu never opens.
+    /// Power Saving neither: its switch is the whole row.
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
-        dataSource.itemIdentifier(for: indexPath) != .switchProfile
+        let item = dataSource.itemIdentifier(for: indexPath)
+        return item != .switchProfile && item != .powerSaving
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
@@ -307,7 +337,7 @@ extension SettingsViewController: UICollectionViewDelegate {
             confirmLogout()
         case .signIn:
             onSignIn?()
-        case .switchProfile, nil:
+        case .switchProfile, .powerSaving, nil:
             // The row's own button opens the menu; selection never reaches here.
             break
         }

@@ -1,4 +1,5 @@
 import CoreStorage
+import DesignSystem
 import Foundation
 import Network
 
@@ -12,7 +13,11 @@ enum MediaPlaybackPolicy {
     /// Swappable for tests; the live answer comes from `NWPathMonitor`.
     static var isOnCellular: () -> Bool = { CellularPathMonitor.shared.isExpensive }
 
-    static var autoplays: Bool { store.preferences.autoplays(onCellular: isOnCellular()) }
+    /// Power Saving (Settings → App and Device) stops every video from
+    /// starting on its own, whatever Autoplay says.
+    static var autoplays: Bool {
+        !PowerSavingPreference.isOn && store.preferences.autoplays(onCellular: isOnCellular())
+    }
     static var preloads: Bool { store.preferences.preloads(onCellular: isOnCellular()) }
     static var peakBitRate: Double { store.preferences.peakBitRate(onCellular: isOnCellular()) }
 }
