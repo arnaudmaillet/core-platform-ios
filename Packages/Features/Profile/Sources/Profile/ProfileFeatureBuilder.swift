@@ -224,6 +224,12 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                                 )
                                             })
                                         }
+                                        let filters = repository as? any CommentFiltersManaging
+                                        if let filters {
+                                            destinations.append(.init(title: "Hidden Words", symbolName: "text.badge.xmark") {
+                                                HiddenWordsViewController(manager: filters)
+                                            })
+                                        }
                                         if let accountStatus {
                                             destinations.append(.init(title: "Account Status", symbolName: "checkmark.shield") {
                                                 AccountStatusViewController(
@@ -241,7 +247,8 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                         }
                                         return SafetySettingsViewController(
                                             destinations: destinations,
-                                            planned: (muting == nil ? ["Muted accounts"] : []) + ["Hidden words and comment filters"]
+                                            planned: (muting == nil ? ["Muted accounts"] : [])
+                                                + (filters == nil ? ["Hidden words and comment filters"] : [])
                                                 + (history == nil ? ["Your reports"] : [])
                                                 + (accountStatus == nil ? ["Account status"] : [])
                                         )

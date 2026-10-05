@@ -33,6 +33,9 @@ public final class MockSocialServices: @unchecked Sendable {
     /// `SetTabSettings` writes, by profile (backend #729): the post window
     /// visitors see, and the tab flags. Absent is the defaults.
     private var tabSettings: [String: Profile_V1_TabSettings] = [:]
+    /// `SetCommentFilters` writes, by profile (backend #728); absent means
+    /// no hidden words and the offensive filter on.
+    private var commentFilters: [String: Profile_V1_CommentFilters] = [:]
     private var viewerDisplayName = MockPostStore.viewer.displayName
     private var viewerBio = MockPostStore.viewer.bio
     private var viewerWebsite = MockPostStore.viewer.websiteURL
@@ -133,6 +136,22 @@ public final class MockSocialServices: @unchecked Sendable {
             response.success = true
             return .success(response)
         }
+        bff.register(path: "/profile.v1.ProfileService/SetCommentFilters") { [self] (request: Profile_V1_SetCommentFiltersRequest) -> Result<Profile_V1_CommandResponse, ConnectError> in
+            // Trimmed, lowercased, de-duplicated and sorted; at most 200
+            // words of at most 64 characters, as on the fleet.
+            let words = Array(Set(request.filters.hiddenWords
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                .filter { !$0.isEmpty })).sorted()
+            guard words.count <= 200, words.allSatisfy({ $0.count <= 64 }) else {
+                return .failure(ConnectError(code: .invalidArgument, message: "PRF-9001: too many hidden words, or one too long"))
+            }
+            var filters = request.filters
+            filters.hiddenWords = words
+            lock.withLock { commentFilters[request.profileID] = filters }
+            var response = Profile_V1_CommandResponse()
+            response.success = true
+            return .success(response)
+        }
         bff.register(path: "/profile.v1.ProfileService/SetVisibility") { [self] (request: Profile_V1_SetVisibilityRequest) in
             setVisibility(request)
         }
@@ -178,6 +197,22 @@ public final class MockSocialServices: @unchecked Sendable {
     }
 
     // MARK: - post.v1
+
+    private func storedCommentFilters(for profileID: String) -> Profile_V1_CommentFilters {
+        lock.withLock { commentFilters[profileID] } ?? {
+            var filters = Profile_V1_CommentFilters()
+            filters.filterOffensive = true
+            return filters
+        }()
+    }
+
+    /// The words a post owner hides from their comments. The comment mock
+    /// reads it to drop matching comments, as comment.v1 does (backend #728).
+    /// The offensive filter has no term list here, as on the fleet until
+    /// trust & safety supplies one.
+    public func hiddenWords(of profileID: String) -> [String] {
+        storedCommentFilters(for: profileID).hiddenWords
+    }
 
     /// Who wrote a post, client-authored or seeded; nil if unknown.
     private func author(ofPost postID: String) -> String? {
@@ -396,6 +431,7 @@ public final class MockSocialServices: @unchecked Sendable {
                 return settings
             }()
             view.tabSettings = lock.withLock { tabSettings[view.profileID] } ?? Self.defaultTabSettings
+            view.commentFilters = storedCommentFilters(for: view.profileID)
             return .success(view)
         }
         guard let author = dataset.author(for: request.profileID) else {
