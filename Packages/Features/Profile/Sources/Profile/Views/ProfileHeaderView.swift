@@ -475,7 +475,7 @@ final class ProfileHeaderView: UIView {
         }
         if changed(\.avatarMonogram) { monogramLabel.text = model.avatarMonogram }
         if changed(\.displayName) { nameLabel.text = model.displayName }
-        if changed(\.handle) { handleLabel.text = model.handle }
+        if changed(\.handleLine) { handleLabel.text = model.handleLine }
         if changed(\.isVerified) { verifiedBadge.isHidden = !model.isVerified }
 
         if changed(\.bio) || changed(\.hasBio) {
@@ -556,7 +556,7 @@ final class ProfileHeaderView: UIView {
         dissolve([bannerView, avatarView, nameLabel, handleLabel, verifiedBadge], after: 0, generation: generation) {
             self.monogramLabel.text = model.avatarMonogram
             self.nameLabel.text = model.displayName
-            self.handleLabel.text = model.handle
+            self.handleLabel.text = model.handleLine
             self.verifiedBadge.isHidden = !model.isVerified
             self.applyBannerPresence(model.bannerImageURL)
             self.bannerView.setImageURL(model.bannerImageURL)

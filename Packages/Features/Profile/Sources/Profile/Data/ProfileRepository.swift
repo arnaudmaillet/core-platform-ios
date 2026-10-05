@@ -150,6 +150,10 @@ public struct UserProfile: Equatable, Sendable {
     /// for this metric. (Views were read beside it until 2026-09-30; nothing
     /// shows them any more.)
     public let reactionCount: CountEstimate
+    /// Personal, creator, business or bot (#415), public on every view.
+    public let accountType: AccountType
+    /// A business's category ("Bakery"), shown beside its handle.
+    public let businessCategory: String?
 
     public init(
         id: ProfileID,
@@ -165,7 +169,9 @@ public struct UserProfile: Equatable, Sendable {
         visibility: ProfileVisibility = .unspecified,
         followerCount: CountEstimate,
         followingCount: CountEstimate,
-        reactionCount: CountEstimate
+        reactionCount: CountEstimate,
+        accountType: AccountType = .personal,
+        businessCategory: String? = nil
     ) {
         self.id = id
         self.handle = handle
@@ -179,6 +185,8 @@ public struct UserProfile: Equatable, Sendable {
         self.followerCount = followerCount
         self.followingCount = followingCount
         self.reactionCount = reactionCount
+        self.accountType = accountType
+        self.businessCategory = businessCategory
     }
 }
 
@@ -815,7 +823,9 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
             visibility: ProfileVisibility(view.visibility),
             followerCount: counts.followers,
             followingCount: counts.following,
-            reactionCount: counts.reactions
+            reactionCount: counts.reactions,
+            accountType: AccountType(view.profileKind),
+            businessCategory: view.profileKind == .brand && !view.businessInfo.category.isEmpty ? view.businessInfo.category : nil
         )
     }
 }
