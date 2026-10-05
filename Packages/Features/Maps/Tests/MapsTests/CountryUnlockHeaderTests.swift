@@ -2,9 +2,10 @@ import Testing
 import UIKit
 @testable import Maps
 
-/// The offer's header, laid out as the sound sheet's: the large round flag
-/// with the rank in a bubble over it, beside three lines — the name, the
-/// continent, and the likes and posts as a small meta line.
+/// The offer's header, laid out as the profile's identity row: the large
+/// round flag with the rank in a bubble over it, beside two halves — the name
+/// (the continent after it, or under it when the two do not fit) over the
+/// counters, each a figure over its word.
 @MainActor
 struct CountryUnlockHeaderTests {
     private static let width: CGFloat = 370
@@ -42,38 +43,75 @@ struct CountryUnlockHeaderTests {
         view.subviews + view.subviews.flatMap(descendants)
     }
 
-    @Test func theFlagIsTheLargeRoundPictureAtTheSoundArtworksSize() throws {
+    private func title(in header: UIView) throws -> CountryTitleLabel {
+        try #require(Self.descendants(of: header).compactMap { $0 as? CountryTitleLabel }.first)
+    }
+
+    private func stat(_ caption: String, in header: UIView) throws -> CountryStatView {
+        try #require(Self.descendants(of: header).compactMap { $0 as? CountryStatView }.first {
+            $0.captionLabel.text == caption
+        }, "no \(caption) column")
+    }
+
+    @Test func theFlagIsTheLargeRoundPictureAtTheAvatarsSize() throws {
         let header = try layOut("ES")
         let flagView = try #require(try view("country.unlock.flag", in: header) as? UIImageView)
         let large = try #require(FlagPalette.largeRoundFlag(for: "ES"))
         #expect(flagView.image === large, "not the 96pt round flag")
         let flag = frame(of: flagView, in: header)
         #expect(flag.size == CGSize(width: 96, height: 96))
-        #expect(flag.minX == 0)
-        // Centred on the lines beside it, as the sound's artwork is.
-        let name = frame(of: try label("Spain", in: header), in: header)
-        let meta = frame(of: try label("8.7K · 86 posts", in: header), in: header)
-        #expect(abs(flag.midY - (name.minY + meta.maxY) / 2) < 1, "the flag is not centred on its lines")
+        #expect(flag.minX == 0 && flag.minY == 0)
     }
 
-    @Test func nameContinentAndCountersAreThreeLinesFromOneLeadingEdge() throws {
+    /// The profile's halves: the name level with the flag's top, the counters
+    /// level with its foot.
+    @Test func theNameTopsTheFlagAndTheCountersFootIt() throws {
         let header = try layOut("ES")
-        let name = frame(of: try label("Spain", in: header), in: header)
-        let continent = frame(of: try label("Europe", in: header), in: header)
-        let meta = frame(of: try label("8.7K · 86 posts", in: header), in: header)
-        let heart = try #require(Self.descendants(of: header).first {
-            $0 is UIImageView && $0.accessibilityIdentifier == nil
-        })
-        #expect(continent.minY >= name.maxY - 0.5 && meta.minY >= continent.maxY - 0.5, "the lines are out of order")
-        #expect(abs(continent.minX - name.minX) < 0.5)
-        #expect(abs(frame(of: heart, in: header).minX - name.minX) < 0.5, "the counters are not leading")
-        #expect(meta.minX > frame(of: heart, in: header).maxX, "the heart is not before the figures")
-        // Smaller than the name: a meta line, not a band of metrics.
-        let metaLabel = try label("8.7K · 86 posts", in: header)
-        let nameLabel = try label("Spain", in: header)
-        let metaFont = try #require(metaLabel.attributedText?.attribute(.font, at: 0, effectiveRange: nil) as? UIFont)
-        #expect(metaFont.pointSize < nameLabel.font.pointSize)
-        #expect(metaLabel.accessibilityLabel == "8.7K likes, 86 posts")
+        let flag = frame(of: try view("country.unlock.flag", in: header), in: header)
+        let title = frame(of: try title(in: header), in: header)
+        let likes = frame(of: try stat("Likes", in: header), in: header)
+        let posts = frame(of: try stat("Posts", in: header), in: header)
+        #expect(abs(title.minY - flag.minY) < 0.5, "the name is not level with the flag's top")
+        #expect(abs(likes.maxY - flag.maxY) < 0.5, "the counters are not level with the flag's foot")
+        #expect(abs(likes.minX - title.minX) < 0.5, "the counters are not leading under the name")
+        #expect(likes.maxX < posts.minX)
+        #expect(posts.maxX < Self.width - 100, "the counters drifted to the trailing edge")
+    }
+
+    /// The profile's columns: the figure over its word — "Likes", not a heart.
+    @Test func eachCounterIsAFigureOverItsWord() throws {
+        let header = try layOut("ES")
+        for (caption, value) in [("Likes", "8.7K"), ("Posts", "86")] {
+            let column = try stat(caption, in: header)
+            #expect(column.valueLabel.text == value)
+            let figure = frame(of: column.valueLabel, in: header)
+            let word = frame(of: column.captionLabel, in: header)
+            #expect(word.minY >= figure.maxY - 0.5, "\(caption): the word is not under the figure")
+            #expect(abs(figure.midX - word.midX) < 0.5, "\(caption): not centred on each other")
+            #expect(column.captionLabel.font.pointSize < column.valueLabel.font.pointSize)
+            #expect(column.accessibilityLabel == caption && column.accessibilityValue == value)
+        }
+        #expect(!Self.descendants(of: header).contains {
+            ($0 as? UIImageView)?.image?.description.contains("heart") == true
+        }, "a heart is back")
+    }
+
+    @Test func aShortNameKeepsTheContinentOnItsLine() throws {
+        let header = try layOut("ES")
+        let label = try title(in: header)
+        #expect(label.continentFollowsName)
+        #expect(label.attributedText?.string == "Spain  Europe")
+        // One line: as tall as the name's own line.
+        #expect(label.bounds.height < label.font.lineHeight * 2)
+    }
+
+    @Test func aNameTooWideForTheContinentPutsItOnTheNextLine() throws {
+        let header = try layOut("CF")
+        let label = try title(in: header)
+        #expect(!label.fitsOneLine(label.bounds.width), "the case does not hold at this width")
+        #expect(!label.continentFollowsName)
+        #expect(label.attributedText?.string == "Central African Republic\nAfrica")
+        #expect(frame(of: label, in: header).maxX <= Self.width + 0.5)
     }
 
     /// The rank is not a counter: it rides the flag's bottom-trailing edge.
@@ -82,7 +120,7 @@ struct CountryUnlockHeaderTests {
         let flag = frame(of: try view("country.unlock.flag", in: header), in: header)
         let bubbleView = try view("country.unlock.rank", in: header)
         let bubble = frame(of: bubbleView, in: header)
-        let name = frame(of: try label("Spain", in: header), in: header)
+        let name = frame(of: try title(in: header), in: header)
         _ = try label("#4", in: bubbleView)
         #expect(bubble.intersects(flag), "the bubble is off the flag")
         #expect(bubble.midX > flag.midX && bubble.midY > flag.midY, "the bubble is not on the bottom-trailing quarter")
@@ -98,22 +136,42 @@ struct CountryUnlockHeaderTests {
         let header = try layOut("CF", standing: CountryStanding(code: "CF", rank: 126, likes: 8_700, posts: 5, price: 15))
         let rank = try label("#126", in: header)
         #expect(rank.bounds.width >= rank.intrinsicContentSize.width - 0.5, "the rank is truncated")
-        let name = frame(of: try label("Central African Republic", in: header), in: header)
+        let name = frame(of: try title(in: header), in: header)
         #expect(frame(of: rank, in: header).maxX < name.minX, "the bubble runs into the lines")
     }
 
-    /// One line each: a long name truncates, and the header keeps its height.
-    @Test func aLongNameTruncatesOnOneLine() throws {
-        let short = try layOut("ES")
-        let long = try layOut("GS")
-        let name = try label("South Georgia and the South Sandwich Islands", in: long)
-        #expect(name.numberOfLines == 1)
-        #expect(frame(of: name, in: long).maxX <= Self.width + 0.5)
-        #expect(long.bounds.height == short.bounds.height, "a long name changed the header's height")
+    /// The name is ONE line, cut with "…" when even alone it is too wide;
+    /// the continent stands under it, and the header is no taller than for
+    /// any other two-line title.
+    @Test func theLongestNameIsCutToOneLine() throws {
+        let header = try layOut("GS")
+        let label = try title(in: header)
+        #expect(!label.continentFollowsName)
+        let lines = try #require(label.attributedText?.string).components(separatedBy: "\n")
+        #expect(lines.count == 2)
+        #expect(lines[0].hasPrefix("South Georgia") && lines[0].hasSuffix("…"), "\(lines[0])")
+        #expect(lines[1] == "Seven seas (open ocean)")
+        let nameFont = try #require(label.attributedText?.attribute(.font, at: 0, effectiveRange: nil) as? UIFont)
+        #expect((lines[0] as NSString).size(withAttributes: [.font: nameFont]).width <= label.bounds.width + 0.5,
+                "the cut name is still wider than its line")
+        #expect(frame(of: label, in: header).maxX <= Self.width + 0.5)
+        // As tall as a name that merely pushed its continent down.
+        let wrapped = try layOut("CF")
+        #expect(header.bounds.height == wrapped.bounds.height, "the long name took more than one line")
+        let flag = frame(of: try view("country.unlock.flag", in: header), in: header)
+        #expect(flag.size == CGSize(width: 96, height: 96), "the column outgrew the flag")
+    }
+
+    @Test func cutKeepsWhatFitsAndOnlyThat() {
+        let font = UIFont.systemFont(ofSize: 17)
+        #expect(CountryTitleLabel.cut("Spain", font: font, to: 200) == "Spain")
+        let cut = CountryTitleLabel.cut("South Georgia and the South Sandwich Islands", font: font, to: 120)
+        #expect(cut.hasSuffix("…") && cut.count > 3)
+        #expect((cut as NSString).size(withAttributes: [.font: font]).width <= 120)
     }
 
     @Test func aSinglePostIsOnePost() throws {
         let header = try layOut("ES", standing: CountryStanding(code: "ES", rank: 9, likes: 3, posts: 1, price: 15))
-        _ = try label("3 · 1 post", in: header)
+        #expect(try stat("Post", in: header).valueLabel.text == "1")
     }
 }

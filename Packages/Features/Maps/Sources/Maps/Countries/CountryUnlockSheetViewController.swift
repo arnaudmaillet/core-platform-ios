@@ -8,9 +8,9 @@ import CoreNavigation
 /// ```
 ///  ┌──────────────────────────────────────┐
 ///  │ ▔▔                                   │
-///  │ ╭────╮  Spain                       │
-///  │ │ 🇪🇸 │  Europe                      │
-///  │ ╰──#4╯  ♥ 12K · 86 posts            │
+///  │ ╭────╮ Spain  Europe                │
+///  │ │ 🇪🇸 │ 12K      86                  │
+///  │ ╰──#4╯ Likes    Posts               │
 ///  │  Unlock Spain to see its posts on    │
 ///  │  your map.                           │
 ///  │ [ ◆ Unlock · 50 ]                    │
@@ -18,12 +18,14 @@ import CoreNavigation
 ///  └──────────────────────────────────────┘
 /// ```
 ///
-/// The header is the sound sheet's (`SoundSheetHeaderView`), the app's one
-/// "picture and what it is" block: a large ROUND picture — the country's
-/// round flag, the map's own artwork drawn at 96pt (`FlagPalette`) — beside
-/// three one-line rows: the name, the continent, and the counters as a small
-/// meta line. The RANK is not a counter: it rides the flag as a bubble on its
-/// bottom-trailing edge.
+/// The header is the profile's identity row (`ProfileHeaderView`): the
+/// country's ROUND flag where the avatar stands — the map's own artwork,
+/// drawn large (`FlagPalette.largeRoundFlag`) — and beside it two halves of
+/// its height: the name over the counters. The continent follows the name on
+/// its line, or takes the next one when the two do not fit
+/// (`CountryTitleLabel`); the counters are the profile's columns, the figure
+/// over its word ("Likes", "Posts"). The RANK is not a counter: it rides the
+/// flag as a bubble on its bottom-trailing edge.
 ///
 /// One detent, the content's own height; the map stays visible and the
 /// country stays lifted above the sheet. Gems only — points (likes) never buy
@@ -220,14 +222,17 @@ final class CountryUnlockSheetViewController: UIViewController {
 
     // MARK: - Header
 
-    /// The flag's side: the sound sheet's artwork's, so the two "picture and
-    /// what it is" blocks of the app read as one.
+    /// The flag's side: the profile avatar's, so the two identity rows of
+    /// the app read as one.
     static let flagSide: CGFloat = 96
+    /// The flag's Dynamic-Type ceiling — the avatar's.
+    static let flagMaxSide: CGFloat = 110
 
-    /// The flag, with the rank in a bubble over its bottom-trailing edge,
-    /// beside the name, the continent and the counters — the sound sheet's
-    /// header (`SoundSheetHeaderView`): the same picture size, the same three
-    /// fonts, the same rhythm.
+    /// The profile's identity row (`ProfileHeaderView`): the flag where the
+    /// avatar stands, with the rank in a bubble over its bottom-trailing edge,
+    /// and beside it two halves of its height — the name (and its continent)
+    /// pushed to the top of the upper one, the counters to the foot of the
+    /// lower one.
     static func header(country: CountryAtlas.Country, standing: CountryStanding?) -> UIView {
         // The round flag the map wears, at its LARGE size (an emoji drawn and
         // trimmed for a code the catalog lacks — never an atlas country).
@@ -235,6 +240,10 @@ final class CountryUnlockSheetViewController: UIViewController {
             ?? FlagPalette.image(for: country.code))
         flag.contentMode = .scaleAspectFit
         flag.accessibilityIdentifier = "country.unlock.flag"
+        // No intrinsic size: the bitmap's would be an unopposed preference
+        // for the flag's side (the profile avatar's trap).
+        flag.setContentHuggingPriority(.init(1), for: .vertical)
+        flag.setContentCompressionResistancePriority(.init(1), for: .vertical)
         let rank = RankBubble(text: standing.map { "#\($0.rank)" } ?? "#—")
         rank.accessibilityIdentifier = "country.unlock.rank"
         let flagBox = UIView()
@@ -243,48 +252,65 @@ final class CountryUnlockSheetViewController: UIViewController {
             flagBox.addSubview(view)
         }
 
-        // ONE line each, truncated: the header's height never depends on how
-        // long the name is.
-        let name = UILabel()
-        name.text = country.name
-        name.font = .scaledFont(forTextStyle: .title3, weight: .semibold)
-        name.adjustsFontForContentSizeCategory = true
-        let continent = UILabel()
-        continent.text = country.continent
-        continent.font = .appFont(forTextStyle: .subheadline)
-        continent.adjustsFontForContentSizeCategory = true
-        continent.textColor = .secondaryLabel
+        let title = CountryTitleLabel(name: country.name, continent: country.continent)
 
         let counters = UIStackView(arrangedSubviews: [
-            Self.counterHeart(),
-            Self.meta(likes: standing.map { CountryStanding.compact($0.likes) } ?? "—",
-                      posts: standing.map { "\($0.posts)" } ?? "—",
-                      postsWord: standing?.posts == 1 ? "post" : "posts"),
-            Self.spacer(),
+            CountryStatView(value: standing.map { CountryStanding.compact($0.likes) } ?? "—", caption: "Likes"),
+            CountryStatView(value: standing.map { "\($0.posts)" } ?? "—",
+                            caption: standing?.posts == 1 ? "Post" : "Posts"),
+            UIView(),
         ])
         counters.alignment = .center
-        counters.spacing = 3
+        counters.spacing = Spacing.xl
 
-        let lines = UIStackView(arrangedSubviews: [name, continent, counters])
-        lines.axis = .vertical
-        lines.spacing = 2
-        lines.setCustomSpacing(Spacing.xs, after: continent)
+        // Two halves, pushed apart — the profile's.
+        let titleHalf = UIView()
+        let countersHalf = UIView()
+        for (view, half) in [(title as UIView, titleHalf), (counters, countersHalf)] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            half.addSubview(view)
+            NSLayoutConstraint.activate([
+                view.leadingAnchor.constraint(equalTo: half.leadingAnchor),
+                view.trailingAnchor.constraint(equalTo: half.trailingAnchor),
+            ])
+        }
+        NSLayoutConstraint.activate([
+            title.topAnchor.constraint(equalTo: titleHalf.topAnchor),
+            title.bottomAnchor.constraint(lessThanOrEqualTo: titleHalf.bottomAnchor),
+            counters.topAnchor.constraint(greaterThanOrEqualTo: countersHalf.topAnchor),
+            counters.bottomAnchor.constraint(equalTo: countersHalf.bottomAnchor),
+        ])
+        let column = UIStackView(arrangedSubviews: [titleHalf, countersHalf])
+        column.axis = .vertical
+        column.alignment = .fill
+        column.distribution = .fillEqually
 
-        let row = UIStackView(arrangedSubviews: [flagBox, lines])
-        row.alignment = .center
-        row.spacing = Spacing.lg
+        let row = UIStackView(arrangedSubviews: [flagBox, column])
+        row.alignment = .top
+        row.spacing = Spacing.md
+        // The side is high, the column's tie to it 999: a name that needs
+        // more than half the disc grows the column, the flag follows it up to
+        // its cap, and past the cap the column outgrows it rather than
+        // clipping a label — the profile's avatar rule.
+        let side = flag.heightAnchor.constraint(equalToConstant: flagSide)
+        side.priority = .defaultHigh
+        let spans = column.heightAnchor.constraint(equalTo: flag.heightAnchor)
+        spans.priority = .init(999)
         NSLayoutConstraint.activate([
             flag.topAnchor.constraint(equalTo: flagBox.topAnchor),
             flag.leadingAnchor.constraint(equalTo: flagBox.leadingAnchor),
             flag.trailingAnchor.constraint(equalTo: flagBox.trailingAnchor),
-            flag.bottomAnchor.constraint(equalTo: flagBox.bottomAnchor),
-            flag.widthAnchor.constraint(equalToConstant: flagSide),
-            flag.heightAnchor.constraint(equalToConstant: flagSide),
+            flag.bottomAnchor.constraint(lessThanOrEqualTo: flagBox.bottomAnchor),
+            flag.widthAnchor.constraint(equalTo: flag.heightAnchor),
+            side,
+            flag.heightAnchor.constraint(lessThanOrEqualToConstant: flagMaxSide),
+            spans,
+            column.heightAnchor.constraint(greaterThanOrEqualTo: flag.heightAnchor),
             // The bubble straddles the disc's rim at its bottom-trailing
             // corner, as a badge does: it may overhang into the gap beside it,
-            // never into the lines.
+            // never into the column.
             rank.bottomAnchor.constraint(equalTo: flag.bottomAnchor, constant: -2),
-            rank.trailingAnchor.constraint(lessThanOrEqualTo: flag.trailingAnchor, constant: Spacing.lg - 4),
+            rank.trailingAnchor.constraint(lessThanOrEqualTo: flag.trailingAnchor, constant: Spacing.md - 4),
         ])
         // A wide rank ("#126") slides LEFT over the disc rather than being
         // truncated against the cap above.
@@ -293,53 +319,158 @@ final class CountryUnlockSheetViewController: UIViewController {
         anchor.isActive = true
         return row
     }
+}
 
-    /// The meta line — the sound sheet's: footnote, figures that do not
-    /// dance, the figures in the ink and their words a step back. "12K · 86
-    /// posts".
-    private static func meta(likes: String, posts: String, postsWord: String) -> UILabel {
-        let size = UIFont.defaultPointSize(for: .footnote)
-        let figure: [NSAttributedString.Key: Any] = [
-            .font: UIFont.scaledMonospacedDigitSystemFont(ofSize: size, weight: .semibold, relativeTo: .footnote),
-            .foregroundColor: UIColor.label,
-        ]
-        let word: [NSAttributedString.Key: Any] = [
-            .font: UIFont.scaledMonospacedDigitSystemFont(ofSize: size, relativeTo: .footnote),
-            .foregroundColor: UIColor.secondaryLabel,
-        ]
-        let text = NSMutableAttributedString(string: likes, attributes: figure)
-        text.append(NSAttributedString(string: " · ", attributes: word))
-        text.append(NSAttributedString(string: posts, attributes: figure))
-        text.append(NSAttributedString(string: " \(postsWord)", attributes: word))
-        let label = UILabel()
-        label.attributedText = text
-        label.adjustsFontForContentSizeCategory = true
-        label.accessibilityLabel = "\(likes) likes, \(posts) \(postsWord)"
-        return label
+/// The country's name and its continent: on ONE line when the two fit the
+/// width, the continent after the name, a step back; the continent on the
+/// NEXT line when they do not. The name is always ONE line, truncated when
+/// even alone it is too wide ("South Georgia and the South…"); so is the
+/// continent.
+///
+/// One label, so the two lines share the text layout: the text is composed
+/// for the width UIKit asks about (`textRect`) — a space between the two when
+/// they fit, a line break when they do not, each line cut to the width by
+/// hand (a label truncates only its LAST line).
+final class CountryTitleLabel: UILabel {
+    let name: String
+    let continent: String
+
+    init(name: String, continent: String) {
+        self.name = name
+        self.continent = continent
+        super.init(frame: .zero)
+        // Never more than the name's line and the continent's: each is cut
+        // to the width before it gets here.
+        numberOfLines = 2
+        lineBreakMode = .byTruncatingTail
+        setContentCompressionResistancePriority(.required, for: .vertical)
+        compose(fits: true)
     }
 
-    /// The likes' heart.
-    ///
-    /// ⚠️ AN IMAGE VIEW, NOT A TEXT ATTACHMENT: the sheet's glass draws its
-    /// labels vibrant, attachments included, and the red heart came out black.
-    /// Its red is baked in (`.alwaysOriginal`), as the shop row's: a tinted
-    /// template came out pink over the dark glass.
-    private static func counterHeart() -> UIImageView {
-        let icon = UIImageView(image: UIImage(systemName: "heart.fill")?
-            .applyingSymbolConfiguration(.init(textStyle: .footnote, scale: .small))?
-            .withTintColor(.systemRed, renderingMode: .alwaysOriginal))
-        icon.contentMode = .center
-        icon.setContentHuggingPriority(.required, for: .horizontal)
-        return icon
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// Whether the continent stands on the name's line at the width laid out.
+    private(set) var continentFollowsName = true
+
+    /// The profile's name: title3 semibold.
+    private var nameFont: UIFont { .scaledFont(forTextStyle: .title3, weight: .semibold) }
+    /// The profile's @handle: subheadline, secondary.
+    private var continentFont: UIFont { .appFont(forTextStyle: .subheadline) }
+
+    private func composed(fits: Bool, width: CGFloat = .greatestFiniteMagnitude) -> NSAttributedString {
+        let name = fits ? self.name : Self.cut(self.name, font: nameFont, to: width)
+        let continent = fits ? self.continent : Self.cut(self.continent, font: continentFont, to: width)
+        let text = NSMutableAttributedString(string: name, attributes: [
+            .font: nameFont, .foregroundColor: UIColor.label,
+        ])
+        text.append(NSAttributedString(string: fits ? "  " : "\n", attributes: [.font: continentFont]))
+        text.append(NSAttributedString(string: continent, attributes: [
+            .font: continentFont, .foregroundColor: UIColor.secondaryLabel,
+        ]))
+        return text
     }
 
-    /// Takes the line's slack, so what it sits beside hugs its own edge.
-    private static func spacer() -> UIView {
-        let view = UIView()
-        view.setContentHuggingPriority(.init(1), for: .horizontal)
-        view.setContentCompressionResistancePriority(.init(1), for: .horizontal)
-        return view
+    /// `text` as it fits `width` on one line in `font`: whole, or its longest
+    /// prefix that fits with "…".
+    static func cut(_ text: String, font: UIFont, to width: CGFloat) -> String {
+        let measure = { (candidate: String) in
+            (candidate as NSString).size(withAttributes: [.font: font]).width.rounded(.up)
+        }
+        guard measure(text) > width else { return text }
+        let characters = Array(text)
+        var (low, high) = (0, characters.count)
+        while low < high {
+            let middle = (low + high + 1) / 2
+            let candidate = String(characters[..<middle]).trimmingCharacters(in: .whitespaces) + "…"
+            if measure(candidate) <= width { low = middle } else { high = middle - 1 }
+        }
+        return String(characters[..<low]).trimmingCharacters(in: .whitespaces) + "…"
     }
+
+    /// The width the text was last cut for, when it does not fit one line.
+    private var composedWidth: CGFloat = .greatestFiniteMagnitude
+
+    private func compose(fits: Bool, width: CGFloat = .greatestFiniteMagnitude) {
+        continentFollowsName = fits
+        composedWidth = width
+        attributedText = composed(fits: fits, width: width)
+        accessibilityLabel = "\(name), \(continent)"
+    }
+
+    /// Whether the name and the continent fit one line `width` wide.
+    func fitsOneLine(_ width: CGFloat) -> Bool {
+        let line = composed(fits: true).boundingRect(
+            with: CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading], context: nil
+        )
+        return line.width.rounded(.up) <= width
+    }
+
+    override func textRect(forBounds bounds: CGRect, limitedToNumberOfLines numberOfLines: Int) -> CGRect {
+        // Asked for a width (a layout pass, a fitting size): compose for it.
+        // Stable: the same width always asks for the same text.
+        if bounds.width > 0, bounds.width < CGFloat.greatestFiniteMagnitude / 2 {
+            let fits = fitsOneLine(bounds.width)
+            if fits != continentFollowsName || (!fits && bounds.width != composedWidth) {
+                compose(fits: fits, width: fits ? .greatestFiniteMagnitude : bounds.width)
+            }
+        }
+        return super.textRect(forBounds: bounds, limitedToNumberOfLines: numberOfLines)
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        // Attributed fonts do not follow Dynamic Type on their own.
+        if previousTraitCollection?.preferredContentSizeCategory != traitCollection.preferredContentSizeCategory {
+            compose(fits: continentFollowsName, width: composedWidth)
+        }
+    }
+}
+
+/// One counter as the profile draws its own (`ProfileStatView`): the figure
+/// over the word that says what it counts, centred on each other, the column
+/// as wide as the wider of the two.
+final class CountryStatView: UIView {
+    let valueLabel = UILabel()
+    let captionLabel = UILabel()
+
+    init(value: String, caption: String) {
+        super.init(frame: .zero)
+        // The profile's type, capped (#482).
+        valueLabel.font = .scaledSystemFont(ofSize: 17, weight: .semibold, relativeTo: .headline, maximumPointSize: 24)
+        valueLabel.adjustsFontForContentSizeCategory = true
+        valueLabel.textColor = .label
+        valueLabel.textAlignment = .center
+        valueLabel.text = value
+        captionLabel.font = .scaledSystemFont(ofSize: 12, relativeTo: .caption1, maximumPointSize: 16)
+        captionLabel.adjustsFontForContentSizeCategory = true
+        captionLabel.textColor = .secondaryLabel
+        captionLabel.textAlignment = .center
+        captionLabel.text = caption
+        for label in [valueLabel, captionLabel] {
+            label.setContentCompressionResistancePriority(.required, for: .vertical)
+            label.setContentCompressionResistancePriority(.required, for: .horizontal)
+        }
+        let stack = UIStackView(arrangedSubviews: [valueLabel, captionLabel])
+        stack.axis = .vertical
+        stack.alignment = .center
+        stack.spacing = Spacing.xs
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+        isAccessibilityElement = true
+        accessibilityLabel = caption
+        accessibilityValue = value
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 }
 
 /// The country's rank, worn over its flag: "#4", white on a near-black
