@@ -127,13 +127,10 @@ struct ProfileIdentityInkTests {
                 #expect(contrast.handle.min >= 4.5, "\(shape) handle \(contrast.handle) \(header.debugInkTones)")
                 #expect(contrast.name.min >= 4.5, "\(shape) name \(contrast.name)")
             }
-            if band, picture == .stripes {
-                withKnownIssue("a band's sharp name over hard stripes", isIntermittent: false, identity)
-            } else if band, picture == .grey, style == .dark {
-                withKnownIssue("a band's handle on the crossover grey, the dark page arriving under it", identity)
-            } else {
-                identity()
-            }
+            // No exception any more: a band's black ramp (5 October 2026) is
+            // shouldered, half there under the name, and closes even hard
+            // stripes and the crossover grey that its blur used to leave.
+            identity()
             // On a poster the counters and the bio stand on the picture too.
             // (On a band they are page ink on the page, whose secondary
             // caption is the system's own 3.3:1 in light mode — not this
@@ -147,19 +144,19 @@ struct ProfileIdentityInkTests {
         }
     }
 
-    /// The picture picks the ink on a BAND, where the page's tone is thin
-    /// under the name: black over a light picture, white over a dark one,
-    /// in both appearances. On a POSTER half the page's tone is already
-    /// under the name (the shoulder): a picture of the page's own side stays
-    /// there, and one of the other side is pulled to the middle, where the
-    /// ink is the one that holds best there.
+    /// A BAND's ramp is black (5 October 2026), half there under the name:
+    /// white ink over a light picture as over a dark one, in both
+    /// appearances. On a POSTER half the PAGE's tone is under the name (the
+    /// shoulder): a picture of the page's own side stays there, and one of
+    /// the other side is pulled to the middle, where the ink is the one that
+    /// holds best there.
     @Test(arguments: [UIUserInterfaceStyle.light, .dark])
     func thePicturePicksTheInk(style: UIUserInterfaceStyle) {
         let bandSize = CGSize(width: 160, height: 90)
         let light = header(picture: Picture.white.image(size: bandSize), style: style)
         #expect(light.bannerFormat == .band)
-        #expect(light.debugInkTones.name == .dark)
-        #expect(light.debugNameInk == HeroInk.Tone.dark.primary)
+        #expect(light.debugInkTones.name == .light)
+        #expect(light.debugNameInk == HeroInk.Tone.light.primary)
         let dark = header(picture: Picture.black.image(size: bandSize), style: style)
         #expect(dark.debugInkTones.name == .light)
         #expect(dark.debugNameInk == HeroInk.Tone.light.primary)
@@ -182,16 +179,16 @@ struct ProfileIdentityInkTests {
         #expect(bio.1.min >= 4.5, "bio \(bio.1)")
     }
 
-    /// The instrument can see a failure: a sharp name over hard stripes. If
-    /// this ever reads AA, the measurement has stopped measuring.
+    /// The instrument can see a failure: the WRONG ink on a name. If this
+    /// ever reads AA, the measurement has stopped measuring.
     ///
-    /// ⚠️ NOT A POSTER ANY MORE: its shoulder puts half the page under the
-    /// name, so a poster always wears the page's side of the inks and its
-    /// fade-out blends an ink into itself. A band over hard stripes is the
-    /// failure the suite knows (`theTypeClearsAAOverAnyPicture`).
+    /// ⚠️ FORCED, because nothing fails on its own any more: a poster's
+    /// shoulder and a band's black one (5 October 2026) put half a tone under
+    /// every name, and the ink picked over it holds over any picture.
     @Test func theInstrumentSeesAFailure() throws {
         let header = header(picture: Picture.stripes.image(size: CGSize(width: 160, height: 90)))
         #expect(header.bannerFormat == .band)
+        header.debugForceNameInk(.black)
         let contrast = try #require(header.debugIdentityContrast())
         #expect(contrast.name.min < 4.5, "name \(contrast.name)")
     }
@@ -204,9 +201,11 @@ struct ProfileIdentityInkTests {
         #expect(band.bannerFormat == .band)
         let poster = header(picture: Picture.white.image())
         #expect(poster.bannerFormat == .poster)
-        for header in [band, poster] {
-            #expect(header.debugNameInk == HeroInk.Tone.dark.primary)
-            #expect(header.debugHandleInk == HeroInk.Tone.dark.secondary)
+        // A band's black ramp takes white type; a poster over a white
+        // picture on a light page, black.
+        for (header, tone) in [(band, HeroInk.Tone.light), (poster, .dark)] {
+            #expect(header.debugNameInk == tone.primary)
+            #expect(header.debugHandleInk == tone.secondary)
             #expect(header.debugNameShadowOpacity > 0)
         }
         let bare = header(picture: nil)
@@ -260,7 +259,9 @@ struct ProfileIdentityInkTests {
         let reads = header.debugInkReadCount
         let fade = try #require(header.debugBannerFade)
         let tones = header.debugInkTones
-        try #require(composed > 0 && baked > 0 && reads > 0)
+        // A band shows no blur (5 October 2026): nothing composed, but the
+        // levels are still baked — the ink is read off them.
+        try #require((band ? composed == 0 : composed > 0) && baked > 0 && reads > 0)
         for pull in stride(from: CGFloat(3), through: 180, by: 3) {
             header.frame.origin.y = pull
             header.setTravelled(-pull)
@@ -286,28 +287,35 @@ struct ProfileIdentityInkTests {
         #expect(header.debugInkReadCount == reads)
     }
 
-    /// The blur's levels are all showing once the picture is in, each fading
-    /// in below the one before, the strongest whole only at the foot; the
-    /// page's ramp is thin under the name and whole at the banner's foot.
+    /// On a poster the blur's levels are all showing once the picture is in,
+    /// each fading in below the one before, the strongest whole only at the
+    /// foot — a band shows none (5 October 2026). The ramp is shouldered on
+    /// both, half there under the name and whole at the banner's foot.
     @Test(arguments: [false, true])
     func theBlurAndThePageClimbToTheFoot(band: Bool) throws {
         let size = band ? CGSize(width: 160, height: 90) : CGSize(width: 90, height: 160)
         let header = header(picture: Picture.grey.image(size: size))
         let levels = header.debugBannerBlurLevels
-        try #require(levels.count == HeroBannerFade.blurSigmas.count)
+        if band {
+            #expect(levels.isEmpty, "a band blurs")
+        } else {
+            try #require(levels.count == HeroBannerFade.blurSigmas.count)
+        }
         let name = header.debugNameFrame
         let fade = try #require(header.debugBannerFade)
-        #expect(abs(levels[0].start - fade.blurStart) < 1)
-        for (lower, upper) in zip(levels, levels.dropFirst()) {
-            #expect(upper.start >= lower.start)
-            #expect(upper.full > lower.full)
-            // Neighbours hand over: the next starts where this one is whole.
-            #expect(abs(upper.start - lower.full) < 1)
+        if !band {
+            #expect(abs(levels[0].start - fade.blurStart) < 1)
+            for (lower, upper) in zip(levels, levels.dropFirst()) {
+                #expect(upper.start >= lower.start)
+                #expect(upper.full > lower.full)
+                // Neighbours hand over: the next starts where this one is whole.
+                #expect(abs(upper.start - lower.full) < 1)
+            }
+            // Whole only at the banner's foot: the blur keeps climbing under
+            // the type.
+            #expect(abs(levels[levels.count - 1].full - header.debugBannerFrame.maxY) < 1)
+            #expect(levels[levels.count - 1].start > name.minY)
         }
-        // Whole only at the banner's foot: the blur keeps climbing under
-        // the type.
-        #expect(abs(levels[levels.count - 1].full - header.debugBannerFrame.maxY) < 1)
-        #expect(levels[levels.count - 1].start > name.minY)
 
         let banner = header.debugBannerFrame
         let locations = header.debugBannerRampLocations
@@ -326,12 +334,9 @@ struct ProfileIdentityInkTests {
         // clear above it, thin under the name, whole at the foot — drawn as
         // the curve the ground is read with.
         #expect(alpha(at: fade.rampStart - 4) == 0)
-        // Thin under a band's name; the shoulder under a poster's.
-        if band {
-            #expect(alpha(at: name.maxY) < 0.2)
-        } else {
-            #expect(abs(alpha(at: name.maxY) - HeroBannerFade.shoulderAlpha) < 0.05)
-        }
+        // The shoulder under the name, on both shapes: with no blur, a
+        // band's black ramp is what closes the picture's spread under its type.
+        #expect(alpha(at: name.minY) >= HeroBannerFade.shoulderAlpha - 0.05)
         let handle = header.debugHandleFrame.midY
         #expect(abs(alpha(at: handle) - HeroBannerFade.rampAlpha(at: handle, geometry: fade)) < 0.02)
         #expect(alpha(at: banner.maxY) > 0.99)

@@ -704,18 +704,16 @@ final class PlaceProfileViewController: UIViewController {
     /// Enough to read as depth, little enough that the crop stays honest.
     private static let bannerParallaxFraction: CGFloat = 0.25
 
-    /// The banner's height: the PROFILE POSTER's geometry, not a share of the
-    /// screen.
+    /// The banner's height: the PROFILE POSTER's — a cover, 80% of the
+    /// screen (`coverScreenFraction`), the identity row at its foot.
     ///
-    /// ⚠️ **IT WAS 70% OF THE VIEWPORT** — 612pt on an 874pt screen, the
-    /// picture reaching two-thirds down before the name — beside a profile
-    /// whose poster gives its picture a 200pt stage under the chrome. Two
-    /// screens of one design, read as two products ("la bannière est beaucoup
-    /// trop haute", 25 September 2026). Now it is the profile's rule: the
-    /// chrome, `HeroBannerMetrics.posterStage` of picture, then the identity
-    /// row — the flag, the name and the counters — and the clearance under
-    /// it. Re-derived on
-    /// every layout, since the name and the counters grow with Dynamic Type.
+    /// ⚠️ History: it was 70% of the viewport, then cut to the poster's 200pt
+    /// stage ("la bannière est beaucoup trop haute", 25 September 2026) so
+    /// the two screens read as one design; on 5 October 2026 both covers went
+    /// to 80% together — the profile's poster and this — so they still match.
+    /// Never less than the chrome, `HeroBannerMetrics.posterStage`, the
+    /// identity row and its clearance; re-derived on every layout, since the
+    /// identity grows with Dynamic Type.
     private var bannerHeight: CGFloat {
         let width = view.bounds.width - 2 * HeroBannerMetrics.identityInset
         guard width > 0 else { return Self.bannerHeightFloor }
@@ -726,9 +724,18 @@ final class PlaceProfileViewController: UIViewController {
                 verticalFittingPriority: .fittingSizeLevel
             ).height ?? 0
         }
-        return view.safeAreaInsets.top + HeroBannerMetrics.posterStage
+        // At least the chrome, the poster's stage and the identity; as tall
+        // as `coverScreenFraction` of the screen whenever that is taller —
+        // the profile poster's own height.
+        let content = view.safeAreaInsets.top + HeroBannerMetrics.posterStage
             + height(of: identityView) + Self.identityClearance
+        return max(content, (view.bounds.height * Self.coverScreenFraction).rounded())
     }
+
+    /// How much of the screen's height the banner — a COVER, the profile
+    /// poster's shape — runs down: 80% (user, 5 October 2026), as a
+    /// profile's poster does; the identity stands at its foot.
+    static let coverScreenFraction: CGFloat = 0.8
 
     /// How much taller than its viewport the image is cut. The parallax slides
     /// the image by at most this, so the overshoot is what guarantees no edge

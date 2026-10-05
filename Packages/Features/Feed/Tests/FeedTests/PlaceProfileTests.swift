@@ -74,19 +74,17 @@ struct PlaceProfileTests {
         profile.viewDidLayoutSubviews()
     }
 
-    /// ⚠️ THE PROFILE POSTER'S GEOMETRY, NOT A SHARE OF THE SCREEN. It was 70%
-    /// of the viewport (612pt on this one) beside a profile whose poster gives
-    /// its picture a 200pt stage — two pages of one design reading as two
-    /// products. The identity row — its flag's top, as a profile's avatar's —
-    /// now stands where the profile's column starts: the chrome plus
-    /// `HeroBannerMetrics.posterStage`.
-    @Test func theIdentityStandsWhereTheProfilesColumnStarts() {
+    /// A COVER, as a profile's poster: the banner runs down 80% of the
+    /// screen (user, 5 October 2026), the identity row at its foot — well
+    /// below where the poster's old 200pt stage put it.
+    @Test func theCoverRunsDownEightyPercentOfTheScreen() {
         let profile = makeProfile()
         laidOut(profile)
-        let expected = profile.view.safeAreaInsets.top + HeroBannerMetrics.posterStage
-        #expect(abs(profile.debugIdentityFrame.minY - expected) < 1,
-                "identity at \(profile.debugIdentityFrame.minY), the poster's column at \(expected)")
-        #expect(profile.debugBannerHeight < 874 * 0.6, "the banner is back to most of the screen")
+        let screen = profile.view.bounds.height
+        #expect(abs(profile.debugBannerHeight - (screen * 0.8).rounded()) < 1,
+                "banner \(profile.debugBannerHeight) of \(screen)")
+        let oldStage = profile.view.safeAreaInsets.top + HeroBannerMetrics.posterStage
+        #expect(profile.debugIdentityFrame.minY > oldStage, "the identity still stands on the old stage")
     }
 
     /// The banner ends under the identity row by the clearance, and nowhere

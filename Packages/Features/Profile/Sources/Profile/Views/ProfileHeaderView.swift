@@ -11,8 +11,8 @@ import UIKit
 /// directly on top of it.
 ///
 /// Identity anatomy:
-/// - a banner-viewing window under the chrome (`Metrics.bannerClearance` of
-///   raw media: a poster's stage, or just air on a band);
+/// - a banner-viewing window under the chrome (a poster's stage — its foot at
+///   80% of the screen, `posterFoot` — or just air on a band);
 /// - then the identity row: the circular avatar left, and beside it two
 ///   halves of the avatar's height — the display name (+ verified badge)
 ///   over the @handle in the TOP half, standing on the picture in its ink
@@ -47,12 +47,10 @@ final class ProfileHeaderView: UIView {
         /// so it gets more. A band's is only air: the disc's top sits just
         /// under the chrome's bottom edge, and the strip is the picture
         /// behind the chrome plus the top half of the identity row.
-        static func bannerClearance(for format: ProfileBannerFormat) -> CGFloat {
-            switch format {
-            case .band, .none: bandGap
-            case .poster: HeroBannerMetrics.posterStage
-            }
-        }
+        /// How much of the screen's height a poster runs down: its foot —
+        /// the tray's — at 80% of the screen (user, 5 October 2026), the
+        /// stage above the identity block whatever the block holds.
+        static let posterScreenFraction: CGFloat = 0.8
         /// The air between the chrome's bottom edge and the avatar, on a band
         /// and on a header with no picture.
         static let bandGap: CGFloat = Spacing.md
@@ -60,9 +58,6 @@ final class ProfileHeaderView: UIView {
         /// counters' half starts at the midline, their type a few points
         /// lower, and the page must be whole by then.
         static let bandFootBelowMidline: CGFloat = 6
-        /// How far above the avatar's midline a band's page tone starts
-        /// arriving — see `placeBannerFade`.
-        static let bandRampAboveMidline: CGFloat = 12
         /// The air above the tray, carried by the tray itself so it holds
         /// whether or not a website row sits above it.
         static let trayGap: CGFloat = Spacing.md
@@ -129,6 +124,7 @@ final class ProfileHeaderView: UIView {
         didSet {
             if chromeTopInset != oldValue { layoutRevision += 1 }
             columnTopConstraint?.constant = columnTopConstant
+            columnTopFloor?.constant = columnTopConstant
             // The status bar's scrim covers the chrome, and stops there.
             bannerView.topScrimHeight = chromeTopInset > 0 ? chromeTopInset : 160
         }
@@ -138,12 +134,45 @@ final class ProfileHeaderView: UIView {
     /// as it lands; settable for QA.
     private(set) var bannerFormat: ProfileBannerFormat = .unresolved
 
-    /// Where the identity column starts: below the chrome and the banner's
-    /// clearance. A band's clearance is only the air under the chrome — the
-    /// strip reaches down INTO the avatar rather than the avatar climbing up
-    /// into the strip.
+    /// Where the identity column starts on a band or with no banner, and
+    /// the highest it may ever start: a band's clearance under the chrome —
+    /// the strip reaches down INTO the avatar rather than the avatar
+    /// climbing up into the strip.
     private var columnTopConstant: CGFloat {
-        chromeTopInset + Metrics.bannerClearance(for: bannerFormat)
+        chromeTopInset + Metrics.bandGap
+    }
+
+    /// A POSTER'S FOOT — the tray's, where a poster ends (`bannerEndsAtTray`)
+    /// — at `posterScreenFraction` of the screen's height, whatever the
+    /// identity block holds (the bio, the link, Dynamic Type): the column is
+    /// pushed down to it, its stage the room left above. A CONSTRAINT, not a
+    /// measure: the screen's fitting pass and every layout solve it alike
+    /// (a measure taken as the content landed still saw the loading bones,
+    /// and put the foot 40pt short). Just under required: a block taller
+    /// than the room keeps the column on its floor (`columnTopFloor`).
+    private var posterFoot: NSLayoutConstraint?
+    /// The column never starts higher than a band's: the floor a poster's
+    /// foot pushes down from.
+    private var columnTopFloor: NSLayoutConstraint?
+
+    private var posterFootConstant: CGFloat {
+        ((window?.screen.bounds.height ?? UIScreen.main.bounds.height) * Metrics.posterScreenFraction).rounded()
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        guard let posterFoot, posterFoot.constant != posterFootConstant else { return }
+        posterFoot.constant = posterFootConstant
+        layoutRevision += 1
+    }
+
+    /// A poster's stage: the air between the chrome and the identity
+    /// column, as laid out — the room its foot at 80% of the screen leaves.
+    var posterClearance: CGFloat {
+        guard bannerFormat == .poster, let identityBlock, identityBlock.frame.height > 0 else {
+            return HeroBannerMetrics.posterStage
+        }
+        return max(Metrics.bandGap, identityBlock.frame.minY - chromeTopInset)
     }
 
     /// Adopts a banner shape: the column's start, whether there is a banner,
@@ -156,6 +185,11 @@ final class ProfileHeaderView: UIView {
         layoutRevision += 1
         bannerFormat = format
         columnTopConstraint?.constant = columnTopConstant
+        columnTopFloor?.constant = columnTopConstant
+        // A poster's column is pushed down to its foot; a band's sits on
+        // its floor.
+        columnTopConstraint?.isActive = format != .poster
+        posterFoot?.isActive = format == .poster
         bannerView.isHidden = format == .none
         bannerEndsAtTray?.isActive = format == .poster
         bannerEndsInAvatar?.isActive = format != .poster
@@ -297,13 +331,16 @@ final class ProfileHeaderView: UIView {
     /// own — the point the poster is gone by, and a detent the scroll rests
     /// at (see `ProfileScrollDetents`).
     var posterFadeOutTravel: CGFloat {
-        Metrics.bannerClearance(for: .poster) - Metrics.bannerClearance(for: .band)
+        posterClearance - Metrics.bandGap
     }
 
     private var hasAppliedBannerFormat = false
     private var bannerEndsInAvatar: NSLayoutConstraint?
     private var bannerEndsAtTray: NSLayoutConstraint?
     private let topRow = UIStackView()
+    /// The identity block — avatar row to tray — whose height sets a
+    /// poster's stage (`posterClearance`).
+    private var identityBlock: UIStackView?
     private let statsRow = UIStackView()
     /// The name and the handle, in the identity row's top half.
     private let nameBlock = UIStackView()
@@ -331,6 +368,8 @@ final class ProfileHeaderView: UIView {
         identityColumn.arrangedSubviews[1].convert(identityColumn.arrangedSubviews[1].bounds, to: self)
     }
     var debugBannerIsHidden: Bool { bannerView.isHidden }
+    var debugBannerShowsBlur: Bool { bannerView.debugShowsBlur }
+    var debugBannerRampTone: UIColor { bannerView.debugRampTone }
     var debugTrayButtons: [UIButton] {
         [followButton, messageButton, editButton, mapPinButton, qrCodeButton, moreButton]
     }
@@ -349,6 +388,9 @@ final class ProfileHeaderView: UIView {
     var debugBlurBakeMilliseconds: Double { bannerView.debugLastBlurBakeMilliseconds }
     var debugBlurBakeBytes: Int { bannerView.debugLastBlurBakeBytes }
     var debugNameInk: UIColor { nameLabel.textColor }
+    /// Puts `ink` on the name, wrong or not — for a test that proves the
+    /// contrast instrument still sees a failure.
+    func debugForceNameInk(_ ink: UIColor) { nameLabel.textColor = ink }
     var debugHandleInk: UIColor { handleLabel.textColor }
     var debugNameShadowOpacity: Float { nameLabel.layer.shadowOpacity }
     /// The ink each block on the picture wears: name + handle, counters, bio.
@@ -1321,6 +1363,7 @@ final class ProfileHeaderView: UIView {
         // full-bleed banner and needs air between its major containers to
         // read premium.
         let column = UIStackView(arrangedSubviews: [topRow, bioLabel, websiteButton, actionRow])
+        identityBlock = column
         column.axis = .vertical
         column.alignment = .fill
         // Air between the block's rows: a step more than the standard stack
@@ -1358,8 +1401,14 @@ final class ProfileHeaderView: UIView {
             equalTo: topAnchor, constant: columnTopConstant
         )
         columnTopConstraint = columnTop
+        let floor = column.topAnchor.constraint(greaterThanOrEqualTo: topAnchor, constant: columnTopConstant)
+        columnTopFloor = floor
+        let foot = column.bottomAnchor.constraint(equalTo: topAnchor, constant: posterFootConstant)
+        foot.priority = .init(999)
+        posterFoot = foot
         column.constrain(in: self) { parent in
             columnTop
+            floor
             column.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: Metrics.horizontalInset)
             column.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -Metrics.horizontalInset)
             column.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -Spacing.xl)
@@ -1452,19 +1501,15 @@ final class ProfileHeaderView: UIView {
             fade = HeroBannerFade.shoulderedGeometry(identityTop: avatar.minY, foot: foot)
         }
         if bannerFormat == .band {
-            // ⚠️ A BAND'S PAGE ARRIVES UNDER THE HANDLE, NOT THE NAME. Its
-            // container is only the name's half (~60pt) and the handle
-            // stands in its lower part: the cubic over the whole of it laid
-            // up to 60% of a light page under a white handle over a dark
-            // strip — 2.61:1 (`-profile-ink-audit`, prof-0). The blur keeps
-            // the whole container; the page's tone climbs from the handle's
-            // line, through the air above the counters, to the foot.
-            fade.rampStart = max(fade.rampStart, avatar.midY - Metrics.bandRampAboveMidline)
-            // ⚠️ AND ITS BLUR CLIMBS THE LADDER, NOT THE SIGMA: over a
-            // container this short the sigma curve put the handle on the
-            // third and fourth levels — "far too strong" (user, 1 October
-            // 2026). See `HeroBannerFade.BlurCurve.ladder`.
-            fade.blurCurve = .ladder
+            // ⚠️ A BAND NO LONGER BLURS, AND ITS RAMP IS BLACK (user, 5
+            // October 2026) — so it is SHOULDERED, as a poster's: with no
+            // blur to calm the strip, only the ramp closes the picture's
+            // spread under the name and the handle, and over half of it
+            // (`shoulderAlpha`) the ground is always on one side of the inks'
+            // crossover — white type over any picture. (Unshouldered, the
+            // black arrived only under the handle's foot: a white strip took
+            // a dark ink there, then the black came up under it — 1.1:1.)
+            fade = HeroBannerFade.shoulderedGeometry(identityTop: avatar.minY, foot: foot)
         }
         bannerView.setFade(fade)
         updateInkTones()
