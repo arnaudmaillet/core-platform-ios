@@ -37,6 +37,8 @@ public final class MockSocialGraphService: @unchecked Sendable {
     private var requests: [Edge: Date] = [:]
     /// Whether a profile is private right now; profile.v1 owns that flag.
     private let isPrivate: @Sendable (String) -> Bool
+    /// Mutes, muter → muted, with their scopes and when (backend #722).
+    private var mutes: [Edge: (scopes: SocialGraph_V1_MuteScopes, at: Date)] = [:]
     /// Who else may see each profile's followers / following lists
     /// (backend #720). Absent means Everyone.
     private var listPrivacy: [String: SocialGraph_V1_ListPrivacy] = [:]
@@ -98,6 +100,9 @@ public final class MockSocialGraphService: @unchecked Sendable {
             view.actorID = request.actorID
             view.targetID = request.targetID
             view.status = relationStatus(from: request.actorID, to: request.targetID)
+            // How the actor mutes the target, so the profile can offer Unmute.
+            view.muted = lock.withLock { mutes[Edge(follower: request.actorID, followee: request.targetID)]?.scopes }
+                ?? SocialGraph_V1_MuteScopes()
             // The counts the view carries, which used to be left at zero.
             // `counter.v1` does not project follower counts at all
             // (`dev/BACKEND_GAPS.md` §7), so this view is the only place they
@@ -198,6 +203,51 @@ public final class MockSocialGraphService: @unchecked Sendable {
         // Both honor `limit` + `page_token`: the follower / following screen
         // pages, and a mock that served the whole graph at once would leave
         // its cursor handling — and its paging spinner — unexercised.
+        bff.register(path: "/social_graph.v1.SocialGraphService/Mute") { [self] (request: SocialGraph_V1_MuteRequest) -> Result<SocialGraph_V1_CommandResponse, ConnectError> in
+            guard request.actorID != request.targetID else {
+                return .failure(ConnectError(code: .invalidArgument, message: "SGR-2001: cannot mute oneself"))
+            }
+            let scopes = request.scopes
+            guard scopes.posts || scopes.stories || scopes.messages else {
+                return .failure(ConnectError(code: .invalidArgument, message: "SGR-9001: at least one scope is required"))
+            }
+            // Re-muting replaces the scopes.
+            lock.withLock { mutes[Edge(follower: request.actorID, followee: request.targetID)] = (scopes, Date()) }
+            var response = SocialGraph_V1_CommandResponse()
+            response.success = true
+            return .success(response)
+        }
+        bff.register(path: "/social_graph.v1.SocialGraphService/Unmute") { [self] (request: SocialGraph_V1_UnmuteRequest) in
+            // Idempotent.
+            lock.withLock { mutes[Edge(follower: request.actorID, followee: request.targetID)] = nil }
+            var response = SocialGraph_V1_CommandResponse()
+            response.success = true
+            return .success(response)
+        }
+        bff.register(path: "/social_graph.v1.SocialGraphService/ListMutes") { [self] (request: SocialGraph_V1_ListMutesRequest) -> Result<SocialGraph_V1_ListMutesResponse, ConnectError> in
+            // Profile-id order, as on the fleet.
+            let all = lock.withLock {
+                mutes.filter { $0.key.follower == request.profileID }
+                    .sorted { $0.key.followee < $1.key.followee }
+                    .map { edge, mute in
+                        var summary = SocialGraph_V1_MuteSummary()
+                        summary.profileID = edge.followee
+                        summary.scopes = mute.scopes
+                        summary.mutedAt = .init(date: mute.at)
+                        return summary
+                    }
+            }
+            let start = Int(request.pageToken) ?? 0
+            let size = Int(min(max(request.limit == 0 ? 50 : request.limit, 1), pageSizeCap))
+            guard start >= 0, start <= all.count else {
+                return .failure(ConnectError(code: .invalidArgument, message: "bad page token"))
+            }
+            let end = min(start + size, all.count)
+            var response = SocialGraph_V1_ListMutesResponse()
+            response.mutes = Array(all[start..<end])
+            response.nextPageToken = end < all.count ? String(end) : ""
+            return .success(response)
+        }
         bff.register(path: "/social_graph.v1.SocialGraphService/RemoveFollower") { [self] (request: SocialGraph_V1_RemoveFollowerRequest) -> Result<SocialGraph_V1_CommandResponse, ConnectError> in
             guard follows(request.followerID, request.profileID) else {
                 return .failure(ConnectError(code: .notFound, message: "SGR-1002: not a follower"))

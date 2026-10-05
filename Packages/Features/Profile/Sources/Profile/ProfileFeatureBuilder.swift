@@ -215,6 +215,15 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                                 )
                                             }
                                         ]
+                                        let muting = repository as? any ProfileMuting
+                                        if let muting {
+                                            destinations.append(.init(title: "Muted Accounts", symbolName: "speaker.slash") {
+                                                MutedAccountsViewController(
+                                                    viewModel: MutedAccountsViewModel(muting: muting),
+                                                    imagePipeline: imagePipeline
+                                                )
+                                            })
+                                        }
                                         if let accountStatus {
                                             destinations.append(.init(title: "Account Status", symbolName: "checkmark.shield") {
                                                 AccountStatusViewController(
@@ -232,7 +241,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                         }
                                         return SafetySettingsViewController(
                                             destinations: destinations,
-                                            planned: ["Muted accounts", "Hidden words and comment filters"]
+                                            planned: (muting == nil ? ["Muted accounts"] : []) + ["Hidden words and comment filters"]
                                                 + (history == nil ? ["Your reports"] : [])
                                                 + (accountStatus == nil ? ["Account status"] : [])
                                         )

@@ -1502,6 +1502,25 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
             return groups
         }
 
+        if viewModel.canMute {
+            let scopes = viewModel.muteScopes
+            // One submenu, a toggle per scope: muting is a set of quiet
+            // preferences, not one switch (backend #722).
+            groups.append(UIMenu(options: .displayInline, children: [
+                UIMenu(
+                    title: scopes.isEmpty ? "Mute" : "Muted",
+                    subtitle: scopes.isEmpty ? nil : scopes.summary,
+                    image: UIImage(systemName: scopes.isEmpty ? "speaker.slash" : "speaker.slash.fill"),
+                    children: MuteScope.allCases.map { scope in
+                        UIAction(
+                            title: scope.title,
+                            state: scopes.contains(scope) ? .on : .off
+                        ) { [weak self] _ in self?.viewModel.toggleMute(scope) }
+                    }
+                )
+            ]))
+        }
+
         let blocked = viewModel.isBlocked
         groups.append(UIMenu(options: .displayInline, children: [
             UIAction(
@@ -1705,6 +1724,12 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
             ToastView.present(message, symbol: "hand.raised.fill", in: navigationController?.view ?? view)
         case .unblocked(let handle):
             ToastView.present("Unblocked \(handle)", symbol: "hand.raised.slash.fill", in: view)
+        case .muteChanged(let handle, let scopes):
+            ToastView.present(
+                ProfileViewModel.muteMessage(handle: handle, scopes: scopes),
+                symbol: scopes.isEmpty ? "speaker.wave.2.fill" : "speaker.slash.fill",
+                in: view
+            )
         case .reported:
             ToastView.present("Report sent", in: view)
         case .failed(let message):
