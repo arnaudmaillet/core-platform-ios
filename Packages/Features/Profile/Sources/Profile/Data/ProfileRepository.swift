@@ -290,7 +290,7 @@ public protocol ProfileSwitching: Sendable {
 // `relationship(for:)` folded to the one question a follow "+" asks.
 public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisibilityManaging, BlockedAccountsManaging, ProfileViewerResolving,
     SocialGraphWriting, SocialGraphReading {
-    private let profileClient: any Profile_V1_ProfileServiceClientInterface
+    let profileClient: any Profile_V1_ProfileServiceClientInterface
     private let counterClient: any Counter_V1_CounterServiceClientInterface
     let socialGraphClient: any SocialGraph_V1_SocialGraphServiceClientInterface
     private let authSession: any AuthSessionProviding
