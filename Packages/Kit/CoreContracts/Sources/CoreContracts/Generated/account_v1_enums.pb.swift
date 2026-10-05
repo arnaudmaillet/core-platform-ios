@@ -255,6 +255,45 @@ public nonisolated enum Account_V1_AgeBracket: SwiftProtobuf.Enum, Swift.CaseIte
 
 }
 
+/// How a contact matched (#661).
+public nonisolated enum Account_V1_ContactChannel: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+  case email // = 1
+  case phone // = 2
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .email
+    case 2: self = .phone
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .email: return 1
+    case .phone: return 2
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [Account_V1_ContactChannel] = [
+    .unspecified,
+    .email,
+    .phone,
+  ]
+
+}
+
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 nonisolated extension Account_V1_AccountStatus: SwiftProtobuf._ProtoNameProviding {
@@ -271,4 +310,8 @@ nonisolated extension Account_V1_AccountRole: SwiftProtobuf._ProtoNameProviding 
 
 nonisolated extension Account_V1_AgeBracket: SwiftProtobuf._ProtoNameProviding {
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0AGE_BRACKET_UNSPECIFIED\0\u{1}AGE_BRACKET_13_15\0\u{1}AGE_BRACKET_16_17\0\u{1}AGE_BRACKET_ADULT\0")
+}
+
+nonisolated extension Account_V1_ContactChannel: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0CONTACT_CHANNEL_UNSPECIFIED\0\u{1}CONTACT_CHANNEL_EMAIL\0\u{1}CONTACT_CHANNEL_PHONE\0")
 }

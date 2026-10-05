@@ -64,9 +64,19 @@ public protocol Moderation_V1_ModerationServiceClientInterface: Sendable {
     func `listQueue`(request: Moderation_V1_ListQueueRequest, headers: Connect.Headers) async -> ResponseMessage<Moderation_V1_ListQueueResponse>
 
     /// File an appeal against a decision (subject to the appeal window and
-    /// appealability of the category).
+    /// appealability of the category). One appeal per decision and appellant:
+    /// filing again returns the existing appeal. Past the window: MOD-5003.
+    /// The appellant (actor_id, the caller on the edge) is the sanctioned account,
+    /// or a member who reported the content before the decision (the report's
+    /// ReportView.decision_id); anyone else gets NOT_FOUND.
     @available(iOS 13, *)
     func `fileAppeal`(request: Moderation_V1_FileAppealRequest, headers: Connect.Headers) async -> ResponseMessage<Moderation_V1_FileAppealResponse>
+
+    /// The caller's own appeals, newest first, each with its status and, once
+    /// resolved, the reviewer's reasons (DSA Art. 20(4)–(5)). The appellant is
+    /// the caller's token.
+    @available(iOS 13, *)
+    func `listMyAppeals`(request: Moderation_V1_ListMyAppealsRequest, headers: Connect.Headers) async -> ResponseMessage<Moderation_V1_ListMyAppealsResponse>
 
     /// Resolve an appeal: uphold the original decision, or overturn it (which
     /// records a reversal decision and reverses the enforcement).
@@ -136,6 +146,11 @@ public final class Moderation_V1_ModerationServiceClient: Moderation_V1_Moderati
     }
 
     @available(iOS 13, *)
+    public func `listMyAppeals`(request: Moderation_V1_ListMyAppealsRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Moderation_V1_ListMyAppealsResponse> {
+        return await self.client.unary(path: "/moderation.v1.ModerationService/ListMyAppeals", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
     public func `resolveAppeal`(request: Moderation_V1_ResolveAppealRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Moderation_V1_ResolveAppealResponse> {
         return await self.client.unary(path: "/moderation.v1.ModerationService/ResolveAppeal", idempotencyLevel: .unknown, request: request, headers: headers)
     }
@@ -160,6 +175,7 @@ public final class Moderation_V1_ModerationServiceClient: Moderation_V1_Moderati
             public static let decideCase = Connect.MethodSpec(name: "DecideCase", service: "moderation.v1.ModerationService", type: .unary)
             public static let listQueue = Connect.MethodSpec(name: "ListQueue", service: "moderation.v1.ModerationService", type: .unary)
             public static let fileAppeal = Connect.MethodSpec(name: "FileAppeal", service: "moderation.v1.ModerationService", type: .unary)
+            public static let listMyAppeals = Connect.MethodSpec(name: "ListMyAppeals", service: "moderation.v1.ModerationService", type: .unary)
             public static let resolveAppeal = Connect.MethodSpec(name: "ResolveAppeal", service: "moderation.v1.ModerationService", type: .unary)
             public static let getStatementOfReasons = Connect.MethodSpec(name: "GetStatementOfReasons", service: "moderation.v1.ModerationService", type: .unary)
             public static let getEnforcementState = Connect.MethodSpec(name: "GetEnforcementState", service: "moderation.v1.ModerationService", type: .unary)

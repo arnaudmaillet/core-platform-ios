@@ -131,11 +131,43 @@ public nonisolated struct Account_V1_AccountView: @unchecked Sendable {
     set {_uniqueStorage()._dateOfBirth = newValue}
   }
 
+  /// Two-step sign-in is on (#649): a TOTP app, plus backup codes.
+  public var mfaEnrolled: Bool {
+    get {_storage._mfaEnrolled}
+    set {_uniqueStorage()._mfaEnrolled = newValue}
+  }
+
+  /// Unused backup codes left (0 when MFA is off).
+  public var mfaRecoveryCodesRemaining: Int32 {
+    get {_storage._mfaRecoveryCodesRemaining}
+    set {_uniqueStorage()._mfaRecoveryCodesRemaining = newValue}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _storage = _StorageClass.defaultInstance
+}
+
+/// The holder's MFA material, for auth only (mesh): never on the edge.
+public nonisolated struct Account_V1_MfaSecretView: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var accountID: String = String()
+
+  public var enrolled: Bool = false
+
+  /// auth's ciphertext of the TOTP seed (empty when not enrolled).
+  public var totpSecret: Data = Data()
+
+  public var recoveryCodesRemaining: Int32 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
 }
 
 /// GDPR record: the holder's own (client edge, account_id = the caller) or any
@@ -245,6 +277,23 @@ public nonisolated struct Account_V1_GdprRecordView: @unchecked Sendable {
   /// Clears the value of `analyticsConsentedAt`. Subsequent reads from it will return its default value.
   public mutating func clearAnalyticsConsentedAt() {_uniqueStorage()._analyticsConsentedAt = nil}
 
+  /// The delivered data export (#653): its download link (a ZIP; a credential
+  /// — show it to the holder only) and when it stops working (7 days). Empty
+  /// while none is delivered, or a newer request is pending.
+  public var dataExportURL: String {
+    get {_storage._dataExportURL}
+    set {_uniqueStorage()._dataExportURL = newValue}
+  }
+
+  public var dataExportExpiresAt: SwiftProtobuf.Google_Protobuf_Timestamp {
+    get {_storage._dataExportExpiresAt ?? SwiftProtobuf.Google_Protobuf_Timestamp()}
+    set {_uniqueStorage()._dataExportExpiresAt = newValue}
+  }
+  /// Returns true if `dataExportExpiresAt` has been explicitly set.
+  public var hasDataExportExpiresAt: Bool {_storage._dataExportExpiresAt != nil}
+  /// Clears the value of `dataExportExpiresAt`. Subsequent reads from it will return its default value.
+  public mutating func clearDataExportExpiresAt() {_uniqueStorage()._dataExportExpiresAt = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -352,6 +401,35 @@ public nonisolated struct Account_V1_VerifyPhoneRequest: Sendable {
   public init() {}
 }
 
+public nonisolated struct Account_V1_ChangeEmailRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var accountID: String = String()
+
+  public var email: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Account_V1_ChangePhoneRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var accountID: String = String()
+
+  /// E.164 (e.g. +33612345678).
+  public var phone: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
 public nonisolated struct Account_V1_ChangePasswordRequest: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -374,8 +452,53 @@ public nonisolated struct Account_V1_EnrollMfaRequest: Sendable {
 
   public var accountID: String = String()
 
-  /// AES-256-GCM encrypted TOTP seed bytes.
+  /// AES-256-GCM encrypted TOTP seed bytes (auth's key; account never reads it).
   public var totpSecret: Data = Data()
+
+  /// A hash of each one-time backup code (at least 6), as auth computes it:
+  /// account matches them exactly and never sees a code.
+  public var recoveryCodeHashes: [String] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Account_V1_GetMfaSecretRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var accountID: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Account_V1_ConsumeRecoveryCodeRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var accountID: String = String()
+
+  public var codeHash: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Account_V1_ReplaceRecoveryCodesRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var accountID: String = String()
+
+  /// At least 6, as for EnrollMfa.
+  public var recoveryCodeHashes: [String] = []
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -711,13 +834,67 @@ public nonisolated struct Account_V1_ListAccountsByStatusResponse: Sendable {
   public init() {}
 }
 
+public nonisolated struct Account_V1_FindProfilesByContactsRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var accountID: String = String()
+
+  /// SHA-256 (32 bytes) of each lower-cased, trimmed email address.
+  public var emailSha256: [Data] = []
+
+  /// SHA-256 (32 bytes) of each E.164 phone number (e.g. "+33612345678").
+  public var phoneSha256: [Data] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// A profile found through one of the caller's contacts.
+public nonisolated struct Account_V1_ContactProfile: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// The hash the app sent, so it can name the contact.
+  public var contactSha256: Data = Data()
+
+  public var channel: Account_V1_ContactChannel = .unspecified
+
+  public var profileID: String = String()
+
+  public var handle: String = String()
+
+  public var displayName: String = String()
+
+  public var avatarURL: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Account_V1_FindProfilesByContactsResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var profiles: [Account_V1_ContactProfile] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 fileprivate nonisolated let _protobuf_package = "account.v1"
 
 nonisolated extension Account_V1_AccountView: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".AccountView"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}identity_id\0\u{1}status\0\u{3}suspension_reason\0\u{1}email\0\u{3}email_verified\0\u{1}phone\0\u{3}phone_verified\0\u{3}kyc_status\0\u{3}country_of_residence\0\u{1}roles\0\u{1}version\0\u{3}created_at\0\u{3}updated_at\0\u{1}permissions\0\u{3}age_bracket\0\u{3}date_of_birth\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}identity_id\0\u{1}status\0\u{3}suspension_reason\0\u{1}email\0\u{3}email_verified\0\u{1}phone\0\u{3}phone_verified\0\u{3}kyc_status\0\u{3}country_of_residence\0\u{1}roles\0\u{1}version\0\u{3}created_at\0\u{3}updated_at\0\u{1}permissions\0\u{3}age_bracket\0\u{3}date_of_birth\0\u{3}mfa_enrolled\0\u{3}mfa_recovery_codes_remaining\0")
 
   fileprivate class _StorageClass {
     var _id: String = String()
@@ -737,6 +914,8 @@ nonisolated extension Account_V1_AccountView: SwiftProtobuf.Message, SwiftProtob
     var _permissions: [String] = []
     var _ageBracket: Account_V1_AgeBracket = .unspecified
     var _dateOfBirth: String = String()
+    var _mfaEnrolled: Bool = false
+    var _mfaRecoveryCodesRemaining: Int32 = 0
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -764,6 +943,8 @@ nonisolated extension Account_V1_AccountView: SwiftProtobuf.Message, SwiftProtob
       _permissions = source._permissions
       _ageBracket = source._ageBracket
       _dateOfBirth = source._dateOfBirth
+      _mfaEnrolled = source._mfaEnrolled
+      _mfaRecoveryCodesRemaining = source._mfaRecoveryCodesRemaining
     }
   }
 
@@ -799,6 +980,8 @@ nonisolated extension Account_V1_AccountView: SwiftProtobuf.Message, SwiftProtob
         case 15: try { try decoder.decodeRepeatedStringField(value: &_storage._permissions) }()
         case 16: try { try decoder.decodeSingularEnumField(value: &_storage._ageBracket) }()
         case 17: try { try decoder.decodeSingularStringField(value: &_storage._dateOfBirth) }()
+        case 18: try { try decoder.decodeSingularBoolField(value: &_storage._mfaEnrolled) }()
+        case 19: try { try decoder.decodeSingularInt32Field(value: &_storage._mfaRecoveryCodesRemaining) }()
         default: break
         }
       }
@@ -862,6 +1045,12 @@ nonisolated extension Account_V1_AccountView: SwiftProtobuf.Message, SwiftProtob
       if !_storage._dateOfBirth.isEmpty {
         try visitor.visitSingularStringField(value: _storage._dateOfBirth, fieldNumber: 17)
       }
+      if _storage._mfaEnrolled != false {
+        try visitor.visitSingularBoolField(value: _storage._mfaEnrolled, fieldNumber: 18)
+      }
+      if _storage._mfaRecoveryCodesRemaining != 0 {
+        try visitor.visitSingularInt32Field(value: _storage._mfaRecoveryCodesRemaining, fieldNumber: 19)
+      }
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -888,6 +1077,8 @@ nonisolated extension Account_V1_AccountView: SwiftProtobuf.Message, SwiftProtob
         if _storage._permissions != rhs_storage._permissions {return false}
         if _storage._ageBracket != rhs_storage._ageBracket {return false}
         if _storage._dateOfBirth != rhs_storage._dateOfBirth {return false}
+        if _storage._mfaEnrolled != rhs_storage._mfaEnrolled {return false}
+        if _storage._mfaRecoveryCodesRemaining != rhs_storage._mfaRecoveryCodesRemaining {return false}
         return true
       }
       if !storagesAreEqual {return false}
@@ -897,9 +1088,54 @@ nonisolated extension Account_V1_AccountView: SwiftProtobuf.Message, SwiftProtob
   }
 }
 
+nonisolated extension Account_V1_MfaSecretView: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".MfaSecretView"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}account_id\0\u{1}enrolled\0\u{3}totp_secret\0\u{3}recovery_codes_remaining\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.accountID) }()
+      case 2: try { try decoder.decodeSingularBoolField(value: &self.enrolled) }()
+      case 3: try { try decoder.decodeSingularBytesField(value: &self.totpSecret) }()
+      case 4: try { try decoder.decodeSingularInt32Field(value: &self.recoveryCodesRemaining) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.accountID.isEmpty {
+      try visitor.visitSingularStringField(value: self.accountID, fieldNumber: 1)
+    }
+    if self.enrolled != false {
+      try visitor.visitSingularBoolField(value: self.enrolled, fieldNumber: 2)
+    }
+    if !self.totpSecret.isEmpty {
+      try visitor.visitSingularBytesField(value: self.totpSecret, fieldNumber: 3)
+    }
+    if self.recoveryCodesRemaining != 0 {
+      try visitor.visitSingularInt32Field(value: self.recoveryCodesRemaining, fieldNumber: 4)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Account_V1_MfaSecretView, rhs: Account_V1_MfaSecretView) -> Bool {
+    if lhs.accountID != rhs.accountID {return false}
+    if lhs.enrolled != rhs.enrolled {return false}
+    if lhs.totpSecret != rhs.totpSecret {return false}
+    if lhs.recoveryCodesRemaining != rhs.recoveryCodesRemaining {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
 nonisolated extension Account_V1_GdprRecordView: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".GdprRecordView"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}account_id\0\u{3}data_processing_consented\0\u{3}marketing_consented\0\u{3}deletion_requested_at\0\u{3}anonymized_at\0\u{3}data_export_requested_at\0\u{3}data_export_completed_at\0\u{3}deletion_scheduled_at\0\u{3}analytics_consented\0\u{3}consent_policy_version\0\u{3}data_processing_consented_at\0\u{3}marketing_consented_at\0\u{3}analytics_consented_at\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}account_id\0\u{3}data_processing_consented\0\u{3}marketing_consented\0\u{3}deletion_requested_at\0\u{3}anonymized_at\0\u{3}data_export_requested_at\0\u{3}data_export_completed_at\0\u{3}deletion_scheduled_at\0\u{3}analytics_consented\0\u{3}consent_policy_version\0\u{3}data_processing_consented_at\0\u{3}marketing_consented_at\0\u{3}analytics_consented_at\0\u{3}data_export_url\0\u{3}data_export_expires_at\0")
 
   fileprivate class _StorageClass {
     var _accountID: String = String()
@@ -915,6 +1151,8 @@ nonisolated extension Account_V1_GdprRecordView: SwiftProtobuf.Message, SwiftPro
     var _dataProcessingConsentedAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
     var _marketingConsentedAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
     var _analyticsConsentedAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
+    var _dataExportURL: String = String()
+    var _dataExportExpiresAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -938,6 +1176,8 @@ nonisolated extension Account_V1_GdprRecordView: SwiftProtobuf.Message, SwiftPro
       _dataProcessingConsentedAt = source._dataProcessingConsentedAt
       _marketingConsentedAt = source._marketingConsentedAt
       _analyticsConsentedAt = source._analyticsConsentedAt
+      _dataExportURL = source._dataExportURL
+      _dataExportExpiresAt = source._dataExportExpiresAt
     }
   }
 
@@ -969,6 +1209,8 @@ nonisolated extension Account_V1_GdprRecordView: SwiftProtobuf.Message, SwiftPro
         case 11: try { try decoder.decodeSingularMessageField(value: &_storage._dataProcessingConsentedAt) }()
         case 12: try { try decoder.decodeSingularMessageField(value: &_storage._marketingConsentedAt) }()
         case 13: try { try decoder.decodeSingularMessageField(value: &_storage._analyticsConsentedAt) }()
+        case 14: try { try decoder.decodeSingularStringField(value: &_storage._dataExportURL) }()
+        case 15: try { try decoder.decodeSingularMessageField(value: &_storage._dataExportExpiresAt) }()
         default: break
         }
       }
@@ -1020,6 +1262,12 @@ nonisolated extension Account_V1_GdprRecordView: SwiftProtobuf.Message, SwiftPro
       try { if let v = _storage._analyticsConsentedAt {
         try visitor.visitSingularMessageField(value: v, fieldNumber: 13)
       } }()
+      if !_storage._dataExportURL.isEmpty {
+        try visitor.visitSingularStringField(value: _storage._dataExportURL, fieldNumber: 14)
+      }
+      try { if let v = _storage._dataExportExpiresAt {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 15)
+      } }()
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -1042,6 +1290,8 @@ nonisolated extension Account_V1_GdprRecordView: SwiftProtobuf.Message, SwiftPro
         if _storage._dataProcessingConsentedAt != rhs_storage._dataProcessingConsentedAt {return false}
         if _storage._marketingConsentedAt != rhs_storage._marketingConsentedAt {return false}
         if _storage._analyticsConsentedAt != rhs_storage._analyticsConsentedAt {return false}
+        if _storage._dataExportURL != rhs_storage._dataExportURL {return false}
+        if _storage._dataExportExpiresAt != rhs_storage._dataExportExpiresAt {return false}
         return true
       }
       if !storagesAreEqual {return false}
@@ -1281,6 +1531,76 @@ nonisolated extension Account_V1_VerifyPhoneRequest: SwiftProtobuf.Message, Swif
   }
 }
 
+nonisolated extension Account_V1_ChangeEmailRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ChangeEmailRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}account_id\0\u{1}email\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.accountID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.email) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.accountID.isEmpty {
+      try visitor.visitSingularStringField(value: self.accountID, fieldNumber: 1)
+    }
+    if !self.email.isEmpty {
+      try visitor.visitSingularStringField(value: self.email, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Account_V1_ChangeEmailRequest, rhs: Account_V1_ChangeEmailRequest) -> Bool {
+    if lhs.accountID != rhs.accountID {return false}
+    if lhs.email != rhs.email {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Account_V1_ChangePhoneRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ChangePhoneRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}account_id\0\u{1}phone\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.accountID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.phone) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.accountID.isEmpty {
+      try visitor.visitSingularStringField(value: self.accountID, fieldNumber: 1)
+    }
+    if !self.phone.isEmpty {
+      try visitor.visitSingularStringField(value: self.phone, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Account_V1_ChangePhoneRequest, rhs: Account_V1_ChangePhoneRequest) -> Bool {
+    if lhs.accountID != rhs.accountID {return false}
+    if lhs.phone != rhs.phone {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
 nonisolated extension Account_V1_ChangePasswordRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ChangePasswordRequest"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}account_id\0\u{3}new_password_hash\0")
@@ -1318,7 +1638,7 @@ nonisolated extension Account_V1_ChangePasswordRequest: SwiftProtobuf.Message, S
 
 nonisolated extension Account_V1_EnrollMfaRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".EnrollMfaRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}account_id\0\u{3}totp_secret\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}account_id\0\u{3}totp_secret\0\u{3}recovery_code_hashes\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1328,6 +1648,7 @@ nonisolated extension Account_V1_EnrollMfaRequest: SwiftProtobuf.Message, SwiftP
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularStringField(value: &self.accountID) }()
       case 2: try { try decoder.decodeSingularBytesField(value: &self.totpSecret) }()
+      case 3: try { try decoder.decodeRepeatedStringField(value: &self.recoveryCodeHashes) }()
       default: break
       }
     }
@@ -1340,12 +1661,116 @@ nonisolated extension Account_V1_EnrollMfaRequest: SwiftProtobuf.Message, SwiftP
     if !self.totpSecret.isEmpty {
       try visitor.visitSingularBytesField(value: self.totpSecret, fieldNumber: 2)
     }
+    if !self.recoveryCodeHashes.isEmpty {
+      try visitor.visitRepeatedStringField(value: self.recoveryCodeHashes, fieldNumber: 3)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Account_V1_EnrollMfaRequest, rhs: Account_V1_EnrollMfaRequest) -> Bool {
     if lhs.accountID != rhs.accountID {return false}
     if lhs.totpSecret != rhs.totpSecret {return false}
+    if lhs.recoveryCodeHashes != rhs.recoveryCodeHashes {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Account_V1_GetMfaSecretRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".GetMfaSecretRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}account_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.accountID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.accountID.isEmpty {
+      try visitor.visitSingularStringField(value: self.accountID, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Account_V1_GetMfaSecretRequest, rhs: Account_V1_GetMfaSecretRequest) -> Bool {
+    if lhs.accountID != rhs.accountID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Account_V1_ConsumeRecoveryCodeRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ConsumeRecoveryCodeRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}account_id\0\u{3}code_hash\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.accountID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.codeHash) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.accountID.isEmpty {
+      try visitor.visitSingularStringField(value: self.accountID, fieldNumber: 1)
+    }
+    if !self.codeHash.isEmpty {
+      try visitor.visitSingularStringField(value: self.codeHash, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Account_V1_ConsumeRecoveryCodeRequest, rhs: Account_V1_ConsumeRecoveryCodeRequest) -> Bool {
+    if lhs.accountID != rhs.accountID {return false}
+    if lhs.codeHash != rhs.codeHash {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Account_V1_ReplaceRecoveryCodesRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ReplaceRecoveryCodesRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}account_id\0\u{3}recovery_code_hashes\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.accountID) }()
+      case 2: try { try decoder.decodeRepeatedStringField(value: &self.recoveryCodeHashes) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.accountID.isEmpty {
+      try visitor.visitSingularStringField(value: self.accountID, fieldNumber: 1)
+    }
+    if !self.recoveryCodeHashes.isEmpty {
+      try visitor.visitRepeatedStringField(value: self.recoveryCodeHashes, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Account_V1_ReplaceRecoveryCodesRequest, rhs: Account_V1_ReplaceRecoveryCodesRequest) -> Bool {
+    if lhs.accountID != rhs.accountID {return false}
+    if lhs.recoveryCodeHashes != rhs.recoveryCodeHashes {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -2100,6 +2525,131 @@ nonisolated extension Account_V1_ListAccountsByStatusResponse: SwiftProtobuf.Mes
   public static func ==(lhs: Account_V1_ListAccountsByStatusResponse, rhs: Account_V1_ListAccountsByStatusResponse) -> Bool {
     if lhs.accounts != rhs.accounts {return false}
     if lhs.total != rhs.total {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Account_V1_FindProfilesByContactsRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".FindProfilesByContactsRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}account_id\0\u{3}email_sha256\0\u{3}phone_sha256\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.accountID) }()
+      case 2: try { try decoder.decodeRepeatedBytesField(value: &self.emailSha256) }()
+      case 3: try { try decoder.decodeRepeatedBytesField(value: &self.phoneSha256) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.accountID.isEmpty {
+      try visitor.visitSingularStringField(value: self.accountID, fieldNumber: 1)
+    }
+    if !self.emailSha256.isEmpty {
+      try visitor.visitRepeatedBytesField(value: self.emailSha256, fieldNumber: 2)
+    }
+    if !self.phoneSha256.isEmpty {
+      try visitor.visitRepeatedBytesField(value: self.phoneSha256, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Account_V1_FindProfilesByContactsRequest, rhs: Account_V1_FindProfilesByContactsRequest) -> Bool {
+    if lhs.accountID != rhs.accountID {return false}
+    if lhs.emailSha256 != rhs.emailSha256 {return false}
+    if lhs.phoneSha256 != rhs.phoneSha256 {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Account_V1_ContactProfile: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ContactProfile"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}contact_sha256\0\u{1}channel\0\u{3}profile_id\0\u{1}handle\0\u{3}display_name\0\u{3}avatar_url\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularBytesField(value: &self.contactSha256) }()
+      case 2: try { try decoder.decodeSingularEnumField(value: &self.channel) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.profileID) }()
+      case 4: try { try decoder.decodeSingularStringField(value: &self.handle) }()
+      case 5: try { try decoder.decodeSingularStringField(value: &self.displayName) }()
+      case 6: try { try decoder.decodeSingularStringField(value: &self.avatarURL) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.contactSha256.isEmpty {
+      try visitor.visitSingularBytesField(value: self.contactSha256, fieldNumber: 1)
+    }
+    if self.channel != .unspecified {
+      try visitor.visitSingularEnumField(value: self.channel, fieldNumber: 2)
+    }
+    if !self.profileID.isEmpty {
+      try visitor.visitSingularStringField(value: self.profileID, fieldNumber: 3)
+    }
+    if !self.handle.isEmpty {
+      try visitor.visitSingularStringField(value: self.handle, fieldNumber: 4)
+    }
+    if !self.displayName.isEmpty {
+      try visitor.visitSingularStringField(value: self.displayName, fieldNumber: 5)
+    }
+    if !self.avatarURL.isEmpty {
+      try visitor.visitSingularStringField(value: self.avatarURL, fieldNumber: 6)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Account_V1_ContactProfile, rhs: Account_V1_ContactProfile) -> Bool {
+    if lhs.contactSha256 != rhs.contactSha256 {return false}
+    if lhs.channel != rhs.channel {return false}
+    if lhs.profileID != rhs.profileID {return false}
+    if lhs.handle != rhs.handle {return false}
+    if lhs.displayName != rhs.displayName {return false}
+    if lhs.avatarURL != rhs.avatarURL {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Account_V1_FindProfilesByContactsResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".FindProfilesByContactsResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}profiles\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.profiles) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.profiles.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.profiles, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Account_V1_FindProfilesByContactsResponse, rhs: Account_V1_FindProfilesByContactsResponse) -> Bool {
+    if lhs.profiles != rhs.profiles {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

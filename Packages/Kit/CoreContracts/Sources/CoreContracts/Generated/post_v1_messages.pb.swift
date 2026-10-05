@@ -443,6 +443,12 @@ public nonisolated struct Post_V1_GetPostRequest: Sendable {
 
   public var postID: String = String()
 
+  /// Mesh only (the GDPR data export, #653): read the post as its author —
+  /// the location as the author sees it, whatever their sharing (#657).
+  /// Honoured only from a mesh caller and only when it names the post's
+  /// author; ignored on the edge.
+  public var asAuthorID: String = String()
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -1284,7 +1290,7 @@ nonisolated extension Post_V1_ListRecentlyDeletedResponse: SwiftProtobuf.Message
 
 nonisolated extension Post_V1_GetPostRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".GetPostRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}post_id\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}post_id\0\u{3}as_author_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1293,6 +1299,7 @@ nonisolated extension Post_V1_GetPostRequest: SwiftProtobuf.Message, SwiftProtob
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularStringField(value: &self.postID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.asAuthorID) }()
       default: break
       }
     }
@@ -1302,11 +1309,15 @@ nonisolated extension Post_V1_GetPostRequest: SwiftProtobuf.Message, SwiftProtob
     if !self.postID.isEmpty {
       try visitor.visitSingularStringField(value: self.postID, fieldNumber: 1)
     }
+    if !self.asAuthorID.isEmpty {
+      try visitor.visitSingularStringField(value: self.asAuthorID, fieldNumber: 2)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Post_V1_GetPostRequest, rhs: Post_V1_GetPostRequest) -> Bool {
     if lhs.postID != rhs.postID {return false}
+    if lhs.asAuthorID != rhs.asAuthorID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
