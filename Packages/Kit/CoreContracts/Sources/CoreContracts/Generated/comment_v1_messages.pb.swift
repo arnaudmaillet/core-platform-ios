@@ -51,6 +51,24 @@ public nonisolated struct Comment_V1_CreateCommentRequest: Sendable {
   public init() {}
 }
 
+/// The post's owner approves (shows and announces) or declines (removes) a
+/// held comment.
+public nonisolated struct Comment_V1_ReviewHeldCommentRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var commentID: String = String()
+
+  public var ownerID: String = String()
+
+  public var approve: Bool = false
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
 public nonisolated struct Comment_V1_DeleteCommentRequest: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -191,6 +209,10 @@ public nonisolated struct Comment_V1_CommentView: Sendable {
 
   public var updatedAtMs: Int64 = 0
 
+  /// Held for the post owner's review (their temporary interaction limit,
+  /// #669): only its author and the post's owner see it.
+  public var held: Bool = false
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -281,6 +303,46 @@ nonisolated extension Comment_V1_CreateCommentRequest: SwiftProtobuf.Message, Sw
     if lhs.gifURL != rhs.gifURL {return false}
     if lhs.gifWidth != rhs.gifWidth {return false}
     if lhs.gifHeight != rhs.gifHeight {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Comment_V1_ReviewHeldCommentRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ReviewHeldCommentRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}comment_id\0\u{3}owner_id\0\u{1}approve\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.commentID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.ownerID) }()
+      case 3: try { try decoder.decodeSingularBoolField(value: &self.approve) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.commentID.isEmpty {
+      try visitor.visitSingularStringField(value: self.commentID, fieldNumber: 1)
+    }
+    if !self.ownerID.isEmpty {
+      try visitor.visitSingularStringField(value: self.ownerID, fieldNumber: 2)
+    }
+    if self.approve != false {
+      try visitor.visitSingularBoolField(value: self.approve, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Comment_V1_ReviewHeldCommentRequest, rhs: Comment_V1_ReviewHeldCommentRequest) -> Bool {
+    if lhs.commentID != rhs.commentID {return false}
+    if lhs.ownerID != rhs.ownerID {return false}
+    if lhs.approve != rhs.approve {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -553,7 +615,7 @@ nonisolated extension Comment_V1_GifMetadata: SwiftProtobuf.Message, SwiftProtob
 
 nonisolated extension Comment_V1_CommentView: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".CommentView"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}comment_id\0\u{3}post_id\0\u{3}author_id\0\u{3}parent_id\0\u{1}status\0\u{1}body\0\u{1}gif\0\u{3}created_at_ms\0\u{3}updated_at_ms\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}comment_id\0\u{3}post_id\0\u{3}author_id\0\u{3}parent_id\0\u{1}status\0\u{1}body\0\u{1}gif\0\u{3}created_at_ms\0\u{3}updated_at_ms\0\u{1}held\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -570,6 +632,7 @@ nonisolated extension Comment_V1_CommentView: SwiftProtobuf.Message, SwiftProtob
       case 7: try { try decoder.decodeSingularMessageField(value: &self._gif) }()
       case 8: try { try decoder.decodeSingularInt64Field(value: &self.createdAtMs) }()
       case 9: try { try decoder.decodeSingularInt64Field(value: &self.updatedAtMs) }()
+      case 10: try { try decoder.decodeSingularBoolField(value: &self.held) }()
       default: break
       }
     }
@@ -607,6 +670,9 @@ nonisolated extension Comment_V1_CommentView: SwiftProtobuf.Message, SwiftProtob
     if self.updatedAtMs != 0 {
       try visitor.visitSingularInt64Field(value: self.updatedAtMs, fieldNumber: 9)
     }
+    if self.held != false {
+      try visitor.visitSingularBoolField(value: self.held, fieldNumber: 10)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -620,6 +686,7 @@ nonisolated extension Comment_V1_CommentView: SwiftProtobuf.Message, SwiftProtob
     if lhs._gif != rhs._gif {return false}
     if lhs.createdAtMs != rhs.createdAtMs {return false}
     if lhs.updatedAtMs != rhs.updatedAtMs {return false}
+    if lhs.held != rhs.held {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

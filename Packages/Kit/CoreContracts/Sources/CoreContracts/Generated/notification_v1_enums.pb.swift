@@ -120,6 +120,152 @@ public nonisolated enum Notification_V1_SubjectKind: SwiftProtobuf.Enum, Swift.C
 
 }
 
+/// What a push or an email is about (notification preferences, #654).
+public nonisolated enum Notification_V1_PushCategory: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+  case likes // = 1
+  case comments // = 2
+  case mentions // = 3
+  case newFollowers // = 4
+  case followRequests // = 5
+  case messages // = 6
+
+  /// New posts from accounts the holder follows.
+  case followedPosts // = 7
+  case placesNearby // = 8
+  case wallet // = 9
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .likes
+    case 2: self = .comments
+    case 3: self = .mentions
+    case 4: self = .newFollowers
+    case 5: self = .followRequests
+    case 6: self = .messages
+    case 7: self = .followedPosts
+    case 8: self = .placesNearby
+    case 9: self = .wallet
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .likes: return 1
+    case .comments: return 2
+    case .mentions: return 3
+    case .newFollowers: return 4
+    case .followRequests: return 5
+    case .messages: return 6
+    case .followedPosts: return 7
+    case .placesNearby: return 8
+    case .wallet: return 9
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [Notification_V1_PushCategory] = [
+    .unspecified,
+    .likes,
+    .comments,
+    .mentions,
+    .newFollowers,
+    .followRequests,
+    .messages,
+    .followedPosts,
+    .placesNearby,
+    .wallet,
+  ]
+
+}
+
+public nonisolated enum Notification_V1_DevicePlatform: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+  case ios // = 1
+  case android // = 2
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .ios
+    case 2: self = .android
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .ios: return 1
+    case .android: return 2
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [Notification_V1_DevicePlatform] = [
+    .unspecified,
+    .ios,
+    .android,
+  ]
+
+}
+
+/// APNs environment of a token (development builds use the sandbox).
+public nonisolated enum Notification_V1_PushEnvironment: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+  case sandbox // = 1
+  case production // = 2
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .sandbox
+    case 2: self = .production
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .sandbox: return 1
+    case .production: return 2
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [Notification_V1_PushEnvironment] = [
+    .unspecified,
+    .sandbox,
+    .production,
+  ]
+
+}
+
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 nonisolated extension Notification_V1_NotificationKind: SwiftProtobuf._ProtoNameProviding {
@@ -128,4 +274,16 @@ nonisolated extension Notification_V1_NotificationKind: SwiftProtobuf._ProtoName
 
 nonisolated extension Notification_V1_SubjectKind: SwiftProtobuf._ProtoNameProviding {
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0SUBJECT_KIND_UNSPECIFIED\0\u{1}SUBJECT_KIND_POST\0\u{1}SUBJECT_KIND_COMMENT\0")
+}
+
+nonisolated extension Notification_V1_PushCategory: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0PUSH_CATEGORY_UNSPECIFIED\0\u{1}PUSH_CATEGORY_LIKES\0\u{1}PUSH_CATEGORY_COMMENTS\0\u{1}PUSH_CATEGORY_MENTIONS\0\u{1}PUSH_CATEGORY_NEW_FOLLOWERS\0\u{1}PUSH_CATEGORY_FOLLOW_REQUESTS\0\u{1}PUSH_CATEGORY_MESSAGES\0\u{1}PUSH_CATEGORY_FOLLOWED_POSTS\0\u{1}PUSH_CATEGORY_PLACES_NEARBY\0\u{1}PUSH_CATEGORY_WALLET\0")
+}
+
+nonisolated extension Notification_V1_DevicePlatform: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0DEVICE_PLATFORM_UNSPECIFIED\0\u{1}DEVICE_PLATFORM_IOS\0\u{1}DEVICE_PLATFORM_ANDROID\0")
+}
+
+nonisolated extension Notification_V1_PushEnvironment: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0PUSH_ENVIRONMENT_UNSPECIFIED\0\u{1}PUSH_ENVIRONMENT_SANDBOX\0\u{1}PUSH_ENVIRONMENT_PRODUCTION\0")
 }

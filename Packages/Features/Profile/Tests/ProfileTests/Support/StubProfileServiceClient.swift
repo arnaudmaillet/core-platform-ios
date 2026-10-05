@@ -5,10 +5,10 @@ import Foundation
 
 /// A `profile.v1` client that answers identity reads and nothing else.
 ///
-/// Shared because two suites need the same thirteen-method conformance for
-/// entirely different reasons — one cares which ids survive an intersection,
-/// the other how many times a repository asks about the same person — and the
-/// stubs for the eleven commands neither of them calls are identical either way.
+/// Shared because two suites need the same full conformance for entirely
+/// different reasons — one cares which ids survive an intersection, the other
+/// how many times a repository asks about the same person — and the stubs for
+/// the commands neither of them calls are identical either way.
 ///
 /// It COUNTS `getProfileByID`, which is the only interesting thing a fake can
 /// say here: the difference between a repository that resolves an author once
@@ -146,5 +146,89 @@ final class StubProfileServiceClient: Profile_V1_ProfileServiceClientInterface, 
         request: Profile_V1_DeleteProfileRequest, headers: Connect.Headers
     ) async -> ResponseMessage<Profile_V1_CommandResponse> {
         ResponseMessage(result: .success(Profile_V1_CommandResponse()))
+    }
+
+    func setInteractionSettings(
+        request: Profile_V1_SetInteractionSettingsRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<Profile_V1_CommandResponse> {
+        ResponseMessage(result: .success(Profile_V1_CommandResponse()))
+    }
+
+    func setInteractionLimit(
+        request: Profile_V1_SetInteractionLimitRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<Profile_V1_CommandResponse> {
+        ResponseMessage(result: .success(Profile_V1_CommandResponse()))
+    }
+
+    func clearInteractionLimit(
+        request: Profile_V1_ClearInteractionLimitRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<Profile_V1_CommandResponse> {
+        ResponseMessage(result: .success(Profile_V1_CommandResponse()))
+    }
+
+    func setLocationSettings(
+        request: Profile_V1_SetLocationSettingsRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<Profile_V1_CommandResponse> {
+        ResponseMessage(result: .success(Profile_V1_CommandResponse()))
+    }
+
+    func setDiscoverySettings(
+        request: Profile_V1_SetDiscoverySettingsRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<Profile_V1_CommandResponse> {
+        ResponseMessage(result: .success(Profile_V1_CommandResponse()))
+    }
+
+    func setCommentFilters(
+        request: Profile_V1_SetCommentFiltersRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<Profile_V1_CommandResponse> {
+        ResponseMessage(result: .success(Profile_V1_CommandResponse()))
+    }
+
+    func setTabSettings(
+        request: Profile_V1_SetTabSettingsRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<Profile_V1_CommandResponse> {
+        ResponseMessage(result: .success(Profile_V1_CommandResponse()))
+    }
+
+    func setFeedSettings(
+        request: Profile_V1_SetFeedSettingsRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<Profile_V1_CommandResponse> {
+        ResponseMessage(result: .success(Profile_V1_CommandResponse()))
+    }
+
+    func setAccountType(
+        request: Profile_V1_SetAccountTypeRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<Profile_V1_CommandResponse> {
+        ResponseMessage(result: .success(Profile_V1_CommandResponse()))
+    }
+
+    func requestVerification(
+        request: Profile_V1_RequestVerificationRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<Profile_V1_CommandResponse> {
+        ResponseMessage(result: .success(Profile_V1_CommandResponse()))
+    }
+
+    func getVerificationRequest(
+        request: Profile_V1_GetVerificationRequestRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<Profile_V1_GetVerificationRequestResponse> {
+        ResponseMessage(result: .success(Profile_V1_GetVerificationRequestResponse()))
+    }
+
+    func listPendingVerificationRequests(
+        request: Profile_V1_ListPendingVerificationRequestsRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<Profile_V1_ListPendingVerificationRequestsResponse> {
+        ResponseMessage(result: .success(Profile_V1_ListPendingVerificationRequestsResponse()))
+    }
+
+    func decideVerificationRequest(
+        request: Profile_V1_DecideVerificationRequestRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<Profile_V1_CommandResponse> {
+        ResponseMessage(result: .success(Profile_V1_CommandResponse()))
+    }
+
+    func checkHandleAvailability(
+        request: Profile_V1_CheckHandleAvailabilityRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<Profile_V1_CheckHandleAvailabilityResponse> {
+        ResponseMessage(result: .success(Profile_V1_CheckHandleAvailabilityResponse()))
     }
 }

@@ -203,6 +203,102 @@ private final class FakeSocialGraphClient: SocialGraph_V1_SocialGraphServiceClie
     ) async -> ResponseMessage<SocialGraph_V1_CheckAccessResponse> {
         ResponseMessage(result: .success(SocialGraph_V1_CheckAccessResponse()))
     }
+
+    func listFollowRequests(
+        request: SocialGraph_V1_ListFollowRequestsRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<SocialGraph_V1_ListFollowRequestsResponse> {
+        ResponseMessage(result: .success(SocialGraph_V1_ListFollowRequestsResponse()))
+    }
+
+    func approveFollowRequest(
+        request: SocialGraph_V1_AnswerFollowRequestRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<SocialGraph_V1_CommandResponse> {
+        ResponseMessage(result: .success(SocialGraph_V1_CommandResponse()))
+    }
+
+    func declineFollowRequest(
+        request: SocialGraph_V1_AnswerFollowRequestRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<SocialGraph_V1_CommandResponse> {
+        ResponseMessage(result: .success(SocialGraph_V1_CommandResponse()))
+    }
+
+    func cancelFollowRequest(
+        request: SocialGraph_V1_CancelFollowRequestRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<SocialGraph_V1_CommandResponse> {
+        ResponseMessage(result: .success(SocialGraph_V1_CommandResponse()))
+    }
+
+    func removeFollower(
+        request: SocialGraph_V1_RemoveFollowerRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<SocialGraph_V1_CommandResponse> {
+        ResponseMessage(result: .success(SocialGraph_V1_CommandResponse()))
+    }
+
+    func setListPrivacy(
+        request: SocialGraph_V1_SetListPrivacyRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<SocialGraph_V1_ListPrivacy> {
+        ResponseMessage(result: .success(SocialGraph_V1_ListPrivacy()))
+    }
+
+    func mute(
+        request: SocialGraph_V1_MuteRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<SocialGraph_V1_CommandResponse> {
+        ResponseMessage(result: .success(SocialGraph_V1_CommandResponse()))
+    }
+
+    func unmute(
+        request: SocialGraph_V1_UnmuteRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<SocialGraph_V1_CommandResponse> {
+        ResponseMessage(result: .success(SocialGraph_V1_CommandResponse()))
+    }
+
+    func restrict(
+        request: SocialGraph_V1_RestrictRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<SocialGraph_V1_CommandResponse> {
+        ResponseMessage(result: .success(SocialGraph_V1_CommandResponse()))
+    }
+
+    func unrestrict(
+        request: SocialGraph_V1_UnrestrictRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<SocialGraph_V1_CommandResponse> {
+        ResponseMessage(result: .success(SocialGraph_V1_CommandResponse()))
+    }
+
+    func getListPrivacy(
+        request: SocialGraph_V1_GetListPrivacyRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<SocialGraph_V1_ListPrivacy> {
+        ResponseMessage(result: .success(SocialGraph_V1_ListPrivacy()))
+    }
+
+    func listMutes(
+        request: SocialGraph_V1_ListMutesRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<SocialGraph_V1_ListMutesResponse> {
+        ResponseMessage(result: .success(SocialGraph_V1_ListMutesResponse()))
+    }
+
+    func listRestricted(
+        request: SocialGraph_V1_ListRestrictedRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<SocialGraph_V1_ListRestrictedResponse> {
+        ResponseMessage(result: .success(SocialGraph_V1_ListRestrictedResponse()))
+    }
+
+    func checkInteraction(
+        request: SocialGraph_V1_CheckInteractionRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<SocialGraph_V1_CheckInteractionResponse> {
+        ResponseMessage(result: .success(SocialGraph_V1_CheckInteractionResponse()))
+    }
+
+    func listMutedProfiles(
+        request: SocialGraph_V1_ListMutedProfilesRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<SocialGraph_V1_ListMutedProfilesResponse> {
+        ResponseMessage(result: .success(SocialGraph_V1_ListMutedProfilesResponse()))
+    }
+
+    func listRestrictedAmong(
+        request: SocialGraph_V1_ListRestrictedAmongRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<SocialGraph_V1_ListRestrictedAmongResponse> {
+        ResponseMessage(result: .success(SocialGraph_V1_ListRestrictedAmongResponse()))
+    }
 }
 
 private struct FakeViewer: ProfileViewerResolving {

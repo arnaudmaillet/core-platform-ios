@@ -20,6 +20,10 @@ public protocol Comment_V1_CommentServiceClientInterface: Sendable {
     @available(iOS 13, *)
     func `deleteComment`(request: Comment_V1_DeleteCommentRequest, headers: Connect.Headers) async -> ResponseMessage<Comment_V1_CommandResponse>
 
+    /// The post owner's review of a held comment (#669).
+    @available(iOS 13, *)
+    func `reviewHeldComment`(request: Comment_V1_ReviewHeldCommentRequest, headers: Connect.Headers) async -> ResponseMessage<Comment_V1_CommandResponse>
+
     /// Point-reads a single comment by ID from the source-of-truth table.
     @available(iOS 13, *)
     func `getComment`(request: Comment_V1_GetCommentRequest, headers: Connect.Headers) async -> ResponseMessage<Comment_V1_CommentView>
@@ -52,6 +56,11 @@ public final class Comment_V1_CommentServiceClient: Comment_V1_CommentServiceCli
     }
 
     @available(iOS 13, *)
+    public func `reviewHeldComment`(request: Comment_V1_ReviewHeldCommentRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Comment_V1_CommandResponse> {
+        return await self.client.unary(path: "/comment.v1.CommentService/ReviewHeldComment", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
     public func `getComment`(request: Comment_V1_GetCommentRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Comment_V1_CommentView> {
         return await self.client.unary(path: "/comment.v1.CommentService/GetComment", idempotencyLevel: .unknown, request: request, headers: headers)
     }
@@ -70,6 +79,7 @@ public final class Comment_V1_CommentServiceClient: Comment_V1_CommentServiceCli
         public enum Methods {
             public static let createComment = Connect.MethodSpec(name: "CreateComment", service: "comment.v1.CommentService", type: .unary)
             public static let deleteComment = Connect.MethodSpec(name: "DeleteComment", service: "comment.v1.CommentService", type: .unary)
+            public static let reviewHeldComment = Connect.MethodSpec(name: "ReviewHeldComment", service: "comment.v1.CommentService", type: .unary)
             public static let getComment = Connect.MethodSpec(name: "GetComment", service: "comment.v1.CommentService", type: .unary)
             public static let listTopLevel = Connect.MethodSpec(name: "ListTopLevel", service: "comment.v1.CommentService", type: .unary)
             public static let listReplies = Connect.MethodSpec(name: "ListReplies", service: "comment.v1.CommentService", type: .unary)

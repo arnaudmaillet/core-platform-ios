@@ -72,6 +72,18 @@ private final class FakeAuthClient: Auth_V1_AuthServiceClientInterface, @uncheck
             ResponseMessage(result: .failure(error))
         }
     }
+
+    func signUp(
+        request: Auth_V1_SignUpRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<Auth_V1_SignUpResponse> {
+        ResponseMessage(result: .success(Auth_V1_SignUpResponse()))
+    }
+
+    func startVerification(
+        request: Auth_V1_StartVerificationRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<Auth_V1_StartVerificationResponse> {
+        ResponseMessage(result: .success(Auth_V1_StartVerificationResponse()))
+    }
 }
 
 private func makeTokens(access: String, refresh: String, session: String = "sess-1", expiresIn: Int64 = 900) -> Auth_V1_TokenPair {

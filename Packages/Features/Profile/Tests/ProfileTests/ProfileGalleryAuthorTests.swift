@@ -191,6 +191,18 @@ private struct StubPostClient: Post_V1_PostServiceClientInterface {
     ) async -> ResponseMessage<Post_V1_CommandResponse> {
         ResponseMessage(result: .success(Post_V1_CommandResponse()))
     }
+
+    func restorePost(
+        request: Post_V1_RestorePostRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<Post_V1_CommandResponse> {
+        ResponseMessage(result: .success(Post_V1_CommandResponse()))
+    }
+
+    func listRecentlyDeleted(
+        request: Post_V1_ListRecentlyDeletedRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<Post_V1_ListRecentlyDeletedResponse> {
+        ResponseMessage(result: .success(Post_V1_ListRecentlyDeletedResponse()))
+    }
 }
 
 private struct StubSearchClient: Search_V1_SearchServiceClientInterface {
