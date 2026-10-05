@@ -55,12 +55,19 @@ struct FollowRequestsTests {
         return ProfileID(id)
     }
 
-    private func settle(until condition: () -> Bool) async {
-        for _ in 0..<200 {
+    /// Waits on STATE, not time: polls until `condition` holds, for up to
+    /// 10 s, and returns at once when it does. The bound is generous because
+    /// a starved CI runner took over two minutes on this suite; a short
+    /// budget that gave up silently made the next step a no-op (#521).
+    @discardableResult
+    private func settle(until condition: () -> Bool) async -> Bool {
+        let deadline = ContinuousClock.now + .seconds(10)
+        while ContinuousClock.now < deadline {
             await Task.yield()
-            if condition() { return }
+            if condition() { return true }
             try? await Task.sleep(for: .milliseconds(5))
         }
+        return condition()
     }
 
     // MARK: - The requester
@@ -103,18 +110,21 @@ struct FollowRequestsTests {
         var buttons: [ProfileViewModel.FollowButton] = []
         viewModel.onFollowButtonChange = { buttons.append($0) }
         viewModel.viewDidLoad()
-        await settle { buttons.last == .follow }
+        // Both reads: the relationship can answer before the profile, and the
+        // button acts on a loaded profile only.
+        try #require(await settle { buttons.last == .follow && viewModel.profile != nil }, "the profile never loaded")
         #expect(buttons.last == .follow)
 
         viewModel.toggleFollow()
         #expect(buttons.last == .requested, "a private profile is asked at once, not followed")
-        await settle { false }
+        // The server's answer, not a guess at how long it takes.
+        try #require(await settle { !viewModel.followInFlight }, "the request never came back")
         #expect(buttons.last == .requested)
         #expect(try await fixture.repository.relationship(for: target) == .requested)
 
         viewModel.toggleFollow()
         #expect(buttons.last == .follow)
-        await settle { false }
+        try #require(await settle { !viewModel.followInFlight }, "the withdrawal never came back")
         #expect(try await fixture.repository.relationship(for: target) == .other(isFollowing: false, isMutual: false, isBlocked: false))
     }
 

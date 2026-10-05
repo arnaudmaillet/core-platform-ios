@@ -244,7 +244,8 @@ public final class ProfileViewModel {
         }
     }
     private var isFollowing = false
-    private var followInFlight = false
+    /// Internal for tests: a follow, request or withdrawal still on its way.
+    private(set) var followInFlight = false
     /// The viewer's outbound block on this profile, from the relationship read
     /// and kept current by `setBlocked`. Drives which of Block / Unblock the
     /// overflow menu offers.
@@ -255,11 +256,16 @@ public final class ProfileViewModel {
     /// relationship; the "..." menu's Mute submenu shows and edits it.
     public private(set) var muteScopes: MuteScopes = .none
     private var muteInFlight = false
+    /// Bumped by every mute toggle, so a read that started before one can't
+    /// land after it and put the old scopes back.
+    private var muteGeneration = 0
     /// Whether this composition can mute at all.
     public var canMute: Bool { repository is any ProfileMuting }
     /// Whether the viewer restricts this profile (#416), read beside the mute.
     public private(set) var isRestricted = false
     private var restrictInFlight = false
+    /// Same guard as `muteGeneration`, for restrict.
+    private var restrictGeneration = 0
     public var canRestrict: Bool { repository is any ProfileRestricting }
 
     private var load: Task<Void, Never>?
@@ -741,6 +747,7 @@ public final class ProfileViewModel {
         let after = before.toggling(scope)
         muteScopes = after
         muteInFlight = true
+        muteGeneration += 1
         Task { [weak self] in
             guard let self else { return }
             do {
@@ -760,6 +767,7 @@ public final class ProfileViewModel {
         let target = !isRestricted
         isRestricted = target
         restrictInFlight = true
+        restrictGeneration += 1
         Task { [weak self] in
             guard let self else { return }
             do {
@@ -1167,12 +1175,17 @@ public final class ProfileViewModel {
             self.relationshipLoad = nil
             // The mute rides beside the relationship; only someone else's
             // profile can be muted.
+            // A toggle made while a read was out wins: the read is from before.
+            let muteAsked = self.muteGeneration
             if relationship != .me, let muting = self.repository as? any ProfileMuting,
-               let scopes = try? await muting.muteScopes(for: id), !self.muteInFlight {
+               let scopes = try? await muting.muteScopes(for: id),
+               !self.muteInFlight, self.muteGeneration == muteAsked {
                 self.muteScopes = scopes
             }
+            let restrictAsked = self.restrictGeneration
             if relationship != .me, let restricting = self.repository as? any ProfileRestricting,
-               let restricted = try? await restricting.isRestricted(id), !self.restrictInFlight {
+               let restricted = try? await restricting.isRestricted(id),
+               !self.restrictInFlight, self.restrictGeneration == restrictAsked {
                 self.isRestricted = restricted
             }
         }
