@@ -25,14 +25,25 @@ final class PrivacySectionViewModel {
     private(set) var pendingRequestCount: Int? {
         didSet { onChange?() }
     }
+    /// How far back others see this profile's posts (#411); nil until read
+    /// or when the screen can't set it.
+    private(set) var postWindow: PostWindow? {
+        didSet { onChange?() }
+    }
     var onChange: (() -> Void)?
 
     private let visibility: any ProfileVisibilityManaging
     let requests: (any FollowRequestsManaging)?
+    let windows: (any PostWindowManaging)?
 
-    init(visibility: any ProfileVisibilityManaging, requests: (any FollowRequestsManaging)? = nil) {
+    init(
+        visibility: any ProfileVisibilityManaging,
+        requests: (any FollowRequestsManaging)? = nil,
+        windows: (any PostWindowManaging)? = nil
+    ) {
         self.visibility = visibility
         self.requests = requests
+        self.windows = windows
     }
 
     /// Re-read when the screen comes back from the inbox.
@@ -41,9 +52,19 @@ final class PrivacySectionViewModel {
         pendingRequestCount = (try? await requests.pendingFollowRequestCount()) ?? pendingRequestCount
     }
 
+    /// Not optimistic: the value shown is the server's.
+    func setPostWindow(_ window: PostWindow) async throws {
+        guard let windows, window != postWindow else { return }
+        try await windows.setPostWindow(window)
+        postWindow = window
+    }
+
     func load() async {
         if case .failed = phase { phase = .loading }
         Task { await refreshRequestCount() }
+        if let windows {
+            Task { self.postWindow = (try? await windows.postWindow()) ?? self.postWindow }
+        }
         do {
             phase = .loaded(isPrivate: try await visibility.activeProfileIsPrivate())
         } catch {

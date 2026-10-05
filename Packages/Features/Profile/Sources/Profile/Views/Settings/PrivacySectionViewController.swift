@@ -13,6 +13,7 @@ final class PrivacySectionViewController: UIViewController {
     private enum Item: Hashable {
         case privateAccount
         case followRequests
+        case postWindow
         case loading
         case failed
         case hideLists
@@ -20,7 +21,7 @@ final class PrivacySectionViewController: UIViewController {
         case planned(String)
     }
 
-    private static let planned = ["Who can comment, mention and message you", "Location sharing"]
+    private static let planned = ["Who can comment, mention and message you", "Location sharing", "Hide profile tabs from others"]
 
     /// "3", or nothing while unread or when none are pending.
     static func requestCountText(_ count: Int?) -> String? {
@@ -74,7 +75,7 @@ final class PrivacySectionViewController: UIViewController {
     private static func footerText(_ section: Section) -> String? {
         switch section {
         case .visibility:
-            "When your profile is private, only your followers can see your posts and your lists. Applies to this profile only."
+            "When your profile is private, only your followers can see your posts and your lists. Older posts outside the window you choose are hidden from others, not deleted; you always see them. Applies to this profile only."
         case .lists:
             nil
         case .comingSoon:
@@ -158,6 +159,18 @@ final class PrivacySectionViewController: UIViewController {
             content.image = UIImage(systemName: "person.badge.clock")
             content.imageProperties.tintColor = .label
             cell.accessories = [.disclosureIndicator()]
+        case .postWindow:
+            content = .valueCell()
+            content.text = "Posts Visible to Others"
+            content.secondaryText = viewModel.postWindow?.title
+            content.image = UIImage(systemName: "calendar")
+            content.imageProperties.tintColor = .label
+            let current = viewModel.postWindow
+            cell.accessories = [.popUpMenu(UIMenu(children: PostWindow.allCases.map { window in
+                UIAction(title: window.title, state: window == current ? .on : .off) { [weak self] _ in
+                    self?.setPostWindow(window)
+                }
+            }), displayed: .always)]
         case .hideLists:
             content.text = "Followers and Following Lists"
             content.image = UIImage(systemName: "person.2")
@@ -186,6 +199,10 @@ final class PrivacySectionViewController: UIViewController {
         // Pending requests stay answerable after going public (backend #655
         // doesn't auto-approve them), so the row shows whenever there's an inbox.
         if viewModel.requests != nil { snapshot.appendItems([.followRequests], toSection: .visibility) }
+        if viewModel.windows != nil, viewModel.postWindow != nil {
+            snapshot.appendItems([.postWindow], toSection: .visibility)
+            snapshot.reconfigureItems([.postWindow])
+        }
         snapshot.appendItems(
             (makeListPrivacy == nil ? [] : [.hideLists]) + (makeDataTransparency == nil ? [] : [.dataTransparency]),
             toSection: .lists
@@ -195,6 +212,20 @@ final class PrivacySectionViewController: UIViewController {
         if case .loaded = viewModel.phase { snapshot.reconfigureItems([.privateAccount]) }
         if viewModel.requests != nil { snapshot.reconfigureItems([.followRequests]) }
         dataSource.apply(snapshot, animatingDifferences: false)
+    }
+
+    private func setPostWindow(_ window: PostWindow) {
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await viewModel.setPostWindow(window)
+            } catch {
+                applySnapshot()
+                let alert = UIAlertController(title: nil, message: "Couldn't change who sees your older posts. Try again.", preferredStyle: .alert)
+                alert.addAction(UIAlertAction(title: "OK", style: .default))
+                present(alert, animated: true)
+            }
+        }
     }
 
     private func setPrivate(_ isPrivate: Bool) {

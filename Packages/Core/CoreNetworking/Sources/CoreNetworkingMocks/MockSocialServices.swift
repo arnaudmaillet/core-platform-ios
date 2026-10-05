@@ -30,6 +30,9 @@ public final class MockSocialServices: @unchecked Sendable {
     public static let restoreWindow: TimeInterval = 30 * 86_400
     /// `SetFeedSettings` writes, by profile (backend #731); absent is Less.
     private var feedSettings: [String: Profile_V1_FeedSettings] = [:]
+    /// `SetTabSettings` writes, by profile (backend #729): the post window
+    /// visitors see, and the tab flags. Absent is the defaults.
+    private var tabSettings: [String: Profile_V1_TabSettings] = [:]
     private var viewerDisplayName = MockPostStore.viewer.displayName
     private var viewerBio = MockPostStore.viewer.bio
     private var viewerWebsite = MockPostStore.viewer.websiteURL
@@ -115,6 +118,21 @@ public final class MockSocialServices: @unchecked Sendable {
             response.success = true
             return .success(response)
         }
+        bff.register(path: "/profile.v1.ProfileService/SetTabSettings") { [self] (request: Profile_V1_SetTabSettingsRequest) in
+            // Partial: an unspecified window or an unset flag keeps its value.
+            lock.withLock {
+                var settings = tabSettings[request.profileID] ?? Self.defaultTabSettings
+                if request.postWindow != .unspecified { settings.postWindow = request.postWindow }
+                if request.hasShowLikes { settings.showLikes = request.showLikes }
+                if request.hasShowSaved { settings.showSaved = request.showSaved }
+                if request.hasShowReposts { settings.showReposts = request.showReposts }
+                if request.hasShowPlaces { settings.showPlaces = request.showPlaces }
+                tabSettings[request.profileID] = settings
+            }
+            var response = Profile_V1_CommandResponse()
+            response.success = true
+            return .success(response)
+        }
         bff.register(path: "/profile.v1.ProfileService/SetVisibility") { [self] (request: Profile_V1_SetVisibilityRequest) in
             setVisibility(request)
         }
@@ -187,9 +205,37 @@ public final class MockSocialServices: @unchecked Sendable {
         return .success(response)
     }
 
+    private static let defaultTabSettings: Profile_V1_TabSettings = {
+        var settings = Profile_V1_TabSettings()
+        settings.postWindow = .all
+        settings.showLikes = true
+        settings.showSaved = false
+        settings.showReposts = true
+        settings.showPlaces = true
+        return settings
+    }()
+
+    /// The oldest creation time a visitor may see of `profileID`'s posts, or
+    /// nil for no limit. The viewer's own account sees everything (backend
+    /// #729: the author and the mesh are never windowed).
+    private func windowStartMS(for profileID: String) -> Int64? {
+        guard !dataset.profileIDs(inAccount: MockAuthService.accountID).contains(profileID) else { return nil }
+        let days: Double? = switch lock.withLock({ tabSettings[profileID]?.postWindow }) {
+        case .sixMonths: 183
+        case .oneMonth: 30
+        case .threeDays: 3
+        default: nil
+        }
+        return days.map { Int64((Date().timeIntervalSince1970 - $0 * 86_400) * 1_000) }
+    }
+
+    /// A post older than its author's window reads as not found to visitors;
+    /// a deleted post still reads, as the tombstone it is.
     private func getPost(_ request: Post_V1_GetPostRequest) -> Result<Post_V1_PostView, ConnectError> {
-        var result = undeletedPost(request)
-        // A deleted post still reads, as the tombstone it is.
+        var result = windowlessPost(request)
+        if case .success(let view) = result, let start = windowStartMS(for: view.profileID), view.publishedAtMs < start {
+            return .failure(ConnectError(code: .notFound, message: "PST-1001: post \(request.postID) not found"))
+        }
         if case .success(var view) = result, let deletedAt = lock.withLock({ deletedPosts[request.postID] }) {
             view.status = .deleted
             view.deletedAtMs = Int64(deletedAt.timeIntervalSince1970 * 1_000)
@@ -198,7 +244,7 @@ public final class MockSocialServices: @unchecked Sendable {
         return result
     }
 
-    private func undeletedPost(_ request: Post_V1_GetPostRequest) -> Result<Post_V1_PostView, ConnectError> {
+    private func windowlessPost(_ request: Post_V1_GetPostRequest) -> Result<Post_V1_PostView, ConnectError> {
         // Client-authored posts first, then the seeded dataset.
         if let draft = postStore?.record(for: request.postID) {
             var view = Post_V1_PostView()
@@ -248,8 +294,10 @@ public final class MockSocialServices: @unchecked Sendable {
             .filter { $0.authorProfileID == request.profileID }
             .map { (postID: $0.postID, mediaURL: $0.media?.url, createdAtMS: $0.publishedAtMS) }
         let deleted = lock.withLock { Set(deletedPosts.keys) }
+        // Visitors' listing stops at the author's window (backend #729).
+        let windowStart = windowStartMS(for: request.profileID) ?? .min
         let all = (authored + seeded)
-            .filter { !deleted.contains($0.postID) }
+            .filter { !deleted.contains($0.postID) && $0.createdAtMS >= windowStart }
             .sorted { $0.createdAtMS > $1.createdAtMS }
 
         let start = Int(request.pageToken) ?? 0
@@ -347,6 +395,7 @@ public final class MockSocialServices: @unchecked Sendable {
                 settings.sensitiveContent = .less
                 return settings
             }()
+            view.tabSettings = lock.withLock { tabSettings[view.profileID] } ?? Self.defaultTabSettings
             return .success(view)
         }
         guard let author = dataset.author(for: request.profileID) else {
