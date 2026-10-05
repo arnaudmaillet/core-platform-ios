@@ -1096,11 +1096,14 @@ final class PlaceProfileViewController: UIViewController {
     /// on the banner's last 44pt. Derived, so the two cannot drift apart.
     private static let selectorSlotFooter =
         selectorSlotHeight - PagedTabBar.Style.navigationTitle.height
-    /// How far the identity's foot must clear the banner's bottom edge: the
-    /// selector's own band, plus real air. Derived from the bar for the reason
-    /// the constraint states — type must never be drawn behind the capsule.
-    private static let identityClearance =
-        PagedTabBar.Style.navigationTitle.height + Spacing.xl
+    /// The air between the identity row and the first post: the profile's
+    /// own under its tray (`ProfileHeaderView`'s column foot, `Spacing.xl`),
+    /// so the two pages' content starts alike (user, 5 October 2026).
+    ///
+    /// ⚠️ It was the selector's band plus that air — 68pt — from when the
+    /// capsule stood on the banner's foot. The strip lives at the foot of the
+    /// screen now, and the band was air with nothing in it.
+    private static let identityClearance = Spacing.xl
     /// The crossfade's length and the size the leaving copy shrinks to —
     /// the profile screen's measured pair, shared so the two screens that
     /// perform the same hand-over cannot drift apart.

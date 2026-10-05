@@ -172,13 +172,13 @@ struct PlaceProfileTests {
         #expect(profile.debugIdentityRidesTheBanner)
     }
 
-    /// ⚠️ THE COUNTERS MUST CLEAR THE CAPSULE THAT NOW OVERLAPS THEM. The old
-    /// -18 was measured against the picture's edge, and the moment the selector
-    /// moved onto the banner that edge stopped being the last thing in the way.
-    @Test func theIdentityClearsTheSelectorItNowSharesTheBannerWith() {
+    /// The first post stands as far under the identity row as a profile's
+    /// stands under its tray (`Spacing.xl`) — not the old selector band's
+    /// 68pt, kept for a capsule that left the banner for the screen's foot.
+    @Test func theFirstPostStandsTheProfilesGapUnderTheIdentity() {
         let profile = makeProfile()
         laidOut(profile)
-        #expect(profile.debugIdentityClearance >= PagedTabBar.Style.navigationTitle.height)
+        #expect(abs(profile.debugIdentityClearance - Spacing.xl) < 0.5)
     }
 
     /// ⚠️ WHAT COVERS THE LIST IS NOT WHAT THE LIST IS INSET BY. This page
