@@ -14,6 +14,7 @@ final class PrivacySectionViewController: UIViewController {
         case privateAccount
         case followRequests
         case postWindow
+        case commentAudience
         case loading
         case failed
         case hideLists
@@ -21,7 +22,10 @@ final class PrivacySectionViewController: UIViewController {
         case planned(String)
     }
 
-    private static let planned = ["Who can comment, mention and message you", "Location sharing", "Hide profile tabs from others"]
+    private var planned: [String] {
+        (viewModel.comments == nil ? ["Who can comment, mention and message you"] : ["Who can mention and message you"])
+            + ["Location sharing", "Hide profile tabs from others"]
+    }
 
     /// "3", or nothing while unread or when none are pending.
     static func requestCountText(_ count: Int?) -> String? {
@@ -75,7 +79,7 @@ final class PrivacySectionViewController: UIViewController {
     private static func footerText(_ section: Section) -> String? {
         switch section {
         case .visibility:
-            "When your profile is private, only your followers can see your posts and your lists. Older posts outside the window you choose are hidden from others, not deleted; you always see them. Applies to this profile only."
+            "When your profile is private, only your followers can see your posts and your lists. Older posts outside the window you choose are hidden from others, not deleted; you always see them. Comments from anyone outside the audience you choose are refused. Applies to this profile only."
         case .lists:
             nil
         case .comingSoon:
@@ -159,6 +163,18 @@ final class PrivacySectionViewController: UIViewController {
             content.image = UIImage(systemName: "person.badge.clock")
             content.imageProperties.tintColor = .label
             cell.accessories = [.disclosureIndicator()]
+        case .commentAudience:
+            content = .valueCell()
+            content.text = "Who Can Comment"
+            content.secondaryText = viewModel.commentAudience?.title
+            content.image = UIImage(systemName: "bubble.left")
+            content.imageProperties.tintColor = .label
+            let current = viewModel.commentAudience
+            cell.accessories = [.popUpMenu(UIMenu(children: CommentAudience.allCases.map { audience in
+                UIAction(title: audience.title, state: audience == current ? .on : .off) { [weak self] _ in
+                    self?.setCommentAudience(audience)
+                }
+            }), displayed: .always)]
         case .postWindow:
             content = .valueCell()
             content.text = "Posts Visible to Others"
@@ -203,15 +219,33 @@ final class PrivacySectionViewController: UIViewController {
             snapshot.appendItems([.postWindow], toSection: .visibility)
             snapshot.reconfigureItems([.postWindow])
         }
+        if viewModel.comments != nil, viewModel.commentAudience != nil {
+            snapshot.appendItems([.commentAudience], toSection: .visibility)
+            snapshot.reconfigureItems([.commentAudience])
+        }
         snapshot.appendItems(
             (makeListPrivacy == nil ? [] : [.hideLists]) + (makeDataTransparency == nil ? [] : [.dataTransparency]),
             toSection: .lists
         )
-        snapshot.appendItems(Self.planned.map(Item.planned), toSection: .comingSoon)
+        snapshot.appendItems(planned.map(Item.planned), toSection: .comingSoon)
         // The switch reads the phase and the saving flag at configuration.
         if case .loaded = viewModel.phase { snapshot.reconfigureItems([.privateAccount]) }
         if viewModel.requests != nil { snapshot.reconfigureItems([.followRequests]) }
         dataSource.apply(snapshot, animatingDifferences: false)
+    }
+
+    private func setCommentAudience(_ audience: CommentAudience) {
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await viewModel.setCommentAudience(audience)
+            } catch {
+                applySnapshot()
+                let alert = UIAlertController(title: nil, message: "Couldn't change who can comment. Try again.", preferredStyle: .alert)
+                alert.addAction(UIAlertAction(title: "OK", style: .default))
+                present(alert, animated: true)
+            }
+        }
     }
 
     private func setPostWindow(_ window: PostWindow) {

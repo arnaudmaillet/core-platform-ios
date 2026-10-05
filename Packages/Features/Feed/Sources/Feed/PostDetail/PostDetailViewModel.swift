@@ -57,6 +57,9 @@ public final class PostDetailViewModel {
     /// Publishing failed. Carries the text, which the composer had already
     /// cleared by the time it was sent.
     var onPublishFailed: ((String) -> Void)?
+    /// A comment the server didn't take: its text, and whether it was
+    /// refused by the author's setting (rather than failed).
+    var onCommentFailed: ((_ text: String, _ refused: Bool) -> Void)?
 
     /// Internal, not private: the compose bar's boost button spends against
     /// this identity, and the view controller is the one holding the wallet.
@@ -234,11 +237,15 @@ public final class PostDetailViewModel {
         setComposing(true)
         Task { [weak self] in
             guard let self else { return }
-            if let entry = try? await commentsProvider.addComment(body, to: postID, parentID: parentID) {
+            do {
+                let entry = try await commentsProvider.addComment(body, to: postID, parentID: parentID)
                 self.insertSubmitted(entry)
                 self.emitComments()
+                self.setComposing(false)
+            } catch {
+                self.setComposing(false)
+                self.onCommentFailed?(body, (error as? CommentsError) == .notAllowed)
             }
-            self.setComposing(false)
         }
     }
 

@@ -62,26 +62,36 @@ public struct MockBackend: Sendable {
         MockAccountService(lifecycle: accountLifecycle).register(on: bff)
         let socialServices = MockSocialServices(dataset: dataset, postStore: postStore)
         socialServices.register(on: bff)
+        // Following a private profile asks (backend #655); profile.v1 owns
+        // who is private. `-mock-follow-requests` seeds the viewer's inbox.
+        let socialGraph = MockSocialGraphService(
+            dataset: dataset,
+            isPrivate: { socialServices.isPrivate($0) },
+            seedsFollowRequests: ProcessInfo.processInfo.arguments.contains("-mock-follow-requests")
+        )
         MockEngagementService(store: counterStore).register(on: bff)
         MockCounterService(store: counterStore).register(on: bff)
         MockMediaService(store: blobStore).register(on: bff)
         MockPostAuthoringService(store: postStore).register(on: bff)
         MockSearchService(dataset: dataset, counters: counterStore).register(on: bff)
         MockNotificationService(dataset: dataset).register(on: bff)
-        // Comments matching a post owner's hidden words are dropped (#404).
+        // Comments matching a post owner's hidden words are dropped (#404),
+        // and one outside the owner's "Who Can Comment" is refused (#397).
         MockCommentService(
             dataset: dataset,
             postStore: postStore,
-            hiddenWords: { socialServices.hiddenWords(of: $0) }
+            hiddenWords: { socialServices.hiddenWords(of: $0) },
+            mayComment: { commenter, owner in
+                switch socialServices.commentAudience(of: owner) {
+                case .noOne: false
+                case .followers: socialGraph.isFollowing(commenter, owner)
+                case .mutuals: socialGraph.isFollowing(commenter, owner) && socialGraph.isFollowing(owner, commenter)
+                default: true
+                }
+            }
         ).register(on: bff)
         MockChatService(dataset: dataset).register(on: bff)
-        // Following a private profile asks (backend #655); profile.v1 owns
-        // who is private. `-mock-follow-requests` seeds the viewer's inbox.
-        MockSocialGraphService(
-            dataset: dataset,
-            isPrivate: { socialServices.isPrivate($0) },
-            seedsFollowRequests: ProcessInfo.processInfo.arguments.contains("-mock-follow-requests")
-        ).register(on: bff)
+        socialGraph.register(on: bff)
         let geoDiscovery = MockGeoDiscoveryService(dataset: dataset, spreadsHierarchy: seedsMapHierarchy)
         geoDiscovery.register(on: bff)
         moderationService.register(on: bff)

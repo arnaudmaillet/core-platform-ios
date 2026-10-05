@@ -30,20 +30,28 @@ final class PrivacySectionViewModel {
     private(set) var postWindow: PostWindow? {
         didSet { onChange?() }
     }
+    /// Who may comment on this profile's posts (#397); nil until read or
+    /// when the screen can't set it.
+    private(set) var commentAudience: CommentAudience? {
+        didSet { onChange?() }
+    }
     var onChange: (() -> Void)?
 
     private let visibility: any ProfileVisibilityManaging
     let requests: (any FollowRequestsManaging)?
     let windows: (any PostWindowManaging)?
+    let comments: (any CommentAudienceManaging)?
 
     init(
         visibility: any ProfileVisibilityManaging,
         requests: (any FollowRequestsManaging)? = nil,
-        windows: (any PostWindowManaging)? = nil
+        windows: (any PostWindowManaging)? = nil,
+        comments: (any CommentAudienceManaging)? = nil
     ) {
         self.visibility = visibility
         self.requests = requests
         self.windows = windows
+        self.comments = comments
     }
 
     /// Re-read when the screen comes back from the inbox.
@@ -59,11 +67,21 @@ final class PrivacySectionViewModel {
         postWindow = window
     }
 
+    /// Not optimistic: the value shown is the server's.
+    func setCommentAudience(_ audience: CommentAudience) async throws {
+        guard let comments, audience != commentAudience else { return }
+        try await comments.setCommentAudience(audience)
+        commentAudience = audience
+    }
+
     func load() async {
         if case .failed = phase { phase = .loading }
         Task { await refreshRequestCount() }
         if let windows {
             Task { self.postWindow = (try? await windows.postWindow()) ?? self.postWindow }
+        }
+        if let comments {
+            Task { self.commentAudience = (try? await comments.commentAudience()) ?? self.commentAudience }
         }
         do {
             phase = .loaded(isPrivate: try await visibility.activeProfileIsPrivate())

@@ -384,6 +384,7 @@ final class PostDetailViewController: UIViewController {
         }
         viewModel.onPublished = { [weak self] entry in self?.becomePublished(entry) }
         viewModel.onPublishFailed = { [weak self] text in self?.restoreUnpublished(text) }
+        viewModel.onCommentFailed = { [weak self] text, refused in self?.restoreUnsent(text, refused: refused) }
         configureProfileSwitcher()
         // The empty page's floor is its block's own height, which the text
         // size changes — see `refitEmptyPage`.
@@ -744,6 +745,21 @@ final class PostDetailViewController: UIViewController {
             "Couldn't Publish",
             "Your post wasn't published. Your text is still here, so you can try again."
         )
+    }
+
+    /// A comment that didn't go: its text comes back, and the notice says
+    /// whether the author limits comments (#397) or it simply failed.
+    private func restoreUnsent(_ text: String, refused: Bool) {
+        let typedSince = composeBar.draftText.trimmingCharacters(in: .whitespacesAndNewlines)
+        composeBar.draftText = typedSince.isEmpty ? text : text + "\n" + composeBar.draftText
+        let notice = Self.commentFailureNotice(refused: refused)
+        presentNotice(notice.title, notice.message)
+    }
+
+    static func commentFailureNotice(refused: Bool) -> (title: String, message: String) {
+        refused
+            ? ("Comments Are Limited", "The author only takes comments from some people.")
+            : ("Couldn't Comment", "Your comment wasn't sent. Your text is still here, so you can try again.")
     }
 
     /// The text page family's notices are alerts — see the conversation's.
