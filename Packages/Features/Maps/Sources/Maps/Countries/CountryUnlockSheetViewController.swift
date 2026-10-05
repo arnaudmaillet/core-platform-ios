@@ -429,6 +429,22 @@ final class CountryTitleLabel: UILabel {
         return line.width.rounded(.up) <= width
     }
 
+    /// The height of the title on TWO lines — the name's and the continent's.
+    var twoLineHeight: CGFloat {
+        composed(fits: false).boundingRect(
+            with: CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading], context: nil
+        ).height.rounded(.up)
+    }
+
+    /// Always as tall as two lines: a title that fits ONE stands centred
+    /// between where the two would be — a label draws its text centred in its
+    /// height — so the name's place does not jump with its length.
+    override var intrinsicContentSize: CGSize {
+        let size = super.intrinsicContentSize
+        return CGSize(width: size.width, height: max(size.height, twoLineHeight))
+    }
+
     override func textRect(forBounds bounds: CGRect, limitedToNumberOfLines numberOfLines: Int) -> CGRect {
         // Asked for a width (a layout pass, a fitting size): compose for it.
         // Stable: the same width always asks for the same text.

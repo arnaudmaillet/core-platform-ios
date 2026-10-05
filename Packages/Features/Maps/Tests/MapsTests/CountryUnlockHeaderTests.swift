@@ -123,8 +123,24 @@ struct CountryUnlockHeaderTests {
         let label = try title(in: header)
         #expect(label.continentFollowsName)
         #expect(label.attributedText?.string == "Spain  Europe")
-        // One line: as tall as the name's own line.
-        #expect(label.bounds.height < label.font.lineHeight * 2)
+    }
+
+    /// A title that fits one line stands centred between where its two lines
+    /// would be: its box is a two-line title's, and its one line sits in the
+    /// middle of it.
+    @Test func aOneLineTitleStandsBetweenTheTwoLinesItWouldTake() throws {
+        let oneLine = try layOut("ES")
+        let twoLines = try layOut("CF")
+        let short = try title(in: oneLine)
+        let wrapped = try title(in: twoLines)
+        #expect(short.continentFollowsName && !wrapped.continentFollowsName)
+        #expect(abs(short.bounds.height - wrapped.bounds.height) < 0.5, "the one-line box is not a two-line box")
+        #expect(abs(short.bounds.height - short.twoLineHeight) < 0.5)
+        let text = short.textRect(forBounds: short.bounds, limitedToNumberOfLines: short.numberOfLines)
+        #expect(text.height < short.bounds.height * 0.75, "the text is not one line")
+        // UILabel centres its text vertically in its height; the box is what
+        // places it.
+        #expect(abs(frame(of: short, in: oneLine).minY - frame(of: wrapped, in: twoLines).minY) < 0.5)
     }
 
     @Test func aNameTooWideForTheContinentPutsItOnTheNextLine() throws {
