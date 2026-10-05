@@ -48,6 +48,9 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     /// Active restrictions on the account (Safety → Account Status). Nil
     /// leaves the row under Coming Soon.
     private let accountStatus: (any AccountStatusProviding)?
+    /// Push preferences (Settings → Notifications, #392). Nil leaves the
+    /// section on its coming-soon page.
+    private let notificationPreferences: (any NotificationPreferencesManaging)?
 
     public init(
         repository: any ProfileProviding,
@@ -60,7 +63,8 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
         account: (any AccountProviding)? = nil,
         switching: (any ProfileSwitching)? = nil,
         accountSessions: (any AccountSessionsManaging)? = nil,
-        accountStatus: (any AccountStatusProviding)? = nil
+        accountStatus: (any AccountStatusProviding)? = nil,
+        notificationPreferences: (any NotificationPreferencesManaging)? = nil
     ) {
         self.repository = repository
         self.reporting = reporting
@@ -73,6 +77,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
         self.switching = switching
         self.accountSessions = accountSessions
         self.accountStatus = accountStatus
+        self.notificationPreferences = notificationPreferences
     }
 
     private func makeSwitcherFactory() -> ProfileSwitcherMenuFactory? {
@@ -182,7 +187,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             // profile action, and it is safe at any stack depth.
             makeSettingsViewController: onLogout.flatMap { onLogout in
                 account.map { account in
-                    { [switching, accountSessions, accountStatus, reporting, gallery, imagePipeline] in
+                    { [switching, accountSessions, accountStatus, reporting, gallery, notificationPreferences, imagePipeline] in
                         SettingsViewController(
                             switching: switching,
                             switcher: makeSwitcherFactory(),
@@ -273,6 +278,8 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                                 + (accountStatus == nil ? ["Account status"] : [])
                                         )
                                     }
+                                case .notifications:
+                                    notificationPreferences.map { NotificationSettingsViewController(manager: $0) }
                                 case .activity:
                                     YourActivityViewController(makeRecentlyDeleted: {
                                         guard let trash = gallery as? any PostTrashManaging,
