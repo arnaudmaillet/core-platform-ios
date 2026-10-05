@@ -1876,6 +1876,8 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
 
         captionLabel.font = .appFont(forTextStyle: .body)
         captionLabel.adjustsFontForContentSizeCategory = true
+        // A `@handle` in the caption opens its profile (#524).
+        captionLabel.opensTextEntities = true
         captionLabel.textColor = .label
         captionLabel.numberOfLines = Self.captionLineLimit
         // WORD WRAPPING, not tail truncation, and that is not a detail: the

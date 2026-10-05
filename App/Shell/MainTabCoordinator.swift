@@ -261,6 +261,8 @@ final class MainTabCoordinator: NSObject, Coordinator {
         applyMessagesAvailability()
         // The stake menu's way to the cartridge pack, from any screen.
         tabBarController.makeStakeShopSheet = { [unowned container] in container.makeStakeShopSheet() }
+        // A `@handle` tapped in a comment, a caption or a bio (#524).
+        tabBarController.openMention = { [weak self] handle, source in self?.openMention(handle, from: source) }
         // The gate every write asks before it runs, found up the chain.
         tabBarController.memberGate = container.memberGate
         createHold.install()
@@ -664,6 +666,32 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
         if !isMember, tabBarController.selectedTab === tab {
             selectTab(.explore)
         }
+    }
+
+    /// The profile a tapped `@handle` names, pushed like an author's. A
+    /// handle that names no one any more (renamed, deleted) says so where the
+    /// tap was, rather than pushing a dead page.
+    private func openMention(_ handle: String, from source: UIView) {
+        Task { [weak self, weak source] in
+            guard let self else { return }
+            switch await container.profileID(forHandle: handle) {
+            case .found(let id):
+                container.router.route(to: .profile(id, stub: nil))
+            case .missing:
+                Self.toast("This account doesn\u{2019}t exist", symbol: "person.crop.circle.badge.questionmark", from: source)
+            case .unavailable:
+                Self.toast("Couldn\u{2019}t open @\(handle)", symbol: "wifi.exclamationmark", from: source)
+            }
+        }
+    }
+
+    /// A toast over the screen `source` is on.
+    private static func toast(_ message: String, symbol: String, from source: UIView?) {
+        guard let source,
+              let screen = sequence(first: source as UIResponder, next: \.next).lazy
+                .compactMap({ $0 as? UIViewController }).first
+        else { return }
+        ToastView.present(message, symbol: symbol, in: screen.view)
     }
 
     /// The "+" is never a place — see `CreateTabItem`. A tap on it lands HERE,

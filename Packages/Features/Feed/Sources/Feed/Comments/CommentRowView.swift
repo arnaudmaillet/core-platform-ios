@@ -359,6 +359,7 @@ final class CommentRowView: UIView {
         // `@handle`s and `#tag`s stand out (#524): comments, replies, chat
         // messages and a text post's caption all draw here.
         bodyLabel.textEntityStyle = .link
+        bodyLabel.opensTextEntities = true
 
         likeButton.configuration?.imagePadding = 3
         likeButton.configuration?.contentInsets = .zero

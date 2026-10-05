@@ -16,7 +16,7 @@ import UIKit
 /// how the stake menu's "Get ×100 cartridges in the Shop" finds the Shop from
 /// the feed rail, the composer or a card (`StakeShopOpening`) — and how any
 /// control finds the gate that asks a guest to sign up (`MemberGateProviding`).
-final class ShellTabBarController: UITabBarController, StakeShopOpening, MemberGateProviding {
+final class ShellTabBarController: UITabBarController, StakeShopOpening, MemberGateProviding, TextEntityOpening {
     /// Called after every layout pass.
     var onLayout: (() -> Void)?
     /// Builds the Shop on its Boosts (`AppContainer.makeStakeShopSheet`);
@@ -33,5 +33,18 @@ final class ShellTabBarController: UITabBarController, StakeShopOpening, MemberG
 
     func makeStakeShop() -> UIViewController? {
         makeStakeShopSheet?()
+    }
+
+    /// Opens a tapped `@handle` (#524), set by the shell; `#tag`s open
+    /// nothing until the hashtag screen exists, so their taps stay the text's.
+    var openMention: ((_ handle: String, _ source: UIView) -> Void)?
+
+    func openTextEntity(_ token: String, from source: UIView) {
+        guard TextEntityLinks.kind(of: token) == .mention else { return }
+        openMention?(String(token.dropFirst()), source)
+    }
+
+    func opensTextEntities(of kind: TextEntity.Kind) -> Bool {
+        kind == .mention && openMention != nil
     }
 }

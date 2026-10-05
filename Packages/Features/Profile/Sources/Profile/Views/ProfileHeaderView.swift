@@ -1152,6 +1152,7 @@ final class ProfileHeaderView: UIView {
         // Over the banner the bio's ink is `HeroInk`'s: its tokens keep it,
         // in semibold (#524).
         bioLabel.textEntityStyle = .emphasis
+        bioLabel.opensTextEntities = true
 
         // Name + verified badge sit on one line; a spacer keeps them leading
         // while the row itself stretches with the fill-aligned column.

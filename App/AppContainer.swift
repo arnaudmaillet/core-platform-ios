@@ -194,6 +194,22 @@ final class AppContainer {
         }
     }
 
+    enum HandleLookup: Equatable {
+        case found(ProfileID)
+        case missing
+        case unavailable
+    }
+
+    /// The profile a `@handle` names (`profile.v1.GetProfileByHandle`, #524).
+    func profileID(forHandle handle: String) async -> HandleLookup {
+        var request = Profile_V1_GetProfileByHandleRequest()
+        request.handle = handle
+        let response = await Profile_V1_ProfileServiceClient(client: authenticatedRPCClient)
+            .getProfileByHandle(request: request, headers: [:])
+        if let view = response.message { return .found(ProfileID(view.profileID)) }
+        return response.error?.code == .notFound ? .missing : .unavailable
+    }
+
     private(set) lazy var authFeature: any AuthFeatureBuilding = AuthFeatureBuilder(
         sessionManager: sessionManager,
         // Sign-up by code (guest mode B4): the new account's profile, and its
