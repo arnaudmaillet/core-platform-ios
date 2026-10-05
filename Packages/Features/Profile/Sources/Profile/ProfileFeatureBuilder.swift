@@ -299,6 +299,9 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                             makeActivityDiscovery: (repository as? any ActivityDiscoveryManaging).map { manager in
                                                 { ActivityDiscoveryViewController(manager: manager) }
                                             },
+                                            makeLocationSharing: (repository as? any LocationSharingManaging).map { manager in
+                                                { LocationSharingViewController(manager: manager) }
+                                            },
                                             imagePipeline: imagePipeline
                                         )
                                     }

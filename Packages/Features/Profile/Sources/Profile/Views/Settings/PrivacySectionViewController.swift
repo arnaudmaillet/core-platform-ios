@@ -19,13 +19,15 @@ final class PrivacySectionViewController: UIViewController {
         case failed
         case hideLists
         case activityDiscovery
+        case locationSharing
         case dataTransparency
         case planned(String)
     }
 
     private var planned: [String] {
         (viewModel.comments == nil ? ["Who can comment, mention and message you"] : ["Who can mention and message you"])
-            + ["Location sharing", "Hide profile tabs from others"]
+            + (makeLocationSharing == nil ? ["Location sharing"] : [])
+            + ["Hide profile tabs from others"]
     }
 
     /// "3", or nothing while unread or when none are pending.
@@ -39,6 +41,8 @@ final class PrivacySectionViewController: UIViewController {
     private let makeListPrivacy: (() -> UIViewController)?
     /// Activity status, read receipts and search (#406, #412); nil hides the row.
     private let makeActivityDiscovery: (() -> UIViewController)?
+    /// Ghost mode and precision (#398); nil keeps it under Coming Soon.
+    private let makeLocationSharing: (() -> UIViewController)?
     /// "Your Data and Permissions" (#414); nil hides the row.
     private let makeDataTransparency: (() -> UIViewController)?
     private let imagePipeline: ImagePipeline?
@@ -50,12 +54,14 @@ final class PrivacySectionViewController: UIViewController {
         makeListPrivacy: (() -> UIViewController)?,
         makeDataTransparency: (() -> UIViewController)? = nil,
         makeActivityDiscovery: (() -> UIViewController)? = nil,
+        makeLocationSharing: (() -> UIViewController)? = nil,
         imagePipeline: ImagePipeline? = nil
     ) {
         self.viewModel = viewModel
         self.makeListPrivacy = makeListPrivacy
         self.makeDataTransparency = makeDataTransparency
         self.makeActivityDiscovery = makeActivityDiscovery
+        self.makeLocationSharing = makeLocationSharing
         self.imagePipeline = imagePipeline
         super.init(nibName: nil, bundle: nil)
         title = SettingsSection.privacy.title
@@ -197,6 +203,11 @@ final class PrivacySectionViewController: UIViewController {
             content.image = UIImage(systemName: "person.2")
             content.imageProperties.tintColor = .label
             cell.accessories = [.disclosureIndicator()]
+        case .locationSharing:
+            content.text = "Location Sharing"
+            content.image = UIImage(systemName: "location")
+            content.imageProperties.tintColor = .label
+            cell.accessories = [.disclosureIndicator()]
         case .activityDiscovery:
             content.text = "Activity and Discovery"
             content.image = UIImage(systemName: "eye")
@@ -236,6 +247,7 @@ final class PrivacySectionViewController: UIViewController {
         snapshot.appendItems(
             (makeListPrivacy == nil ? [] : [.hideLists])
                 + (makeActivityDiscovery == nil ? [] : [.activityDiscovery])
+                + (makeLocationSharing == nil ? [] : [.locationSharing])
                 + (makeDataTransparency == nil ? [] : [.dataTransparency]),
             toSection: .lists
         )
@@ -293,7 +305,7 @@ final class PrivacySectionViewController: UIViewController {
 extension PrivacySectionViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         switch dataSource.itemIdentifier(for: indexPath) {
-        case .followRequests, .hideLists, .activityDiscovery, .dataTransparency, .failed: true
+        case .followRequests, .hideLists, .activityDiscovery, .locationSharing, .dataTransparency, .failed: true
         default: false
         }
     }
@@ -309,6 +321,10 @@ extension PrivacySectionViewController: UICollectionViewDelegate {
             )
         case .hideLists:
             if let screen = makeListPrivacy?() {
+                navigationController?.pushViewController(screen, animated: true)
+            }
+        case .locationSharing:
+            if let screen = makeLocationSharing?() {
                 navigationController?.pushViewController(screen, animated: true)
             }
         case .activityDiscovery:

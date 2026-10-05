@@ -23,6 +23,10 @@ public final class MockSocialServices: @unchecked Sendable {
     /// `SetVisibility` writes, by profile. Only the viewer's account's
     /// profiles can be changed; others keep their seeded flag.
     private var visibilityOverrides: [String: Profile_V1_ProfileVisibility] = [:]
+    /// `SetLocationSettings` writes, by profile (backend #717); absent is
+    /// not ghosted, precise. Stored only: the viewer is always the reader
+    /// here, and the author's own reads are never filtered.
+    private var locationSettings: [String: Profile_V1_LocationSettings] = [:]
     /// `SetDiscoverySettings` writes, by profile (backend #726); absent is
     /// everything on.
     private var discoverySettings: [String: Profile_V1_DiscoverySettings] = [:]
@@ -189,6 +193,12 @@ public final class MockSocialServices: @unchecked Sendable {
                 if request.hasInSuggestions { settings.inSuggestions = request.inSuggestions }
                 discoverySettings[request.profileID] = settings
             }
+            var response = Profile_V1_CommandResponse()
+            response.success = true
+            return .success(response)
+        }
+        bff.register(path: "/profile.v1.ProfileService/SetLocationSettings") { [self] (request: Profile_V1_SetLocationSettingsRequest) in
+            lock.withLock { locationSettings[request.profileID] = request.settings }
             var response = Profile_V1_CommandResponse()
             response.success = true
             return .success(response)
@@ -501,6 +511,7 @@ public final class MockSocialServices: @unchecked Sendable {
                 return proto
             }
             view.visibility = lock.withLock { visibilityOverrides[view.profileID] } ?? .public
+            if let location = lock.withLock({ locationSettings[view.profileID] }) { view.locationSettings = location }
             // Owner-only on the fleet; the viewer's own view here.
             view.discoverySettings = lock.withLock { discoverySettings[view.profileID] } ?? Self.defaultDiscoverySettings
             view.interactionSettings = storedInteractionSettings(for: view.profileID)
