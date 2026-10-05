@@ -819,8 +819,7 @@ final class AppContainer {
     /// needs the gateway route added in `dev/envoy/envoy.yaml` — see
     /// `dev/BACKEND_GAPS.md` §11.
     private lazy var profileReportRepository = ProfileReportRepository(
-        moderationClient: Moderation_V1_ModerationServiceClient(client: authenticatedRPCClient),
-        authSession: sessionManager
+        moderationClient: Moderation_V1_ModerationServiceClient(client: authenticatedRPCClient)
     )
 
     /// The viewer's account details for the settings screen (read-only —
