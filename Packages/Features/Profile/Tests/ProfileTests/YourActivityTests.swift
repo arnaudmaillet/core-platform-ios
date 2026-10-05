@@ -29,7 +29,9 @@ struct YourActivityTests {
 
     @Test func thePageShowsTheStoresTime() throws {
         let store = ScreenTimeStore(defaults: UserDefaults(suiteName: "activity-\(UUID().uuidString)")!)
-        let now = Date()
+        // Noon, so the 25 minutes never straddle midnight (CI runs at 00:21Z
+        // once counted only 21 of them as today's).
+        let now = Calendar.current.date(bySettingHour: 12, minute: 0, second: 0, of: Date())!
         store.record(from: now.addingTimeInterval(-25 * 60), to: now)
         let controller = YourActivityViewController(store: store, now: { now })
         controller.loadViewIfNeeded()

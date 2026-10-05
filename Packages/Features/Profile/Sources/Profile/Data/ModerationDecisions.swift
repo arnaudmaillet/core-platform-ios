@@ -76,12 +76,14 @@ public enum FiledAppeals {
 
     public static func record(decisionID: String, at date: Date) {
         var filed = defaults.dictionary(forKey: key) as? [String: Double] ?? [:]
-        filed[decisionID] = date.timeIntervalSince1970
+        // Date's own clock, so the value reads back equal to what was stored
+        // (a 1970-based round-trip loses the last bits of the fraction).
+        filed[decisionID] = date.timeIntervalSinceReferenceDate
         defaults.set(filed, forKey: key)
     }
 
     public static func filedAt(decisionID: String) -> Date? {
-        (defaults.dictionary(forKey: key) as? [String: Double])?[decisionID].map(Date.init(timeIntervalSince1970:))
+        (defaults.dictionary(forKey: key) as? [String: Double])?[decisionID].map(Date.init(timeIntervalSinceReferenceDate:))
     }
 }
 
