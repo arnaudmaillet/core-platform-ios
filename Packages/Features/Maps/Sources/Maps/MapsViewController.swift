@@ -1134,6 +1134,8 @@ final class MapsViewController: UIViewController {
         if offerCamera == nil { offerCamera = mapView.camera.copy() as? MKMapCamera }
         countryLayer.select(country.code)
         let sheet = CountryUnlockSheetViewController(country: country, access: countryAccess)
+        // Wrapped BEFORE its view loads: the measure counts its toolbar.
+        let presented = sheet.wrappedInSheet()
         // The country being sold stands ABOVE the sheet, not under it.
         sheet.loadViewIfNeeded()
         frame(country, bottomInset: offerBottomInset(sheet))
@@ -1144,12 +1146,12 @@ final class MapsViewController: UIViewController {
         }
         sheet.onDismissed = { [weak self] in self?.offerDidClose(country) }
         offerSheet = sheet
-        present(sheet, animated: true)
+        present(presented, animated: true)
     }
 
     /// The band left above an offer's sheet, where its country is framed.
     private func offerBottomInset(_ sheet: CountryUnlockSheetViewController) -> CGFloat {
-        sheet.contentHeight + view.safeAreaInsets.bottom
+        sheet.sheetHeight + view.safeAreaInsets.bottom
     }
 
     /// Closes the open offer. `returning`: whether the map flies back to the
@@ -1157,7 +1159,7 @@ final class MapsViewController: UIViewController {
     private func closeOffer(returning: Bool) {
         // Already on its way down (and the map already on its way back): a
         // tap or a pan now is the user's, not a second close.
-        guard let offerSheet, !offerSheet.isBeingDismissed else { return }
+        guard let offerSheet, !offerSheet.isLeaving else { return }
         offerReturns = returning
         #if DEBUG
         OfferLog.note("close requested returning=\(returning)")
