@@ -63,11 +63,13 @@ static_resources:
                         - match: { prefix: "/search.v1.SearchService/" }
                           route: { cluster: search, timeout: 30s }
                         # Report, Your Reports and Account Status call moderation.v1.
-                        # NOTE: the upstream port below is WRONG — see
-                        # dev/BACKEND_GAPS.md §11. Verify it against the fleet's
-                        # compose file before relying on this route.
+                        # Its client RPCs take the principal from the bearer: they
+                        # answer only in EDGE mode (`dev/fleet-gateway.sh up --edge`).
                         - match: { prefix: "/moderation.v1.ModerationService/" }
                           route: { cluster: moderation, timeout: 30s }
+                        # The map's tiles and timelines.
+                        - match: { prefix: "/geo_discovery.v1.GeoDiscoveryService/" }
+                          route: { cluster: geo_discovery, timeout: 30s }
                 http_filters:
                   - name: envoy.filters.http.grpc_web
                     typed_config:
@@ -249,9 +251,8 @@ static_resources:
         endpoints:
           - lb_endpoints:
               - endpoint: { address: { socket_address: { address: search-server, port_value: 50062 } } }
-    # WRONG upstream: moderation listens on :50061 (mesh) and :9443 (edge)
-    # (backend #703). The client RPCs need the edge listener and the bearer
-    # token; its transport is unconfirmed. See dev/BACKEND_GAPS.md §11.
+    # moderation listens on :50061 (mesh) and :9443 (edge, plaintext h2c like
+    # the mesh). Its client RPCs need the bearer, so use edge mode.
     - name: moderation
       type: STRICT_DNS
       lb_policy: ROUND_ROBIN
@@ -264,4 +265,17 @@ static_resources:
         cluster_name: moderation
         endpoints:
           - lb_endpoints:
-              - endpoint: { address: { socket_address: { address: moderation-server, port_value: 50054 } } }
+              - endpoint: { address: { socket_address: { address: moderation-server, port_value: 50061 } } }
+    - name: geo_discovery
+      type: STRICT_DNS
+      lb_policy: ROUND_ROBIN
+      typed_extension_protocol_options:
+        envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+          "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+          explicit_http_config:
+            http2_protocol_options: {}
+      load_assignment:
+        cluster_name: geo_discovery
+        endpoints:
+          - lb_endpoints:
+              - endpoint: { address: { socket_address: { address: geo-discovery-server, port_value: 50054 } } }
