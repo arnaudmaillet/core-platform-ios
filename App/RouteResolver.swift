@@ -323,6 +323,11 @@ private extension AppRoute {
         switch self {
         case .messageUser(_, let stub), .sendLink(_, _, let stub):
             .message(handle: stub?.handle)
+        // The inbox is a member's: its tab is greyed out for a guest, so a
+        // route there (a deep link, a notification) asks them to sign up and
+        // lands once they have.
+        case .messages, .conversation:
+            .inbox
         default:
             nil
         }
