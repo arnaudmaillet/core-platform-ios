@@ -99,7 +99,10 @@ public struct MockBackend: Sendable {
                 case .mutuals: socialGraph.isFollowing(commenter, owner) && socialGraph.isFollowing(owner, commenter)
                 default: true
                 }
-            }
+            },
+            // `-mock-held-comments` holds two comments on each of the viewer's first
+            // three posts for their review (#416).
+            seedsHeldComments: ProcessInfo.processInfo.arguments.contains("-mock-held-comments")
         ).register(on: bff)
         MockChatService(dataset: dataset).register(on: bff)
         socialGraph.register(on: bff)

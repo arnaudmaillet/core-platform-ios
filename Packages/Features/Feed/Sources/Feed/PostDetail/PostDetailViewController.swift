@@ -385,6 +385,10 @@ final class PostDetailViewController: UIViewController {
         viewModel.onPublished = { [weak self] entry in self?.becomePublished(entry) }
         viewModel.onPublishFailed = { [weak self] text in self?.restoreUnpublished(text) }
         viewModel.onCommentFailed = { [weak self] text, refused in self?.restoreUnsent(text, refused: refused) }
+        viewModel.onReviewFailed = { [weak self] approve in
+            let notice = Self.reviewFailureNotice(approve: approve)
+            self?.presentNotice(notice.title, notice.message)
+        }
         configureProfileSwitcher()
         // The empty page's floor is its block's own height, which the text
         // size changes — see `refitEmptyPage`.
@@ -754,6 +758,14 @@ final class PostDetailViewController: UIViewController {
         composeBar.draftText = typedSince.isEmpty ? text : text + "\n" + composeBar.draftText
         let notice = Self.commentFailureNotice(refused: refused)
         presentNotice(notice.title, notice.message)
+    }
+
+    /// A held comment's review that didn't go: it is still held.
+    static func reviewFailureNotice(approve: Bool) -> (title: String, message: String) {
+        (
+            approve ? "Couldn't Approve Comment" : "Couldn't Decline Comment",
+            "The comment is still held for your review. Try again in a moment."
+        )
     }
 
     static func commentFailureNotice(refused: Bool) -> (title: String, message: String) {
@@ -1330,7 +1342,15 @@ final class PostDetailViewController: UIViewController {
         commentsHeaderLabel.isHidden = mode == .commentsOnly
         guard case .loaded(let models) = state else { return }
         latestComments = models
+        let previous = streamModels
         streamModels = Dictionary(models.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        // A row keeps its identity (the comment id) when it is approved or
+        // its review starts, so the diff alone would leave it drawn as before.
+        let reviewChanged = models.compactMap { model -> StreamItem? in
+            guard let old = previous[model.id],
+                  old.isHeld != model.isHeld || old.canReview != model.canReview else { return nil }
+            return .comment(model.id)
+        }
         // Bones were on screen and real rows are about to take their place.
         let replacesBones = !commentsLoaded && hasAppliedStream && !models.isEmpty
         commentsLoaded = true
@@ -1345,7 +1365,7 @@ final class PostDetailViewController: UIViewController {
         // The first apply lands cold (nothing to animate FROM); reloads,
         // sort re-ranks, and submissions animate as native diffs — moves,
         // insertions, deletions, all UIKit's own.
-        applyStream(animated: hasAppliedStream)
+        applyStream(animated: hasAppliedStream, reconfiguring: reviewChanged)
     }
 
     /// The bones step aside and the loaded comments arrive, one after the
@@ -1713,7 +1733,12 @@ final class PostDetailViewController: UIViewController {
         // affordance is honest, the mutations wait on a moderation backend.
         let block = UIAction(title: "Block User", image: UIImage(systemName: "hand.raised"), attributes: .destructive) { _ in }
         let report = UIAction(title: "Report", image: UIImage(systemName: "flag"), attributes: .destructive) { _ in }
-        return UIMenu(children: [copy, select, share, UIMenu(options: .displayInline, children: [block, report])])
+        let moderation = UIMenu(options: .displayInline, children: [block, report])
+        guard model.canReview else { return UIMenu(children: [copy, select, share, moderation]) }
+        let review = CommentRowView.reviewActions { [weak self] approve in
+            self?.viewModel.reviewHeldComment(id, approve: approve)
+        }
+        return UIMenu(children: [review, copy, select, share, moderation])
     }
 
     private func streamItems() -> [StreamItem] {
@@ -1767,13 +1792,18 @@ final class PostDetailViewController: UIViewController {
         hasAppliedStream && !introducesCaption
     }
 
-    private func applyStream(animated: Bool, completion: (() -> Void)? = nil) {
+    private func applyStream(
+        animated: Bool, reconfiguring: [StreamItem] = [], completion: (() -> Void)? = nil
+    ) {
         var snapshot = NSDiffableDataSourceSnapshot<StreamSection, StreamItem>()
         let sections = streamSections()
         for (section, items) in sections {
             snapshot.appendSections([section])
             snapshot.appendItems(items, toSection: section)
         }
+        let shown = Set(streamDataSource.snapshot().itemIdentifiers)
+        let stale = reconfiguring.filter { shown.contains($0) && snapshot.indexOfItem($0) != nil }
+        if !stale.isEmpty { snapshot.reconfigureItems(stale) }
         if streamPolicy.update(sections.map(\.section)) {
             collectionView.collectionViewLayout.invalidateLayout()
         }
@@ -2206,6 +2236,9 @@ final class PostDetailViewController: UIViewController {
             self.retireKeyboardOr { self.enterReplyState(for: model) }
         }
         row.onShare = { [weak self] in self?.presentCommentShare(model) }
+        row.onReview = model.canReview
+            ? { [weak self] approve in self?.viewModel.reviewHeldComment(model.id, approve: approve) }
+            : nil
         // Moderation seams: the menu is the honest affordance; the
         // block/report mutations wait on a moderation backend (the
         // repost/save posture).
