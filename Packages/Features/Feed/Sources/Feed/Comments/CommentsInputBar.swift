@@ -1038,7 +1038,7 @@ final class CommentsInputBar: UIView {
         let button = UIButton(configuration: .glass())
         button.configuration?.cornerStyle = .capsule
         var title = AttributedString("Sign up to comment")
-        title.font = .preferredFont(forTextStyle: .headline)
+        title.font = .appFont(forTextStyle: .headline)
         button.configuration?.attributedTitle = title
         button.configuration?.baseForegroundColor = .label
         button.accessibilityIdentifier = "comments.sign-up"
