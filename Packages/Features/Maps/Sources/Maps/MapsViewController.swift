@@ -94,10 +94,12 @@ final class MapsViewController: UIViewController {
     /// (`CardCloseLanding`) and the flight's registered intermediate
     /// (`ZoomTransitionSource`, refusing any hero). The whole `MapPlace` travels (not
     /// just its `galleryTitle`) so the builder can wire the header's follow
-    /// toggle to this place's identity; the last argument stages the page's
-    /// OWN dismissal back to the cluster marker (`makeMapReturnSource`).
+    /// toggle to this place's identity; the country code (ISO alpha-2, "" at
+    /// sea) is the marker's — the one its flag border wears — for the page's
+    /// flag and subtitle; the last argument stages the page's OWN dismissal
+    /// back to the cluster marker (`makeMapReturnSource`).
     private let makeClusterGallery: (
-        [PostID], MapPlace, UIViewController,
+        [PostID], MapPlace, String, UIViewController,
         @escaping (@escaping () -> UIImage?) -> (any ZoomTransitionSource)?,
         ((UIViewController) -> RevealGeometry?)?
     ) -> UIViewController
@@ -361,7 +363,7 @@ final class MapsViewController: UIViewController {
         makeRevealGeometry: @escaping
             (UIViewController, TextRevealOrigin, (() -> Void)?) -> RevealGeometry,
         makeClusterGallery: @escaping (
-            [PostID], MapPlace, UIViewController,
+            [PostID], MapPlace, String, UIViewController,
         @escaping (@escaping () -> UIImage?) -> (any ZoomTransitionSource)?,
             ((UIViewController) -> RevealGeometry?)?
         ) -> UIViewController,
@@ -1288,6 +1290,14 @@ final class MapsViewController: UIViewController {
         let code = CountryAtlas.shared.country(owning: coordinate)?.code ?? ""
         pinCountries[pin.postID] = code
         return code
+    }
+
+    /// The country `annotation`'s marker speaks for (ISO alpha-2, "" at sea):
+    /// its REPRESENTATIVE's — a city's is its country's, as its flag border.
+    private func countryCode(of annotation: any MKAnnotation) -> String {
+        let cluster = annotation as? MapComputedCluster
+        guard let pin = cluster?.representative ?? (annotation as? MapAnnotation)?.pin else { return "" }
+        return countryCode(of: pin)
     }
 
     /// What `annotation`'s marker wears around its face: the flag border and
@@ -3196,8 +3206,9 @@ extension MapsViewController: MKMapViewDelegate {
             let placePage: ((UIViewController) -> UIViewController)? = hierarchyPlace.map { place in
                 let mapReturn = makeMapReturnSource(for: annotation)
                 let markerClose = makeMarkerClose(for: annotation)
+                let country = countryCode(of: annotation)
                 return { [makeClusterGallery] feed in
-                    makeClusterGallery(postIDs, place, feed, mapReturn, markerClose)
+                    makeClusterGallery(postIDs, place, country, feed, mapReturn, markerClose)
                 }
             }
             #if DEBUG
@@ -3455,7 +3466,7 @@ extension MapsViewController: MKMapViewDelegate {
         var gallery: UIViewController?
         if let place = Self.hierarchyPlace(of: annotation) {
             let built = makeClusterGallery(
-                postIDs, place, feedVC, makeMapReturnSource(for: annotation),
+                postIDs, place, countryCode(of: annotation), feedVC, makeMapReturnSource(for: annotation),
                 makeMarkerClose(for: annotation)
             )
             gallery = built
