@@ -23,6 +23,9 @@ public final class MockSocialServices: @unchecked Sendable {
     /// `SetVisibility` writes, by profile. Only the viewer's account's
     /// profiles can be changed; others keep their seeded flag.
     private var visibilityOverrides: [String: Profile_V1_ProfileVisibility] = [:]
+    /// `SetDiscoverySettings` writes, by profile (backend #726); absent is
+    /// everything on.
+    private var discoverySettings: [String: Profile_V1_DiscoverySettings] = [:]
     /// `SetInteractionSettings` writes, by profile (backend #714). prof-13 —
     /// public, and not followed by the viewer — takes comments from its
     /// followers only, so a refused comment can be seen without setup.
@@ -173,6 +176,23 @@ public final class MockSocialServices: @unchecked Sendable {
             response.success = true
             return .success(response)
         }
+        bff.register(path: "/profile.v1.ProfileService/SetDiscoverySettings") { [self] (request: Profile_V1_SetDiscoverySettingsRequest) in
+            // Partial: an unset flag keeps its value.
+            lock.withLock {
+                var settings = discoverySettings[request.profileID] ?? Self.defaultDiscoverySettings
+                if request.hasActivityStatus { settings.activityStatus = request.activityStatus }
+                if request.hasReadReceipts { settings.readReceipts = request.readReceipts }
+                if request.hasByPhone { settings.byPhone = request.byPhone }
+                if request.hasByEmail { settings.byEmail = request.byEmail }
+                if request.hasByHandleSearch { settings.byHandleSearch = request.byHandleSearch }
+                if request.hasByQr { settings.byQr = request.byQr }
+                if request.hasInSuggestions { settings.inSuggestions = request.inSuggestions }
+                discoverySettings[request.profileID] = settings
+            }
+            var response = Profile_V1_CommandResponse()
+            response.success = true
+            return .success(response)
+        }
         bff.register(path: "/profile.v1.ProfileService/SetVisibility") { [self] (request: Profile_V1_SetVisibilityRequest) in
             setVisibility(request)
         }
@@ -283,6 +303,23 @@ public final class MockSocialServices: @unchecked Sendable {
         default: nil
         }
         return days.map { Int64((Date().timeIntervalSince1970 - $0 * 86_400) * 1_000) }
+    }
+
+    static let defaultDiscoverySettings: Profile_V1_DiscoverySettings = {
+        var settings = Profile_V1_DiscoverySettings()
+        settings.activityStatus = true
+        settings.readReceipts = true
+        settings.byPhone = true
+        settings.byEmail = true
+        settings.byHandleSearch = true
+        settings.byQr = true
+        settings.inSuggestions = true
+        return settings
+    }()
+
+    /// Whether search may show `profileID` (backend #726: `discoverable`).
+    public func isFindableInSearch(_ profileID: String) -> Bool {
+        (lock.withLock { discoverySettings[profileID] } ?? Self.defaultDiscoverySettings).byHandleSearch
     }
 
     static let defaultInteractionSettings: Profile_V1_InteractionSettings = {
@@ -464,6 +501,8 @@ public final class MockSocialServices: @unchecked Sendable {
                 return proto
             }
             view.visibility = lock.withLock { visibilityOverrides[view.profileID] } ?? .public
+            // Owner-only on the fleet; the viewer's own view here.
+            view.discoverySettings = lock.withLock { discoverySettings[view.profileID] } ?? Self.defaultDiscoverySettings
             view.interactionSettings = storedInteractionSettings(for: view.profileID)
             // Owner-only on the fleet; the viewer's own view here.
             view.feedSettings = lock.withLock { feedSettings[view.profileID] } ?? {

@@ -296,6 +296,9 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                                 { ListPrivacyViewController(manager: lists) }
                                             },
                                             makeDataTransparency: { DataTransparencyViewController() },
+                                            makeActivityDiscovery: (repository as? any ActivityDiscoveryManaging).map { manager in
+                                                { ActivityDiscoveryViewController(manager: manager) }
+                                            },
                                             imagePipeline: imagePipeline
                                         )
                                     }

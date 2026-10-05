@@ -73,7 +73,12 @@ public struct MockBackend: Sendable {
         MockCounterService(store: counterStore).register(on: bff)
         MockMediaService(store: blobStore).register(on: bff)
         MockPostAuthoringService(store: postStore).register(on: bff)
-        MockSearchService(dataset: dataset, counters: counterStore).register(on: bff)
+        // A profile whose owner turned off "Show Up in Search" is left out (#412).
+        MockSearchService(
+            dataset: dataset,
+            counters: counterStore,
+            isFindable: { socialServices.isFindableInSearch($0) }
+        ).register(on: bff)
         MockNotificationService(dataset: dataset).register(on: bff)
         // Comments matching a post owner's hidden words are dropped (#404),
         // and one outside the owner's "Who Can Comment" is refused (#397).
