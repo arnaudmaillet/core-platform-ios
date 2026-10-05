@@ -73,9 +73,31 @@ struct CountryUnlockHeaderTests {
         let posts = frame(of: try stat("Posts", in: header), in: header)
         #expect(abs(title.minY - flag.minY) < 0.5, "the name is not level with the flag's top")
         #expect(abs(likes.maxY - flag.maxY) < 0.5, "the counters are not level with the flag's foot")
-        #expect(abs(likes.minX - title.minX) < 0.5, "the counters are not leading under the name")
         #expect(likes.maxX < posts.minX)
-        #expect(posts.maxX < Self.width - 100, "the counters drifted to the trailing edge")
+    }
+
+    /// The counters' row is cut into four equal parts across the column:
+    /// Likes centred in the first, Posts in the second, the last two free.
+    @Test func theCountersStandInTheFirstTwoOfFourEqualParts() throws {
+        let header = try layOut("ES")
+        let title = frame(of: try title(in: header), in: header)
+        let parts = Self.descendants(of: header)
+            .filter { $0.accessibilityIdentifier == "country.unlock.counterPart" }
+            .map { frame(of: $0, in: header) }
+            .sorted { $0.minX < $1.minX }
+        try #require(parts.count == 4)
+        let quarter = (Self.width - title.minX) / 4
+        for (index, part) in parts.enumerated() {
+            #expect(abs(part.width - quarter) < 0.5, "part \(index) is not a quarter")
+            #expect(abs(part.minX - (title.minX + CGFloat(index) * quarter)) < 0.5, "part \(index) is out of place")
+        }
+        let likes = frame(of: try stat("Likes", in: header), in: header)
+        let posts = frame(of: try stat("Posts", in: header), in: header)
+        #expect(abs(likes.midX - parts[0].midX) < 0.5, "Likes is not centred in the first part")
+        #expect(abs(posts.midX - parts[1].midX) < 0.5, "Posts is not centred in the second part")
+        #expect(Self.descendants(of: header).filter { $0 is CountryStatView }.allSatisfy {
+            frame(of: $0, in: header).maxX <= parts[1].maxX
+        }, "a counter stands in the free parts")
     }
 
     /// The profile's columns: the figure over its word — "Likes", not a heart.

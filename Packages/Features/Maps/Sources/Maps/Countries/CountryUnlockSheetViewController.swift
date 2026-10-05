@@ -9,8 +9,8 @@ import CoreNavigation
 ///  ┌──────────────────────────────────────┐
 ///  │ ▔▔                                   │
 ///  │ ╭────╮ Spain  Europe                │
-///  │ │ 🇪🇸 │ 12K      86                  │
-///  │ ╰──#4╯ Likes    Posts               │
+///  │ │ 🇪🇸 │  12K    86                   │
+///  │ ╰──#4╯ Likes  Posts   ·      ·      │
 ///  │  Unlock Spain to see its posts on    │
 ///  │  your map.                           │
 ///  │ [ ◆ Unlock · 50 ]                    │
@@ -227,6 +227,9 @@ final class CountryUnlockSheetViewController: UIViewController {
     static let flagSide: CGFloat = 96
     /// The flag's Dynamic-Type ceiling — the avatar's.
     static let flagMaxSide: CGFloat = 110
+    /// The equal parts the counters' row is cut into; the counters fill the
+    /// first ones, in order.
+    static let counterParts = 4
 
     /// The profile's identity row (`ProfileHeaderView`): the flag where the
     /// avatar stands, with the rank in a bubble over its bottom-trailing edge,
@@ -254,14 +257,33 @@ final class CountryUnlockSheetViewController: UIViewController {
 
         let title = CountryTitleLabel(name: country.name, continent: country.continent)
 
-        let counters = UIStackView(arrangedSubviews: [
+        // FOUR EQUAL PARTS across the column, each counter centred in its
+        // own: Likes in the first, Posts in the second, the last two kept
+        // free — so the columns stand where four would, whatever their
+        // figures' widths.
+        let stats = [
             CountryStatView(value: standing.map { CountryStanding.compact($0.likes) } ?? "—", caption: "Likes"),
             CountryStatView(value: standing.map { "\($0.posts)" } ?? "—",
                             caption: standing?.posts == 1 ? "Post" : "Posts"),
-            UIView(),
-        ])
-        counters.alignment = .center
-        counters.spacing = Spacing.xl
+        ]
+        let parts = (0..<Self.counterParts).map { index in
+            let part = UIView()
+            part.accessibilityIdentifier = "country.unlock.counterPart"
+            guard index < stats.count else { return part }
+            let stat = stats[index]
+            stat.translatesAutoresizingMaskIntoConstraints = false
+            part.addSubview(stat)
+            NSLayoutConstraint.activate([
+                stat.topAnchor.constraint(equalTo: part.topAnchor),
+                stat.bottomAnchor.constraint(equalTo: part.bottomAnchor),
+                stat.centerXAnchor.constraint(equalTo: part.centerXAnchor),
+                stat.leadingAnchor.constraint(greaterThanOrEqualTo: part.leadingAnchor),
+            ])
+            return part
+        }
+        let counters = UIStackView(arrangedSubviews: parts)
+        counters.alignment = .fill
+        counters.distribution = .fillEqually
 
         // Two halves, pushed apart — the profile's.
         let titleHalf = UIView()
