@@ -57,10 +57,49 @@ final class GuestModeUITests: XCTestCase {
     }
 
     /// The whole loop: a guest reads a post and its comments, likes it (the
-    /// rail's like stakes a point), signs in from the sheet with the mock's
-    /// credentials — and is still on that post, with the like landed.
+    /// rail's like stakes a point), signs in from the sheet with a code sent
+    /// to the mock's demo address — and is still on that post, with the like
+    /// landed.
     func testAGuestsLikeLandsAfterSigningInFromTheSheet() {
         let app = launch(["-open-post", "post-0001"])
+        let (like, before, prompt) = likeAsGuest(in: app)
+
+        continueWithEmail("demo@example.com", code: "123456", in: app)
+
+        XCTAssertTrue(prompt.waitForNonExistence(timeout: 15), "signing in did not close the sheet")
+        assertLikeLanded(like, before: before, in: app)
+    }
+
+    /// A new address signs up from the sheet — code, birthday, consent,
+    /// username — and the like the guest started lands on the post they were
+    /// reading (#444).
+    func testAGuestSignsUpByCodeAndTheirLikeLands() {
+        let app = launch(["-open-post", "post-0001"])
+        let (like, before, prompt) = likeAsGuest(in: app)
+
+        continueWithEmail("new.guest@example.com", code: "123456", in: app)
+        let birthday = app.buttons["Continue"]
+        XCTAssertTrue(app.staticTexts["When\u{2019}s Your Birthday?"].waitForExistence(timeout: 10), "no birthday step")
+        birthday.tap()
+        let agree = app.buttons["Agree and Continue"]
+        XCTAssertTrue(agree.waitForExistence(timeout: 8), "no consent step")
+        agree.tap()
+        let handle = app.textFields["signup.handle"]
+        XCTAssertTrue(handle.waitForExistence(timeout: 10), "no username step")
+        handle.typeText("new.guest")
+        XCTAssertTrue(staticText(beginningWith: "@new.guest is available", in: app).waitForExistence(timeout: 8),
+                      "the username was never checked")
+        app.buttons["Create Account"].tap()
+
+        XCTAssertTrue(prompt.waitForNonExistence(timeout: 15), "signing up did not close the sheet")
+        assertLikeLanded(like, before: before, in: app)
+    }
+
+    // MARK: Steps
+
+    /// Opens the post's sign-up sheet by liking it as a guest: the like
+    /// button, its value before, and the sheet's headline.
+    private func likeAsGuest(in app: XCUIApplication) -> (XCUIElement, String?, XCUIElement) {
         let like = app.buttons["Boost post"]
         XCTAssertTrue(like.waitForExistence(timeout: 25), "the post never showed its like button")
         // The comments are readable; writing one is what needs an account.
@@ -71,37 +110,35 @@ final class GuestModeUITests: XCTestCase {
             "the comment field does not invite the guest to sign up"
         )
         let before = like.value as? String
-
         like.tap()
         // The welcome gift is named on a like (report §3.2).
         let prompt = staticText(beginningWith: "Sign up to use your", in: app)
         XCTAssertTrue(prompt.waitForExistence(timeout: 8), "like did not ask the guest to sign up")
+        return (like, before, prompt)
+    }
 
-        // "Login with Email" today, "Continue with email" once #467 lands. A
-        // method is a list row, so it is matched at any type.
+    /// "Continue with email": the address, then the six digits (the step
+    /// submits on the sixth). A method is a list row, so it is matched at any
+    /// type.
+    private func continueWithEmail(_ address: String, code: String, in app: XCUIApplication) {
         let email = app.descendants(matching: .any)
             .matching(NSPredicate(format: "label CONTAINS[c] 'with email'")).firstMatch
         XCTAssertTrue(email.waitForExistence(timeout: 5), "the sheet offers no email sign-in")
         email.tap()
+        let field = app.textFields["signup.email"]
+        XCTAssertTrue(field.waitForExistence(timeout: 8), "the email step never appeared")
+        // Return is the step's Go: it sends the code.
+        field.typeText("\(address)\n")
+        let codeField = app.textFields["signup.code"]
+        XCTAssertTrue(codeField.waitForExistence(timeout: 10), "the code step never appeared")
+        codeField.typeText(code)
+    }
 
-        let identifier = app.textFields.matching(NSPredicate(format: "placeholderValue == 'Email'")).firstMatch
-        XCTAssertTrue(identifier.waitForExistence(timeout: 8), "the email screen never appeared")
-        identifier.tap()
-        identifier.typeText("demo")
-        let password = app.secureTextFields.matching(NSPredicate(format: "placeholderValue == 'Password'")).firstMatch
-        password.tap()
-        // Return is the form's Go: it submits.
-        password.typeText("password123\n")
-
-        XCTAssertTrue(prompt.waitForNonExistence(timeout: 15), "signing in did not close the sheet")
-        // The replayed like stakes one more point on the post.
+    /// The replayed like stakes one more point on the post, and the viewer is
+    /// still on it, pushed where they were: its rail and its back button.
+    private func assertLikeLanded(_ like: XCUIElement, before: String?, in app: XCUIApplication) {
         let landed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value != %@", before ?? ""), object: like)
         XCTAssertEqual(XCTWaiter.wait(for: [landed], timeout: 10), .completed, "the like did not land")
-        // iOS offers to save the password over the app (an AutoFill panel in
-        // SpringBoard's process, not the app's): decline it when it shows.
-        let notNow = XCUIApplication(bundleIdentifier: "com.apple.springboard").buttons["Not Now"]
-        if notNow.waitForExistence(timeout: 3) { notNow.tap() }
-        // Still on the post, pushed where it was: its rail and its back button.
         XCTAssertTrue(like.exists, "signing in moved the viewer off the post")
         XCTAssertTrue(app.buttons["BackButton"].exists, "signing in reset the post's stack")
     }
