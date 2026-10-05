@@ -593,6 +593,7 @@ final class PostDetailViewController: UIViewController {
         captionLabel.adjustsFontForContentSizeCategory = true
         captionLabel.textColor = .label
         captionLabel.numberOfLines = 0
+        captionLabel.textEntityStyle = .link
 
         mediaView.clipsToBounds = true
         mediaView.layer.cornerRadius = 12

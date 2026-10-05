@@ -748,7 +748,13 @@ final class SnapChromeView: UIView {
     /// sees the final line, and Case C's bisection — which counts graphemes —
     /// can never cut an emote in half.
     static func composedCaption(_ caption: String, timestamp: String?, width: CGFloat) -> NSAttributedString {
-        let captionString = EmoteText.attributedString(caption, attributes: captionAttributes(secondary: false))
+        let marked = NSMutableAttributedString(
+            attributedString: EmoteText.attributedString(caption, attributes: captionAttributes(secondary: false))
+        )
+        // `@handle`s and `#tag`s in semibold, white like the rest over the
+        // media (#524) — before anything is measured.
+        marked.applyTextEntityStyle(.emphasis)
+        let captionString: NSAttributedString = marked
         guard let timestamp, !timestamp.isEmpty, width > 0 else { return captionString }
 
         let timestampString = NSAttributedString(string: timestamp, attributes: captionAttributes(secondary: true))

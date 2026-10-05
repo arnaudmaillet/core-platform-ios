@@ -78,8 +78,23 @@ open class EmoteLabel: UILabel {
 
     // MARK: - Text
 
+    /// `@handle`s and `#tag`s in plain `text` are marked and styled (#524).
+    /// Nil, the default: they stay plain text.
+    public var textEntityStyle: TextEntityStyle? {
+        didSet {
+            guard textEntityStyle != oldValue, let current = entitySource ?? super.text else { return }
+            text = current
+        }
+    }
+
+    /// The plain text behind attributed text this label built for its
+    /// entities: rebuilt when the font or the colour changes, which `UILabel`
+    /// would otherwise apply over the whole string, entities included.
+    private var entitySource: String?
+
     /// Sets plain `text`, drawn in the label's current font, colour and
-    /// alignment, with its emotes marked (`:code:`s replaced).
+    /// alignment, with its emotes marked (`:code:`s replaced) and, with a
+    /// `textEntityStyle`, its `@handle`s and `#tag`s styled.
     public func setEmoteText(_ text: String?) {
         guard let text else {
             attributedText = nil
@@ -90,16 +105,25 @@ open class EmoteLabel: UILabel {
         // the label's own `lineBreakMode` already governs its last line.
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = textAlignment
-        attributedText = EmoteText.attributedString(text, attributes: [
+        let built = EmoteText.attributedString(text, attributes: [
             .font: font ?? UIFont.appFont(forTextStyle: .body),
             .foregroundColor: textColor ?? UIColor.label,
             .paragraphStyle: paragraph
         ], catalog: engine.catalog)
+        guard let textEntityStyle else {
+            attributedText = built
+            return
+        }
+        let styled = NSMutableAttributedString(attributedString: built)
+        styled.applyTextEntityStyle(textEntityStyle)
+        attributedText = styled
+        entitySource = text
     }
 
     override open var attributedText: NSAttributedString? {
         get { super.attributedText }
         set {
+            entitySource = nil
             super.attributedText = newValue
             textDidChange()
         }
@@ -116,6 +140,11 @@ open class EmoteLabel: UILabel {
                 setEmoteText(newValue)
                 return
             }
+            if let newValue, textEntityStyle != nil, !TextEntityScanner.entities(in: newValue).isEmpty {
+                setEmoteText(newValue)
+                return
+            }
+            entitySource = nil
             super.text = newValue
             textDidChange()
         }
@@ -124,7 +153,20 @@ open class EmoteLabel: UILabel {
     /// `UILabel` re-applies a new font (Dynamic Type included) across its
     /// attributed text; the marks survive, the layout does not.
     override open var font: UIFont! {
-        didSet { layoutDidChange() }
+        didSet {
+            if let entitySource {
+                setEmoteText(entitySource)
+            }
+            layoutDidChange()
+        }
+    }
+
+    override open var textColor: UIColor! {
+        didSet {
+            if let entitySource {
+                setEmoteText(entitySource)
+            }
+        }
     }
 
     override open var numberOfLines: Int {

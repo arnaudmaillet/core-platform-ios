@@ -724,7 +724,10 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// a `:code:` is already the one glyph it draws as, so every measurement
     /// below sees the final line.
     private static func plain(_ text: String, font: UIFont?) -> NSAttributedString {
-        EmoteText.attributedString(text, attributes: attributes(font: font))
+        let caption = NSMutableAttributedString(attributedString: EmoteText.attributedString(text, attributes: attributes(font: font)))
+        // `@handle`s and `#tag`s (#524), before anything is measured.
+        caption.applyTextEntityStyle(.link)
+        return caption
     }
 
     private static func attributes(font: UIFont?) -> [NSAttributedString.Key: Any] {
