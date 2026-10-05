@@ -23,6 +23,12 @@ public final class MockSocialServices: @unchecked Sendable {
     /// `SetVisibility` writes, by profile. Only the viewer's account's
     /// profiles can be changed; others keep their seeded flag.
     private var visibilityOverrides: [String: Profile_V1_ProfileVisibility] = [:]
+    /// `SetAccountType` writes, by profile (backend #734): the kind, and a
+    /// business's public contact card. prof-6 is seeded a creator so the
+    /// header's type can be seen without setup.
+    private var accountTypes: [String: (kind: Profile_V1_ProfileKind, business: Profile_V1_BusinessInfo?)] = [
+        "prof-6": (.professional, nil)
+    ]
     /// `SetLocationSettings` writes, by profile (backend #717); absent is
     /// not ghosted, precise. Stored only: the viewer is always the reader
     /// here, and the author's own reads are never filtered.
@@ -203,6 +209,22 @@ public final class MockSocialServices: @unchecked Sendable {
             response.success = true
             return .success(response)
         }
+        bff.register(path: "/profile.v1.ProfileService/SetAccountType") { [self] (request: Profile_V1_SetAccountTypeRequest) -> Result<Profile_V1_CommandResponse, ConnectError> in
+            guard request.kind != .bot, request.kind != .unspecified else {
+                return .failure(ConnectError(code: .invalidArgument, message: "PRF-9001: choose personal, professional or brand"))
+            }
+            if request.kind == .brand {
+                let category = request.business.category.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !category.isEmpty, category.count <= 64 else {
+                    return .failure(ConnectError(code: .invalidArgument, message: "PRF-9001: a brand needs a category of 1 to 64 characters"))
+                }
+            }
+            // The card exists only for a brand; switching away drops it.
+            lock.withLock { accountTypes[request.profileID] = (request.kind, request.kind == .brand ? request.business : nil) }
+            var response = Profile_V1_CommandResponse()
+            response.success = true
+            return .success(response)
+        }
         bff.register(path: "/profile.v1.ProfileService/SetVisibility") { [self] (request: Profile_V1_SetVisibilityRequest) in
             setVisibility(request)
         }
@@ -330,6 +352,13 @@ public final class MockSocialServices: @unchecked Sendable {
     /// Whether search may show `profileID` (backend #726: `discoverable`).
     public func isFindableInSearch(_ profileID: String) -> Bool {
         (lock.withLock { discoverySettings[profileID] } ?? Self.defaultDiscoverySettings).byHandleSearch
+    }
+
+    /// The kind and card on any profile view: public, unlike the settings.
+    private func applyAccountType(to view: inout Profile_V1_ProfileView) {
+        let stored = lock.withLock { accountTypes[view.profileID] }
+        view.profileKind = stored?.kind ?? .personal
+        if let business = stored?.business { view.businessInfo = business }
     }
 
     static let defaultInteractionSettings: Profile_V1_InteractionSettings = {
@@ -511,6 +540,7 @@ public final class MockSocialServices: @unchecked Sendable {
                 return proto
             }
             view.visibility = lock.withLock { visibilityOverrides[view.profileID] } ?? .public
+            applyAccountType(to: &view)
             if let location = lock.withLock({ locationSettings[view.profileID] }) { view.locationSettings = location }
             // Owner-only on the fleet; the viewer's own view here.
             view.discoverySettings = lock.withLock { discoverySettings[view.profileID] } ?? Self.defaultDiscoverySettings
@@ -543,6 +573,7 @@ public final class MockSocialServices: @unchecked Sendable {
         // is standing in for.
         view.visibility = lock.withLock { visibilityOverrides[author.profileID] }
             ?? (dataset.isRelationshipsPrivate(author.profileID) ? .private : .public)
+        applyAccountType(to: &view)
         // Public on the view, so others can show "comments limited".
         view.interactionSettings = storedInteractionSettings(for: author.profileID)
         // The viewer's other profiles answer here too.

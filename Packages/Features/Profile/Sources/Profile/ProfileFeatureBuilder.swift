@@ -160,6 +160,13 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                     viewModel: EditProfileViewModel(repository: repository, seed: profile, onSaved: onSaved),
                     imagePipeline: imagePipeline
                 )
+                if let types = repository as? any AccountTypeManaging {
+                    editor.onOpenAccountType = { [weak editor] in
+                        editor?.navigationController?.pushViewController(
+                            AccountTypeViewController(manager: types), animated: true
+                        )
+                    }
+                }
                 if let lists = repository as? any ListPrivacyManaging {
                     editor.onOpenPrivacy = { [weak editor] in
                         editor?.navigationController?.pushViewController(

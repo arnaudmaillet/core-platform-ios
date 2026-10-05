@@ -8,6 +8,9 @@ public struct ProfileDisplayModel: Equatable, Sendable {
     public let id: ProfileID
     /// "@handle" with the sigil applied once, here.
     public let handle: String
+    /// The handle line as the header draws it: "@ada · Creator", or a
+    /// business's category ("@bakery · Bakery"); the bare handle otherwise.
+    public let handleLine: String
     public let displayName: String
     public let bio: String
     public let hasBio: Bool
@@ -37,6 +40,7 @@ public struct ProfileDisplayModel: Equatable, Sendable {
     public init(profile: UserProfile) {
         id = profile.id
         handle = "@" + profile.handle
+        handleLine = Self.handleLine(handle: "@" + profile.handle, type: profile.accountType, category: profile.businessCategory)
         displayName = profile.displayName
         bio = profile.bio
         hasBio = !profile.bio.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -49,6 +53,14 @@ public struct ProfileDisplayModel: Equatable, Sendable {
         bannerImageURL = profile.avatarURL
         websiteText = Self.websiteDisplay(profile.websiteURL)
         websiteURL = profile.websiteURL
+    }
+
+    static func handleLine(handle: String, type: AccountType, category: String?) -> String {
+        switch type {
+        case .creator: handle + " · " + AccountType.creator.title
+        case .business: handle + " · " + (category ?? AccountType.business.title)
+        case .personal, .bot: handle
+        }
     }
 
     /// "https://www.ada.dev/notes/" → "ada.dev/notes".

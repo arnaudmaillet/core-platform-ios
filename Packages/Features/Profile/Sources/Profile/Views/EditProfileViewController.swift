@@ -28,6 +28,8 @@ final class EditProfileViewController: UIViewController {
     /// controller doesn't own the navigation stack it sits in, and the
     /// composition root is what knows how the privacy store is built.
     var onOpenPrivacy: (() -> Void)?
+    /// Pushes Account Type (#415); nil hides the row.
+    var onOpenAccountType: (() -> Void)?
 
     private enum Section: Int, CaseIterable {
         case hero, identity, links, privacy
@@ -55,6 +57,8 @@ final class EditProfileViewController: UIViewController {
         /// Pushes the privacy screen. Not a `field`: it edits nothing on the
         /// profile being saved here, it navigates.
         case privacy
+        /// Pushes Account Type; navigates like `privacy`.
+        case accountType
         // Shimmer placeholders shown while the profile loads. They ride the same
         // sections + list layout as the real items, so the skeleton mirrors the
         // grouped geometry exactly; `rowSkeleton`'s index only varies the value
@@ -137,6 +141,14 @@ final class EditProfileViewController: UIViewController {
             cell.accessories = [.disclosureIndicator()]
         }
 
+        let accountTypeRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { cell, _, _ in
+            var content = UIListContentConfiguration.valueCell()
+            content.text = "Account Type"
+            content.image = UIImage(systemName: "briefcase")
+            cell.contentConfiguration = content
+            cell.accessories = [.disclosureIndicator()]
+        }
+
         let heroSkeletonRegistration = UICollectionView.CellRegistration<EditProfileHeroSkeletonCell, Item> { _, _, _ in }
 
         let rowSkeletonRegistration = UICollectionView.CellRegistration<EditProfileSkeletonRowCell, Int> { cell, _, index in
@@ -151,6 +163,8 @@ final class EditProfileViewController: UIViewController {
                 return collectionView.dequeueConfiguredReusableCell(using: fieldRegistration, for: indexPath, item: field)
             case .privacy:
                 return collectionView.dequeueConfiguredReusableCell(using: privacyRegistration, for: indexPath, item: item)
+            case .accountType:
+                return collectionView.dequeueConfiguredReusableCell(using: accountTypeRegistration, for: indexPath, item: item)
             case .heroSkeleton:
                 return collectionView.dequeueConfiguredReusableCell(using: heroSkeletonRegistration, for: indexPath, item: item)
             case .rowSkeleton(let index):
@@ -203,7 +217,7 @@ final class EditProfileViewController: UIViewController {
         snapshot.appendItems([.hero], toSection: .hero)
         snapshot.appendItems([.field(.name), .field(.username), .field(.bio), .field(.website)], toSection: .identity)
         snapshot.appendItems([.field(.links)], toSection: .links)
-        snapshot.appendItems([.privacy], toSection: .privacy)
+        snapshot.appendItems([.privacy] + (onOpenAccountType == nil ? [] : [.accountType]), toSection: .privacy)
 
         guard isShowingSkeleton else {
             dataSource.apply(snapshot, animatingDifferences: false)
@@ -411,6 +425,7 @@ extension EditProfileViewController: UICollectionViewDelegate {
         switch dataSource.itemIdentifier(for: indexPath) {
         case .field(let field): edit(field)
         case .privacy: onOpenPrivacy?()
+        case .accountType: onOpenAccountType?()
         default: break
         }
     }
