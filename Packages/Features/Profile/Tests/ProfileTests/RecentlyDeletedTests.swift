@@ -109,6 +109,22 @@ struct RecentlyDeletedTests {
         #expect(viewModel.phase == .loaded([]))
     }
 
+    /// A window that crosses the end of daylight saving still starts at 30
+    /// days: Paris, deleted at 00:30 on 6 October, the clocks go back on
+    /// 25 October.
+    @Test func theWindowSurvivesTheClockChange() throws {
+        var paris = Calendar(identifier: .gregorian)
+        paris.timeZone = try #require(TimeZone(identifier: "Europe/Paris"))
+        let deletedAt = try #require(paris.date(from: DateComponents(year: 2026, month: 10, day: 6, hour: 0, minute: 30)))
+        let text = GalleryPost(id: PostID("p"), kind: .text, isRepost: false, thumbnailURL: nil, caption: "", publishedAtMS: 0)
+        let deleted = DeletedPost(post: text, deletedAt: deletedAt)
+        #expect(deleted.daysLeft(now: deletedAt, calendar: paris) == 30)
+        #expect(deleted.daysLeft(now: deletedAt.addingTimeInterval(29 * 86_400), calendar: paris) == 1)
+        // And the other way, into daylight saving (29 March 2026).
+        let spring = try #require(paris.date(from: DateComponents(year: 2026, month: 3, day: 20, hour: 23, minute: 30)))
+        #expect(DeletedPost(post: text, deletedAt: spring).daysLeft(now: spring, calendar: paris) == 30)
+    }
+
     @Test func theRowsReadPlainly() {
         let day = Date(timeIntervalSince1970: 1_800_000_000)
         let calendar = Calendar(identifier: .gregorian)
