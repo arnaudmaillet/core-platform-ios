@@ -23,6 +23,13 @@ public protocol Post_V1_PostServiceClientInterface: Sendable {
     @available(iOS 13, *)
     func `deletePost`(request: Post_V1_DeletePostRequest, headers: Connect.Headers) async -> ResponseMessage<Post_V1_CommandResponse>
 
+    /// "Recently deleted" (#663): restore within 30 days, and the list.
+    @available(iOS 13, *)
+    func `restorePost`(request: Post_V1_RestorePostRequest, headers: Connect.Headers) async -> ResponseMessage<Post_V1_CommandResponse>
+
+    @available(iOS 13, *)
+    func `listRecentlyDeleted`(request: Post_V1_ListRecentlyDeletedRequest, headers: Connect.Headers) async -> ResponseMessage<Post_V1_ListRecentlyDeletedResponse>
+
     @available(iOS 13, *)
     func `getPost`(request: Post_V1_GetPostRequest, headers: Connect.Headers) async -> ResponseMessage<Post_V1_PostView>
 
@@ -59,6 +66,16 @@ public final class Post_V1_PostServiceClient: Post_V1_PostServiceClientInterface
     }
 
     @available(iOS 13, *)
+    public func `restorePost`(request: Post_V1_RestorePostRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Post_V1_CommandResponse> {
+        return await self.client.unary(path: "/post.v1.PostService/RestorePost", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `listRecentlyDeleted`(request: Post_V1_ListRecentlyDeletedRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Post_V1_ListRecentlyDeletedResponse> {
+        return await self.client.unary(path: "/post.v1.PostService/ListRecentlyDeleted", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
     public func `getPost`(request: Post_V1_GetPostRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Post_V1_PostView> {
         return await self.client.unary(path: "/post.v1.PostService/GetPost", idempotencyLevel: .unknown, request: request, headers: headers)
     }
@@ -74,6 +91,8 @@ public final class Post_V1_PostServiceClient: Post_V1_PostServiceClientInterface
             public static let publishPost = Connect.MethodSpec(name: "PublishPost", service: "post.v1.PostService", type: .unary)
             public static let updatePost = Connect.MethodSpec(name: "UpdatePost", service: "post.v1.PostService", type: .unary)
             public static let deletePost = Connect.MethodSpec(name: "DeletePost", service: "post.v1.PostService", type: .unary)
+            public static let restorePost = Connect.MethodSpec(name: "RestorePost", service: "post.v1.PostService", type: .unary)
+            public static let listRecentlyDeleted = Connect.MethodSpec(name: "ListRecentlyDeleted", service: "post.v1.PostService", type: .unary)
             public static let getPost = Connect.MethodSpec(name: "GetPost", service: "post.v1.PostService", type: .unary)
             public static let listPostsByProfile = Connect.MethodSpec(name: "ListPostsByProfile", service: "post.v1.PostService", type: .unary)
         }

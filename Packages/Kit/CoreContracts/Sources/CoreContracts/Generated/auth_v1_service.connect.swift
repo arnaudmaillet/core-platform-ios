@@ -40,6 +40,19 @@ public protocol Auth_V1_AuthServiceClientInterface: Sendable {
     @available(iOS 13, *)
     func `refresh`(request: Auth_V1_RefreshRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_RefreshResponse>
 
+    /// Creates an account from a native Sign in with Apple / Google id_token,
+    /// with the date of birth, the consent and the home country, and opens a
+    /// member session (edge: public). Returns `existing_account` instead when
+    /// the identity, or its verified email, already has one.
+    @available(iOS 13, *)
+    func `signUp`(request: Auth_V1_SignUpRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_SignUpResponse>
+
+    /// Sends a one-time code to an email address or by SMS (edge: public), for a
+    /// passwordless SignUp or Login with `verification_code`. Rate-limited per
+    /// address / number (RESOURCE_EXHAUSTED with `retry-after-secs`).
+    @available(iOS 13, *)
+    func `startVerification`(request: Auth_V1_StartVerificationRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_StartVerificationResponse>
+
     /// Start an anonymous GUEST session for an app installation (guest mode:
     /// browse before sign-up). No account is created. The edge token carries
     /// sub = "guest:<guest_id>", kind = "guest", perms = ["read:public"], no
@@ -105,6 +118,16 @@ public final class Auth_V1_AuthServiceClient: Auth_V1_AuthServiceClientInterface
     }
 
     @available(iOS 13, *)
+    public func `signUp`(request: Auth_V1_SignUpRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Auth_V1_SignUpResponse> {
+        return await self.client.unary(path: "/auth.v1.AuthService/SignUp", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `startVerification`(request: Auth_V1_StartVerificationRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Auth_V1_StartVerificationResponse> {
+        return await self.client.unary(path: "/auth.v1.AuthService/StartVerification", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
     public func `startGuestSession`(request: Auth_V1_StartGuestSessionRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Auth_V1_StartGuestSessionResponse> {
         return await self.client.unary(path: "/auth.v1.AuthService/StartGuestSession", idempotencyLevel: .unknown, request: request, headers: headers)
     }
@@ -143,6 +166,8 @@ public final class Auth_V1_AuthServiceClient: Auth_V1_AuthServiceClientInterface
         public enum Methods {
             public static let login = Connect.MethodSpec(name: "Login", service: "auth.v1.AuthService", type: .unary)
             public static let refresh = Connect.MethodSpec(name: "Refresh", service: "auth.v1.AuthService", type: .unary)
+            public static let signUp = Connect.MethodSpec(name: "SignUp", service: "auth.v1.AuthService", type: .unary)
+            public static let startVerification = Connect.MethodSpec(name: "StartVerification", service: "auth.v1.AuthService", type: .unary)
             public static let startGuestSession = Connect.MethodSpec(name: "StartGuestSession", service: "auth.v1.AuthService", type: .unary)
             public static let logout = Connect.MethodSpec(name: "Logout", service: "auth.v1.AuthService", type: .unary)
             public static let logoutAllSessions = Connect.MethodSpec(name: "LogoutAllSessions", service: "auth.v1.AuthService", type: .unary)

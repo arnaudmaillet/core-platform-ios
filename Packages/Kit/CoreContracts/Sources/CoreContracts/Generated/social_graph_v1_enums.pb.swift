@@ -48,6 +48,9 @@ public nonisolated enum SocialGraph_V1_RelationStatus: SwiftProtobuf.Enum, Swift
 
   /// Target has blocked actor. No follow is possible in either direction.
   case blockedBy // = 6
+
+  /// Actor asked to follow target (a private profile); awaiting the owner.
+  case requested // = 7
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -63,6 +66,7 @@ public nonisolated enum SocialGraph_V1_RelationStatus: SwiftProtobuf.Enum, Swift
     case 4: self = .mutual
     case 5: self = .blocking
     case 6: self = .blockedBy
+    case 7: self = .requested
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -76,6 +80,7 @@ public nonisolated enum SocialGraph_V1_RelationStatus: SwiftProtobuf.Enum, Swift
     case .mutual: return 4
     case .blocking: return 5
     case .blockedBy: return 6
+    case .requested: return 7
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -89,6 +94,7 @@ public nonisolated enum SocialGraph_V1_RelationStatus: SwiftProtobuf.Enum, Swift
     .mutual,
     .blocking,
     .blockedBy,
+    .requested,
   ]
 
 }
@@ -142,12 +148,173 @@ public nonisolated enum SocialGraph_V1_ContentAccess: SwiftProtobuf.Enum, Swift.
 
 }
 
+/// An interaction a profile's owner controls (profile.v1 InteractionSettings).
+public nonisolated enum SocialGraph_V1_InteractionKind: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+
+  /// Commenting on the target's posts.
+  case comment // = 1
+
+  /// Mentioning or tagging the target.
+  case mention // = 2
+
+  /// Messaging the target directly.
+  case message // = 3
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .comment
+    case 2: self = .mention
+    case 3: self = .message
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .comment: return 1
+    case .mention: return 2
+    case .message: return 3
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [SocialGraph_V1_InteractionKind] = [
+    .unspecified,
+    .comment,
+    .mention,
+    .message,
+  ]
+
+}
+
+/// Who may see one of a profile's relationship lists (followers, following).
+public nonisolated enum SocialGraph_V1_ListAudience: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+
+  /// On a SetListPrivacy request: leave this list unchanged.
+  case unspecified // = 0
+  case everyone // = 1
+
+  /// Profiles that follow the owner.
+  case followers // = 2
+
+  /// Followers the owner follows back.
+  case mutuals // = 3
+
+  /// The owner alone.
+  case onlyMe // = 4
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .everyone
+    case 2: self = .followers
+    case 3: self = .mutuals
+    case 4: self = .onlyMe
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .everyone: return 1
+    case .followers: return 2
+    case .mutuals: return 3
+    case .onlyMe: return 4
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [SocialGraph_V1_ListAudience] = [
+    .unspecified,
+    .everyone,
+    .followers,
+    .mutuals,
+    .onlyMe,
+  ]
+
+}
+
+/// One kind of content a mute covers.
+public nonisolated enum SocialGraph_V1_MuteScope: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+
+  /// The muted profile's posts, in the muter's feeds.
+  case posts // = 1
+  case stories // = 2
+  case messages // = 3
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .posts
+    case 2: self = .stories
+    case 3: self = .messages
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .posts: return 1
+    case .stories: return 2
+    case .messages: return 3
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [SocialGraph_V1_MuteScope] = [
+    .unspecified,
+    .posts,
+    .stories,
+    .messages,
+  ]
+
+}
+
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 nonisolated extension SocialGraph_V1_RelationStatus: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0RELATION_STATUS_UNSPECIFIED\0\u{1}RELATION_STATUS_NONE\0\u{1}RELATION_STATUS_FOLLOWING\0\u{1}RELATION_STATUS_FOLLOWED_BY\0\u{1}RELATION_STATUS_MUTUAL\0\u{1}RELATION_STATUS_BLOCKING\0\u{1}RELATION_STATUS_BLOCKED_BY\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0RELATION_STATUS_UNSPECIFIED\0\u{1}RELATION_STATUS_NONE\0\u{1}RELATION_STATUS_FOLLOWING\0\u{1}RELATION_STATUS_FOLLOWED_BY\0\u{1}RELATION_STATUS_MUTUAL\0\u{1}RELATION_STATUS_BLOCKING\0\u{1}RELATION_STATUS_BLOCKED_BY\0\u{1}RELATION_STATUS_REQUESTED\0")
 }
 
 nonisolated extension SocialGraph_V1_ContentAccess: SwiftProtobuf._ProtoNameProviding {
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0CONTENT_ACCESS_UNSPECIFIED\0\u{1}CONTENT_ACCESS_VISIBLE\0\u{1}CONTENT_ACCESS_HEADER_ONLY\0\u{1}CONTENT_ACCESS_HIDDEN\0")
+}
+
+nonisolated extension SocialGraph_V1_InteractionKind: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0INTERACTION_KIND_UNSPECIFIED\0\u{1}INTERACTION_KIND_COMMENT\0\u{1}INTERACTION_KIND_MENTION\0\u{1}INTERACTION_KIND_MESSAGE\0")
+}
+
+nonisolated extension SocialGraph_V1_ListAudience: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0LIST_AUDIENCE_UNSPECIFIED\0\u{1}LIST_AUDIENCE_EVERYONE\0\u{1}LIST_AUDIENCE_FOLLOWERS\0\u{1}LIST_AUDIENCE_MUTUALS\0\u{1}LIST_AUDIENCE_ONLY_ME\0")
+}
+
+nonisolated extension SocialGraph_V1_MuteScope: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0MUTE_SCOPE_UNSPECIFIED\0\u{1}MUTE_SCOPE_POSTS\0\u{1}MUTE_SCOPE_STORIES\0\u{1}MUTE_SCOPE_MESSAGES\0")
 }

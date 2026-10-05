@@ -45,6 +45,58 @@ public protocol Profile_V1_ProfileServiceClientInterface: Sendable {
     @available(iOS 13, *)
     func `setVisibility`(request: Profile_V1_SetVisibilityRequest, headers: Connect.Headers) async -> ResponseMessage<Profile_V1_CommandResponse>
 
+    /// Who may comment / mention / message this profile, downloads, like counts.
+    @available(iOS 13, *)
+    func `setInteractionSettings`(request: Profile_V1_SetInteractionSettingsRequest, headers: Connect.Headers) async -> ResponseMessage<Profile_V1_CommandResponse>
+
+    /// A temporary interaction limit (#669): hold comments and messages from
+    /// non-followers / recent followers until a time (owner only).
+    @available(iOS 13, *)
+    func `setInteractionLimit`(request: Profile_V1_SetInteractionLimitRequest, headers: Connect.Headers) async -> ResponseMessage<Profile_V1_CommandResponse>
+
+    @available(iOS 13, *)
+    func `clearInteractionLimit`(request: Profile_V1_ClearInteractionLimitRequest, headers: Connect.Headers) async -> ResponseMessage<Profile_V1_CommandResponse>
+
+    /// Ghost mode and location precision (owner only).
+    @available(iOS 13, *)
+    func `setLocationSettings`(request: Profile_V1_SetLocationSettingsRequest, headers: Connect.Headers) async -> ResponseMessage<Profile_V1_CommandResponse>
+
+    /// Activity status, read receipts and how people can find this profile
+    /// (owner only).
+    @available(iOS 13, *)
+    func `setDiscoverySettings`(request: Profile_V1_SetDiscoverySettingsRequest, headers: Connect.Headers) async -> ResponseMessage<Profile_V1_CommandResponse>
+
+    /// Hidden words and the offensive-comment filter (owner only).
+    @available(iOS 13, *)
+    func `setCommentFilters`(request: Profile_V1_SetCommentFiltersRequest, headers: Connect.Headers) async -> ResponseMessage<Profile_V1_CommandResponse>
+
+    /// Post history window and tab visibility (owner only).
+    @available(iOS 13, *)
+    func `setTabSettings`(request: Profile_V1_SetTabSettingsRequest, headers: Connect.Headers) async -> ResponseMessage<Profile_V1_CommandResponse>
+
+    /// Feed controls: the sensitive-content level (owner only).
+    @available(iOS 13, *)
+    func `setFeedSettings`(request: Profile_V1_SetFeedSettingsRequest, headers: Connect.Headers) async -> ResponseMessage<Profile_V1_CommandResponse>
+
+    /// Account type: personal / professional (creator) / brand (business),
+    /// with a brand's public contact card (owner only).
+    @available(iOS 13, *)
+    func `setAccountType`(request: Profile_V1_SetAccountTypeRequest, headers: Connect.Headers) async -> ResponseMessage<Profile_V1_CommandResponse>
+
+    /// Verification requests: the owner asks and follows its status; staff
+    /// (mesh-only) list the pending ones and decide.
+    @available(iOS 13, *)
+    func `requestVerification`(request: Profile_V1_RequestVerificationRequest, headers: Connect.Headers) async -> ResponseMessage<Profile_V1_CommandResponse>
+
+    @available(iOS 13, *)
+    func `getVerificationRequest`(request: Profile_V1_GetVerificationRequestRequest, headers: Connect.Headers) async -> ResponseMessage<Profile_V1_GetVerificationRequestResponse>
+
+    @available(iOS 13, *)
+    func `listPendingVerificationRequests`(request: Profile_V1_ListPendingVerificationRequestsRequest, headers: Connect.Headers) async -> ResponseMessage<Profile_V1_ListPendingVerificationRequestsResponse>
+
+    @available(iOS 13, *)
+    func `decideVerificationRequest`(request: Profile_V1_DecideVerificationRequestRequest, headers: Connect.Headers) async -> ResponseMessage<Profile_V1_CommandResponse>
+
     /// Grant a platform verification badge (admin only).
     @available(iOS 13, *)
     func `verifyProfile`(request: Profile_V1_VerifyProfileRequest, headers: Connect.Headers) async -> ResponseMessage<Profile_V1_CommandResponse>
@@ -69,6 +121,13 @@ public protocol Profile_V1_ProfileServiceClientInterface: Sendable {
     /// Resolve a @handle to its full profile view (cache-aside, two hops).
     @available(iOS 13, *)
     func `getProfileByHandle`(request: Profile_V1_GetProfileByHandleRequest, headers: Connect.Headers) async -> ResponseMessage<Profile_V1_ProfileView>
+
+    /// Whether a @handle can be taken right now (sign-up's live check; guests
+    /// and members). Normalized like CreateProfile does (lower-cased); a taken
+    /// handle includes one released less than 30 days ago. Advisory: the claim at
+    /// CreateProfile is what reserves it.
+    @available(iOS 13, *)
+    func `checkHandleAvailability`(request: Profile_V1_CheckHandleAvailabilityRequest, headers: Connect.Headers) async -> ResponseMessage<Profile_V1_CheckHandleAvailabilityResponse>
 
     /// Paginated list of all profiles owned by an account.
     @available(iOS 13, *)
@@ -114,6 +173,71 @@ public final class Profile_V1_ProfileServiceClient: Profile_V1_ProfileServiceCli
     }
 
     @available(iOS 13, *)
+    public func `setInteractionSettings`(request: Profile_V1_SetInteractionSettingsRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Profile_V1_CommandResponse> {
+        return await self.client.unary(path: "/profile.v1.ProfileService/SetInteractionSettings", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `setInteractionLimit`(request: Profile_V1_SetInteractionLimitRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Profile_V1_CommandResponse> {
+        return await self.client.unary(path: "/profile.v1.ProfileService/SetInteractionLimit", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `clearInteractionLimit`(request: Profile_V1_ClearInteractionLimitRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Profile_V1_CommandResponse> {
+        return await self.client.unary(path: "/profile.v1.ProfileService/ClearInteractionLimit", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `setLocationSettings`(request: Profile_V1_SetLocationSettingsRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Profile_V1_CommandResponse> {
+        return await self.client.unary(path: "/profile.v1.ProfileService/SetLocationSettings", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `setDiscoverySettings`(request: Profile_V1_SetDiscoverySettingsRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Profile_V1_CommandResponse> {
+        return await self.client.unary(path: "/profile.v1.ProfileService/SetDiscoverySettings", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `setCommentFilters`(request: Profile_V1_SetCommentFiltersRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Profile_V1_CommandResponse> {
+        return await self.client.unary(path: "/profile.v1.ProfileService/SetCommentFilters", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `setTabSettings`(request: Profile_V1_SetTabSettingsRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Profile_V1_CommandResponse> {
+        return await self.client.unary(path: "/profile.v1.ProfileService/SetTabSettings", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `setFeedSettings`(request: Profile_V1_SetFeedSettingsRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Profile_V1_CommandResponse> {
+        return await self.client.unary(path: "/profile.v1.ProfileService/SetFeedSettings", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `setAccountType`(request: Profile_V1_SetAccountTypeRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Profile_V1_CommandResponse> {
+        return await self.client.unary(path: "/profile.v1.ProfileService/SetAccountType", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `requestVerification`(request: Profile_V1_RequestVerificationRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Profile_V1_CommandResponse> {
+        return await self.client.unary(path: "/profile.v1.ProfileService/RequestVerification", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `getVerificationRequest`(request: Profile_V1_GetVerificationRequestRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Profile_V1_GetVerificationRequestResponse> {
+        return await self.client.unary(path: "/profile.v1.ProfileService/GetVerificationRequest", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `listPendingVerificationRequests`(request: Profile_V1_ListPendingVerificationRequestsRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Profile_V1_ListPendingVerificationRequestsResponse> {
+        return await self.client.unary(path: "/profile.v1.ProfileService/ListPendingVerificationRequests", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `decideVerificationRequest`(request: Profile_V1_DecideVerificationRequestRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Profile_V1_CommandResponse> {
+        return await self.client.unary(path: "/profile.v1.ProfileService/DecideVerificationRequest", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
     public func `verifyProfile`(request: Profile_V1_VerifyProfileRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Profile_V1_CommandResponse> {
         return await self.client.unary(path: "/profile.v1.ProfileService/VerifyProfile", idempotencyLevel: .unknown, request: request, headers: headers)
     }
@@ -144,6 +268,11 @@ public final class Profile_V1_ProfileServiceClient: Profile_V1_ProfileServiceCli
     }
 
     @available(iOS 13, *)
+    public func `checkHandleAvailability`(request: Profile_V1_CheckHandleAvailabilityRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Profile_V1_CheckHandleAvailabilityResponse> {
+        return await self.client.unary(path: "/profile.v1.ProfileService/CheckHandleAvailability", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
     public func `listProfilesByAccount`(request: Profile_V1_ListProfilesByAccountRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Profile_V1_ListProfilesByAccountResponse> {
         return await self.client.unary(path: "/profile.v1.ProfileService/ListProfilesByAccount", idempotencyLevel: .unknown, request: request, headers: headers)
     }
@@ -156,12 +285,26 @@ public final class Profile_V1_ProfileServiceClient: Profile_V1_ProfileServiceCli
             public static let updateAvatar = Connect.MethodSpec(name: "UpdateAvatar", service: "profile.v1.ProfileService", type: .unary)
             public static let updateBanner = Connect.MethodSpec(name: "UpdateBanner", service: "profile.v1.ProfileService", type: .unary)
             public static let setVisibility = Connect.MethodSpec(name: "SetVisibility", service: "profile.v1.ProfileService", type: .unary)
+            public static let setInteractionSettings = Connect.MethodSpec(name: "SetInteractionSettings", service: "profile.v1.ProfileService", type: .unary)
+            public static let setInteractionLimit = Connect.MethodSpec(name: "SetInteractionLimit", service: "profile.v1.ProfileService", type: .unary)
+            public static let clearInteractionLimit = Connect.MethodSpec(name: "ClearInteractionLimit", service: "profile.v1.ProfileService", type: .unary)
+            public static let setLocationSettings = Connect.MethodSpec(name: "SetLocationSettings", service: "profile.v1.ProfileService", type: .unary)
+            public static let setDiscoverySettings = Connect.MethodSpec(name: "SetDiscoverySettings", service: "profile.v1.ProfileService", type: .unary)
+            public static let setCommentFilters = Connect.MethodSpec(name: "SetCommentFilters", service: "profile.v1.ProfileService", type: .unary)
+            public static let setTabSettings = Connect.MethodSpec(name: "SetTabSettings", service: "profile.v1.ProfileService", type: .unary)
+            public static let setFeedSettings = Connect.MethodSpec(name: "SetFeedSettings", service: "profile.v1.ProfileService", type: .unary)
+            public static let setAccountType = Connect.MethodSpec(name: "SetAccountType", service: "profile.v1.ProfileService", type: .unary)
+            public static let requestVerification = Connect.MethodSpec(name: "RequestVerification", service: "profile.v1.ProfileService", type: .unary)
+            public static let getVerificationRequest = Connect.MethodSpec(name: "GetVerificationRequest", service: "profile.v1.ProfileService", type: .unary)
+            public static let listPendingVerificationRequests = Connect.MethodSpec(name: "ListPendingVerificationRequests", service: "profile.v1.ProfileService", type: .unary)
+            public static let decideVerificationRequest = Connect.MethodSpec(name: "DecideVerificationRequest", service: "profile.v1.ProfileService", type: .unary)
             public static let verifyProfile = Connect.MethodSpec(name: "VerifyProfile", service: "profile.v1.ProfileService", type: .unary)
             public static let hideProfile = Connect.MethodSpec(name: "HideProfile", service: "profile.v1.ProfileService", type: .unary)
             public static let restoreProfile = Connect.MethodSpec(name: "RestoreProfile", service: "profile.v1.ProfileService", type: .unary)
             public static let deleteProfile = Connect.MethodSpec(name: "DeleteProfile", service: "profile.v1.ProfileService", type: .unary)
             public static let getProfileByID = Connect.MethodSpec(name: "GetProfileById", service: "profile.v1.ProfileService", type: .unary)
             public static let getProfileByHandle = Connect.MethodSpec(name: "GetProfileByHandle", service: "profile.v1.ProfileService", type: .unary)
+            public static let checkHandleAvailability = Connect.MethodSpec(name: "CheckHandleAvailability", service: "profile.v1.ProfileService", type: .unary)
             public static let listProfilesByAccount = Connect.MethodSpec(name: "ListProfilesByAccount", service: "profile.v1.ProfileService", type: .unary)
         }
     }

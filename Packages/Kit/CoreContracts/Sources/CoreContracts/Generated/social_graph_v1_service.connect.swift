@@ -21,20 +21,48 @@ import SwiftProtobuf
 ///   1. Self-interaction is rejected (a profile cannot follow or block itself).
 ///   2. A block bi-directionally severs any existing follow and prevents future follows.
 ///   3. Mutual follows (A→B and B→A) are implicitly "friends" — no dedicated table.
+///   4. Following a PRIVATE profile creates a pending request (no access until approved).
 ///
 /// All mutating RPCs (commands) return CommandResponse.
 /// All read RPCs (queries) return typed view or paginated response messages.
 public protocol SocialGraph_V1_SocialGraphServiceClientInterface: Sendable {
 
-    /// Record that actor follows target.
+    /// Record that actor follows target — or, when target is private, that actor
+    /// asks to (CommandResponse.requested; SGR-1005 if already pending).
     /// Rejected if a block exists in either direction, or if actor == target.
     @available(iOS 13, *)
     func `follow`(request: SocialGraph_V1_FollowRequest, headers: Connect.Headers) async -> ResponseMessage<SocialGraph_V1_CommandResponse>
+
+    /// The private profile's pending follow requests, newest first (its owner).
+    @available(iOS 13, *)
+    func `listFollowRequests`(request: SocialGraph_V1_ListFollowRequestsRequest, headers: Connect.Headers) async -> ResponseMessage<SocialGraph_V1_ListFollowRequestsResponse>
+
+    /// The owner lets the requester follow (a real follow: counts, feeds).
+    @available(iOS 13, *)
+    func `approveFollowRequest`(request: SocialGraph_V1_AnswerFollowRequestRequest, headers: Connect.Headers) async -> ResponseMessage<SocialGraph_V1_CommandResponse>
+
+    /// The owner turns the request down (the requester is not notified).
+    @available(iOS 13, *)
+    func `declineFollowRequest`(request: SocialGraph_V1_AnswerFollowRequestRequest, headers: Connect.Headers) async -> ResponseMessage<SocialGraph_V1_CommandResponse>
+
+    /// The requester withdraws a pending request. SGR-1006 if none is pending.
+    @available(iOS 13, *)
+    func `cancelFollowRequest`(request: SocialGraph_V1_CancelFollowRequestRequest, headers: Connect.Headers) async -> ResponseMessage<SocialGraph_V1_CommandResponse>
 
     /// Remove an existing follow from actor to target.
     /// Rejected if no follow exists.
     @available(iOS 13, *)
     func `unfollow`(request: SocialGraph_V1_UnfollowRequest, headers: Connect.Headers) async -> ResponseMessage<SocialGraph_V1_CommandResponse>
+
+    /// The owner (profile_id) removes follower_id from their followers.
+    /// CommandResponse: actor_id = the owner, target_id = the removed follower.
+    @available(iOS 13, *)
+    func `removeFollower`(request: SocialGraph_V1_RemoveFollowerRequest, headers: Connect.Headers) async -> ResponseMessage<SocialGraph_V1_CommandResponse>
+
+    /// Who may see the owner's follower / following lists (everyone, followers,
+    /// mutuals, only me), enforced by ListFollowers / ListFollowing.
+    @available(iOS 13, *)
+    func `setListPrivacy`(request: SocialGraph_V1_SetListPrivacyRequest, headers: Connect.Headers) async -> ResponseMessage<SocialGraph_V1_ListPrivacy>
 
     /// Record that actor blocks target.
     /// Severs any existing follow between them (in both directions).
@@ -46,6 +74,24 @@ public protocol SocialGraph_V1_SocialGraphServiceClientInterface: Sendable {
     /// Does not restore severed follows.
     @available(iOS 13, *)
     func `unblock`(request: SocialGraph_V1_UnblockRequest, headers: Connect.Headers) async -> ResponseMessage<SocialGraph_V1_CommandResponse>
+
+    /// Mute target's posts / stories / messages for actor (re-muting replaces
+    /// the scopes). The target is not told. Rejected if actor == target.
+    @available(iOS 13, *)
+    func `mute`(request: SocialGraph_V1_MuteRequest, headers: Connect.Headers) async -> ResponseMessage<SocialGraph_V1_CommandResponse>
+
+    /// Lift actor's mute of target (no-op when none).
+    @available(iOS 13, *)
+    func `unmute`(request: SocialGraph_V1_UnmuteRequest, headers: Connect.Headers) async -> ResponseMessage<SocialGraph_V1_CommandResponse>
+
+    /// Restrict target: its comments on actor's posts are seen only by target
+    /// and actor. Not told to the target. Rejected if actor == target.
+    @available(iOS 13, *)
+    func `restrict`(request: SocialGraph_V1_RestrictRequest, headers: Connect.Headers) async -> ResponseMessage<SocialGraph_V1_CommandResponse>
+
+    /// Lift actor's restriction of target (no-op when none).
+    @available(iOS 13, *)
+    func `unrestrict`(request: SocialGraph_V1_UnrestrictRequest, headers: Connect.Headers) async -> ResponseMessage<SocialGraph_V1_CommandResponse>
 
     /// Returns the full bidirectional relationship context between actor and target,
     /// plus the target's follower/following counts.
@@ -60,6 +106,18 @@ public protocol SocialGraph_V1_SocialGraphServiceClientInterface: Sendable {
     @available(iOS 13, *)
     func `listFollowing`(request: SocialGraph_V1_ListFollowingRequest, headers: Connect.Headers) async -> ResponseMessage<SocialGraph_V1_ListFollowingResponse>
 
+    /// The owner's list privacy (defaults: everyone).
+    @available(iOS 13, *)
+    func `getListPrivacy`(request: SocialGraph_V1_GetListPrivacyRequest, headers: Connect.Headers) async -> ResponseMessage<SocialGraph_V1_ListPrivacy>
+
+    /// The profile's mutes, in profile-id order (its owner).
+    @available(iOS 13, *)
+    func `listMutes`(request: SocialGraph_V1_ListMutesRequest, headers: Connect.Headers) async -> ResponseMessage<SocialGraph_V1_ListMutesResponse>
+
+    /// The profiles the owner restricts, in profile-id order (its owner).
+    @available(iOS 13, *)
+    func `listRestricted`(request: SocialGraph_V1_ListRestrictedRequest, headers: Connect.Headers) async -> ResponseMessage<SocialGraph_V1_ListRestrictedResponse>
+
     /// Paginated list of profiles blocked by the given profile.
     @available(iOS 13, *)
     func `listBlocks`(request: SocialGraph_V1_ListBlocksRequest, headers: Connect.Headers) async -> ResponseMessage<SocialGraph_V1_ListBlocksResponse>
@@ -70,6 +128,24 @@ public protocol SocialGraph_V1_SocialGraphServiceClientInterface: Sendable {
     /// read call it with the reader they took from the edge token.
     @available(iOS 13, *)
     func `checkAccess`(request: SocialGraph_V1_CheckAccessRequest, headers: Connect.Headers) async -> ResponseMessage<SocialGraph_V1_CheckAccessResponse>
+
+    /// May the actor comment on / mention / message the target, per the
+    /// target's interaction settings (profile.v1) and blocks either way? A
+    /// profile may always interact with itself. MESH-ONLY: the service that
+    /// owns the interaction asks before writing it, with the actor taken from
+    /// the edge token.
+    @available(iOS 13, *)
+    func `checkInteraction`(request: SocialGraph_V1_CheckInteractionRequest, headers: Connect.Headers) async -> ResponseMessage<SocialGraph_V1_CheckInteractionResponse>
+
+    /// The profiles a reader mutes for a scope. MESH-ONLY: timeline drops
+    /// their posts from the reader's feeds.
+    @available(iOS 13, *)
+    func `listMutedProfiles`(request: SocialGraph_V1_ListMutedProfilesRequest, headers: Connect.Headers) async -> ResponseMessage<SocialGraph_V1_ListMutedProfilesResponse>
+
+    /// Which of the candidates the owner restricts. MESH-ONLY: comment hides a
+    /// restricted commenter's comments on the owner's posts from other readers.
+    @available(iOS 13, *)
+    func `listRestrictedAmong`(request: SocialGraph_V1_ListRestrictedAmongRequest, headers: Connect.Headers) async -> ResponseMessage<SocialGraph_V1_ListRestrictedAmongResponse>
 }
 
 /// Concrete implementation of `SocialGraph_V1_SocialGraphServiceClientInterface`.
@@ -86,8 +162,38 @@ public final class SocialGraph_V1_SocialGraphServiceClient: SocialGraph_V1_Socia
     }
 
     @available(iOS 13, *)
+    public func `listFollowRequests`(request: SocialGraph_V1_ListFollowRequestsRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<SocialGraph_V1_ListFollowRequestsResponse> {
+        return await self.client.unary(path: "/social_graph.v1.SocialGraphService/ListFollowRequests", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `approveFollowRequest`(request: SocialGraph_V1_AnswerFollowRequestRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<SocialGraph_V1_CommandResponse> {
+        return await self.client.unary(path: "/social_graph.v1.SocialGraphService/ApproveFollowRequest", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `declineFollowRequest`(request: SocialGraph_V1_AnswerFollowRequestRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<SocialGraph_V1_CommandResponse> {
+        return await self.client.unary(path: "/social_graph.v1.SocialGraphService/DeclineFollowRequest", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `cancelFollowRequest`(request: SocialGraph_V1_CancelFollowRequestRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<SocialGraph_V1_CommandResponse> {
+        return await self.client.unary(path: "/social_graph.v1.SocialGraphService/CancelFollowRequest", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
     public func `unfollow`(request: SocialGraph_V1_UnfollowRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<SocialGraph_V1_CommandResponse> {
         return await self.client.unary(path: "/social_graph.v1.SocialGraphService/Unfollow", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `removeFollower`(request: SocialGraph_V1_RemoveFollowerRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<SocialGraph_V1_CommandResponse> {
+        return await self.client.unary(path: "/social_graph.v1.SocialGraphService/RemoveFollower", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `setListPrivacy`(request: SocialGraph_V1_SetListPrivacyRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<SocialGraph_V1_ListPrivacy> {
+        return await self.client.unary(path: "/social_graph.v1.SocialGraphService/SetListPrivacy", idempotencyLevel: .unknown, request: request, headers: headers)
     }
 
     @available(iOS 13, *)
@@ -98,6 +204,26 @@ public final class SocialGraph_V1_SocialGraphServiceClient: SocialGraph_V1_Socia
     @available(iOS 13, *)
     public func `unblock`(request: SocialGraph_V1_UnblockRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<SocialGraph_V1_CommandResponse> {
         return await self.client.unary(path: "/social_graph.v1.SocialGraphService/Unblock", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `mute`(request: SocialGraph_V1_MuteRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<SocialGraph_V1_CommandResponse> {
+        return await self.client.unary(path: "/social_graph.v1.SocialGraphService/Mute", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `unmute`(request: SocialGraph_V1_UnmuteRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<SocialGraph_V1_CommandResponse> {
+        return await self.client.unary(path: "/social_graph.v1.SocialGraphService/Unmute", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `restrict`(request: SocialGraph_V1_RestrictRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<SocialGraph_V1_CommandResponse> {
+        return await self.client.unary(path: "/social_graph.v1.SocialGraphService/Restrict", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `unrestrict`(request: SocialGraph_V1_UnrestrictRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<SocialGraph_V1_CommandResponse> {
+        return await self.client.unary(path: "/social_graph.v1.SocialGraphService/Unrestrict", idempotencyLevel: .unknown, request: request, headers: headers)
     }
 
     @available(iOS 13, *)
@@ -116,6 +242,21 @@ public final class SocialGraph_V1_SocialGraphServiceClient: SocialGraph_V1_Socia
     }
 
     @available(iOS 13, *)
+    public func `getListPrivacy`(request: SocialGraph_V1_GetListPrivacyRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<SocialGraph_V1_ListPrivacy> {
+        return await self.client.unary(path: "/social_graph.v1.SocialGraphService/GetListPrivacy", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `listMutes`(request: SocialGraph_V1_ListMutesRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<SocialGraph_V1_ListMutesResponse> {
+        return await self.client.unary(path: "/social_graph.v1.SocialGraphService/ListMutes", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `listRestricted`(request: SocialGraph_V1_ListRestrictedRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<SocialGraph_V1_ListRestrictedResponse> {
+        return await self.client.unary(path: "/social_graph.v1.SocialGraphService/ListRestricted", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
     public func `listBlocks`(request: SocialGraph_V1_ListBlocksRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<SocialGraph_V1_ListBlocksResponse> {
         return await self.client.unary(path: "/social_graph.v1.SocialGraphService/ListBlocks", idempotencyLevel: .unknown, request: request, headers: headers)
     }
@@ -125,17 +266,48 @@ public final class SocialGraph_V1_SocialGraphServiceClient: SocialGraph_V1_Socia
         return await self.client.unary(path: "/social_graph.v1.SocialGraphService/CheckAccess", idempotencyLevel: .unknown, request: request, headers: headers)
     }
 
+    @available(iOS 13, *)
+    public func `checkInteraction`(request: SocialGraph_V1_CheckInteractionRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<SocialGraph_V1_CheckInteractionResponse> {
+        return await self.client.unary(path: "/social_graph.v1.SocialGraphService/CheckInteraction", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `listMutedProfiles`(request: SocialGraph_V1_ListMutedProfilesRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<SocialGraph_V1_ListMutedProfilesResponse> {
+        return await self.client.unary(path: "/social_graph.v1.SocialGraphService/ListMutedProfiles", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `listRestrictedAmong`(request: SocialGraph_V1_ListRestrictedAmongRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<SocialGraph_V1_ListRestrictedAmongResponse> {
+        return await self.client.unary(path: "/social_graph.v1.SocialGraphService/ListRestrictedAmong", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
     public enum Metadata {
         public enum Methods {
             public static let follow = Connect.MethodSpec(name: "Follow", service: "social_graph.v1.SocialGraphService", type: .unary)
+            public static let listFollowRequests = Connect.MethodSpec(name: "ListFollowRequests", service: "social_graph.v1.SocialGraphService", type: .unary)
+            public static let approveFollowRequest = Connect.MethodSpec(name: "ApproveFollowRequest", service: "social_graph.v1.SocialGraphService", type: .unary)
+            public static let declineFollowRequest = Connect.MethodSpec(name: "DeclineFollowRequest", service: "social_graph.v1.SocialGraphService", type: .unary)
+            public static let cancelFollowRequest = Connect.MethodSpec(name: "CancelFollowRequest", service: "social_graph.v1.SocialGraphService", type: .unary)
             public static let unfollow = Connect.MethodSpec(name: "Unfollow", service: "social_graph.v1.SocialGraphService", type: .unary)
+            public static let removeFollower = Connect.MethodSpec(name: "RemoveFollower", service: "social_graph.v1.SocialGraphService", type: .unary)
+            public static let setListPrivacy = Connect.MethodSpec(name: "SetListPrivacy", service: "social_graph.v1.SocialGraphService", type: .unary)
             public static let block = Connect.MethodSpec(name: "Block", service: "social_graph.v1.SocialGraphService", type: .unary)
             public static let unblock = Connect.MethodSpec(name: "Unblock", service: "social_graph.v1.SocialGraphService", type: .unary)
+            public static let mute = Connect.MethodSpec(name: "Mute", service: "social_graph.v1.SocialGraphService", type: .unary)
+            public static let unmute = Connect.MethodSpec(name: "Unmute", service: "social_graph.v1.SocialGraphService", type: .unary)
+            public static let restrict = Connect.MethodSpec(name: "Restrict", service: "social_graph.v1.SocialGraphService", type: .unary)
+            public static let unrestrict = Connect.MethodSpec(name: "Unrestrict", service: "social_graph.v1.SocialGraphService", type: .unary)
             public static let getRelationStatus = Connect.MethodSpec(name: "GetRelationStatus", service: "social_graph.v1.SocialGraphService", type: .unary)
             public static let listFollowers = Connect.MethodSpec(name: "ListFollowers", service: "social_graph.v1.SocialGraphService", type: .unary)
             public static let listFollowing = Connect.MethodSpec(name: "ListFollowing", service: "social_graph.v1.SocialGraphService", type: .unary)
+            public static let getListPrivacy = Connect.MethodSpec(name: "GetListPrivacy", service: "social_graph.v1.SocialGraphService", type: .unary)
+            public static let listMutes = Connect.MethodSpec(name: "ListMutes", service: "social_graph.v1.SocialGraphService", type: .unary)
+            public static let listRestricted = Connect.MethodSpec(name: "ListRestricted", service: "social_graph.v1.SocialGraphService", type: .unary)
             public static let listBlocks = Connect.MethodSpec(name: "ListBlocks", service: "social_graph.v1.SocialGraphService", type: .unary)
             public static let checkAccess = Connect.MethodSpec(name: "CheckAccess", service: "social_graph.v1.SocialGraphService", type: .unary)
+            public static let checkInteraction = Connect.MethodSpec(name: "CheckInteraction", service: "social_graph.v1.SocialGraphService", type: .unary)
+            public static let listMutedProfiles = Connect.MethodSpec(name: "ListMutedProfiles", service: "social_graph.v1.SocialGraphService", type: .unary)
+            public static let listRestrictedAmong = Connect.MethodSpec(name: "ListRestrictedAmong", service: "social_graph.v1.SocialGraphService", type: .unary)
         }
     }
 }

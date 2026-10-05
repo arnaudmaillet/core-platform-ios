@@ -234,6 +234,271 @@ public nonisolated enum Profile_V1_MaskingReason: SwiftProtobuf.Enum, Swift.Case
 
 }
 
+/// Whether a handle can be taken.
+public nonisolated enum Profile_V1_HandleAvailability: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+  case available // = 1
+
+  /// Fails the handle rules (2–30 of [a-z0-9._], alphanumeric ends, no "..").
+  case invalid // = 2
+
+  /// In use, or released less than 30 days ago.
+  case taken // = 3
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .available
+    case 2: self = .invalid
+    case 3: self = .taken
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .available: return 1
+    case .invalid: return 2
+    case .taken: return 3
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [Profile_V1_HandleAvailability] = [
+    .unspecified,
+    .available,
+    .invalid,
+    .taken,
+  ]
+
+}
+
+/// Who may interact with a profile in a given way (enforced server-side through
+/// social-graph's CheckInteraction; a block always wins).
+public nonisolated enum Profile_V1_InteractionAudience: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+  case everyone // = 1
+  case followers // = 2
+
+  /// Profiles this one follows back.
+  case mutuals // = 3
+  case noOne // = 4
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .everyone
+    case 2: self = .followers
+    case 3: self = .mutuals
+    case 4: self = .noOne
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .everyone: return 1
+    case .followers: return 2
+    case .mutuals: return 3
+    case .noOne: return 4
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [Profile_V1_InteractionAudience] = [
+    .unspecified,
+    .everyone,
+    .followers,
+    .mutuals,
+    .noOne,
+  ]
+
+}
+
+/// How precisely others see where a profile's posts were made.
+public nonisolated enum Profile_V1_LocationPrecision: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+  case precise // = 1
+
+  /// City level: only the coarse map band, at a coarse point.
+  case city // = 2
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .precise
+    case 2: self = .city
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .precise: return 1
+    case .city: return 2
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [Profile_V1_LocationPrecision] = [
+    .unspecified,
+    .precise,
+    .city,
+  ]
+
+}
+
+/// How far back others see a profile's posts.
+public nonisolated enum Profile_V1_PostWindow: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+  case all // = 1
+  case sixMonths // = 2
+  case oneMonth // = 3
+  case threeDays // = 4
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .all
+    case 2: self = .sixMonths
+    case 3: self = .oneMonth
+    case 4: self = .threeDays
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .all: return 1
+    case .sixMonths: return 2
+    case .oneMonth: return 3
+    case .threeDays: return 4
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [Profile_V1_PostWindow] = [
+    .unspecified,
+    .all,
+    .sixMonths,
+    .oneMonth,
+    .threeDays,
+  ]
+
+}
+
+/// How much sensitive content a holder's discovery feeds show.
+public nonisolated enum Profile_V1_SensitiveContent: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+  case less // = 1
+  case standard // = 2
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .less
+    case 2: self = .standard
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .less: return 1
+    case .standard: return 2
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [Profile_V1_SensitiveContent] = [
+    .unspecified,
+    .less,
+    .standard,
+  ]
+
+}
+
+/// Whom a temporary interaction limit holds back.
+public nonisolated enum Profile_V1_LimitAudience: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+  case nonFollowers // = 1
+
+  /// Non-followers and profiles that followed in the last week.
+  case recentFollowers // = 2
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .nonFollowers
+    case 2: self = .recentFollowers
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .nonFollowers: return 1
+    case .recentFollowers: return 2
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [Profile_V1_LimitAudience] = [
+    .unspecified,
+    .nonFollowers,
+    .recentFollowers,
+  ]
+
+}
+
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 nonisolated extension Profile_V1_ProfileStatus: SwiftProtobuf._ProtoNameProviding {
@@ -254,4 +519,28 @@ nonisolated extension Profile_V1_VerificationKind: SwiftProtobuf._ProtoNameProvi
 
 nonisolated extension Profile_V1_MaskingReason: SwiftProtobuf._ProtoNameProviding {
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0MASKING_REASON_UNSPECIFIED\0\u{1}MASKING_REASON_ACCOUNT_SUSPENDED\0\u{1}MASKING_REASON_ACCOUNT_DELETED\0\u{1}MASKING_REASON_CONTENT_POLICY\0")
+}
+
+nonisolated extension Profile_V1_HandleAvailability: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0HANDLE_AVAILABILITY_UNSPECIFIED\0\u{1}HANDLE_AVAILABILITY_AVAILABLE\0\u{1}HANDLE_AVAILABILITY_INVALID\0\u{1}HANDLE_AVAILABILITY_TAKEN\0")
+}
+
+nonisolated extension Profile_V1_InteractionAudience: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0INTERACTION_AUDIENCE_UNSPECIFIED\0\u{1}INTERACTION_AUDIENCE_EVERYONE\0\u{1}INTERACTION_AUDIENCE_FOLLOWERS\0\u{1}INTERACTION_AUDIENCE_MUTUALS\0\u{1}INTERACTION_AUDIENCE_NO_ONE\0")
+}
+
+nonisolated extension Profile_V1_LocationPrecision: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0LOCATION_PRECISION_UNSPECIFIED\0\u{1}LOCATION_PRECISION_PRECISE\0\u{1}LOCATION_PRECISION_CITY\0")
+}
+
+nonisolated extension Profile_V1_PostWindow: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0POST_WINDOW_UNSPECIFIED\0\u{1}POST_WINDOW_ALL\0\u{1}POST_WINDOW_SIX_MONTHS\0\u{1}POST_WINDOW_ONE_MONTH\0\u{1}POST_WINDOW_THREE_DAYS\0")
+}
+
+nonisolated extension Profile_V1_SensitiveContent: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0SENSITIVE_CONTENT_UNSPECIFIED\0\u{1}SENSITIVE_CONTENT_LESS\0\u{1}SENSITIVE_CONTENT_STANDARD\0")
+}
+
+nonisolated extension Profile_V1_LimitAudience: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0LIMIT_AUDIENCE_UNSPECIFIED\0\u{1}LIMIT_AUDIENCE_NON_FOLLOWERS\0\u{1}LIMIT_AUDIENCE_RECENT_FOLLOWERS\0")
 }

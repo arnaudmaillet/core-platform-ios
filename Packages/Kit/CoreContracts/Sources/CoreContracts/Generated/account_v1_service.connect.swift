@@ -24,11 +24,13 @@ public protocol Account_V1_AccountServiceClientInterface: Sendable {
     @available(iOS 13, *)
     func `createAccount`(request: Account_V1_CreateAccountRequest, headers: Connect.Headers) async -> ResponseMessage<Account_V1_CommandResponse>
 
-    /// Mark the account's email address as verified.
+    /// Mark the account's email address as verified. Mesh only: auth calls it
+    /// after the holder proved the address (a verified id_token or a one-time code).
     @available(iOS 13, *)
     func `verifyEmail`(request: Account_V1_VerifyEmailRequest, headers: Connect.Headers) async -> ResponseMessage<Account_V1_CommandResponse>
 
-    /// Mark the account's phone number as verified.
+    /// Mark the account's phone number as verified. Mesh only: auth calls it
+    /// after the holder proved the number (a one-time SMS code).
     @available(iOS 13, *)
     func `verifyPhone`(request: Account_V1_VerifyPhoneRequest, headers: Connect.Headers) async -> ResponseMessage<Account_V1_CommandResponse>
 
@@ -119,6 +121,17 @@ public protocol Account_V1_AccountServiceClientInterface: Sendable {
     /// Fetch the full account aggregate view by IdP subject claim.
     @available(iOS 13, *)
     func `getAccountByIdentityID`(request: Account_V1_GetAccountByIdentityIdRequest, headers: Connect.Headers) async -> ResponseMessage<Account_V1_AccountView>
+
+    /// Fetch the account holding an email address (case-insensitive). Mesh only:
+    /// auth's sign-up uses it to spot an account created with another method,
+    /// so a client can never enumerate addresses through it.
+    @available(iOS 13, *)
+    func `getAccountByEmail`(request: Account_V1_GetAccountByEmailRequest, headers: Connect.Headers) async -> ResponseMessage<Account_V1_AccountView>
+
+    /// Fetch the account holding a phone number (E.164). Mesh only, like
+    /// GetAccountByEmail (auth's phone sign-up).
+    @available(iOS 13, *)
+    func `getAccountByPhone`(request: Account_V1_GetAccountByPhoneRequest, headers: Connect.Headers) async -> ResponseMessage<Account_V1_AccountView>
 
     /// Lightweight status check used by auth middleware and gateway.
     @available(iOS 13, *)
@@ -259,6 +272,16 @@ public final class Account_V1_AccountServiceClient: Account_V1_AccountServiceCli
     }
 
     @available(iOS 13, *)
+    public func `getAccountByEmail`(request: Account_V1_GetAccountByEmailRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Account_V1_AccountView> {
+        return await self.client.unary(path: "/account.v1.AccountService/GetAccountByEmail", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `getAccountByPhone`(request: Account_V1_GetAccountByPhoneRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Account_V1_AccountView> {
+        return await self.client.unary(path: "/account.v1.AccountService/GetAccountByPhone", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
     public func `getAccountStatus`(request: Account_V1_GetAccountStatusRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Account_V1_AccountStatusView> {
         return await self.client.unary(path: "/account.v1.AccountService/GetAccountStatus", idempotencyLevel: .unknown, request: request, headers: headers)
     }
@@ -302,6 +325,8 @@ public final class Account_V1_AccountServiceClient: Account_V1_AccountServiceCli
             public static let revokeRole = Connect.MethodSpec(name: "RevokeRole", service: "account.v1.AccountService", type: .unary)
             public static let getAccountByID = Connect.MethodSpec(name: "GetAccountById", service: "account.v1.AccountService", type: .unary)
             public static let getAccountByIdentityID = Connect.MethodSpec(name: "GetAccountByIdentityId", service: "account.v1.AccountService", type: .unary)
+            public static let getAccountByEmail = Connect.MethodSpec(name: "GetAccountByEmail", service: "account.v1.AccountService", type: .unary)
+            public static let getAccountByPhone = Connect.MethodSpec(name: "GetAccountByPhone", service: "account.v1.AccountService", type: .unary)
             public static let getAccountStatus = Connect.MethodSpec(name: "GetAccountStatus", service: "account.v1.AccountService", type: .unary)
             public static let getGdprRecord = Connect.MethodSpec(name: "GetGdprRecord", service: "account.v1.AccountService", type: .unary)
             public static let updateConsents = Connect.MethodSpec(name: "UpdateConsents", service: "account.v1.AccountService", type: .unary)

@@ -83,6 +83,13 @@ public nonisolated enum Auth_V1_GrantType: SwiftProtobuf.Enum, Swift.CaseIterabl
   /// password transits TLS to the IdP broker and is NEVER stored by this service
   /// (credentials are owned by the IdP under the federated model).
   case password // = 2
+
+  /// A native Sign in with Apple / Google id_token, verified by this service
+  /// against the provider's keys (no IdP round-trip).
+  case idToken // = 3
+
+  /// A one-time code sent to an email address (StartVerification).
+  case verificationCode // = 4
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -94,6 +101,8 @@ public nonisolated enum Auth_V1_GrantType: SwiftProtobuf.Enum, Swift.CaseIterabl
     case 0: self = .unspecified
     case 1: self = .authorizationCode
     case 2: self = .password
+    case 3: self = .idToken
+    case 4: self = .verificationCode
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -103,6 +112,8 @@ public nonisolated enum Auth_V1_GrantType: SwiftProtobuf.Enum, Swift.CaseIterabl
     case .unspecified: return 0
     case .authorizationCode: return 1
     case .password: return 2
+    case .idToken: return 3
+    case .verificationCode: return 4
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -112,6 +123,145 @@ public nonisolated enum Auth_V1_GrantType: SwiftProtobuf.Enum, Swift.CaseIterabl
     .unspecified,
     .authorizationCode,
     .password,
+    .idToken,
+    .verificationCode,
+  ]
+
+}
+
+/// Where a one-time code is sent.
+public nonisolated enum Auth_V1_VerificationChannel: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+  case email // = 1
+
+  /// A phone number (E.164), for phone-only accounts.
+  case sms // = 2
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .email
+    case 2: self = .sms
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .email: return 1
+    case .sms: return 2
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [Auth_V1_VerificationChannel] = [
+    .unspecified,
+    .email,
+    .sms,
+  ]
+
+}
+
+/// A third-party identity provider whose id_tokens this service verifies.
+public nonisolated enum Auth_V1_FederatedProvider: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+  case apple // = 1
+  case google // = 2
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .apple
+    case 2: self = .google
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .apple: return 1
+    case .google: return 2
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [Auth_V1_FederatedProvider] = [
+    .unspecified,
+    .apple,
+    .google,
+  ]
+
+}
+
+/// How an existing account signs in (SignUp's "you already have an account").
+public nonisolated enum Auth_V1_SignInMethod: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+  case apple // = 1
+  case google // = 2
+
+  /// Email / username + password (the IdP's own credential).
+  case password // = 3
+
+  /// A one-time code sent to the email address (no password).
+  case emailCode // = 4
+
+  /// A one-time code sent by SMS to the phone number (no password, no email).
+  case phoneCode // = 5
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .apple
+    case 2: self = .google
+    case 3: self = .password
+    case 4: self = .emailCode
+    case 5: self = .phoneCode
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .apple: return 1
+    case .google: return 2
+    case .password: return 3
+    case .emailCode: return 4
+    case .phoneCode: return 5
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [Auth_V1_SignInMethod] = [
+    .unspecified,
+    .apple,
+    .google,
+    .password,
+    .emailCode,
+    .phoneCode,
   ]
 
 }
@@ -123,5 +273,17 @@ nonisolated extension Auth_V1_SessionStatus: SwiftProtobuf._ProtoNameProviding {
 }
 
 nonisolated extension Auth_V1_GrantType: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0GRANT_TYPE_UNSPECIFIED\0\u{1}AUTHORIZATION_CODE\0\u{1}PASSWORD\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0GRANT_TYPE_UNSPECIFIED\0\u{1}AUTHORIZATION_CODE\0\u{1}PASSWORD\0\u{1}ID_TOKEN\0\u{1}VERIFICATION_CODE\0")
+}
+
+nonisolated extension Auth_V1_VerificationChannel: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0VERIFICATION_CHANNEL_UNSPECIFIED\0\u{1}VERIFICATION_CHANNEL_EMAIL\0\u{1}VERIFICATION_CHANNEL_SMS\0")
+}
+
+nonisolated extension Auth_V1_FederatedProvider: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0FEDERATED_PROVIDER_UNSPECIFIED\0\u{1}FEDERATED_PROVIDER_APPLE\0\u{1}FEDERATED_PROVIDER_GOOGLE\0")
+}
+
+nonisolated extension Auth_V1_SignInMethod: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0SIGN_IN_METHOD_UNSPECIFIED\0\u{1}SIGN_IN_METHOD_APPLE\0\u{1}SIGN_IN_METHOD_GOOGLE\0\u{1}SIGN_IN_METHOD_PASSWORD\0\u{1}SIGN_IN_METHOD_EMAIL_CODE\0\u{1}SIGN_IN_METHOD_PHONE_CODE\0")
 }

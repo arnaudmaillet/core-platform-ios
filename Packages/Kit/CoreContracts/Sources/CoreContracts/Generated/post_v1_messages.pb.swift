@@ -170,6 +170,8 @@ public nonisolated struct Post_V1_PostView: @unchecked Sendable {
   /// Clears the value of `audioRef`. Subsequent reads from it will return its default value.
   public mutating func clearAudioRef() {_uniqueStorage()._audioRef = nil}
 
+  /// As the author shares it with this reader: the point for the author,
+  /// the centre of its city cell (city level) or absent (ghost mode) for anyone else.
   public var location: Post_V1_GeoPoint {
     get {_storage._location ?? Post_V1_GeoPoint()}
     set {_uniqueStorage()._location = newValue}
@@ -182,6 +184,41 @@ public nonisolated struct Post_V1_PostView: @unchecked Sendable {
   public var moderation: Post_V1_ModerationRestriction {
     get {_storage._moderation}
     set {_uniqueStorage()._moderation = newValue}
+  }
+
+  /// The post's own reuse permission (#669); unset = the author's default.
+  public var allowRemix: Bool {
+    get {_storage._allowRemix ?? false}
+    set {_uniqueStorage()._allowRemix = newValue}
+  }
+  /// Returns true if `allowRemix` has been explicitly set.
+  public var hasAllowRemix: Bool {_storage._allowRemix != nil}
+  /// Clears the value of `allowRemix`. Subsequent reads from it will return its default value.
+  public mutating func clearAllowRemix() {_uniqueStorage()._allowRemix = nil}
+
+  public var allowSoundReuse: Bool {
+    get {_storage._allowSoundReuse ?? false}
+    set {_uniqueStorage()._allowSoundReuse = newValue}
+  }
+  /// Returns true if `allowSoundReuse` has been explicitly set.
+  public var hasAllowSoundReuse: Bool {_storage._allowSoundReuse != nil}
+  /// Clears the value of `allowSoundReuse`. Subsequent reads from it will return its default value.
+  public mutating func clearAllowSoundReuse() {_uniqueStorage()._allowSoundReuse = nil}
+
+  /// Mesh reads only: older than its author's post window (#664). Clients
+  /// other than the author get NOT_FOUND instead, so a mesh caller serving
+  /// clients (comments, search) must withhold the post too.
+  public var outsideWindow: Bool {
+    get {_storage._outsideWindow}
+    set {_uniqueStorage()._outsideWindow = newValue}
+  }
+
+  /// Mesh reads only: when the post leaves its author's post window (#664),
+  /// created_at + the window; 0 without a window. A read model serving clients
+  /// (search) stores it to withhold the post once that time passes.
+  public var visibleUntilMs: Int64 {
+    get {_storage._visibleUntilMs}
+    set {_uniqueStorage()._visibleUntilMs = newValue}
   }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
@@ -260,12 +297,34 @@ public nonisolated struct Post_V1_CreatePostRequest: Sendable {
   /// Clears the value of `location`. Subsequent reads from it will return its default value.
   public mutating func clearLocation() {self._location = nil}
 
+  /// This post's own remix / original-sound reuse permission (#669); absent
+  /// follows the author's profile default.
+  public var allowRemix: Bool {
+    get {_allowRemix ?? false}
+    set {_allowRemix = newValue}
+  }
+  /// Returns true if `allowRemix` has been explicitly set.
+  public var hasAllowRemix: Bool {self._allowRemix != nil}
+  /// Clears the value of `allowRemix`. Subsequent reads from it will return its default value.
+  public mutating func clearAllowRemix() {self._allowRemix = nil}
+
+  public var allowSoundReuse: Bool {
+    get {_allowSoundReuse ?? false}
+    set {_allowSoundReuse = newValue}
+  }
+  /// Returns true if `allowSoundReuse` has been explicitly set.
+  public var hasAllowSoundReuse: Bool {self._allowSoundReuse != nil}
+  /// Clears the value of `allowSoundReuse`. Subsequent reads from it will return its default value.
+  public mutating func clearAllowSoundReuse() {self._allowSoundReuse = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _audioRef: Post_V1_AudioReference? = nil
   fileprivate var _location: Post_V1_GeoPoint? = nil
+  fileprivate var _allowRemix: Bool? = nil
+  fileprivate var _allowSoundReuse: Bool? = nil
 }
 
 public nonisolated struct Post_V1_CreatePostResponse: Sendable {
@@ -322,6 +381,55 @@ public nonisolated struct Post_V1_DeletePostRequest: Sendable {
   public var postID: String = String()
 
   public var profileID: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// Bring a deleted post back within 30 days of its deletion (its author):
+/// published again or a draft again. PST-1006 if not deleted, PST-1007 after
+/// 30 days.
+public nonisolated struct Post_V1_RestorePostRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var postID: String = String()
+
+  public var profileID: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// The author's deleted posts still restorable (30 days after deleted_at_ms),
+/// newest deletion first.
+public nonisolated struct Post_V1_ListRecentlyDeletedRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var profileID: String = String()
+
+  public var limit: Int32 = 0
+
+  public var pageToken: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Post_V1_ListRecentlyDeletedResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var posts: [Post_V1_PostView] = []
+
+  public var nextToken: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -556,7 +664,7 @@ nonisolated extension Post_V1_MediaAttachmentView: SwiftProtobuf.Message, SwiftP
 
 nonisolated extension Post_V1_PostView: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".PostView"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}post_id\0\u{3}profile_id\0\u{1}kind\0\u{1}status\0\u{1}caption\0\u{1}attachments\0\u{3}parent_id\0\u{3}root_id\0\u{3}created_at_ms\0\u{3}updated_at_ms\0\u{3}published_at_ms\0\u{3}deleted_at_ms\0\u{3}audio_ref\0\u{1}location\0\u{1}moderation\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}post_id\0\u{3}profile_id\0\u{1}kind\0\u{1}status\0\u{1}caption\0\u{1}attachments\0\u{3}parent_id\0\u{3}root_id\0\u{3}created_at_ms\0\u{3}updated_at_ms\0\u{3}published_at_ms\0\u{3}deleted_at_ms\0\u{3}audio_ref\0\u{1}location\0\u{1}moderation\0\u{3}allow_remix\0\u{3}allow_sound_reuse\0\u{3}outside_window\0\u{3}visible_until_ms\0")
 
   fileprivate class _StorageClass {
     var _postID: String = String()
@@ -574,6 +682,10 @@ nonisolated extension Post_V1_PostView: SwiftProtobuf.Message, SwiftProtobuf._Me
     var _audioRef: Post_V1_AudioReference? = nil
     var _location: Post_V1_GeoPoint? = nil
     var _moderation: Post_V1_ModerationRestriction = .unspecified
+    var _allowRemix: Bool? = nil
+    var _allowSoundReuse: Bool? = nil
+    var _outsideWindow: Bool = false
+    var _visibleUntilMs: Int64 = 0
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -599,6 +711,10 @@ nonisolated extension Post_V1_PostView: SwiftProtobuf.Message, SwiftProtobuf._Me
       _audioRef = source._audioRef
       _location = source._location
       _moderation = source._moderation
+      _allowRemix = source._allowRemix
+      _allowSoundReuse = source._allowSoundReuse
+      _outsideWindow = source._outsideWindow
+      _visibleUntilMs = source._visibleUntilMs
     }
   }
 
@@ -632,6 +748,10 @@ nonisolated extension Post_V1_PostView: SwiftProtobuf.Message, SwiftProtobuf._Me
         case 13: try { try decoder.decodeSingularMessageField(value: &_storage._audioRef) }()
         case 14: try { try decoder.decodeSingularMessageField(value: &_storage._location) }()
         case 15: try { try decoder.decodeSingularEnumField(value: &_storage._moderation) }()
+        case 16: try { try decoder.decodeSingularBoolField(value: &_storage._allowRemix) }()
+        case 17: try { try decoder.decodeSingularBoolField(value: &_storage._allowSoundReuse) }()
+        case 18: try { try decoder.decodeSingularBoolField(value: &_storage._outsideWindow) }()
+        case 19: try { try decoder.decodeSingularInt64Field(value: &_storage._visibleUntilMs) }()
         default: break
         }
       }
@@ -689,6 +809,18 @@ nonisolated extension Post_V1_PostView: SwiftProtobuf.Message, SwiftProtobuf._Me
       if _storage._moderation != .unspecified {
         try visitor.visitSingularEnumField(value: _storage._moderation, fieldNumber: 15)
       }
+      try { if let v = _storage._allowRemix {
+        try visitor.visitSingularBoolField(value: v, fieldNumber: 16)
+      } }()
+      try { if let v = _storage._allowSoundReuse {
+        try visitor.visitSingularBoolField(value: v, fieldNumber: 17)
+      } }()
+      if _storage._outsideWindow != false {
+        try visitor.visitSingularBoolField(value: _storage._outsideWindow, fieldNumber: 18)
+      }
+      if _storage._visibleUntilMs != 0 {
+        try visitor.visitSingularInt64Field(value: _storage._visibleUntilMs, fieldNumber: 19)
+      }
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -713,6 +845,10 @@ nonisolated extension Post_V1_PostView: SwiftProtobuf.Message, SwiftProtobuf._Me
         if _storage._audioRef != rhs_storage._audioRef {return false}
         if _storage._location != rhs_storage._location {return false}
         if _storage._moderation != rhs_storage._moderation {return false}
+        if _storage._allowRemix != rhs_storage._allowRemix {return false}
+        if _storage._allowSoundReuse != rhs_storage._allowSoundReuse {return false}
+        if _storage._outsideWindow != rhs_storage._outsideWindow {return false}
+        if _storage._visibleUntilMs != rhs_storage._visibleUntilMs {return false}
         return true
       }
       if !storagesAreEqual {return false}
@@ -809,7 +945,7 @@ nonisolated extension Post_V1_CommandResponse: SwiftProtobuf.Message, SwiftProto
 
 nonisolated extension Post_V1_CreatePostRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".CreatePostRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}profile_id\0\u{1}kind\0\u{1}caption\0\u{1}attachments\0\u{3}parent_id\0\u{3}root_id\0\u{3}audio_ref\0\u{1}location\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}profile_id\0\u{1}kind\0\u{1}caption\0\u{1}attachments\0\u{3}parent_id\0\u{3}root_id\0\u{3}audio_ref\0\u{1}location\0\u{3}allow_remix\0\u{3}allow_sound_reuse\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -825,6 +961,8 @@ nonisolated extension Post_V1_CreatePostRequest: SwiftProtobuf.Message, SwiftPro
       case 6: try { try decoder.decodeSingularStringField(value: &self.rootID) }()
       case 7: try { try decoder.decodeSingularMessageField(value: &self._audioRef) }()
       case 8: try { try decoder.decodeSingularMessageField(value: &self._location) }()
+      case 9: try { try decoder.decodeSingularBoolField(value: &self._allowRemix) }()
+      case 10: try { try decoder.decodeSingularBoolField(value: &self._allowSoundReuse) }()
       default: break
       }
     }
@@ -859,6 +997,12 @@ nonisolated extension Post_V1_CreatePostRequest: SwiftProtobuf.Message, SwiftPro
     try { if let v = self._location {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 8)
     } }()
+    try { if let v = self._allowRemix {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 9)
+    } }()
+    try { if let v = self._allowSoundReuse {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 10)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -871,6 +1015,8 @@ nonisolated extension Post_V1_CreatePostRequest: SwiftProtobuf.Message, SwiftPro
     if lhs.rootID != rhs.rootID {return false}
     if lhs._audioRef != rhs._audioRef {return false}
     if lhs._location != rhs._location {return false}
+    if lhs._allowRemix != rhs._allowRemix {return false}
+    if lhs._allowSoundReuse != rhs._allowSoundReuse {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -1021,6 +1167,116 @@ nonisolated extension Post_V1_DeletePostRequest: SwiftProtobuf.Message, SwiftPro
   public static func ==(lhs: Post_V1_DeletePostRequest, rhs: Post_V1_DeletePostRequest) -> Bool {
     if lhs.postID != rhs.postID {return false}
     if lhs.profileID != rhs.profileID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Post_V1_RestorePostRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".RestorePostRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}post_id\0\u{3}profile_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.postID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.profileID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.postID.isEmpty {
+      try visitor.visitSingularStringField(value: self.postID, fieldNumber: 1)
+    }
+    if !self.profileID.isEmpty {
+      try visitor.visitSingularStringField(value: self.profileID, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Post_V1_RestorePostRequest, rhs: Post_V1_RestorePostRequest) -> Bool {
+    if lhs.postID != rhs.postID {return false}
+    if lhs.profileID != rhs.profileID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Post_V1_ListRecentlyDeletedRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ListRecentlyDeletedRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}profile_id\0\u{1}limit\0\u{3}page_token\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.profileID) }()
+      case 2: try { try decoder.decodeSingularInt32Field(value: &self.limit) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.pageToken) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.profileID.isEmpty {
+      try visitor.visitSingularStringField(value: self.profileID, fieldNumber: 1)
+    }
+    if self.limit != 0 {
+      try visitor.visitSingularInt32Field(value: self.limit, fieldNumber: 2)
+    }
+    if !self.pageToken.isEmpty {
+      try visitor.visitSingularStringField(value: self.pageToken, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Post_V1_ListRecentlyDeletedRequest, rhs: Post_V1_ListRecentlyDeletedRequest) -> Bool {
+    if lhs.profileID != rhs.profileID {return false}
+    if lhs.limit != rhs.limit {return false}
+    if lhs.pageToken != rhs.pageToken {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Post_V1_ListRecentlyDeletedResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ListRecentlyDeletedResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}posts\0\u{3}next_token\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.posts) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.nextToken) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.posts.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.posts, fieldNumber: 1)
+    }
+    if !self.nextToken.isEmpty {
+      try visitor.visitSingularStringField(value: self.nextToken, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Post_V1_ListRecentlyDeletedResponse, rhs: Post_V1_ListRecentlyDeletedResponse) -> Bool {
+    if lhs.posts != rhs.posts {return false}
+    if lhs.nextToken != rhs.nextToken {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

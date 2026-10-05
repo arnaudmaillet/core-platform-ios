@@ -35,6 +35,25 @@ public protocol Notification_V1_NotificationServiceClientInterface: Sendable {
     /// On RecvError::Lagged the client must re-poll ListNotifications.
     @available(iOS 13, *)
     func `streamNotifications`(headers: Connect.Headers) -> any Connect.ServerOnlyAsyncStreamInterface<Notification_V1_StreamNotificationsRequest, Notification_V1_StreamNotificationsResponse>
+
+    /// Push devices (#654): register / forget a device for the profile.
+    @available(iOS 13, *)
+    func `registerDevice`(request: Notification_V1_RegisterDeviceRequest, headers: Connect.Headers) async -> ResponseMessage<Notification_V1_CommandResponse>
+
+    @available(iOS 13, *)
+    func `unregisterDevice`(request: Notification_V1_UnregisterDeviceRequest, headers: Connect.Headers) async -> ResponseMessage<Notification_V1_CommandResponse>
+
+    /// Push and email per category, pause, quiet hours.
+    @available(iOS 13, *)
+    func `getNotificationPreferences`(request: Notification_V1_GetNotificationPreferencesRequest, headers: Connect.Headers) async -> ResponseMessage<Notification_V1_NotificationPreferences>
+
+    @available(iOS 13, *)
+    func `updateNotificationPreferences`(request: Notification_V1_UpdateNotificationPreferencesRequest, headers: Connect.Headers) async -> ResponseMessage<Notification_V1_NotificationPreferences>
+
+    /// MESH-ONLY: the devices a push about a category goes to right now (none
+    /// when the holder's preferences hold it). For the push sender.
+    @available(iOS 13, *)
+    func `resolvePushTargets`(request: Notification_V1_ResolvePushTargetsRequest, headers: Connect.Headers) async -> ResponseMessage<Notification_V1_ResolvePushTargetsResponse>
 }
 
 /// Concrete implementation of `Notification_V1_NotificationServiceClientInterface`.
@@ -70,6 +89,31 @@ public final class Notification_V1_NotificationServiceClient: Notification_V1_No
         return self.client.serverOnlyStream(path: "/notification.v1.NotificationService/StreamNotifications", headers: headers)
     }
 
+    @available(iOS 13, *)
+    public func `registerDevice`(request: Notification_V1_RegisterDeviceRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Notification_V1_CommandResponse> {
+        return await self.client.unary(path: "/notification.v1.NotificationService/RegisterDevice", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `unregisterDevice`(request: Notification_V1_UnregisterDeviceRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Notification_V1_CommandResponse> {
+        return await self.client.unary(path: "/notification.v1.NotificationService/UnregisterDevice", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `getNotificationPreferences`(request: Notification_V1_GetNotificationPreferencesRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Notification_V1_NotificationPreferences> {
+        return await self.client.unary(path: "/notification.v1.NotificationService/GetNotificationPreferences", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `updateNotificationPreferences`(request: Notification_V1_UpdateNotificationPreferencesRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Notification_V1_NotificationPreferences> {
+        return await self.client.unary(path: "/notification.v1.NotificationService/UpdateNotificationPreferences", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `resolvePushTargets`(request: Notification_V1_ResolvePushTargetsRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Notification_V1_ResolvePushTargetsResponse> {
+        return await self.client.unary(path: "/notification.v1.NotificationService/ResolvePushTargets", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
     public enum Metadata {
         public enum Methods {
             public static let listNotifications = Connect.MethodSpec(name: "ListNotifications", service: "notification.v1.NotificationService", type: .unary)
@@ -77,6 +121,11 @@ public final class Notification_V1_NotificationServiceClient: Notification_V1_No
             public static let markRead = Connect.MethodSpec(name: "MarkRead", service: "notification.v1.NotificationService", type: .unary)
             public static let markAllRead = Connect.MethodSpec(name: "MarkAllRead", service: "notification.v1.NotificationService", type: .unary)
             public static let streamNotifications = Connect.MethodSpec(name: "StreamNotifications", service: "notification.v1.NotificationService", type: .serverStream)
+            public static let registerDevice = Connect.MethodSpec(name: "RegisterDevice", service: "notification.v1.NotificationService", type: .unary)
+            public static let unregisterDevice = Connect.MethodSpec(name: "UnregisterDevice", service: "notification.v1.NotificationService", type: .unary)
+            public static let getNotificationPreferences = Connect.MethodSpec(name: "GetNotificationPreferences", service: "notification.v1.NotificationService", type: .unary)
+            public static let updateNotificationPreferences = Connect.MethodSpec(name: "UpdateNotificationPreferences", service: "notification.v1.NotificationService", type: .unary)
+            public static let resolvePushTargets = Connect.MethodSpec(name: "ResolvePushTargets", service: "notification.v1.NotificationService", type: .unary)
         }
     }
 }
