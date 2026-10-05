@@ -782,6 +782,8 @@ struct FlagPaletteTests {
             if let image = entry.image {
                 #expect(image.size == CGSize(width: 40, height: 40), "\(country.code): rendered for the 40pt disc")
             }
+            let large = FlagPalette.largeRoundFlag(for: country.code)
+            #expect(large?.size == CGSize(width: 96, height: 96), "\(country.code): no 96pt flag for the offer")
         }
     }
 

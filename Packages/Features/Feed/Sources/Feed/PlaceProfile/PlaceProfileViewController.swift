@@ -59,12 +59,16 @@ final class PlaceProfileViewController: UIViewController {
     /// The page's tone over the picture's last few points, under the
     /// counters and the selector.
     private let bannerRamp = HeroBannerRampView()
-    /// "#3 City Rank" — the first counter, when the place has a rank to show.
-    private let rankMetric = PlaceMetricView(title: "Rank")
-    /// The heart every tile of this page counts, summed. It used to sit beside
-    /// a "Views" total and be called "Reactions"; the views went (2026-09-30)
-    /// and the word became the tiles' own.
-    private let likesMetric = PlaceMetricView(title: "Likes")
+    /// The place's IDENTITY ROW — the unlock sheet's own (`PlaceIdentityView`,
+    /// DesignSystem): its round flag (a city's is its country's) with the rank
+    /// in a bubble over it, the name and its subtitle (a country's continent,
+    /// a city's country), and the place's Likes and Posts. One component for
+    /// both, so the country's sheet and its page cannot drift apart.
+    private let identityView: PlaceIdentityView
+    /// The heart every tile of this page counts, summed — what the Likes
+    /// column shows. It used to sit beside a "Views" total and be called
+    /// "Reactions"; the views went (2026-09-30).
+    private var likesTotal: Int64 = 0
 
     /// The page's two tabs, by what they ARE rather than where they sit.
     enum Tab: Equatable {
@@ -138,15 +142,12 @@ final class PlaceProfileViewController: UIViewController {
     /// chrome exists to hold.
     private let placeName: String
     private let rank: PlaceRankBadge?
-    /// The banner's hero identity: the place's name, and nothing else.
-    ///
-    /// ⚠️ THE KIND LINE WAS DELETED, not hidden. "CITY CLUSTER" whispered above
-    /// the name was a taxonomy label competing with the identity — and the map
-    /// the viewer just came from had already said which kind of cluster this
-    /// is. The SPLITTER stays: `placeName` still arrives as the gallery's
-    /// "Paris • City Cluster", so stripping the kind is the only way to draw
-    /// the name alone.
-    private let heroNameLabel = UILabel()
+    /// ⚠️ THE KIND LINE WAS DELETED, not hidden. "CITY CLUSTER" whispered
+    /// above the name was a taxonomy label competing with the identity — and
+    /// the map the viewer just came from had already said which kind of
+    /// cluster this is. The SPLITTER stays: `placeName` still arrives as the
+    /// gallery's "Paris • City Cluster", so stripping the kind is the only way
+    /// to draw the name alone (`heroTitleComponents`).
     /// The two pages under their hosted-header contract, pager order.
     private var hostedPages: [any PlaceProfileHostedPage] = []
     /// Which page the header is riding. Adopted at tab-tap time (the
@@ -702,8 +703,6 @@ final class PlaceProfileViewController: UIViewController {
     /// How far the image lags the scroll, as a fraction of the header's travel.
     /// Enough to read as depth, little enough that the crop stays honest.
     private static let bannerParallaxFraction: CGFloat = 0.25
-    /// The gap between the name and the counters under it.
-    private static let nameToMetricsGap: CGFloat = Spacing.lg
 
     /// The banner's height: the PROFILE POSTER's geometry, not a share of the
     /// screen.
@@ -713,8 +712,9 @@ final class PlaceProfileViewController: UIViewController {
     /// whose poster gives its picture a 200pt stage under the chrome. Two
     /// screens of one design, read as two products ("la bannière est beaucoup
     /// trop haute", 25 September 2026). Now it is the profile's rule: the
-    /// chrome, `HeroBannerMetrics.posterStage` of picture, then the identity —
-    /// the name and the counters — and the clearance under them. Re-derived on
+    /// chrome, `HeroBannerMetrics.posterStage` of picture, then the identity
+    /// row — the flag, the name and the counters — and the clearance under
+    /// it. Re-derived on
     /// every layout, since the name and the counters grow with Dynamic Type.
     private var bannerHeight: CGFloat {
         let width = view.bounds.width - 2 * HeroBannerMetrics.identityInset
@@ -727,8 +727,7 @@ final class PlaceProfileViewController: UIViewController {
             ).height ?? 0
         }
         return view.safeAreaInsets.top + HeroBannerMetrics.posterStage
-            + height(of: heroNameLabel) + Self.nameToMetricsGap + height(of: metricsBand)
-            + Self.identityClearance
+            + height(of: identityView) + Self.identityClearance
     }
 
     /// How much taller than its viewport the image is cut. The parallax slides
@@ -744,6 +743,7 @@ final class PlaceProfileViewController: UIViewController {
         postIDs: [PostID],
         placeName: String = "",
         rank: PlaceRankBadge? = nil,
+        identity: PlaceIdentity? = nil,
         imagePipeline: ImagePipeline,
         videoPlayback: VideoPlaybackController?,
         following: ClusterGalleryFollowing? = nil,
@@ -755,6 +755,14 @@ final class PlaceProfileViewController: UIViewController {
         self.postIDs = postIDs
         self.placeName = placeName
         self.rank = rank
+        self.identityView = PlaceIdentityView(
+            flag: identity?.flag,
+            name: Self.heroTitleComponents(of: placeName).name,
+            subtitle: identity?.subtitle,
+            // Dashes until the place's posts arrive (`render`).
+            counters: [.init(value: "—", caption: "Likes"), .init(value: "—", caption: "Posts")],
+            rank: rank?.positionText
+        )
         self.imagePipeline = imagePipeline
         self.following = following
         self.wallet = wallet
@@ -987,73 +995,30 @@ final class PlaceProfileViewController: UIViewController {
             DispatchQueue.main.async { [weak self] in self?.updateHeroInk(force: true) }
         }
 
-        // THE HERO TITLE: the place's name at the banner's foot, standing on
-        // the picture — the identity leads the page, not the chrome.
+        // THE IDENTITY ROW at the banner's foot, standing on the picture — the
+        // identity leads the page, not the chrome. The unlock sheet's own
+        // (`PlaceIdentityView`): the flag, the name and its subtitle, Likes
+        // and Posts.
         //
         // ⚠️ THE PICTURE'S INK, THE PROFILE'S RULE (`HeroInk`). It was
         // `.label` over a page-toned plate, which was only ~0.2–0.4 under the
         // name: black type over a dark photograph (or white over a bright
         // one, in dark mode) read faint. #327 put a black scrim under white
         // type; that read as a black veil and went (30 September 2026). What
-        // stands under the name now is the picture's progressively blurred
-        // foot (`HeroBannerFade`), and the name wears white or black by what
-        // that blurred picture is behind it (`updateHeroInk`) — white alone
-        // measured 2.34:1 over this page's light mock picture.
-        heroNameLabel.text = Self.heroTitleComponents(of: placeName).name
-        // ⚠️ 34 LITERAL, not read back from `preferredFont(forTextStyle:).pointSize`.
+        // stands under the identity now is the picture's progressively
+        // blurred foot (`HeroBannerFade`), and the title and each counter wear
+        // white or black by what that blurred picture is behind them
+        // (`updateHeroInk`) — white alone measured 2.34:1 over this page's
+        // light mock picture.
         //
-        // That value ALREADY reflects the current content-size category, so
-        // feeding it to `UIFontMetrics.scaledFont` scales it a second time —
-        // the frozen `.title1.pointSize` this replaces had the same shape of
-        // bug in reverse: it sampled the category once, at construction, and
-        // never grew again. 34 is `largeTitle` at `.large`, which is exactly
-        // the base `scaledFont` expects to be handed.
-        //
-        // Up from 28: the banner grew by 17% and 28 was sized for the old one,
-        // so holding it would have made the identity proportionally SMALLER
-        // inside a larger picture.
-        heroNameLabel.font = UIFontMetrics(forTextStyle: .largeTitle).scaledFont(
-            for: .systemFont(ofSize: 34, weight: .bold), maximumPointSize: 40
-        )
-        heroNameLabel.adjustsFontForContentSizeCategory = true
-        heroNameLabel.accessibilityTraits = .header
-        heroNameLabel.adjustsFontSizeToFitWidth = true
-        heroNameLabel.minimumScaleFactor = 0.6
-        // ⚠️ LEADING, on the profile's column: the place's name stands where
-        // an account's does on a poster, so the two pages read as one design.
-        heroNameLabel.textAlignment = .natural
-        applyHeroLegibility()
-        heroNameLabel.translatesAutoresizingMaskIntoConstraints = false
-        bannerBox.addSubview(heroNameLabel)
-
-        // The profile's counter row: equal cells across the full column width,
-        // the place's rank first when it has one (a hidden cell takes no
-        // share of the row).
-        rankMetric.isHidden = rank == nil
-        if let rank {
-            rankMetric.setText(rank.positionText, title: rank.label)
-        }
-        let metrics = UIStackView(arrangedSubviews: [rankMetric, likesMetric])
-        metrics.distribution = .fillEqually
-        // No spacing: the cells ARE the spacing, equal across the column, as
-        // on the profile. (The old +xxl answered a centred pair that clumped
-        // in the middle of the screen; the row spans the column now.)
-        metrics.spacing = 0
-        metrics.alignment = .top
-        metrics.translatesAutoresizingMaskIntoConstraints = false
-        // ⚠️ INSIDE THE BANNER, under the name, ON THE PICTURE. The counters
-        // are part of the place's identity, so they stand on its picture as a
-        // poster's do on a profile — in the picture's ink, read off the
-        // blurred picture behind them — and the page arrives only over the
+        // ⚠️ INSIDE THE BANNER, ON THE PICTURE, counters included: they are
+        // part of the place's identity, so they stand on its picture as a
+        // poster's do on a profile, and the page arrives only over the
         // banner's last few points, where the list begins (user, 30
-        // September 2026; they were briefly on a page band under the name).
-        //
-        // Their bottom still keeps the old selector slot's clearance, derived
-        // from the bar's own height rather than typed as a constant: the
-        // header's height and every inset derived from it hang off it.
-        bannerBox.addSubview(metrics)
-        self.metricsBand = metrics
-
+        // September 2026).
+        applyHeroLegibility()
+        identityView.translatesAutoresizingMaskIntoConstraints = false
+        bannerBox.addSubview(identityView)
 
         // ⚠️ Stretchy banner, the profile's own mechanism: the host is moved
         // by its TOP CONSTRAINT rather than a transform precisely so this
@@ -1079,32 +1044,19 @@ final class PlaceProfileViewController: UIViewController {
             // The BOTTOM is the fixed edge (host.top + bannerHeight), so a
             // stretched banner grows upward while the title holds still.
             bannerBottom,
-            // The hero title rides the banner's FIXED bottom edge (see the
+            // The identity rides the banner's FIXED bottom edge (see the
             // stretch note above), so a pull-down stretches the image behind
-            // it while the name holds its seat over the blur. Leading, with
-            // the counters directly beneath it.
-            heroNameLabel.leadingAnchor.constraint(
+            // it while the identity holds its seat over the blur. On the
+            // profile's column.
+            identityView.leadingAnchor.constraint(
                 equalTo: bannerBox.leadingAnchor, constant: HeroBannerMetrics.identityInset
             ),
-            heroNameLabel.trailingAnchor.constraint(
-                lessThanOrEqualTo: bannerBox.trailingAnchor, constant: -HeroBannerMetrics.identityInset
-            ),
-            metrics.topAnchor.constraint(
-                equalTo: heroNameLabel.bottomAnchor, constant: Self.nameToMetricsGap
-            ),
-            metrics.leadingAnchor.constraint(
-                equalTo: bannerBox.leadingAnchor, constant: HeroBannerMetrics.identityInset
-            ),
-            metrics.trailingAnchor.constraint(
+            identityView.trailingAnchor.constraint(
                 equalTo: bannerBox.trailingAnchor, constant: -HeroBannerMetrics.identityInset
             ),
-            // ⚠️ DERIVED FROM THE BAR, not typed. The selector now stands
-            // INSIDE the banner's own rectangle, so the identity's foot has to
-            // clear a capsule rather than the picture's edge: the old -18 put
-            // the counters straight behind the glass the moment the bar moved
-            // up. Deriving it means a change to the bar's height cannot leave
-            // type drawn underneath it.
-            metrics.bottomAnchor.constraint(
+            // ⚠️ DERIVED FROM THE BAR, not typed: the identity's foot keeps
+            // the old selector slot's clearance — see `debugIdentityClearance`.
+            identityView.bottomAnchor.constraint(
                 equalTo: bannerBox.bottomAnchor, constant: -Self.identityClearance
             ),
             // ⚠️ **THE BANNER'S BOTTOM IS WHAT GIVES THE HOST A HEIGHT NOW.**
@@ -1134,7 +1086,6 @@ final class PlaceProfileViewController: UIViewController {
     private static let dockTransition: TimeInterval = 0.26
     private static let dockZoomScale: CGFloat = 0.88
 
-    private var metricsBand: UIStackView!
 
     private func configureTabs() {
         // The header rides the ACTIVE page's offset — every page reports,
@@ -1221,14 +1172,14 @@ final class PlaceProfileViewController: UIViewController {
 
     // MARK: - The scroll coordinator (the profile page's arithmetic)
 
-    /// Which ink the name and each counter wear on the picture — read off
+    /// Which ink the title and each counter wear on the picture — read off
     /// the blurred picture behind each (`updateHeroInk`); see `HeroInk`.
-    /// Per COUNTER, not per row: the two columns stand half a banner apart,
-    /// and one ink for the row was the worse of two grounds (a light wall
-    /// under one, dark hair under the other measured 2.3:1 in either ink).
+    /// Per COUNTER, not per row: the columns stand apart, and one ink for
+    /// the row was the worse of two grounds (a light wall under one, dark hair
+    /// under the other measured 2.3:1 in either ink). The rank's bubble wears
+    /// its own fixed ink.
     private var nameTone = HeroInk.defaultTone
-    private var rankTone = HeroInk.defaultTone
-    private var likesTone = HeroInk.defaultTone
+    private var counterTones: [HeroInk.Tone] = [HeroInk.defaultTone, HeroInk.defaultTone]
     private var heroInkReadFor: [CGRect] = []
     #if DEBUG
     /// How many times the ground under the type was read.
@@ -1240,10 +1191,8 @@ final class PlaceProfileViewController: UIViewController {
     /// opposite tone — it holds a glyph where the picture puts its own tone
     /// right behind it.
     private func applyHeroLegibility() {
-        heroNameLabel.textColor = nameTone.primary
-        HeroInk.applyShadow(to: heroNameLabel, tone: nameTone, onPicture: 1)
-        rankMetric.setInk(tone: rankTone)
-        likesMetric.setInk(tone: likesTone)
+        identityView.setTitleInk(nameTone)
+        identityView.setCounterInks(counterTones)
     }
 
     /// Reads the blurred picture behind the name and behind each counter and
@@ -1258,7 +1207,7 @@ final class PlaceProfileViewController: UIViewController {
         // rides the box's foot, and in the box's own space a pull-down (the
         // box stretching up) moved it down its ground and read the ground
         // again every two points of the pull.
-        let blocks = [heroNameLabel, rankMetric, likesMetric].map(restingFrame(of:))
+        let blocks = ([identityView.titleLabel] + identityView.statViews).map(restingFrame(of:))
         let moved = blocks.count != heroInkReadFor.count
             || zip(blocks, heroInkReadFor).contains { abs($0.minY - $1.minY) > 2 || abs($0.height - $1.height) > 2 }
         guard force || moved, let nameGround = bannerView.groundPixels(behind: blocks[0]) else { return }
@@ -1267,21 +1216,15 @@ final class PlaceProfileViewController: UIViewController {
         debugInkReadCount += 1
         #endif
         let name = HeroInk.tone(forGround: nameGround, current: nameTone)
-        var rank = rankTone
-        if !rankMetric.isHidden, let ground = bannerView.groundPixels(behind: blocks[1]) {
-            rank = HeroInk.tone(forGround: ground, current: rankTone)
-        }
-        var likes = likesTone
-        if let ground = bannerView.groundPixels(behind: blocks[2]) {
-            likes = HeroInk.tone(forGround: ground, current: likesTone)
+        let counters = zip(blocks.dropFirst(), counterTones).map { block, current in
+            bannerView.groundPixels(behind: block).map { HeroInk.tone(forGround: $0, current: current) } ?? current
         }
         #if DEBUG
         HeroInk.debugTraceGround(nameGround, name: "place-name", picked: name)
         #endif
-        guard name != nameTone || rank != rankTone || likes != likesTone else { return }
+        guard name != nameTone || counters != counterTones else { return }
         nameTone = name
-        rankTone = rank
-        likesTone = likes
+        counterTones = counters
         guard view.isInVisibleWindow else { return applyHeroLegibility() }
         UIView.transition(
             with: bannerBox, duration: 0.2, options: [.transitionCrossDissolve, .allowUserInteraction]
@@ -1304,13 +1247,13 @@ final class PlaceProfileViewController: UIViewController {
     /// halo over the photograph, the scrim a black veil. `HeroBannerFade` is
     /// the profile banner's run-out too, so the two screens cannot drift.
     private func placeHeroFade() {
-        guard let metricsBand else { return }
         bannerBox.layoutIfNeeded()
         // In the box's space AT REST: a pull-down stretches the box above,
         // and must not move the fade — see `HeroBannerPictureView`.
-        let name = restingFrame(of: heroNameLabel)
+        // From the identity's top — the flag's, as a profile's avatar is its.
+        let name = restingFrame(of: identityView)
         let foot = bannerBox.bounds.height - restingDrop
-        guard name.height > 0, metricsBand.frame.height > 0, foot > name.minY else { return }
+        guard name.height > 0, foot > name.minY else { return }
         // Shouldered, as a profile's poster: the name stands on the picture
         // where the blur is still nil, so the page's tone is already half
         // there under it.
@@ -1640,7 +1583,11 @@ final class PlaceProfileViewController: UIViewController {
         // numbers, and a check-in with no photograph is still something that
         // happened here — dropping it from a total because a grid cannot draw
         // it would make the place look quieter than it is.
-        likesMetric.setValue(Self.aggregatedLikes(of: members))
+        likesTotal = Self.aggregatedLikes(of: members)
+        identityView.setCounters([
+            .init(value: CountFormatter.compactString(for: likesTotal), caption: "Likes"),
+            .init(value: "\(members.count)", caption: members.count == 1 ? "Post" : "Posts"),
+        ])
         renderBanner(for: Self.bannerPost(in: gallery))
     }
 
@@ -2512,11 +2459,15 @@ extension PlaceProfileViewController {
     var debugHeaderBottom: CGFloat { headerHost.frame.maxY }
     /// The picture's top inside the box — negative while it is cut taller.
     var debugBannerImageTop: CGFloat { bannerView.pictureFrame.minY }
-    var debugHeroNameInk: UIColor { heroNameLabel.textColor }
-    /// The ink the name and the counters wear on the picture.
-    var debugHeroInkTones: (name: HeroInk.Tone, rank: HeroInk.Tone, likes: HeroInk.Tone) {
-        (nameTone, rankTone, likesTone)
+    var debugHeroNameInk: UIColor? {
+        identityView.titleLabel.attributedText?.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? UIColor
     }
+    /// The ink the title and each counter wear on the picture.
+    var debugHeroInkTones: (name: HeroInk.Tone, likes: HeroInk.Tone, posts: HeroInk.Tone) {
+        (nameTone, counterTones[0], counterTones[1])
+    }
+    /// The identity row, for a test that reads it.
+    var debugIdentity: PlaceIdentityView { identityView }
     /// The banner's fade, in the view's space.
     var debugBannerFade: HeroBannerFade.Geometry? {
         bannerView.fade?.offset(by: headerHost.frame.minY)
@@ -2546,8 +2497,8 @@ extension PlaceProfileViewController {
     /// `HeroInk.debugContrast`. Labelled by their text.
     func debugHeroInkContrast() -> [(String, HeroInkContrast)]? {
         view.layoutIfNeeded()
-        let metrics = [rankMetric, likesMetric].filter { !$0.isHidden }
-        let labels = [heroNameLabel] + metrics.flatMap(\.debugLabels)
+        let labels: [UILabel] = [identityView.titleLabel]
+            + identityView.statViews.flatMap { [$0.valueLabel, $0.captionLabel] }
         guard let measured = HeroInk.debugContrast(of: labels, in: bannerBox, over: Surface.page)
         else { return nil }
         return zip(labels, measured).map { ($0.text ?? "?", $1) }
@@ -2556,18 +2507,15 @@ extension PlaceProfileViewController {
     func debugApplyHeaderOffset(_ travelled: CGFloat) { applyHeaderOffset(travelled) }
     /// Whether the name and the counters are drawn ON the banner.
     var debugIdentityRidesTheBanner: Bool {
-        heroNameLabel.isDescendant(of: bannerBox)
-            && (metricsBand.map { $0.isDescendant(of: bannerBox) } ?? false)
+        identityView.isDescendant(of: bannerBox)
     }
     /// The name's and the counter row's frames, in the view's space.
-    var debugNameFrame: CGRect { heroNameLabel.convert(heroNameLabel.bounds, to: view) }
-    var debugMetricsFrame: CGRect {
-        metricsBand.map { $0.convert($0.bounds, to: view) } ?? .zero
-    }
-    /// The rank column as drawn — nil when it is not.
-    var debugRankColumn: (value: String?, caption: String?)? {
-        rankMetric.isHidden ? nil : (rankMetric.accessibilityValue, rankMetric.accessibilityLabel)
-    }
+    var debugNameFrame: CGRect { identityView.titleLabel.convert(identityView.titleLabel.bounds, to: view) }
+    /// The whole identity row — flag, title, counters — in the view's space.
+    var debugIdentityFrame: CGRect { identityView.convert(identityView.bounds, to: view) }
+    var debugMetricsFrame: CGRect { identityView.countersRow.convert(identityView.countersRow.bounds, to: view) }
+    /// The rank's bubble as drawn — nil when it is not.
+    var debugRank: String? { identityView.rankBubble.isHidden ? nil : identityView.rankBubble.text }
     /// The band's two numbers as rendered — the place's own totals, which are
     /// deliberately NOT the gallery's (see `render`).
     /// Which Activity row a dismissal from the MAP is currently aimed at. The
@@ -2595,7 +2543,7 @@ extension PlaceProfileViewController {
         default: Int(argument).flatMap { tabOrder.indices.contains($0) ? $0 : nil }
         }
     }
-    var debugLikes: Int64 { likesMetric.debugValue }
+    var debugLikes: Int64 { likesTotal }
     /// How many hydrations reached the page — a refresh that brought the same
     /// members must leave it where it was.
     var debugRenderCount: Int { renders }
@@ -2612,7 +2560,7 @@ extension PlaceProfileViewController {
         page.debugHasRefreshControl || activityPage.debugHasRefreshControl
     }
     var debugIsLoading: Bool { isLoading }
-    var debugHeroName: String? { heroNameLabel.text }
+    var debugHeroName: String? { identityView.titleLabel.name }
     /// How far the identity's foot clears the banner's edge — the invariant the
     /// old -18 constant broke the moment the selector moved onto the banner.
     ///
@@ -2621,7 +2569,7 @@ extension PlaceProfileViewController {
     /// but its stated reason is history: the selector is at the foot of the
     /// screen. Re-decide it rather than inheriting it.
     var debugIdentityClearance: CGFloat {
-        bannerBox.bounds.height - (metricsBand?.frame.maxY ?? 0)
+        bannerBox.bounds.height - identityView.frame.maxY
     }
     /// Drives the active page to a travel offset through the same path a
     /// finger's scroll reports through.
@@ -2648,99 +2596,6 @@ protocol PlaceProfileHostedPage: UIView {
 }
 
 extension ForYouGridPage: PlaceProfileHostedPage {}
-
-// MARK: - Header pieces
-
-/// One column of the metrics band: a compact count over its caption — the
-/// profile header's metric shape, minus everything an account has and a
-/// place doesn't.
-private final class PlaceMetricView: UIView {
-    private let valueLabel = UILabel()
-    private let titleLabel = UILabel()
-
-    init(title: String) {
-        super.init(frame: .zero)
-        // ⚠️ 20 AND 13 LITERAL, for the reason the hero name states: a point
-        // size read back from `preferredFont` already carries the current
-        // category, and re-scaling it scales it twice.
-        //
-        // DOWN from title2-bold (22). The name went 28 → 34, so the pair goes
-        // from 28:22 — two bolds arguing about which is the headline — to
-        // 34:20, which reads as a title and a measurement.
-        // ⚠️ THE PROFILE'S COUNTER TYPE (headline over caption1), since the
-        // row is the profile's row now: cells across the column, the same
-        // shape as Followers / Following / Likes.
-        valueLabel.font = .appFont(forTextStyle: .headline)
-        valueLabel.adjustsFontForContentSizeCategory = true
-        valueLabel.textColor = .label
-        valueLabel.textAlignment = .center
-        valueLabel.text = "—"
-        // footnote, not caption1: the profile's counters are caption1 because
-        // three of them share one row. Two on a full banner can afford a step.
-        titleLabel.font = .appFont(forTextStyle: .caption1)
-        titleLabel.adjustsFontForContentSizeCategory = true
-        titleLabel.textColor = .secondaryLabel
-        titleLabel.textAlignment = .center
-        titleLabel.text = title
-        let column = UIStackView(arrangedSubviews: [valueLabel, titleLabel])
-        column.axis = .vertical
-        column.spacing = Spacing.xs
-        column.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(column)
-        NSLayoutConstraint.activate([
-            column.topAnchor.constraint(equalTo: topAnchor),
-            column.leadingAnchor.constraint(equalTo: leadingAnchor),
-            column.trailingAnchor.constraint(equalTo: trailingAnchor),
-            column.bottomAnchor.constraint(equalTo: bottomAnchor),
-        ])
-        isAccessibilityElement = true
-        accessibilityLabel = title
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    /// The picture's ink — the counters stand on the banner's picture, as a
-    /// poster's do on a profile: white or black by what is behind them
-    /// (`HeroInk`), with a soft shadow of the opposite tone.
-    func setInk(tone: HeroInk.Tone) {
-        valueLabel.textColor = tone.primary
-        titleLabel.textColor = tone.secondary
-        for label in [valueLabel, titleLabel] {
-            HeroInk.applyShadow(to: label, tone: tone, onPicture: 1)
-        }
-    }
-
-    func setValue(_ value: Int64) {
-        stored = value
-        valueLabel.text = CountFormatter.compactString(for: value)
-        accessibilityValue = valueLabel.text
-    }
-
-    /// A value that is not a count — the rank's "#3" — and its caption.
-    func setText(_ value: String, title: String) {
-        valueLabel.text = value
-        titleLabel.text = title
-        accessibilityLabel = title
-        accessibilityValue = value
-    }
-
-    #if DEBUG
-    /// The value and its caption, for the ink audit.
-    var debugLabels: [UILabel] { [valueLabel, titleLabel] }
-    /// The raw total, before `CountFormatter` rounds it into something a
-    /// column can hold. A test asserting "57" against "57" through the
-    /// formatter would pass just as well against "57.4K".
-    private(set) var debugValue: Int64 = 0
-    private var stored: Int64 {
-        get { debugValue }
-        set { debugValue = newValue }
-    }
-    #else
-    private var stored: Int64 = 0
-    #endif
-}
-
 
 // MARK: - The map return flight's destination half
 //
