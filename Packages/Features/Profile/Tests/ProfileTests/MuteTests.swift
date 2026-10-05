@@ -35,12 +35,19 @@ struct MuteTests {
         )
     }
 
-    private func settle(until condition: () -> Bool) async {
-        for _ in 0..<200 {
+    /// Waits on STATE, not time: polls until `condition` holds, for up to
+    /// 10 s, and returns at once when it does. The bound is generous because
+    /// a starved CI runner took over two minutes on this suite; a short
+    /// budget that gave up silently made the next step a no-op (#521).
+    @discardableResult
+    private func settle(until condition: () -> Bool) async -> Bool {
+        let deadline = ContinuousClock.now + .seconds(10)
+        while ContinuousClock.now < deadline {
             await Task.yield()
-            if condition() { return }
+            if condition() { return true }
             try? await Task.sleep(for: .milliseconds(5))
         }
+        return condition()
     }
 
     /// Muting stores the scopes, re-muting replaces them, the relation reads
@@ -92,7 +99,9 @@ struct MuteTests {
         var results: [ProfileViewModel.ActionResult] = []
         viewModel.onActionResult = { results.append($0) }
         viewModel.viewDidLoad()
-        await settle { viewModel.canModerate }
+        // Both reads: the relationship can answer before the profile, and the
+        // menu acts on a loaded profile only.
+        try #require(await settle { viewModel.canModerate && viewModel.profile != nil }, "the profile never loaded")
         #expect(viewModel.canMute)
 
         viewModel.toggleMute(.posts)
