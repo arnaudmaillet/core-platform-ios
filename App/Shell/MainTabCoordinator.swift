@@ -651,7 +651,16 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
     /// to stand.
     private func applyMessagesAvailability() {
         guard let tab = messagesTab?.tab else { return }
-        tab.isEnabled = isMember
+        if tab.isEnabled != isMember {
+            tab.isEnabled = isMember
+            // ⚠️ iOS 27 does not redraw a bar item when only `isEnabled`
+            // changes: a guest who signed in kept a grey Messages tab until
+            // they tapped it. Any other change redraws it, so the image goes
+            // round once.
+            let image = tab.image
+            tab.image = nil
+            tab.image = image
+        }
         if !isMember, tabBarController.selectedTab === tab {
             selectTab(.explore)
         }
