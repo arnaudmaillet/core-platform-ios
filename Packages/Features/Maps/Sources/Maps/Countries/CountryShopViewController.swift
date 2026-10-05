@@ -534,8 +534,11 @@ public final class CountryShopViewController: UIViewController {
         navigationItem.searchController?.searchBar.resignFirstResponder()
         var presenter: UIViewController = navigationController ?? self
         while let next = presenter.presentedViewController, !next.isBeingDismissed { presenter = next }
-        guard !(presenter is CountryUnlockSheetViewController) else { return }
-        presenter.present(CountryUnlockSheetViewController(country: country, access: access), animated: true)
+        guard !((presenter as? UINavigationController)?.viewControllers.first is CountryUnlockSheetViewController)
+        else { return }
+        presenter.present(
+            CountryUnlockSheetViewController(country: country, access: access).wrappedInSheet(), animated: true
+        )
     }
 
     /// The close button. From the PRESENTER: on the shop itself `dismiss`

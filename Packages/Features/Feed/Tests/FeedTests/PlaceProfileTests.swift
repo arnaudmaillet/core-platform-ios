@@ -77,48 +77,78 @@ struct PlaceProfileTests {
     /// ⚠️ THE PROFILE POSTER'S GEOMETRY, NOT A SHARE OF THE SCREEN. It was 70%
     /// of the viewport (612pt on this one) beside a profile whose poster gives
     /// its picture a 200pt stage — two pages of one design reading as two
-    /// products. The name now stands where the profile's column starts: the
-    /// chrome plus `HeroBannerMetrics.posterStage`.
-    @Test func theNameStandsWhereTheProfilesColumnStarts() {
+    /// products. The identity row — its flag's top, as a profile's avatar's —
+    /// now stands where the profile's column starts: the chrome plus
+    /// `HeroBannerMetrics.posterStage`.
+    @Test func theIdentityStandsWhereTheProfilesColumnStarts() {
         let profile = makeProfile()
         laidOut(profile)
         let expected = profile.view.safeAreaInsets.top + HeroBannerMetrics.posterStage
-        #expect(abs(profile.debugNameFrame.minY - expected) < 1,
-                "name at \(profile.debugNameFrame.minY), the poster's column at \(expected)")
+        #expect(abs(profile.debugIdentityFrame.minY - expected) < 1,
+                "identity at \(profile.debugIdentityFrame.minY), the poster's column at \(expected)")
         #expect(profile.debugBannerHeight < 874 * 0.6, "the banner is back to most of the screen")
     }
 
-    /// The banner ends under the counters by the clearance, and nowhere else —
-    /// derived from its content, so Dynamic Type cannot put type off it.
-    @Test func theBannerEndsJustUnderTheCounters() {
+    /// The banner ends under the identity row by the clearance, and nowhere
+    /// else — derived from its content, so Dynamic Type cannot put type off
+    /// it. The counters stand inside the row, above its foot.
+    @Test func theBannerEndsJustUnderTheIdentity() {
         let profile = makeProfile()
         laidOut(profile)
-        #expect(abs(profile.debugIdentityClearance - (profile.debugBannerHeight - profile.debugMetricsFrame.maxY)) < 1)
+        #expect(abs(profile.debugIdentityClearance - (profile.debugBannerHeight - profile.debugIdentityFrame.maxY)) < 1)
+        #expect(profile.debugMetricsFrame.maxY <= profile.debugIdentityFrame.maxY + 0.5)
     }
 
-    /// On the profile's grid: the name on the column's leading edge, the
-    /// counters across the whole column.
+    /// On the profile's grid: the flag on the column's leading edge, as an
+    /// avatar is; the name and the counters beside it, to the column's end.
     @Test func theIdentityIsLaidOnTheProfilesColumn() {
         let profile = makeProfile()
         laidOut(profile)
-        #expect(abs(profile.debugNameFrame.minX - HeroBannerMetrics.identityInset) < 0.5)
-        #expect(abs(profile.debugMetricsFrame.minX - HeroBannerMetrics.identityInset) < 0.5)
+        let identity = profile.debugIdentityFrame
+        #expect(abs(identity.minX - HeroBannerMetrics.identityInset) < 0.5)
+        #expect(abs(identity.maxX - (402 - HeroBannerMetrics.identityInset)) < 0.5)
+        let flagRight = identity.minX + PlaceIdentityView.flagSide
+        #expect(profile.debugNameFrame.minX > flagRight, "the name runs under the flag")
+        #expect(abs(profile.debugMetricsFrame.minX - profile.debugNameFrame.minX) < 0.5)
         #expect(abs(profile.debugMetricsFrame.maxX - (402 - HeroBannerMetrics.identityInset)) < 0.5)
     }
 
-    /// "#3 City Rank" leads the counters when the place has a rank…
-    @Test func aRankedPlaceShowsItsRankFirst() {
+    /// "#3" rides the flag in its bubble when the place has a rank…
+    @Test func aRankedPlaceWearsItsRankOnTheFlag() {
         let profile = makeProfile(rank: PlaceRankBadge(position: 3, label: "City Rank"))
         laidOut(profile)
-        #expect(profile.debugRankColumn?.value == "#3")
-        #expect(profile.debugRankColumn?.caption == "City Rank")
+        #expect(profile.debugRank == "#3")
     }
 
-    /// …and a place with none (every place on the fleet today) draws no column.
-    @Test func anUnrankedPlaceDrawsNoRankColumn() {
+    /// …and a place with none (every place on the fleet today) draws no bubble.
+    @Test func anUnrankedPlaceDrawsNoRank() {
         let profile = makeProfile()
         laidOut(profile)
-        #expect(profile.debugRankColumn == nil)
+        #expect(profile.debugRank == nil)
+    }
+
+    /// The identity row is the unlock sheet's (`PlaceIdentityView`): the flag
+    /// and the subtitle the map resolved, the name without its kind, and the
+    /// place's Likes and Posts — no flag without a country.
+    @Test func theIdentityRowWearsTheFlagAndSubtitleTheMapGave() {
+        let flag = UIGraphicsImageRenderer(size: CGSize(width: 96, height: 96)).image { _ in }
+        let profile = PlaceProfileViewController(
+            postIDs: [], placeName: "Paris • City Cluster",
+            identity: PlaceIdentity(flag: flag, subtitle: "France"),
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            videoPlayback: nil, loadPosts: { [] }, openPost: { _, _, _ in }
+        )
+        laidOut(profile)
+        let identity = profile.debugIdentity
+        #expect(identity.flagView.image === flag)
+        #expect(identity.titleLabel.name == "Paris")
+        #expect(identity.titleLabel.subtitle == "France")
+        #expect(identity.statViews.map(\.captionLabel.text) == ["Likes", "Posts"])
+
+        let bare = makeProfile()
+        laidOut(bare)
+        #expect(bare.debugIdentity.flagView.image == nil, "a flag out of nowhere")
+        #expect(bare.debugIdentity.titleLabel.subtitle == "")
     }
 
     /// ⚠️ THE SELECTOR IS ON THE BANNER, NOT UNDER IT — bottoms level.
@@ -440,6 +470,8 @@ struct PlaceProfileTests {
         for _ in 0..<50 where profile.renderedPosts.isEmpty { await Task.yield() }
         #expect(profile.renderedPosts.count == 1, "precondition: the text post left the grid")
         #expect(profile.debugLikes == 57)
+        // Both posts count, the text one too.
+        #expect(profile.debugIdentity.statViews.map(\.valueLabel.text) == ["57", "2"])
     }
 
     // MARK: - The follow toggle
