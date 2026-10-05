@@ -443,6 +443,18 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
     }
 
     public func register(on bff: MockBFF) {
+        // Country access from location (backend B10). The mock has no GeoIP:
+        // a sent code is granted, nothing sent is NOT_SENT.
+        bff.register(path: "/geo_discovery.v1.GeoDiscoveryService/GetCountryAccess") { (request: GeoDiscovery_V1_GetCountryAccessRequest) in
+            var response = GeoDiscovery_V1_GetCountryAccessResponse()
+            if request.currentCountry.isEmpty {
+                response.outcome = .notSent
+            } else {
+                response.outcome = .granted
+                response.currentCountry = request.currentCountry.uppercased()
+            }
+            return .success(response)
+        }
         bff.register(path: "/geo_discovery.v1.GeoDiscoveryService/QueryTile") { [self] (request: GeoDiscovery_V1_QueryTileRequest, headers: Headers) in
             queryTile(request, filter: headers[Self.filterHeader]?.first)
         }

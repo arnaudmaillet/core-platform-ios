@@ -1,4 +1,6 @@
 import AuthInterface
+import Connect
+import CoreContracts
 import CoreLocation
 import CoreNetworkingMocks
 import CoreStorage
@@ -137,5 +139,22 @@ final class CountryAccessService: CountryAccess {
             activity[code] = (current.likes + likes, current.posts + 1)
         }
         return activity
+    }
+}
+
+/// The device's country, as the server lets it open (backend B10, #455):
+/// `geo_discovery.v1.GetCountryAccess` checks the code against the network's
+/// GeoIP country (roaming tolerated). Only a granted code opens; a refusal,
+/// or no answer, opens nothing. The same call with nothing sent closes the
+/// country left behind on the server's side too — what filters a guest's map.
+struct GeoCountryAccessVerifier: CurrentCountryVerifying {
+    let geoClient: any GeoDiscovery_V1_GeoDiscoveryServiceClientInterface
+
+    func verify(_ code: String?) async -> String? {
+        var request = GeoDiscovery_V1_GetCountryAccessRequest()
+        request.currentCountry = code ?? ""
+        guard let response = await geoClient.getCountryAccess(request: request, headers: [:]).message,
+              response.outcome == .granted, !response.currentCountry.isEmpty else { return nil }
+        return response.currentCountry
     }
 }

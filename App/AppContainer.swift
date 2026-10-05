@@ -100,14 +100,14 @@ final class AppContainer {
 
     /// RPC client for everything except AuthService; attaches the edge token
     /// and refreshes it single-flight.
-    private(set) lazy var authenticatedRPCClient = ConnectClientFactory.makeAuthenticated(
+    private(set) lazy var authenticatedRPCClient: ProtocolClientInterface = ConnectClientFactory.makeAuthenticated(
         host: environment.host,
         tokenProvider: sessionManager,
         wire: environment.wire,
         httpClient: rpcHTTPClient
     )
 
-    private(set) lazy var sessionManager = SessionManager(
+    private(set) lazy var sessionManager: SessionManager = SessionManager(
         authClient: Auth_V1_AuthServiceClient(client: unauthenticatedRPCClient),
         store: KeychainSessionStore(store: KeychainStore(service: "cn.wynn.core-platform-ios")),
         configuration: .init(deviceID: Self.persistentDeviceID(), userAgent: Self.userAgent()),
@@ -622,7 +622,13 @@ final class AppContainer {
 
     /// Where the device is, as a country — asked for in context from the map
     /// (guest mode §3.1), never at launch. Opens that country for free.
-    private(set) lazy var currentCountry = CurrentCountryProvider()
+    private(set) lazy var currentCountry: CurrentCountryProvider = CurrentCountryProvider(
+        // Only the country the server grants opens (B10): it checks the code
+        // against the network's GeoIP country.
+        verifier: GeoCountryAccessVerifier(
+            geoClient: GeoDiscovery_V1_GeoDiscoveryServiceClient(client: authenticatedRPCClient)
+        )
+    )
 
     /// The Shop's Boosts: the ×100 cartridge pack, over the ONE wallet. Mock
     /// mode only, like the shop itself (no `countryAccess`, no shop door).

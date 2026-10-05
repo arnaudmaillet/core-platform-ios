@@ -16,6 +16,61 @@ struct CurrentCountryTests {
         #expect(CurrentCountryProvider.permission(for: .restricted) == .denied)
     }
 
+    // MARK: - The server decides (B10, #455)
+
+    private final class Verifier: CurrentCountryVerifying, @unchecked Sendable {
+        let grants: Bool
+        private(set) var asked: [String?] = []
+        init(grants: Bool) { self.grants = grants }
+        func verify(_ code: String?) async -> String? {
+            asked.append(code)
+            return grants ? code : nil
+        }
+    }
+
+    private func waitForChange(of provider: CurrentCountryProvider, _ action: () -> Void) async {
+        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+            var token: NSObjectProtocol?
+            token = NotificationCenter.default.addObserver(
+                forName: .currentCountryDidChange, object: provider, queue: nil
+            ) { _ in
+                if let token { NotificationCenter.default.removeObserver(token) }
+                done.resume()
+            }
+            action()
+        }
+    }
+
+    private func fix(_ provider: CurrentCountryProvider) {
+        provider.locationManager(
+            CLLocationManager(), didUpdateLocations: [CLLocation(latitude: 48.85, longitude: 2.35)]
+        )
+    }
+
+    @Test func aCountryTheServerGrantsOpens() async {
+        let verifier = Verifier(grants: true)
+        let provider = CurrentCountryProvider(resolve: { _ in "FR" }, verifier: verifier)
+        await waitForChange(of: provider) { fix(provider) }
+        #expect(provider.currentCountry == "FR")
+        #expect(verifier.asked == ["FR"])
+
+        // The same country again is not asked again.
+        fix(provider)
+        for _ in 0..<5 { await Task.yield() }
+        #expect(verifier.asked == ["FR"])
+    }
+
+    /// A spoofed position — or a network the server can't place — opens
+    /// nothing.
+    @Test func aCountryTheServerRefusesStaysShut() async {
+        let verifier = Verifier(grants: false)
+        let provider = CurrentCountryProvider(resolve: { _ in "FR" }, verifier: verifier)
+        fix(provider)
+        for _ in 0..<20 { await Task.yield() }
+        #expect(provider.currentCountry == nil)
+        #expect(verifier.asked == ["FR"])
+    }
+
     @Test func aGuestWithoutLocationHasNothingOpen() {
         #expect(Access(home: nil, current: nil).hasNoOpenCountry)
     }
