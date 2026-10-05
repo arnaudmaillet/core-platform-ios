@@ -187,6 +187,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
         }
         profileTab?.show(member: isMember)
         messagesTab?.show(member: isMember)
+        applyMessagesAvailability()
         forYouTab?.start()
         for (_, tab) in orderedTabs {
             (tab as? ExploreTabCoordinator)?.viewerDidChange()
@@ -257,6 +258,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
         popGestureEnablers = orderedTabs.map { NativePopGestureEnabler(taking: $0.1.navigationController) }
         tabBarController.tabs = orderedTabs.map { $0.1.tab } + [createItem.tab]
         tabBarController.delegate = self
+        applyMessagesAvailability()
         // The stake menu's way to the cartridge pack, from any screen.
         tabBarController.makeStakeShopSheet = { [unowned container] in container.makeStakeShopSheet() }
         // The gate every write asks before it runs, found up the chain.
@@ -639,6 +641,20 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
         // Selection resizes the tab buttons (the selected one carries the
         // lens), so the overlays have to follow.
         alignMenuOverlays()
+    }
+
+    /// A guest has no conversations: the Messages tab stands greyed out and
+    /// takes no tap — the bar's own disabled state (`UITab.isEnabled`), not a
+    /// faded view (the bar is UIKit's to draw). A route to Messages asks a
+    /// guest to sign up instead (`AppRoute.gatedAction`). A session that ends
+    /// with Messages selected leaves it for Explore: a greyed tab is no place
+    /// to stand.
+    private func applyMessagesAvailability() {
+        guard let tab = messagesTab?.tab else { return }
+        tab.isEnabled = isMember
+        if !isMember, tabBarController.selectedTab === tab {
+            selectTab(.explore)
+        }
     }
 
     /// The "+" is never a place — see `CreateTabItem`. A tap on it lands HERE,

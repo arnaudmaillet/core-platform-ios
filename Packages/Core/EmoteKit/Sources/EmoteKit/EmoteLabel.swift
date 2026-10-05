@@ -294,7 +294,7 @@ open class EmoteLabel: UILabel {
         }
         let origin = textOrigin(in: textBox)
         let placements = textLayout.placements(for: marks)
-        let policy = AnimatedIconView.policy
+        let policy = EmoteMotion.policy
         let motion: EmoteEngine.Motion = policy == .still ? .still : .loop
         let scale = traitCollection.displayScale
         var live = Set<Int>()
@@ -397,6 +397,7 @@ open class EmoteLabel: UILabel {
         // Selector observers are dropped with the label: nothing to remove.
         for name in [
             UIAccessibility.reduceMotionStatusDidChangeNotification,
+            Notification.Name.emoteAnimationPreferenceDidChange,
             Notification.Name.NSProcessInfoPowerStateDidChange,
             ProcessInfo.thermalStateDidChangeNotification
         ] {

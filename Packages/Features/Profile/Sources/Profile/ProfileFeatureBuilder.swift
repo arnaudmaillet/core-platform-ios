@@ -112,7 +112,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                 switch section {
                 // Device settings need no account: a guest's choices stay on
                 // this iPhone like anyone's (#468).
-                case .playback, .display, .mediaComments, .language, .storage:
+                case .playback, .display, .emojis, .mediaComments, .language, .storage:
                     AppPreferencesViewController(page: section)
                 case .help:
                     SettingsLinksViewController.help(links: .current)
@@ -168,7 +168,8 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                 if let types = repository as? any AccountTypeManaging {
                     editor.onOpenAccountType = { [weak editor] in
                         editor?.navigationController?.pushViewController(
-                            AccountTypeViewController(manager: types), animated: true
+                            AccountTypeViewController(manager: types, verifier: repository as? any VerificationRequesting),
+                            animated: true
                         )
                     }
                 }
@@ -304,7 +305,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                             }
                                         })
                                     }
-                                case .playback, .display, .mediaComments, .language, .storage:
+                                case .playback, .display, .emojis, .mediaComments, .language, .storage:
                                     AppPreferencesViewController(page: section)
                                 case .help:
                                     SettingsLinksViewController.help(links: .current)

@@ -3,7 +3,8 @@ import UIKit
 
 /// Edit Profile → Account Type (#415, backend #734): Personal, Creator or
 /// Business. The type is public on the profile; a business also shows its
-/// category and a contact card. Not optimistic.
+/// category and a contact card. Not optimistic. Below, the verified badge:
+/// where the profile stands, and the way to ask for one.
 final class AccountTypeViewController: UIViewController {
     enum Phase: Equatable {
         case loading
@@ -12,7 +13,15 @@ final class AccountTypeViewController: UIViewController {
     }
 
     enum Section: Hashable {
-        case type, contact
+        case type, contact, verification
+    }
+
+    /// The badge row's state, loaded on its own: a failure there leaves the
+    /// account type usable.
+    enum VerificationPhase: Equatable {
+        case loading
+        case loaded(VerificationStatus)
+        case failed
     }
 
     enum ContactField: Hashable, CaseIterable {
@@ -38,20 +47,26 @@ final class AccountTypeViewController: UIViewController {
     private enum Item: Hashable {
         case type(AccountType)
         case contact(ContactField)
+        case verification
         case loading
         case failed
     }
 
     private let manager: any AccountTypeManaging
+    private let verifier: (any VerificationRequesting)?
     private var phase: Phase = .loading {
+        didSet { applySnapshot() }
+    }
+    private var verification: VerificationPhase = .loading {
         didSet { applySnapshot() }
     }
     private var isSaving = false
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
 
-    init(manager: any AccountTypeManaging) {
+    init(manager: any AccountTypeManaging, verifier: (any VerificationRequesting)? = nil) {
         self.manager = manager
+        self.verifier = verifier
         super.init(nibName: nil, bundle: nil)
         title = "Account Type"
         hidesBottomBarWhenPushed = true
@@ -77,6 +92,42 @@ final class AccountTypeViewController: UIViewController {
         configureDataSource()
         applySnapshot()
         load()
+        loadVerification()
+    }
+
+    private func loadVerification() {
+        guard let verifier else { return }
+        verification = .loading
+        Task { [weak self] in
+            do {
+                let status = try await verifier.verificationStatus()
+                self?.verification = .loaded(status)
+            } catch {
+                self?.verification = .failed
+            }
+        }
+    }
+
+    /// The badge row's words for each state.
+    static func verificationRow(_ phase: VerificationPhase) -> (title: String, detail: String?) {
+        switch phase {
+        case .loading:
+            ("Verification", "Loading…")
+        case .failed:
+            ("Verification", "Couldn't load your verification status. Tap to try again.")
+        case .loaded(.notRequested):
+            ("Request Verification", "Ask for a verified badge next to your name.")
+        case .loaded(.pending(let category, let submittedAt)):
+            (
+                "Verification Requested",
+                [category?.title, "Sent \(submittedAt.formatted(date: .abbreviated, time: .omitted))", "Waiting for a decision"]
+                    .compactMap { $0 }.joined(separator: " · ")
+            )
+        case .loaded(.rejected(let reason, _)):
+            ("Not Approved", (reason.isEmpty ? "" : reason + "\n") + "You can ask again.")
+        case .loaded(.verified(let category)):
+            ("Verified", category.map { "\($0.title) · The badge shows next to your name." } ?? "The badge shows next to your name.")
+        }
     }
 
     private func load() {
@@ -98,6 +149,8 @@ final class AccountTypeViewController: UIViewController {
             type == .bot ? AccountType.bot.detail : "Everyone can see your account type. Applies to this profile only."
         case .contact:
             "Shown on your profile to everyone. The category is required; email and phone are optional."
+        case .verification:
+            "A verified badge shows next to your name everywhere. You'll see the decision here."
         }
     }
 
@@ -129,6 +182,19 @@ final class AccountTypeViewController: UIViewController {
                     content.secondaryText = (value?.isEmpty ?? true) ? "Add" : value
                 }
                 cell.accessories = [.disclosureIndicator()]
+            case .verification:
+                let row = Self.verificationRow(verification)
+                content.text = row.title
+                content.secondaryText = row.detail
+                switch verification {
+                case .loaded(.verified):
+                    content.image = UIImage(systemName: "checkmark.seal.fill")
+                    content.imageProperties.tintColor = .systemBlue
+                case .loaded(let status) where status.canRequest:
+                    cell.accessories = [.disclosureIndicator()]
+                default:
+                    break
+                }
             case .loading:
                 content = .cell()
                 content.text = "Loading…"
@@ -147,7 +213,11 @@ final class AccountTypeViewController: UIViewController {
             elementKind: UICollectionView.elementKindSectionHeader
         ) { [weak self] view, _, indexPath in
             var content = UIListContentConfiguration.header()
-            content.text = self?.dataSource.sectionIdentifier(for: indexPath.section) == .contact ? "Contact Card" : nil
+            content.text = switch self?.dataSource.sectionIdentifier(for: indexPath.section) {
+            case .contact: "Contact Card"
+            case .verification: "Verification"
+            default: nil
+            }
             view.contentConfiguration = content
         }
         let footer = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
@@ -181,6 +251,11 @@ final class AccountTypeViewController: UIViewController {
             if type == .business {
                 snapshot.appendSections([.contact])
                 snapshot.appendItems(ContactField.allCases.map(Item.contact), toSection: .contact)
+            }
+            // A bot is the platform's; it has no badge to ask for.
+            if verifier != nil, type != .bot {
+                snapshot.appendSections([.verification])
+                snapshot.appendItems([.verification], toSection: .verification)
             }
             snapshot.reconfigureItems(snapshot.itemIdentifiers)
         }
@@ -258,6 +333,21 @@ final class AccountTypeViewController: UIViewController {
         }
     }
 
+    private func openVerification() {
+        switch verification {
+        case .failed:
+            loadVerification()
+        case .loaded(let status) where status.canRequest:
+            guard let verifier else { return }
+            let form = VerificationRequestViewController(manager: verifier) { [weak self] in
+                self?.loadVerification()
+            }
+            navigationController?.pushViewController(form, animated: true)
+        default:
+            break
+        }
+    }
+
     /// A one-field alert. The category can't be left empty.
     private func ask(_ field: ContactField, current: String, then: @escaping (String) -> Void) {
         let alert = UIAlertController(title: field.title, message: nil, preferredStyle: .alert)
@@ -286,6 +376,12 @@ extension AccountTypeViewController: UICollectionViewDelegate {
         switch dataSource.itemIdentifier(for: indexPath) {
         case .type(let type): type != .bot
         case .contact, .failed: true
+        case .verification:
+            switch verification {
+            case .failed: true
+            case .loaded(let status): status.canRequest
+            case .loading: false
+            }
         default: false
         }
     }
@@ -295,6 +391,7 @@ extension AccountTypeViewController: UICollectionViewDelegate {
         switch dataSource.itemIdentifier(for: indexPath) {
         case .type(let type): choose(type)
         case .contact(let field): edit(field)
+        case .verification: openVerification()
         case .failed: load()
         default: break
         }

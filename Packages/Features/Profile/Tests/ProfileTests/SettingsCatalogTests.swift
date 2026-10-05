@@ -1,16 +1,16 @@
 import Testing
 @testable import Profile
 
-/// The shape of Settings: seventeen sections in four scopes, in the order of
+/// The shape of Settings: eighteen sections in four scopes, in the order of
 /// `dev/ACCOUNT_SETTINGS_GAP_REPORT.md`, and the scope wording that tells the
 /// viewer which profile a toggle belongs to.
 @MainActor
 struct SettingsCatalogTests {
-    @Test func seventeenSectionsSplitByScope() {
-        #expect(SettingsSection.allCases.count == 17)
+    @Test func eighteenSectionsSplitByScope() {
+        #expect(SettingsSection.allCases.count == 18)
         #expect(SettingsSection.sections(in: .account) == [.account, .security, .familyAndTeens, .wallet, .adsAndData])
         #expect(SettingsSection.sections(in: .profile) == [.privacy, .safety, .notifications, .whatYouSee, .activity])
-        #expect(SettingsSection.sections(in: .device) == [.playback, .display, .mediaComments, .language, .storage])
+        #expect(SettingsSection.sections(in: .device) == [.playback, .display, .emojis, .mediaComments, .language, .storage])
         #expect(SettingsSection.sections(in: .support) == [.help, .legal])
     }
 
@@ -39,6 +39,7 @@ struct SettingsCatalogTests {
     @Test func eachDevicePageShowsItsSections() {
         #expect(AppPreferencesViewController.sections(for: .playback) == [.playback, .sounds])
         #expect(AppPreferencesViewController.sections(for: .display) == [.appearance, .care, .motion])
+        #expect(AppPreferencesViewController.sections(for: .emojis) == [.emojis])
         #expect(AppPreferencesViewController.sections(for: .mediaComments) == [.band, .subtitles, .commentsScreen, .muted])
         #expect(AppPreferencesViewController.sections(for: .language) == [.language])
         #expect(AppPreferencesViewController.sections(for: .storage) == [.storage])
@@ -47,6 +48,16 @@ struct SettingsCatalogTests {
             page.loadViewIfNeeded()
             #expect(page.title == section.title)
         }
+    }
+
+    /// Power Saving sits on its own under App and Device and says what it
+    /// changes, and that the viewer's own settings come back.
+    @Test func powerSavingSaysWhatItChanges() {
+        let footer = SettingsViewController.powerSavingFooter
+        #expect(footer.contains("animated emojis"))
+        #expect(footer.contains("Reduce Motion"))
+        #expect(footer.contains("playing on their own"))
+        #expect(footer.contains("come back"))
     }
 
     @Test func theLanguageRowNamesTheAppLanguage() {

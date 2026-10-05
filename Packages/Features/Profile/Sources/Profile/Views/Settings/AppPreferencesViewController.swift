@@ -3,20 +3,21 @@ import DesignSystem
 import UIKit
 
 /// The screens of Settings → App and Device (#468): Playback and Sound,
-/// Display, Comments on Media, Language and Storage — one controller, one
+/// Display, Emojis, Comments on Media, Language and Storage — one controller, one
 /// page per section (#409, #410). Everything here is stored on the device
 /// (`MediaPlaybackPreferencesStore`, `MediaCommentPreferencesStore`,
 /// `AppearancePreference`, `MotionPreference`) and follows the iPhone, not
 /// the profile.
 final class AppPreferencesViewController: UIViewController {
     enum Section: Int, CaseIterable {
-        case playback, sounds, appearance, care, motion, band, subtitles, commentsScreen, muted, language, storage
+        case playback, sounds, appearance, care, motion, emojis, band, subtitles, commentsScreen, muted, language, storage
     }
 
     private enum Item: Hashable {
         case autoplay, startsWithSound, dataSaver
         case interfaceSounds, haptics
         case appearance, careMode, reduceMotion
+        case animatedEmojis
         case bandSwitch, opacity, bandBackground, speed
         case mutedWords, mutedAccounts
         case subtitlesSwitch, subtitleBackground
@@ -30,6 +31,7 @@ final class AppPreferencesViewController: UIViewController {
         switch page {
         case .playback: [.playback, .sounds]
         case .display: [.appearance, .care, .motion]
+        case .emojis: [.emojis]
         case .mediaComments: [.band, .subtitles, .commentsScreen, .muted]
         case .language: [.language]
         case .storage: [.storage]
@@ -101,6 +103,11 @@ final class AppPreferencesViewController: UIViewController {
         dataSource.apply(snapshot, animatingDifferences: false)
     }
 
+    /// Power Saving overrides Reduce Motion, Autoplay and Animate Emojis
+    /// while it is on: their rows show what applies, and can't be changed
+    /// until it is off.
+    private var isPowerSaving: Bool { PowerSavingPreference.isOn }
+
     private func measureCache() {
         let cache = cache
         Task { [weak self] in
@@ -148,6 +155,7 @@ final class AppPreferencesViewController: UIViewController {
         case .appearance: "Appearance"
         case .care: "Care Mode"
         case .motion: "Motion"
+        case .emojis: "Emojis"
         case .sounds: "Sounds and Haptics"
         case .language: "Language"
         case .playback: "Playback"
@@ -165,12 +173,20 @@ final class AppPreferencesViewController: UIViewController {
         case .care: "Larger, bolder text everywhere in the app, and the reaction band switched off for a calmer screen. If your iPhone's own text size is larger, it is kept."
         case .sounds: "Interface sounds are the small pops and clicks of the app's own controls; a video's sound is set above. A phone on silent stays silent, and iOS's System Haptics setting still applies."
         case .motion:
-            MotionPreference.appReducesMotion
+            PowerSavingPreference.isOn
+                ? Self.powerSavingNote
+                : MotionPreference.appReducesMotion
                 ? "Transitions and effects are kept to a minimum in the app."
                 : "Off, the app follows iOS (Accessibility → Motion → Reduce Motion is currently "
                     + (UIAccessibility.isReduceMotionEnabled ? "on" : "off") + ")."
+        case .emojis:
+            PowerSavingPreference.isOn
+                ? Self.powerSavingNote
+                : "Emojis and stickers in comments, messages and posts play their animation. Off, they stay still."
         case .language: "The app is in English for now. When more languages arrive, you'll choose yours here and in iOS Settings."
-        case .playback: "A video that doesn't start on its own shows its first frame with a play mark; tap it to play. Data Saver lowers stream quality and stops loading upcoming videos ahead while on cellular."
+        case .playback:
+            (PowerSavingPreference.isOn ? Self.powerSavingNote + " " : "")
+                + "A video that doesn't start on its own shows its first frame with a play mark; tap it to play. Data Saver lowers stream quality and stops loading upcoming videos ahead while on cellular."
         case .band: "The short reactions that scroll over videos and photos. Background darkens the strip behind them; it darkens more while you scrub through them."
         case .muted: "Comments with these words, or from these accounts, never appear in the reaction band or the subtitles. They still show in the comments."
         case .subtitles: "Comments shown as captions above the reaction band. Background is the shade behind each caption."
@@ -178,6 +194,9 @@ final class AppPreferencesViewController: UIViewController {
         case .storage: "Downloaded videos and animations, kept so they open instantly. Clearing them frees space; nothing you made is removed."
         }
     }
+
+    /// What an overridden section says while Power Saving is on.
+    static let powerSavingNote = "Power Saving is on, so this is set for you. Turn it off in Settings → App and Device to use your own choice."
 
     static func appearanceTitle(_ appearance: AppearancePreference) -> String {
         appearance.title
@@ -245,6 +264,7 @@ final class AppPreferencesViewController: UIViewController {
         case .appearance: [.appearance]
         case .care: [.careMode]
         case .motion: [.reduceMotion]
+        case .emojis: [.animatedEmojis]
         case .band: [.bandSwitch, .opacity, .bandBackground, .speed]
         case .muted: [.mutedWords, .mutedAccounts]
         case .subtitles: [.subtitlesSwitch, .subtitleBackground]
@@ -294,8 +314,17 @@ final class AppPreferencesViewController: UIViewController {
             }]
         case .reduceMotion:
             cell.contentConfiguration = Self.label("Reduce Motion", symbol: "figure.walk.motion")
-            cell.accessories = [switchAccessory(isOn: MotionPreference.appReducesMotion) { isOn in
+            cell.accessories = [switchAccessory(
+                isOn: MotionPreference.appReducesMotion || isPowerSaving, isEnabled: !isPowerSaving
+            ) { isOn in
                 MotionPreference.appReducesMotion = isOn
+            }]
+        case .animatedEmojis:
+            cell.contentConfiguration = Self.label("Animate Emojis", symbol: "face.smiling")
+            cell.accessories = [switchAccessory(
+                isOn: EmoteAnimationPreference.animatesEmotes, isEnabled: !isPowerSaving
+            ) { isOn in
+                EmoteAnimationPreference.isOn = isOn
             }]
         case .appLanguage:
             var content = Self.label("App Language", symbol: "globe")
@@ -305,7 +334,9 @@ final class AppPreferencesViewController: UIViewController {
             cell.contentConfiguration = nil
             let options = MediaPlaybackPreferences.Autoplay.allCases
             let control = UISegmentedControl(items: options.map(Self.autoplayTitle))
-            control.selectedSegmentIndex = options.firstIndex(of: playback.preferences.autoplay) ?? 0
+            let shown = isPowerSaving ? .never : playback.preferences.autoplay
+            control.selectedSegmentIndex = options.firstIndex(of: shown) ?? 0
+            control.isEnabled = !isPowerSaving
             control.accessibilityLabel = "Autoplay"
             control.addAction(UIAction { [weak self] action in
                 guard let control = action.sender as? UISegmentedControl else { return }
@@ -426,9 +457,10 @@ final class AppPreferencesViewController: UIViewController {
         return content
     }
 
-    private func switchAccessory(isOn: Bool, onChange: @escaping (Bool) -> Void) -> UICellAccessory {
+    private func switchAccessory(isOn: Bool, isEnabled: Bool = true, onChange: @escaping (Bool) -> Void) -> UICellAccessory {
         let toggle = UISwitch()
         toggle.isOn = isOn
+        toggle.isEnabled = isEnabled
         toggle.addAction(UIAction { action in
             guard let toggle = action.sender as? UISwitch else { return }
             onChange(toggle.isOn)
