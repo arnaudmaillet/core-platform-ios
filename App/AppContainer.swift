@@ -195,7 +195,15 @@ final class AppContainer {
     }
 
     private(set) lazy var authFeature: any AuthFeatureBuilding = AuthFeatureBuilder(
-        sessionManager: sessionManager
+        sessionManager: sessionManager,
+        // Sign-up by code (guest mode B4): the new account's profile, and its
+        // home country — the country location opened, else the storefront's.
+        profileSetup: AccountProfileSetupService(
+            profileClient: Profile_V1_ProfileServiceClient(client: authenticatedRPCClient)
+        ),
+        homeCountry: { [weak self] in
+            await self?.currentCountry.currentCountry ?? Locale.current.region?.identifier ?? ""
+        }
     )
 
     // MARK: - Media
