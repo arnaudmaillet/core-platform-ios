@@ -7,6 +7,9 @@ import CoreStorage
 import DesignSystem
 import MediaPlayback
 import UIKit
+#if DEBUG
+import CoreNetworkingMocks
+#endif
 import Upload
 #if DEBUG
 import ChatInterface
@@ -80,12 +83,22 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
             return
         }
         // `-guest`: signs out first, so the run starts as a fresh install's
-        // first launch would — browsing with no account.
+        // first launch would — browsing with no account. With
+        // `-guest-sign-in-after <seconds>`, the guest then signs in to the mock
+        // fixture account by itself: the guest → member transition, with no
+        // typing (the simulator drops keystrokes while the keyboard rises).
         if ProcessInfo.processInfo.arguments.contains("-guest") {
             let sessionManager = container.sessionManager
+            let arguments = ProcessInfo.processInfo.arguments
+            let signInAfter = arguments.firstIndex(of: "-guest-sign-in-after")
+                .flatMap { $0 + 1 < arguments.count ? Double(arguments[$0 + 1]) : nil }
             Task { [weak self] in
                 await sessionManager.logout()
                 self?.observeAuthState()
+                guard let signInAfter else { return }
+                try? await Task.sleep(for: .seconds(signInAfter))
+                let credentials = MockAuthService.defaultCredentials
+                try? await sessionManager.login(username: credentials.username, password: credentials.password)
             }
             return
         }
