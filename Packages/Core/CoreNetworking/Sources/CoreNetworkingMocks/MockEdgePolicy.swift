@@ -40,6 +40,9 @@ public enum MockEdgePolicy {
 
     static let openPaths: Set<String> = [
         "/auth.v1.AuthService/Login",
+        // Two-step sign-in's second step (#383): the session doesn't exist
+        // until it answers.
+        "/auth.v1.AuthService/CompleteLogin",
         "/auth.v1.AuthService/Refresh",
         // A guest's read pass, and the App Attest challenge before it (#523).
         "/auth.v1.AuthService/StartGuestSession",

@@ -31,10 +31,12 @@ public struct AccountDetails: Equatable, Sendable {
     /// Private: the holder's own view. Nil when none is on file (#394).
     public let dateOfBirth: BirthDate?
     public let ageBracket: AgeBracket
+    /// Two-step sign-in is on (#383, `mfa_enrolled`).
+    public let twoStepOn: Bool
 
     public init(
         email: String, emailVerified: Bool, phone: String, phoneVerified: Bool, country: String,
-        dateOfBirth: BirthDate? = nil, ageBracket: AgeBracket = .unknown
+        dateOfBirth: BirthDate? = nil, ageBracket: AgeBracket = .unknown, twoStepOn: Bool = false
     ) {
         self.email = email
         self.emailVerified = emailVerified
@@ -43,6 +45,7 @@ public struct AccountDetails: Equatable, Sendable {
         self.country = country
         self.dateOfBirth = dateOfBirth
         self.ageBracket = ageBracket
+        self.twoStepOn = twoStepOn
     }
 }
 
@@ -117,7 +120,8 @@ public actor AccountRepository: AccountProviding, AccountLifecycleManaging, Acco
                 phoneVerified: view.phoneVerified,
                 country: view.countryOfResidence,
                 dateOfBirth: BirthDate(iso: view.dateOfBirth),
-                ageBracket: AgeBracket(view.ageBracket)
+                ageBracket: AgeBracket(view.ageBracket),
+                twoStepOn: view.mfaEnrolled
             )
         case .failure(let error):
             throw AccountError.transport(message: error.message ?? "code \(error.code)")

@@ -32,6 +32,9 @@ public enum CodeSignIn: Equatable, Sendable {
     case existing(PendingAccount)
     /// No account yet (AUT-6004): carry on with `signUp`.
     case needsSignUp
+    /// The account has two-step sign-in on (#383): the identity is proven,
+    /// and `completeSecondStep` takes the holder's code.
+    case needsSecondStep(SecondStepChallenge)
 }
 
 /// A provider that signs people in natively and hands back an id_token.
@@ -158,12 +161,10 @@ extension SessionManager {
         request.guestRefreshToken = guestSession?.refreshToken ?? ""
         let response = await authClient.login(request: request, headers: [:])
         switch response.result {
+        case .success(let body) where body.mfaRequired:
+            return .needsSecondStep(Self.secondStepChallenge(body))
         case .success(let body):
-            let session = Self.makeSession(accountID: AccountID(body.accountID), tokens: body.tokens, now: now())
-            return .existing(PendingAccount(
-                accountID: session.accountID, accessToken: session.accessToken, session: session,
-                reactivated: body.reactivated
-            ))
+            return .existing(pendingAccount(body))
         case .failure(let error) where error.code == .notFound:
             return .needsSignUp
         case .failure(let error):
@@ -216,6 +217,21 @@ extension SessionManager {
         case .failure(let error):
             throw Self.failure(error, for: credential)
         }
+    }
+
+    /// The second step of a code or Apple sign-in (#383): the account, not yet
+    /// the app's session — `completeSignIn` (or the profile first) follows,
+    /// as for `.existing`.
+    public func completeSecondStep(_ challenge: SecondStepChallenge, code: String) async throws -> PendingAccount {
+        pendingAccount(try await secondStep(challenge, code: code))
+    }
+
+    private func pendingAccount(_ body: Auth_V1_LoginResponse) -> PendingAccount {
+        let session = Self.makeSession(accountID: AccountID(body.accountID), tokens: body.tokens, now: now())
+        return PendingAccount(
+            accountID: session.accountID, accessToken: session.accessToken, session: session,
+            reactivated: body.reactivated
+        )
     }
 
     /// An account that has its profile becomes the app's session.

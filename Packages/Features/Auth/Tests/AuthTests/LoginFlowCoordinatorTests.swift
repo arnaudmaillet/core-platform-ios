@@ -4,7 +4,8 @@ import UIKit
 @testable import Auth
 
 private struct NoLogin: LoginPerforming {
-    func login(username: String, password: String) async throws {}
+    func login(username: String, password: String) async throws -> LoginOutcome { .signedIn }
+    func completeLogin(_ challenge: SecondStepChallenge, code: String) async throws {}
 }
 
 @MainActor
@@ -54,6 +55,7 @@ private actor FakeSignUp: SignUpPerforming {
     private(set) var signedInAccount: PendingAccount?
     private(set) var signedInWith: SignInCredential?
     private(set) var signedUpWith: SignInCredential?
+    private(set) var secondStepCodes: [String] = []
     private var nonces = 0
 
     init(signIn: CodeSignIn = .needsSignUp, signUp: SignUpOutcome = .created(pendingAccount)) {
@@ -83,6 +85,11 @@ private actor FakeSignUp: SignUpPerforming {
     }
 
     func completeSignIn(_ account: PendingAccount) async { signedInAccount = account }
+
+    func completeSecondStep(_ challenge: SecondStepChallenge, code: String) async throws -> PendingAccount {
+        secondStepCodes.append(code)
+        return pendingAccount
+    }
 
     func completeSignUp(_ pending: PendingAccount) async throws { completed = pending }
 }
@@ -190,6 +197,27 @@ struct SignUpFlowTests {
 
         #expect(navigation.topViewController === code)
         #expect(await signUp.signedInAccount == pendingAccount, "the account becomes the session")
+    }
+
+    /// Two-step sign-in on (#383): the emailed code leads to the app's code,
+    /// and that one signs the account in.
+    @Test func aCodeForATwoStepAccountAsksForTheAppsCode() async throws {
+        let signUp = FakeSignUp(signIn: .needsSecondStep(SecondStepChallenge(token: "mfa-1", expiresIn: 300)))
+        let (navigation, email) = try emailStep(signUp)
+        email.onContinue?("demo@example.com")
+        let code = try await top(navigation, is: VerificationCodeViewController.self)
+
+        code.onSubmit?("123456")
+        let second = try await top(navigation, is: SecondStepViewController.self)
+        #expect(await signUp.signedInAccount == nil, "not signed in before the second step")
+
+        second.onSubmit?("654321")
+        for _ in 0..<200 {
+            if await signUp.signedInAccount != nil { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(await signUp.secondStepCodes == ["654321"])
+        #expect(await signUp.signedInAccount == pendingAccount)
     }
 
     /// An account a sign-up left before its profile picks up at the username

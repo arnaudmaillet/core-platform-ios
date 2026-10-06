@@ -32,6 +32,7 @@ final class LoginFlowCoordinator {
     var makeRegistrationViewController: (@MainActor () -> UIViewController)?
 
     private let viewModel: LoginViewModel
+    private let loginService: any LoginPerforming
     private weak var navigationController: UINavigationController?
 
     /// Sign-up and sign-in by code (guest mode B4, #449). Nil keeps the
@@ -123,6 +124,7 @@ final class LoginFlowCoordinator {
         homeCountry: @escaping @Sendable () async -> String = { Locale.current.region?.identifier ?? "" }
     ) {
         viewModel = LoginViewModel(loginService: loginService)
+        self.loginService = loginService
         self.signUp = signUp
         self.federated = federated
         self.profileSetup = profileSetup
@@ -146,6 +148,9 @@ final class LoginFlowCoordinator {
         }
         methodSelection.onLogIn = { [self] in
             showEmailAuth()
+        }
+        viewModel.onSecondStep = { [weak self] challenge in
+            self?.showSecondStep(challenge, finishing: .password)
         }
         methodSelection.flowToolbarItems = flowToolbarItems
 
@@ -298,6 +303,9 @@ final class LoginFlowCoordinator {
                 switch try await signUp.signIn(credential) {
                 case .existing(let account):
                     await self?.finishSignIn(account, from: step)
+                case .needsSecondStep(let challenge):
+                    step?.setWorking(false)
+                    self?.showSecondStep(challenge, finishing: .pendingAccount)
                 case .needsSignUp:
                     step?.setWorking(false)
                     self?.credential = credential
@@ -328,6 +336,9 @@ final class LoginFlowCoordinator {
                 case .existing(let account):
                     self?.suggestedName = result.displayName
                     await self?.finishSignIn(account, from: nil)
+                case .needsSecondStep(let challenge):
+                    self?.suggestedName = result.displayName
+                    self?.showSecondStep(challenge, finishing: .pendingAccount)
                 case .needsSignUp:
                     self?.credential = credential
                     self?.suggestedName = result.displayName
@@ -352,6 +363,64 @@ final class LoginFlowCoordinator {
             return
         }
         await signUp.completeSignIn(account)
+    }
+
+    // MARK: - Two-step sign-in (#383)
+
+    /// How a second step finishes: a password sign-in becomes the session at
+    /// once; a code or Apple sign-in hands back its account, which goes
+    /// through `finishSignIn` like any other (the profile check, #548).
+    enum SecondStepFinish {
+        case password, pendingAccount
+    }
+
+    private func showSecondStep(_ challenge: SecondStepChallenge, finishing: SecondStepFinish) {
+        let step = SecondStepViewController()
+        step.onSubmit = { [weak self, weak step] code in
+            self?.completeSecondStep(challenge, code: code, finishing: finishing, from: step)
+        }
+        prepare(step)
+        push(step)
+    }
+
+    private func completeSecondStep(
+        _ challenge: SecondStepChallenge, code: String, finishing: SecondStepFinish, from step: SecondStepViewController?
+    ) {
+        step?.setWorking(true)
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                switch finishing {
+                case .password:
+                    try await loginService.completeLogin(challenge, code: code)
+                case .pendingAccount:
+                    guard let signUp else { return }
+                    let account = try await signUp.completeSecondStep(challenge, code: code)
+                    await finishSignIn(account, from: step)
+                }
+            } catch AuthError.secondStepExpired {
+                // The challenge is gone: back to where the sign-in began.
+                step?.setWorking(false)
+                presentSecondStepExpired()
+            } catch {
+                step?.setWorking(false)
+                presentFlowError(error, on: step)
+                step?.clearCode()
+            }
+        }
+    }
+
+    private func presentSecondStepExpired() {
+        let alert = UIAlertController(
+            title: "Sign In Again", message: LoginViewModel.message(for: .secondStepExpired), preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "OK", style: .default) { [weak self] _ in
+            guard let navigation = self?.navigationController,
+                  let index = navigation.viewControllers.lastIndex(where: { $0 is SecondStepViewController }),
+                  index > 0 else { return }
+            navigation.popToViewController(navigation.viewControllers[index - 1], animated: true)
+        })
+        navigationController?.topViewController?.present(alert, animated: true)
     }
 
     private func showBirthday() {

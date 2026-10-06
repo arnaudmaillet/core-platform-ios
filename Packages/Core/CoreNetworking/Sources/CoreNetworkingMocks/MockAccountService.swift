@@ -217,6 +217,7 @@ public final class MockAccountService: @unchecked Sendable {
 
     private var viewerAccount: Account_V1_AccountView {
         var view = Self.baseAccount
+        view.mfaEnrolled = lifecycle.isTwoStepOn
         if let dateOfBirth = lock.withLock({ dateOfBirth }), let age = Self.age(of: dateOfBirth) {
             view.dateOfBirth = dateOfBirth
             view.ageBracket = age >= 18 ? .adult : (age >= 16 ? .ageBracket1617 : .ageBracket1315)

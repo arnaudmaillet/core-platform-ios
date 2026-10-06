@@ -103,6 +103,10 @@ public protocol AccountPasswordChanging: Sendable {
 /// session; the gated call that follows carries it.
 public protocol CredentialStepUp: Sendable {
     func stepUp(password: String) async throws
+    /// With two-step sign-in on (#383): the authenticator's code or a backup
+    /// code proves the holder too — the only way for an account without a
+    /// password.
+    func stepUp(code: String) async throws
 }
 
 /// Whoever vends the session's access token (the app's `SessionManager`):
@@ -113,6 +117,8 @@ public protocol AccessTokenInstalling: Sendable {
 
 public enum StepUpError: Error, Equatable {
     case wrongPassword
+    /// The two-step code didn't match (AUT-5017).
+    case wrongCode
     case transport(message: String)
 }
 
@@ -141,7 +147,7 @@ public enum PasswordChangeError: Error, Equatable {
 /// the calling principal's account (empty `account_id`), so the bearer token
 /// is what says whose sessions these are.
 public actor AccountSessionsRepository: AccountSessionsManaging, AccountPasswordChanging, CredentialStepUp {
-    private let authClient: any Auth_V1_AuthServiceClientInterface
+    let authClient: any Auth_V1_AuthServiceClientInterface
     /// Hands a step-up's fresh access token to whoever vends tokens (the
     /// app's `SessionManager`), so the next authenticated call carries it.
     private let tokenInstaller: (any AccessTokenInstalling)?
@@ -151,6 +157,19 @@ public actor AccountSessionsRepository: AccountSessionsManaging, AccountPassword
     public init(authClient: any Auth_V1_AuthServiceClientInterface, tokenInstaller: (any AccessTokenInstalling)? = nil) {
         self.authClient = authClient
         self.tokenInstaller = tokenInstaller
+    }
+
+    public func stepUp(code: String) async throws {
+        var request = Auth_V1_VerifyCredentialsRequest()
+        request.credential = .mfaCode(code.trimmingCharacters(in: .whitespacesAndNewlines))
+        let response = await authClient.verifyCredentials(request: request, headers: [:])
+        switch response.result {
+        case .success(let body):
+            await tokenInstaller?.installStepUpToken(body.accessToken, expiresIn: body.expiresIn)
+        case .failure(let error):
+            if error.code == .unauthenticated { throw StepUpError.wrongCode }
+            throw StepUpError.transport(message: error.message ?? "code \(error.code)")
+        }
     }
 
     public func stepUp(password: String) async throws {

@@ -4,15 +4,17 @@ import Testing
 
 private final class FakeLoginService: LoginPerforming, @unchecked Sendable {
     let lock = NSLock()
-    var result: Result<Void, AuthError> = .success(())
+    var result: Result<LoginOutcome, AuthError> = .success(.signedIn)
     var receivedUsername: String?
 
-    func login(username: String, password: String) async throws {
+    func login(username: String, password: String) async throws -> LoginOutcome {
         try lock.withLock {
             receivedUsername = username
             return try result.get()
         }
     }
+
+    func completeLogin(_ challenge: SecondStepChallenge, code: String) async throws {}
 }
 
 @MainActor
@@ -47,6 +49,28 @@ struct LoginViewModelTests {
         viewModel.submit(username: "demo", password: "wrong")
 
         #expect(await awaitTerminalState(viewModel) == .failed(message: "Incorrect username or password."))
+    }
+
+    /// Two-step sign-in on (#383): the right password leads to the code,
+    /// not to an error.
+    @Test func aRightPasswordWithTwoStepOnAsksForTheCode() async {
+        let service = FakeLoginService()
+        let challenge = SecondStepChallenge(token: "mfa-1", expiresIn: 300)
+        service.result = .success(.needsSecondStep(challenge))
+        let viewModel = LoginViewModel(loginService: service)
+        var asked: SecondStepChallenge?
+        viewModel.onSecondStep = { asked = $0 }
+
+        viewModel.submit(username: "demo", password: "pw")
+
+        #expect(await awaitTerminalState(viewModel) == .idle)
+        #expect(asked == challenge)
+    }
+
+    @Test func secondStepFailuresReadPlainly() {
+        #expect(LoginViewModel.message(for: .wrongSecondStepCode).contains("backup code"))
+        #expect(LoginViewModel.message(for: .secondStepLocked).contains("Too many"))
+        #expect(LoginViewModel.message(for: .secondStepExpired).contains("Sign in again"))
     }
 
     @Test func emptyFieldsFailFastWithoutCallingService() {
