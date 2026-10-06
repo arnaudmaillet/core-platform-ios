@@ -24,10 +24,12 @@ public struct VerificationChallenge: Equatable, Sendable {
     public let resendAfter: TimeInterval
 }
 
-/// What a code proved, at sign-in.
+/// What a code or an id_token proved, at sign-in.
 public enum CodeSignIn: Equatable, Sendable {
-    /// An account answered to that address: the viewer is signed in.
-    case signedIn
+    /// An account answered to that identity. It is not the app's session
+    /// yet: `completeSignIn` makes it so — or, for an account a sign-up left
+    /// without a profile, the profile comes first, then `completeSignUp`.
+    case existing(PendingAccount)
     /// No account yet (AUT-6004): carry on with `signUp`.
     case needsSignUp
 }
@@ -83,6 +85,8 @@ public struct PendingAccount: Equatable, Sendable {
     public let accountID: AccountID
     public let accessToken: String
     let session: AuthSession
+    /// A self-deactivated account that signing in resumed (#650).
+    var reactivated = false
 }
 
 public enum SignUpOutcome: Equatable, Sendable {
@@ -129,8 +133,10 @@ extension SessionManager {
         try await signIn(.code(challengeID: challengeID, code: code))
     }
 
-    /// Signs in with a code or an id_token. An identity with no account
-    /// answers `.needsSignUp`; the same credential then goes to `signUp`.
+    /// Proves an identity with a code or an id_token. An identity with an
+    /// account answers `.existing` — not yet the app's session, see
+    /// `completeSignIn`; one with none answers `.needsSignUp`, and the same
+    /// credential then goes to `signUp`.
     ///
     /// The device's guest session goes along (`guest_refresh_token`): the
     /// server ends it, and the guest becomes the member.
@@ -153,9 +159,11 @@ extension SessionManager {
         let response = await authClient.login(request: request, headers: [:])
         switch response.result {
         case .success(let body):
-            install(Self.makeSession(accountID: AccountID(body.accountID), tokens: body.tokens, now: now()))
-            pendingReactivationNotice = body.reactivated
-            return .signedIn
+            let session = Self.makeSession(accountID: AccountID(body.accountID), tokens: body.tokens, now: now())
+            return .existing(PendingAccount(
+                accountID: session.accountID, accessToken: session.accessToken, session: session,
+                reactivated: body.reactivated
+            ))
         case .failure(let error) where error.code == .notFound:
             return .needsSignUp
         case .failure(let error):
@@ -208,6 +216,12 @@ extension SessionManager {
         case .failure(let error):
             throw Self.failure(error, for: credential)
         }
+    }
+
+    /// An account that has its profile becomes the app's session.
+    public func completeSignIn(_ account: PendingAccount) {
+        install(account.session)
+        pendingReactivationNotice = account.reactivated
     }
 
     /// The account now has its profile: a `Refresh` mints the token whose

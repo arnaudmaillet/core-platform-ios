@@ -51,6 +51,7 @@ private actor FakeSignUp: SignUpPerforming {
     private(set) var sentTo: [String] = []
     private(set) var details: SignUpDetails?
     private(set) var completed: PendingAccount?
+    private(set) var signedInAccount: PendingAccount?
     private(set) var signedInWith: SignInCredential?
     private(set) var signedUpWith: SignInCredential?
     private var nonces = 0
@@ -81,6 +82,8 @@ private actor FakeSignUp: SignUpPerforming {
         return signUpAnswer
     }
 
+    func completeSignIn(_ account: PendingAccount) async { signedInAccount = account }
+
     func completeSignUp(_ pending: PendingAccount) async throws { completed = pending }
 }
 
@@ -94,6 +97,9 @@ private let pendingAccount: PendingAccount = {
 
 private actor FakeProfileSetup: AccountProfileSetup {
     private(set) var created: (handle: String, name: String)?
+    private let profiled: Bool
+    init(hasProfile: Bool = true) { profiled = hasProfile }
+    func hasProfile(_ account: PendingAccount) async -> Bool { profiled }
     func checkHandle(_ handle: String) async -> HandleCheck { .available(normalized: handle.lowercased()) }
     func createProfile(for account: PendingAccount, handle: String, displayName: String) async throws {
         created = (handle, displayName)
@@ -174,7 +180,8 @@ struct SignUpFlowTests {
     }
 
     @Test func aCodeForAnExistingAccountSignsInWithoutMoreSteps() async throws {
-        let (navigation, email) = try emailStep(FakeSignUp(signIn: .signedIn))
+        let signUp = FakeSignUp(signIn: .existing(pendingAccount))
+        let (navigation, email) = try emailStep(signUp)
         email.onContinue?("demo@example.com")
         let code = try await top(navigation, is: VerificationCodeViewController.self)
 
@@ -182,6 +189,29 @@ struct SignUpFlowTests {
         try await Task.sleep(for: .milliseconds(200))
 
         #expect(navigation.topViewController === code)
+        #expect(await signUp.signedInAccount == pendingAccount, "the account becomes the session")
+    }
+
+    /// An account a sign-up left before its profile picks up at the username
+    /// step, and only becomes the session once it has one.
+    @Test func anAccountWithNoProfileFinishesSettingUp() async throws {
+        let signUp = FakeSignUp(signIn: .existing(pendingAccount))
+        let setup = FakeProfileSetup(hasProfile: false)
+        let (navigation, email) = try emailStep(signUp, profileSetup: setup)
+        email.onContinue?("half.done@example.com")
+        try await top(navigation, is: VerificationCodeViewController.self).onSubmit?("123456")
+
+        let profile = try await top(navigation, is: ProfileSetupViewController.self)
+        #expect(await signUp.signedInAccount == nil)
+        #expect(profile.navigationItem.hidesBackButton)
+
+        profile.onCreate?("half.done", "")
+        for _ in 0..<200 {
+            if await signUp.completed != nil { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(await setup.created?.handle == "half.done")
+        #expect(await signUp.completed == pendingAccount)
     }
 
     /// Agreeing creates the account with what the steps collected, then the
@@ -219,7 +249,7 @@ struct SignUpFlowTests {
     /// Apple gets the server's nonce, and the id_token goes back with the
     /// same raw nonce; an Apple ID with an account needs nothing more.
     @Test func appleSignsInWithTheServersNonce() async throws {
-        let signUp = FakeSignUp(signIn: .signedIn)
+        let signUp = FakeSignUp(signIn: .existing(pendingAccount))
         let apple = FakeApple()
         let navigation = try pick(.provider(.apple), signUp, apple: apple)
 

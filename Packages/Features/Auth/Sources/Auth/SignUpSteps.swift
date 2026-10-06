@@ -259,13 +259,17 @@ final class ProfileSetupViewController: SignUpStepViewController {
 
     private let suggestedName: String?
 
-    init(setup: any AccountProfileSetup, suggestedName: String? = nil) {
+    /// `finishing`: the account exists already — a sign-up that stopped
+    /// here is picked up at the next sign-in.
+    init(setup: any AccountProfileSetup, suggestedName: String? = nil, finishing: Bool = false) {
         self.setup = setup
         self.suggestedName = suggestedName
         super.init(
-            emoji: "\u{1F44B}", title: "Choose a Username",
-            subtitle: "It\u{2019}s how people find you. You can change it later.",
-            buttonTitle: "Create Account"
+            emoji: "\u{1F44B}", title: finishing ? "Finish Setting Up" : "Choose a Username",
+            subtitle: finishing
+                ? "Your account has no profile yet. Choose a username to finish."
+                : "It\u{2019}s how people find you. You can change it later.",
+            buttonTitle: finishing ? "Done" : "Create Account"
         )
     }
 

@@ -162,7 +162,12 @@ struct AuthEndToEndTests {
 
         let outcome = try await stack.manager.signIn(challengeID: challenge.id, code: MockAuthService.verificationCode)
 
-        #expect(outcome == .signedIn)
+        guard case .existing(let account) = outcome else {
+            Issue.record("expected the demo account, got \(outcome)")
+            return
+        }
+        #expect(await stack.manager.currentState() == .unauthenticated, "not the session until completed")
+        await stack.manager.completeSignIn(account)
         #expect(await stack.manager.currentState() == .authenticated(AccountID(MockAuthService.accountID)))
         #expect(try await stack.manager.validAccessToken()?.hasPrefix("at-") == true)
         #expect(try stack.guestStore.load() == nil, "the guest became the member")
@@ -256,7 +261,11 @@ struct AuthEndToEndTests {
 
         let outcome = try await stack.manager.signIn(try await appleCredential(stack, email: MockAuthService.appleEmail))
 
-        #expect(outcome == .signedIn)
+        guard case .existing(let account) = outcome else {
+            Issue.record("expected the Apple account, got \(outcome)")
+            return
+        }
+        await stack.manager.completeSignIn(account)
         #expect(await stack.manager.currentState() == .authenticated(AccountID(MockAuthService.accountID)))
     }
 
