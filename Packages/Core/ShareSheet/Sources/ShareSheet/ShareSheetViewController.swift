@@ -22,24 +22,24 @@ import UIKit
 /// handles *after dismissing this sheet*. Presenting a share sheet from a
 /// sheet stacks two cards and shrinks the one underneath; routing to a thread
 /// from a sheet would push behind it. See `onSystemShare` / `onSendToTarget`.
-final class ProfileShareViewController: UIViewController {
+public final class ShareSheetViewController: UIViewController {
     /// Fires after this sheet has been dismissed, with the rendered share card
     /// — the presenter opens `UIActivityViewController` with it.
-    var onSystemShare: ((ProfileViewModel.ShareCard, UIImage) -> Void)?
+    public var onSystemShare: ((ShareCard, UIImage) -> Void)?
     /// Fires after this sheet has been dismissed: send the profile to someone.
-    var onSendToTarget: ((ProfileShareTarget, ProfileViewModel.ShareCard) -> Void)?
+    public var onSendToTarget: ((ShareTarget, ShareCard) -> Void)?
 
-    private let card: ProfileViewModel.ShareCard
+    private let card: ShareCard
     private let imagePipeline: ImagePipeline
-    private let targeting: (any ProfileShareTargeting)?
+    private let targeting: (any ShareTargeting)?
     private let deviceCornerRadius: CGFloat
 
     /// The sheet's own Liquid Glass surface. UIKit gives a `.pageSheet` an
     /// opaque background; this replaces it, so the profile underneath stays
     /// present as a blurred backdrop instead of being painted over.
     private let glassBackdrop = UIVisualEffectView(effect: nil)
-    private let cardView: ProfileQRCardView
-    private let targetsView: ProfileShareTargetsView
+    private let cardView: ShareQRCardView
+    private let targetsView: ShareTargetsView
     private let searchBar = UISearchBar()
     /// Our own Cancel, not `UISearchBar.showsCancelButton`.
     ///
@@ -114,6 +114,8 @@ final class ProfileShareViewController: UIViewController {
     /// actions, and the rules between them. Searching is a focused state —
     /// see `setSearching`.
     private var nonSearchSections: [UIView] = []
+    /// The divider under the people row — it goes with the row.
+    private var targetsDivider: UIView?
 
     /// Search results, as a standard vertical list.
     ///
@@ -153,7 +155,7 @@ final class ProfileShareViewController: UIViewController {
     /// The suggestion set, retained so entering search can show it instantly.
     /// An empty list behind a blinking cursor reads as "no one to send to";
     /// the people you'd most likely pick are already in hand.
-    private var suggestedTargets: [ProfileShareTarget] = []
+    private var suggestedTargets: [ShareTarget] = []
     /// Set when the graph answers WHILE searching, where the horizontal row is
     /// hidden and skips its render. Leaving search then owes it one — and only
     /// then, which is what keeps the ordinary return free of any re-render.
@@ -168,10 +170,10 @@ final class ProfileShareViewController: UIViewController {
     ///   whole presentation animated with UIKit's default radius and the
     ///   corners snapped to the device's the instant it finished. Taking it as
     ///   an input means `preferredCornerRadius` is set before the first frame.
-    init(
-        card: ProfileViewModel.ShareCard,
+    public init(
+        card: ShareCard,
         imagePipeline: ImagePipeline,
-        targeting: (any ProfileShareTargeting)?,
+        targeting: (any ShareTargeting)?,
         deviceCornerRadius: CGFloat,
         fallbackWidth: CGFloat
     ) {
@@ -180,8 +182,8 @@ final class ProfileShareViewController: UIViewController {
         self.targeting = targeting
         self.deviceCornerRadius = deviceCornerRadius
         self.fallbackWidth = fallbackWidth
-        cardView = ProfileQRCardView(imagePipeline: imagePipeline)
-        targetsView = ProfileShareTargetsView(imagePipeline: imagePipeline, inset: Self.margin)
+        cardView = ShareQRCardView(imagePipeline: imagePipeline)
+        targetsView = ShareTargetsView(imagePipeline: imagePipeline, inset: Self.margin)
         super.init(nibName: nil, bundle: nil)
         modalPresentationStyle = .pageSheet
         configureDetent()
@@ -194,7 +196,7 @@ final class ProfileShareViewController: UIViewController {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     /// One detent, sized to the content — not `.medium()`, which is a fixed
     /// fraction of the screen and would park a fixed-height card above a dead
@@ -227,12 +229,12 @@ final class ProfileShareViewController: UIViewController {
         }
     }
 
-    override func viewDidLoad() {
+    override public func viewDidLoad() {
         super.viewDidLoad()
         // Cleared, not coloured: the glass backdrop below IS the surface. A
         // background colour here would sit over the blur and defeat it — and
         // semantic colours resolve translucent inside an iOS 26 sheet anyway
-        // (the trap `ProfileQRCardView` documents).
+        // (the trap `ShareQRCardView` documents).
         view.backgroundColor = .clear
         glassBackdrop.pin(to: view)
         configureViews()
@@ -242,7 +244,7 @@ final class ProfileShareViewController: UIViewController {
         loadTargets()
     }
 
-    override func viewDidAppear(_ animated: Bool) {
+    override public func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         materializeGlass()
     }
@@ -305,7 +307,7 @@ final class ProfileShareViewController: UIViewController {
     /// layout and recursed until the stack blew. Nothing that can dirty layout
     /// belongs in this method — the list's insets are set declaratively from
     /// `setSearching` for exactly that reason.
-    override func viewDidLayoutSubviews() {
+    override public func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         #if DEBUG
         guard ProcessInfo.processInfo.arguments.contains("-profile-share-demo") else { return }
@@ -400,6 +402,10 @@ final class ProfileShareViewController: UIViewController {
         searchBarSection = searchSection
         searchSection.isHidden = true
         nonSearchSections = [cardSection, topDivider, targetsView, bottomDivider, actions]
+        targetsDivider = bottomDivider
+        // No one to send to — no source of people (a place's sheet, today),
+        // and later an empty one — and the row goes, Search with it.
+        if targeting == nil { hideTargetsRow() }
         // The card, the quick-send row, the actions tray, their containers, and
         // the column itself: none of them may give up height.
         makeContentRigid([cardView, cardSection, targetsView, actions, column])
@@ -509,10 +515,10 @@ final class ProfileShareViewController: UIViewController {
     /// scroll view, so further actions land without a re-layout.
     private func makeActionsTray() -> UIView {
         let actions = UIStackView(arrangedSubviews: [
-            ProfileShareActionChip(
+            ShareActionChip(
                 title: "Share", symbol: "square.and.arrow.up", prominent: true
             ) { [weak self] in self?.handOffToSystemShare() },
-            ProfileShareActionChip(title: "Copy Link", symbol: "link", prominent: false) { [weak self] in
+            ShareActionChip(title: "Copy Link", symbol: "link", prominent: false) { [weak self] in
                 self?.copyLink()
             }
         ])
@@ -603,10 +609,7 @@ final class ProfileShareViewController: UIViewController {
     // MARK: - Targets
 
     private func loadTargets() {
-        guard let targeting else {
-            targetsView.render([])
-            return
-        }
+        guard let targeting else { return }
         Task { [weak self] in
             let targets = await targeting.shareTargets(limit: Self.targetLimit)
             guard let self else { return }
@@ -622,11 +625,31 @@ final class ProfileShareViewController: UIViewController {
                 self.suggestionsAwaitingRender = true
                 return
             }
-            // Renders even when empty: the row keeps its Search bubble, which
-            // is the whole point of it leading the row.
+            // ⚠️ NO ONE TO SEND TO, NO ROW (user, 5 October 2026): a viewer
+            // who follows nobody — or a guest, who has no graph — would only
+            // ever find a lone Search bubble and skeletons going nowhere, so
+            // the row and its Search go, and the sheet closes up.
+            guard !targets.isEmpty else { return self.hideTargetsRow(animated: true) }
             self.targetsView.render(targets)
         }
     }
+
+    /// Takes the people row out — Search, its faces and the divider under
+    /// it — for good: it is no longer a section search hides and restores,
+    /// and the sheet's content-sized detent closes up over it.
+    private func hideTargetsRow(animated: Bool = false) {
+        guard nonSearchSections.contains(where: { $0 === targetsView }) else { return }
+        let removed: [UIView] = [targetsView] + (targetsDivider.map { [$0] } ?? [])
+        nonSearchSections.removeAll { section in removed.contains { $0 === section } }
+        for view in removed { view.isHidden = true }
+        guard animated, let sheet = sheetPresentationController else { return }
+        sheet.animateChanges { sheet.invalidateDetents() }
+    }
+
+    #if DEBUG
+    /// Whether the people row stands in the sheet.
+    public var debugShowsTargetsRow: Bool { !targetsView.isHidden }
+    #endif
 
     // MARK: - Search
 
@@ -834,8 +857,8 @@ final class ProfileShareViewController: UIViewController {
 
     private enum ResultsSection { case results }
 
-    private func makeResultsSource() -> UICollectionViewDiffableDataSource<ResultsSection, ProfileShareTarget> {
-        let registration = UICollectionView.CellRegistration<ProfileSearchResultCell, ProfileShareTarget> {
+    private func makeResultsSource() -> UICollectionViewDiffableDataSource<ResultsSection, ShareTarget> {
+        let registration = UICollectionView.CellRegistration<ShareSearchResultCell, ShareTarget> {
             [imagePipeline] cell, _, target in
             cell.configure(with: target, imagePipeline: imagePipeline)
         }
@@ -846,8 +869,8 @@ final class ProfileShareViewController: UIViewController {
         }
     }
 
-    private func applyResults(_ targets: [ProfileShareTarget]) {
-        var snapshot = NSDiffableDataSourceSnapshot<ResultsSection, ProfileShareTarget>()
+    private func applyResults(_ targets: [ShareTarget]) {
+        var snapshot = NSDiffableDataSourceSnapshot<ResultsSection, ShareTarget>()
         snapshot.appendSections([.results])
         snapshot.appendItems(targets)
         resultsSource.apply(snapshot, animatingDifferences: true)
@@ -864,8 +887,8 @@ final class ProfileShareViewController: UIViewController {
     /// is on its way out and its trait collection (which supplies the render
     /// scale) is no longer meaningful.
     private func handOffToSystemShare() {
-        let image = ProfileShareCard.render(
-            ProfileQRCardView(imagePipeline: imagePipeline).configured(with: card),
+        let image = ShareCardImage.render(
+            ShareQRCardView(imagePipeline: imagePipeline).configured(with: card),
             width: 320,
             scale: traitCollection.displayScale
         )
@@ -877,7 +900,7 @@ final class ProfileShareViewController: UIViewController {
 
     /// Same handoff shape as the system share: the thread is pushed onto the
     /// stack this sheet is covering, so the sheet has to be gone first.
-    private func send(to target: ProfileShareTarget) {
+    private func send(to target: ShareTarget) {
         let card = card
         dismiss(animated: true) { [onSendToTarget] in
             onSendToTarget?(target, card)
@@ -894,37 +917,37 @@ final class ProfileShareViewController: UIViewController {
 
     #if DEBUG
     /// Test hooks — these actions are behind taps the simulator can't inject.
-    func qaHandOffToSystemShare() { handOffToSystemShare() }
-    func qaCancelSearch() { setSearching(false) }
+    public func qaHandOffToSystemShare() { handOffToSystemShare() }
+    public func qaCancelSearch() { setSearching(false) }
     /// Scrolls the results so rows pass beneath the floating search row.
-    func qaScrollResults(by offset: CGFloat) {
+    public func qaScrollResults(by offset: CGFloat) {
         resultsView.setContentOffset(
             CGPoint(x: 0, y: resultsView.contentOffset.y + offset), animated: false
         )
     }
     /// Lowers the keyboard WITHOUT leaving search — the state in which the
     /// built-in cancel button used to go dead.
-    func qaLowerKeyboard() { searchBar.resignFirstResponder() }
+    public func qaLowerKeyboard() { searchBar.resignFirstResponder() }
     /// Whether our Cancel is genuinely tappable in the current state.
-    var qaCancelIsUsable: Bool {
+    public var qaCancelIsUsable: Bool {
         cancelSearchButton.isEnabled && cancelSearchButton.isUserInteractionEnabled
             && !cancelSearchButton.isHidden
     }
     /// Fires Cancel the way a tap would.
-    func qaTapCancel() { cancelSearchButton.sendActions(for: .primaryActionTriggered) }
+    public func qaTapCancel() { cancelSearchButton.sendActions(for: .primaryActionTriggered) }
     /// Goes through the real delegate + data-source lookup, not a shortcut
     /// around them — selecting a row is the path under test.
-    func qaSelectFirstResult() {
+    public func qaSelectFirstResult() {
         let first = IndexPath(item: 0, section: 0)
         guard resultsSource.itemIdentifier(for: first) != nil else { return }
         collectionView(resultsView, didSelectItemAt: first)
     }
-    func qaBeginSearch(_ query: String) {
+    public func qaBeginSearch(_ query: String) {
         setSearching(true)
         searchBar.text = query
         runSearch(query)
     }
-    func qaSendToFirstTarget() {
+    public func qaSendToFirstTarget() {
         guard let targeting else { return }
         Task { [weak self] in
             guard let target = await targeting.shareTargets(limit: 1).first else { return }
@@ -934,29 +957,29 @@ final class ProfileShareViewController: UIViewController {
     #endif
 }
 
-private extension ProfileQRCardView {
+private extension ShareQRCardView {
     /// Configures and returns self, so a throwaway card can be built inline
     /// for rasterization without a local binding.
-    func configured(with card: ProfileViewModel.ShareCard) -> ProfileQRCardView {
+    func configured(with card: ShareCard) -> ShareQRCardView {
         configure(with: card)
         return self
     }
 }
 
-extension ProfileShareViewController: UISearchBarDelegate {
-    func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
+extension ShareSheetViewController: UISearchBarDelegate {
+    public func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
         runSearch(searchText)
     }
 
-    func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
+    public func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
         // Dismiss the keyboard but stay in search: the results are the point,
         // and they are behind the keyboard on the smaller phones.
         searchBar.resignFirstResponder()
     }
 }
 
-extension ProfileShareViewController: UICollectionViewDelegate {
-    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+extension ShareSheetViewController: UICollectionViewDelegate {
+    public func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         collectionView.deselectItem(at: indexPath, animated: true)
         guard let target = resultsSource.itemIdentifier(for: indexPath) else { return }
         // Exactly the quick-send path: dismiss, then open the thread with the

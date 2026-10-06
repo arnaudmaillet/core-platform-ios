@@ -6,6 +6,7 @@ import FeedInterface
 import MediaCore
 import MediaPlayback
 import PostGrid
+import ShareSheet
 import UIKit
 
 /// The PLACE PROFILE that sits BENEATH a semantic-cluster feed (Case B of the
@@ -30,7 +31,8 @@ import UIKit
 ///   relationship screen ships. Deliberately For You's own vocabulary and
 ///   shapes: its Discover is a media grid and its Following is a card list,
 ///   which is exactly this pair for one place.
-/// The follow-this-place pin and a "..." menu keep the top-right slots.
+/// Under the identity, the profile's tray: Pin (follow the place) and its QR
+/// code; the balance keeps the top-right slot.
 ///
 /// It remains an ordinary navigation citizen — plain title ("Paris • City
 /// Cluster"), tab bar visible, native edge-pop back to the map — because
@@ -176,11 +178,18 @@ final class PlaceProfileViewController: UIViewController {
     /// The header's follow-this-place toggle, when the caller's subject has a
     /// followable identity (`ClusterGalleryFollowing`); nil hides the button.
     private let following: ClusterGalleryFollowing?
-    /// The two trailing items, held so the bar's group is composed in one
-    /// place — see `configureNavigationItems`. Either can be nil: the pin
-    /// needs a follow seam, the balance needs a wallet.
-    private var followItem: UIBarButtonItem?
+    /// The trailing item: the balance, when there is a wallet. The pin left
+    /// the bar for the tray (user, 5 October 2026).
     private var walletItem: UIBarButtonItem?
+    /// The tray under the identity row — the profile's (`HeroTray`): the
+    /// Pin capsule, then the QR code's bubble, each from its seam.
+    private let actionRow = UIStackView()
+    /// Follows the place — pins it, as the map's "pinned" filter reads it.
+    private let pinButton = UIButton(configuration: HeroTray.capsule(prominent: true))
+    /// The place's share link as a QR code — the profile's bubble.
+    private let qrCodeButton = UIButton(configuration: HeroTray.bubble(systemImage: "qrcode"))
+    /// What the QR code carries; nil, no bubble.
+    private let shareURL: URL?
     /// The viewer's spendable balance, in the same face it wears on the map,
     /// For You, the profile and the post screen.
     private let walletBadge = WalletBadgeButton()
@@ -704,18 +713,16 @@ final class PlaceProfileViewController: UIViewController {
     /// Enough to read as depth, little enough that the crop stays honest.
     private static let bannerParallaxFraction: CGFloat = 0.25
 
-    /// The banner's height: the PROFILE POSTER's geometry, not a share of the
-    /// screen.
+    /// The banner's height: the PROFILE POSTER's — a cover, 80% of the
+    /// screen (`coverScreenFraction`), the identity row at its foot.
     ///
-    /// ⚠️ **IT WAS 70% OF THE VIEWPORT** — 612pt on an 874pt screen, the
-    /// picture reaching two-thirds down before the name — beside a profile
-    /// whose poster gives its picture a 200pt stage under the chrome. Two
-    /// screens of one design, read as two products ("la bannière est beaucoup
-    /// trop haute", 25 September 2026). Now it is the profile's rule: the
-    /// chrome, `HeroBannerMetrics.posterStage` of picture, then the identity
-    /// row — the flag, the name and the counters — and the clearance under
-    /// it. Re-derived on
-    /// every layout, since the name and the counters grow with Dynamic Type.
+    /// ⚠️ History: it was 70% of the viewport, then cut to the poster's 200pt
+    /// stage ("la bannière est beaucoup trop haute", 25 September 2026) so
+    /// the two screens read as one design; on 5 October 2026 both covers went
+    /// to 80% together — the profile's poster and this — so they still match.
+    /// Never less than the chrome, `HeroBannerMetrics.posterStage`, the
+    /// identity row and its clearance; re-derived on every layout, since the
+    /// identity grows with Dynamic Type.
     private var bannerHeight: CGFloat {
         let width = view.bounds.width - 2 * HeroBannerMetrics.identityInset
         guard width > 0 else { return Self.bannerHeightFloor }
@@ -726,9 +733,27 @@ final class PlaceProfileViewController: UIViewController {
                 verticalFittingPriority: .fittingSizeLevel
             ).height ?? 0
         }
-        return view.safeAreaInsets.top + HeroBannerMetrics.posterStage
-            + height(of: identityView) + Self.identityClearance
+        // `coverScreenFraction` of the screen — or, should the identity
+        // outgrow it (Dynamic Type), down to the identity's clearance.
+        let content = contentTop + height(of: identityView) + Self.identityClearance
+        return max(content, (view.bounds.height * Self.coverScreenFraction).rounded())
     }
+
+    /// How much of the screen's height the banner — a COVER, the profile
+    /// poster's shape — runs down: 80% (user, 5 October 2026), as a
+    /// profile's poster does.
+    static let coverScreenFraction: CGFloat = 0.8
+    /// Where the CONTENT starts — the identity row, then the posts: 40% of
+    /// the screen, OVER the picture, which runs on under it to 80% — the
+    /// two dissociated, as on a profile's poster (user, 5 October 2026).
+    static let contentScreenFraction: CGFloat = 0.4
+
+    /// The identity row's top, from the header's: 40% of the screen, never
+    /// under the chrome.
+    private var contentTop: CGFloat {
+        max((view.bounds.height * Self.contentScreenFraction).rounded(), view.safeAreaInsets.top + Spacing.md)
+    }
+    private var contentTopConstraint: NSLayoutConstraint?
 
     /// How much taller than its viewport the image is cut. The parallax slides
     /// the image by at most this, so the overshoot is what guarantees no edge
@@ -755,6 +780,7 @@ final class PlaceProfileViewController: UIViewController {
         self.postIDs = postIDs
         self.placeName = placeName
         self.rank = rank
+        self.shareURL = identity?.shareURL
         self.identityView = PlaceIdentityView(
             flag: identity?.flag,
             name: Self.heroTitleComponents(of: placeName).name,
@@ -980,7 +1006,13 @@ final class PlaceProfileViewController: UIViewController {
         bannerBox.clipsToBounds = true
         bannerBox.backgroundColor = Surface.card
         bannerBox.translatesAutoresizingMaskIntoConstraints = false
-        headerHost.addSubview(bannerBox)
+        // ⚠️ BEHIND THE PAGES, not in the floating header: the cover runs to
+        // 80% of the screen while the identity row and the posts start at
+        // 40%, OVER its lower part (user, 5 October 2026). The pages are
+        // clear; only their cards cover it. It still rests on the header's
+        // top and travels with it (`bannerRestingTop`), so the fade, the ink
+        // and the stretch are read in its space as before.
+        view.insertSubview(bannerBox, belowSubview: pager)
 
         // Both fill the box; the picture slides INSIDE its view for the
         // parallax (`applyBannerParallax`), under a blur and a ramp that stay
@@ -1018,7 +1050,8 @@ final class PlaceProfileViewController: UIViewController {
         // September 2026).
         applyHeroLegibility()
         identityView.translatesAutoresizingMaskIntoConstraints = false
-        bannerBox.addSubview(identityView)
+        headerHost.addSubview(identityView)
+        configureActionRow()
 
         // ⚠️ Stretchy banner, the profile's own mechanism: the host is moved
         // by its TOP CONSTRAINT rather than a transform precisely so this
@@ -1033,6 +1066,8 @@ final class PlaceProfileViewController: UIViewController {
             equalTo: headerHost.topAnchor, constant: bannerHeight
         )
         bannerHeightConstraint = bannerBottom
+        let contentTop = identityView.topAnchor.constraint(equalTo: headerHost.topAnchor, constant: self.contentTop)
+        contentTopConstraint = contentTop
         NSLayoutConstraint.activate([
             top,
             headerHost.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -1042,29 +1077,37 @@ final class PlaceProfileViewController: UIViewController {
             bannerBox.leadingAnchor.constraint(equalTo: headerHost.leadingAnchor),
             bannerBox.trailingAnchor.constraint(equalTo: headerHost.trailingAnchor),
             // The BOTTOM is the fixed edge (host.top + bannerHeight), so a
-            // stretched banner grows upward while the title holds still.
+            // stretched banner grows upward while the identity holds still.
             bannerBottom,
-            // The identity rides the banner's FIXED bottom edge (see the
-            // stretch note above), so a pull-down stretches the image behind
-            // it while the identity holds its seat over the blur. On the
-            // profile's column.
+            // The identity at `contentTop` of the header — 40% of the screen,
+            // on the cover — on the profile's column.
+            contentTop,
             identityView.leadingAnchor.constraint(
-                equalTo: bannerBox.leadingAnchor, constant: HeroBannerMetrics.identityInset
+                equalTo: headerHost.leadingAnchor, constant: HeroBannerMetrics.identityInset
             ),
             identityView.trailingAnchor.constraint(
-                equalTo: bannerBox.trailingAnchor, constant: -HeroBannerMetrics.identityInset
+                equalTo: headerHost.trailingAnchor, constant: -HeroBannerMetrics.identityInset
             ),
-            // ⚠️ DERIVED FROM THE BAR, not typed: the identity's foot keeps
-            // the old selector slot's clearance — see `debugIdentityClearance`.
-            identityView.bottomAnchor.constraint(
-                equalTo: bannerBox.bottomAnchor, constant: -Self.identityClearance
+            // ⚠️ **THE IDENTITY'S FOOT IS WHAT GIVES THE HOST A HEIGHT NOW** —
+            // the banner's used to, until the two were dissociated: the pages
+            // are inset by the host, so the posts start right under the
+            // identity, over the picture's lower part. The foot keeps the old
+            // selector slot's clearance, derived from the bar, not typed (see
+            // `debugIdentityClearance`).
+            // The tray under the identity, on the profile's column — and
+            // its foot, not the identity's, ends the header.
+            actionRow.topAnchor.constraint(
+                equalTo: identityView.bottomAnchor, constant: actionRow.isHidden ? 0 : Self.trayGap
             ),
-            // ⚠️ **THE BANNER'S BOTTOM IS WHAT GIVES THE HOST A HEIGHT NOW.**
-            // It used to be the selector slot's, which was a sibling pinned to
-            // `headerHost.bottomAnchor` — delete the slot without this and
-            // `headerHeight` goes ambiguous, taking the pages' inset and every
-            // number derived from it with it.
-            bannerBox.bottomAnchor.constraint(equalTo: headerHost.bottomAnchor),
+            actionRow.leadingAnchor.constraint(
+                equalTo: headerHost.leadingAnchor, constant: HeroBannerMetrics.identityInset
+            ),
+            actionRow.trailingAnchor.constraint(
+                equalTo: headerHost.trailingAnchor, constant: -HeroBannerMetrics.identityInset
+            ),
+            headerHost.bottomAnchor.constraint(
+                equalTo: actionRow.bottomAnchor, constant: Self.identityClearance
+            ),
         ])
     }
 
@@ -1075,11 +1118,83 @@ final class PlaceProfileViewController: UIViewController {
     /// on the banner's last 44pt. Derived, so the two cannot drift apart.
     private static let selectorSlotFooter =
         selectorSlotHeight - PagedTabBar.Style.navigationTitle.height
-    /// How far the identity's foot must clear the banner's bottom edge: the
-    /// selector's own band, plus real air. Derived from the bar for the reason
-    /// the constraint states — type must never be drawn behind the capsule.
-    private static let identityClearance =
-        PagedTabBar.Style.navigationTitle.height + Spacing.xl
+    /// The air between the tray and the first post: the profile's own under
+    /// its tray (`ProfileHeaderView`'s column foot, `Spacing.xl`), so the two
+    /// pages' content starts alike (user, 5 October 2026).
+    ///
+    /// ⚠️ It was the selector's band plus that air — 68pt — from when the
+    /// capsule stood on the banner's foot. The strip lives at the foot of the
+    /// screen now, and the band was air with nothing in it.
+    private static let identityClearance = Spacing.xl
+    /// The air above the tray: the profile's (`trayGap`).
+    private static let trayGap: CGFloat = Spacing.md
+
+    /// The tray, as the profile composes its own: a capsule leading, a bubble
+    /// beside it, the rest of the row empty. Each control only with its seam
+    /// — no follow closure, no Pin; no share link, no QR code — and no tray
+    /// at all with neither (its height and its gap go with it).
+    private func configureActionRow() {
+        actionRow.axis = .horizontal
+        actionRow.alignment = .fill
+        actionRow.spacing = Spacing.sm
+        actionRow.translatesAutoresizingMaskIntoConstraints = false
+        headerHost.addSubview(actionRow)
+        if following != nil { actionRow.addArrangedSubview(pinButton) }
+        if shareURL != nil {
+            qrCodeButton.accessibilityLabel = "QR code"
+            qrCodeButton.addAction(UIAction { [weak self] _ in self?.presentQRCode() }, for: .primaryActionTriggered)
+            qrCodeButton.widthAnchor.constraint(equalToConstant: HeroTray.bubbleSize).isActive = true
+            actionRow.addArrangedSubview(qrCodeButton)
+        }
+        // The rest of the row: the controls keep their own widths, leading.
+        let spacer = UIView()
+        spacer.setContentHuggingPriority(.init(1), for: .horizontal)
+        actionRow.addArrangedSubview(spacer)
+        let empty = actionRow.arrangedSubviews.count == 1
+        actionRow.isHidden = empty
+        actionRow.heightAnchor.constraint(equalToConstant: empty ? 0 : HeroTray.bubbleSize).isActive = true
+        for button in [pinButton, qrCodeButton] {
+            button.setContentHuggingPriority(.required, for: .horizontal)
+            PressFeedback.attach(to: button, sound: nil)
+        }
+    }
+
+    /// The place's share sheet — the PROFILE'S OWN (`ShareSheet`, shared):
+    /// its QR card with the place's flag punched in, its name and country,
+    /// and the actions tray. No row of people to send it to: the page has no
+    /// source of them, and a row with nobody in it is not drawn.
+    private func presentQRCode() {
+        guard let sheet = makeShareSheet() else { return }
+        // The system sheet opens once this one is gone — the profile's
+        // hand-off (presenting from a sheet would stack two).
+        sheet.onSystemShare = { [weak self] card, image in
+            guard let self else { return }
+            let activity = UIActivityViewController(
+                activityItems: [ShareItemSource(card: card, icon: image), image], applicationActivities: nil
+            )
+            activity.popoverPresentationController?.sourceView = self.qrCodeButton
+            self.present(activity, animated: true)
+        }
+        present(sheet, animated: true)
+    }
+
+    private func makeShareSheet() -> ShareSheetViewController? {
+        guard let shareURL else { return nil }
+        let card = ShareCard(
+            displayName: identityView.titleLabel.name,
+            handle: identityView.titleLabel.subtitle,
+            avatarURL: nil,
+            avatarImage: identityView.flagView.image,
+            url: shareURL
+        )
+        return ShareSheetViewController(
+            card: card,
+            imagePipeline: imagePipeline,
+            targeting: nil,
+            deviceCornerRadius: ScreenGeometry.cornerRadius(behind: view),
+            fallbackWidth: view.bounds.width
+        )
+    }
     /// The crossfade's length and the size the leaving copy shrinks to —
     /// the profile screen's measured pair, shared so the two screens that
     /// perform the same hand-over cannot drift apart.
@@ -1247,6 +1362,8 @@ final class PlaceProfileViewController: UIViewController {
     /// halo over the photograph, the scrim a black veil. `HeroBannerFade` is
     /// the profile banner's run-out too, so the two screens cannot drift.
     private func placeHeroFade() {
+        // The identity stands in the floating header, over the box.
+        headerHost.layoutIfNeeded()
         bannerBox.layoutIfNeeded()
         // In the box's space AT REST: a pull-down stretches the box above,
         // and must not move the fade — see `HeroBannerPictureView`.
@@ -1383,6 +1500,7 @@ final class PlaceProfileViewController: UIViewController {
         // Idempotent per value — the pages guard their own writes.
         // The banner is re-derived rather than fixed: the chrome, the name and
         // the counters all change with the device and with Dynamic Type.
+        contentTopConstraint?.constant = contentTop
         bannerHeightConstraint?.constant = bannerHeight
         placeHeroFade()
         let header = headerHeight
@@ -1412,10 +1530,12 @@ final class PlaceProfileViewController: UIViewController {
         headerTopConstraint?.constant = -min(travelled, headerTravel)
         applyBannerParallax(travelled: travelled)
         let alpha = Self.identityAlpha(travelled: travelled, dockLine: headerTravel)
-        // The BOX, so the picture, its blur, the name and the counters fade as
-        // one identity rather than the image sliding out from under its own
-        // caption.
+        // The box AND the identity row — apart since the cover was dissociated
+        // from its content — so the picture, its blur, the name and the
+        // counters fade as one identity rather than the image sliding out
+        // from under its own caption.
         bannerBox.alpha = alpha
+        identityView.alpha = alpha
     }
 
     /// The identity fade's ramp: opaque until the last stretch of travel,
@@ -1727,7 +1847,7 @@ final class PlaceProfileViewController: UIViewController {
     /// around everything in it. Left sharing, a balance and a pin read as
     /// one segmented control with a divider nobody drew.
     private func applyTrailingItems() {
-        let items = [followItem, walletItem].compactMap { $0 }
+        let items = [walletItem].compactMap { $0 }
         for item in items { item.sharesBackground = false }
         navigationItem.rightBarButtonItems = items
     }
@@ -1790,43 +1910,35 @@ final class PlaceProfileViewController: UIViewController {
         )
     }
 
-    /// The trailing pin, and nothing but the pin.
-    ///
-    /// ⚠️ A PLAIN BAR ITEM, where this was a custom view carrying a label.
-    /// The word is gone on purpose — the state is already in the fill, and a
-    /// titled item is charged its whole word against the bar's budget
-    /// (34pt of platter around it, measured), which is width the docked
-    /// selector then does not have: measured, "Activity" came back clipped to
-    /// "Activi" on a 402pt device with the label up. A glyph item costs the
-    /// 44pt every glyph costs, and UIKit draws it as the same bubble the
-    /// map's bell and the profile's tray wear.
+    /// The tray's Pin capsule: following a place pins it (the map's
+    /// "pinned" filter reads the same store). It left the navigation bar's
+    /// corner for the tray (user, 5 October 2026), the profile's Follow
+    /// capsule's place — so it carries its word again, which the bar could
+    /// not afford.
     private func configureFollowButton() {
-        guard let following else { return }
-        let item = UIBarButtonItem(primaryAction: UIAction { [weak self] _ in
+        guard following != nil else { return }
+        pinButton.addAction(UIAction { [weak self] _ in
             guard let self else { return }
             MemberGates.perform(.followPlace, from: self) { [weak self] in
                 guard let self, let following = self.following else { return }
                 self.renderFollowState(following.toggle())
             }
-        })
-        followItem = item
-        renderFollowState(following.isFollowing())
+        }, for: .primaryActionTriggered)
+        renderFollowState(following?.isFollowing() ?? false)
     }
 
-    /// One place decides both states' looks, so they can't drift: the outline
-    /// pin calls, the filled one rests. The word that used to sit beside it
-    /// is gone (see `configureFollowButton`), so the FILL is the whole of the
-    /// state — which is why the label a screen reader hears still says both
-    /// words.
+    /// One place decides both states' looks, so they can't drift — the
+    /// profile's Follow/Following pair: the PROMINENT capsule invites ("Pin",
+    /// the outline pin), the quiet one rests ("Pinned", the filled pin).
     private func renderFollowState(_ isFollowing: Bool) {
         followState = isFollowing
-        // A PIN: following a place pins it (the map's "pinned" filter reads
-        // the same store), and the heart now means points — see
-        // `PointsSymbol`.
-        followItem?.image = UIImage(systemName: isFollowing ? "pin.fill" : "pin")
-        followItem?.tintColor = isFollowing ? .secondaryLabel : .tintColor
-        followItem?.accessibilityLabel = isFollowing
-            ? "Unfollow this place" : "Follow this place"
+        var configuration = HeroTray.capsule(prominent: !isFollowing)
+        configuration.title = isFollowing ? "Pinned" : "Pin"
+        configuration.image = UIImage(systemName: isFollowing ? "pin.fill" : "pin")
+        configuration.imagePadding = Spacing.xs
+        configuration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(textStyle: .footnote)
+        pinButton.configuration = configuration
+        pinButton.accessibilityLabel = isFollowing ? "Unfollow this place" : "Follow this place"
     }
 
     // MARK: - Opening a tile
@@ -2468,6 +2580,13 @@ extension PlaceProfileViewController {
     }
     /// The identity row, for a test that reads it.
     var debugIdentity: PlaceIdentityView { identityView }
+    /// The tray's controls as laid out, leading first.
+    var debugTrayButtons: [UIButton] {
+        actionRow.arrangedSubviews.compactMap { $0 as? UIButton }
+    }
+    var debugTrayFrame: CGRect { actionRow.convert(actionRow.bounds, to: view) }
+    /// The share sheet the QR bubble opens.
+    func debugMakeShareSheet() -> ShareSheetViewController? { makeShareSheet() }
     /// The banner's fade, in the view's space.
     var debugBannerFade: HeroBannerFade.Geometry? {
         bannerView.fade?.offset(by: headerHost.frame.minY)
@@ -2507,7 +2626,10 @@ extension PlaceProfileViewController {
     func debugApplyHeaderOffset(_ travelled: CGFloat) { applyHeaderOffset(travelled) }
     /// Whether the name and the counters are drawn ON the banner.
     var debugIdentityRidesTheBanner: Bool {
-        identityView.isDescendant(of: bannerBox)
+        // Over the picture, inside its frame — no longer inside its view
+        // since the cover and its content were dissociated.
+        let banner = bannerBox.convert(bannerBox.bounds, to: view)
+        return banner.contains(identityView.convert(identityView.bounds, to: view))
     }
     /// The name's and the counter row's frames, in the view's space.
     var debugNameFrame: CGRect { identityView.titleLabel.convert(identityView.titleLabel.bounds, to: view) }
@@ -2569,7 +2691,8 @@ extension PlaceProfileViewController {
     /// but its stated reason is history: the selector is at the foot of the
     /// screen. Re-decide it rather than inheriting it.
     var debugIdentityClearance: CGFloat {
-        bannerBox.bounds.height - identityView.frame.maxY
+        // From the tray's foot, the header's last content.
+        headerHost.bounds.height - actionRow.frame.maxY
     }
     /// Drives the active page to a travel offset through the same path a
     /// finger's scroll reports through.

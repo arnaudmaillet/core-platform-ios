@@ -11,14 +11,14 @@ import UIKit
 /// - A QR code has to be high-contrast dark-on-light to scan. Rendered on a
 ///   translucent material it composites against whatever moves behind it, and
 ///   in dark mode it inverts into something many scanners reject outright.
-/// - The card is also rasterized and shared (`ProfileShareCard`), where it
+/// - The card is also rasterized and shared (`ShareCardImage`), where it
 ///   lands on a stranger's screen with no backdrop to refract. A material that
 ///   samples its surroundings has nothing to sample there.
 ///
 /// So the card fixes `overrideUserInterfaceStyle = .light` and paints a solid
 /// background. The glass in this feature lives on the action chips beside it,
 /// where it is chrome rather than payload.
-final class ProfileQRCardView: UIView {
+public final class ShareQRCardView: UIView {
     private enum Metrics {
         /// Floor for the corner radius, for hosts that don't supply one.
         static let minimumCornerRadius: CGFloat = 20
@@ -30,7 +30,7 @@ final class ProfileQRCardView: UIView {
         /// The avatar's diameter as a fraction of the QR's side. A circle this
         /// size occludes ~6% of the code's area — comfortably inside error
         /// correction level H's ~30% budget, so the code still decodes with
-        /// the avatar on top (asserted in `ProfileQRCodeTests`).
+        /// the avatar on top (asserted in `QRCodeImageTests`).
         static let avatarFraction: CGFloat = 0.22
         /// The white ring punched around the avatar, so the modules never
         /// touch it and the centre reads as intentional rather than damaged.
@@ -42,7 +42,7 @@ final class ProfileQRCardView: UIView {
     /// Verified in-sim: inside an iOS 26 sheet the semantic background colours
     /// resolve *translucent*, so the card sampled two different greys over two
     /// different parts of the profile behind it. Harmless-looking on screen,
-    /// but fatal to `ProfileShareCard`, which renders into an opaque context —
+    /// but fatal to `ShareCardImage`, which renders into an opaque context —
     /// a translucent background composites there against black. A card that is
     /// shared as an image cannot borrow its colour from its surroundings.
     /// (This is light-mode `secondarySystemBackground`'s own value.)
@@ -62,7 +62,7 @@ final class ProfileQRCardView: UIView {
     private var renderedURL: URL?
     private var renderedSide: CGFloat = 0
 
-    init(imagePipeline: ImagePipeline?) {
+    public init(imagePipeline: ImagePipeline?) {
         self.imagePipeline = imagePipeline
         super.init(frame: .zero)
         // The whole point of the card: it does not follow the appearance.
@@ -80,7 +80,7 @@ final class ProfileQRCardView: UIView {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     deinit {
         avatarTask?.cancel()
@@ -171,7 +171,7 @@ final class ProfileQRCardView: UIView {
         bringSubviewToFront(avatarView)
     }
 
-    override func layoutSubviews() {
+    override public func layoutSubviews() {
         super.layoutSubviews()
         punchView.layer.cornerRadius = punchView.bounds.width / 2
         monogramLabel.font = .systemFont(ofSize: max(avatarView.bounds.width * 0.38, 8), weight: .semibold)
@@ -193,7 +193,7 @@ final class ProfileQRCardView: UIView {
         )
     }
 
-    func configure(with card: ProfileViewModel.ShareCard) {
+    public func configure(with card: ShareCard) {
         nameLabel.text = card.displayName
         handleLabel.text = card.handle
         monogramLabel.text = Self.monogram(for: card.displayName)
@@ -202,7 +202,13 @@ final class ProfileQRCardView: UIView {
         renderedSide = 0
         qrImageView.image = nil
         setNeedsLayout()
-        loadAvatar(card.avatarURL)
+        // A picture in hand — a place's flag — needs no fetch.
+        if let image = card.avatarImage {
+            avatarTask?.cancel()
+            avatarView.image = image
+        } else {
+            loadAvatar(card.avatarURL)
+        }
     }
 
     /// The QR is generated at the resolved pixel size rather than a guessed
@@ -235,7 +241,7 @@ final class ProfileQRCardView: UIView {
     /// "no size yet" cases cost nothing and no duplicate render is scheduled.
     /// Renders the code on THIS thread, now, if it has not landed yet.
     ///
-    /// ⚠️ **The export path needs this and cannot wait.** `ProfileShareCard`
+    /// ⚠️ **The export path needs this and cannot wait.** `ShareCardImage`
     /// snapshots the card into a bitmap synchronously; with only the async
     /// path, sharing produced a card with a blank centre — the code arrived
     /// after the snapshot had already been taken. On-screen display stays
@@ -246,7 +252,7 @@ final class ProfileQRCardView: UIView {
         let side = qrImageView.bounds.width.rounded()
         guard side > 0, let url = renderedURL, qrImageView.image == nil else { return }
         renderedSide = side
-        qrImageView.image = ProfileQRCode.makeImage(
+        qrImageView.image = QRCodeImage.makeImage(
             for: url, side: side, scale: traitCollection.displayScale
         )
     }
@@ -260,7 +266,7 @@ final class ProfileQRCardView: UIView {
         let scale = traitCollection.displayScale
         renderTask = Task { [weak self] in
             let image = await Task.detached(priority: .userInitiated) {
-                ProfileQRCode.makeImage(for: url, side: side, scale: scale)
+                QRCodeImage.makeImage(for: url, side: side, scale: scale)
             }.value
             guard let self, !Task.isCancelled, self.renderedURL == url else { return }
             self.qrImageView.image = image
