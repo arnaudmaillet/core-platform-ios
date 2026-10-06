@@ -6,6 +6,7 @@ public protocol SignUpPerforming: Sendable {
     func startVerification(_ channel: VerificationChannel, to destination: String, locale: String) async throws -> VerificationChallenge
     func startFederatedSignIn() async throws -> String
     func signIn(_ credential: SignInCredential) async throws -> CodeSignIn
+    func completeSecondStep(_ challenge: SecondStepChallenge, code: String) async throws -> PendingAccount
     func signUp(_ credential: SignInCredential, details: SignUpDetails) async throws -> SignUpOutcome
     func completeSignIn(_ account: PendingAccount) async
     func completeSignUp(_ pending: PendingAccount) async throws

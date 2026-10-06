@@ -2,11 +2,12 @@ import DesignSystem
 import UIKit
 
 /// Settings → Security and Login: the Security Checkup, Change Password
-/// (#382), where the account is signed in and the two ways out — one other
-/// device, or every device at once (#384) — and App Lock (#418).
+/// (#382), Two-Step Sign-In with its backup codes (#383), where the account
+/// is signed in and the two ways out — one other device, or every device at
+/// once (#384) — and App Lock (#418).
 ///
-/// Two-factor, backup codes and passkeys are listed under Coming Soon: they
-/// wait on backend arnaudmaillet/core-platform-backend#649.
+/// Passkeys are listed under Coming Soon (#405): the server has them
+/// (backend #808), the app's contracts and associated domain don't yet.
 final class SecuritySettingsViewController: UIViewController {
     private enum Section: Hashable {
         case checkup, password, sessions, global, appLock, comingSoon
@@ -15,6 +16,7 @@ final class SecuritySettingsViewController: UIViewController {
     private enum Item: Hashable {
         case checkup
         case changePassword
+        case twoStep
         case requireLock
         case lockDelay
         case session(AccountSession)
@@ -24,13 +26,14 @@ final class SecuritySettingsViewController: UIViewController {
         case planned(String)
     }
 
-    private static let planned = ["Two-factor authentication", "Backup codes and passkeys"]
+    private static let planned = ["Passkeys", "New sign-in alerts"]
 
     private let viewModel: SecuritySettingsViewModel
     private let onSignedOutEverywhere: () -> Void
     private let authenticator: any DeviceAuthenticating
     private let makeCheckup: (() -> UIViewController)?
     private let makeChangePassword: (() -> UIViewController)?
+    private let makeTwoStep: (() -> UIViewController)?
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
 
@@ -39,9 +42,11 @@ final class SecuritySettingsViewController: UIViewController {
         onSignedOutEverywhere: @escaping () -> Void,
         authenticator: any DeviceAuthenticating = DeviceAuthenticator(),
         makeCheckup: (() -> UIViewController)? = nil,
-        makeChangePassword: (() -> UIViewController)? = nil
+        makeChangePassword: (() -> UIViewController)? = nil,
+        makeTwoStep: (() -> UIViewController)? = nil
     ) {
         self.viewModel = viewModel
+        self.makeTwoStep = makeTwoStep
         self.onSignedOutEverywhere = onSignedOutEverywhere
         self.authenticator = authenticator
         self.makeCheckup = makeCheckup
@@ -153,9 +158,10 @@ final class SecuritySettingsViewController: UIViewController {
             snapshot.appendSections([.checkup])
             snapshot.appendItems([.checkup], toSection: .checkup)
         }
-        if makeChangePassword != nil {
+        let passwordRows: [Item] = (makeChangePassword != nil ? [.changePassword] : []) + (makeTwoStep != nil ? [.twoStep] : [])
+        if !passwordRows.isEmpty {
             snapshot.appendSections([.password])
-            snapshot.appendItems([.changePassword], toSection: .password)
+            snapshot.appendItems(passwordRows, toSection: .password)
         }
         snapshot.appendSections([.sessions, .global, .appLock, .comingSoon])
         switch viewModel.phase {
@@ -213,6 +219,13 @@ final class SecuritySettingsViewController: UIViewController {
             var content = UIListContentConfiguration.cell()
             content.text = "Change Password"
             content.image = UIImage(systemName: "key")
+            content.imageProperties.tintColor = .label
+            cell.contentConfiguration = content
+            cell.accessories = [.disclosureIndicator()]
+        case .twoStep:
+            var content = UIListContentConfiguration.cell()
+            content.text = "Two-Step Sign-In"
+            content.image = UIImage(systemName: "lock.shield")
             content.imageProperties.tintColor = .label
             cell.contentConfiguration = content
             cell.accessories = [.disclosureIndicator()]
@@ -405,7 +418,7 @@ extension SecuritySettingsViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         switch dataSource.itemIdentifier(for: indexPath) {
         case .session(let session): !session.isCurrent
-        case .failed, .logOutEverywhere, .checkup, .changePassword: true
+        case .failed, .logOutEverywhere, .checkup, .changePassword, .twoStep: true
         case .loading, .planned, .requireLock, .lockDelay, nil: false
         }
     }
@@ -425,6 +438,10 @@ extension SecuritySettingsViewController: UICollectionViewDelegate {
             }
         case .changePassword:
             if let screen = makeChangePassword?() {
+                navigationController?.pushViewController(screen, animated: true)
+            }
+        case .twoStep:
+            if let screen = makeTwoStep?() {
                 navigationController?.pushViewController(screen, animated: true)
             }
         default:

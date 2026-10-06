@@ -215,6 +215,9 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                             },
                                             makeChangePassword: (sessions as? any AccountPasswordChanging).map { changer in
                                                 { ChangePasswordViewController(changer: changer) }
+                                            },
+                                            makeTwoStep: (sessions as? any TwoStepManaging & CredentialStepUp).map { twoStep in
+                                                { TwoStepViewController(account: account, manager: twoStep, stepUp: twoStep) }
                                             }
                                         )
                                     }

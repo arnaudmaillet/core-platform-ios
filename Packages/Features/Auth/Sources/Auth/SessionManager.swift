@@ -74,7 +74,10 @@ public actor SessionManager {
 
     // MARK: - Login / logout
 
-    public func login(username: String, password: String) async throws {
+    /// Signs in with a password. With two-step sign-in on (#383) the password
+    /// is proven but no session exists yet: `.needsSecondStep`, and
+    /// `completeLogin` finishes with the holder's code.
+    public func login(username: String, password: String) async throws -> LoginOutcome {
         var grant = Auth_V1_PasswordGrant()
         grant.username = username
         grant.password = password
@@ -86,19 +89,52 @@ public actor SessionManager {
 
         let response = await authClient.login(request: request, headers: [:])
         switch response.result {
+        case .success(let body) where body.mfaRequired:
+            return .needsSecondStep(Self.secondStepChallenge(body))
         case .success(let body):
-            let session = Self.makeSession(
-                accountID: AccountID(body.accountID),
-                tokens: body.tokens,
-                now: now()
-            )
-            self.session = session
-            try? store.save(session)
-            pendingReactivationNotice = body.reactivated
-            broadcast(.authenticated(session.accountID))
+            adopt(body)
+            return .signedIn
         case .failure(let error):
             throw AuthError.loginFailure(error)
         }
+    }
+
+    /// The second step of a password sign-in: the authenticator's six digits
+    /// or a backup code (`auth.v1.CompleteLogin`). A wrong code leaves the
+    /// challenge usable.
+    public func completeLogin(_ challenge: SecondStepChallenge, code: String) async throws {
+        adopt(try await secondStep(challenge, code: code))
+    }
+
+    /// A finished sign-in becomes the session.
+    private func adopt(_ body: Auth_V1_LoginResponse) {
+        let session = Self.makeSession(
+            accountID: AccountID(body.accountID),
+            tokens: body.tokens,
+            now: now()
+        )
+        self.session = session
+        try? store.save(session)
+        pendingReactivationNotice = body.reactivated
+        broadcast(.authenticated(session.accountID))
+    }
+
+    /// `auth.v1.CompleteLogin`.
+    func secondStep(_ challenge: SecondStepChallenge, code: String) async throws -> Auth_V1_LoginResponse {
+        var request = Auth_V1_CompleteLoginRequest()
+        request.mfaToken = challenge.token
+        request.code = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        let response = await authClient.completeLogin(request: request, headers: [:])
+        switch response.result {
+        case .success(let body):
+            return body
+        case .failure(let error):
+            throw AuthError.secondStepFailure(error)
+        }
+    }
+
+    static func secondStepChallenge(_ body: Auth_V1_LoginResponse) -> SecondStepChallenge {
+        SecondStepChallenge(token: body.mfaToken, expiresIn: TimeInterval(body.mfaExpiresIn))
     }
 
     /// True once after a login that reactivated a self-deactivated account,

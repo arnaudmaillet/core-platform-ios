@@ -57,7 +57,9 @@ public struct MockBackend: Sendable {
         // One account lifecycle for both: step-up proofs minted by auth are
         // what account's gated RPCs check, and a deactivation made through
         // account is what the next auth login resumes.
-        let accountLifecycle = MockAccountLifecycle()
+        // `-mock-two-step`: the demo account starts with two-step sign-in on
+        // (#383), so the sign-in's second step shows without enrolling first.
+        let accountLifecycle = MockAccountLifecycle(twoStepOn: ProcessInfo.processInfo.arguments.contains("-mock-two-step"))
         MockAuthService(lifecycle: accountLifecycle).register(on: bff)
         MockAccountService(lifecycle: accountLifecycle).register(on: bff)
         // `-mock-verification pending|rejected|approved` gives the viewer a

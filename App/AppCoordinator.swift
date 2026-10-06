@@ -98,7 +98,7 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
                 guard let signInAfter else { return }
                 try? await Task.sleep(for: .seconds(signInAfter))
                 let credentials = MockAuthService.defaultCredentials
-                try? await sessionManager.login(username: credentials.username, password: credentials.password)
+                _ = try? await sessionManager.login(username: credentials.username, password: credentials.password)
             }
             return
         }
@@ -158,10 +158,14 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         let composer = container.postComposer
         Task { [weak self] in
             await sessionManager.logout()
-            try? await sessionManager.login(
+            let outcome = try? await sessionManager.login(
                 username: credentials.username,
                 password: credentials.password
             )
+            // Two-step sign-in on (`-mock-two-step`): the mock's code finishes it.
+            if case .needsSecondStep(let challenge)? = outcome {
+                try? await sessionManager.completeLogin(challenge, code: MockAuthService.verificationCode)
+            }
             self?.observeAuthState()
             // Exercises the real upload+create+publish flow so the compose
             // wiring is verifiable without driving the picker UI.

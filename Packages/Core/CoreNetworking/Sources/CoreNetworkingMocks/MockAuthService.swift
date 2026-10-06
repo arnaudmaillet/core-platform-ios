@@ -119,6 +119,21 @@ public final class MockAuthService: @unchecked Sendable {
         bff.register(path: "/auth.v1.AuthService/ChangePassword") { [self] (request: Auth_V1_ChangePasswordRequest, headers: Headers) in
             changePassword(request, callerSession: callerSession(headers))
         }
+        bff.register(path: "/auth.v1.AuthService/CompleteLogin") { [self] (request: Auth_V1_CompleteLoginRequest) in
+            completeLogin(request)
+        }
+        bff.register(path: "/auth.v1.AuthService/StartMfaEnrollment") { [self] (_: Auth_V1_StartMfaEnrollmentRequest, headers: Headers) in
+            startMfaEnrollment(headers)
+        }
+        bff.register(path: "/auth.v1.AuthService/ConfirmMfaEnrollment") { [self] (request: Auth_V1_ConfirmMfaEnrollmentRequest, headers: Headers) in
+            confirmMfaEnrollment(request, headers: headers)
+        }
+        bff.register(path: "/auth.v1.AuthService/DisableMfa") { [self] (_: Auth_V1_DisableMfaRequest, headers: Headers) in
+            disableMfa(headers)
+        }
+        bff.register(path: "/auth.v1.AuthService/RegenerateBackupCodes") { [self] (_: Auth_V1_RegenerateBackupCodesRequest, headers: Headers) in
+            regenerateBackupCodes(headers)
+        }
     }
 
     /// The session behind a request's bearer token, if any.
@@ -144,6 +159,9 @@ public final class MockAuthService: @unchecked Sendable {
         let expected = lock.withLock { credentials }
         guard grant.username == expected.username, grant.password == expected.password else {
             return .failure(ConnectError(code: .unauthenticated, message: "invalid credentials"))
+        }
+        if lifecycle.isTwoStepOn {
+            return .success(lock.withLock { secondStepLocked(device: request.device, guestRefreshToken: "") })
         }
 
         return lock.withLock {
@@ -235,6 +253,9 @@ public final class MockAuthService: @unchecked Sendable {
                 return .failure(ConnectError(code: .notFound, message: "AUT-6004: no account for this address"))
             }
             challenges[grant.challengeID]?.used = true
+            if lifecycle.isTwoStepOn {
+                return .success(secondStepLocked(device: request.device, guestRefreshToken: request.guestRefreshToken))
+            }
             var response = Auth_V1_LoginResponse()
             response.accountID = Self.accountID
             response.tokens = memberSessionLocked(device: request.device, guestRefreshToken: request.guestRefreshToken)
@@ -323,6 +344,9 @@ public final class MockAuthService: @unchecked Sendable {
                 return .failure(ConnectError(code: .notFound, message: "AUT-6004: no account for this identity"))
             }
             federatedNonces.remove(grant.nonce)
+            if lifecycle.isTwoStepOn {
+                return .success(secondStepLocked(device: request.device, guestRefreshToken: request.guestRefreshToken))
+            }
             var response = Auth_V1_LoginResponse()
             response.accountID = Self.accountID
             response.tokens = memberSessionLocked(device: request.device, guestRefreshToken: request.guestRefreshToken)
@@ -496,7 +520,8 @@ public final class MockAuthService: @unchecked Sendable {
     /// Step-up (auth.v1 VerifyCredentials): the password proves the holder
     /// again, and the caller's session gets a fresh access token that
     /// step-up-gated RPCs accept for `MockAccountLifecycle.stepUpWindow`. The
-    /// refresh token is unchanged. An MFA code is refused: there is no MFA.
+    /// refresh token is unchanged. With two-step sign-in on, the authenticator's
+    /// code or a backup code proves the holder too (#649).
     private func verifyCredentials(
         _ request: Auth_V1_VerifyCredentialsRequest, callerSession: String?
     ) -> Result<Auth_V1_VerifyCredentialsResponse, ConnectError> {
@@ -504,11 +529,20 @@ public final class MockAuthService: @unchecked Sendable {
             guard let callerSession, let record = sessions[callerSession], !record.revoked else {
                 return .failure(ConnectError(code: .unauthenticated, message: "AUT-5001: sign in first"))
             }
-            guard case .password(let password)? = request.credential else {
-                return .failure(ConnectError(code: .failedPrecondition, message: "AUT-5007: no MFA enrolled"))
-            }
-            guard password == credentials.password else {
-                return .failure(ConnectError(code: .unauthenticated, message: "AUT-5002: the password is wrong"))
+            switch request.credential {
+            case .password(let password)?:
+                guard password == credentials.password else {
+                    return .failure(ConnectError(code: .unauthenticated, message: "AUT-5002: the password is wrong"))
+                }
+            case .mfaCode(let code)?:
+                guard lifecycle.isTwoStepOn else {
+                    return .failure(ConnectError(code: .failedPrecondition, message: "AUT-5020: two-step sign-in is off"))
+                }
+                guard lifecycle.acceptsSecondFactor(code) else {
+                    return .failure(ConnectError(code: .unauthenticated, message: "AUT-5017: the code is wrong"))
+                }
+            default:
+                return .failure(ConnectError(code: .invalidArgument, message: "AUT-VAL-027: a credential is required"))
             }
             tokenCounter += 1
             let token = "at-\(tokenCounter)"
@@ -559,6 +593,136 @@ public final class MockAuthService: @unchecked Sendable {
             response.sessionsRevoked = revoked
             return .success(response)
         }
+    }
+
+    // MARK: - Two-step sign-in (#649)
+
+    /// A sign-in waiting for its second factor (`mfa_token`).
+    private struct PendingSecondStep {
+        let device: Auth_V1_DeviceContext
+        let guestRefreshToken: String
+        let issuedAt = Date()
+        var wrongCodes = 0
+    }
+    private var secondSteps: [String: PendingSecondStep] = [:]
+    /// How long an `mfa_token` lasts, as `mfa_expires_in`.
+    public static let secondStepLifetime: Int64 = 300
+
+    /// The credential is proven but no session exists yet: the answer that
+    /// asks for the second factor.
+    private func secondStepLocked(device: Auth_V1_DeviceContext, guestRefreshToken: String) -> Auth_V1_LoginResponse {
+        tokenCounter += 1
+        let token = "mfa-\(tokenCounter)"
+        secondSteps[token] = PendingSecondStep(device: device, guestRefreshToken: guestRefreshToken)
+        var response = Auth_V1_LoginResponse()
+        response.accountID = Self.accountID
+        response.mfaRequired = true
+        response.mfaToken = token
+        response.mfaExpiresIn = Self.secondStepLifetime
+        return response
+    }
+
+    /// The contract (CompleteLogin): the authenticator's code or a backup
+    /// code finishes the sign-in; a wrong one is AUT-5017 and the token stays
+    /// usable; five wrong ones are AUT-5018; an unknown, expired or used token
+    /// is AUT-5021.
+    private func completeLogin(_ request: Auth_V1_CompleteLoginRequest) -> Result<Auth_V1_LoginResponse, ConnectError> {
+        lock.withLock {
+            guard let pending = secondSteps[request.mfaToken],
+                  Date().timeIntervalSince(pending.issuedAt) <= TimeInterval(Self.secondStepLifetime) else {
+                return .failure(ConnectError(code: .unauthenticated, message: "AUT-5021: sign in again"))
+            }
+            guard pending.wrongCodes < 5 else {
+                return .failure(ConnectError(code: .resourceExhausted, message: "AUT-5018: too many wrong codes, try again later"))
+            }
+            guard lifecycle.acceptsSecondFactor(request.code) else {
+                secondSteps[request.mfaToken]?.wrongCodes += 1
+                return .failure(ConnectError(code: .unauthenticated, message: "AUT-5017: the code is wrong"))
+            }
+            secondSteps[request.mfaToken] = nil
+            var response = Auth_V1_LoginResponse()
+            response.accountID = Self.accountID
+            response.reactivated = lifecycle.resumeIfDeactivated()
+            response.tokens = memberSessionLocked(device: pending.device, guestRefreshToken: pending.guestRefreshToken)
+            return .success(response)
+        }
+    }
+
+    private static func bearer(_ headers: Headers) -> String {
+        let value = headers.first { $0.key.lowercased() == "authorization" }?.value.first ?? ""
+        return value.hasPrefix("Bearer ") ? String(value.dropFirst("Bearer ".count)) : value
+    }
+
+    /// UNAUTHENTICATED without a session; PERMISSION_DENIED "step_up_required"
+    /// unless the bearer was stepped up in the last few minutes.
+    private func settingsRefusal(_ headers: Headers, needsStepUp: Bool) -> ConnectError? {
+        guard callerSession(headers) != nil else {
+            return ConnectError(code: .unauthenticated, message: "AUT-5001: sign in first")
+        }
+        guard !needsStepUp || lifecycle.isSteppedUp(accessToken: Self.bearer(headers)) else {
+            return ConnectError(code: .permissionDenied, message: "step_up_required: verify it's you again")
+        }
+        return nil
+    }
+
+    /// Signs out every session but the caller's; how many ended.
+    private func revokeOtherSessionsLocked(except caller: String?) -> Int32 {
+        var revoked: Int32 = 0
+        for (id, record) in sessions where id != caller && !record.revoked && !record.isGuest {
+            sessions[id]?.revoked = true
+            revoked += 1
+        }
+        return revoked
+    }
+
+    private func startMfaEnrollment(_ headers: Headers) -> Result<Auth_V1_StartMfaEnrollmentResponse, ConnectError> {
+        if let refusal = settingsRefusal(headers, needsStepUp: true) { return .failure(refusal) }
+        guard lifecycle.startEnrollment() else {
+            return .failure(ConnectError(code: .alreadyExists, message: "AUT-5022: two-step sign-in is already on"))
+        }
+        let secret = MockAccountLifecycle.authenticatorSecret
+        var response = Auth_V1_StartMfaEnrollmentResponse()
+        response.secret = secret
+        response.otpauthUri = "otpauth://totp/Core%20Platform:\(Self.demoEmail)?secret=\(secret)&issuer=Core%20Platform&algorithm=SHA1&digits=6&period=30"
+        response.expiresIn = Int64(MockAccountLifecycle.enrollmentWindow)
+        return .success(response)
+    }
+
+    private func confirmMfaEnrollment(
+        _ request: Auth_V1_ConfirmMfaEnrollmentRequest, headers: Headers
+    ) -> Result<Auth_V1_BackupCodesResponse, ConnectError> {
+        if let refusal = settingsRefusal(headers, needsStepUp: false) { return .failure(refusal) }
+        guard request.code.trimmingCharacters(in: .whitespaces) == Self.verificationCode else {
+            return .failure(ConnectError(code: .unauthenticated, message: "AUT-5017: the code is wrong"))
+        }
+        guard let codes = lifecycle.confirmEnrollment() else {
+            return .failure(ConnectError(code: .unauthenticated, message: "AUT-5021: no enrolment is waiting, start again"))
+        }
+        let caller = callerSession(headers)
+        var response = Auth_V1_BackupCodesResponse()
+        response.backupCodes = codes
+        response.sessionsRevoked = lock.withLock { revokeOtherSessionsLocked(except: caller) }
+        return .success(response)
+    }
+
+    private func disableMfa(_ headers: Headers) -> Result<Auth_V1_DisableMfaResponse, ConnectError> {
+        if let refusal = settingsRefusal(headers, needsStepUp: true) { return .failure(refusal) }
+        guard lifecycle.disableTwoStep() else {
+            return .failure(ConnectError(code: .failedPrecondition, message: "AUT-5020: two-step sign-in is off"))
+        }
+        return .success(Auth_V1_DisableMfaResponse())
+    }
+
+    private func regenerateBackupCodes(_ headers: Headers) -> Result<Auth_V1_BackupCodesResponse, ConnectError> {
+        if let refusal = settingsRefusal(headers, needsStepUp: true) { return .failure(refusal) }
+        guard let codes = lifecycle.regenerateBackupCodes() else {
+            return .failure(ConnectError(code: .failedPrecondition, message: "AUT-5020: two-step sign-in is off"))
+        }
+        let caller = callerSession(headers)
+        var response = Auth_V1_BackupCodesResponse()
+        response.backupCodes = codes
+        response.sessionsRevoked = lock.withLock { revokeOtherSessionsLocked(except: caller) }
+        return .success(response)
     }
 
     private func makeTokenPair(sessionID: String, refreshToken: String) -> Auth_V1_TokenPair {

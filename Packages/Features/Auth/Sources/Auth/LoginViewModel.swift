@@ -3,7 +3,9 @@ import Foundation
 /// Narrow seam between the login screen and the session manager, so the
 /// view model is testable without RPC plumbing.
 public protocol LoginPerforming: Sendable {
-    func login(username: String, password: String) async throws
+    func login(username: String, password: String) async throws -> LoginOutcome
+    /// The second step, with the authenticator's code or a backup code.
+    func completeLogin(_ challenge: SecondStepChallenge, code: String) async throws
 }
 
 extension SessionManager: LoginPerforming {}
@@ -23,6 +25,9 @@ public final class LoginViewModel {
     /// The view's render hook. Navigation on success is NOT signalled here —
     /// the app coordinator observes `AuthSessionProviding.stateUpdates()`.
     public var onStateChange: ((State) -> Void)?
+    /// The password was right and two-step sign-in is on (#383): the flow
+    /// asks for the code.
+    public var onSecondStep: ((SecondStepChallenge) -> Void)?
 
     private let loginService: any LoginPerforming
     private var submission: Task<Void, Never>?
@@ -43,8 +48,9 @@ public final class LoginViewModel {
         state = .submitting
         submission = Task {
             do {
-                try await loginService.login(username: username, password: password)
+                let outcome = try await loginService.login(username: username, password: password)
                 state = .idle
+                if case .needsSecondStep(let challenge) = outcome { onSecondStep?(challenge) }
             } catch let error as AuthError {
                 state = .failed(message: Self.message(for: error))
             } catch {
@@ -67,6 +73,12 @@ public final class LoginViewModel {
             "You\u{2019}re not old enough to create an account."
         case .identityRejected:
             "We couldn\u{2019}t confirm it\u{2019}s you. Try signing in again."
+        case .wrongSecondStepCode:
+            "That code didn\u{2019}t work. Check your authenticator app, or use a backup code."
+        case .secondStepLocked:
+            "Too many wrong codes. Wait a few minutes, then try again."
+        case .secondStepExpired:
+            "This sign-in timed out. Sign in again."
         }
     }
 }
