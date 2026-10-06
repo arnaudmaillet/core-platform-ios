@@ -109,7 +109,8 @@ struct MockEdgePolicyTests {
                      "/moderation.v1.ModerationService/SubmitReport",
                      "/moderation.v1.ModerationService/ListMyReports", "/auth.v1.AuthService/Login",
                      "/auth.v1.AuthService/Refresh", "/auth.v1.AuthService/StartGuestSession",
-                     "/auth.v1.AuthService/StartDeviceAttestation"] {
+                     "/auth.v1.AuthService/StartDeviceAttestation", "/auth.v1.AuthService/StartVerification",
+                     "/auth.v1.AuthService/SignUp", "/profile.v1.ProfileService/CheckHandleAvailability"] {
             #expect(served.contains(path), "\(path) is in the policy but not served")
             #expect(MockEdgePolicy.access(for: path) != .member, "\(path) should be open to guests")
         }

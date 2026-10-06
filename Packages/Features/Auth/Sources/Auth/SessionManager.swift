@@ -37,17 +37,17 @@ public actor SessionManager {
         }
     }
 
-    private let authClient: any Auth_V1_AuthServiceClientInterface
-    private let store: any SessionStore
+    let authClient: any Auth_V1_AuthServiceClientInterface
+    let store: any SessionStore
     private let configuration: Configuration
-    private let now: @Sendable () -> Date
+    let now: @Sendable () -> Date
 
-    private var session: AuthSession?
+    var session: AuthSession?
     /// Nil keeps the pre-guest behaviour: no token without a member session.
-    private let guest: GuestSessionContext?
+    let guest: GuestSessionContext?
     /// The guest's session. Its `accountID` holds the GUEST id — there is no
     /// account; nothing outside this type ever reads it.
-    private var guestSession: AuthSession?
+    var guestSession: AuthSession?
     /// Single-flight, like the member refresh: a start or a refresh of the
     /// guest session in flight that every reader awaits.
     private var guestTask: Task<AuthSession?, Never>?
@@ -56,7 +56,7 @@ public actor SessionManager {
     private var observers: [UUID: AsyncStream<AuthState>.Continuation] = [:]
     /// The last login resumed a self-deactivated account (#650), and nobody
     /// has said "welcome back" yet.
-    private var pendingReactivationNotice = false
+    var pendingReactivationNotice = false
 
     public init(
         authClient: any Auth_V1_AuthServiceClientInterface,
@@ -298,7 +298,7 @@ public actor SessionManager {
 
     // MARK: - State observation
 
-    private func bootstrapIfNeeded() {
+    func bootstrapIfNeeded() {
         guard !didBootstrap else { return }
         didBootstrap = true
         session = try? store.load()
@@ -310,7 +310,7 @@ public actor SessionManager {
         return session.map { .authenticated($0.accountID) } ?? .unauthenticated
     }
 
-    private func broadcast(_ state: AuthState) {
+    func broadcast(_ state: AuthState) {
         for continuation in observers.values {
             continuation.yield(state)
         }
@@ -322,14 +322,14 @@ public actor SessionManager {
 
     // MARK: - Helpers
 
-    private func deviceContext() -> Auth_V1_DeviceContext {
+    func deviceContext() -> Auth_V1_DeviceContext {
         var device = Auth_V1_DeviceContext()
         device.deviceID = configuration.deviceID
         device.userAgent = configuration.userAgent
         return device
     }
 
-    private static func makeSession(
+    static func makeSession(
         accountID: AccountID,
         tokens: Auth_V1_TokenPair,
         now: Date

@@ -340,6 +340,44 @@ public final class MockSocialServices: @unchecked Sendable {
         bff.register(path: "/profile.v1.ProfileService/ChangeHandle") { [self] (request: Profile_V1_ChangeHandleRequest) in
             changeHandle(request)
         }
+        bff.register(path: "/profile.v1.ProfileService/CheckHandleAvailability") { [self] (request: Profile_V1_CheckHandleAvailabilityRequest) in
+            .success(handleAvailability(request.handle))
+        }
+        bff.register(path: "/profile.v1.ProfileService/CreateProfile") { [self] (request: Profile_V1_CreateProfileRequest) in
+            createProfile(request)
+        }
+    }
+
+    // MARK: - Sign-up (B4)
+
+    /// `^[a-z0-9._]{3,30}$`, case-insensitive, and not anyone else's.
+    func handleAvailability(_ raw: String) -> Profile_V1_CheckHandleAvailabilityResponse {
+        var response = Profile_V1_CheckHandleAvailabilityResponse()
+        let handle = raw.trimmingCharacters(in: .whitespaces).lowercased()
+        let allowed = Set("abcdefghijklmnopqrstuvwxyz0123456789._")
+        guard (3...30).contains(handle.count), handle.allSatisfy(allowed.contains) else {
+            response.availability = .invalid
+            response.invalidReason = "3–30 letters, numbers, dots or underscores."
+            return response
+        }
+        response.handle = handle
+        let taken = dataset.authors.contains { $0.handle.lowercased() == handle }
+        response.availability = taken ? .taken : .available
+        return response
+    }
+
+    /// The mock is one world with one viewer: a new account's profile is the
+    /// demo viewer's, named with what the sign-up chose.
+    private func createProfile(_ request: Profile_V1_CreateProfileRequest) -> Result<Profile_V1_CommandResponse, ConnectError> {
+        let check = handleAvailability(request.handle)
+        guard check.availability == .available else {
+            return .failure(ConnectError(code: .alreadyExists, message: "PRF-1001: handle unavailable"))
+        }
+        lock.withLock {
+            viewerHandle = check.handle
+            if !request.displayName.isEmpty { viewerDisplayName = request.displayName }
+        }
+        return .success(Self.accepted(profileID: MockPostStore.viewer.profileID))
     }
 
     // MARK: - timeline.v1

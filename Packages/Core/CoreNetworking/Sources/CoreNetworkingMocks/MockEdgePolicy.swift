@@ -44,12 +44,18 @@ public enum MockEdgePolicy {
         // A guest's read pass, and the App Attest challenge before it (#523).
         "/auth.v1.AuthService/StartGuestSession",
         "/auth.v1.AuthService/StartDeviceAttestation",
+        // Codes and sign-up (B4): before there is an account, there is no
+        // session to ask for — the guest token goes along if there is one.
+        "/auth.v1.AuthService/StartVerification",
+        "/auth.v1.AuthService/SignUp",
     ]
 
     static let guestReadablePaths: Set<String> = [
         "/post.v1.PostService/GetPost",
         "/post.v1.PostService/ListPostsByProfile",
         "/profile.v1.ProfileService/GetProfileById",
+        // A handle is checked before there is a profile to own it (B4).
+        "/profile.v1.ProfileService/CheckHandleAvailability",
         "/comment.v1.CommentService/ListTopLevel",
         "/comment.v1.CommentService/ListReplies",
         "/counter.v1.CounterService/BatchGetCounters",
