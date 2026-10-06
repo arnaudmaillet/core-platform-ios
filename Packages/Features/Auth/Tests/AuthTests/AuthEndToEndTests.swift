@@ -241,6 +241,54 @@ struct AuthEndToEndTests {
         }
     }
 
+    // MARK: Sign in with Apple (#507)
+
+    private func appleCredential(_ stack: SignUpStack, email: String) async throws -> SignInCredential {
+        let nonce = try await stack.manager.startFederatedSignIn()
+        #expect(!nonce.isEmpty)
+        // What Apple would sign: the nonce's SHA-256 hex.
+        let token = MockIdToken.make(subject: "apple-\(email)", email: email, nonce: nonce)
+        return .idToken(.apple, token: token, nonce: nonce)
+    }
+
+    @Test func anAppleIDWithAnAccountSignsIn() async throws {
+        let stack = try await makeSignUpStack()
+
+        let outcome = try await stack.manager.signIn(try await appleCredential(stack, email: MockAuthService.appleEmail))
+
+        #expect(outcome == .signedIn)
+        #expect(await stack.manager.currentState() == .authenticated(AccountID(MockAuthService.accountID)))
+    }
+
+    /// A new Apple ID: Login answers NOT_FOUND without spending the nonce,
+    /// SignUp takes the same token, and the token can't sign up twice.
+    @Test func aNewAppleIDSignsUpWithTheSameTokenOnce() async throws {
+        let stack = try await makeSignUpStack()
+        let credential = try await appleCredential(stack, email: "nina@icloud.com")
+        #expect(try await stack.manager.signIn(credential) == .needsSignUp)
+
+        let outcome = try await stack.manager.signUp(credential, details: adult())
+
+        guard case .created = outcome else {
+            Issue.record("expected a created account, got \(outcome)")
+            return
+        }
+        #expect(stack.authService.lastSignUpRequest?.idToken.provider == .apple)
+        await #expect(throws: AuthError.identityRejected, "the nonce is spent") {
+            try await stack.manager.signUp(credential, details: self.adult())
+        }
+    }
+
+    @Test func aTokenForAnotherNonceIsRefused() async throws {
+        let stack = try await makeSignUpStack()
+        let nonce = try await stack.manager.startFederatedSignIn()
+        let token = MockIdToken.make(subject: "apple-x", email: "x@icloud.com", nonce: "a-nonce-the-server-never-made")
+
+        await #expect(throws: AuthError.identityRejected) {
+            try await stack.manager.signIn(.idToken(.apple, token: token, nonce: nonce))
+        }
+    }
+
     @Test func wrongPasswordFailsWithInvalidCredentials() async {
         let (manager, _) = makeStack()
 

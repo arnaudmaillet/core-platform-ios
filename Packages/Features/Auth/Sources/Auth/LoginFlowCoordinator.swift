@@ -36,14 +36,20 @@ final class LoginFlowCoordinator {
 
     /// Sign-up and sign-in by code (guest mode B4, #449). Nil keeps the
     /// password screen behind "email" and the unavailable phone path.
-    private let signUp: (any CodeSignUpPerforming)?
+    private let signUp: (any SignUpPerforming)?
+    /// Native Sign in with Apple. Nil keeps the provider rows unavailable.
+    private let federated: (any FederatedSignInProviding)?
     /// The new account's profile. Nil completes a sign-up without one.
     private let profileSetup: (any AccountProfileSetup)?
     /// The account's home country: the current one, else the storefront's.
     private let homeCountry: @Sendable () async -> String
     /// What the steps have collected so far.
     private var challenge: VerificationChallenge?
-    private var code: String?
+    /// What proved the identity: the code, or the provider's id_token. It
+    /// signs the account up once the steps are done.
+    private var credential: SignInCredential?
+    /// The name a provider shared, for the profile step.
+    private var suggestedName: String?
     private var dateOfBirth: DateComponents?
 
     /// One toolbar item set for the WHOLE flow, shared by every step (see
@@ -111,12 +117,14 @@ final class LoginFlowCoordinator {
 
     init(
         loginService: any LoginPerforming,
-        signUp: (any CodeSignUpPerforming)? = nil,
+        signUp: (any SignUpPerforming)? = nil,
+        federated: (any FederatedSignInProviding)? = nil,
         profileSetup: (any AccountProfileSetup)? = nil,
         homeCountry: @escaping @Sendable () async -> String = { Locale.current.region?.identifier ?? "" }
     ) {
         viewModel = LoginViewModel(loginService: loginService)
         self.signUp = signUp
+        self.federated = federated
         self.profileSetup = profileSetup
         self.homeCountry = homeCountry
     }
@@ -158,6 +166,8 @@ final class LoginFlowCoordinator {
 
     private func select(_ method: SignInMethod) {
         switch method {
+        case .provider(.apple) where signUp != nil && federated != nil:
+            signIn(with: .apple)
         case .provider(let provider):
             presentFederatedUnavailable(provider)
         case .email:
@@ -284,18 +294,48 @@ final class LoginFlowCoordinator {
         step?.setWorking(true)
         Task { [weak self] in
             do {
-                switch try await signUp.signIn(challengeID: challenge.id, code: code) {
+                let credential = SignInCredential.code(challengeID: challenge.id, code: code)
+                switch try await signUp.signIn(credential) {
                 case .signedIn:
                     break // the presenter dismisses on the new session
                 case .needsSignUp:
                     step?.setWorking(false)
-                    self?.code = code
+                    self?.credential = credential
+                    self?.suggestedName = nil
                     self?.showBirthday()
                 }
             } catch {
                 step?.setWorking(false)
                 self?.presentFlowError(error, on: step)
                 step?.clearCode()
+            }
+        }
+    }
+
+    /// Sign in with Apple (#507): a nonce from the server, Apple's sheet,
+    /// then the id_token signs in — or, for an Apple ID with no account,
+    /// the sign-up steps follow with it. Closing Apple's sheet says nothing.
+    private func signIn(with provider: FederatedProvider) {
+        guard let signUp, let federated, let screen = navigationController?.topViewController else { return }
+        screen.view.isUserInteractionEnabled = false
+        Task { [weak self] in
+            defer { screen.view.isUserInteractionEnabled = true }
+            do {
+                let nonce = try await signUp.startFederatedSignIn()
+                let result = try await federated.signIn(with: provider, nonce: nonce)
+                let credential = SignInCredential.idToken(provider, token: result.idToken, nonce: nonce)
+                switch try await signUp.signIn(credential) {
+                case .signedIn:
+                    break // the presenter dismisses on the new session
+                case .needsSignUp:
+                    self?.credential = credential
+                    self?.suggestedName = result.displayName
+                    self?.showBirthday()
+                }
+            } catch is FederatedSignInCancelled {
+                return
+            } catch {
+                self?.presentFlowError(error, on: nil)
             }
         }
     }
@@ -321,7 +361,7 @@ final class LoginFlowCoordinator {
     }
 
     private func createAccount(marketing: Bool, analytics: Bool, from step: ConsentViewController?) {
-        guard let signUp, let challenge, let code, let dateOfBirth else { return }
+        guard let signUp, let credential, let dateOfBirth else { return }
         step?.setWorking(true)
         let homeCountry = homeCountry
         Task { [weak self] in
@@ -330,7 +370,7 @@ final class LoginFlowCoordinator {
                     dateOfBirth: dateOfBirth, policyVersion: PrivacyPolicy.version,
                     marketing: marketing, analytics: analytics, homeCountry: await homeCountry()
                 )
-                switch try await signUp.signUp(challengeID: challenge.id, code: code, details: details) {
+                switch try await signUp.signUp(credential, details: details) {
                 case .created(let pending):
                     step?.setWorking(false)
                     if let self, let profileSetup {
@@ -353,7 +393,7 @@ final class LoginFlowCoordinator {
     }
 
     private func showProfileSetup(for pending: PendingAccount, setup: any AccountProfileSetup) {
-        let step = ProfileSetupViewController(setup: setup)
+        let step = ProfileSetupViewController(setup: setup, suggestedName: suggestedName)
         step.onCreate = { [weak self, weak step] handle, name in
             guard let signUp = self?.signUp else { return }
             step?.setWorking(true)
