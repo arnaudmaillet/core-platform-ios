@@ -6,10 +6,8 @@ import MediaPlayback
 import NotificationsInterface
 import ProfileInterface
 import UIKit
-import Upload
-#if DEBUG
 import DesignSystem
-#endif
+import Upload
 
 /// The app shell: a `UITabBarController` composed of one child
 /// `TabCoordinator` per tab. It exists for guests and members alike (guest
