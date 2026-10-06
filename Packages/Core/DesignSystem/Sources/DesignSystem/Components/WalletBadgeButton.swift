@@ -137,6 +137,11 @@ public final class WalletBadgeButton: UIButton {
         layer.addSublayer(ringLayer)
 
         update(balance: 0, claimAvailable: false)
+        // Power Saving posts this too (`PowerSavingPreference`).
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(motionPreferenceChanged),
+            name: UIAccessibility.reduceMotionStatusDidChangeNotification, object: nil
+        )
     }
 
     @available(*, unavailable)
@@ -276,14 +281,45 @@ public final class WalletBadgeButton: UIButton {
         } else {
             coinView.layer.removeAnimation(forKey: Self.pulseKey)
             coinView.layer.shadowOpacity = 0
+            coinView.layer.shouldRasterize = false
         }
     }
 
     private static let pulseKey = "wallet.pulse"
 
+    /// Whether the breath stands still — Reduce Motion, the app's or iOS's,
+    /// and Power Saving. Swappable for tests.
+    var reducesMotion: () -> Bool = { MotionPreference.reducesMotion }
+    /// Test seams: the breath and the glow as they are on screen.
+    var isBreathing: Bool { coinView.layer.animation(forKey: Self.pulseKey) != nil }
+    var isGlowing: Bool { coinView.layer.shadowOpacity > 0 }
+
+    /// Reduce Motion or Power Saving changed: the breath follows, the glow
+    /// stays.
+    @objc private func motionPreferenceChanged() {
+        guard wantsPulse else { return }
+        coinView.layer.removeAnimation(forKey: Self.pulseKey)
+        addPulseIfMissing()
+    }
+
     private func addPulseIfMissing() {
         guard window != nil,
               coinView.layer.animation(forKey: Self.pulseKey) == nil else { return }
+        // The glow says "something is waiting" on its own: it is what stays
+        // under Reduce Motion and Power Saving.
+        coinView.layer.shadowColor = PointsSymbol.tint.cgColor
+        coinView.layer.shadowOpacity = 0.8
+        coinView.layer.shadowRadius = 6
+        coinView.layer.shadowOffset = .zero
+        // ⚠️ RASTERIZED, because a shadow with no path on a layer that scales
+        // forever was drawn offscreen again every frame of the breath — the
+        // render server's work on every screen wearing the badge, measured
+        // as the bulk of an idle inbox's cost (#580). Rasterized once, glow
+        // included, the breath only scales a bitmap; and the glow keeps the
+        // heart's outline, which a shadow path would round off.
+        coinView.layer.shouldRasterize = true
+        coinView.layer.rasterizationScale = traitCollection.displayScale > 0 ? traitCollection.displayScale : 3
+        guard !reducesMotion() else { return }
         // A breath, not a bounce: subtle enough to live in a toolbar, alive
         // enough to say "something is waiting".
         let pulse = CABasicAnimation(keyPath: "transform.scale")
@@ -294,10 +330,5 @@ public final class WalletBadgeButton: UIButton {
         pulse.repeatCount = .infinity
         pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
         coinView.layer.add(pulse, forKey: Self.pulseKey)
-        // The glow rides the same state, static while the scale breathes.
-        coinView.layer.shadowColor = PointsSymbol.tint.cgColor
-        coinView.layer.shadowOpacity = 0.8
-        coinView.layer.shadowRadius = 6
-        coinView.layer.shadowOffset = .zero
     }
 }

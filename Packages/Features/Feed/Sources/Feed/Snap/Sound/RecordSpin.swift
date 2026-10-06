@@ -1,3 +1,4 @@
+import DesignSystem
 import QuartzCore
 
 extension CALayer {
@@ -7,7 +8,12 @@ extension CALayer {
     /// eight seconds — and stops it WHERE IT IS: paused in place rather than
     /// removed, so the next play turns it on from there instead of snapping
     /// back upright. Shared by the sound sheet's artwork and the feed's cover.
-    func setRecordSpinning(_ spinning: Bool) {
+    ///
+    /// Still under Reduce Motion and Power Saving (#580): an endless turn
+    /// keeps the screen redrawing every frame for as long as the sound plays.
+    @MainActor
+    func setRecordSpinning(_ spinning: Bool, reducesMotion: Bool = MotionPreference.reducesMotion) {
+        let spinning = spinning && !reducesMotion
         if spinning {
             if animation(forKey: Self.recordSpinKey) == nil {
                 let spin = CABasicAnimation(keyPath: "transform.rotation.z")
