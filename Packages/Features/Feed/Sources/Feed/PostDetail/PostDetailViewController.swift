@@ -1259,7 +1259,7 @@ final class PostDetailViewController: UIViewController {
     }
 
     private func renderEngagement(_ state: PostDetailViewModel.EngagementState) {
-        likeCountLabel.text = state.likeCount > 0 ? "\(state.likeCount)" : ""
+        likeCountLabel.text = state.likeCount > 0 && !state.countHidden ? "\(state.likeCount)" : ""
         var config = likeButton.configuration
         config?.image = UIImage(systemName: state.isLiked ? "heart.fill" : "heart")
         config?.baseForegroundColor = state.isLiked ? .systemRed : .secondaryLabel
@@ -1271,7 +1271,7 @@ final class PostDetailViewController: UIViewController {
         // screen, and a zero before the fetch is not a count — it is the
         // absence of one, and the row would assert "nobody liked this" over
         // the number the opener actually handed it.
-        setCaptionLikeCount(latestPost == nil ? nil : state.likeCount)
+        setCaptionLikeCount(latestPost == nil || state.countHidden ? nil : state.likeCount)
     }
 
     /// The count the caption row's closing line shows: the live one once the

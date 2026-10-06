@@ -52,7 +52,7 @@ final class RestingCommentsPlaceholderView: UIView {
                 caption: text,
                 monogram: CommentsInputBar.monogram(model.authorName),
                 avatarURL: model.avatarURL,
-                likeCount: model.cardMetrics?.reactions ?? model.likeCount,
+                likeCount: model.cardMetrics?.reactions ?? model.visibleLikeCount,
                 imagePipeline: imagePipeline
             )
             stack.addArrangedSubview(Self.gapped(caption))

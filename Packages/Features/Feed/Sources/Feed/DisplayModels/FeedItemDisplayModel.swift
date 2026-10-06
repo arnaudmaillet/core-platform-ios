@@ -44,6 +44,11 @@ public struct FeedItemDisplayModel: Identifiable, Sendable, Equatable {
     /// updates supersede it via the realtime plane). Rendered by the
     /// engaged card's metrics row.
     let likeCount: Int64
+    /// The author hides like counts from this reader (#397): no number is
+    /// shown, not even a 0.
+    let likeCountHidden: Bool
+    /// What the surfaces show: the count, or nil when it is hidden.
+    var visibleLikeCount: Int64? { likeCountHidden ? nil : likeCount }
     /// The post's age as a compact relative string ("now"/"3m"/"5h"/"5d"),
     /// the design system's timestamp form (the nav pill and comment rows
     /// use the same). Rendered leading on the engaged info card's actions
@@ -94,6 +99,7 @@ public struct FeedItemDisplayModel: Identifiable, Sendable, Equatable {
         thumbnailURL: URL?,
         audioText: String?,
         likeCount: Int64 = 0,
+        likeCountHidden: Bool = false,
         timestampText: String = "",
         cardMetrics: PostCardMetrics? = nil,
         extraMedia: [GalleryPost.MediaPage] = [],
@@ -111,6 +117,7 @@ public struct FeedItemDisplayModel: Identifiable, Sendable, Equatable {
         self.thumbnailURL = thumbnailURL
         self.audioText = audioText
         self.likeCount = likeCount
+        self.likeCountHidden = likeCountHidden
         self.timestampText = timestampText
         self.cardMetrics = cardMetrics
         self.extraMedia = extraMedia
@@ -156,6 +163,7 @@ public struct FeedDisplayModelBuilder: Sendable {
             audioText: (attachment != nil && mediaKind == .video)
                 ? "Original sound · @\(entry.author.handle)" : nil,
             likeCount: entry.likeCount,
+            likeCountHidden: entry.post.likeCountsHidden,
             timestampText: Self.readableTimestamp(from: entry.post.publishedAt, to: now),
             // Everything after the head. `attachments` is a repeated field and
             // this builder kept only its first element — the page showed one
