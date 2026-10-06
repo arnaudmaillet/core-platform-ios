@@ -16,6 +16,10 @@ private final class FakeAuthClient: Auth_V1_AuthServiceClientInterface, @uncheck
     var loginResult: Result<Auth_V1_LoginResponse, ConnectError> = .failure(.init(code: .unimplemented, message: nil))
     var lastRefreshToken: String?
     var logoutHeaders: [Connect.Headers] = []
+    var guestResult: Result<Auth_V1_StartGuestSessionResponse, ConnectError> = .failure(.init(code: .unimplemented, message: nil))
+    var guestRequests: [Auth_V1_StartGuestSessionRequest] = []
+    var guestDelayNanoseconds: UInt64 = 0
+    var challengeResult: Result<Auth_V1_StartDeviceAttestationResponse, ConnectError> = .failure(.init(code: .unimplemented, message: nil))
 
     func login(request: Auth_V1_LoginRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_LoginResponse> {
         response(from: lock.withLock { loginResult })
@@ -53,7 +57,12 @@ private final class FakeAuthClient: Auth_V1_AuthServiceClientInterface, @uncheck
     }
 
     func startGuestSession(request: Auth_V1_StartGuestSessionRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_StartGuestSessionResponse> {
-        response(from: .failure(.init(code: .unimplemented, message: nil)))
+        let delay = lock.withLock {
+            guestRequests.append(request)
+            return guestDelayNanoseconds
+        }
+        if delay > 0 { try? await Task.sleep(nanoseconds: delay) }
+        return response(from: lock.withLock { guestResult })
     }
 
     func changePassword(request: Auth_V1_ChangePasswordRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_ChangePasswordResponse> {
@@ -94,7 +103,7 @@ private final class FakeAuthClient: Auth_V1_AuthServiceClientInterface, @uncheck
     }
 
     func startDeviceAttestation(request: Auth_V1_StartDeviceAttestationRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_StartDeviceAttestationResponse> {
-        response(from: .failure(.init(code: .unimplemented, message: nil)))
+        response(from: lock.withLock { challengeResult })
     }
 
     func changeContact(request: Auth_V1_ChangeContactRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_ChangeContactResponse> {
@@ -342,6 +351,152 @@ struct SessionManagerTests {
 
         #expect(await manager.currentState() == .unauthenticated)
         #expect(try store.load() == nil)
+    }
+
+    // MARK: - Guest sessions (guest mode B1)
+
+    private struct StubAttestor: GuestAttesting {
+        let proof: GuestAttestation?
+        func attest(challenge: String) async -> GuestAttestation? {
+            proof.map { GuestAttestation(keyID: $0.keyID, attestation: "\($0.attestation)|\(challenge)") }
+        }
+    }
+
+    private func guestResponse(access: String, refresh: String = "grt-1", guestID: String = "guest-1") -> Auth_V1_StartGuestSessionResponse {
+        var body = Auth_V1_StartGuestSessionResponse()
+        body.guestID = guestID
+        body.tokens = makeTokens(access: access, refresh: refresh, session: "guest-sess-1")
+        return body
+    }
+
+    private func guestManager(
+        _ client: FakeAuthClient, guestStore: InMemorySessionStore = InMemorySessionStore(),
+        attestor: (any GuestAttesting)? = nil, store: InMemorySessionStore = InMemorySessionStore()
+    ) -> SessionManager {
+        SessionManager(
+            authClient: client, store: store, configuration: Self.config,
+            guest: GuestSessionContext(
+                store: guestStore, locale: { "fr-FR" }, regionHint: { "FR" },
+                currentCountry: { "FR" }, attestor: attestor
+            )
+        )
+    }
+
+    @Test func aGuestReadsWithAGuestTokenStartedOnFirstUse() async throws {
+        let client = FakeAuthClient()
+        client.guestResult = .success(guestResponse(access: "gt-1"))
+        let guestStore = InMemorySessionStore()
+        let manager = guestManager(client, guestStore: guestStore)
+
+        #expect(try await manager.validAccessToken() == "gt-1")
+        #expect(try await manager.validAccessToken() == "gt-1", "the session is reused")
+        #expect(client.guestRequests.count == 1)
+        let sent = try #require(client.guestRequests.first)
+        #expect(sent.device.deviceID == "test-device")
+        #expect(sent.locale == "fr-FR" && sent.regionHint == "FR" && sent.currentCountry == "FR")
+        #expect(try guestStore.load()?.accessToken == "gt-1", "kept in its own keychain item")
+        #expect(await manager.currentState() == .unauthenticated, "a guest token is no account")
+    }
+
+    @Test func concurrentFirstReadsStartOneGuestSession() async throws {
+        let client = FakeAuthClient()
+        client.guestDelayNanoseconds = 50_000_000
+        client.guestResult = .success(guestResponse(access: "gt-1"))
+        let manager = guestManager(client)
+
+        async let a = manager.validAccessToken()
+        async let b = manager.validAccessToken()
+        async let c = manager.validAccessToken()
+        let tokens = try await [a, b, c]
+
+        #expect(tokens == ["gt-1", "gt-1", "gt-1"])
+        #expect(client.guestRequests.count == 1)
+    }
+
+    @Test func anExpiredGuestTokenIsRefreshed() async throws {
+        let client = FakeAuthClient()
+        var refreshed = Auth_V1_RefreshResponse()
+        refreshed.tokens = makeTokens(access: "gt-2", refresh: "grt-2", session: "guest-sess-1")
+        client.refreshResult = .success(refreshed)
+        let guestStore = InMemorySessionStore(session: AuthSession(
+            accountID: AccountID("guest-1"), sessionID: SessionID("guest-sess-1"),
+            accessToken: "gt-stale", accessTokenExpiry: Date(timeIntervalSince1970: 100), refreshToken: "grt-1"
+        ))
+        let manager = guestManager(client, guestStore: guestStore)
+
+        #expect(try await manager.validAccessToken() == "gt-2")
+        #expect(client.lastRefreshToken == "grt-1")
+        #expect(client.guestRequests.isEmpty)
+    }
+
+    @Test func aGuestSessionTheServerForgotIsReplaced() async throws {
+        let client = FakeAuthClient()
+        client.refreshResult = .failure(ConnectError(code: .unauthenticated, message: "revoked"))
+        client.guestResult = .success(guestResponse(access: "gt-new"))
+        let guestStore = InMemorySessionStore(session: AuthSession(
+            accountID: AccountID("guest-1"), sessionID: SessionID("guest-sess-1"),
+            accessToken: "gt-stale", accessTokenExpiry: Date(timeIntervalSince1970: 100), refreshToken: "grt-1"
+        ))
+        let manager = guestManager(client, guestStore: guestStore)
+
+        #expect(try await manager.validAccessToken() == "gt-new")
+        #expect(client.guestRequests.count == 1)
+    }
+
+    @Test func noGuestSessionMeansNoToken() async throws {
+        let client = FakeAuthClient()
+        client.guestResult = .failure(ConnectError(code: .permissionDenied, message: "guest sessions are off"))
+        let manager = guestManager(client)
+        #expect(try await manager.validAccessToken() == nil)
+    }
+
+    /// A member's token wins; signing out falls back to the guest's.
+    @Test func aMemberOutranksTheGuestAndLeavesItBehind() async throws {
+        let client = FakeAuthClient()
+        client.guestResult = .success(guestResponse(access: "gt-1"))
+        var login = Auth_V1_LoginResponse()
+        login.accountID = "acct-1"
+        login.tokens = makeTokens(access: "at-1", refresh: "rt-1")
+        client.loginResult = .success(login)
+        let manager = guestManager(client)
+
+        #expect(try await manager.validAccessToken() == "gt-1")
+        try await manager.login(username: "demo", password: "pw")
+        #expect(try await manager.validAccessToken() == "at-1")
+        await manager.logout()
+        #expect(try await manager.validAccessToken() == "gt-1")
+        #expect(client.guestRequests.count == 1, "the guest session outlived the member's")
+    }
+
+    /// #523: a challenge, then an attestation bound to it, on the request.
+    @Test func theGuestSessionCarriesAnAppAttestProof() async throws {
+        let client = FakeAuthClient()
+        var challenge = Auth_V1_StartDeviceAttestationResponse()
+        challenge.challenge = "ch-1"
+        client.challengeResult = .success(challenge)
+        client.guestResult = .success(guestResponse(access: "gt-1"))
+        let manager = guestManager(client, attestor: StubAttestor(proof: GuestAttestation(keyID: "key-1", attestation: "att")))
+
+        _ = try await manager.validAccessToken()
+
+        let sent = try #require(client.guestRequests.first)
+        #expect(sent.attestKeyID == "key-1")
+        #expect(sent.attestation == "att|ch-1")
+        #expect(sent.attestChallenge == "ch-1")
+    }
+
+    /// The simulator, an old device: no proof, and the session still starts.
+    @Test func noAttestationStillStartsTheSession() async throws {
+        let client = FakeAuthClient()
+        var challenge = Auth_V1_StartDeviceAttestationResponse()
+        challenge.challenge = "ch-1"
+        client.challengeResult = .success(challenge)
+        client.guestResult = .success(guestResponse(access: "gt-1"))
+        let manager = guestManager(client, attestor: StubAttestor(proof: nil))
+
+        #expect(try await manager.validAccessToken() == "gt-1")
+        let sent = try #require(client.guestRequests.first)
+        #expect(sent.attestation.isEmpty && sent.attestKeyID.isEmpty && sent.attestChallenge.isEmpty)
     }
 
     @Test func unauthenticatedManagerVendsNilToken() async throws {

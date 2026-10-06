@@ -6,7 +6,7 @@ import Foundation
 /// guest's write the way the fleet will, instead of passing every gating bug.
 ///
 /// Three kinds of route:
-/// - **open**: no session at all — signing in;
+/// - **open**: no session at all — signing in, and starting a guest session;
 /// - **guest-readable**: the public reads a guest browses with, and the one
 ///   write a guest may make (a report, DSA Art. 16);
 /// - **member**: everything else — every other write, and every read about
@@ -15,10 +15,14 @@ import Foundation
 /// A route not listed is a member route: a new RPC is closed to guests until
 /// someone decides otherwise, the edge's own default.
 ///
-/// **The caller.** A request with a bearer token is a member's; one without is
-/// a guest's. The guest token (`StartGuestSession`, backend B1) does not exist
-/// yet: until it does, a guest is simply a caller with no token. Whether a
-/// member's token is still good is `MockAuthService`'s business (refresh,
+/// **The caller**, from the bearer, as the fleet's edge reads its token:
+/// - none: **anonymous** — only the open routes, as at the fleet's edge
+///   (B1: every read needs `read:public`);
+/// - a guest token (`StartGuestSession`, the mock mints them `gt-…`): a
+///   **guest** — open and guest-readable routes;
+/// - any other token: a **member** — everything.
+///
+/// Whether a token is still good is `MockAuthService`'s business (refresh,
 /// reuse detection), not the edge's — the mock's sessions live in memory, and
 /// a token restored from the keychain by a later launch must keep working.
 public enum MockEdgePolicy {
@@ -29,6 +33,7 @@ public enum MockEdgePolicy {
     }
 
     public enum Caller: Sendable, Equatable {
+        case anonymous
         case guest
         case member
     }
@@ -36,6 +41,9 @@ public enum MockEdgePolicy {
     static let openPaths: Set<String> = [
         "/auth.v1.AuthService/Login",
         "/auth.v1.AuthService/Refresh",
+        // A guest's read pass, and the App Attest challenge before it (#523).
+        "/auth.v1.AuthService/StartGuestSession",
+        "/auth.v1.AuthService/StartDeviceAttestation",
     ]
 
     static let guestReadablePaths: Set<String> = [
@@ -65,18 +73,35 @@ public enum MockEdgePolicy {
 
     public static func caller(from headers: Headers) -> Caller {
         let bearer = headers.first { $0.key.lowercased() == "authorization" }?.value.first ?? ""
-        return bearer.isEmpty ? .guest : .member
+        if bearer.isEmpty { return .anonymous }
+        return bearer.hasPrefix("Bearer gt-") ? .guest : .member
     }
 
     /// The edge's answer: nil lets the call through, an error refuses it —
-    /// `unauthenticated`, what the fleet answers a call without a session.
+    /// `unauthenticated`, what the fleet answers a call without the session
+    /// the route needs.
     public static func refusal(path: String, headers: Headers) -> ConnectError? {
-        guard access(for: path) == .member, caller(from: headers) == .guest else { return nil }
+        let caller = caller(from: headers)
+        let needed: Caller
+        switch access(for: path) {
+        case .open: return nil
+        case .guestReadable:
+            guard caller == .anonymous else { return nil }
+            needed = .guest
+        case .member:
+            guard caller != .member else { return nil }
+            needed = .member
+        }
         #if DEBUG
-        // The line to grep for: a guest reached a member route, so some
-        // control is missing its gate (or a screen reads the viewer's data).
-        print("[edge] REFUSED guest call to \(path)")
+        // The line to look for (`log show`, or Console — NSLog, so it is in
+        // the unified log). A guest on a member route: some control is
+        // missing its gate (or a screen reads the viewer's data). An
+        // anonymous read: the app had no guest token to send.
+        NSLog("[edge] REFUSED %@ call to %@", "\(caller)", path)
         #endif
-        return ConnectError(code: .unauthenticated, message: "MockEdgePolicy: \(path) needs a member session")
+        return ConnectError(
+            code: .unauthenticated,
+            message: "MockEdgePolicy: \(path) needs a \(needed == .guest ? "guest or member" : "member") session"
+        )
     }
 }

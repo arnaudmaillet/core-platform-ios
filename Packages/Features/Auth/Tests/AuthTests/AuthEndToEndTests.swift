@@ -88,6 +88,38 @@ struct AuthEndToEndTests {
         #expect(response.error?.code == .unauthenticated)
     }
 
+    /// Guest mode B1 end to end: a guest reads public content through an edge
+    /// that — like the fleet's — refuses an anonymous read, with the guest
+    /// token `SessionManager` starts on the first read; a write stays refused.
+    @Test func aGuestReadsThroughTheEdgeWithAGuestToken() async throws {
+        let backend = MockBackend(enforcesEdgePolicy: true)
+        let manager = SessionManager(
+            authClient: Auth_V1_AuthServiceClient(
+                client: ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: backend.bff)
+            ),
+            store: InMemorySessionStore(),
+            configuration: .init(deviceID: "e2e-device"),
+            guest: GuestSessionContext(store: InMemorySessionStore())
+        )
+        let reads = ConnectClientFactory.makeAuthenticated(
+            host: "https://mock.bff.local", tokenProvider: manager, httpClient: backend.bff
+        )
+        var getPost = Post_V1_GetPostRequest()
+        getPost.postID = backend.dataset.posts[0].postID
+
+        let read = await Post_V1_PostServiceClient(client: reads).getPost(request: getPost, headers: [:])
+        #expect(read.error == nil)
+        let token = try #require(try await manager.validAccessToken())
+        #expect(token.hasPrefix("gt-"))
+        #expect(await manager.currentState() == .unauthenticated)
+
+        var like = Engagement_V1_UpsertReactionRequest()
+        like.postID = getPost.postID
+        like.kind = .heart
+        let write = await Engagement_V1_EngagementServiceClient(client: reads).upsertReaction(request: like, headers: [:])
+        #expect(write.error?.code == .unauthenticated, "a guest token is a read pass")
+    }
+
     @Test func wrongPasswordFailsWithInvalidCredentials() async {
         let (manager, _) = makeStack()
 

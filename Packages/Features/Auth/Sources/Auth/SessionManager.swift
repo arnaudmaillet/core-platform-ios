@@ -11,6 +11,12 @@ import Foundation
 /// refresh tokens on every use and treats reuse as compromise (revoking the
 /// whole session generation), so two concurrent refreshes would sign the user
 /// out. All concurrent `validAccessToken()` callers await one shared task.
+///
+/// **Guests read with a token of their own** (guest mode B1): with nobody
+/// signed in, `validAccessToken()` vends a guest session's token — started on
+/// first use, refreshed like a member's, and kept when a member signs out.
+/// The viewer stays `.unauthenticated`: a guest token is a read pass, not an
+/// account.
 public actor SessionManager {
     public struct Configuration: Sendable {
         /// Stable client-provided device identifier for session management.
@@ -37,6 +43,14 @@ public actor SessionManager {
     private let now: @Sendable () -> Date
 
     private var session: AuthSession?
+    /// Nil keeps the pre-guest behaviour: no token without a member session.
+    private let guest: GuestSessionContext?
+    /// The guest's session. Its `accountID` holds the GUEST id — there is no
+    /// account; nothing outside this type ever reads it.
+    private var guestSession: AuthSession?
+    /// Single-flight, like the member refresh: a start or a refresh of the
+    /// guest session in flight that every reader awaits.
+    private var guestTask: Task<AuthSession?, Never>?
     private var didBootstrap = false
     private var refreshTask: Task<AuthSession, Error>?
     private var observers: [UUID: AsyncStream<AuthState>.Continuation] = [:]
@@ -48,10 +62,12 @@ public actor SessionManager {
         authClient: any Auth_V1_AuthServiceClientInterface,
         store: any SessionStore,
         configuration: Configuration,
+        guest: GuestSessionContext? = nil,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.authClient = authClient
         self.store = store
+        self.guest = guest
         self.configuration = configuration
         self.now = now
     }
@@ -153,7 +169,7 @@ public actor SessionManager {
 
     public func validAccessToken() async throws -> String? {
         bootstrapIfNeeded()
-        guard let session else { return nil }
+        guard let session else { return await guestAccessToken() }
         if session.accessTokenExpiry.timeIntervalSince(now()) > configuration.expiryLeeway {
             return session.accessToken
         }
@@ -207,12 +223,86 @@ public actor SessionManager {
         }
     }
 
+    // MARK: - Guest session
+
+    /// The guest's token: the session's while it's good; else a refreshed one;
+    /// else a new session. Nil when guest sessions are off (no context, or the
+    /// server refused one) — the call then goes without a token, as before.
+    private func guestAccessToken() async -> String? {
+        guard let guest else { return nil }
+        if let current = guestSession,
+           current.accessTokenExpiry.timeIntervalSince(now()) > configuration.expiryLeeway {
+            return current.accessToken
+        }
+        if let guestTask { return await guestTask.value?.accessToken }
+
+        let current = guestSession
+        let client = authClient
+        let device = deviceContext()
+        let issuedAt = now()
+        let task = Task<AuthSession?, Never> {
+            if let current, let refreshed = await Self.refreshGuest(current, client: client, device: device, now: issuedAt) {
+                return refreshed
+            }
+            return await Self.startGuest(guest, client: client, device: device, now: issuedAt)
+        }
+        guestTask = task
+        defer { guestTask = nil }
+        let renewed = await task.value
+        guestSession = renewed
+        if let renewed { try? guest.store.save(renewed) } else { try? guest.store.clear() }
+        return renewed?.accessToken
+    }
+
+    /// Nil when the server no longer honours the session's refresh token — a
+    /// new session is started instead.
+    private static func refreshGuest(
+        _ current: AuthSession, client: any Auth_V1_AuthServiceClientInterface,
+        device: Auth_V1_DeviceContext, now: Date
+    ) async -> AuthSession? {
+        var request = Auth_V1_RefreshRequest()
+        request.refreshToken = current.refreshToken
+        request.device = device
+        guard case .success(let body) = await client.refresh(request: request, headers: [:]).result else {
+            return nil
+        }
+        return makeSession(accountID: current.accountID, tokens: body.tokens, now: now)
+    }
+
+    /// `StartGuestSession`, with an App Attest proof when the device can give
+    /// one (#523): a single-use challenge first, then the attestation bound to
+    /// it.
+    private static func startGuest(
+        _ guest: GuestSessionContext, client: any Auth_V1_AuthServiceClientInterface,
+        device: Auth_V1_DeviceContext, now: Date
+    ) async -> AuthSession? {
+        var request = Auth_V1_StartGuestSessionRequest()
+        request.device = device
+        request.locale = guest.locale()
+        request.regionHint = guest.regionHint()
+        request.currentCountry = await guest.currentCountry() ?? ""
+        if let attestor = guest.attestor,
+           case .success(let challenge) = await client.startDeviceAttestation(
+               request: Auth_V1_StartDeviceAttestationRequest(), headers: [:]
+           ).result,
+           let proof = await attestor.attest(challenge: challenge.challenge) {
+            request.attestKeyID = proof.keyID
+            request.attestation = proof.attestation
+            request.attestChallenge = challenge.challenge
+        }
+        guard case .success(let body) = await client.startGuestSession(request: request, headers: [:]).result else {
+            return nil
+        }
+        return makeSession(accountID: AccountID(body.guestID), tokens: body.tokens, now: now)
+    }
+
     // MARK: - State observation
 
     private func bootstrapIfNeeded() {
         guard !didBootstrap else { return }
         didBootstrap = true
         session = try? store.load()
+        guestSession = try? guest?.store.load()
     }
 
     private func currentAuthState() -> AuthState {
