@@ -33,6 +33,9 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
     private let container: AppContainer
     private var stateObservation: Task<Void, Never>?
     private var mainTabCoordinator: MainTabCoordinator?
+    /// A link that arrived before the shell existed (a cold launch from a
+    /// link), opened once it does.
+    private var pendingDeepLink: AppRoute?
     /// The sign-in flow a guest opened, presented over the shell; dismissed
     /// when the session lands.
     private weak var presentedSignIn: UIViewController?
@@ -47,6 +50,20 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
     init(window: UIWindow, container: AppContainer) {
         self.window = window
         self.container = container
+    }
+
+    /// Opens a link into the app — a universal link on `wynn.cn` or the
+    /// `wynn:` scheme (#524). False for one the app does not know. A link
+    /// that arrives before the shell exists waits for it.
+    @discardableResult
+    func open(_ url: URL) -> Bool {
+        guard let route = AppRoute(deepLink: url) else { return false }
+        if mainTabCoordinator == nil {
+            pendingDeepLink = route
+        } else {
+            container.router.route(to: route)
+        }
+        return true
     }
 
     func start() {
@@ -264,6 +281,10 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         container.routeResolver.navigator = tabCoordinator
         mainTabCoordinator = tabCoordinator
         setRoot(tabCoordinator.rootViewController)
+        if let pendingDeepLink {
+            self.pendingDeepLink = nil
+            container.router.route(to: pendingDeepLink)
+        }
         #if DEBUG
         // `-gate-demo`: asks the member gate for a like ~2 s in, as a gated tap
         // would, and logs the answer — so the sheet's prompt and its close /

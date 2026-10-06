@@ -35,6 +35,14 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         let coordinator = AppCoordinator(window: window, container: AppContainer.shared)
         appCoordinator = coordinator
         coordinator.start()
+        // Launched by a link (#524): a `wynn:` URL, or a universal link on
+        // `wynn.cn`. The coordinator holds it until the shell is up.
+        if let url = connectionOptions.urlContexts.first?.url {
+            coordinator.open(url)
+        } else if let url = connectionOptions.userActivities
+            .first(where: { $0.activityType == NSUserActivityTypeBrowsingWeb })?.webpageURL {
+            coordinator.open(url)
+        }
 
         let lock = AppLockCoordinator(scene: windowScene, mainWindow: window)
         appLock = lock
@@ -44,6 +52,19 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         ScreenTimeCoordinator.applyDebugSeed()
         #endif
         screenTime = ScreenTimeCoordinator(scene: windowScene, mainWindow: window)
+    }
+
+    /// A `wynn:` link opened while the app runs.
+    func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
+        guard let url = URLContexts.first?.url else { return }
+        appCoordinator?.open(url)
+    }
+
+    /// A universal link on `wynn.cn` opened while the app runs.
+    func scene(_ scene: UIScene, continue userActivity: NSUserActivity) {
+        guard userActivity.activityType == NSUserActivityTypeBrowsingWeb,
+              let url = userActivity.webpageURL else { return }
+        appCoordinator?.open(url)
     }
 
     func sceneWillResignActive(_ scene: UIScene) {

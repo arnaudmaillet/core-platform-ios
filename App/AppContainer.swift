@@ -1124,7 +1124,9 @@ final class AppContainer {
                 welcome: self.welcomeGiftFace,
                 makeSheet: { [unowned self] in self.makeWalletSheet() }
             )
-        }
+        },
+        // A tapped `@handle` and a `wynn.cn/@handle` link (#524).
+        lookupHandle: { [unowned self] handle in await self.profileID(forHandle: handle) }
     )
 
     var router: any Router { routeResolver }

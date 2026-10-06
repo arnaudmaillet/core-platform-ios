@@ -1,6 +1,7 @@
 import ChatInterface
 import CoreModels
 import CoreNavigation
+import DesignSystem
 import FeedInterface
 import OSLog
 import ProfileInterface
@@ -37,6 +38,8 @@ final class RouteResolver: Router {
     /// wallet and its sheet belong to the container, which builds this
     /// resolver before it has built either.
     private let attachBalance: (UIViewController) -> Void
+    /// The profile a handle names (`GetProfileByHandle`), for `.profileHandle`.
+    private let lookupHandle: (String) async -> AppContainer.HandleLookup
     private let logger = Logger(subsystem: "cn.wynn.core-platform-ios", category: "navigation")
     /// The profile being prepared for its push — see `pushWhenReady`. One at a
     /// time: any newer route supersedes it.
@@ -47,8 +50,10 @@ final class RouteResolver: Router {
         profileFeature: @escaping () -> any ProfileFeatureBuilding,
         feedFeature: @escaping () -> any FeedFeatureBuilding,
         chatFeature: @escaping () -> any ChatFeatureBuilding,
-        attachBalance: @escaping (UIViewController) -> Void
+        attachBalance: @escaping (UIViewController) -> Void,
+        lookupHandle: @escaping (String) async -> AppContainer.HandleLookup = { _ in .unavailable }
     ) {
+        self.lookupHandle = lookupHandle
         self.searchFeature = searchFeature
         self.profileFeature = profileFeature
         self.feedFeature = feedFeature
@@ -252,6 +257,24 @@ final class RouteResolver: Router {
                 push(destination, using: navigator, animated: false)
             }
 
+        case .profileHandle(let handle):
+            // A tapped `@handle` or a `wynn.cn/@handle` link (#524): looked up,
+            // then the profile is routed like an author's. A handle that names
+            // no one (renamed, deleted) says so on the screen the viewer is on
+            // rather than pushing a dead page.
+            Task { [weak self, weak navigator] in
+                guard let self else { return }
+                switch await lookupHandle(handle) {
+                case .found(let id):
+                    // `self.`: inside `route(to:)` the bare name is the route.
+                    self.route(to: .profile(id, stub: nil))
+                case .missing:
+                    Self.toast("This account doesn\u{2019}t exist", symbol: "person.crop.circle.badge.questionmark", on: navigator)
+                case .unavailable:
+                    Self.toast("Couldn\u{2019}t open @\(handle)", symbol: "wifi.exclamationmark", on: navigator)
+                }
+            }
+
         case .hashtag(let tag):
             // A tapped `#tag`, a hashtag completion, a searched `#tag` (#524):
             // a plain push, like a post's detail.
@@ -318,6 +341,14 @@ final class RouteResolver: Router {
             push(thread, using: navigator)
 
         }
+    }
+}
+
+extension RouteResolver {
+    /// A toast over the screen the viewer is on.
+    static func toast(_ message: String, symbol: String, on navigator: (any AppNavigating)?) {
+        guard let screen = navigator?.activeNavigationController?.topViewController else { return }
+        ToastView.present(message, symbol: symbol, in: screen.view)
     }
 }
 
