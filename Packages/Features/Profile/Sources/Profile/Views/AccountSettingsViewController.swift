@@ -15,6 +15,8 @@ final class AccountSettingsViewController: UIViewController {
     /// Backs Delete Account. Nil hides the row rather than offering a
     /// deletion that cannot be sent.
     private let lifecycle: (any AccountLifecycleManaging)?
+    /// What Delete Account names before the irreversible step (#402).
+    private let deletionChecklist: @Sendable () async -> DeletionChecklist?
     private let onAccountDeleted: () -> Void
     private let deactivator: (any AccountDeactivating)?
     private let stepUp: (any CredentialStepUp)?
@@ -62,9 +64,11 @@ final class AccountSettingsViewController: UIViewController {
         deactivator: (any AccountDeactivating)? = nil,
         stepUp: (any CredentialStepUp)? = nil,
         contactChanger: (any ContactChanging)? = nil,
-        onDeactivated: @escaping () -> Void = {}
+        onDeactivated: @escaping () -> Void = {},
+        deletionChecklist: @escaping @Sendable () async -> DeletionChecklist? = { nil }
     ) {
         self.contactChanger = contactChanger
+        self.deletionChecklist = deletionChecklist
         self.account = account
         self.lifecycle = lifecycle
         self.onAccountDeleted = onAccountDeleted
@@ -268,7 +272,7 @@ final class AccountSettingsViewController: UIViewController {
         case .delete:
             guard let lifecycle else { return }
             push(DeleteAccountViewController(
-                viewModel: DeleteAccountViewModel(lifecycle: lifecycle),
+                viewModel: DeleteAccountViewModel(lifecycle: lifecycle, checklist: deletionChecklist),
                 onAccountDeleted: onAccountDeleted,
                 makeDataExport: { [weak self] in self?.makeDataExport() },
                 stepUp: stepUp,

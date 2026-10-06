@@ -203,7 +203,8 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                         deactivator: account as? any AccountDeactivating,
                                         stepUp: accountSessions as? any CredentialStepUp,
                                         contactChanger: accountSessions as? any ContactChanging,
-                                        onDeactivated: onLogout
+                                        onDeactivated: onLogout,
+                                        deletionChecklist: deletionChecklist
                                     )
                                 case .security:
                                     accountSessions.map { sessions in
@@ -305,7 +306,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                         ConsentsViewController(manager: manager, makeDeleteAccount: {
                                             (account as? any AccountLifecycleManaging).map { lifecycle in
                                                 DeleteAccountViewController(
-                                                    viewModel: DeleteAccountViewModel(lifecycle: lifecycle),
+                                                    viewModel: DeleteAccountViewModel(lifecycle: lifecycle, checklist: deletionChecklist),
                                                     onAccountDeleted: onLogout,
                                                     stepUp: accountSessions as? any CredentialStepUp,
                                                     canceller: lifecycle as? any AccountDeletionCancelling
@@ -388,6 +389,21 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     /// The active profile's interest tags (timeline #662), for What You See.
     /// Nil leaves the Your Interests section out.
     public var interestTags: (any InterestTagsManaging)?
+
+    /// What Delete Account names before the irreversible step (#402): every
+    /// profile on the account, and what is left in the wallet.
+    private var deletionChecklist: @Sendable () async -> DeletionChecklist? {
+        let switching = switching
+        let wallet = wallet
+        return {
+            let profiles = try? await switching?.accountProfiles()
+            return DeletionChecklist(
+                profileHandles: profiles?.map(\.handle),
+                points: wallet?.balance,
+                gems: wallet?.snapshot().gems
+            )
+        }
+    }
 
     public func makeProfileViewController(for profileID: ProfileID, identityStub: ProfileIdentityStub?) -> UIViewController {
         // Idempotent: the cache hears the follow channel from the first

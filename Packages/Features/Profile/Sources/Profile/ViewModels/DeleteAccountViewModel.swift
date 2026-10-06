@@ -1,6 +1,16 @@
 import Foundation
 
-/// State for Settings → Account → Delete Account (#386).
+/// What this account would lose, named before the irreversible step (#402):
+/// its profiles by handle, and what is left in the wallet. Nil fields were
+/// unreadable; the screen then falls back to the general wording.
+struct DeletionChecklist: Equatable, Sendable {
+    /// Every profile on the account, by handle (without `@`).
+    var profileHandles: [String]?
+    var points: Int?
+    var gems: Int?
+}
+
+/// State for Settings → Account → Delete Account (#386, #402).
 @MainActor
 final class DeleteAccountViewModel {
     enum Phase: Equatable {
@@ -14,17 +24,28 @@ final class DeleteAccountViewModel {
     private(set) var phase: Phase = .loading {
         didSet { onChange?() }
     }
+    /// Nil until read (or when nothing could be read).
+    private(set) var checklist: DeletionChecklist? {
+        didSet { onChange?() }
+    }
     var onChange: (() -> Void)?
 
     private let lifecycle: any AccountLifecycleManaging
+    private let readChecklist: @Sendable () async -> DeletionChecklist?
     private let now: () -> Date
 
-    init(lifecycle: any AccountLifecycleManaging, now: @escaping () -> Date = Date.init) {
+    init(
+        lifecycle: any AccountLifecycleManaging,
+        checklist: @escaping @Sendable () async -> DeletionChecklist? = { nil },
+        now: @escaping () -> Date = Date.init
+    ) {
         self.lifecycle = lifecycle
+        self.readChecklist = checklist
         self.now = now
     }
 
     func load() async {
+        async let checklist = readChecklist()
         // A record we cannot read (the endpoint is restricted on some
         // deployments) is treated as "no request yet": the screen then offers
         // the button, and a duplicate request is harmless server-side.
@@ -33,6 +54,7 @@ final class DeleteAccountViewModel {
         } else {
             phase = .ready(permanentOn: AccountDeletionPolicy.permanentDate(requestedAt: now()))
         }
+        self.checklist = await checklist
     }
 
     /// Requests deletion; returns the date it becomes permanent.
