@@ -169,6 +169,9 @@ public final class MockSocialServices: @unchecked Sendable {
         bff.register(path: "/profile.v1.ProfileService/GetProfileById") { [self] (request: Profile_V1_GetProfileByIdRequest) in
             getProfileByID(request)
         }
+        bff.register(path: "/profile.v1.ProfileService/GetProfileByHandle") { [self] (request: Profile_V1_GetProfileByHandleRequest) in
+            getProfileByHandle(request)
+        }
         bff.register(path: "/profile.v1.ProfileService/ListProfilesByAccount") { [self] (request: Profile_V1_ListProfilesByAccountRequest) in
             listProfilesByAccount(request)
         }
@@ -765,6 +768,22 @@ public final class MockSocialServices: @unchecked Sendable {
         // The viewer's other profiles answer here too.
         if let settings = lock.withLock({ feedSettings[author.profileID] }) { view.feedSettings = settings }
         return .success(view)
+    }
+
+    /// A `@handle` in text, to the profile it names (#524): the same view
+    /// `GetProfileById` answers, so the push carries everything it would.
+    private func getProfileByHandle(_ request: Profile_V1_GetProfileByHandleRequest) -> Result<Profile_V1_ProfileView, ConnectError> {
+        let handle = request.handle.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "@ "))
+        let ownHandle = lock.withLock { self.viewerHandle }
+        let profileID = handle == ownHandle.lowercased()
+            ? MockPostStore.viewer.profileID
+            : dataset.authors.first { $0.handle.lowercased() == handle }?.profileID
+        guard let profileID else {
+            return .failure(ConnectError(code: .notFound, message: "no profile @\(handle)"))
+        }
+        var byID = Profile_V1_GetProfileByIdRequest()
+        byID.profileID = profileID
+        return getProfileByID(byID)
     }
 
     private func listProfilesByAccount(_ request: Profile_V1_ListProfilesByAccountRequest) -> Result<Profile_V1_ListProfilesByAccountResponse, ConnectError> {

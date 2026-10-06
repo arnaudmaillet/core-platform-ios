@@ -87,6 +87,37 @@ open class EmoteLabel: UILabel {
         }
     }
 
+    /// A tap on a `@handle` or `#tag` opens it, through the
+    /// `TextEntityOpening` up the responder chain (#524). Off by default:
+    /// turning it on makes the label take touches, which it then hands on —
+    /// a tap anywhere but on a token is refused, so it reaches the cell, the
+    /// row or the page under the label as before.
+    public var opensTextEntities = false {
+        didSet {
+            guard opensTextEntities != oldValue else { return }
+            if opensTextEntities {
+                addGestureRecognizer(entityTap)
+                isUserInteractionEnabled = true
+            } else {
+                removeGestureRecognizer(entityTap)
+            }
+        }
+    }
+
+    private lazy var entityTap = UITapGestureRecognizer(target: self, action: #selector(entityTapped(_:)))
+
+    override open func gestureRecognizerShouldBegin(_ gesture: UIGestureRecognizer) -> Bool {
+        guard gesture === entityTap else { return super.gestureRecognizerShouldBegin(gesture) }
+        guard let token = TextEntityLinks.token(at: gesture.location(in: self), in: self),
+              let opener = TextEntityLinks.opener(from: self) else { return false }
+        return opener.opensTextEntities(of: TextEntityLinks.kind(of: token))
+    }
+
+    @objc private func entityTapped(_ gesture: UITapGestureRecognizer) {
+        guard let token = TextEntityLinks.token(at: gesture.location(in: self), in: self) else { return }
+        TextEntityLinks.opener(from: self)?.openTextEntity(token, from: self)
+    }
+
     /// The plain text behind attributed text this label built for its
     /// entities: rebuilt when the font or the colour changes, which `UILabel`
     /// would otherwise apply over the whole string, entities included.

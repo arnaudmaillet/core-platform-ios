@@ -315,4 +315,19 @@ struct CoreNetworkingTests {
         #expect(try await visibility(of: restricted.profileID) == .private)
         #expect(try await visibility(of: open.profileID) == .public)
     }
+
+    /// A `@handle` in text resolves to the profile it names, whatever its
+    /// case; one that names no one answers NOT_FOUND (#524).
+    @Test func aHandleResolvesToItsProfile() async throws {
+        let backend = MockBackend()
+        let client = Profile_V1_ProfileServiceClient(client: backend.makeRPCClient())
+        var request = Profile_V1_GetProfileByHandleRequest()
+        request.handle = "Kenji.Dev"
+        let view = try await client.getProfileByHandle(request: request, headers: [:]).result.get()
+        #expect(view.handle == "kenji.dev")
+        #expect(view.displayName == "Kenji Tanaka")
+
+        request.handle = "nobody.here"
+        #expect(await client.getProfileByHandle(request: request, headers: [:]).error?.code == .notFound)
+    }
 }

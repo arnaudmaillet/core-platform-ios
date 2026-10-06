@@ -58,6 +58,8 @@ public enum MockEdgePolicy {
         "/profile.v1.ProfileService/GetProfileById",
         // A handle is checked before there is a profile to own it (B4).
         "/profile.v1.ProfileService/CheckHandleAvailability",
+        // A `@handle` in text, tapped by a guest too (#524).
+        "/profile.v1.ProfileService/GetProfileByHandle",
         "/comment.v1.CommentService/ListTopLevel",
         "/comment.v1.CommentService/ListReplies",
         "/counter.v1.CounterService/BatchGetCounters",
