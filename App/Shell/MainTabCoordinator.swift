@@ -262,6 +262,8 @@ final class MainTabCoordinator: NSObject, Coordinator {
         // A `@handle` tapped in a comment, a caption or a bio (#524).
         tabBarController.openMention = { [weak self] handle, source in self?.openMention(handle, from: source) }
         tabBarController.openHashtag = { [weak container] tag in container?.router.route(to: .hashtag(tag)) }
+        // ...and completes them while they are typed, in every composer.
+        tabBarController.textCompletions = container.textCompletions
         // The gate every write asks before it runs, found up the chain.
         tabBarController.memberGate = container.memberGate
         createHold.install()

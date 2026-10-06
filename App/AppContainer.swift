@@ -14,6 +14,7 @@ import CoreNetworkingMocks
 import CoreRealtime
 import CoreRealtimeMocks
 import CoreStorage
+import DesignSystem
 import EmoteKit
 import Feed
 import FeedInterface
@@ -975,6 +976,12 @@ final class AppContainer {
     // MARK: - Search
 
     private lazy var searchRepository = SearchRepository(
+        searchClient: Search_V1_SearchServiceClient(client: authenticatedRPCClient)
+    )
+
+    /// `@` and `#` completions for every composer (#524), handed to the shell
+    /// so composers find it up their responder chain.
+    private(set) lazy var textCompletions: any TextCompletionProviding = TextCompletionService(
         searchClient: Search_V1_SearchServiceClient(client: authenticatedRPCClient)
     )
 

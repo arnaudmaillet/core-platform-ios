@@ -1,3 +1,4 @@
+import DesignSystem
 import UIKit
 
 /// Gives a composer's `UITextView` emotes: a panel that swaps in for the
@@ -24,6 +25,10 @@ import UIKit
 ///   house codes first; a tap replaces the `:query` with the emote. The panel's magnifier
 ///   switches to the keyboard and types the `:` for you.
 /// - Every pick lands in `EmoteRecents`.
+/// - **`@` and `#` complete too** (#524): a person's handle or a tag, from
+///   the `TextCompletionProviding` up the field's responder chain (the shell
+///   holds the app's), on a strip in the same place; a tap replaces the
+///   token being typed with the whole one and a space.
 ///
 /// ## What the field shows
 ///
@@ -61,6 +66,17 @@ public final class EmoteKeyboard: NSObject {
     /// above the field touches no one's layout.
     public weak var suggestionAnchor: UIView?
 
+    /// Whether `@` and `#` complete. On by default.
+    public var completesTextEntities = true
+    /// Where completions come from. Nil, the default: the
+    /// `TextCompletionSource` up the field's responder chain, asked each time
+    /// — a composer needs no wiring, and one off-screen completes nothing.
+    public var textCompleter: (any TextCompletionProviding)?
+    private let completionStrip = TextCompletionStrip()
+    private var completionTask: Task<Void, Never>?
+    /// A beat after the last keystroke, not one round trip per letter.
+    var completionDebounce: Duration = .milliseconds(150)
+
     /// Whether the panel stands in for the keyboard right now.
     public var isShowingPanel: Bool {
         textView?.inputView is EmotePickerView
@@ -93,6 +109,7 @@ public final class EmoteKeyboard: NSObject {
         super.init()
 
         strip.onSelect = { [weak self] emote in self?.acceptSuggestion(emote) }
+        completionStrip.onSelect = { [weak self] completion in self?.acceptCompletion(completion) }
         heights.track(self)
 
         toggleButton.accessibilityIdentifier = "emote-toggle"
@@ -140,6 +157,8 @@ public final class EmoteKeyboard: NSObject {
 
     @objc private func textDidEndEditing(_ note: Notification) {
         showSuggestions([])
+        completionTask?.cancel()
+        showCompletions([])
         guard let textView, isShowingPanel else { return }
         textView.inputView = nil
         updateToggle()
@@ -211,34 +230,96 @@ public final class EmoteKeyboard: NSObject {
     }
 
     private func refreshSuggestions() {
-        guard suggestsInline, let textView, textView.isFirstResponder || textView.window == nil,
-              let query = EmoteComposing.inlineQuery(in: textView.text ?? "", caret: textView.selectedRange.location)
-        else {
+        guard let textView, textView.isFirstResponder || textView.window == nil else {
             showSuggestions([])
+            hideCompletions()
             return
         }
-        showSuggestions(EmoteComposing.suggestions(for: query.query, catalog: engine.catalog))
+        let text = textView.text ?? ""
+        let caret = textView.selectedRange.location
+        // One token is typed at a time: an emote query wins, then a handle
+        // or a tag.
+        if suggestsInline, let query = EmoteComposing.inlineQuery(in: text, caret: caret) {
+            hideCompletions()
+            showSuggestions(EmoteComposing.suggestions(for: query.query, catalog: engine.catalog))
+            return
+        }
+        showSuggestions([])
+        refreshCompletions(in: text, caret: caret)
     }
 
     /// Floats the strip just above the anchor, in the anchor's window, or
     /// takes it away.
     private func showSuggestions(_ emotes: [Emote]) {
         strip.show(emotes)
-        guard !emotes.isEmpty, let anchor = suggestionAnchor ?? textView, let window = anchor.window else {
-            strip.removeFromSuperview()
+        place(strip, showing: !emotes.isEmpty)
+    }
+
+    /// Puts `overlay` just above the anchor, in the anchor's window, or takes
+    /// it away.
+    private func place(_ overlay: UIView, showing: Bool) {
+        guard showing, let anchor = suggestionAnchor ?? textView, let window = anchor.window else {
+            overlay.removeFromSuperview()
             return
         }
-        if strip.superview !== window { window.addSubview(strip) }
+        if overlay.superview !== window { window.addSubview(overlay) }
         let field = anchor.convert(anchor.bounds, to: window)
         let inset: CGFloat = 8
         let width = min(window.bounds.width - inset * 2, 520)
-        strip.frame = CGRect(
+        overlay.frame = CGRect(
             x: (window.bounds.width - width) / 2,
             y: field.minY - EmoteSuggestionStrip.height - inset,
             width: width,
             height: EmoteSuggestionStrip.height
         )
-        window.bringSubviewToFront(strip)
+        window.bringSubviewToFront(overlay)
+    }
+
+    // MARK: - @ and # completions
+
+    /// The handle or tag being typed, asked for a beat after the last
+    /// keystroke. What is on the strip stays while the next answer comes;
+    /// an answer for a token no longer being typed is dropped.
+    private func refreshCompletions(in text: String, caret: Int) {
+        guard completesTextEntities, let textView,
+              let token = TextEntityScanner.partialToken(in: text, caret: caret),
+              let provider = textCompleter ?? TextCompletions.provider(from: textView)
+        else {
+            hideCompletions()
+            return
+        }
+        completionTask?.cancel()
+        let debounce = completionDebounce
+        completionTask = Task { [weak self] in
+            try? await Task.sleep(for: debounce)
+            guard !Task.isCancelled else { return }
+            let found = await provider.completions(for: token.kind, prefix: token.query)
+            guard !Task.isCancelled, let self, self.typedToken() == token else { return }
+            self.showCompletions(found)
+        }
+    }
+
+    private func typedToken() -> PartialTextEntity? {
+        guard let textView else { return nil }
+        return TextEntityScanner.partialToken(in: textView.text ?? "", caret: textView.selectedRange.location)
+    }
+
+    private func hideCompletions() {
+        completionTask?.cancel()
+        completionTask = nil
+        showCompletions([])
+    }
+
+    private func showCompletions(_ completions: [TextCompletion]) {
+        completionStrip.show(completions)
+        place(completionStrip, showing: !completions.isEmpty)
+    }
+
+    /// The token being typed becomes the whole one, and a space.
+    private func acceptCompletion(_ completion: TextCompletion) {
+        guard let token = typedToken() else { return }
+        hideCompletions()
+        replace(token.range, with: completion.token + " ")
     }
 
     // MARK: - Test seams
@@ -250,4 +331,10 @@ public final class EmoteKeyboard: NSObject {
         acceptSuggestion(strip.suggestions[index])
     }
     func search() { startSearch() }
+    var completionTokens: [String] { completionStrip.completions.map(\.token) }
+    var isShowingCompletions: Bool { completionStrip.superview != nil && !completionStrip.isHidden }
+    func selectCompletion(at index: Int) {
+        guard index < completionStrip.completions.count else { return }
+        acceptCompletion(completionStrip.completions[index])
+    }
 }

@@ -83,7 +83,8 @@ public final class MockSearchService: @unchecked Sendable {
                     .contains { $0.hasPrefix(prefix) }
         }
         let limit = request.limit > 0 ? Int(request.limit) : matches.count
-        response.suggestions = matches.prefix(limit).map { author in
+        // Appended: a request for profiles AND tags keeps the tags above.
+        response.suggestions += matches.prefix(limit).map { author in
             var suggestion = Search_V1_Suggestion()
             suggestion.entityType = .profile
             suggestion.text = author.handle

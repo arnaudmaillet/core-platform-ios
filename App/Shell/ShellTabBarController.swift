@@ -53,4 +53,10 @@ final class ShellTabBarController: UITabBarController, StakeShopOpening, MemberG
         case .hashtag: openHashtag != nil
         }
     }
+
+    /// `@` and `#` completions for every composer up this chain (#524), set
+    /// by the shell.
+    var textCompletions: (any TextCompletionProviding)?
 }
+
+extension ShellTabBarController: TextCompletionSource {}
