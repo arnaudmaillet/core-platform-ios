@@ -104,6 +104,7 @@ struct MockEdgePolicyTests {
                      "/social_graph.v1.SocialGraphService/ListFollowing",
                      "/geo_discovery.v1.GeoDiscoveryService/QueryTile", "/search.v1.SearchService/Search",
                      "/timeline.v1.TimelineService/GetDiscoveryFeed",
+                     "/geo_discovery.v1.GeoDiscoveryService/GetCountryAccess",
                      "/search.v1.SearchService/Suggest", "/media.v1.MediaService/ResolveDelivery",
                      "/moderation.v1.ModerationService/SubmitReport",
                      "/moderation.v1.ModerationService/ListMyReports", "/auth.v1.AuthService/Login",
