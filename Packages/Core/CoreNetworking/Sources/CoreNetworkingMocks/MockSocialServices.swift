@@ -774,8 +774,8 @@ public final class MockSocialServices: @unchecked Sendable {
     /// `GetProfileById` answers, so the push carries everything it would.
     private func getProfileByHandle(_ request: Profile_V1_GetProfileByHandleRequest) -> Result<Profile_V1_ProfileView, ConnectError> {
         let handle = request.handle.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "@ "))
-        let viewerHandle = lock.withLock { viewerHandle }
-        let profileID = handle == viewerHandle.lowercased()
+        let ownHandle = lock.withLock { self.viewerHandle }
+        let profileID = handle == ownHandle.lowercased()
             ? MockPostStore.viewer.profileID
             : dataset.authors.first { $0.handle.lowercased() == handle }?.profileID
         guard let profileID else {
