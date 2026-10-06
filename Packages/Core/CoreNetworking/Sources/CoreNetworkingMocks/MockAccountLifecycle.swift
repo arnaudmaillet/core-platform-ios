@@ -104,6 +104,9 @@ public final class MockAccountLifecycle: @unchecked Sendable {
     /// Two-step sign-in is on (`AccountView.mfa_enrolled`).
     public var isTwoStepOn: Bool { lock.withLock { twoStepOn } }
 
+    /// Unused backup codes (`AccountView.mfa_recovery_codes_remaining`).
+    public var backupCodesLeft: Int { lock.withLock { backupCodes.count } }
+
     /// Starts (or restarts) an enrolment; false when two-step is already on.
     func startEnrollment(at date: Date = Date()) -> Bool {
         lock.withLock {

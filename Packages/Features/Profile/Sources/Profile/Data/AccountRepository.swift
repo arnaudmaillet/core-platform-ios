@@ -33,10 +33,13 @@ public struct AccountDetails: Equatable, Sendable {
     public let ageBracket: AgeBracket
     /// Two-step sign-in is on (#383, `mfa_enrolled`).
     public let twoStepOn: Bool
+    /// Unused backup codes (#405); 0 when two-step is off.
+    public let backupCodesLeft: Int
 
     public init(
         email: String, emailVerified: Bool, phone: String, phoneVerified: Bool, country: String,
-        dateOfBirth: BirthDate? = nil, ageBracket: AgeBracket = .unknown, twoStepOn: Bool = false
+        dateOfBirth: BirthDate? = nil, ageBracket: AgeBracket = .unknown, twoStepOn: Bool = false,
+        backupCodesLeft: Int = 0
     ) {
         self.email = email
         self.emailVerified = emailVerified
@@ -46,6 +49,7 @@ public struct AccountDetails: Equatable, Sendable {
         self.dateOfBirth = dateOfBirth
         self.ageBracket = ageBracket
         self.twoStepOn = twoStepOn
+        self.backupCodesLeft = backupCodesLeft
     }
 }
 
@@ -121,7 +125,8 @@ public actor AccountRepository: AccountProviding, AccountLifecycleManaging, Acco
                 country: view.countryOfResidence,
                 dateOfBirth: BirthDate(iso: view.dateOfBirth),
                 ageBracket: AgeBracket(view.ageBracket),
-                twoStepOn: view.mfaEnrolled
+                twoStepOn: view.mfaEnrolled,
+                backupCodesLeft: Int(view.mfaRecoveryCodesRemaining)
             )
         case .failure(let error):
             throw AccountError.transport(message: error.message ?? "code \(error.code)")

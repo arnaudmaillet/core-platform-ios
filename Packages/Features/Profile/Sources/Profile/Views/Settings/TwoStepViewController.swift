@@ -11,9 +11,13 @@ import UIKit
 final class TwoStepViewController: UIViewController {
     enum Phase: Equatable {
         case loading
-        case loaded(isOn: Bool)
+        /// `codesLeft`: unused backup codes (#405); 0 when off.
+        case loaded(isOn: Bool, codesLeft: Int)
         case failed
     }
+
+    /// Few enough that the screen says to get new ones.
+    static let lowOnCodes = 2
 
     enum Section: Hashable {
         case status, backupCodes, toggle
@@ -22,6 +26,7 @@ final class TwoStepViewController: UIViewController {
     private enum Item: Hashable {
         case loading, failed
         case status(isOn: Bool)
+        case codesLeft(Int)
         case turnOn, newBackupCodes, turnOff
     }
 
@@ -71,21 +76,25 @@ final class TwoStepViewController: UIViewController {
         Task { [weak self] in
             guard let self else { return }
             do {
-                phase = .loaded(isOn: try await account.currentAccount().twoStepOn)
+                let details = try await account.currentAccount()
+                phase = .loaded(isOn: details.twoStepOn, codesLeft: details.backupCodesLeft)
             } catch {
                 phase = .failed
             }
         }
     }
 
-    static func footer(_ section: Section, isOn: Bool) -> String? {
+    static func footer(_ section: Section, isOn: Bool, codesLeft: Int = 10) -> String? {
         switch section {
         case .status:
             isOn
                 ? "When you sign in, you enter a code from your authenticator app after your password, emailed code or Apple ID."
                 : "Add a code from an authenticator app — like Passwords, Google Authenticator or 1Password — to every sign-in, so your password alone isn't enough."
         case .backupCodes:
-            "Each backup code works once, when you can't use your authenticator app. Getting new ones stops the old ones and logs out your other devices."
+            (codesLeft <= lowOnCodes
+                ? (codesLeft == 0 ? "You have no backup codes left. " : "You're running low on backup codes. ")
+                : "")
+                + "Each backup code works once, when you can't use your authenticator app. Getting new ones stops the old ones and logs out your other devices."
         case .toggle:
             isOn ? "Signing in will need only your password, emailed code or Apple ID." : nil
         }
@@ -115,6 +124,10 @@ final class TwoStepViewController: UIViewController {
                 content = .cell()
                 content.text = "Turn On Two-Step Sign-In"
                 content.textProperties.color = .tintColor
+            case .codesLeft(let count):
+                content.text = "Codes Left"
+                content.secondaryText = String(count)
+                content.secondaryTextProperties.color = count <= Self.lowOnCodes ? .systemOrange : .secondaryLabel
             case .newBackupCodes:
                 content = .cell()
                 content.text = "Get New Backup Codes"
@@ -141,8 +154,8 @@ final class TwoStepViewController: UIViewController {
         ) { [weak self] view, _, indexPath in
             guard let self else { return }
             var content = UIListContentConfiguration.footer()
-            if case .loaded(let isOn) = phase, let section = dataSource.sectionIdentifier(for: indexPath.section) {
-                content.text = Self.footer(section, isOn: isOn)
+            if case .loaded(let isOn, let codesLeft) = phase, let section = dataSource.sectionIdentifier(for: indexPath.section) {
+                content.text = Self.footer(section, isOn: isOn, codesLeft: codesLeft)
             }
             view.contentConfiguration = content
         }
@@ -162,11 +175,11 @@ final class TwoStepViewController: UIViewController {
             snapshot.appendItems([.loading], toSection: .status)
         case .failed:
             snapshot.appendItems([.failed], toSection: .status)
-        case .loaded(let isOn):
+        case .loaded(let isOn, let codesLeft):
             snapshot.appendItems([.status(isOn: isOn)], toSection: .status)
             if isOn {
                 snapshot.appendSections([.backupCodes, .toggle])
-                snapshot.appendItems([.newBackupCodes], toSection: .backupCodes)
+                snapshot.appendItems([.codesLeft(codesLeft), .newBackupCodes], toSection: .backupCodes)
                 snapshot.appendItems([.turnOff], toSection: .toggle)
             } else {
                 snapshot.appendSections([.toggle])
@@ -211,7 +224,7 @@ final class TwoStepViewController: UIViewController {
     /// Turned on: the backup codes replace the setup screen, and this one
     /// says On underneath.
     private func didTurnOn(with codes: BackupCodes) {
-        phase = .loaded(isOn: true)
+        phase = .loaded(isOn: true, codesLeft: codes.codes.count)
         showBackupCodes(codes)
     }
 
@@ -234,7 +247,9 @@ final class TwoStepViewController: UIViewController {
             guard let self else { return }
             defer { isWorking = false }
             do {
-                showBackupCodes(try await manager.regenerateBackupCodes())
+                let codes = try await manager.regenerateBackupCodes()
+                phase = .loaded(isOn: true, codesLeft: codes.codes.count)
+                showBackupCodes(codes)
             } catch {
                 presentFailure(error)
             }
@@ -262,7 +277,7 @@ final class TwoStepViewController: UIViewController {
             defer { isWorking = false }
             do {
                 try await manager.disableTwoStep()
-                phase = .loaded(isOn: false)
+                phase = .loaded(isOn: false, codesLeft: 0)
             } catch {
                 presentFailure(error)
             }

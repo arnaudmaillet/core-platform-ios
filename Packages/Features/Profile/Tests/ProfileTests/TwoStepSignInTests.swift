@@ -101,6 +101,28 @@ struct TwoStepSignInTests {
         await #expect(throws: TwoStepError.alreadyChanged) { try await fixture.sessions.disableTwoStep() }
     }
 
+    /// The account says how many backup codes are left (#405): ten after
+    /// turning on, one fewer per code used, ten again with new ones.
+    @Test func theCodesLeftCountDown() async throws {
+        let fixture = try await fixture(twoStepOn: true)
+        #expect(try await fixture.account.currentAccount().backupCodesLeft == 10)
+
+        try await fixture.sessions.stepUp(code: MockAuthService.verificationCode)
+        let codes = try await fixture.sessions.regenerateBackupCodes()
+        try await fixture.sessions.stepUp(code: try #require(codes.codes.first))
+        try await fixture.sessions.stepUp(code: codes.codes[1])
+        #expect(try await fixture.account.currentAccount().backupCodesLeft == 8)
+
+        try await fixture.sessions.disableTwoStep()
+        #expect(try await fixture.account.currentAccount().backupCodesLeft == 0)
+    }
+
+    @Test func runningLowOnCodesIsSaid() {
+        #expect(TwoStepViewController.footer(.backupCodes, isOn: true, codesLeft: 8)?.hasPrefix("Each backup code") == true)
+        #expect(TwoStepViewController.footer(.backupCodes, isOn: true, codesLeft: 2)?.hasPrefix("You're running low") == true)
+        #expect(TwoStepViewController.footer(.backupCodes, isOn: true, codesLeft: 0)?.hasPrefix("You have no backup codes left") == true)
+    }
+
     @Test func theSetupKeyReadsInGroupsOfFour() {
         let enrollment = TwoStepEnrollment(secret: "JBSWY3DPEHPK3PXP", otpauthURI: "", expiresIn: 600)
         #expect(enrollment.groupedSecret == "JBSW Y3DP EHPK 3PXP")
