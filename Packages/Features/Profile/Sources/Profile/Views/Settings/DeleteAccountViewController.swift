@@ -27,12 +27,39 @@ final class DeleteAccountViewController: UIViewController {
         case cancelRequest
     }
 
-    private static let consequences = [
-        "Every profile on this account",
-        "Posts, comments and messages",
-        "Followers, following and saved posts",
-        "Points and gems in your wallet"
-    ]
+    /// What gets deleted, as concrete as the account allows (#402): the
+    /// profiles by handle and the wallet's balance when they could be read,
+    /// the general wording otherwise.
+    static func consequences(for checklist: DeletionChecklist?) -> [String] {
+        [
+            profilesLine(checklist?.profileHandles),
+            "Posts, comments and messages",
+            "Followers, following and saved posts",
+            walletLine(points: checklist?.points, gems: checklist?.gems),
+        ]
+    }
+
+    static func profilesLine(_ handles: [String]?) -> String {
+        guard let handles, !handles.isEmpty else { return "Every profile on this account" }
+        let named = handles.map { "@" + $0 }
+        if named.count == 1 { return "Your profile \(named[0])" }
+        let shown = named.prefix(3).joined(separator: ", ")
+        let more = named.count > 3 ? " and \(named.count - 3) more" : ""
+        return "All \(named.count) profiles on this account: \(shown)\(more)"
+    }
+
+    static func walletLine(points: Int?, gems: Int?) -> String {
+        let parts = [
+            points.flatMap { $0 > 0 ? count($0, "point") : nil },
+            gems.flatMap { $0 > 0 ? count($0, "gem") : nil },
+        ].compactMap { $0 }
+        guard !parts.isEmpty else { return "Points and gems in your wallet" }
+        return "Your " + parts.joined(separator: " and ") + ". They can't be refunded or moved to another account"
+    }
+
+    private static func count(_ value: Int, _ noun: String) -> String {
+        "\(value.formatted()) \(noun)\(value == 1 ? "" : "s")"
+    }
 
     private let viewModel: DeleteAccountViewModel
     private let onAccountDeleted: () -> Void
@@ -172,7 +199,7 @@ final class DeleteAccountViewController: UIViewController {
     private func applySnapshot() {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
         snapshot.appendSections([.consequences])
-        snapshot.appendItems(Self.consequences.map(Item.consequence), toSection: .consequences)
+        snapshot.appendItems(Self.consequences(for: viewModel.checklist).map(Item.consequence), toSection: .consequences)
         if case .ready = viewModel.phase, hasDataExport {
             snapshot.appendSections([.beforeYouGo])
             snapshot.appendItems([.downloadData], toSection: .beforeYouGo)
