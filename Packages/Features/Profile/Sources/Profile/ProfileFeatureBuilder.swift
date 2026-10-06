@@ -344,7 +344,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                     }
                                 case .whatYouSee:
                                     (repository as? any FeedPreferencesManaging).map { preferences in
-                                        WhatYouSeeViewController(preferences: preferences, isTeen: {
+                                        WhatYouSeeViewController(preferences: preferences, interestTags: interestTags, isTeen: {
                                             (try? await account.currentAccount().ageBracket.isTeen) ?? false
                                         })
                                     }
@@ -384,6 +384,9 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     /// the followers lists keep agreeing with a follow made anywhere else.
     /// Nil leaves each screen with the answer it loaded.
     public var followEvents: FollowGraphEvents?
+    /// The active profile's interest tags (timeline #662), for What You See.
+    /// Nil leaves the Your Interests section out.
+    public var interestTags: (any InterestTagsManaging)?
 
     public func makeProfileViewController(for profileID: ProfileID, identityStub: ProfileIdentityStub?) -> UIViewController {
         // Idempotent: the cache hears the follow channel from the first

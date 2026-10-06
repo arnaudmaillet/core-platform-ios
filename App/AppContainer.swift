@@ -560,20 +560,25 @@ final class AppContainer {
     private lazy var discoveryRepository = DiscoveryFeedRepository(
         timelineClient: Timeline_V1_TimelineServiceClient(client: authenticatedRPCClient),
         base: feedRepository,
-        contentLevel: { [weak self] in await self?.discoveryContentLevel() ?? .restricted }
+        reader: { [weak self] in await self?.discoveryReader() ?? .guest }
     )
 
-    /// The active profile's Sensitive Content setting (#407) as Discover's
-    /// content level. A guest — and anything that can't be read — is
-    /// restricted; the server clamps teens and guests to it anyway.
-    private func discoveryContentLevel() async -> DiscoveryContentLevel {
+    /// Who reads Discover (#407, #413): the active profile, its Sensitive
+    /// Content setting as the content level, and its Personalised For You
+    /// setting. A guest — and anything that can't be read — is restricted
+    /// and unpersonalised; the server clamps teens and guests anyway.
+    private func discoveryReader() async -> DiscoveryReader {
         guard memberGate.isMember,
-              let profileID = try? await viewerSession.activeProfileID() else { return .restricted }
+              let profileID = try? await viewerSession.activeProfileID() else { return .guest }
         var request = Profile_V1_GetProfileByIdRequest()
         request.profileID = profileID.rawValue
         let view = await Profile_V1_ProfileServiceClient(client: authenticatedRPCClient)
             .getProfileByID(request: request, headers: [:]).message
-        return view?.feedSettings.sensitiveContent == .standard ? .standard : .restricted
+        return DiscoveryReader(
+            contentLevel: view?.feedSettings.sensitiveContent == .standard ? .standard : .restricted,
+            profileID: profileID.rawValue,
+            nonPersonalized: view?.feedSettings.nonPersonalized ?? true
+        )
     }
 
     /// Set by the shell, which owns the presentation of the camera.
@@ -961,6 +966,11 @@ final class AppContainer {
         // A follow made on another surface (a feed's "+", a card's Unfollow)
         // reaches the profile screens and their followers lists.
         builder.followEvents = followGraphEvents
+        // What You See → Your Interests (#413).
+        builder.interestTags = InterestTagsRepository(
+            timelineClient: Timeline_V1_TimelineServiceClient(client: authenticatedRPCClient),
+            profiles: profileRepository
+        )
         builder.openFeedHero = { [weak self] postIDs, presenter, origin in
             self?.feedFeature.presentSnapFeedHero(
                 postIDs: postIDs, from: presenter, origin: origin

@@ -16,8 +16,28 @@ public enum DiscoveryContentLevel: Equatable, Sendable {
     }
 }
 
+/// Who is reading Discover, as `GetDiscoveryFeed` asks: the content level,
+/// and the profile whose interest tags rank the page (#413, timeline #662).
+public struct DiscoveryReader: Equatable, Sendable {
+    public var contentLevel: DiscoveryContentLevel
+    /// The active profile; nil for a guest, whose page is never personalised.
+    public var profileID: String?
+    /// The profile's Personalised For You is off. The server enforces the
+    /// stored setting anyway; sending it keeps one read honest meanwhile.
+    public var nonPersonalized: Bool
+
+    public init(contentLevel: DiscoveryContentLevel, profileID: String?, nonPersonalized: Bool) {
+        self.contentLevel = contentLevel
+        self.profileID = profileID
+        self.nonPersonalized = nonPersonalized
+    }
+
+    public static let guest = DiscoveryReader(contentLevel: .restricted, profileID: nil, nonPersonalized: true)
+}
+
 /// For You's Discover corpus: `timeline.v1.GetDiscoveryFeed` (backend B3,
-/// #448/#512) — one non-personalised pool, for guests and members alike.
+/// #448/#512) — one pool for guests and members alike, ranked by the
+/// reader's interest tags when it keeps Personalised For You on (#413).
 ///
 /// The RPC answers identifiers only, as the following feed does; the posts
 /// are hydrated through the app's one feed repository (`base`), so a tile and
@@ -27,20 +47,20 @@ public enum DiscoveryContentLevel: Equatable, Sendable {
 public actor DiscoveryFeedRepository: FeedProviding {
     private let timelineClient: any Timeline_V1_TimelineServiceClientInterface
     private let base: any FeedProviding
-    private let contentLevel: @Sendable () async -> DiscoveryContentLevel
+    private let reader: @Sendable () async -> DiscoveryReader
     private let region: @Sendable () -> String
     private let pageSize: Int32
 
     public init(
         timelineClient: any Timeline_V1_TimelineServiceClientInterface,
         base: any FeedProviding,
-        contentLevel: @escaping @Sendable () async -> DiscoveryContentLevel = { .restricted },
+        reader: @escaping @Sendable () async -> DiscoveryReader = { .guest },
         region: @escaping @Sendable () -> String = { Locale.current.region?.identifier ?? "" },
         pageSize: Int32 = 20
     ) {
         self.timelineClient = timelineClient
         self.base = base
-        self.contentLevel = contentLevel
+        self.reader = reader
         self.region = region
         self.pageSize = pageSize
     }
@@ -70,8 +90,9 @@ public actor DiscoveryFeedRepository: FeedProviding {
     }
 
     /// FOR_YOU: the server's default mix (trending, with fresh posts given a
-    /// chance). The level is asked on every first page and every page after,
-    /// so a Sensitive Content change applies from the next load.
+    /// chance). The reader is asked on every first page and every page after,
+    /// so a Sensitive Content or Personalised For You change applies from the
+    /// next load.
     private func loadPage(token: String) async throws -> FeedPage {
         // "A page can hold fewer items than asked (even none) with a
         // non-empty token: keep paging" — the contract's words. A few hops,
@@ -89,7 +110,10 @@ public actor DiscoveryFeedRepository: FeedProviding {
         var request = Timeline_V1_GetDiscoveryFeedRequest()
         request.ranking = .forYou
         request.region = region()
-        request.contentLevel = await contentLevel().proto
+        let reader = await reader()
+        request.contentLevel = reader.contentLevel.proto
+        request.profileID = reader.profileID ?? ""
+        request.nonPersonalized = reader.nonPersonalized
         request.pageToken = token
         request.limit = pageSize
         let response = await timelineClient.getDiscoveryFeed(request: request, headers: [:])
