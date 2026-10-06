@@ -734,12 +734,13 @@ public struct MockSocialDataset: Sendable {
         self.mediaCatalog = mediaCatalog
         // (handle, name, bio, website) — bios vary from empty to multi-line so
         // the profile header exercises every identity-row combination. Many
-        // carry an emote or two, one a run, as bios do.
+        // carry an emote or two, one a run, as bios do; a few carry a
+        // `@handle` or a `#tag` (#524).
         let names: [(String, String, String, String)] = [
             ("ava.moreau", "Ava Moreau", "Street photography, mostly Lyon. 📸\nPrints on request.", "https://www.avamoreau.example/prints/"),
             ("kenji.dev", "Kenji Tanaka", "Building small tools for small teams. Coffee first ☕, commits later. :laptop:", "https://kenji.example"),
             ("lena_klein", "Lena Klein", "", ""),
-            ("marcus.holt", "Marcus Holt", "Trail runner 🏁 · Amateur baker 🍪", ""),
+            ("marcus.holt", "Marcus Holt", "Trail runner 🏁 · Amateur baker 🍪\nLong runs with @priya.raman. #trailrunning", ""),
             ("sofia.reyes", "Sofía Reyes", "Cocino, viajo, repito. 🌮✈️", "https://sofia.example/blog"),
             ("tom.okafor", "Tom Okafor", "Bass, mostly. 🎸", ""),
             ("yuki.snow", "Yuki Shirakawa", "Snow reports and mountain film. ❄️\nSee you in Hakuba.", ""),
@@ -748,8 +749,8 @@ public struct MockSocialDataset: Sendable {
             ("olu.adeyemi", "Olu Adeyemi", "Backend by day, bread by night.", "https://olu.example"),
             ("priya.raman", "Priya Raman", "Long runs and longer playlists 🎶🔥 :lol:", ""),
             ("quentin.dubois", "Quentin Dubois", "", ""),
-            ("rosa.iglesias", "Rosa Iglesias", "Archivist. Ask me about microfilm.", ""),
-            ("sam.whitfield", "Sam Whitfield", "Boats, mostly small ones. 🌊", "https://sam.example"),
+            ("rosa.iglesias", "Rosa Iglesias", "Archivist. Ask me about #microfilm.", ""),
+            ("sam.whitfield", "Sam Whitfield", "Boats, mostly small ones. 🌊 #sailing", "https://sam.example"),
             ("tara.nkemelu", "Tara Nkemelu", "Illustration + risograph.", ""),
             ("umar.qadir", "Umar Qadir", "Teaching maths, learning guitar. :books: 🎸", ""),
             ("vera.lindqvist", "Vera Lindqvist", "Cold water swimmer. 🥶\nYes, year round.", ""),

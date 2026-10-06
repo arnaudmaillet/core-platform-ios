@@ -1149,6 +1149,9 @@ final class ProfileHeaderView: UIView {
         bioLabel.adjustsFontForContentSizeCategory = true
         bioLabel.textColor = .label
         bioLabel.numberOfLines = 0
+        // Over the banner the bio's ink is `HeroInk`'s: its tokens keep it,
+        // in semibold (#524).
+        bioLabel.textEntityStyle = .emphasis
 
         // Name + verified badge sit on one line; a spacer keeps them leading
         // while the row itself stretches with the fill-aligned column.

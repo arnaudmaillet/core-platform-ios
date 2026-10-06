@@ -174,6 +174,9 @@ public final class PostCardCaptionOverlay: UIView {
         avatarPicture.isHidden = true
         avatarPicture.pin(to: avatar)
         captionLabel.font = Self.captionFont(onMedia: onMedia)
+        // `@handle`s and `#tag`s (#524): the link colour on a plain card,
+        // semibold in the caption's own white over a picture.
+        captionLabel.textEntityStyle = onMedia ? .emphasis : .link
         captionLabel.textColor = onMedia ? .white : .label
         captionLabel.numberOfLines = max(0, captionLines ?? (onMedia ? Self.mediaCaptionLines : Self.textCaptionLines))
         captionLabel.lineBreakMode = .byTruncatingTail
@@ -188,9 +191,11 @@ public final class PostCardCaptionOverlay: UIView {
                 ))
             }
             captionLabel.attributedText = caption.map {
-                EmoteText.attributedString($0, attributes: Self.inlineAttributes(
+                let marked = NSMutableAttributedString(attributedString: EmoteText.attributedString($0, attributes: Self.inlineAttributes(
                     font: captionLabel.font, color: .white
-                ), catalog: captionLabel.engine.catalog)
+                ), catalog: captionLabel.engine.catalog))
+                marked.applyTextEntityStyle(.emphasis)
+                return marked
             }
         } else {
             authorLabel.text = author

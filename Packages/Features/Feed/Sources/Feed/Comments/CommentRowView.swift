@@ -356,6 +356,9 @@ final class CommentRowView: UIView {
         bodyLabel.adjustsFontForContentSizeCategory = true
         bodyLabel.textColor = .label
         bodyLabel.numberOfLines = 0
+        // `@handle`s and `#tag`s stand out (#524): comments, replies, chat
+        // messages and a text post's caption all draw here.
+        bodyLabel.textEntityStyle = .link
 
         likeButton.configuration?.imagePadding = 3
         likeButton.configuration?.contentInsets = .zero
