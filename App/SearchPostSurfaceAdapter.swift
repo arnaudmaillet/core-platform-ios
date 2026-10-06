@@ -48,6 +48,13 @@ struct SearchPostSurfaceAdapter: SearchPostSurfaceProviding {
 
         func setPlaybackActive(_ active: Bool) { surface.setPlaybackActive(active) }
 
+        var onNearEnd: (() -> Void)? {
+            get { surface.onNearEnd }
+            set { surface.onNearEnd = newValue }
+        }
+
+        func setPaging(_ paging: Bool) { surface.setPaging(paging) }
+
         func show(_ state: SearchPostSurfaceState) {
             let translated: PostSetSurfaceState = switch state {
             case .loading: .loading

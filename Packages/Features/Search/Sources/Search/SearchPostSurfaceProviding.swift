@@ -47,6 +47,22 @@ public protocol SearchPostSurface: AnyObject {
     /// Whether this surface is the tab the viewer is on. A surface one swipe
     /// away is laid out and must not be playing.
     func setPlaybackActive(_ active: Bool)
+
+    /// Called as the viewer nears the end of what is shown: the cue to fetch
+    /// the next page and show the longer list, which is appended (#579).
+    var onNearEnd: (() -> Void)? { get set }
+
+    /// The footer spinner, while a next page is fetched.
+    func setPaging(_ paging: Bool)
+}
+
+public extension SearchPostSurface {
+    var onNearEnd: (() -> Void)? {
+        get { nil }
+        set {}
+    }
+
+    func setPaging(_ paging: Bool) {}
 }
 
 /// What a post surface is being asked to show.

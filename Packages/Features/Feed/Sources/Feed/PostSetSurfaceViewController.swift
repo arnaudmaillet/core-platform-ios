@@ -49,6 +49,12 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
     private var loadTask: Task<Void, Never>?
     /// The ids currently on screen, so an identical re-show is not a re-fetch.
     private var shownIDs: [PostID] = []
+    /// The posts hydrated for `shownIDs`, in their order — what a next page
+    /// is appended to (#579).
+    private var shownPosts: [GalleryPost] = []
+
+    /// See `PostSetSurface.onNearEnd`.
+    var onNearEnd: (() -> Void)?
 
     /// Opens a post WITH a flight. Supplied by the builder, which owns the
     /// snap feed and the transition — the same closure the place profile is
@@ -92,6 +98,12 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
             page.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
         page.onItemTapped = { [weak self] index in self?.openTile(at: index) }
+        page.onNearEnd = { [weak self] in self?.onNearEnd?() }
+    }
+
+    func setPaging(_ paging: Bool) {
+        loadViewIfNeeded()
+        page.setPaging(paging)
     }
 
     /// The departure, described for the flight machinery.
@@ -241,6 +253,7 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
         switch state {
         case .loading:
             shownIDs = []
+            shownPosts = []
             page.render(.loading)
 
         case .posts(let ids):
@@ -252,7 +265,15 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
             // it changes — without this, one search would hydrate the same ids
             // four times over.
             guard ids != shownIDs else { return }
+            // A list that EXTENDS the one shown is the caller's next page
+            // (#579): only the new posts are hydrated, and they are appended
+            // — no skeleton, nothing already on screen moves.
+            if !shownIDs.isEmpty, ids.count > shownIDs.count, ids.starts(with: shownIDs) {
+                append(Array(ids.dropFirst(shownIDs.count)), completing: ids)
+                return
+            }
             shownIDs = ids
+            shownPosts = []
             guard !ids.isEmpty else {
                 page.render(.content([]))
                 return
@@ -262,13 +283,14 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
             loadTask = Task { [weak self] in
                 guard let self else { return }
                 let posts = await self.hydrate(ids)
-                guard !Task.isCancelled, self.shownIDs == ids else { return }
+                guard !Task.isCancelled, self.shownIDs.starts(with: ids) else { return }
                 // ⚠️ RE-ORDERED BACK INTO THE ANSWER'S ORDER. The hydration
                 // reads a timeline, which returns what it returns; the ranking
                 // the viewer picked lives in the id list, and handing the page
                 // the provider's order would quietly replace their sort.
                 let byID = Dictionary(posts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-                self.page.render(.content(ids.compactMap { byID[$0] }))
+                self.shownPosts = ids.compactMap { byID[$0] }
+                self.page.render(.content(self.shownPosts))
                 // ⚠️ RE-ASSERTED AFTER THE RENDER. See `isPlaybackActive`.
                 // ⚠️ AFTER A LAYOUT PASS, not just after the snapshot. The
                 // page's autoplay reconcile asks the collection view which
@@ -292,14 +314,34 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
 
         case .empty(let message):
             shownIDs = []
+            shownPosts = []
             loadTask?.cancel()
             page.render(.content([]))
             _ = message
 
         case .failed(let message):
             shownIDs = []
+            shownPosts = []
             loadTask?.cancel()
             page.render(.failed(message: message))
+        }
+    }
+
+    /// Hydrates `added` and appends it to what is shown, after whatever load
+    /// is still running — so pages land in order, each on the last.
+    private func append(_ added: [PostID], completing ids: [PostID]) {
+        shownIDs = ids
+        let previous = loadTask
+        loadTask = Task { [weak self] in
+            await previous?.value
+            guard let self, !Task.isCancelled else { return }
+            let posts = await self.hydrate(added)
+            // Still this list, or one that extends it further.
+            guard !Task.isCancelled, self.shownIDs.starts(with: ids) else { return }
+            let byID = Dictionary(posts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            let known = Set(self.shownPosts.map(\.id))
+            self.shownPosts += added.compactMap { known.contains($0) ? nil : byID[$0] }
+            self.page.render(.content(self.shownPosts))
         }
     }
 }

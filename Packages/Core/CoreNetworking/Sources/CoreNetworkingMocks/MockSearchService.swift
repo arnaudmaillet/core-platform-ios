@@ -102,6 +102,8 @@ public final class MockSearchService: @unchecked Sendable {
 
         let wantsProfiles = request.entityTypes.isEmpty || request.entityTypes.contains(.profile)
         let wantsPosts = request.entityTypes.isEmpty || request.entityTypes.contains(.post)
+        /// Every post that matched, past the page — the estimate.
+        var postTotal = 0
 
         if wantsProfiles {
             let matches = sorted(
@@ -141,13 +143,28 @@ public final class MockSearchService: @unchecked Sendable {
             // One `#tag` is that tag, whole — `#travel` is not `#travelogue`;
             // anything else is the caption substring it always was.
             let isTag = query.hasPrefix("#") && !query.contains(" ")
-            let matches = sortedPosts(
+            let allMatches = sortedPosts(
                 dataset.posts.filter { record in
                     isTag ? Self.tags(in: record.caption).contains(String(query.dropFirst()))
                         : record.caption.lowercased().contains(query)
                 },
                 by: request.sort
             )
+            // Paged as the fleet pages (#579): `page_size` posts from where
+            // `page_token` says, and a token for the rest. No page size, every
+            // match — what the profile's Tagged search sends.
+            let start = Self.postOffset(from: request.pageToken)
+            let matches: ArraySlice<MockSocialDataset.PostRecord>
+            // Posts-only requests page; a federated one keeps every match, so
+            // its profiles and posts are not cut against each other.
+            if request.pageSize > 0, request.entityTypes == [.post] {
+                let end = min(start + Int(request.pageSize), allMatches.count)
+                matches = start < end ? allMatches[start..<end] : []
+                if end < allMatches.count { response.nextPageToken = Self.postToken(offset: end) }
+            } else {
+                matches = allMatches[min(start, allMatches.count)...]
+            }
+            postTotal = allMatches.count
             response.hits += matches.map { record in
                 var hit = Search_V1_SearchHit()
                 hit.entityType = .post
@@ -178,9 +195,19 @@ public final class MockSearchService: @unchecked Sendable {
             }
         }
 
-        response.estimatedTotal = Int64(response.hits.count)
+        // Every match, not this page's: a paged answer still says how many.
+        let postHits = response.hits.filter { $0.entityType == .post }.count
+        response.estimatedTotal = Int64(response.hits.count - postHits + postTotal)
         return .success(response)
     }
+
+    /// Where a posts page starts: `post:<offset>`, else the top.
+    static func postOffset(from token: String) -> Int {
+        guard token.hasPrefix("post:"), let offset = Int(token.dropFirst("post:".count)), offset >= 0 else { return 0 }
+        return offset
+    }
+
+    static func postToken(offset: Int) -> String { "post:\(offset)" }
 
     /// The author's handle, INCLUDING the viewer's own.
     ///

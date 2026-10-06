@@ -14,7 +14,11 @@ private actor TagSearch: SearchProviding {
     var recent: [PostSearchHit] = []
     var count: Int?
     var fails = false
+    /// Fails every page after the first — a next page that does not arrive.
+    var failsNextPages = false
     private(set) var queries: [String] = []
+    /// Every page token asked for, in order (nil for a first page).
+    private(set) var tokens: [String?] = []
 
     init(top: [PostSearchHit] = [], recent: [PostSearchHit] = [], count: Int? = nil, fails: Bool = false) {
         self.top = top
@@ -23,14 +27,31 @@ private actor TagSearch: SearchProviding {
         self.fails = fails
     }
 
+    func setFailsNextPages(_ fails: Bool) { failsNextPages = fails }
+
     func searchProfiles(matching query: String, sort: SearchSortOrder, limit: Int32) async throws -> [ProfileSearchResult] { [] }
     func suggestions(forPrefix prefix: String, limit: Int32) async throws -> [SearchSuggestion] { [] }
-    func searchPosts(matching query: String, sort: SearchSortOrder, limit: Int32) async throws -> [PostSearchHit] {
-        queries.append(query)
-        if fails { throw SearchError.transport(message: "offline") }
-        return sort == .popularity ? top : recent
-    }
     func hashtagPostCount(_ tag: String) async throws -> Int? { count }
+
+    /// Pages `limit` at a time; the token is the offset of the next page.
+    func searchPostsPage(
+        matching query: String, sort: SearchSortOrder, limit: Int32, pageToken: String?
+    ) async throws -> PostSearchPage {
+        queries.append(query)
+        tokens.append(pageToken)
+        if fails || (failsNextPages && pageToken != nil) { throw SearchError.transport(message: "offline") }
+        let all = sort == .popularity ? top : recent
+        let start = pageToken.flatMap(Int.init) ?? 0
+        let end = min(start + Int(limit), all.count)
+        return PostSearchPage(
+            hits: start < end ? Array(all[start..<end]) : [],
+            nextPageToken: end < all.count ? String(end) : nil
+        )
+    }
+}
+
+private func hits(_ count: Int, prefix: String = "p", media: Bool = true) -> [PostSearchHit] {
+    (0..<count).map { PostSearchHit(id: PostID("\(prefix)\($0)"), hasMedia: media) }
 }
 
 @MainActor
@@ -64,14 +85,76 @@ struct HashtagViewModelTests {
         await small.load()
         #expect(small.countText == "2 posts")
 
-        let full = (0..<Int(HashtagViewModel.pageSize)).map { hit("p\($0)") }
-        let big = HashtagViewModel(tag: "travel", repository: TagSearch(recent: full, count: 1_500))
+        let more = hits(Int(HashtagViewModel.pageSize) + 5)
+        let big = HashtagViewModel(tag: "travel", repository: TagSearch(recent: more, count: 1_500))
         await big.load()
         #expect(big.countText == "1.5K posts")
 
         let one = HashtagViewModel(tag: "travel", repository: TagSearch(recent: [hit("a")]))
         await one.load()
         #expect(one.countText == "1 post")
+    }
+
+    // MARK: Paging (#579)
+
+    private var page: Int { Int(HashtagViewModel.pageSize) }
+
+    /// The first request asks for a page; each next one sends the token of
+    /// the page before, appends, and nothing is asked once there is no more.
+    @Test func recentLoadsPageByPageAndStops() async {
+        let all = hits(page * 2 + 4)
+        let search = TagSearch(recent: all)
+        let viewModel = HashtagViewModel(tag: "travel", repository: search)
+        await viewModel.load()
+        #expect(viewModel.recent == .posts(Array(all.prefix(page)).map(\.id)))
+
+        await viewModel.loadMore(.recent)
+        #expect(viewModel.recent == .posts(Array(all.prefix(page * 2)).map(\.id)), "appended, in order")
+        await viewModel.loadMore(.recent)
+        #expect(viewModel.recent == .posts(all.map(\.id)))
+        await viewModel.loadMore(.recent)
+
+        let recentTokens = await search.tokens.filter { $0 != nil }
+        #expect(recentTokens == [String(page), String(page * 2)], "each page from the last one's token, then no more")
+    }
+
+    /// Two approaches to the end while a page is on its way ask once.
+    @Test func oneNextPageAtATime() async {
+        let search = TagSearch(recent: hits(page * 3))
+        let viewModel = HashtagViewModel(tag: "travel", repository: search)
+        await viewModel.load()
+        async let first: Void = viewModel.loadMore(.recent)
+        async let second: Void = viewModel.loadMore(.recent)
+        _ = await (first, second)
+        #expect(await search.tokens.filter { $0 != nil } == [String(page)])
+    }
+
+    /// A next page that fails keeps what is shown, and the next approach to
+    /// the end asks again.
+    @Test func aFailedNextPageKeepsThePostsAndIsRetried() async {
+        let all = hits(page * 2)
+        let search = TagSearch(recent: all)
+        let viewModel = HashtagViewModel(tag: "travel", repository: search)
+        await viewModel.load()
+        await search.setFailsNextPages(true)
+        await viewModel.loadMore(.recent)
+        #expect(viewModel.recent == .posts(Array(all.prefix(page)).map(\.id)))
+        #expect(!viewModel.isLoadingMore(.recent))
+
+        await search.setFailsNextPages(false)
+        await viewModel.loadMore(.recent)
+        #expect(viewModel.recent == .posts(all.map(\.id)))
+    }
+
+    /// Top shows pictures only: a page of text posts adds nothing, so it
+    /// reads on rather than leave the viewer at an end that does not move.
+    @Test func topReadsPastAPageOfTextPosts() async {
+        let text = hits(page, prefix: "t", media: false)
+        let pictures = hits(4, prefix: "m")
+        let search = TagSearch(top: text + pictures)
+        let viewModel = HashtagViewModel(tag: "travel", repository: search)
+        await viewModel.load()
+        #expect(viewModel.top == .posts(pictures.map(\.id)))
     }
 
     @Test func nothingTaggedIsEmptyAndAFailureSaysSo() async {
@@ -108,6 +191,28 @@ struct HashtagRepositoryTests {
 
         #expect(try await repository().hashtagPostCount("travel") == tagged.count)
         #expect(try await repository().hashtagPostCount("nosuchtag") == nil)
+    }
+
+    /// The mock pages as the fleet does (#579): a page size, a token for the
+    /// rest, every tagged post once across the pages, none past the end.
+    @Test func aTagsPostsComePageByPage() async throws {
+        let tagged = Set(MockSocialDataset().posts
+            .filter { $0.caption.lowercased().contains("#travel") }
+            .map { PostID($0.postID) })
+        let repository = repository()
+        var seen: [PostID] = []
+        var token: String?
+        var pages = 0
+        repeat {
+            let page = try await repository.searchPostsPage(matching: "#travel", sort: .recency, limit: 10, pageToken: token)
+            #expect(page.hits.count <= 10)
+            seen += page.hits.map(\.id)
+            token = page.nextPageToken
+            pages += 1
+        } while token != nil && pages < 20
+        #expect(pages >= 2, "the corpus needs more than one page of #travel")
+        #expect(seen.count == Set(seen).count, "no post twice")
+        #expect(Set(seen) == tagged)
     }
 
     @Test func aHashSuggestsTags() async throws {

@@ -79,6 +79,18 @@ public struct PostSearchHit: Equatable, Sendable, Identifiable {
     }
 }
 
+/// One page of post hits, and where the next one starts (#579).
+public struct PostSearchPage: Equatable, Sendable {
+    public let hits: [PostSearchHit]
+    /// Nil when there is no next page.
+    public let nextPageToken: String?
+
+    public init(hits: [PostSearchHit], nextPageToken: String?) {
+        self.hits = hits
+        self.nextPageToken = nextPageToken
+    }
+}
+
 /// One typeahead completion from `search.v1.Suggest`.
 public struct SearchSuggestion: Equatable, Sendable {
     /// What the suggestion is a completion *of*. `search.v1` can answer for
@@ -146,11 +158,26 @@ public protocol SearchProviding: Sendable {
     /// and periodically refreshed, not a live counter (`HashtagHit`). Nil when
     /// the index knows no such tag.
     func hashtagPostCount(_ tag: String) async throws -> Int?
+
+    /// One page of `searchPosts`: `pageToken` nil for the first, then the
+    /// `nextPageToken` of the page before (#579).
+    func searchPostsPage(
+        matching query: String, sort: SearchSortOrder, limit: Int32, pageToken: String?
+    ) async throws -> PostSearchPage
 }
 
 public extension SearchProviding {
     func searchPosts(matching query: String, sort: SearchSortOrder, limit: Int32) async throws -> [PostSearchHit] { [] }
     func hashtagPostCount(_ tag: String) async throws -> Int? { nil }
+
+    /// One page holding `searchPosts`' answer, and no next one — for a fake
+    /// that does not page.
+    func searchPostsPage(
+        matching query: String, sort: SearchSortOrder, limit: Int32, pageToken: String?
+    ) async throws -> PostSearchPage {
+        guard pageToken == nil else { return PostSearchPage(hits: [], nextPageToken: nil) }
+        return PostSearchPage(hits: try await searchPosts(matching: query, sort: sort, limit: limit), nextPageToken: nil)
+    }
 }
 
 /// Reads people results from search.v1. Scoped to the PROFILE entity type; post
@@ -198,14 +225,21 @@ public actor SearchRepository: SearchProviding {
     public func searchPosts(
         matching query: String, sort: SearchSortOrder, limit: Int32
     ) async throws -> [PostSearchHit] {
+        try await searchPostsPage(matching: query, sort: sort, limit: limit, pageToken: nil).hits
+    }
+
+    public func searchPostsPage(
+        matching query: String, sort: SearchSortOrder, limit: Int32, pageToken: String?
+    ) async throws -> PostSearchPage {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return [] }
+        guard !trimmed.isEmpty else { return PostSearchPage(hits: [], nextPageToken: nil) }
 
         var request = Search_V1_SearchRequest()
         request.query = trimmed
         request.entityTypes = [.post]
         request.sort = Self.wireSort(sort)
         request.pageSize = limit
+        request.pageToken = pageToken ?? ""
 
         let response = await searchClient.search(request: request, headers: [:])
         switch response.result {
@@ -219,9 +253,10 @@ public actor SearchRepository: SearchProviding {
             // `MultiSearch` exists on the contract for exactly this and is
             // unrouted in the mock, so it is not a path anything can run
             // offline today. Recorded rather than guessed at.
-            return body.hits
+            let hits = body.hits
                 .filter { $0.entityType == .post }
                 .map { PostSearchHit(id: PostID($0.id), hasMedia: !$0.post.thumbnailKey.isEmpty) }
+            return PostSearchPage(hits: hits, nextPageToken: body.nextPageToken.isEmpty ? nil : body.nextPageToken)
         case .failure(let error):
             throw SearchError.transport(message: error.message ?? "code \(error.code)")
         }

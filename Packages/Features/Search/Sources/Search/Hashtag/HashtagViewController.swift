@@ -93,6 +93,15 @@ final class HashtagViewController: UIViewController {
             addChild(page)
             page.didMove(toParent: self)
         }
+        // Each tab asks for its next page as the viewer nears its end (#579).
+        topPage.onNearEnd = { [weak self] in
+            guard let self else { return }
+            Task { await self.viewModel.loadMore(.top) }
+        }
+        recentPage.onNearEnd = { [weak self] in
+            guard let self else { return }
+            Task { await self.viewModel.loadMore(.recent) }
+        }
         pager = HorizontalPagerView(
             pages: [topPage.viewController.view, recentPage.viewController.view],
             initialIndex: 0
@@ -123,6 +132,8 @@ final class HashtagViewController: UIViewController {
         navigationItem.subtitle = viewModel.countText
         topPage.show(viewModel.top)
         recentPage.show(viewModel.recent)
+        topPage.setPaging(viewModel.isLoadingMore(.top))
+        recentPage.setPaging(viewModel.isLoadingMore(.recent))
     }
 
     /// The page in front plays, and only while this screen is up.
