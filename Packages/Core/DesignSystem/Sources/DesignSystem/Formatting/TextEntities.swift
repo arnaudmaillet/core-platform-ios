@@ -183,3 +183,109 @@ public extension NSMutableAttributedString {
         }
     }
 }
+
+// MARK: - The token being typed
+
+/// The `@handle` or `#tag` being typed at the caret — what a composer
+/// completes (#524).
+public struct PartialTextEntity: Equatable, Sendable {
+    public let kind: TextEntity.Kind
+    /// What follows the sigil up to the caret, as typed.
+    public let query: String
+    /// The sigil and the query, in UTF-16 units: what a completion replaces.
+    public let range: NSRange
+}
+
+extension TextEntityScanner {
+    /// The token the caret is at the end of, once it holds at least one
+    /// character after its sigil; nil anywhere else. The sigil opens a token
+    /// by `entities(in:)`'s rules (not glued to a word, not doubled), and a
+    /// handle holds a handle's characters, a tag a tag's.
+    public static func partialToken(in text: String, caret: Int) -> PartialTextEntity? {
+        let units = Array(text.utf16)
+        guard caret > 0, caret <= units.count else { return nil }
+        // Back over what a handle or a tag may hold, to the sigil.
+        var start = caret
+        while start > 0 {
+            let unit = units[start - 1]
+            if unit == at || unit == hash { break }
+            guard isHandleUnit(unit) || isTagUnit(unit) else { return nil }
+            start -= 1
+        }
+        let sigil = start - 1
+        guard sigil >= 0, units[sigil] == at || units[sigil] == hash, startsToken(units, at: sigil),
+              caret > start
+        else { return nil }
+        let query = String(decoding: units[start..<caret], as: UTF16.self)
+        let kind: TextEntity.Kind = units[sigil] == at ? .mention : .hashtag
+        switch kind {
+        case .mention:
+            // A handle's own characters, starting with a letter or a digit,
+            // no longer than a handle may be.
+            guard units[start..<caret].allSatisfy(isHandleUnit), !isSeparator(units[start]),
+                  caret - start <= handleLength.upperBound
+            else { return nil }
+        case .hashtag:
+            guard query.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" }) else { return nil }
+        }
+        return PartialTextEntity(kind: kind, query: query, range: NSRange(location: sigil, length: caret - sigil))
+    }
+
+    /// Anything a tag may hold, unit by unit: a letter or digit of any
+    /// script, a mark, `_`, or half of a pair beyond the BMP.
+    private static func isTagUnit(_ unit: UInt16) -> Bool {
+        if unit == underscore || UTF16.isLeadSurrogate(unit) || UTF16.isTrailSurrogate(unit) { return true }
+        guard let scalar = Unicode.Scalar(unit) else { return false }
+        let properties = scalar.properties
+        return properties.isAlphabetic || properties.numericType != nil
+            || properties.generalCategory == .nonspacingMark || properties.generalCategory == .spacingMark
+    }
+}
+
+// MARK: - Completions
+
+/// One completion for a token being typed: a person's handle or a tag.
+public struct TextCompletion: Equatable, Sendable, Identifiable {
+    public let kind: TextEntity.Kind
+    /// The handle or the tag, without its sigil, as it is inserted.
+    public let value: String
+    /// A person's name, when the source knows one.
+    public let title: String?
+
+    public init(kind: TextEntity.Kind, value: String, title: String? = nil) {
+        self.kind = kind
+        self.value = value
+        self.title = title
+    }
+
+    /// The token as it lands in the text: `@kenji.dev`, `#travel`.
+    public var token: String { (kind == .mention ? "@" : "#") + value }
+    public var id: String { token.lowercased() }
+}
+
+/// Where completions come from — the app's search index, behind a feature
+/// boundary no composer may cross.
+public protocol TextCompletionProviding: Sendable {
+    /// Completions for `prefix` (no sigil), best first; empty when there are
+    /// none or the source could not answer.
+    func completions(for kind: TextEntity.Kind, prefix: String) async -> [TextCompletion]
+}
+
+/// Whoever holds the app's `TextCompletionProviding`, found UP THE RESPONDER
+/// CHAIN from the field being typed in — the shell's tab bar controller, as
+/// for `TextEntityOpening` — so every composer completes without a
+/// dependency threaded through the screens that draw one.
+@MainActor
+public protocol TextCompletionSource: AnyObject {
+    var textCompletions: (any TextCompletionProviding)? { get }
+}
+
+@MainActor
+public enum TextCompletions {
+    /// The first provider up `source`'s responder chain.
+    public static func provider(from source: UIResponder) -> (any TextCompletionProviding)? {
+        sequence(first: source, next: \.next).lazy
+            .compactMap { ($0 as? any TextCompletionSource)?.textCompletions }
+            .first
+    }
+}

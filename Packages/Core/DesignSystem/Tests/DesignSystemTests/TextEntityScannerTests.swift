@@ -82,3 +82,40 @@ struct TextEntityScannerTests {
         #expect(tokens("@ alone and # alone").isEmpty)
     }
 }
+
+/// The `@` or `#` word being typed at the caret — what a composer completes.
+@Suite("Partial text entity")
+struct PartialTextEntityTests {
+    private func token(_ text: String, caret: Int? = nil) -> PartialTextEntity? {
+        TextEntityScanner.partialToken(in: text, caret: caret ?? (text as NSString).length)
+    }
+
+    @Test func aHandleAndATagBeingTyped() {
+        #expect(token("ride with @ke") == PartialTextEntity(kind: .mention, query: "ke", range: NSRange(location: 10, length: 3)))
+        #expect(token("on the #tr") == PartialTextEntity(kind: .hashtag, query: "tr", range: NSRange(location: 7, length: 3)))
+        #expect(token("@k")?.query == "k")
+        #expect(token("@kenji.d")?.query == "kenji.d")
+        #expect(token("#東京")?.query == "東京")
+    }
+
+    @Test func nothingWithoutACharacterAfterTheSigil() {
+        #expect(token("hey @") == nil)
+        #expect(token("hey #") == nil)
+        #expect(token("") == nil)
+    }
+
+    @Test func notAToken() {
+        #expect(token("mail a@b") == nil, "glued to a word")
+        #expect(token("@@alex") == nil, "doubled")
+        #expect(token("#a.b") == nil, "a tag holds no dot")
+        #expect(token("@_alex") == nil, "a handle starts with a letter or digit")
+        #expect(token("@kenji ") == nil, "finished")
+        #expect(token("just text") == nil)
+    }
+
+    @Test func theCaretDecides() {
+        // The caret right after "@ke", with more text after it.
+        #expect(token("hi @ke there", caret: 6)?.query == "ke")
+        #expect(token("hi @ke there", caret: 12) == nil)
+    }
+}
