@@ -222,6 +222,12 @@ public final class MockAccountService: @unchecked Sendable {
             view.dateOfBirth = dateOfBirth
             view.ageBracket = age >= 18 ? .adult : (age >= 16 ? .ageBracket1617 : .ageBracket1315)
         }
+        // `ChangeContact` (auth) moves these (#393).
+        let contact = lifecycle.contact
+        view.email = contact.email
+        view.emailVerified = contact.emailVerified
+        view.phone = contact.phone
+        view.phoneVerified = contact.phoneVerified
         return view
     }
 

@@ -201,6 +201,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                         onAccountDeleted: onLogout,
                                         deactivator: account as? any AccountDeactivating,
                                         stepUp: accountSessions as? any CredentialStepUp,
+                                        contactChanger: accountSessions as? any ContactChanging,
                                         onDeactivated: onLogout
                                     )
                                 case .security:

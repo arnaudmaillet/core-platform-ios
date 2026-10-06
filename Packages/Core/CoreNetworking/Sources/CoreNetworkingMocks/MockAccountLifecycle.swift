@@ -44,6 +44,35 @@ public final class MockAccountLifecycle: @unchecked Sendable {
         lock.withLock { deactivated = true }
     }
 
+    // MARK: - Contact (backend #651)
+
+    /// The demo account's email and phone: `ChangeContact` (auth) writes
+    /// them, `GetAccountById` (account) reads them.
+    public struct Contact: Equatable, Sendable {
+        public var email = "demo@example.com"
+        public var emailVerified = true
+        public var phone = "+1 (555) 010-0142"
+        public var phoneVerified = false
+    }
+
+    private var contactInfo = Contact()
+
+    public var contact: Contact { lock.withLock { contactInfo } }
+
+    /// A code proved the new address, so it arrives verified.
+    func changeContact(email: String? = nil, phone: String? = nil) {
+        lock.withLock {
+            if let email {
+                contactInfo.email = email
+                contactInfo.emailVerified = true
+            }
+            if let phone {
+                contactInfo.phone = phone
+                contactInfo.phoneVerified = true
+            }
+        }
+    }
+
     /// Resumes a deactivated account, withdrawing a pending deletion with it;
     /// true when it was deactivated.
     func resumeIfDeactivated() -> Bool {

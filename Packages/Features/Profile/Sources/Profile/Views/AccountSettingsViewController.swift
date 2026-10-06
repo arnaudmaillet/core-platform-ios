@@ -6,9 +6,10 @@ import UIKit
 /// push-to-child pattern as Edit Profile: account rows show
 /// `[Label]  [Value] ›` and push a focused editor.
 ///
-/// Contract reality (see `AccountRepository`): email/phone are read-only —
-/// `account.v1` has no change RPC — so their editors are honest placeholders
-/// (Save reports "not available yet").
+/// Email and phone change through `auth.v1` (#393, backend #651): a code to
+/// the new address, behind a step-up (`ChangeContactViewController`). Without
+/// a `contactChanger` their editors stay honest placeholders (Save reports
+/// "not available yet").
 final class AccountSettingsViewController: UIViewController {
     private let account: any AccountProviding
     /// Backs Delete Account. Nil hides the row rather than offering a
@@ -17,6 +18,8 @@ final class AccountSettingsViewController: UIViewController {
     private let onAccountDeleted: () -> Void
     private let deactivator: (any AccountDeactivating)?
     private let stepUp: (any CredentialStepUp)?
+    /// Changes the email and phone; nil keeps the placeholders.
+    private let contactChanger: (any ContactChanging)?
     /// After a deactivation: sign out, the account being asleep until the next
     /// login.
     private let onDeactivated: () -> Void
@@ -58,8 +61,10 @@ final class AccountSettingsViewController: UIViewController {
         onAccountDeleted: @escaping () -> Void = {},
         deactivator: (any AccountDeactivating)? = nil,
         stepUp: (any CredentialStepUp)? = nil,
+        contactChanger: (any ContactChanging)? = nil,
         onDeactivated: @escaping () -> Void = {}
     ) {
+        self.contactChanger = contactChanger
         self.account = account
         self.lifecycle = lifecycle
         self.onAccountDeleted = onAccountDeleted
@@ -156,13 +161,15 @@ final class AccountSettingsViewController: UIViewController {
         }
     }
 
-    /// After the date of birth is saved: re-read the account, redraw its rows.
+    /// After the date of birth, the email or the phone changed: re-read the
+    /// account, redraw its rows.
     private func reloadAccount() {
         Task { [weak self] in
             guard let self else { return }
             self.details = try? await self.account.currentAccount()
             var snapshot = self.dataSource.snapshot()
-            snapshot.reconfigureItems([.row(.birthDate)].filter { snapshot.indexOfItem($0) != nil })
+            let rows: [Item] = [.row(.email), .row(.phone), .row(.birthDate)]
+            snapshot.reconfigureItems(rows.filter { snapshot.indexOfItem($0) != nil })
             await self.dataSource.apply(snapshot, animatingDifferences: false)
         }
     }
@@ -276,7 +283,29 @@ final class AccountSettingsViewController: UIViewController {
         }
     }
 
+    /// The new address, a code to it, then the change (#393). The list shows
+    /// the stored address once the server has it, and says so.
+    private func pushContactChange(_ kind: ContactKind) {
+        guard let contactChanger else { return }
+        let current = kind == .email ? details?.email : (details?.phone.isEmpty == false ? details?.phone : nil)
+        push(ChangeContactViewController(
+            kind: kind, current: current, changer: contactChanger, stepUp: stepUp
+        ) { [weak self] stored in
+            guard let self else { return }
+            reportReadOnly(Self.contactChangedNotice(kind, to: stored))
+            reloadAccount()
+            navigationController?.popToViewController(self, animated: true)
+        })
+    }
+
+    static func contactChangedNotice(_ kind: ContactKind, to address: String) -> String {
+        kind == .email
+            ? "Your email is now \(address). Use it the next time you sign in."
+            : "Your phone number is now \(address)."
+    }
+
     private func pushEmailEditor() {
+        if contactChanger != nil { return pushContactChange(.email) }
         push(EditFieldViewController(config: .init(
             title: "Email",
             initialValue: details?.email ?? "",
@@ -292,6 +321,7 @@ final class AccountSettingsViewController: UIViewController {
     }
 
     private func pushPhoneEditor() {
+        if contactChanger != nil { return pushContactChange(.phone) }
         push(EditFieldViewController(config: .init(
             title: "Phone",
             initialValue: details?.phone ?? "",
