@@ -15,6 +15,8 @@ final class PrivacySectionViewController: UIViewController {
         case followRequests
         case postWindow
         case commentAudience
+        case likeCounts
+        case downloads
         case loading
         case failed
         case hideLists
@@ -26,6 +28,7 @@ final class PrivacySectionViewController: UIViewController {
 
     private var planned: [String] {
         (viewModel.comments == nil ? ["Who can comment, mention and message you"] : ["Who can mention and message you"])
+            + (viewModel.sharing == nil ? ["Downloads of your posts and who sees your likes"] : [])
             + (makeLocationSharing == nil ? ["Location sharing"] : [])
             + ["Hide profile tabs from others"]
     }
@@ -186,6 +189,26 @@ final class PrivacySectionViewController: UIViewController {
                     self?.setCommentAudience(audience)
                 }
             }), displayed: .always)]
+        case .likeCounts, .downloads:
+            let isLikes = item == .likeCounts
+            content.text = isLikes ? "Show Like Counts" : "Allow Downloads"
+            content.secondaryText = isLikes
+                ? "Others see how many likes your posts get. You always do."
+                : "Others can save your photos and videos."
+            content.secondaryTextProperties.color = .secondaryLabel
+            content.image = UIImage(systemName: isLikes ? "heart" : "arrow.down.circle")
+            content.imageProperties.tintColor = .label
+            let toggle = UISwitch()
+            if let sharing = viewModel.postSharing {
+                toggle.isOn = isLikes ? sharing.showsLikeCounts : sharing.allowsDownloads
+            }
+            toggle.accessibilityLabel = content.text
+            toggle.addAction(UIAction { [weak self] action in
+                guard let self, let toggle = action.sender as? UISwitch, var next = viewModel.postSharing else { return }
+                if isLikes { next.showsLikeCounts = toggle.isOn } else { next.allowsDownloads = toggle.isOn }
+                setPostSharing(next)
+            }, for: .valueChanged)
+            cell.accessories = [.customView(configuration: .init(customView: toggle, placement: .trailing(displayed: .always)))]
         case .postWindow:
             content = .valueCell()
             content.text = "Posts Visible to Others"
@@ -244,6 +267,10 @@ final class PrivacySectionViewController: UIViewController {
             snapshot.appendItems([.commentAudience], toSection: .visibility)
             snapshot.reconfigureItems([.commentAudience])
         }
+        if viewModel.sharing != nil, viewModel.postSharing != nil {
+            snapshot.appendItems([.likeCounts, .downloads], toSection: .visibility)
+            snapshot.reconfigureItems([.likeCounts, .downloads])
+        }
         snapshot.appendItems(
             (makeListPrivacy == nil ? [] : [.hideLists])
                 + (makeActivityDiscovery == nil ? [] : [.activityDiscovery])
@@ -266,6 +293,21 @@ final class PrivacySectionViewController: UIViewController {
             } catch {
                 applySnapshot()
                 let alert = UIAlertController(title: nil, message: "Couldn't change who can comment. Try again.", preferredStyle: .alert)
+                alert.addAction(UIAlertAction(title: "OK", style: .default))
+                present(alert, animated: true)
+            }
+        }
+    }
+
+    private func setPostSharing(_ next: PostSharing) {
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await viewModel.setPostSharing(next)
+            } catch {
+                // Snap the switch back to what the server holds.
+                applySnapshot()
+                let alert = UIAlertController(title: nil, message: "Couldn't change this setting. Try again.", preferredStyle: .alert)
                 alert.addAction(UIAlertAction(title: "OK", style: .default))
                 present(alert, animated: true)
             }

@@ -321,7 +321,8 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                                 visibility: visibility,
                                                 requests: repository as? any FollowRequestsManaging,
                                                 windows: repository as? any PostWindowManaging,
-                                                comments: repository as? any CommentAudienceManaging
+                                                comments: repository as? any CommentAudienceManaging,
+                                                sharing: repository as? any PostSharingManaging
                                             ),
                                             makeListPrivacy: (repository as? any ListPrivacyManaging).map { lists in
                                                 { ListPrivacyViewController(manager: lists) }

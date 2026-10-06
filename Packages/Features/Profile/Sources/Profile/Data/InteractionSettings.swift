@@ -47,18 +47,25 @@ extension ProfileRepository: CommentAudienceManaging {
         return CommentAudience(view.interactionSettings.comments)
     }
 
+    public func setCommentAudience(_ audience: CommentAudience) async throws {
+        try await writeInteractionSettings(as: "setCommentAudience") { $0.comments = audience.proto }
+    }
+
     /// `SetInteractionSettings` takes the whole set, so the others are read
     /// back and sent unchanged. An unset audience is sent as Everyone, the
     /// default (the server refuses UNSPECIFIED).
-    public func setCommentAudience(_ audience: CommentAudience) async throws {
-        let profileID = try await resolveViewerProfileID(forWrite: "setCommentAudience")
+    func writeInteractionSettings(
+        as write: String, _ change: (inout Profile_V1_InteractionSettings) -> Void
+    ) async throws {
+        let profileID = try await resolveViewerProfileID(forWrite: write)
         let current = try await fetchProfileView(id: profileID).interactionSettings
         var settings = Profile_V1_InteractionSettings()
-        settings.comments = audience.proto
+        settings.comments = current.comments == .unspecified ? .everyone : current.comments
         settings.mentions = current.mentions == .unspecified ? .everyone : current.mentions
         settings.messages = current.messages == .unspecified ? .everyone : current.messages
         settings.allowDownloads = current.allowDownloads
         settings.showLikeCounts = current.showLikeCounts
+        change(&settings)
         // Remix, sound reuse and the limit are left out: absent keeps them.
         var request = Profile_V1_SetInteractionSettingsRequest()
         request.profileID = profileID.rawValue
@@ -66,6 +73,40 @@ extension ProfileRepository: CommentAudienceManaging {
         let response = await profileClient.setInteractionSettings(request: request, headers: [:])
         if let error = response.error {
             throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+        }
+    }
+}
+
+/// How others may use the active profile's posts (#397, backend #809): see
+/// how many likes they have, and download them. Enforced by the server: a
+/// post's view tells each reader whether counts are hidden from them and
+/// whether they may download it.
+public struct PostSharing: Equatable, Sendable {
+    public var showsLikeCounts: Bool
+    public var allowsDownloads: Bool
+
+    public init(showsLikeCounts: Bool, allowsDownloads: Bool) {
+        self.showsLikeCounts = showsLikeCounts
+        self.allowsDownloads = allowsDownloads
+    }
+}
+
+/// Settings → Privacy → Show Like Counts and Allow Downloads.
+public protocol PostSharingManaging: Sendable {
+    func postSharing() async throws -> PostSharing
+    func setPostSharing(_ sharing: PostSharing) async throws
+}
+
+extension ProfileRepository: PostSharingManaging {
+    public func postSharing() async throws -> PostSharing {
+        let settings = try await fetchProfileView(id: try await resolveViewerProfileID()).interactionSettings
+        return PostSharing(showsLikeCounts: settings.showLikeCounts, allowsDownloads: settings.allowDownloads)
+    }
+
+    public func setPostSharing(_ sharing: PostSharing) async throws {
+        try await writeInteractionSettings(as: "setPostSharing") {
+            $0.showLikeCounts = sharing.showsLikeCounts
+            $0.allowDownloads = sharing.allowsDownloads
         }
     }
 }
