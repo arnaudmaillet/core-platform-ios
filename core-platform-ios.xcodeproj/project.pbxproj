@@ -321,6 +321,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				APP_ATTEST_ENVIRONMENT = development;
 				CODE_SIGN_ENTITLEMENTS = "core-platform-ios.entitlements";
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = "core-platform-ios-device-debug.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 4ZZ7J5Z8ZX;
