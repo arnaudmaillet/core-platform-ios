@@ -21,19 +21,23 @@ public struct DeletedPost: Equatable, Sendable {
         deletedAt.map { $0.addingTimeInterval(TimeInterval(Self.restoreWindowDays) * 86_400) }
     }
 
-    /// Whole days left to restore it, never below zero.
+    /// Whole days left to restore it, never below zero: 30 on the day of
+    /// the deletion, one fewer at each local midnight, 0 ("Last day") on the
+    /// thirtieth day after it.
     ///
-    /// Counted at the UTC offset of `now`, not in the zone's own rules: the
-    /// window is 30 × 24 h, and across the end of daylight saving its last
-    /// instant falls at 23:30 on the day before, so a post deleted at 00:30
-    /// read "29 days left" at once (a test failed just after midnight).
+    /// Counted in CALENDAR days, in the zone's own rules, from the deletion's
+    /// day — not from `restorableUntil`. The window is 30 × 24 h, so a change
+    /// of clocks inside it moves its last instant by an hour: read as a day,
+    /// it fell on the day before (a post deleted at 00:30 read "29 days
+    /// left" at once), and pinning the count to one UTC offset instead made
+    /// it skip a number at the end of daylight saving (12, 10) and repeat
+    /// one at its start (22, 22). An hour either way at the very end of the
+    /// window is the price of a count that moves by one a day.
     public func daysLeft(now: Date = Date(), calendar: Calendar = .current) -> Int? {
-        guard let until = restorableUntil else { return nil }
-        var fixed = calendar
-        if let offset = TimeZone(secondsFromGMT: calendar.timeZone.secondsFromGMT(for: now)) {
-            fixed.timeZone = offset
-        }
-        let days = fixed.dateComponents([.day], from: fixed.startOfDay(for: now), to: fixed.startOfDay(for: until)).day ?? 0
+        guard let deletedAt,
+              let lastDay = calendar.date(byAdding: .day, value: Self.restoreWindowDays, to: calendar.startOfDay(for: deletedAt))
+        else { return nil }
+        let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: now), to: lastDay).day ?? 0
         return max(days, 0)
     }
 }
