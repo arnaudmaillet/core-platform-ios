@@ -56,6 +56,8 @@ public enum MockEdgePolicy {
         "/social_graph.v1.SocialGraphService/ListFollowers",
         "/social_graph.v1.SocialGraphService/ListFollowing",
         "/geo_discovery.v1.GeoDiscoveryService/QueryTile",
+        // For You's Discover, the same pool for guests and members (B3).
+        "/timeline.v1.TimelineService/GetDiscoveryFeed",
         "/search.v1.SearchService/Search",
         "/search.v1.SearchService/Suggest",
         "/media.v1.MediaService/ResolveDelivery",

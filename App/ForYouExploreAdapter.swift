@@ -21,10 +21,9 @@ import Search
 /// `GalleryPost` (media, aspect ratios, video URLs — everything a tile needs)
 /// down to the author and score a list of people actually reads.
 ///
-/// ⚠️ The corpus is the viewer's FOLLOWING timeline, because no discovery or
-/// trending endpoint exists — `dev/BACKEND_GAPS.md` §14. Everything downstream
-/// is honest about that: the grid is "Trending" among what was loaded, and the
-/// rail is "Creators", not "Discover".
+/// The corpus is Discover's pool (`GetDiscoveryFeed`), everyone's, ranked by
+/// the server; with no discovery wired it falls back to the viewer's
+/// FOLLOWING timeline.
 struct ForYouExploreAdapter: ExploreProviding {
     private let forYou: any ForYouProviding
 
@@ -36,7 +35,11 @@ struct ForYouExploreAdapter: ExploreProviding {
         // One page. The repository's page size is the feed's, which is already
         // more than a short list of people needs, and paging a section the
         // viewer cannot scroll past would be fetching for nobody.
-        try await forYou.firstPage().posts.prefix(limit).compactMap { post in
+        // Discover's pool when the backend serves one; the following
+        // timeline otherwise.
+        let discover = try await forYou.discoveryFirstPage()
+        let page = if let discover { discover } else { try await forYou.firstPage() }
+        return page.posts.prefix(limit).compactMap { post in
             // A post whose projection carried no author identifies nobody, so
             // there is no row it could become. `GalleryPost` carries the
             // author optionally because the profile gallery, already scoped to

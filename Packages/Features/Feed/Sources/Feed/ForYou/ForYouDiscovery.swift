@@ -13,13 +13,12 @@ import PostGrid
 /// on a curated surface. The *format* axis is shared — see
 /// `GalleryFilter.Format`.
 ///
-/// ⚠️ **Both read the same corpus today.** There is no recommendation or
-/// discovery RPC in the contracts — `timeline.v1` exposes only
-/// `GetFollowingFeed` and `GetAudioFeed` — so the tab is served by the
-/// following timeline and these are ORDERINGS of it, not separate feeds.
-/// `.recent` sorts by publication and `.trending` by reactions. See
-/// `dev/BACKEND_GAPS.md` §14; when a real discovery endpoint lands, this enum
-/// is the seam that picks between corpora and the ordering falls away.
+/// ⚠️ **Orderings of a LOADED corpus, applied only where Discover has no
+/// corpus of its own.** With `timeline.v1.GetDiscoveryFeed` wired
+/// (`ForYouProviding.discoveryFirstPage`), Discover keeps the SERVER's order
+/// and these apply to nothing; they remain for a provider that serves the
+/// following timeline alone (tests, a composition without discovery) —
+/// `.recent` by publication, `.trending` by reactions.
 ///
 /// ❌ **There was a third case, `.following` — the timeline's own order,
 /// unmodified — and it was REMOVED (2026-08-03), not lost.** The screen's tabs
@@ -67,9 +66,22 @@ public struct ForYouPage: Sendable, Equatable {
 }
 
 /// What the For You grid consumes; faked in view-model tests.
+///
+/// Two corpora: `firstPage`/`page(after:)` is the FOLLOWING timeline (the
+/// rows, the pushed Friends and Following lists); `discoveryFirstPage`/
+/// `discoveryPage(after:)` is DISCOVER's own (`GetDiscoveryFeed`). A provider
+/// with no discovery answers nil, and Discover is then the timeline — what
+/// it was before the backend served one.
 public protocol ForYouProviding: Sendable {
     func firstPage() async throws -> ForYouPage
     func page(after token: String) async throws -> ForYouPage
+    func discoveryFirstPage() async throws -> ForYouPage?
+    func discoveryPage(after token: String) async throws -> ForYouPage?
+}
+
+public extension ForYouProviding {
+    func discoveryFirstPage() async throws -> ForYouPage? { nil }
+    func discoveryPage(after token: String) async throws -> ForYouPage? { nil }
 }
 
 /// Serves the For You grid off the existing timeline read path.
@@ -85,13 +97,28 @@ public actor ForYouRepository: ForYouProviding {
     /// Optional so a composition root without one still gets a working grid,
     /// with its counters hidden, which is what every card did before this.
     private let counterClient: (any Counter_V1_CounterServiceClientInterface)?
+    /// Discover's own corpus (`DiscoveryFeedRepository`). Nil: Discover is
+    /// `feed`.
+    private let discovery: (any FeedProviding)?
 
     public init(
         feed: any FeedProviding,
-        counterClient: (any Counter_V1_CounterServiceClientInterface)? = nil
+        counterClient: (any Counter_V1_CounterServiceClientInterface)? = nil,
+        discovery: (any FeedProviding)? = nil
     ) {
         self.feed = feed
         self.counterClient = counterClient
+        self.discovery = discovery
+    }
+
+    public func discoveryFirstPage() async throws -> ForYouPage? {
+        guard let discovery else { return nil }
+        return await withCounters(Self.map(try await discovery.loadFirstPage()))
+    }
+
+    public func discoveryPage(after token: String) async throws -> ForYouPage? {
+        guard let discovery else { return nil }
+        return await withCounters(Self.map(try await discovery.loadPage(afterToken: token)))
     }
 
     public func firstPage() async throws -> ForYouPage {

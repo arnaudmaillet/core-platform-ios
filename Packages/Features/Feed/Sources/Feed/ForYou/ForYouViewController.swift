@@ -98,10 +98,9 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     private let reporting: (any ContentReporting)?
     /// Unfollows a row's author. Nil withholds that row for the same reason.
     ///
-    /// ⚠️ Both tabs here are served by `timeline.v1.GetFollowingFeed` — there
-    /// is no discovery corpus (see `DiscoverySource`) — so every author on this
-    /// screen is one the viewer follows, which is what makes UNFOLLOW the
-    /// honest verb rather than a toggle that has to ask first.
+    /// ⚠️ The rows are `timeline.v1.GetFollowingFeed`'s, but Discover reads
+    /// its own pool (`GetDiscoveryFeed`) — anyone's posts — so Unfollow is
+    /// offered only where `ForYouViewModel.isFollowed` says so.
     private let socialGraph: (any SocialGraphWriting)?
     /// The balance and the sheet behind it, for the header every screen this
     /// one pushes wears (`PushedScreenHeader`). This screen's OWN badge is the
@@ -972,7 +971,8 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         for context: ForYouGridPage.AuthorMenuContext
     ) -> [PostCardMenuAction] {
         var actions: [PostCardMenuAction] = []
-        if socialGraph != nil {
+        // Discover is everyone: Unfollow only for an author the viewer follows.
+        if socialGraph != nil, viewModel.isFollowed(context.authorID) {
             let handle = context.post.authorHandle ?? ""
             actions.append(.unfollow { [weak self] in
                 // The handle is not in the ROW (the card names its author right
