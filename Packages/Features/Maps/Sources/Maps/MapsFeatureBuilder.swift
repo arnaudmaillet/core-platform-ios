@@ -228,11 +228,12 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
             // built by the Feed feature because the grid, the flight card and
             // the retarget wiring are all its internals. `mapReturn` rides
             // through so the page's own dismissal can fly home to the marker.
-            makeClusterGallery: { postIDs, place, feed, mapReturn, markerClose in
+            makeClusterGallery: { postIDs, place, countryCode, feed, mapReturn, markerClose in
                 feedFeature().makeClusterGallery(
                     postIDs: postIDs,
                     title: place.galleryTitle,
                     rank: place.rankBadge,
+                    identity: Self.placeIdentity(of: place, countryCode: countryCode),
                     // The header's follow toggle, bound to THIS place's
                     // identity in the map's own store — which is also what
                     // the Favorites sub-filter reads, so the button and the
@@ -254,5 +255,33 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
             isMember: isMember,
             locator: countryAccess == nil ? nil : locator
         )
+    }
+}
+
+extension MapsFeatureBuilder {
+    /// What a place's page wears beside its name: its country's round flag,
+    /// LARGE (a city wears its country's, as its marker's border does), and
+    /// its subtitle — a country's continent, a city's country; neither for a
+    /// place in no country (at sea) — and its share link, for its QR code.
+    static func placeIdentity(of place: MapPlace, countryCode: String) -> PlaceIdentity? {
+        let country = CountryAtlas.shared.country(code: countryCode)
+        return PlaceIdentity(
+            flag: country.flatMap { FlagPalette.largeRoundFlag(for: $0.code) ?? FlagPalette.image(for: $0.code) },
+            subtitle: country.map { place.kind == .country ? $0.continent : $0.name },
+            shareURL: shareURL(of: place)
+        )
+    }
+
+    /// A place's public web address: `https://wynn.cn/place/<id>`.
+    ///
+    /// Synthesized client-side from the place's identity, as a profile's is
+    /// from its handle (`ProfileShareLink`, same host): no service returns
+    /// one, and the place identity itself is mock-only today (`MapPlace`).
+    static func shareURL(of place: MapPlace) -> URL? {
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = "wynn.cn"
+        components.path = "/place/" + place.id
+        return components.url
     }
 }

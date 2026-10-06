@@ -710,6 +710,18 @@ public final class HeroBannerPictureView: UIView {
     }
     private var settledFade: HeroBannerFade.Geometry?
 
+    /// Whether the picture blurs down its run-out. Off, the picture stays
+    /// sharp to its foot and only the paired ramp fades it — a profile's
+    /// band (user, 5 October 2026). The levels are still baked: the type's
+    /// ink is read off them (`groundPixels`), from the sharpest.
+    public var showsBlur = true {
+        didSet {
+            guard showsBlur != oldValue else { return }
+            composed = nil
+            composeBlur()
+        }
+    }
+
     /// Where the picture stands, slid by the parallax, in this view's
     /// coordinates at rest.
     public var pictureFrame: CGRect {
@@ -782,7 +794,8 @@ public final class HeroBannerPictureView: UIView {
     public func groundPixels(behind rect: CGRect) -> [SIMD3<Float>]? {
         guard baked != nil, let levels = bake?.levels, let fade else { return nil }
         let spans = HeroBannerFade.levelSpans(fade)
-        let shown = levels.indices.last { $0 < spans.count && spans[$0].full <= rect.minY } ?? 0
+        // No blur shown: the sharpest level is the picture behind the type.
+        let shown = showsBlur ? levels.indices.last { $0 < spans.count && spans[$0].full <= rect.minY } ?? 0 : 0
         guard let image = levels[shown].cgImage,
               let space = CGColorSpace(name: CGColorSpace.sRGB) else { return nil }
         let frame = pictureFrame.offsetBy(dx: 0, dy: -pictureShift)
@@ -927,6 +940,7 @@ public final class HeroBannerPictureView: UIView {
         #if DEBUG
         if Self.comparesMaterial { return hideBlur() }
         #endif
+        guard showsBlur else { return hideBlur() }
         let spans = shownSpans
         guard let bake, let fade, let image = sharp.image, let first = spans.first,
               image.size.width > 0, image.size.height > 0

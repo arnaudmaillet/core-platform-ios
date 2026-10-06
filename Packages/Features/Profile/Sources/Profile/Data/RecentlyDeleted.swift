@@ -22,9 +22,18 @@ public struct DeletedPost: Equatable, Sendable {
     }
 
     /// Whole days left to restore it, never below zero.
+    ///
+    /// Counted at the UTC offset of `now`, not in the zone's own rules: the
+    /// window is 30 × 24 h, and across the end of daylight saving its last
+    /// instant falls at 23:30 on the day before, so a post deleted at 00:30
+    /// read "29 days left" at once (a test failed just after midnight).
     public func daysLeft(now: Date = Date(), calendar: Calendar = .current) -> Int? {
         guard let until = restorableUntil else { return nil }
-        let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: now), to: calendar.startOfDay(for: until)).day ?? 0
+        var fixed = calendar
+        if let offset = TimeZone(secondsFromGMT: calendar.timeZone.secondsFromGMT(for: now)) {
+            fixed.timeZone = offset
+        }
+        let days = fixed.dateComponents([.day], from: fixed.startOfDay(for: now), to: fixed.startOfDay(for: until)).day ?? 0
         return max(days, 0)
     }
 }

@@ -114,6 +114,14 @@ enum FlagPalette {
         UIImage(named: code.uppercased(), in: .module, compatibleWith: nil)
     }
 
+    /// The round flag of `code` drawn LARGE (96pt, the unlock offer's
+    /// header), or nil. A separate image set, so the map — which holds every
+    /// country's flag decoded at world zoom — never decodes this one; read it
+    /// for one flag on screen, not for a layer of them.
+    static func largeRoundFlag(for code: String) -> UIImage? {
+        UIImage(named: code.uppercased() + "-large", in: .module, compatibleWith: nil)
+    }
+
     /// The regional-indicator flag ("🇫🇷").
     static func emoji(for code: String) -> String {
         code.uppercased().unicodeScalars.compactMap { UnicodeScalar(127_397 + $0.value) }

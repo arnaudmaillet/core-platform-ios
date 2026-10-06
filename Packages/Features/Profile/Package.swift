@@ -21,7 +21,8 @@ let package = Package(
         .package(path: "../../Core/DesignSystem"),
         .package(path: "../../Core/EmoteKit"),
         .package(path: "../../Core/MediaPlayback"),
-        .package(path: "../../Core/PostGrid")
+        .package(path: "../../Core/PostGrid"),
+        .package(path: "../../Core/ShareSheet")
     ],
     targets: [
         .target(
@@ -48,13 +49,17 @@ let package = Package(
                 // resolves a module the whole graph can see, and only a clean
                 // build asks whether THIS target was entitled to it.
                 "CoreNetworking",
-                "PostGrid"
+                "PostGrid",
+                // The share sheet the QR bubble and "..." → Share open — shared
+                // with the place page since 5 October 2026.
+                "ShareSheet"
             ]
         ),
         .testTarget(
             name: "ProfileTests",
             dependencies: [
                 "Profile",
+                "ShareSheet",
                 "CoreNavigation",
                 "CoreStorage",
                 // The identity-ink suite reads `HeroInk`'s constants directly.

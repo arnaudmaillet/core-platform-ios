@@ -8,22 +8,31 @@ import CoreNavigation
 /// ```
 ///  ┌──────────────────────────────────────┐
 ///  │ ▔▔                                   │
-///  │               🇪🇸                     │
-///  │             Spain                    │
-///  │             Europe                   │
-///  │    #4          ♥ 12.4K       86      │
-///  │   Rank          Likes       Posts    │
+///  │ ╭────╮ Spain  Europe                │
+///  │ │ 🇪🇸 │  12K    86                   │
+///  │ ╰──#4╯ Likes  Posts   ·      ·      │
 ///  │  Unlock Spain to see its posts on    │
 ///  │  your map.                           │
-///  │ [ ◆ Unlock · 50 ]                    │
-///  │         You have 100 gems            │
+///  │  You have 100 gems                   │
+///  │(        ◆ Unlock · 50               )│  ← the native toolbar
 ///  └──────────────────────────────────────┘
 /// ```
 ///
-/// One detent, the content's own height; the map stays visible and the
-/// country stays lifted above the sheet. Gems only — points (likes) never buy
-/// a country. Short of gems, the button is disabled and the line under it
-/// says how many are missing.
+/// The header is the place identity row (`PlaceIdentityView`, DesignSystem),
+/// the place page's too: the country's ROUND flag where a profile's avatar
+/// stands — the map's own artwork, drawn large (`FlagPalette.largeRoundFlag`)
+/// — and beside it the name and its continent over Likes and Posts. The RANK
+/// rides the flag as a bubble.
+///
+/// One detent, the content's own height and the toolbar's; the map stays
+/// visible and the country stays lifted above the sheet. Gems only — points
+/// (likes) never buy a country. Short of gems, the button is disabled and the
+/// line above it says how many are missing.
+///
+/// **THE UNLOCK IS THE SHEET'S NATIVE TOOLBAR**, as "Use this sound" is the
+/// sound sheet's: the screen is presented as the root of a navigation
+/// controller that hides its bar and shows its toolbar (`wrappedInSheet`),
+/// and the prominent capsule fills the toolbar.
 final class CountryUnlockSheetViewController: UIViewController {
     /// The country was unlocked; the sheet is on its way out.
     var onUnlocked: ((String) -> Void)?
@@ -39,28 +48,54 @@ final class CountryUnlockSheetViewController: UIViewController {
     private let country: CountryAtlas.Country
     private let access: any CountryAccess
     private let stack = UIStackView()
-    private let unlockButton = UIButton(configuration: .prominentGlass())
+    /// The unlock — the toolbar's one item.
+    let unlockButton = UIButton(configuration: .prominentGlass())
     private let balanceLabel = UILabel()
     private var closeFlight = OfferCloseFlight()
     private static let detent = UISheetPresentationController.Detent.Identifier("country.unlock")
-    /// The sheet's height above the bottom safe area — measured when the
-    /// view loads; the map frames the country above it.
-    private(set) var contentHeight: CGFloat = 380
+    /// The content's height — measured when the view loads.
+    private(set) var contentHeight: CGFloat = 330
+    /// The toolbar's band above the home indicator: the bar's own estimate
+    /// until the sheet is on screen, then what its safe area says.
+    private(set) var toolbarBand: CGFloat = 52
+    /// The sheet's height above the bottom safe area: the content and the
+    /// toolbar. The map frames the country above it.
+    ///
+    /// ⚠️ A custom detent's height EXCLUDES the bottom safe area — the sheet
+    /// adds it back (the wallet sheet's rule).
+    var sheetHeight: CGFloat { contentHeight + toolbarBand }
 
     init(country: CountryAtlas.Country, access: any CountryAccess) {
         self.country = country
         self.access = access
         super.init(nibName: nil, bundle: nil)
-        modalPresentationStyle = .pageSheet
-        if let sheet = sheetPresentationController {
+    }
+
+    /// The sheet as it is presented: this screen as the root of a navigation
+    /// controller that hides its bar and shows its TOOLBAR (the unlock), set
+    /// up as a page sheet of one detent.
+    ///
+    /// ⚠️ The sheet's configuration lives on the NAVIGATION controller's
+    /// presentation — the one presented.
+    func wrappedInSheet() -> UINavigationController {
+        let navigation = UINavigationController(rootViewController: self)
+        navigation.setNavigationBarHidden(true, animated: false)
+        navigation.setToolbarHidden(false, animated: false)
+        navigation.modalPresentationStyle = .pageSheet
+        if let sheet = navigation.sheetPresentationController {
             sheet.detents = [.custom(identifier: Self.detent) { [weak self] context in
-                min(self?.contentHeight ?? 380, context.maximumDetentValue)
+                min(self?.sheetHeight ?? 380, context.maximumDetentValue)
             }]
             sheet.prefersGrabberVisible = true
             // The map behind stays live: the lifted country is what is sold.
             sheet.largestUndimmedDetentIdentifier = Self.detent
         }
+        return navigation
     }
+
+    /// Whether the sheet is on its way out — the navigation controller is
+    /// what is presented, and so what is dismissed.
+    var isLeaving: Bool { (navigationController ?? self).isBeingDismissed }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -71,66 +106,32 @@ final class CountryUnlockSheetViewController: UIViewController {
         view.backgroundColor = .clear
         let standing = access.standing(of: country.code)
 
-        let flag = UILabel()
-        flag.text = country.flag
-        flag.font = .systemFont(ofSize: 56) // a picture, not text (#482)
-        let name = UILabel()
-        name.text = country.name
-        name.font = UIFont.scaledFont(forTextStyle: .title2, weight: .bold)
-        name.adjustsFontForContentSizeCategory = true
-        let continent = UILabel()
-        continent.text = country.continent
-        continent.font = .appFont(forTextStyle: .subheadline)
-        continent.textColor = .secondaryLabel
-
-        let metrics = UIStackView(arrangedSubviews: [
-            Self.metric(value: standing.map { "#\($0.rank)" } ?? "—", caption: "Rank"),
-            Self.metric(value: standing.map { CountryStanding.compact($0.likes) } ?? "—",
-                        caption: "Likes", heart: true),
-            Self.metric(value: standing.map { "\($0.posts)" } ?? "—", caption: "Posts"),
-        ])
-        metrics.distribution = .fillEqually
+        let header = Self.header(country: country, standing: standing)
 
         let pitch = UILabel()
         pitch.text = "Unlock \(country.name) to see its posts on your map."
         pitch.font = .appFont(forTextStyle: .subheadline)
         pitch.textColor = .secondaryLabel
-        pitch.textAlignment = .center
         pitch.numberOfLines = 0
 
         let price = standing?.price ?? CountryStanding.price(forRank: .max)
-        var configuration = unlockButton.configuration
-        configuration?.image = UIImage(systemName: "diamond.fill")
-        configuration?.imagePadding = Spacing.sm
-        configuration?.title = "Unlock · \(price)"
-        configuration?.cornerStyle = .capsule
-        unlockButton.configuration = configuration
-        unlockButton.tintColor = .systemBlue
-        unlockButton.addAction(UIAction { [weak self] _ in
-            guard let self else { return }
-            MemberGates.perform(.unlockCountry, from: self) { [weak self] in self?.unlock() }
-        }, for: .primaryActionTriggered)
-        unlockButton.heightAnchor.constraint(equalToConstant: 50).isActive = true
+        configureUnlockButton(price: price)
+        let unlockItem = UIBarButtonItem(customView: unlockButton)
+        // Its own prominent capsule is its background: no bubble in a bubble.
+        unlockItem.hidesSharedBackground = true
+        toolbarItems = [unlockItem]
 
         balanceLabel.font = .appFont(forTextStyle: .footnote)
         balanceLabel.textColor = .secondaryLabel
-        balanceLabel.textAlignment = .center
         refreshBalance(price: price)
 
         stack.axis = .vertical
         stack.alignment = .fill
         stack.spacing = Spacing.xs
-        for view in [flag, name, continent] {
-            (view as? UILabel)?.textAlignment = .center
-            stack.addArrangedSubview(view)
-        }
-        stack.setCustomSpacing(Spacing.xl, after: continent)
-        stack.addArrangedSubview(metrics)
-        stack.setCustomSpacing(Spacing.lg, after: metrics)
+        stack.addArrangedSubview(header)
+        stack.setCustomSpacing(Spacing.lg, after: header)
         stack.addArrangedSubview(pitch)
-        stack.setCustomSpacing(Spacing.lg, after: pitch)
-        stack.addArrangedSubview(unlockButton)
-        stack.setCustomSpacing(Spacing.sm, after: unlockButton)
+        stack.setCustomSpacing(Spacing.sm, after: pitch)
         stack.addArrangedSubview(balanceLabel)
         stack.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(stack)
@@ -142,9 +143,23 @@ final class CountryUnlockSheetViewController: UIViewController {
         measure()
     }
 
+    override func viewIsAppearing(_ animated: Bool) {
+        super.viewIsAppearing(animated)
+        // On screen: the toolbar's real band, read off the safe area — the
+        // bar's own estimate answered 48 where the sheet gave 52 (the sound
+        // sheet's measure). Re-ask the detent only when it moved.
+        guard let window = view.window else { return }
+        let band = max(0, view.safeAreaInsets.bottom - window.safeAreaInsets.bottom)
+        guard band > 0, band < 120, abs(band - toolbarBand) > 0.5 else { return }
+        toolbarBand = band
+        navigationController?.sheetPresentationController?.animateChanges {
+            navigationController?.sheetPresentationController?.invalidateDetents()
+        }
+    }
+
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        guard isBeingDismissed else { return }
+        guard isLeaving else { return }
         // ⚠️ Not `viewDidDisappear`: the map's flight back waits for nothing
         // the sheet does on its way down — see `OfferCloseFlight`.
         let coordinator = transitionCoordinator
@@ -193,14 +208,16 @@ final class CountryUnlockSheetViewController: UIViewController {
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
-        if isBeingDismissed { onDismissed?() }
+        if isLeaving { onDismissed?() }
     }
 
-    /// The detent is the content: measured once, before the sheet rises.
-    ///
-    /// ⚠️ A custom detent's height EXCLUDES the bottom safe area — the sheet
-    /// adds it back (the wallet sheet's rule).
+    /// The detent is the content and the toolbar: measured once, before the
+    /// sheet rises — the toolbar's band as the bar estimates it.
     private func measure() {
+        if let toolbar = navigationController?.toolbar {
+            let estimate = toolbar.sizeThatFits(CGSize(width: view.bounds.width, height: 0)).height
+            if estimate > 0 { toolbarBand = estimate }
+        }
         let width = presentingViewController?.view.window?.bounds.width ?? UIScreen.main.bounds.width
         let size = stack.systemLayoutSizeFitting(
             CGSize(width: width - 2 * Spacing.lg, height: UIView.layoutFittingCompressedSize.height),
@@ -208,6 +225,46 @@ final class CountryUnlockSheetViewController: UIViewController {
         )
         contentHeight = (Spacing.xl + size.height + Spacing.lg).rounded()
     }
+
+    /// The prominent blue capsule, as tall as a bar's bubbles, filling the
+    /// toolbar.
+    ///
+    /// **IT FILLS THE BAR BY AUTO LAYOUT, NOT BY ARITHMETIC** — the sound
+    /// sheet's "Use this sound": there is no flexible-width bar item, and a
+    /// `.prominent` title item's `width` is ignored on iOS 27. A custom view
+    /// that hugs nothing and asks, at the lowest priority, for more room than
+    /// any bar has is stretched by the bar to exactly what it leaves.
+    private func configureUnlockButton(price: Int) {
+        var configuration = UIButton.Configuration.prominentGlass()
+        configuration.image = UIImage(systemName: "diamond.fill")
+        configuration.imagePadding = Spacing.sm
+        configuration.title = "Unlock · \(price)"
+        configuration.cornerStyle = .capsule
+        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
+            var attributes = attributes
+            attributes.font = UIFont.scaledFont(forTextStyle: .body, weight: .semibold)
+            return attributes
+        }
+        unlockButton.configuration = configuration
+        unlockButton.tintColor = .systemBlue
+        unlockButton.accessibilityIdentifier = "country.unlock.button"
+        unlockButton.addAction(UIAction { [weak self] _ in
+            guard let self else { return }
+            MemberGates.perform(.unlockCountry, from: self) { [weak self] in self?.unlock() }
+        }, for: .primaryActionTriggered)
+        unlockButton.setContentHuggingPriority(.init(1), for: .horizontal)
+        let fill = unlockButton.widthAnchor.constraint(equalToConstant: 10_000)
+        fill.priority = .init(2)
+        // 999, never required: the bar's first pass pins its item wrapper to
+        // the raw intrinsic size.
+        let height = unlockButton.heightAnchor.constraint(equalToConstant: Self.barBubbleHeight)
+        height.priority = .init(999)
+        NSLayoutConstraint.activate([fill, height])
+    }
+
+    /// A bar's glass bubbles' height: 48 on iOS 27 (the sound sheet's
+    /// measure) — at 44 a capsule stood visibly shorter.
+    static let barBubbleHeight: CGFloat = 48
 
     private func refreshBalance(price: Int) {
         let gems = access.gems
@@ -237,39 +294,23 @@ final class CountryUnlockSheetViewController: UIViewController {
         }
     }
 
-    private static func metric(value: String, caption: String, heart: Bool = false) -> UIView {
-        let valueLabel = UILabel()
-        valueLabel.font = .scaledMonospacedDigitSystemFont(
-            ofSize: 20, weight: .bold, relativeTo: .title3, maximumPointSize: 28
+    // MARK: - Header
+
+    /// The place identity row (`PlaceIdentityView`, shared with the place
+    /// page): the country's round flag at its LARGE size, the rank in a
+    /// bubble over it, the name and its continent, Likes and Posts.
+    static func header(country: CountryAtlas.Country, standing: CountryStanding?) -> PlaceIdentityView {
+        PlaceIdentityView(
+            // The round flag the map wears (an emoji drawn and trimmed for a
+            // code the catalog lacks — never an atlas country).
+            flag: FlagPalette.largeRoundFlag(for: country.code) ?? FlagPalette.image(for: country.code),
+            name: country.name,
+            subtitle: country.continent,
+            counters: [
+                .init(value: standing.map { CountryStanding.compact($0.likes) } ?? "—", caption: "Likes"),
+                .init(value: standing.map { "\($0.posts)" } ?? "—", caption: standing?.posts == 1 ? "Post" : "Posts"),
+            ],
+            rank: standing.map { "#\($0.rank)" } ?? "#—"
         )
-        valueLabel.adjustsFontForContentSizeCategory = true
-        valueLabel.textAlignment = .center
-        valueLabel.text = value
-        var valueView: UIView = valueLabel
-        if heart {
-            // ⚠️ AN IMAGE VIEW, NOT A TEXT ATTACHMENT: the sheet's glass draws
-            // its labels vibrant, attachments included, and the red heart
-            // came out black.
-            let icon = UIImageView(image: UIImage(systemName: "heart.fill")?
-                .applyingSymbolConfiguration(.init(pointSize: 15, weight: .bold)))
-            icon.tintColor = .systemRed
-            icon.contentMode = .center
-            let row = UIStackView(arrangedSubviews: [icon, valueLabel])
-            row.spacing = 4
-            row.alignment = .center
-            let centred = UIStackView(arrangedSubviews: [row])
-            centred.axis = .vertical
-            centred.alignment = .center
-            valueView = centred
-        }
-        let captionLabel = UILabel()
-        captionLabel.text = caption
-        captionLabel.font = .appFont(forTextStyle: .caption1)
-        captionLabel.textColor = .secondaryLabel
-        captionLabel.textAlignment = .center
-        let column = UIStackView(arrangedSubviews: [valueView, captionLabel])
-        column.axis = .vertical
-        column.spacing = 2
-        return column
     }
 }

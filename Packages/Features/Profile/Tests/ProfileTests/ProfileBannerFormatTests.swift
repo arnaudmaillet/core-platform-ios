@@ -114,18 +114,13 @@ struct ProfileBannerFormatTests {
         #expect(abs(fade.blurFull - foot) < 0.5)
         #expect(abs(fade.rampEnd - foot) < 0.5)
         #expect(abs(avatar.minY - fade.blurStart - HeroBannerFade.blurLead) < 0.5)
-        if format == .poster {
-            // Shouldered: the page's tone eased in just above the container,
-            // already half there at its top — the blur untouched.
-            #expect(abs((fade.rampShoulder ?? .nan) - fade.blurStart) < 0.5)
-            #expect(abs(fade.rampStart - (fade.blurStart - HeroBannerFade.shoulderRise)) < 0.5)
-        } else {
-            #expect(fade.rampShoulder == nil)
-            #expect(fade.rampStart >= fade.blurStart - 0.5)
-        }
-        // A band's blur climbs the ladder of levels — the softer curve its
-        // short container needs; a poster keeps the sigma curve.
-        #expect(fade.blurCurve == (format == .band ? .ladder : .sigma))
+        // Shouldered on both: the ramp's tone eased in just above the
+        // container, already half there at its top — on a band (black, and
+        // no blur since 5 October 2026) it is all that closes the picture's
+        // spread under the name.
+        #expect(abs((fade.rampShoulder ?? .nan) - fade.blurStart) < 0.5)
+        #expect(abs(fade.rampStart - (fade.blurStart - HeroBannerFade.shoulderRise)) < 0.5)
+        #expect(header.debugBannerShowsBlur == (format == .poster))
         // The blur is next to nothing under the name: sigma under 3.5pt.
         let spans = HeroBannerFade.levelSpans(fade)
         try #require(spans.count > 2)
@@ -137,11 +132,13 @@ struct ProfileBannerFormatTests {
     /// the page is whole behind the tray's foot. Under the name the page's
     /// tone is already half there (the shoulder), and the counters are
     /// still on the picture.
-    @Test func aPosterRunsToTheTraysFoot() throws {
+    @Test func aPosterRunsPastTheTraysFoot() throws {
         let header = header(format: .poster)
         let banner = header.debugBannerFrame
         let tray = header.debugTrayFrame
-        #expect(abs(banner.maxY - tray.maxY) < 0.5)
+        // Since 5 October 2026 the picture runs to 80% of the screen and the
+        // block starts at 40%, over it: the tray stands on the picture too.
+        #expect(banner.maxY > tray.maxY)
         let fade = try #require(header.debugBannerFade)
         #expect(abs(fade.rampEnd - banner.maxY) < 0.5)
         let underName = HeroBannerFade.rampAlpha(at: header.debugNameFrame.minY, geometry: fade)
@@ -152,13 +149,14 @@ struct ProfileBannerFormatTests {
         #expect(alphas.last == 1)
     }
 
-    /// On a band the name and the handle stand on the picture — the page's
-    /// tone still thin behind them — and the counters on the page, nearly
-    /// whole behind them.
+    /// On a band the name and the handle stand on the picture — darkened by
+    /// the black ramp's shoulder behind them — and the counters on the page,
+    /// nearly whole behind them.
     @Test func onABandTheNameStandsOnThePictureAndTheCountersOnThePage() throws {
         let header = header(format: .band)
         let fade = try #require(header.debugBannerFade)
-        #expect(HeroBannerFade.rampAlpha(at: header.debugNameFrame.maxY, geometry: fade) < 0.2)
+        #expect(HeroBannerFade.rampAlpha(at: header.debugNameFrame.minY, geometry: fade)
+                >= HeroBannerFade.shoulderAlpha - 0.001)
         #expect(HeroBannerFade.rampAlpha(at: header.debugStatsFrame.minY, geometry: fade) > 0.7)
         #expect(header.debugNameFrame.minY >= header.debugBannerFrame.minY)
     }
@@ -201,12 +199,13 @@ struct ProfileBannerFormatTests {
     }
 
     /// A band is the shorter header, by exactly the poster's clearance: the
-    /// band's column starts on the chrome, the poster's a clearance below it.
+    /// band's column starts on the chrome, the poster's a clearance below it
+    /// — the stage that puts a poster's foot at 80% of the screen.
     @Test func aBandIsShorterThanAPoster() {
         let band = header(format: .band)
         let poster = header(format: .poster)
         #expect(band.bounds.height < poster.bounds.height)
-        #expect(abs((poster.bounds.height - band.bounds.height) - (200 - 12)) < 1)
+        #expect(abs((poster.bounds.height - band.bounds.height) - (poster.posterClearance - 12)) < 1)
     }
 
     /// A profile with no picture has no banner at all: the identity block

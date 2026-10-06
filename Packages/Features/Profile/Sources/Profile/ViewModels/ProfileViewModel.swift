@@ -4,6 +4,7 @@ import CoreStorage
 import Foundation
 import MapsInterface
 import PostGrid
+import ShareSheet
 
 @MainActor
 public final class ProfileViewModel {
@@ -351,13 +352,9 @@ public final class ProfileViewModel {
     /// Everything the share sheet renders, resolved together so the QR code,
     /// the card, and the system share sheet's link preview cannot disagree
     /// about who is being shared.
-    public nonisolated struct ShareCard: Equatable, Sendable {
-        public let displayName: String
-        /// Includes the leading `@`.
-        public let handle: String
-        public let avatarURL: URL?
-        public let url: URL
-    }
+    /// The share payload — the shared sheet's card (`ShareSheet.ShareCard`):
+    /// display name, handle (with its leading `@`), avatar, link.
+    public typealias ShareCard = ShareSheet.ShareCard
 
     /// The share payload, once the profile has loaded. `nil` before then —
     /// every share affordance is gated on it rather than rendering a card

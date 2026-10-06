@@ -278,6 +278,7 @@ public protocol FeedFeatureBuilding: ConversationThreadScreenBuilding, TextPostS
         postIDs: [PostID],
         title: String,
         rank: PlaceRankBadge?,
+        identity: PlaceIdentity?,
         following: ClusterGalleryFollowing?,
         feed: UIViewController,
         mapReturn: @escaping (@escaping () -> UIImage?) -> (any ZoomTransitionSource)?,
@@ -306,8 +307,26 @@ public struct PlaceRankBadge: Equatable, Sendable {
     public var positionText: String { "#\(position)" }
 }
 
+/// What the place page's identity row wears beside the name: the place's
+/// round flag (a city's is its country's) and its subtitle (a country's
+/// continent, a city's country). Resolved by the map, which owns the flags
+/// and the atlas; nil when the place stands in no country (at sea).
+public struct PlaceIdentity {
+    public let flag: UIImage?
+    public let subtitle: String?
+    /// The place's public web address — what its QR code carries. Nil: the
+    /// page draws no QR button.
+    public let shareURL: URL?
+
+    public init(flag: UIImage?, subtitle: String?, shareURL: URL? = nil) {
+        self.flag = flag
+        self.subtitle = subtitle
+        self.shareURL = shareURL
+    }
+}
+
 extension FeedFeatureBuilding {
-    /// A place with no rank to show.
+    /// A place with no rank and no flag to show.
     public func makeClusterGallery(
         postIDs: [PostID],
         title: String,
@@ -316,7 +335,7 @@ extension FeedFeatureBuilding {
         mapReturn: @escaping (@escaping () -> UIImage?) -> (any ZoomTransitionSource)?
     ) -> UIViewController {
         makeClusterGallery(
-            postIDs: postIDs, title: title, rank: nil, following: following,
+            postIDs: postIDs, title: title, rank: nil, identity: nil, following: following,
             feed: feed, mapReturn: mapReturn, markerClose: nil
         )
     }

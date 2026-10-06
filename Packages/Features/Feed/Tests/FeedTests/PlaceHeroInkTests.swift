@@ -133,8 +133,8 @@ struct PlaceHeroInkTests {
         for picture in [Picture.white, .black] {
             let profile = place(picture, style: style)
             #expect(profile.debugHeroInkTones.name == pageSide, "\(picture)")
-            #expect(profile.debugHeroInkTones.rank == pageSide, "\(picture)")
             #expect(profile.debugHeroInkTones.likes == pageSide, "\(picture)")
+            #expect(profile.debugHeroInkTones.posts == pageSide, "\(picture)")
             #expect(profile.debugHeroNameInk == pageSide.primary, "\(picture)")
         }
     }
@@ -149,14 +149,14 @@ struct PlaceHeroInkTests {
         #expect(name.1.median - name.1.min > 1, "name \(name.1)")
     }
 
-    /// The blur and the page's tone climbing from just above the name — the
-    /// identity's top — all the way down to the banner's foot, under the
+    /// The blur and the page's tone climbing from just above the identity
+    /// row — its flag's top, as a profile's avatar's — all the way down to the banner's foot, under the
     /// counters too: the whole identity on the picture, as on a profile's
     /// poster, half the page already behind it and whole at the foot.
     @Test func theFadeRunsTheIdentityOnThePicture() throws {
         let profile = place(.grey, style: .light)
         let fade = try #require(profile.debugBannerFade)
-        let name = profile.debugNameFrame
+        let name = profile.debugIdentityFrame
         let metrics = profile.debugMetricsFrame
         let box = profile.debugBannerBoxFrame
         #expect(abs(fade.blurFull - box.maxY) < 0.5)

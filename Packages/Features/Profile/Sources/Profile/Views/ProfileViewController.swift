@@ -7,6 +7,7 @@ import MapsInterface
 import MediaPlayback
 import DesignSystem
 import PostGrid
+import ShareSheet
 import UIKit
 
 final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
@@ -2196,6 +2197,13 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         // transform, and `lessThanOrEqualTo` the view's top is what pins the
         // banner while the host travels down under a pull, stretching it instead
         // of dragging it away and exposing the background behind.
+        // ⚠️ THE BANNER STANDS BEHIND THE PAGES, not in the floating header:
+        // a poster's picture runs to 80% of the screen while its identity
+        // block — and the posts after it — start at 40%, OVER the picture's
+        // lower part (user, 5 October 2026). The pages are clear; only their
+        // cards cover it. It still rests on the header's top and travels
+        // with it, so the fade, the ink and the stretch are read as before.
+        headerView.moveBanner(into: view, below: galleryPager)
         headerView.anchorBanner(toViewportTop: view.topAnchor)
 
         galleryPager.onVerticalScroll = { [weak self] offset in
