@@ -41,6 +41,10 @@ public enum AppRoute: Equatable, Sendable {
     /// `navigationItem.searchController`, where the tab used to have the system
     /// draw that field as a capsule in the tab bar instead.
     case search
+    /// The posts carrying a `#tag` (#524): a tapped tag in any text, a hashtag
+    /// completion, a searched `#tag`. The tag without its `#`, lowercased —
+    /// what the index stores.
+    case hashtag(String)
     case conversation(ConversationID)
     /// Open a direct-message thread with a profile, finding or creating the
     /// conversation as needed. The stub carries whatever identity the origin

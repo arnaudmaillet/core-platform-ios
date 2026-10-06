@@ -35,16 +35,22 @@ final class ShellTabBarController: UITabBarController, StakeShopOpening, MemberG
         makeStakeShopSheet?()
     }
 
-    /// Opens a tapped `@handle` (#524), set by the shell; `#tag`s open
-    /// nothing until the hashtag screen exists, so their taps stay the text's.
+    /// Opens a tapped `@handle` and a tapped `#tag` (#524), set by the shell.
     var openMention: ((_ handle: String, _ source: UIView) -> Void)?
+    var openHashtag: ((_ tag: String) -> Void)?
 
     func openTextEntity(_ token: String, from source: UIView) {
-        guard TextEntityLinks.kind(of: token) == .mention else { return }
-        openMention?(String(token.dropFirst()), source)
+        let bare = String(token.dropFirst())
+        switch TextEntityLinks.kind(of: token) {
+        case .mention: openMention?(bare, source)
+        case .hashtag: openHashtag?(bare)
+        }
     }
 
     func opensTextEntities(of kind: TextEntity.Kind) -> Bool {
-        kind == .mention && openMention != nil
+        switch kind {
+        case .mention: openMention != nil
+        case .hashtag: openHashtag != nil
+        }
     }
 }

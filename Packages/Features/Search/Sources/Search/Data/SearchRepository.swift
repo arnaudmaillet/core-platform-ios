@@ -141,10 +141,16 @@ public protocol SearchProviding: Sendable {
     /// exactly the difference between what a half-typed query needs and what a
     /// submitted one does.
     func suggestions(forPrefix prefix: String, limit: Int32) async throws -> [SearchSuggestion]
+
+    /// How many posts carry `tag` (no `#`), as the index counts them — coarse
+    /// and periodically refreshed, not a live counter (`HashtagHit`). Nil when
+    /// the index knows no such tag.
+    func hashtagPostCount(_ tag: String) async throws -> Int?
 }
 
 public extension SearchProviding {
     func searchPosts(matching query: String, sort: SearchSortOrder, limit: Int32) async throws -> [PostSearchHit] { [] }
+    func hashtagPostCount(_ tag: String) async throws -> Int? { nil }
 }
 
 /// Reads people results from search.v1. Scoped to the PROFILE entity type; post
@@ -230,14 +236,41 @@ public actor SearchRepository: SearchProviding {
         // about the index rather than about any one screen: `search.v1` stores
         // handles bare, so "@sof" is a prefix that matches nothing. The same
         // rule `PeopleDirectoryRepository` applies to its own query.
-        request.prefix = trimmed.hasPrefix("@") ? String(trimmed.dropFirst()) : trimmed
-        request.entityTypes = [.profile]
+        // A `#` asks for TAGS, and only tags (#524): "#tra" means a hashtag
+        // being typed, never a person whose name starts "tra".
+        if trimmed.hasPrefix("#") {
+            request.prefix = String(trimmed.dropFirst())
+            request.entityTypes = [.hashtag]
+        } else {
+            request.prefix = trimmed.hasPrefix("@") ? String(trimmed.dropFirst()) : trimmed
+            request.entityTypes = [.profile]
+        }
         request.limit = limit
 
         let response = await searchClient.suggest(request: request, headers: [:])
         switch response.result {
         case .success(let body):
             return body.suggestions.compactMap(Self.makeSuggestion)
+        case .failure(let error):
+            throw SearchError.transport(message: error.message ?? "code \(error.code)")
+        }
+    }
+
+    public func hashtagPostCount(_ tag: String) async throws -> Int? {
+        let bare = tag.hasPrefix("#") ? String(tag.dropFirst()) : tag
+        guard !bare.isEmpty else { return nil }
+        var request = Search_V1_SearchRequest()
+        request.query = bare
+        request.entityTypes = [.hashtag]
+        request.pageSize = 10
+        let response = await searchClient.search(request: request, headers: [:])
+        switch response.result {
+        case .success(let body):
+            // The engine matches loosely ("travel" finds "travelogue" too):
+            // the count is the one tag that IS this one.
+            return body.hits
+                .first { $0.entityType == .hashtag && $0.hashtag.tag.lowercased() == bare.lowercased() }
+                .map { Int($0.hashtag.postCount) }
         case .failure(let error):
             throw SearchError.transport(message: error.message ?? "code \(error.code)")
         }

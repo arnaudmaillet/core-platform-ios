@@ -66,6 +66,8 @@ public struct SearchRowDisplayModel: Equatable, Sendable, Identifiable {
     public enum Action: Equatable, Sendable {
         /// Run this row's `text` as a search.
         case search
+        /// Open a hashtag's posts (#524): the tag, without its `#`.
+        case openHashtag(String)
         /// Open a person, in one tap.
         ///
         /// ⚠️ **Not "search for their name".** That was the old behaviour and
@@ -114,8 +116,12 @@ public struct SearchRowDisplayModel: Equatable, Sendable, Identifiable {
     public init(suggestion: SearchSuggestion) {
         // Keyed on the text, like a history entry, so the two lists can be
         // concatenated and de-duplicated against each other by identity alone.
-        id = suggestion.text.lowercased()
-        text = suggestion.text
+        // A hashtag completion is the bare tag, as the index stores it; it
+        // reads with its `#`, which is also what tells it apart from a handle.
+        let shown = suggestion.kind == .hashtag && !suggestion.text.hasPrefix("#")
+            ? "#" + suggestion.text : suggestion.text
+        id = shown.lowercased()
+        text = shown
         subtitle = nil
         source = .completion
         // Only a PROFILE completion carrying an id can be opened. A hashtag
@@ -135,9 +141,14 @@ public struct SearchRowDisplayModel: Equatable, Sendable, Identifiable {
             // starts empty and is filled in by `ProfileAvatarProviding`.
             avatarURL = nil
             monogram = Self.monogram(for: suggestion.text)
+        } else if suggestion.kind == .hashtag {
+            action = .openHashtag(String(shown.dropFirst()).lowercased())
+            subject = .symbol("number")
+            avatarURL = nil
+            monogram = ""
         } else {
             action = .search
-            subject = .symbol(suggestion.kind == .hashtag ? "number" : "magnifyingglass")
+            subject = .symbol("magnifyingglass")
             avatarURL = nil
             monogram = ""
         }

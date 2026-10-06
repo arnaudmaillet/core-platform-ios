@@ -261,6 +261,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
         tabBarController.makeStakeShopSheet = { [unowned container] in container.makeStakeShopSheet() }
         // A `@handle` tapped in a comment, a caption or a bio (#524).
         tabBarController.openMention = { [weak self] handle, source in self?.openMention(handle, from: source) }
+        tabBarController.openHashtag = { [weak container] tag in container?.router.route(to: .hashtag(tag)) }
         // The gate every write asks before it runs, found up the chain.
         tabBarController.memberGate = container.memberGate
         createHold.install()

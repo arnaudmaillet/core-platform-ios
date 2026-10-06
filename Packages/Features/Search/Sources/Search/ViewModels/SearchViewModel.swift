@@ -342,6 +342,14 @@ public final class SearchViewModel {
     public func submitQuery(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        // One `#tag` and nothing else is a place, not a query (#524): it
+        // opens the tag's posts, and is remembered like any search.
+        if let tag = Self.hashtag(in: trimmed) {
+            query = trimmed
+            recentSearches?.recordQuery(trimmed)
+            router?.route(to: .hashtag(tag))
+            return
+        }
         query = trimmed
         submittedQuery = trimmed
         recentSearches?.recordQuery(trimmed)
@@ -350,6 +358,15 @@ public final class SearchViewModel {
         searchTask = Task { [weak self] in
             await self?.runSearch(trimmed)
         }
+    }
+
+    /// The tag when `text` is exactly one `#tag`, lowercased, without its `#`.
+    static func hashtag(in text: String) -> String? {
+        let entities = TextEntityScanner.entities(in: text)
+        guard entities.count == 1, let entity = entities.first, entity.kind == .hashtag,
+              entity.range.location == 0, entity.range.length == (text as NSString).length
+        else { return nil }
+        return entity.value
     }
 
     /// A text row was tapped — a remembered search, a remembered person, or a
@@ -378,6 +395,10 @@ public final class SearchViewModel {
             // query the search bar is not displaying.
             onQueryTextChange?(row.text)
             submitQuery(row.text)
+        case .openHashtag(let tag):
+            onQueryTextChange?(row.text)
+            recentSearches?.recordQuery(row.text)
+            router?.route(to: .hashtag(tag))
         case .openProfile(let profileID, let handle, let displayName, let avatarURL):
             openProfile(
                 id: profileID, handle: handle, displayName: displayName,

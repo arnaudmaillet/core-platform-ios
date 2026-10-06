@@ -61,4 +61,11 @@ public struct SearchFeatureBuilder: SearchFeatureBuilding {
             makeWalletSheet: makeWalletSheet
         )
     }
+
+    public func makeHashtagViewController(tag: String) -> UIViewController {
+        HashtagViewController(
+            viewModel: HashtagViewModel(tag: tag, repository: repository),
+            postSurfaces: postSurfaces
+        )
+    }
 }

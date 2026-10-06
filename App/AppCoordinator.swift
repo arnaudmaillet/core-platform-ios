@@ -448,6 +448,10 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         if let index = arguments.firstIndex(of: "-open-post"), index + 1 < arguments.count {
             container.router.route(to: .post(PostID(arguments[index + 1])))
         }
+        // `-open-hashtag <tag>`: a tag's posts (#524), as a tapped `#tag` opens them.
+        if let index = arguments.firstIndex(of: "-open-hashtag"), index + 1 < arguments.count {
+            container.router.route(to: .hashtag(arguments[index + 1]))
+        }
         // `-open-foryou` selects the For You root tab on launch.
         //
         // Direct tab selection rather than a route, because there is no
