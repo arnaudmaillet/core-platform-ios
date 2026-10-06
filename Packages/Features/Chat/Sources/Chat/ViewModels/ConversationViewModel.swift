@@ -235,7 +235,8 @@ public final class ConversationViewModel {
                 )
                 return
             }
-            if let message = try? await self.repository.send(body, to: id, replyingTo: replyTo) {
+            do {
+                let message = try await self.repository.send(body, to: id, replyingTo: replyTo)
                 self.messages.append(message)
                 self.emit()
                 // Only reached when the send succeeded, so there is nothing to
@@ -243,9 +244,22 @@ public final class ConversationViewModel {
                 // gets this far.
                 self.onDidSendMessage?(id, message)
                 await self.markRead(id, upTo: message.id)
+            } catch {
+                // Said, not dropped: a refused or failed message used to
+                // vanish without a word.
+                let notice = Self.sendFailureNotice(error)
+                self.onActionNotice?(notice.title, notice.message)
             }
             self.setSending(false)
         }
+    }
+
+    /// What a message that didn't go says: the recipient takes none (#397),
+    /// or it simply failed.
+    static func sendFailureNotice(_ error: Error) -> (title: String, message: String) {
+        (error as? ChatError) == .messagesRefused
+            ? ("Can't Send Message", "This account doesn't take messages.")
+            : ("Couldn't send", "Your message wasn't sent. Check your connection and try again.")
     }
 
     /// The context menu's action funnel. Reply and Delete are wired; Forward

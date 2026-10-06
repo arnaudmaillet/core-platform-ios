@@ -761,7 +761,8 @@ final class PostDetailViewController: UIViewController {
         composeBar.draftText = typedSince.isEmpty ? text : text + "\n" + composeBar.draftText
         presentNotice(
             "Couldn't Publish",
-            "Your post wasn't published. Your text is still here, so you can try again."
+            viewModel.publishFailureReason
+                ?? "Your post wasn't published. Your text is still here, so you can try again."
         )
     }
 

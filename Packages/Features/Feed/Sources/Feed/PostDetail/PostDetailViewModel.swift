@@ -60,6 +60,9 @@ public final class PostDetailViewModel {
     /// Publishing failed. Carries the text, which the composer had already
     /// cleared by the time it was sent.
     var onPublishFailed: ((String) -> Void)?
+    /// Why the last publish failed, when the error says (a refused mention,
+    /// #397); nil for a plain failure.
+    private(set) var publishFailureReason: String?
     /// A comment the server didn't take: its text, and whether it was
     /// refused by the author's setting (rather than failed).
     var onCommentFailed: ((_ text: String, _ refused: Bool) -> Void)?
@@ -296,6 +299,7 @@ public final class PostDetailViewModel {
                 self?.setComposing(false)
             } catch {
                 self?.setComposing(false)
+                self?.publishFailureReason = (error as? LocalizedError)?.errorDescription
                 self?.onPublishFailed?(body)
             }
         }

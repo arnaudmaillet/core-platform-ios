@@ -1398,6 +1398,7 @@ final class NewPostViewController: UIViewController {
         case .emptyPost: "Add a photo or write something first."
         case .notAuthenticated, .noViewerProfile: "Sign in again to post."
         case .media(let why): why
+        case .mentionRefused: error.errorDescription ?? "Someone you mentioned doesn't allow mentions."
         case .transport(let why): why
         }
     }
