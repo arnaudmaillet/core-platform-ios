@@ -34,6 +34,18 @@ final class LoginFlowCoordinator {
     private let viewModel: LoginViewModel
     private weak var navigationController: UINavigationController?
 
+    /// Sign-up and sign-in by code (guest mode B4, #449). Nil keeps the
+    /// password screen behind "email" and the unavailable phone path.
+    private let signUp: (any CodeSignUpPerforming)?
+    /// The new account's profile. Nil completes a sign-up without one.
+    private let profileSetup: (any AccountProfileSetup)?
+    /// The account's home country: the current one, else the storefront's.
+    private let homeCountry: @Sendable () async -> String
+    /// What the steps have collected so far.
+    private var challenge: VerificationChallenge?
+    private var code: String?
+    private var dateOfBirth: DateComponents?
+
     /// One toolbar item set for the WHOLE flow, shared by every step (see
     /// `flowToolbarItems` on the base controller for why identical instances
     /// matter): Privacy & Legal pinned leading, Contact pinned trailing, one
@@ -97,8 +109,16 @@ final class LoginFlowCoordinator {
         return item
     }
 
-    init(loginService: any LoginPerforming) {
+    init(
+        loginService: any LoginPerforming,
+        signUp: (any CodeSignUpPerforming)? = nil,
+        profileSetup: (any AccountProfileSetup)? = nil,
+        homeCountry: @escaping @Sendable () async -> String = { Locale.current.region?.identifier ?? "" }
+    ) {
         viewModel = LoginViewModel(loginService: loginService)
+        self.signUp = signUp
+        self.profileSetup = profileSetup
+        self.homeCountry = homeCountry
     }
 
     /// `onClose` non-nil = presented over the app rather than installed as the
@@ -141,7 +161,7 @@ final class LoginFlowCoordinator {
         case .provider(let provider):
             presentFederatedUnavailable(provider)
         case .email:
-            showEmailAuth()
+            if signUp != nil { showEmailCode() } else { showEmailAuth() }
         case .phone:
             showPhoneAuth()
         }
@@ -150,7 +170,11 @@ final class LoginFlowCoordinator {
     private func showPhoneAuth() {
         let phone = PhoneAuthViewController()
         phone.onSendCode = { [self] e164, display in
-            beginOTPVerification(e164: e164, display: display)
+            if signUp != nil {
+                sendCode(.sms, to: e164, display: display, from: nil)
+            } else {
+                beginOTPVerification(e164: e164, display: display)
+            }
         }
         phone.flowToolbarItems = flowToolbarItems
         phone.navigationItem.rightBarButtonItem = makeLanguageNavItem()
@@ -189,6 +213,206 @@ final class LoginFlowCoordinator {
             message: "Code verification requires backend support that isn\u{2019}t live. Sign in with email instead.",
             preferredStyle: .alert
         )
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        navigationController?.topViewController?.present(alert, animated: true)
+    }
+
+    // MARK: - Codes and sign-up (guest mode B4, #449)
+
+    private func showEmailCode() {
+        let step = EmailEntryViewController()
+        step.onContinue = { [weak self, weak step] address in
+            self?.sendCode(.email, to: address, display: address, from: step)
+        }
+        prepare(step)
+        push(step)
+    }
+
+    private func prepare(_ step: UIViewController) {
+        (step as? BottomAnchoredTableViewController)?.flowToolbarItems = flowToolbarItems
+        step.navigationItem.rightBarButtonItem = makeLanguageNavItem()
+    }
+
+    private func sendCode(
+        _ channel: VerificationChannel, to destination: String, display: String, from step: SignUpStepViewController?
+    ) {
+        guard let signUp else { return }
+        step?.setWorking(true)
+        Task { [weak self] in
+            do {
+                let challenge = try await signUp.startVerification(
+                    channel, to: destination, locale: Locale.current.identifier(.bcp47)
+                )
+                step?.setWorking(false)
+                self?.showCode(challenge, display: display)
+            } catch {
+                step?.setWorking(false)
+                self?.presentFlowError(error, on: step)
+            }
+        }
+    }
+
+    private func showCode(_ challenge: VerificationChallenge, display: String) {
+        self.challenge = challenge
+        let step = VerificationCodeViewController(destination: display, resendAfter: challenge.resendAfter)
+        step.onSubmit = { [weak self, weak step] code in self?.verify(code, from: step) }
+        step.onResend = { [weak self, weak step] in self?.resendCode(from: step) }
+        prepare(step)
+        push(step)
+    }
+
+    private func resendCode(from step: VerificationCodeViewController?) {
+        guard let signUp, let current = challenge else { return }
+        Task { [weak self] in
+            do {
+                let fresh = try await signUp.startVerification(
+                    current.channel, to: current.destination, locale: Locale.current.identifier(.bcp47)
+                )
+                self?.challenge = fresh
+                step?.codeResent(resendAfter: fresh.resendAfter)
+            } catch {
+                self?.presentFlowError(error, on: step)
+            }
+        }
+    }
+
+    /// The code signs an existing account in — the shell sees the session and
+    /// puts the flow away — or, for an address with no account, the sign-up
+    /// steps follow with the same code.
+    private func verify(_ code: String, from step: VerificationCodeViewController?) {
+        guard let signUp, let challenge else { return }
+        step?.setWorking(true)
+        Task { [weak self] in
+            do {
+                switch try await signUp.signIn(challengeID: challenge.id, code: code) {
+                case .signedIn:
+                    break // the presenter dismisses on the new session
+                case .needsSignUp:
+                    step?.setWorking(false)
+                    self?.code = code
+                    self?.showBirthday()
+                }
+            } catch {
+                step?.setWorking(false)
+                self?.presentFlowError(error, on: step)
+                step?.clearCode()
+            }
+        }
+    }
+
+    private func showBirthday() {
+        let step = BirthdayViewController()
+        step.onContinue = { [weak self] birthday in
+            self?.dateOfBirth = birthday
+            self?.showConsent()
+        }
+        prepare(step)
+        push(step)
+    }
+
+    private func showConsent() {
+        let step = ConsentViewController()
+        step.onAgree = { [weak self, weak step] marketing, analytics in
+            self?.createAccount(marketing: marketing, analytics: analytics, from: step)
+        }
+        step.onOpenPolicy = { [weak self] in self?.showLegalPlaceholder(.privacy) }
+        prepare(step)
+        push(step)
+    }
+
+    private func createAccount(marketing: Bool, analytics: Bool, from step: ConsentViewController?) {
+        guard let signUp, let challenge, let code, let dateOfBirth else { return }
+        step?.setWorking(true)
+        let homeCountry = homeCountry
+        Task { [weak self] in
+            do {
+                let details = SignUpDetails(
+                    dateOfBirth: dateOfBirth, policyVersion: PrivacyPolicy.version,
+                    marketing: marketing, analytics: analytics, homeCountry: await homeCountry()
+                )
+                switch try await signUp.signUp(challengeID: challenge.id, code: code, details: details) {
+                case .created(let pending):
+                    step?.setWorking(false)
+                    if let self, let profileSetup {
+                        showProfileSetup(for: pending, setup: profileSetup)
+                    } else {
+                        try await signUp.completeSignUp(pending)
+                    }
+                case .existingAccount(let method):
+                    step?.setWorking(false)
+                    self?.presentExistingAccount(method)
+                }
+            } catch AuthError.underMinimumAge {
+                step?.setWorking(false)
+                self?.presentUnderMinimumAge()
+            } catch {
+                step?.setWorking(false)
+                self?.presentFlowError(error, on: step)
+            }
+        }
+    }
+
+    private func showProfileSetup(for pending: PendingAccount, setup: any AccountProfileSetup) {
+        let step = ProfileSetupViewController(setup: setup)
+        step.onCreate = { [weak self, weak step] handle, name in
+            guard let signUp = self?.signUp else { return }
+            step?.setWorking(true)
+            Task { [weak self] in
+                do {
+                    try await setup.createProfile(for: pending, handle: handle, displayName: name)
+                    try await signUp.completeSignUp(pending) // the presenter dismisses on the session
+                } catch {
+                    step?.setWorking(false)
+                    self?.presentFlowError(error, on: step)
+                }
+            }
+        }
+        prepare(step)
+        // No way back past an account that now exists: the step replaces the
+        // flow behind it.
+        step.navigationItem.hidesBackButton = true
+        push(step)
+    }
+
+    private func presentExistingAccount(_ method: ExistingSignInMethod) {
+        let how = switch method {
+        case .apple: "Sign in with Apple"
+        case .google: "Sign in with Google"
+        case .password: "Log in with your password"
+        case .emailCode: "Continue with email"
+        case .phoneCode: "Continue with your phone"
+        case .unknown: "Sign in"
+        }
+        let alert = UIAlertController(
+            title: "You Already Have an Account",
+            message: "This address is already used by an account. \(how) to get back to it.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "OK", style: .default) { [weak self] _ in
+            self?.navigationController?.popToRootViewController(animated: true)
+        })
+        navigationController?.topViewController?.present(alert, animated: true)
+    }
+
+    private func presentUnderMinimumAge() {
+        let alert = UIAlertController(
+            title: "You Can\u{2019}t Create an Account",
+            message: "You need to be old enough to use this app. You can keep browsing without an account.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "OK", style: .default) { [weak self] _ in
+            self?.navigationController?.popToRootViewController(animated: true)
+        })
+        navigationController?.topViewController?.present(alert, animated: true)
+    }
+
+    private func presentFlowError(_ error: Error, on step: SignUpStepViewController?) {
+        if let step {
+            step.present(error: error)
+            return
+        }
+        let message = (error as? AuthError).map(LoginViewModel.message(for:)) ?? "Something went wrong. Try again."
+        let alert = UIAlertController(title: "Couldn\u{2019}t Continue", message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "OK", style: .default))
         navigationController?.topViewController?.present(alert, animated: true)
     }

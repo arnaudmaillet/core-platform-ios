@@ -17,6 +17,13 @@ public final class AuthInterceptor: UnaryInterceptor, Sendable {
         _ request: HTTPRequest<Message>,
         proceed: @escaping @Sendable (Result<HTTPRequest<Message>, ConnectError>) -> Void
     ) {
+        // A call that names its own bearer keeps it: creating a new account's
+        // profile runs with THAT account's token while the app's session is
+        // still the guest's (`AccountProfileSetupService`).
+        if request.headers.keys.contains(where: { $0.lowercased() == "authorization" }) {
+            proceed(.success(request))
+            return
+        }
         let tokenProvider = tokenProvider
         Task {
             do {

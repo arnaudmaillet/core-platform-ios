@@ -53,7 +53,7 @@ public final class LoginViewModel {
         }
     }
 
-    private static func message(for error: AuthError) -> String {
+    static func message(for error: AuthError) -> String {
         switch error {
         case .invalidCredentials:
             "Incorrect username or password."
