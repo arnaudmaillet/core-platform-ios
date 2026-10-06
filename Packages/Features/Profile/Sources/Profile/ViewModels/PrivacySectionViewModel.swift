@@ -35,23 +35,31 @@ final class PrivacySectionViewModel {
     private(set) var commentAudience: CommentAudience? {
         didSet { onChange?() }
     }
+    /// Like counts and downloads of this profile's posts (#397); nil until
+    /// read or when the screen can't set them.
+    private(set) var postSharing: PostSharing? {
+        didSet { onChange?() }
+    }
     var onChange: (() -> Void)?
 
     private let visibility: any ProfileVisibilityManaging
     let requests: (any FollowRequestsManaging)?
     let windows: (any PostWindowManaging)?
     let comments: (any CommentAudienceManaging)?
+    let sharing: (any PostSharingManaging)?
 
     init(
         visibility: any ProfileVisibilityManaging,
         requests: (any FollowRequestsManaging)? = nil,
         windows: (any PostWindowManaging)? = nil,
-        comments: (any CommentAudienceManaging)? = nil
+        comments: (any CommentAudienceManaging)? = nil,
+        sharing: (any PostSharingManaging)? = nil
     ) {
         self.visibility = visibility
         self.requests = requests
         self.windows = windows
         self.comments = comments
+        self.sharing = sharing
     }
 
     /// Re-read when the screen comes back from the inbox.
@@ -74,8 +82,18 @@ final class PrivacySectionViewModel {
         commentAudience = audience
     }
 
+    /// Not optimistic: the switches show the server's values.
+    func setPostSharing(_ next: PostSharing) async throws {
+        guard let sharing, next != postSharing else { return }
+        try await sharing.setPostSharing(next)
+        postSharing = next
+    }
+
     func load() async {
         if case .failed = phase { phase = .loading }
+        if let sharing {
+            Task { self.postSharing = (try? await sharing.postSharing()) ?? self.postSharing }
+        }
         Task { await refreshRequestCount() }
         if let windows {
             Task { self.postWindow = (try? await windows.postWindow()) ?? self.postWindow }
