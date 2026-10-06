@@ -271,7 +271,10 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                         let history = reporting as? any ReportHistoryProviding
                                         if let history {
                                             destinations.append(.init(title: "Your Reports", symbolName: "flag") {
-                                                YourReportsViewController(history: history)
+                                                YourReportsViewController(
+                                                    history: history,
+                                                    appeals: accountStatus as? any ModerationDecisionReviewing
+                                                )
                                             })
                                         }
                                         return SafetySettingsViewController(

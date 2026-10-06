@@ -29,14 +29,6 @@ struct DecisionsAndReportsTests {
         AccountStatusRepository(moderationClient: moderationClient(service), authSession: Session())
     }
 
-    /// A scratch store, so the appeals this suite files don't land in the
-    /// test host's standard defaults.
-    private func isolateFiledAppeals() -> UserDefaults {
-        let defaults = UserDefaults(suiteName: "DecisionsAndReportsTests-\(UUID().uuidString)")!
-        FiledAppeals.defaults = defaults
-        return defaults
-    }
-
     // MARK: - Statement of reasons
 
     @Test func aRestrictionCarriesTheDecisionThatImposedIt() async throws {
@@ -79,10 +71,9 @@ struct DecisionsAndReportsTests {
     // MARK: - Appeal
 
     /// An empty appeal is refused before it's sent; a real one is filed,
-    /// and this iPhone remembers it so a second isn't offered.
-    @Test func anAppealIsFiledOnceWithItsReasons() async throws {
-        _ = isolateFiledAppeals()
-        defer { FiledAppeals.defaults = .standard }
+    /// read back from the server under review (#576, not remembered on the
+    /// device), and filing again doesn't make a second.
+    @Test func anAppealIsFiledOnceAndReadBackUnderReview() async throws {
         let service = MockModerationService(seedsViewerRestriction: true)
         let repository = statusRepository(service)
         let decision = MockModerationService.seededDecisionID
@@ -90,16 +81,70 @@ struct DecisionsAndReportsTests {
         await #expect(throws: AppealError.emptyStatement) {
             _ = try await repository.fileAppeal(decisionID: decision, statement: " \n ")
         }
-        #expect(service.filedAppeals.isEmpty)
-        #expect(FiledAppeals.filedAt(decisionID: decision) == nil)
+        #expect(try await repository.myAppeals().isEmpty)
 
         let filedAt = try await repository.fileAppeal(decisionID: decision, statement: "  I was quoting them.  ")
+        let again = try await repository.fileAppeal(decisionID: decision, statement: "Really, I was.")
+        #expect(again == filedAt)
         #expect(service.filedAppeals.map(\.statement) == ["I was quoting them."])
-        #expect(FiledAppeals.filedAt(decisionID: decision) == filedAt)
+
+        let appeal = try #require(DecisionDetailViewController.appeal(for: decision, in: try await repository.myAppeals()))
+        #expect(appeal.status == .pending)
+        #expect(!appeal.byReporter)
+        #expect(DecisionDetailViewController.appealStatusText(appeal).title == "Appeal under review")
 
         await #expect(throws: AppealError.notFound) {
             _ = try await repository.fileAppeal(decisionID: "someone-elses", statement: "Please")
         }
+    }
+
+    /// A resolved appeal says how it ended and why (DSA Art. 20(4)–(5)).
+    @Test func aResolvedAppealSaysHowItEndedAndWhy() {
+        let upheld = FiledAppeal(
+            id: "a", decisionID: "d", status: .upheld, filedAt: Date(), resolvedAt: Date(), reasons: "The rule applies."
+        )
+        #expect(DecisionDetailViewController.appealStatusText(upheld).title == "Appeal reviewed: the decision stands")
+        #expect(DecisionDetailViewController.appealFooter(upheld) == "Reviewer's reasons: The rule applies.")
+        var reversed = Moderation_V1_AppealView()
+        reversed.status = .overturned
+        #expect(FiledAppeal(reversed).status == .overturned)
+        #expect(DecisionDetailViewController.appealFooter(nil).hasPrefix("If you think this decision is wrong"))
+    }
+
+    // MARK: - A reporter's appeal
+
+    /// A decided report names its decision; its reporter appeals it, and the
+    /// row follows the appeal. The seeded resolved one carries its reasons.
+    @Test func aReporterAppealsTheDecisionOnTheirReport() async throws {
+        let service = MockModerationService(seedsReportHistory: true)
+        let statuses = statusRepository(service)
+        let seeded = YourReportsViewController.reporterAppeals(try await statuses.myAppeals())
+        let resolved = try #require(seeded["dec-report-post-seed-reported-1"])
+        #expect(resolved.status == .upheld)
+        #expect(!resolved.reasons.isEmpty)
+        #expect(YourReportsViewController.appealText(resolved) == "Appeal: decision stands")
+
+        let actioned = "dec-report-profile-seed-reported-1"
+        _ = try await statuses.fileAppeal(decisionID: actioned, statement: "They're still at it.")
+        let mine = YourReportsViewController.reporterAppeals(try await statuses.myAppeals())
+        #expect(mine[actioned]?.status == .pending)
+        #expect(mine[actioned]?.byReporter == true)
+
+        // Still under review: nothing to appeal yet.
+        await #expect(throws: AppealError.notFound) {
+            _ = try await statuses.fileAppeal(decisionID: "dec-report-comment-seed-reported-1", statement: "Please")
+        }
+    }
+
+    @Test func aDecidedReportCarriesItsDecision() {
+        var view = Moderation_V1_ReportView()
+        view.status = .noViolation
+        view.decisionID = "dec-1"
+        #expect(FiledReport(view).decisionID == "dec-1")
+        view.decisionID = ""
+        #expect(FiledReport(view).decisionID == nil)
+        let report = FiledReport(view)
+        #expect(YourReportsViewController.appealIntro(report, subject: "post").hasPrefix("We didn't find that this post broke our rules"))
     }
 
     @Test func theComposerWaitsForReasonsAndSaysWhyAnAppealFailed() {
