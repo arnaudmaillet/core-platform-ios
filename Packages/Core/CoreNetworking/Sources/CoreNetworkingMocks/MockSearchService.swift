@@ -8,6 +8,10 @@ import Foundation
 /// search matches captions the same way — the profile gallery's "Tagged"
 /// category rides it with `@handle` queries against the seeded mentions.
 ///
+/// A query that is one `#tag` matches the posts carrying that tag, whole,
+/// rather than every caption the text appears in; hashtag hits and hashtag
+/// completions are answered when asked for by entity type (#524).
+///
 /// `Suggest` is prefix-matched instead — see the method. `MultiSearch` is still
 /// unrouted: nothing calls it, and a fake for an RPC with no caller would be a
 /// guess about a shape no screen has had to agree with yet.
@@ -54,6 +58,20 @@ public final class MockSearchService: @unchecked Sendable {
 
         let prefix = request.prefix.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !prefix.isEmpty else { return .success(response) }
+
+        if request.entityTypes.contains(.hashtag) {
+            let tag = prefix.hasPrefix("#") ? String(prefix.dropFirst()) : prefix
+            let limit = request.limit > 0 ? Int(request.limit) : .max
+            response.suggestions += tagCounts()
+                .filter { $0.tag.hasPrefix(tag) }
+                .prefix(limit)
+                .map { entry in
+                    var suggestion = Search_V1_Suggestion()
+                    suggestion.entityType = .hashtag
+                    suggestion.text = entry.tag
+                    return suggestion
+                }
+        }
 
         let wantsProfiles = request.entityTypes.isEmpty || request.entityTypes.contains(.profile)
         guard wantsProfiles else { return .success(response) }
@@ -104,8 +122,31 @@ public final class MockSearchService: @unchecked Sendable {
             }
         }
 
+        if request.entityTypes.contains(.hashtag) {
+            let tag = query.hasPrefix("#") ? String(query.dropFirst()) : query
+            response.hits += tagCounts().filter { $0.tag.contains(tag) }.map { entry in
+                var hit = Search_V1_SearchHit()
+                hit.entityType = .hashtag
+                hit.id = entry.tag
+                var hashtag = Search_V1_HashtagHit()
+                hashtag.tag = entry.tag
+                hashtag.postCount = Int64(entry.count)
+                hit.hashtag = hashtag
+                return hit
+            }
+        }
+
         if wantsPosts {
-            let matches = dataset.posts.filter { $0.caption.lowercased().contains(query) }
+            // One `#tag` is that tag, whole — `#travel` is not `#travelogue`;
+            // anything else is the caption substring it always was.
+            let isTag = query.hasPrefix("#") && !query.contains(" ")
+            let matches = sortedPosts(
+                dataset.posts.filter { record in
+                    isTag ? Self.tags(in: record.caption).contains(String(query.dropFirst()))
+                        : record.caption.lowercased().contains(query)
+                },
+                by: request.sort
+            )
             response.hits += matches.map { record in
                 var hit = Search_V1_SearchHit()
                 hit.entityType = .post
@@ -213,6 +254,43 @@ public final class MockSearchService: @unchecked Sendable {
         case .relevance, .unspecified, .UNRECOGNIZED:
             authors
         }
+    }
+
+    /// Posts in the order the request asks for: newest first, or most liked
+    /// first; dataset order otherwise. Ties keep dataset order.
+    private func sortedPosts(
+        _ posts: [MockSocialDataset.PostRecord], by sort: Search_V1_SearchSort
+    ) -> [MockSocialDataset.PostRecord] {
+        let key: (MockSocialDataset.PostRecord) -> Int64
+        switch sort {
+        case .recency: key = \.publishedAtMS
+        case .popularity: key = { [counters] in counters?.likeCount(for: $0.postID) ?? 0 }
+        case .relevance, .unspecified, .UNRECOGNIZED: return posts
+        }
+        return posts.enumerated()
+            .sorted { (key($0.element), -$0.offset) > (key($1.element), -$1.offset) }
+            .map(\.element)
+    }
+
+    /// Every tag the corpus carries and how many posts carry it, most used
+    /// first, then alphabetical.
+    private func tagCounts() -> [(tag: String, count: Int)] {
+        var counts: [String: Int] = [:]
+        for post in dataset.posts {
+            for tag in Self.tags(in: post.caption) { counts[tag, default: 0] += 1 }
+        }
+        return counts.map { (tag: $0.key, count: $0.value) }
+            .sorted { ($0.count, $1.tag) > ($1.count, $0.tag) }
+    }
+
+    /// The tags in a caption, lowercased and without their `#`: words that
+    /// start with one, cut at the first character a tag cannot hold.
+    static func tags(in caption: String) -> Set<String> {
+        Set(caption.split(whereSeparator: \.isWhitespace).compactMap { word in
+            guard word.hasPrefix("#") else { return nil }
+            let tag = word.dropFirst().prefix { $0.isLetter || $0.isNumber || $0 == "_" }
+            return tag.contains(where: \.isLetter) ? tag.lowercased() : nil
+        })
     }
 
     /// Orders by a key derived from each author's posts, descending, with the

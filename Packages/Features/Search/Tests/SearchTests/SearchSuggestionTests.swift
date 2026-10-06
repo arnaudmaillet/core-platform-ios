@@ -186,7 +186,9 @@ struct SearchSuggestionTests {
     /// instead; that lives in `SearchProfileTapTests`.)
     @Test func tappingANonPersonCompletionSearchesForIt() async {
         let (viewModel, phases) = makeViewModel(
-            StubSuggestProvider([suggestion("swiftui", kind: .hashtag)])
+            // A post completion: not a person, and not a tag either (a tag
+            // opens its own screen — `SearchProfileTapTests`).
+            StubSuggestProvider([suggestion("swiftui", kind: .post)])
         )
         var fieldText: String?
         viewModel.onQueryTextChange = { fieldText = $0 }

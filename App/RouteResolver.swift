@@ -252,6 +252,11 @@ final class RouteResolver: Router {
                 push(destination, using: navigator, animated: false)
             }
 
+        case .hashtag(let tag):
+            // A tapped `#tag`, a hashtag completion, a searched `#tag` (#524):
+            // a plain push, like a post's detail.
+            push(searchFeature().makeHashtagViewController(tag: tag), using: navigator)
+
         case .post(let postID):
             let detail = feedFeature().makePostDetailViewController(for: postID, mode: .full)
             push(detail, using: navigator)

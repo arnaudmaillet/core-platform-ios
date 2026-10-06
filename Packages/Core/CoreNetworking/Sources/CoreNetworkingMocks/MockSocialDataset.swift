@@ -845,6 +845,14 @@ public struct MockSocialDataset: Sendable {
             "First swim of the year. Never again. Until tomorrow. 🥶🥶",
             "Late train home, good book, zero signal."
         ]
+        // Hashtags (#524), by bank entry, so the hashtag screen has posts to
+        // show offline — several tags, several posts each, in all three post
+        // kinds. ⚠️ The same rule as the captions above: a tag is caption
+        // text, so none may contain a `ContentContext` keyword.
+        let captionTags: [Int: String] = [
+            0: "#goldenhour", 5: "#travel", 7: "#travel #mountains",
+            8: "#foodie", 9: "#foodie #ramen", 14: "#coldwater", 15: "#travel"
+        ]
         // Placeholder shapes, read only when the bundle has no clips or photos
         // (a post otherwise declares its own file's size): portrait,
         // landscape, square.
@@ -863,6 +871,9 @@ public struct MockSocialDataset: Sendable {
             // and (via index % 3) in all three post kinds.
             if index % 4 == 1 {
                 caption += " Spotted with @\(authors[(index + 4) % authors.count].handle)."
+            }
+            if let tags = captionTags[index % captionBank.count] {
+                caption += " \(tags)"
             }
             // One of every three posts is video, one image, one text-only —
             // a mix that exercises all three snap-feed cell paths.

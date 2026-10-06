@@ -128,23 +128,19 @@ struct SearchProfileTapTests {
         #expect(store.recents.map(\.text) == ["ada"])
     }
 
-    /// A hashtag completion carries no id by contract, so it stays a search.
-    @Test func tappingANonProfileCompletionStillSearches() async {
+    /// A hashtag completion carries no id by contract, and needs none: it
+    /// opens its tag's posts (#524), and is remembered as `#tag`.
+    @Test func tappingAHashtagCompletionOpensItsTag() async {
         let (viewModel, store, router, phases) = make(completions: [
             SearchSuggestion(text: "swift", kind: .hashtag, id: "")
         ])
         viewModel.queryChanged("sw")
         await settle(until: { !rows(phases).isEmpty })
 
-        viewModel.didSelectRow("swift")
-        // On the PHASE, not on the store: recording is synchronous inside
-        // `submitQuery`, so waiting for the entry would return before the
-        // search it triggers has emitted anything.
-        await settle(until: { phases().contains { $0 == .loading || $0 == .empty(query: "swift") } })
+        viewModel.didSelectRow("#swift")
 
-        #expect(router.routes.isEmpty)
-        #expect(store.recents.map(\.text) == ["swift"])
-        #expect(phases().contains { $0 == .loading || $0 == .empty(query: "swift") })
+        #expect(router.routes == [.hashtag("swift")])
+        #expect(store.recents.map(\.text) == ["#swift"])
     }
 
     /// A profile completion the index answered without an id identifies
