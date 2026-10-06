@@ -197,6 +197,59 @@ public nonisolated enum SocialGraph_V1_InteractionKind: SwiftProtobuf.Enum, Swif
 
 }
 
+/// Why CheckInteraction refused (#656). Mesh only: the asking service decides
+/// what the actor learns, and never tells a blocked actor of the block.
+public nonisolated enum SocialGraph_V1_InteractionRefusal: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+
+  /// Not refused.
+  case unspecified // = 0
+
+  /// A block, either way.
+  case blocked // = 1
+
+  /// The target's audience for this kind is no one.
+  case noOne // = 2
+
+  /// The target's audience (followers / mutuals) excludes the actor: chat
+  /// turns a message into a request.
+  case audience // = 3
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .blocked
+    case 2: self = .noOne
+    case 3: self = .audience
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .blocked: return 1
+    case .noOne: return 2
+    case .audience: return 3
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [SocialGraph_V1_InteractionRefusal] = [
+    .unspecified,
+    .blocked,
+    .noOne,
+    .audience,
+  ]
+
+}
+
 /// Who may see one of a profile's relationship lists (followers, following).
 public nonisolated enum SocialGraph_V1_ListAudience: SwiftProtobuf.Enum, Swift.CaseIterable {
   public typealias RawValue = Int
@@ -309,6 +362,10 @@ nonisolated extension SocialGraph_V1_ContentAccess: SwiftProtobuf._ProtoNameProv
 
 nonisolated extension SocialGraph_V1_InteractionKind: SwiftProtobuf._ProtoNameProviding {
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0INTERACTION_KIND_UNSPECIFIED\0\u{1}INTERACTION_KIND_COMMENT\0\u{1}INTERACTION_KIND_MENTION\0\u{1}INTERACTION_KIND_MESSAGE\0")
+}
+
+nonisolated extension SocialGraph_V1_InteractionRefusal: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0INTERACTION_REFUSAL_UNSPECIFIED\0\u{1}INTERACTION_REFUSAL_BLOCKED\0\u{1}INTERACTION_REFUSAL_NO_ONE\0\u{1}INTERACTION_REFUSAL_AUDIENCE\0")
 }
 
 nonisolated extension SocialGraph_V1_ListAudience: SwiftProtobuf._ProtoNameProviding {

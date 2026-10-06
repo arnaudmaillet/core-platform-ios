@@ -14,24 +14,27 @@ public protocol SessionStore: Sendable {
 /// serialization logic is testable where the keychain is unavailable (bare
 /// test runners lack the required entitlement).
 public struct KeychainSessionStore: SessionStore {
-    private static let key = "auth.session"
+    private let key: String
     private let store: any SecureDataStore
 
-    public init(store: any SecureDataStore) {
+    /// `key` is the keychain item: the member's session by default; the guest
+    /// session (guest mode) keeps its own, so a sign-in never overwrites it.
+    public init(store: any SecureDataStore, key: String = "auth.session") {
         self.store = store
+        self.key = key
     }
 
     public func save(_ session: AuthSession) throws {
-        try store.save(JSONEncoder().encode(session), forKey: Self.key)
+        try store.save(JSONEncoder().encode(session), forKey: key)
     }
 
     public func load() throws -> AuthSession? {
-        guard let data = try store.load(forKey: Self.key) else { return nil }
+        guard let data = try store.load(forKey: key) else { return nil }
         return try JSONDecoder().decode(AuthSession.self, from: data)
     }
 
     public func clear() throws {
-        try store.delete(forKey: Self.key)
+        try store.delete(forKey: key)
     }
 }
 

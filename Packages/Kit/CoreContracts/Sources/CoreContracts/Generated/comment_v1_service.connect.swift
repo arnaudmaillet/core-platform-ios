@@ -35,6 +35,11 @@ public protocol Comment_V1_CommentServiceClientInterface: Sendable {
     /// Paginates direct replies to a top-level comment, newest-first.
     @available(iOS 13, *)
     func `listReplies`(request: Comment_V1_ListRepliesRequest, headers: Connect.Headers) async -> ResponseMessage<Comment_V1_ListCommentsResponse>
+
+    /// A profile's own comments, newest first, as stored now (deleted ones as
+    /// tombstones). Mesh only (never on the edge): the GDPR data export (#653).
+    @available(iOS 13, *)
+    func `listCommentsByAuthor`(request: Comment_V1_ListCommentsByAuthorRequest, headers: Connect.Headers) async -> ResponseMessage<Comment_V1_ListCommentsResponse>
 }
 
 /// Concrete implementation of `Comment_V1_CommentServiceClientInterface`.
@@ -75,6 +80,11 @@ public final class Comment_V1_CommentServiceClient: Comment_V1_CommentServiceCli
         return await self.client.unary(path: "/comment.v1.CommentService/ListReplies", idempotencyLevel: .unknown, request: request, headers: headers)
     }
 
+    @available(iOS 13, *)
+    public func `listCommentsByAuthor`(request: Comment_V1_ListCommentsByAuthorRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Comment_V1_ListCommentsResponse> {
+        return await self.client.unary(path: "/comment.v1.CommentService/ListCommentsByAuthor", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
     public enum Metadata {
         public enum Methods {
             public static let createComment = Connect.MethodSpec(name: "CreateComment", service: "comment.v1.CommentService", type: .unary)
@@ -83,6 +93,7 @@ public final class Comment_V1_CommentServiceClient: Comment_V1_CommentServiceCli
             public static let getComment = Connect.MethodSpec(name: "GetComment", service: "comment.v1.CommentService", type: .unary)
             public static let listTopLevel = Connect.MethodSpec(name: "ListTopLevel", service: "comment.v1.CommentService", type: .unary)
             public static let listReplies = Connect.MethodSpec(name: "ListReplies", service: "comment.v1.CommentService", type: .unary)
+            public static let listCommentsByAuthor = Connect.MethodSpec(name: "ListCommentsByAuthor", service: "comment.v1.CommentService", type: .unary)
         }
     }
 }

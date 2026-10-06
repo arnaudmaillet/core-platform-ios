@@ -88,6 +88,216 @@ struct AuthEndToEndTests {
         #expect(response.error?.code == .unauthenticated)
     }
 
+    /// Guest mode B1 end to end: a guest reads public content through an edge
+    /// that — like the fleet's — refuses an anonymous read, with the guest
+    /// token `SessionManager` starts on the first read; a write stays refused.
+    @Test func aGuestReadsThroughTheEdgeWithAGuestToken() async throws {
+        let backend = MockBackend(enforcesEdgePolicy: true)
+        let manager = SessionManager(
+            authClient: Auth_V1_AuthServiceClient(
+                client: ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: backend.bff)
+            ),
+            store: InMemorySessionStore(),
+            configuration: .init(deviceID: "e2e-device"),
+            guest: GuestSessionContext(store: InMemorySessionStore())
+        )
+        let reads = ConnectClientFactory.makeAuthenticated(
+            host: "https://mock.bff.local", tokenProvider: manager, httpClient: backend.bff
+        )
+        var getPost = Post_V1_GetPostRequest()
+        getPost.postID = backend.dataset.posts[0].postID
+
+        let read = await Post_V1_PostServiceClient(client: reads).getPost(request: getPost, headers: [:])
+        #expect(read.error == nil)
+        let token = try #require(try await manager.validAccessToken())
+        #expect(token.hasPrefix("gt-"))
+        #expect(await manager.currentState() == .unauthenticated)
+
+        var like = Engagement_V1_UpsertReactionRequest()
+        like.postID = getPost.postID
+        like.kind = .heart
+        let write = await Engagement_V1_EngagementServiceClient(client: reads).upsertReaction(request: like, headers: [:])
+        #expect(write.error?.code == .unauthenticated, "a guest token is a read pass")
+    }
+
+    // MARK: - Codes and sign-up (guest mode B4, #449)
+
+    private struct SignUpStack {
+        let backend: MockBackend
+        let manager: SessionManager
+        let guestStore: InMemorySessionStore
+        let authService: MockAuthService
+    }
+
+    /// A guest (with a guest session) against an edge like the fleet's.
+    private func makeSignUpStack() async throws -> SignUpStack {
+        let backend = MockBackend(enforcesEdgePolicy: true)
+        let authService = MockAuthService()
+        authService.register(on: backend.bff) // the stack's own, to read back what it was sent
+        let guestStore = InMemorySessionStore()
+        let manager = SessionManager(
+            authClient: Auth_V1_AuthServiceClient(
+                client: ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: backend.bff)
+            ),
+            store: InMemorySessionStore(),
+            configuration: .init(deviceID: "e2e-device"),
+            guest: GuestSessionContext(store: guestStore)
+        )
+        #expect(try await manager.validAccessToken()?.hasPrefix("gt-") == true, "starts as a guest")
+        return SignUpStack(backend: backend, manager: manager, guestStore: guestStore, authService: authService)
+    }
+
+    private func adult() -> SignUpDetails {
+        SignUpDetails(
+            dateOfBirth: DateComponents(year: 1990, month: 4, day: 12),
+            policyVersion: "2026-10", marketing: false, analytics: true, homeCountry: "FR"
+        )
+    }
+
+    @Test func aCodeSignsAnExistingAccountInAndEndsTheGuestSession() async throws {
+        let stack = try await makeSignUpStack()
+        let guestRefresh = try #require(try stack.guestStore.load()?.refreshToken)
+        let challenge = try await stack.manager.startVerification(.email, to: MockAuthService.demoEmail)
+        #expect(challenge.channel == .email && challenge.resendAfter > 0)
+
+        let outcome = try await stack.manager.signIn(challengeID: challenge.id, code: MockAuthService.verificationCode)
+
+        guard case .existing(let account) = outcome else {
+            Issue.record("expected the demo account, got \(outcome)")
+            return
+        }
+        #expect(await stack.manager.currentState() == .unauthenticated, "not the session until completed")
+        await stack.manager.completeSignIn(account)
+        #expect(await stack.manager.currentState() == .authenticated(AccountID(MockAuthService.accountID)))
+        #expect(try await stack.manager.validAccessToken()?.hasPrefix("at-") == true)
+        #expect(try stack.guestStore.load() == nil, "the guest became the member")
+        // The server ended the guest session it was handed.
+        var refresh = Auth_V1_RefreshRequest()
+        refresh.refreshToken = guestRefresh
+        let auth = Auth_V1_AuthServiceClient(
+            client: ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: stack.backend.bff)
+        )
+        #expect(await auth.refresh(request: refresh, headers: [:]).error?.code == .unauthenticated)
+    }
+
+    /// The whole sign-up: a new address, the steps' answers, a profile made
+    /// with the pending account's token — and only then a member.
+    @Test func aNewAddressSignsUpThenBecomesAMemberOnceItHasAProfile() async throws {
+        let stack = try await makeSignUpStack()
+        let challenge = try await stack.manager.startVerification(.email, to: "new.person@example.com")
+        #expect(try await stack.manager.signIn(challengeID: challenge.id, code: MockAuthService.verificationCode) == .needsSignUp)
+
+        let outcome = try await stack.manager.signUp(
+            challengeID: challenge.id, code: MockAuthService.verificationCode, details: adult()
+        )
+        guard case .created(let pending) = outcome else {
+            Issue.record("expected a created account, got \(outcome)")
+            return
+        }
+        #expect(await stack.manager.currentState() == .unauthenticated, "no profile yet: not the app's member")
+        let sent = try #require(stack.authService.lastSignUpRequest)
+        #expect(sent.dateOfBirth == "1990-04-12")
+        #expect(sent.consent.dataProcessing && sent.consent.analytics && !sent.consent.marketing)
+        #expect(sent.consent.policyVersion == "2026-10" && sent.homeCountry == "FR")
+        #expect(!sent.guestRefreshToken.isEmpty, "the guest session went along")
+
+        var create = Profile_V1_CreateProfileRequest()
+        create.accountID = pending.accountID.rawValue
+        create.handle = "new.person"
+        create.displayName = "New Person"
+        let profiles = Profile_V1_ProfileServiceClient(
+            client: ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: stack.backend.bff)
+        )
+        let created = await profiles.createProfile(
+            request: create, headers: ["Authorization": ["Bearer \(pending.accessToken)"]]
+        )
+        #expect(created.error == nil)
+
+        try await stack.manager.completeSignUp(pending)
+        #expect(await stack.manager.currentState() == .authenticated(pending.accountID))
+        #expect(try stack.guestStore.load() == nil)
+    }
+
+    @Test func underThirteenCreatesNothing() async throws {
+        let stack = try await makeSignUpStack()
+        let challenge = try await stack.manager.startVerification(.sms, to: "+33612345678")
+        var young = adult()
+        young.dateOfBirth = DateComponents(year: Calendar.current.component(.year, from: Date()) - 10, month: 1, day: 1)
+        await #expect(throws: AuthError.underMinimumAge) {
+            try await stack.manager.signUp(challengeID: challenge.id, code: MockAuthService.verificationCode, details: young)
+        }
+        #expect(await stack.manager.currentState() == .unauthenticated)
+    }
+
+    @Test func anAddressThatSignsInWithAppleSaysSo() async throws {
+        let stack = try await makeSignUpStack()
+        let challenge = try await stack.manager.startVerification(.email, to: MockAuthService.appleEmail)
+        let outcome = try await stack.manager.signUp(
+            challengeID: challenge.id, code: MockAuthService.verificationCode, details: adult()
+        )
+        #expect(outcome == .existingAccount(.apple))
+    }
+
+    @Test func aWrongCodeIsRefused() async throws {
+        let stack = try await makeSignUpStack()
+        let challenge = try await stack.manager.startVerification(.email, to: MockAuthService.demoEmail)
+        await #expect(throws: AuthError.invalidCode) {
+            try await stack.manager.signIn(challengeID: challenge.id, code: "000000")
+        }
+    }
+
+    // MARK: Sign in with Apple (#507)
+
+    private func appleCredential(_ stack: SignUpStack, email: String) async throws -> SignInCredential {
+        let nonce = try await stack.manager.startFederatedSignIn()
+        #expect(!nonce.isEmpty)
+        // What Apple would sign: the nonce's SHA-256 hex.
+        let token = MockIdToken.make(subject: "apple-\(email)", email: email, nonce: nonce)
+        return .idToken(.apple, token: token, nonce: nonce)
+    }
+
+    @Test func anAppleIDWithAnAccountSignsIn() async throws {
+        let stack = try await makeSignUpStack()
+
+        let outcome = try await stack.manager.signIn(try await appleCredential(stack, email: MockAuthService.appleEmail))
+
+        guard case .existing(let account) = outcome else {
+            Issue.record("expected the Apple account, got \(outcome)")
+            return
+        }
+        await stack.manager.completeSignIn(account)
+        #expect(await stack.manager.currentState() == .authenticated(AccountID(MockAuthService.accountID)))
+    }
+
+    /// A new Apple ID: Login answers NOT_FOUND without spending the nonce,
+    /// SignUp takes the same token, and the token can't sign up twice.
+    @Test func aNewAppleIDSignsUpWithTheSameTokenOnce() async throws {
+        let stack = try await makeSignUpStack()
+        let credential = try await appleCredential(stack, email: "nina@icloud.com")
+        #expect(try await stack.manager.signIn(credential) == .needsSignUp)
+
+        let outcome = try await stack.manager.signUp(credential, details: adult())
+
+        guard case .created = outcome else {
+            Issue.record("expected a created account, got \(outcome)")
+            return
+        }
+        #expect(stack.authService.lastSignUpRequest?.idToken.provider == .apple)
+        await #expect(throws: AuthError.identityRejected, "the nonce is spent") {
+            try await stack.manager.signUp(credential, details: self.adult())
+        }
+    }
+
+    @Test func aTokenForAnotherNonceIsRefused() async throws {
+        let stack = try await makeSignUpStack()
+        let nonce = try await stack.manager.startFederatedSignIn()
+        let token = MockIdToken.make(subject: "apple-x", email: "x@icloud.com", nonce: "a-nonce-the-server-never-made")
+
+        await #expect(throws: AuthError.identityRejected) {
+            try await stack.manager.signIn(.idToken(.apple, token: token, nonce: nonce))
+        }
+    }
+
     @Test func wrongPasswordFailsWithInvalidCredentials() async {
         let (manager, _) = makeStack()
 

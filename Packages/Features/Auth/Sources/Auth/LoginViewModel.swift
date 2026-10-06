@@ -53,7 +53,7 @@ public final class LoginViewModel {
         }
     }
 
-    private static func message(for error: AuthError) -> String {
+    static func message(for error: AuthError) -> String {
         switch error {
         case .invalidCredentials:
             "Incorrect username or password."
@@ -61,6 +61,12 @@ public final class LoginViewModel {
             "Your session has expired. Sign in again."
         case .transport:
             "Can't reach the server. Check your connection and try again."
+        case .invalidCode:
+            "That code didn\u{2019}t work. Check it, or ask for a new one."
+        case .underMinimumAge:
+            "You\u{2019}re not old enough to create an account."
+        case .identityRejected:
+            "We couldn\u{2019}t confirm it\u{2019}s you. Try signing in again."
         }
     }
 }

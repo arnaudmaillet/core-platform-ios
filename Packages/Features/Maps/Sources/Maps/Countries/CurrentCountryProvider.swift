@@ -25,6 +25,16 @@ public protocol CurrentCountryLocating: AnyObject {
     func requestPermission()
 }
 
+/// Asks the server whether the device's country may open (backend B10,
+/// `geo_discovery.v1.GetCountryAccess`): it checks the code against the
+/// network's GeoIP country, so a spoofed GPS position opens nothing.
+public protocol CurrentCountryVerifying: Sendable {
+    /// The country to open — `code` when granted, nil otherwise. Called with
+    /// nil too: telling the server nothing is sent closes the country left
+    /// behind (decision 10).
+    func verify(_ code: String?) async -> String?
+}
+
 public extension Notification.Name {
     /// Posted by a `CurrentCountryLocating` when the country or the
     /// permission changed.
@@ -49,6 +59,12 @@ public final class CurrentCountryProvider: NSObject, CurrentCountryLocating {
 
     private let manager = CLLocationManager()
     private let resolve: (CLLocationCoordinate2D) -> String?
+    /// Nil trusts the device (mock mode, tests).
+    private let verifier: (any CurrentCountryVerifying)?
+    /// The last code the device resolved, verified or not — what a new fix is
+    /// compared against, so an unchanged country is not re-verified.
+    private var resolvedCountry: String??
+    private var verification: Task<Void, Never>?
     private var foregroundObserver: NSObjectProtocol?
     private var isUpdating = false
     #if DEBUG
@@ -59,10 +75,12 @@ public final class CurrentCountryProvider: NSObject, CurrentCountryLocating {
     private let pinned: String??
     #endif
 
-    public init(resolve: @escaping (CLLocationCoordinate2D) -> String? = {
-        CountryAtlas.shared.country(owning: $0)?.code
-    }) {
+    public init(
+        resolve: @escaping (CLLocationCoordinate2D) -> String? = { CountryAtlas.shared.country(owning: $0)?.code },
+        verifier: (any CurrentCountryVerifying)? = nil
+    ) {
         self.resolve = resolve
+        self.verifier = verifier
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
         pinned = arguments.firstIndex(of: "-current-country")
@@ -127,7 +145,24 @@ public final class CurrentCountryProvider: NSObject, CurrentCountryLocating {
         manager.stopMonitoringSignificantLocationChanges()
     }
 
+    /// The device resolved `country`: the server decides whether it opens
+    /// (`verifier`), and only its answer is published.
     private func settle(on country: String?) {
+        guard resolvedCountry != .some(country) else { return }
+        resolvedCountry = .some(country)
+        guard let verifier else {
+            publish(country)
+            return
+        }
+        verification?.cancel()
+        verification = Task { [weak self] in
+            let granted = await verifier.verify(country)
+            guard !Task.isCancelled else { return }
+            self?.publish(granted)
+        }
+    }
+
+    private func publish(_ country: String?) {
         guard country != currentCountry else { return }
         currentCountry = country
         NotificationCenter.default.post(name: .currentCountryDidChange, object: self)

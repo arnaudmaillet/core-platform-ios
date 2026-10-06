@@ -9,13 +9,13 @@ import UIKit
 /// what the system's list content gives, including its Dynamic Type behaviour
 /// and its separator inset, and hand-rolling it would only be a slower way to
 /// arrive at the same row.
-final class ProfileSearchResultCell: UICollectionViewListCell {
+final class ShareSearchResultCell: UICollectionViewListCell {
     static let avatarSize = CGSize(width: 40, height: 40)
 
     private var avatarTask: Task<Void, Never>?
-    private var target: ProfileShareTarget?
+    private var target: ShareTarget?
 
-    func configure(with target: ProfileShareTarget, imagePipeline: ImagePipeline?) {
+    func configure(with target: ShareTarget, imagePipeline: ImagePipeline?) {
         self.target = target
         avatarTask?.cancel()
 
@@ -39,7 +39,7 @@ final class ProfileSearchResultCell: UICollectionViewListCell {
         }
     }
 
-    private func apply(target: ProfileShareTarget, avatar: UIImage?) {
+    private func apply(target: ShareTarget, avatar: UIImage?) {
         var content = defaultContentConfiguration()
         content.text = target.displayName
         // The handle without its `@`: the sigil is decoration here, and the

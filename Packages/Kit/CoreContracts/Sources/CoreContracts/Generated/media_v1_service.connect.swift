@@ -49,6 +49,13 @@ public protocol Media_V1_MediaServiceClientInterface: Sendable {
     @available(iOS 13, *)
     func `getAsset`(request: Media_V1_GetAssetRequest, headers: Connect.Headers) async -> ResponseMessage<Media_V1_GetAssetResponse>
 
+    /// An account's assets (not deleted), paged by id, each with a signed
+    /// download of its original (valid `url_ttl_secs`, 60 s – 7 days; none for
+    /// an asset that is not deliverable). Mesh only (never on the edge): the
+    /// GDPR data export (#653).
+    @available(iOS 13, *)
+    func `listAssetsByOwner`(request: Media_V1_ListAssetsByOwnerRequest, headers: Connect.Headers) async -> ResponseMessage<Media_V1_ListAssetsByOwnerResponse>
+
     /// Owner-initiated hard delete. Refused (PERMISSION_DENIED, MED-7003) while a
     /// legal hold is active.
     @available(iOS 13, *)
@@ -99,6 +106,11 @@ public final class Media_V1_MediaServiceClient: Media_V1_MediaServiceClientInter
     }
 
     @available(iOS 13, *)
+    public func `listAssetsByOwner`(request: Media_V1_ListAssetsByOwnerRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Media_V1_ListAssetsByOwnerResponse> {
+        return await self.client.unary(path: "/media.v1.MediaService/ListAssetsByOwner", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
     public func `deleteAsset`(request: Media_V1_DeleteAssetRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Media_V1_DeleteAssetResponse> {
         return await self.client.unary(path: "/media.v1.MediaService/DeleteAsset", idempotencyLevel: .unknown, request: request, headers: headers)
     }
@@ -124,6 +136,7 @@ public final class Media_V1_MediaServiceClient: Media_V1_MediaServiceClientInter
             public static let commitUpload = Connect.MethodSpec(name: "CommitUpload", service: "media.v1.MediaService", type: .unary)
             public static let abortUpload = Connect.MethodSpec(name: "AbortUpload", service: "media.v1.MediaService", type: .unary)
             public static let getAsset = Connect.MethodSpec(name: "GetAsset", service: "media.v1.MediaService", type: .unary)
+            public static let listAssetsByOwner = Connect.MethodSpec(name: "ListAssetsByOwner", service: "media.v1.MediaService", type: .unary)
             public static let deleteAsset = Connect.MethodSpec(name: "DeleteAsset", service: "media.v1.MediaService", type: .unary)
             public static let resolveDelivery = Connect.MethodSpec(name: "ResolveDelivery", service: "media.v1.MediaService", type: .unary)
             public static let batchResolveDelivery = Connect.MethodSpec(name: "BatchResolveDelivery", service: "media.v1.MediaService", type: .unary)

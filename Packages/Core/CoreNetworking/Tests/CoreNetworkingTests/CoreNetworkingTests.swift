@@ -69,6 +69,25 @@ struct CoreNetworkingTests {
         #expect(headers["Authorization"] == ["Bearer edge-token-42"])
     }
 
+    /// A call that names its own bearer keeps it — a new account's profile
+    /// is created with that account's token, not the app's session's.
+    @Test func anExplicitBearerIsNotOverwritten() async throws {
+        let bff = MockBFF()
+        MockAuthService().register(on: bff)
+        let client = Auth_V1_AuthServiceClient(
+            client: ConnectClientFactory.makeAuthenticated(
+                host: "https://mock.bff.local",
+                tokenProvider: StubTokenProvider(token: "app-session-token"),
+                httpClient: bff
+            )
+        )
+
+        _ = await client.login(request: makeLoginRequest(), headers: ["Authorization": ["Bearer pending-account-token"]])
+
+        let headers = try #require(bff.recordedRequests.first?.headers)
+        #expect(headers["Authorization"] == ["Bearer pending-account-token"])
+    }
+
     @Test func authInterceptorPassesThroughWhenUnauthenticated() async throws {
         let bff = MockBFF()
         MockAuthService().register(on: bff)

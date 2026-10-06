@@ -1,35 +1,13 @@
 import Connect
 import CoreContracts
 import CoreModels
+import ShareSheet
 import Foundation
 
-/// Someone the viewer can send a profile to, as the share sheet's quick row
-/// renders them.
-public struct ProfileShareTarget: Equatable, Hashable, Sendable {
-    public let id: ProfileID
-    public let displayName: String
-    public let handle: String
-    public let avatarURL: URL?
-
-    public init(id: ProfileID, displayName: String, handle: String, avatarURL: URL?) {
-        self.id = id
-        self.displayName = displayName
-        self.handle = handle
-        self.avatarURL = avatarURL
-    }
-}
-
-/// Supplies the share sheet's quick-send row.
-public protocol ProfileShareTargeting: Sendable {
-    /// Up to `limit` people, best candidates first. Best-effort: an empty
-    /// result leaves the row with just its Search entry rather than failing
-    /// the sheet.
-    func shareTargets(limit: Int) async -> [ProfileShareTarget]
-    /// People matching `query`, for the row's Search entry — the only way to
-    /// reach someone the social graph didn't suggest. Best-effort in the same
-    /// way; an empty query returns nothing rather than everything.
-    func searchTargets(query: String, limit: Int) async -> [ProfileShareTarget]
-}
+/// Someone to send a profile to — the shared sheet's `ShareTarget`.
+public typealias ProfileShareTarget = ShareTarget
+/// Supplies the profile share sheet's quick-send row — `ShareTargeting`.
+public typealias ProfileShareTargeting = ShareTargeting
 
 /// Ranks share targets out of the viewer's social graph.
 ///

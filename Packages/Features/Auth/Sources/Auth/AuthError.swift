@@ -9,6 +9,14 @@ public enum AuthError: Error, Equatable, Sendable {
     /// the local session has been cleared and the user must sign in again.
     case sessionExpired
     case transport(message: String)
+    /// A one-time code that was wrong, expired, or already used.
+    case invalidCode
+    /// Under the minimum age to hold an account (13; 16 in some countries —
+    /// AUT-6005). Nothing was created or kept.
+    case underMinimumAge
+    /// An Apple / Google id_token the server refused (bad, expired, its nonce
+    /// used — AUT-5008 — or without an email). A new sign-in fixes it.
+    case identityRejected
 
     static func loginFailure(_ error: ConnectError) -> AuthError {
         switch error.code {

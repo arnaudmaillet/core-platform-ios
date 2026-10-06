@@ -694,9 +694,26 @@ public nonisolated struct Profile_V1_LocationSettings: Sendable {
 
   public var precision: Profile_V1_LocationPrecision = .unspecified
 
+  /// Who sees the location when not a ghost (#657). Teens: mutuals.
+  public var audience: Profile_V1_LocationAudience = .unspecified
+
+  /// The app adds the location to new posts by default (a stored preference;
+  /// the server never changes a post for it). On a set request, absent keeps
+  /// the stored value. Teens: off.
+  public var onNewPosts: Bool {
+    get {_onNewPosts ?? false}
+    set {_onNewPosts = newValue}
+  }
+  /// Returns true if `onNewPosts` has been explicitly set.
+  public var hasOnNewPosts: Bool {self._onNewPosts != nil}
+  /// Clears the value of `onNewPosts`. Subsequent reads from it will return its default value.
+  public mutating func clearOnNewPosts() {self._onNewPosts = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+
+  fileprivate var _onNewPosts: Bool? = nil
 }
 
 public nonisolated struct Profile_V1_SetLocationSettingsRequest: Sendable {
@@ -2376,7 +2393,7 @@ nonisolated extension Profile_V1_SetInteractionSettingsRequest: SwiftProtobuf.Me
 
 nonisolated extension Profile_V1_LocationSettings: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".LocationSettings"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}ghost\0\u{1}precision\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}ghost\0\u{1}precision\0\u{1}audience\0\u{3}on_new_posts\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -2386,24 +2403,38 @@ nonisolated extension Profile_V1_LocationSettings: SwiftProtobuf.Message, SwiftP
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularBoolField(value: &self.ghost) }()
       case 2: try { try decoder.decodeSingularEnumField(value: &self.precision) }()
+      case 3: try { try decoder.decodeSingularEnumField(value: &self.audience) }()
+      case 4: try { try decoder.decodeSingularBoolField(value: &self._onNewPosts) }()
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
     if self.ghost != false {
       try visitor.visitSingularBoolField(value: self.ghost, fieldNumber: 1)
     }
     if self.precision != .unspecified {
       try visitor.visitSingularEnumField(value: self.precision, fieldNumber: 2)
     }
+    if self.audience != .unspecified {
+      try visitor.visitSingularEnumField(value: self.audience, fieldNumber: 3)
+    }
+    try { if let v = self._onNewPosts {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 4)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Profile_V1_LocationSettings, rhs: Profile_V1_LocationSettings) -> Bool {
     if lhs.ghost != rhs.ghost {return false}
     if lhs.precision != rhs.precision {return false}
+    if lhs.audience != rhs.audience {return false}
+    if lhs._onNewPosts != rhs._onNewPosts {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

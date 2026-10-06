@@ -100,7 +100,7 @@ public final class ForYouViewModel {
     /// Whether another page of the corpus can still be fetched. What lets
     /// Discover decide the chunk at its tail instead of holding the posts
     /// behind it back for a page that is never coming.
-    public var hasMorePages: Bool { nextPageToken != nil }
+    public var hasMorePages: Bool { hasDiscovery ? discoveryToken != nil : nextPageToken != nil }
 
     public var onSnapshotChange: ((Snapshot) -> Void)?
     /// Fires when a NEXT-PAGE fetch starts and again when it settles.
@@ -181,6 +181,13 @@ public final class ForYouViewModel {
     /// (see `dev/BACKEND_GAPS.md` §14). A source change re-sorts everything,
     /// because there the viewer asked for exactly that.
     private var corpus: [GalleryPost]?
+    /// DISCOVER's own corpus (`GetDiscoveryFeed`), in the SERVER's order —
+    /// nil until its first page lands. Only when the repository serves one
+    /// (`hasDiscovery`); otherwise Discover is `corpus`, as before.
+    private var discovery: [GalleryPost]?
+    private var discoveryToken: String?
+    /// Whether the repository answered with a discovery corpus of its own.
+    private var hasDiscovery = false
     /// The instant this session counts from, frozen the first time a corpus
     /// lands and never moved again. See `ForYouSessionWatermark`.
     private var sessionWatermark: ForYouSessionWatermark?
@@ -322,6 +329,20 @@ public final class ForYouViewModel {
     /// `resolveRelations` as pages land, kept live by `FollowGraphEvents`.
     private var relations: [ProfileID: FollowRelation] = [:]
 
+    /// Whether `author` is someone the viewer follows — what offers
+    /// Unfollow on a card. A known answer decides; an unanswered author is
+    /// followed only if the FOLLOWING timeline served them. With Discover on
+    /// its own pool, an author it ranked is anyone, and an Unfollow on a
+    /// stranger would be a lie.
+    public func isFollowed(_ author: ProfileID?) -> Bool {
+        guard let author else { return false }
+        if let relation = relations[author] {
+            return Circle.of(relation) == .friend || Circle.of(relation) == .following
+        }
+        guard hasDiscovery else { return true }
+        return corpus?.contains { $0.authorID == author } == true
+    }
+
     func circle(of author: ProfileID?) -> Circle {
         guard let author else { return .following }
         return Circle.of(relations[author])
@@ -398,12 +419,14 @@ public final class ForYouViewModel {
     /// (BACKEND_GAPS §14), and the timeline is the whole population this
     /// screen sees; followed and not.
     public var discoverPosts: [GalleryPost] {
-        context.filtering(corpus ?? [])
+        context.filtering(hasDiscovery ? discovery ?? [] : corpus ?? [])
     }
 
-    /// The loaded posts of one circle, under the lens, in display order.
+    /// The loaded posts of one circle, under the lens, in display order —
+    /// from the FOLLOWING timeline, never from Discover's pool: a followed
+    /// author's posts the discovery pool happened to rank are not the rows.
     private func posts(in circle: Circle) -> [GalleryPost] {
-        discoverPosts.filter { self.circle(of: $0.authorID) == circle }
+        context.filtering(corpus ?? []).filter { self.circle(of: $0.authorID) == circle }
     }
 
     /// FOLLOWING's posts: the people the viewer follows who are not friends.
@@ -431,6 +454,10 @@ public final class ForYouViewModel {
     /// Called as the list nears its end. A no-op when a page is already in
     /// flight, when the corpus is exhausted, or before the first page landed.
     public func loadNextPageIfNeeded() {
+        if hasDiscovery {
+            loadNextDiscoveryPageIfNeeded()
+            return
+        }
         guard pageLoad == nil, load == nil, corpus != nil, let token = nextPageToken else { return }
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
@@ -485,6 +512,34 @@ public final class ForYouViewModel {
         onPagingChange?(true)
     }
 
+    /// Discover's next page: appended in the server's order, de-duplicated
+    /// (the contract warns a post can come back on a later page when it moves
+    /// between rankings).
+    private func loadNextDiscoveryPageIfNeeded() {
+        guard pageLoad == nil, load == nil, discovery != nil, let token = discoveryToken else { return }
+        pageLoad = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                self.pageLoad = nil
+                self.onPagingChange?(false)
+            }
+            guard let page = try? await repository.discoveryPage(after: token), !Task.isCancelled else { return }
+            let existing = Set((discovery ?? []).map(\.id))
+            discovery = (discovery ?? []) + Self.unique(page.posts).filter { !existing.contains($0.id) }
+            discoveryToken = page.nextPageToken
+            publish()
+            onLoadSettled?()
+        }
+        // After the assignment — see `loadNextPageIfNeeded`.
+        onPagingChange?(true)
+    }
+
+    /// `posts` with each id once, first occurrence kept.
+    nonisolated static func unique(_ posts: [GalleryPost]) -> [GalleryPost] {
+        var seen = Set<PostID>()
+        return posts.filter { seen.insert($0.id).inserted }
+    }
+
     private func loadFirstPage(reset: Bool) {
         if reset {
             load?.cancel()
@@ -496,6 +551,8 @@ public final class ForYouViewModel {
             }
             pageLoad = nil
             corpus = nil
+            discovery = nil
+            discoveryToken = nil
             failure = nil
             nextPageToken = nil
         }
@@ -505,13 +562,28 @@ public final class ForYouViewModel {
             guard let self else { return }
             defer { self.load = nil }
             do {
-                let page = try await repository.firstPage()
+                // Both corpora at once: Discover's (when the repository serves
+                // one) and the following timeline the rows are made of.
+                async let discoveryPage = repository.discoveryFirstPage()
+                async let followingPage = repository.firstPage()
+                let discover = try await discoveryPage
+                let page: ForYouPage
+                if let discover {
+                    // The rows' corpus only: its failure — a guest has no
+                    // timeline — leaves them empty, not the page failed.
+                    page = (try? await followingPage) ?? ForYouPage(posts: [], nextPageToken: nil)
+                } else {
+                    page = try await followingPage
+                }
                 guard !Task.isCancelled else { return }
                 // Asked before the first publish, so no row ever shows an
                 // author it is about to move.
                 await resolveRelations(for: page.posts)
                 guard !Task.isCancelled else { return }
                 corpus = source.ordering(page.posts)
+                hasDiscovery = discover != nil
+                discovery = discover.map { Self.unique($0.posts) }
+                discoveryToken = discover?.nextPageToken
                 failure = nil
                 nextPageToken = page.nextPageToken
                 #if DEBUG
@@ -536,7 +608,7 @@ public final class ForYouViewModel {
     /// moved while the post was open. Deliberately unfiltered, because the
     /// question is "does this post exist" and not "does this page show it".
     public func post(for id: PostID) -> GalleryPost? {
-        corpus?.first { $0.id == id }
+        discovery?.first { $0.id == id } ?? corpus?.first { $0.id == id }
     }
 
     // MARK: - Publishing

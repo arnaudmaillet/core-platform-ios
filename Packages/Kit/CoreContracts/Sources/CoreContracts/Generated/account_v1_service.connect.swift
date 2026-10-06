@@ -34,17 +34,42 @@ public protocol Account_V1_AccountServiceClientInterface: Sendable {
     @available(iOS 13, *)
     func `verifyPhone`(request: Account_V1_VerifyPhoneRequest, headers: Connect.Headers) async -> ResponseMessage<Account_V1_CommandResponse>
 
+    /// Replace the account's email / phone with one its holder just proved
+    /// (#651): set and verified at once. Mesh only: auth calls them after a
+    /// one-time code sent to the new address. Another account's address:
+    /// ACC-1003 / ACC-1004.
+    @available(iOS 13, *)
+    func `changeEmail`(request: Account_V1_ChangeEmailRequest, headers: Connect.Headers) async -> ResponseMessage<Account_V1_CommandResponse>
+
+    @available(iOS 13, *)
+    func `changePhone`(request: Account_V1_ChangePhoneRequest, headers: Connect.Headers) async -> ResponseMessage<Account_V1_CommandResponse>
+
     /// Replace the stored Argon2id password hash.
     @available(iOS 13, *)
     func `changePassword`(request: Account_V1_ChangePasswordRequest, headers: Connect.Headers) async -> ResponseMessage<Account_V1_CommandResponse>
 
-    /// Store an encrypted TOTP seed and activate MFA for the account.
+    /// Store an encrypted TOTP seed and its backup codes: MFA is on (ACC-5001
+    /// when it already is).
     @available(iOS 13, *)
     func `enrollMfa`(request: Account_V1_EnrollMfaRequest, headers: Connect.Headers) async -> ResponseMessage<Account_V1_CommandResponse>
 
     /// Remove all MFA credentials and deactivate MFA enforcement.
     @available(iOS 13, *)
     func `revokeMfa`(request: Account_V1_RevokeMfaRequest, headers: Connect.Headers) async -> ResponseMessage<Account_V1_CommandResponse>
+
+    /// The encrypted seed and how many backup codes are left, for auth to check
+    /// a code. Never on the edge.
+    @available(iOS 13, *)
+    func `getMfaSecret`(request: Account_V1_GetMfaSecretRequest, headers: Connect.Headers) async -> ResponseMessage<Account_V1_MfaSecretView>
+
+    /// Spend one backup code (by its hash): it works once. ACC-5003 when no
+    /// unused code has that hash, ACC-5002 when MFA is off.
+    @available(iOS 13, *)
+    func `consumeRecoveryCode`(request: Account_V1_ConsumeRecoveryCodeRequest, headers: Connect.Headers) async -> ResponseMessage<Account_V1_CommandResponse>
+
+    /// Replace every backup code with a new set (the holder regenerated them).
+    @available(iOS 13, *)
+    func `replaceRecoveryCodes`(request: Account_V1_ReplaceRecoveryCodesRequest, headers: Connect.Headers) async -> ResponseMessage<Account_V1_CommandResponse>
 
     /// Update the KYC verification outcome (admin / compliance officer only).
     @available(iOS 13, *)
@@ -151,6 +176,16 @@ public protocol Account_V1_AccountServiceClientInterface: Sendable {
     /// Paginated list of accounts filtered by lifecycle status (admin / ops).
     @available(iOS 13, *)
     func `listAccountsByStatus`(request: Account_V1_ListAccountsByStatusRequest, headers: Connect.Headers) async -> ResponseMessage<Account_V1_ListAccountsByStatusResponse>
+
+    /// Find the profiles of one's address book (#661): SHA-256 hashes of the
+    /// contacts' normalized email addresses (lower-cased, trimmed) and phone
+    /// numbers (E.164), at most 1000 per call; nothing of them is kept. A
+    /// contact matches an active account's verified email / phone, then its
+    /// active profiles that are findable that way (profile discovery
+    /// settings), never blocked either way, never the caller's own. Edge:
+    /// the caller's account.
+    @available(iOS 13, *)
+    func `findProfilesByContacts`(request: Account_V1_FindProfilesByContactsRequest, headers: Connect.Headers) async -> ResponseMessage<Account_V1_FindProfilesByContactsResponse>
 }
 
 /// Concrete implementation of `Account_V1_AccountServiceClientInterface`.
@@ -177,6 +212,16 @@ public final class Account_V1_AccountServiceClient: Account_V1_AccountServiceCli
     }
 
     @available(iOS 13, *)
+    public func `changeEmail`(request: Account_V1_ChangeEmailRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Account_V1_CommandResponse> {
+        return await self.client.unary(path: "/account.v1.AccountService/ChangeEmail", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `changePhone`(request: Account_V1_ChangePhoneRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Account_V1_CommandResponse> {
+        return await self.client.unary(path: "/account.v1.AccountService/ChangePhone", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
     public func `changePassword`(request: Account_V1_ChangePasswordRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Account_V1_CommandResponse> {
         return await self.client.unary(path: "/account.v1.AccountService/ChangePassword", idempotencyLevel: .unknown, request: request, headers: headers)
     }
@@ -189,6 +234,21 @@ public final class Account_V1_AccountServiceClient: Account_V1_AccountServiceCli
     @available(iOS 13, *)
     public func `revokeMfa`(request: Account_V1_RevokeMfaRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Account_V1_CommandResponse> {
         return await self.client.unary(path: "/account.v1.AccountService/RevokeMfa", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `getMfaSecret`(request: Account_V1_GetMfaSecretRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Account_V1_MfaSecretView> {
+        return await self.client.unary(path: "/account.v1.AccountService/GetMfaSecret", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `consumeRecoveryCode`(request: Account_V1_ConsumeRecoveryCodeRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Account_V1_CommandResponse> {
+        return await self.client.unary(path: "/account.v1.AccountService/ConsumeRecoveryCode", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `replaceRecoveryCodes`(request: Account_V1_ReplaceRecoveryCodesRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Account_V1_CommandResponse> {
+        return await self.client.unary(path: "/account.v1.AccountService/ReplaceRecoveryCodes", idempotencyLevel: .unknown, request: request, headers: headers)
     }
 
     @available(iOS 13, *)
@@ -301,14 +361,24 @@ public final class Account_V1_AccountServiceClient: Account_V1_AccountServiceCli
         return await self.client.unary(path: "/account.v1.AccountService/ListAccountsByStatus", idempotencyLevel: .unknown, request: request, headers: headers)
     }
 
+    @available(iOS 13, *)
+    public func `findProfilesByContacts`(request: Account_V1_FindProfilesByContactsRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Account_V1_FindProfilesByContactsResponse> {
+        return await self.client.unary(path: "/account.v1.AccountService/FindProfilesByContacts", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
     public enum Metadata {
         public enum Methods {
             public static let createAccount = Connect.MethodSpec(name: "CreateAccount", service: "account.v1.AccountService", type: .unary)
             public static let verifyEmail = Connect.MethodSpec(name: "VerifyEmail", service: "account.v1.AccountService", type: .unary)
             public static let verifyPhone = Connect.MethodSpec(name: "VerifyPhone", service: "account.v1.AccountService", type: .unary)
+            public static let changeEmail = Connect.MethodSpec(name: "ChangeEmail", service: "account.v1.AccountService", type: .unary)
+            public static let changePhone = Connect.MethodSpec(name: "ChangePhone", service: "account.v1.AccountService", type: .unary)
             public static let changePassword = Connect.MethodSpec(name: "ChangePassword", service: "account.v1.AccountService", type: .unary)
             public static let enrollMfa = Connect.MethodSpec(name: "EnrollMfa", service: "account.v1.AccountService", type: .unary)
             public static let revokeMfa = Connect.MethodSpec(name: "RevokeMfa", service: "account.v1.AccountService", type: .unary)
+            public static let getMfaSecret = Connect.MethodSpec(name: "GetMfaSecret", service: "account.v1.AccountService", type: .unary)
+            public static let consumeRecoveryCode = Connect.MethodSpec(name: "ConsumeRecoveryCode", service: "account.v1.AccountService", type: .unary)
+            public static let replaceRecoveryCodes = Connect.MethodSpec(name: "ReplaceRecoveryCodes", service: "account.v1.AccountService", type: .unary)
             public static let updateKycStatus = Connect.MethodSpec(name: "UpdateKycStatus", service: "account.v1.AccountService", type: .unary)
             public static let suspendAccount = Connect.MethodSpec(name: "SuspendAccount", service: "account.v1.AccountService", type: .unary)
             public static let reactivateAccount = Connect.MethodSpec(name: "ReactivateAccount", service: "account.v1.AccountService", type: .unary)
@@ -331,6 +401,7 @@ public final class Account_V1_AccountServiceClient: Account_V1_AccountServiceCli
             public static let getGdprRecord = Connect.MethodSpec(name: "GetGdprRecord", service: "account.v1.AccountService", type: .unary)
             public static let updateConsents = Connect.MethodSpec(name: "UpdateConsents", service: "account.v1.AccountService", type: .unary)
             public static let listAccountsByStatus = Connect.MethodSpec(name: "ListAccountsByStatus", service: "account.v1.AccountService", type: .unary)
+            public static let findProfilesByContacts = Connect.MethodSpec(name: "FindProfilesByContacts", service: "account.v1.AccountService", type: .unary)
         }
     }
 }

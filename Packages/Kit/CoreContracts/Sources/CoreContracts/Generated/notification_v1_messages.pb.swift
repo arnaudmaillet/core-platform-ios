@@ -117,13 +117,16 @@ public nonisolated struct Notification_V1_NotificationView: Sendable {
 
   public var targetProfileID: String = String()
 
-  /// Primary actor. For collapsed rows this is the most-recent sender.
+  /// Primary actor. For collapsed rows this is the most-recent sender. A
+  /// notice from the platform itself (an appeal's outcome) has none: the nil
+  /// UUID, no sample senders and a sender_count of 0.
   public var senderProfileID: String = String()
 
   /// Up to 5 sample senders for "X, Y and N others" display.
   public var sampleSenderIds: [String] = []
 
-  /// Total number of distinct senders collapsed into this row (>= 1).
+  /// Total number of distinct senders collapsed into this row (>= 1; 0 for a
+  /// platform notice).
   public var senderCount: Int32 = 0
 
   public var kind: Notification_V1_NotificationKind = .unspecified
@@ -218,7 +221,11 @@ public nonisolated struct Notification_V1_RegisterDeviceRequest: Sendable {
 
   public var profileID: String = String()
 
-  /// The install's own id (iOS identifierForVendor), ≤ 128 chars.
+  /// The install's own id, ≤ 128 chars: the same one the session sent at login
+  /// (auth.v1.DeviceContext.device_id, the token's `did`). On the edge a
+  /// session bound to a device registers that device only (PERMISSION_DENIED
+  /// otherwise), and a token registered from another device for another
+  /// account is refused (NTF-2004).
   public var deviceID: String = String()
 
   /// The APNs / FCM token, ≤ 512 chars.

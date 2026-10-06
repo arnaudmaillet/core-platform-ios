@@ -30,9 +30,21 @@ public protocol Auth_V1_AuthServiceClientInterface: Sendable {
     /// Broker credentials/authorization-code to the IdP, establish a session, and
     /// return an edge access token + opaque refresh token. Resolves (or, on first
     /// login, creates) the IdP-subject → account link and gates issuance on the
-    /// account being active.
+    /// account being active. With two-step sign-in on (#649) no session is
+    /// issued yet: the response carries `mfa_required` and an `mfa_token`, and
+    /// CompleteLogin finishes the sign-in.
     @available(iOS 13, *)
     func `login`(request: Auth_V1_LoginRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_LoginResponse>
+
+    /// The second step of a sign-in (#649): the code from the holder's
+    /// authenticator app, or one of their backup codes, for the `mfa_token`
+    /// Login returned. Issues the session (once). A wrong code is AUT-5017
+    /// (UNAUTHENTICATED; the challenge stays usable until it expires); five
+    /// wrong codes in 15 minutes lock the account's codes (AUT-5018,
+    /// RESOURCE_EXHAUSTED, `retry-after-secs`); an unknown, expired or used
+    /// token is AUT-5021 (sign in again).
+    @available(iOS 13, *)
+    func `completeLogin`(request: Auth_V1_CompleteLoginRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_LoginResponse>
 
     /// Rotate the refresh token (single-use) and mint a fresh edge token. Reusing
     /// an already-rotated refresh token is treated as compromise and revokes the
@@ -53,12 +65,26 @@ public protocol Auth_V1_AuthServiceClientInterface: Sendable {
     @available(iOS 13, *)
     func `startVerification`(request: Auth_V1_StartVerificationRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_StartVerificationResponse>
 
+    /// A single-use nonce for a native Sign in with Apple / Google (edge:
+    /// public). The app passes it (Apple: its SHA-256 hex) to the provider, then
+    /// the raw value in `IdTokenGrant.nonce`: SignUp / Login consume it, so an
+    /// id_token cannot be replayed within its lifetime.
+    @available(iOS 13, *)
+    func `startFederatedSignIn`(request: Auth_V1_StartFederatedSignInRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_StartFederatedSignInResponse>
+
+    /// A single-use challenge for App Attest (edge: public): the app attests a
+    /// fresh Secure Enclave key for it, then presents the attestation to
+    /// StartGuestSession.
+    @available(iOS 13, *)
+    func `startDeviceAttestation`(request: Auth_V1_StartDeviceAttestationRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_StartDeviceAttestationResponse>
+
     /// Start an anonymous GUEST session for an app installation (guest mode:
     /// browse before sign-up). No account is created. The edge token carries
     /// sub = "guest:<guest_id>", kind = "guest", perms = ["read:public"], no
     /// profiles, and the installation's device id (`did`); it is refreshed with
     /// Refresh. The client edge refuses a guest token on every `authenticated`
-    /// method: guests only read public content.
+    /// method: guests only read public content. With App Attest enforced, the
+    /// request must carry a valid attestation (PERMISSION_DENIED otherwise).
     @available(iOS 13, *)
     func `startGuestSession`(request: Auth_V1_StartGuestSessionRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_StartGuestSessionResponse>
 
@@ -89,6 +115,41 @@ public protocol Auth_V1_AuthServiceClientInterface: Sendable {
     @available(iOS 13, *)
     func `verifyCredentials`(request: Auth_V1_VerifyCredentialsRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_VerifyCredentialsResponse>
 
+    /// Change the caller's email or phone (#651) to the address a
+    /// StartVerification code proved (send the code there first). Needs a recent
+    /// credential proof (VerifyCredentials), like any takeover-prone action.
+    /// Everything that signs the holder in follows: the account, the password
+    /// account's IdP email, the passwordless code sign-in. The address on file
+    /// before is told. Another account's address: AUT-6006 / AUT-6007.
+    @available(iOS 13, *)
+    func `changeContact`(request: Auth_V1_ChangeContactRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_ChangeContactResponse>
+
+    /// Start turning two-step sign-in on: a new seed for the holder's
+    /// authenticator app (the `otpauth://` URI for a QR code, or the secret to
+    /// type), kept until its first code confirms it (10 minutes; starting again
+    /// replaces it). Needs a recent credential proof. AUT-5022 when already on.
+    @available(iOS 13, *)
+    func `startMfaEnrollment`(request: Auth_V1_StartMfaEnrollmentRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_StartMfaEnrollmentResponse>
+
+    /// The first code from the authenticator app: two-step sign-in is on, the
+    /// backup codes are returned — shown once, never again — and the account's
+    /// other sessions are signed out. The account's email is told. A wrong
+    /// code is AUT-5017; no enrolment waiting (expired, or never started) is
+    /// AUT-5021.
+    @available(iOS 13, *)
+    func `confirmMfaEnrollment`(request: Auth_V1_ConfirmMfaEnrollmentRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_BackupCodesResponse>
+
+    /// Turn two-step sign-in off. Needs a recent credential proof; the
+    /// account's email is told. AUT-5020 when already off.
+    @available(iOS 13, *)
+    func `disableMfa`(request: Auth_V1_DisableMfaRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_DisableMfaResponse>
+
+    /// A new set of backup codes (shown once; the old ones stop working); the
+    /// other sessions are signed out. Needs a recent credential proof; the
+    /// account's email is told. AUT-5020 when two-step sign-in is off.
+    @available(iOS 13, *)
+    func `regenerateBackupCodes`(request: Auth_V1_RegenerateBackupCodesRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_BackupCodesResponse>
+
     /// INTERNAL. Server-side token introspection returning the normalized
     /// principal, for callers that cannot verify edge tokens locally.
     @available(iOS 13, *)
@@ -113,6 +174,11 @@ public final class Auth_V1_AuthServiceClient: Auth_V1_AuthServiceClientInterface
     }
 
     @available(iOS 13, *)
+    public func `completeLogin`(request: Auth_V1_CompleteLoginRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Auth_V1_LoginResponse> {
+        return await self.client.unary(path: "/auth.v1.AuthService/CompleteLogin", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
     public func `refresh`(request: Auth_V1_RefreshRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Auth_V1_RefreshResponse> {
         return await self.client.unary(path: "/auth.v1.AuthService/Refresh", idempotencyLevel: .unknown, request: request, headers: headers)
     }
@@ -125,6 +191,16 @@ public final class Auth_V1_AuthServiceClient: Auth_V1_AuthServiceClientInterface
     @available(iOS 13, *)
     public func `startVerification`(request: Auth_V1_StartVerificationRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Auth_V1_StartVerificationResponse> {
         return await self.client.unary(path: "/auth.v1.AuthService/StartVerification", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `startFederatedSignIn`(request: Auth_V1_StartFederatedSignInRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Auth_V1_StartFederatedSignInResponse> {
+        return await self.client.unary(path: "/auth.v1.AuthService/StartFederatedSignIn", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `startDeviceAttestation`(request: Auth_V1_StartDeviceAttestationRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Auth_V1_StartDeviceAttestationResponse> {
+        return await self.client.unary(path: "/auth.v1.AuthService/StartDeviceAttestation", idempotencyLevel: .unknown, request: request, headers: headers)
     }
 
     @available(iOS 13, *)
@@ -153,6 +229,31 @@ public final class Auth_V1_AuthServiceClient: Auth_V1_AuthServiceClientInterface
     }
 
     @available(iOS 13, *)
+    public func `changeContact`(request: Auth_V1_ChangeContactRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Auth_V1_ChangeContactResponse> {
+        return await self.client.unary(path: "/auth.v1.AuthService/ChangeContact", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `startMfaEnrollment`(request: Auth_V1_StartMfaEnrollmentRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Auth_V1_StartMfaEnrollmentResponse> {
+        return await self.client.unary(path: "/auth.v1.AuthService/StartMfaEnrollment", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `confirmMfaEnrollment`(request: Auth_V1_ConfirmMfaEnrollmentRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Auth_V1_BackupCodesResponse> {
+        return await self.client.unary(path: "/auth.v1.AuthService/ConfirmMfaEnrollment", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `disableMfa`(request: Auth_V1_DisableMfaRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Auth_V1_DisableMfaResponse> {
+        return await self.client.unary(path: "/auth.v1.AuthService/DisableMfa", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `regenerateBackupCodes`(request: Auth_V1_RegenerateBackupCodesRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Auth_V1_BackupCodesResponse> {
+        return await self.client.unary(path: "/auth.v1.AuthService/RegenerateBackupCodes", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
     public func `introspect`(request: Auth_V1_IntrospectRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Auth_V1_IntrospectResponse> {
         return await self.client.unary(path: "/auth.v1.AuthService/Introspect", idempotencyLevel: .unknown, request: request, headers: headers)
     }
@@ -165,14 +266,22 @@ public final class Auth_V1_AuthServiceClient: Auth_V1_AuthServiceClientInterface
     public enum Metadata {
         public enum Methods {
             public static let login = Connect.MethodSpec(name: "Login", service: "auth.v1.AuthService", type: .unary)
+            public static let completeLogin = Connect.MethodSpec(name: "CompleteLogin", service: "auth.v1.AuthService", type: .unary)
             public static let refresh = Connect.MethodSpec(name: "Refresh", service: "auth.v1.AuthService", type: .unary)
             public static let signUp = Connect.MethodSpec(name: "SignUp", service: "auth.v1.AuthService", type: .unary)
             public static let startVerification = Connect.MethodSpec(name: "StartVerification", service: "auth.v1.AuthService", type: .unary)
+            public static let startFederatedSignIn = Connect.MethodSpec(name: "StartFederatedSignIn", service: "auth.v1.AuthService", type: .unary)
+            public static let startDeviceAttestation = Connect.MethodSpec(name: "StartDeviceAttestation", service: "auth.v1.AuthService", type: .unary)
             public static let startGuestSession = Connect.MethodSpec(name: "StartGuestSession", service: "auth.v1.AuthService", type: .unary)
             public static let logout = Connect.MethodSpec(name: "Logout", service: "auth.v1.AuthService", type: .unary)
             public static let logoutAllSessions = Connect.MethodSpec(name: "LogoutAllSessions", service: "auth.v1.AuthService", type: .unary)
             public static let changePassword = Connect.MethodSpec(name: "ChangePassword", service: "auth.v1.AuthService", type: .unary)
             public static let verifyCredentials = Connect.MethodSpec(name: "VerifyCredentials", service: "auth.v1.AuthService", type: .unary)
+            public static let changeContact = Connect.MethodSpec(name: "ChangeContact", service: "auth.v1.AuthService", type: .unary)
+            public static let startMfaEnrollment = Connect.MethodSpec(name: "StartMfaEnrollment", service: "auth.v1.AuthService", type: .unary)
+            public static let confirmMfaEnrollment = Connect.MethodSpec(name: "ConfirmMfaEnrollment", service: "auth.v1.AuthService", type: .unary)
+            public static let disableMfa = Connect.MethodSpec(name: "DisableMfa", service: "auth.v1.AuthService", type: .unary)
+            public static let regenerateBackupCodes = Connect.MethodSpec(name: "RegenerateBackupCodes", service: "auth.v1.AuthService", type: .unary)
             public static let introspect = Connect.MethodSpec(name: "Introspect", service: "auth.v1.AuthService", type: .unary)
             public static let listSessions = Connect.MethodSpec(name: "ListSessions", service: "auth.v1.AuthService", type: .unary)
         }

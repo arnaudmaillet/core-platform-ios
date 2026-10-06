@@ -21,7 +21,8 @@ let package = Package(
         .package(path: "../../Core/CoreStorage"),
         .package(path: "../../Core/DesignSystem"),
         .package(path: "../../Core/EmoteKit"),
-        .package(path: "../../Core/PostGrid")
+        .package(path: "../../Core/PostGrid"),
+        .package(path: "../../Core/ShareSheet")
     ],
     targets: [
         .target(
@@ -45,7 +46,9 @@ let package = Package(
                 // resolves a module the whole graph can see, and only a clean
                 // build asks whether THIS target was entitled to it.
                 "CoreNetworking",
-                "PostGrid"
+                "PostGrid",
+                // The place page's QR bubble opens the profile's share sheet.
+                "ShareSheet"
             ]
         ),
         .testTarget(

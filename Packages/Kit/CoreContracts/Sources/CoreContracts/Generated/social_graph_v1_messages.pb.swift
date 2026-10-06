@@ -341,6 +341,13 @@ public nonisolated struct SocialGraph_V1_TargetAccess: Sendable {
 
   public var access: SocialGraph_V1_ContentAccess = .unspecified
 
+  /// Some viewer profile follows the target (#657: an author's location
+  /// audience). One's own profile counts. False for an anonymous reader.
+  public var follows: Bool = false
+
+  /// Some viewer profile and the target follow each other.
+  public var mutual: Bool = false
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -386,9 +393,23 @@ public nonisolated struct SocialGraph_V1_ListFollowRequestsResponse: Sendable {
 
   public var nextPageToken: String = String()
 
+  /// How many requests are pending in all — on the first page only (no
+  /// page_token), so a screen can show the number without reading every page.
+  /// Counted up to 1000: 1000 means "1000 or more".
+  public var pendingCount: Int64 {
+    get {_pendingCount ?? 0}
+    set {_pendingCount = newValue}
+  }
+  /// Returns true if `pendingCount` has been explicitly set.
+  public var hasPendingCount: Bool {self._pendingCount != nil}
+  /// Clears the value of `pendingCount`. Subsequent reads from it will return its default value.
+  public mutating func clearPendingCount() {self._pendingCount = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+
+  fileprivate var _pendingCount: Int64? = nil
 }
 
 /// The owner of `owner_id` answers `requester_id`'s request.
@@ -449,6 +470,10 @@ public nonisolated struct SocialGraph_V1_CheckInteractionResponse: Sendable {
   /// With allowed: accept the comment / message but hold it for the target's
   /// review — the target's temporary interaction limit covers the actor (#669).
   public var held: Bool = false
+
+  /// Without allowed: why (a block, no one, or an audience that excludes
+  /// the actor). UNSPECIFIED when allowed, and from servers before #656.
+  public var refusal: SocialGraph_V1_InteractionRefusal = .unspecified
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -1431,7 +1456,7 @@ nonisolated extension SocialGraph_V1_CheckAccessRequest: SwiftProtobuf.Message, 
 
 nonisolated extension SocialGraph_V1_TargetAccess: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".TargetAccess"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}target_profile_id\0\u{1}access\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}target_profile_id\0\u{1}access\0\u{1}follows\0\u{1}mutual\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1441,6 +1466,8 @@ nonisolated extension SocialGraph_V1_TargetAccess: SwiftProtobuf.Message, SwiftP
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularStringField(value: &self.targetProfileID) }()
       case 2: try { try decoder.decodeSingularEnumField(value: &self.access) }()
+      case 3: try { try decoder.decodeSingularBoolField(value: &self.follows) }()
+      case 4: try { try decoder.decodeSingularBoolField(value: &self.mutual) }()
       default: break
       }
     }
@@ -1453,12 +1480,20 @@ nonisolated extension SocialGraph_V1_TargetAccess: SwiftProtobuf.Message, SwiftP
     if self.access != .unspecified {
       try visitor.visitSingularEnumField(value: self.access, fieldNumber: 2)
     }
+    if self.follows != false {
+      try visitor.visitSingularBoolField(value: self.follows, fieldNumber: 3)
+    }
+    if self.mutual != false {
+      try visitor.visitSingularBoolField(value: self.mutual, fieldNumber: 4)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: SocialGraph_V1_TargetAccess, rhs: SocialGraph_V1_TargetAccess) -> Bool {
     if lhs.targetProfileID != rhs.targetProfileID {return false}
     if lhs.access != rhs.access {return false}
+    if lhs.follows != rhs.follows {return false}
+    if lhs.mutual != rhs.mutual {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -1536,7 +1571,7 @@ nonisolated extension SocialGraph_V1_ListFollowRequestsRequest: SwiftProtobuf.Me
 
 nonisolated extension SocialGraph_V1_ListFollowRequestsResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ListFollowRequestsResponse"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}requests\0\u{3}next_page_token\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}requests\0\u{3}next_page_token\0\u{3}pending_count\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1546,24 +1581,33 @@ nonisolated extension SocialGraph_V1_ListFollowRequestsResponse: SwiftProtobuf.M
       switch fieldNumber {
       case 1: try { try decoder.decodeRepeatedMessageField(value: &self.requests) }()
       case 2: try { try decoder.decodeSingularStringField(value: &self.nextPageToken) }()
+      case 3: try { try decoder.decodeSingularInt64Field(value: &self._pendingCount) }()
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
     if !self.requests.isEmpty {
       try visitor.visitRepeatedMessageField(value: self.requests, fieldNumber: 1)
     }
     if !self.nextPageToken.isEmpty {
       try visitor.visitSingularStringField(value: self.nextPageToken, fieldNumber: 2)
     }
+    try { if let v = self._pendingCount {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 3)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: SocialGraph_V1_ListFollowRequestsResponse, rhs: SocialGraph_V1_ListFollowRequestsResponse) -> Bool {
     if lhs.requests != rhs.requests {return false}
     if lhs.nextPageToken != rhs.nextPageToken {return false}
+    if lhs._pendingCount != rhs._pendingCount {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -1681,7 +1725,7 @@ nonisolated extension SocialGraph_V1_CheckInteractionRequest: SwiftProtobuf.Mess
 
 nonisolated extension SocialGraph_V1_CheckInteractionResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".CheckInteractionResponse"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}allowed\0\u{1}held\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}allowed\0\u{1}held\0\u{1}refusal\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1691,6 +1735,7 @@ nonisolated extension SocialGraph_V1_CheckInteractionResponse: SwiftProtobuf.Mes
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularBoolField(value: &self.allowed) }()
       case 2: try { try decoder.decodeSingularBoolField(value: &self.held) }()
+      case 3: try { try decoder.decodeSingularEnumField(value: &self.refusal) }()
       default: break
       }
     }
@@ -1703,12 +1748,16 @@ nonisolated extension SocialGraph_V1_CheckInteractionResponse: SwiftProtobuf.Mes
     if self.held != false {
       try visitor.visitSingularBoolField(value: self.held, fieldNumber: 2)
     }
+    if self.refusal != .unspecified {
+      try visitor.visitSingularEnumField(value: self.refusal, fieldNumber: 3)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: SocialGraph_V1_CheckInteractionResponse, rhs: SocialGraph_V1_CheckInteractionResponse) -> Bool {
     if lhs.allowed != rhs.allowed {return false}
     if lhs.held != rhs.held {return false}
+    if lhs.refusal != rhs.refusal {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

@@ -472,6 +472,16 @@ over a full page rather than a page of its own.
 
 ## 14. No discovery / recommendation feed for the "For You" tab
 
+> **RESOLVED (2026-10-05, #512 / #448).** The backend serves
+> `timeline.v1.GetDiscoveryFeed` (B3, arnaudmaillet/core-platform#673): one
+> non-personalised pool, `FOR_YOU` / `TRENDING` / `RECENT` / `NEARBY`, with a
+> `content_level` the server clamps to `RESTRICTED` for teens and guests.
+> For You's **Discover** now reads it (`DiscoveryFeedRepository`, `FOR_YOU`,
+> the active profile's Sensitive Content setting as the level) for guests and
+> members alike, in the server's order; the Friends / Following rows keep
+> reading `GetFollowingFeed`. The search screen's trending corpus reads the
+> same pool. The text below records how it was before.
+
 The app's slot-1 tab is now **For You**, a curated discovery grid. Nothing in
 the contracts can serve it. `timeline.v1` exposes exactly two RPCs:
 

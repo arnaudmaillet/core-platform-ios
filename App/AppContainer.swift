@@ -100,17 +100,27 @@ final class AppContainer {
 
     /// RPC client for everything except AuthService; attaches the edge token
     /// and refreshes it single-flight.
-    private(set) lazy var authenticatedRPCClient = ConnectClientFactory.makeAuthenticated(
+    private(set) lazy var authenticatedRPCClient: ProtocolClientInterface = ConnectClientFactory.makeAuthenticated(
         host: environment.host,
         tokenProvider: sessionManager,
         wire: environment.wire,
         httpClient: rpcHTTPClient
     )
 
-    private(set) lazy var sessionManager = SessionManager(
+    private(set) lazy var sessionManager: SessionManager = SessionManager(
         authClient: Auth_V1_AuthServiceClient(client: unauthenticatedRPCClient),
         store: KeychainSessionStore(store: KeychainStore(service: "cn.wynn.core-platform-ios")),
-        configuration: .init(deviceID: Self.persistentDeviceID(), userAgent: Self.userAgent())
+        configuration: .init(deviceID: Self.persistentDeviceID(), userAgent: Self.userAgent()),
+        // A guest reads with a token of their own (guest mode B1), started on
+        // the first read, with an App Attest proof where the device has one
+        // (#523) and the country location says it's in (B10).
+        guest: GuestSessionContext(
+            store: KeychainSessionStore(
+                store: KeychainStore(service: "cn.wynn.core-platform-ios"), key: "auth.guestSession"
+            ),
+            currentCountry: { [weak self] in await self?.currentCountry.currentCountry },
+            attestor: AppAttestGuestAttestor(keyStore: KeychainStore(service: "cn.wynn.core-platform-ios"))
+        )
     )
 
     /// Who is signed in and as which profile, for the whole app: every
@@ -185,8 +195,26 @@ final class AppContainer {
     }
 
     private(set) lazy var authFeature: any AuthFeatureBuilding = AuthFeatureBuilder(
-        sessionManager: sessionManager
+        sessionManager: sessionManager,
+        // Sign-up by code (guest mode B4): the new account's profile, and its
+        // home country — the country location opened, else the storefront's.
+        profileSetup: AccountProfileSetupService(
+            profileClient: Profile_V1_ProfileServiceClient(client: authenticatedRPCClient)
+        ),
+        homeCountry: { [weak self] in
+            await self?.currentCountry.currentCountry ?? Locale.current.region?.identifier ?? ""
+        },
+        federated: federatedSignIn()
     )
+
+    /// Sign in with Apple's sheet (#507); `-mock-apple-sign-in <email>` skips
+    /// it in DEBUG.
+    private func federatedSignIn() -> any FederatedSignInProviding {
+        #if DEBUG
+        if let mock = MockAppleSignIn.fromLaunchArguments() { return mock }
+        #endif
+        return AppleSignInProvider()
+    }
 
     // MARK: - Media
 
@@ -506,17 +534,29 @@ final class AppContainer {
         // "Use this sound": the shell opens its camera with it. Read at the
         // tap, because the shell sets it after this builder exists.
         useSound: { [unowned self] sound in self.onUseSound?(sound) },
-        isMember: { [unowned self] in self.memberGate.isMember },
-        guestDiscoveryPostIDs: { [unowned self] in try await self.guestDiscoveryPostIDs() }
+        discovery: discoveryRepository
     )
 
-    /// A guest's For You, until the backend has a discovery feed (#448): the
-    /// posts the map knows worldwide, most liked first. `QueryTile` is the one
-    /// viewer-free list both the fleet and the mock serve today.
-    private func guestDiscoveryPostIDs() async throws -> [PostID] {
-        let world = MapViewport(swLat: -85, swLng: -180, neLat: 85, neLng: 180, zoomLevel: 2)
-        let pins = try await mapsRepository.queryTile(world, filter: nil).pins
-        return pins.sorted { $0.likeCount > $1.likeCount }.prefix(60).map(\.postID)
+    /// Discover's pool (`timeline.v1.GetDiscoveryFeed`, backend B3 / #512):
+    /// the same for guests and members, hydrated through the one feed
+    /// repository. Also the search screen's trending corpus.
+    private lazy var discoveryRepository = DiscoveryFeedRepository(
+        timelineClient: Timeline_V1_TimelineServiceClient(client: authenticatedRPCClient),
+        base: feedRepository,
+        contentLevel: { [weak self] in await self?.discoveryContentLevel() ?? .restricted }
+    )
+
+    /// The active profile's Sensitive Content setting (#407) as Discover's
+    /// content level. A guest — and anything that can't be read — is
+    /// restricted; the server clamps teens and guests to it anyway.
+    private func discoveryContentLevel() async -> DiscoveryContentLevel {
+        guard memberGate.isMember,
+              let profileID = try? await viewerSession.activeProfileID() else { return .restricted }
+        var request = Profile_V1_GetProfileByIdRequest()
+        request.profileID = profileID.rawValue
+        let view = await Profile_V1_ProfileServiceClient(client: authenticatedRPCClient)
+            .getProfileByID(request: request, headers: [:]).message
+        return view?.feedSettings.sensitiveContent == .standard ? .standard : .restricted
     }
 
     /// Set by the shell, which owns the presentation of the camera.
@@ -600,7 +640,13 @@ final class AppContainer {
 
     /// Where the device is, as a country — asked for in context from the map
     /// (guest mode §3.1), never at launch. Opens that country for free.
-    private(set) lazy var currentCountry = CurrentCountryProvider()
+    private(set) lazy var currentCountry: CurrentCountryProvider = CurrentCountryProvider(
+        // Only the country the server grants opens (B10): it checks the code
+        // against the network's GeoIP country.
+        verifier: GeoCountryAccessVerifier(
+            geoClient: GeoDiscovery_V1_GeoDiscoveryServiceClient(client: authenticatedRPCClient)
+        )
+    )
 
     /// The Shop's Boosts: the ×100 cartridge pack, over the ONE wallet. Mock
     /// mode only, like the shop itself (no `countryAccess`, no shop door).
@@ -797,8 +843,7 @@ final class AppContainer {
     /// needs the gateway route added in `dev/envoy/envoy.yaml` — see
     /// `dev/BACKEND_GAPS.md` §11.
     private lazy var profileReportRepository = ProfileReportRepository(
-        moderationClient: Moderation_V1_ModerationServiceClient(client: authenticatedRPCClient),
-        authSession: sessionManager
+        moderationClient: Moderation_V1_ModerationServiceClient(client: authenticatedRPCClient)
     )
 
     /// The viewer's account details for the settings screen (read-only —
@@ -927,7 +972,8 @@ final class AppContainer {
     private lazy var exploreRepository = ForYouExploreAdapter(
         forYou: ForYouRepository(
             feed: feedRepository,
-            counterClient: Counter_V1_CounterServiceClient(client: authenticatedRPCClient)
+            counterClient: Counter_V1_CounterServiceClient(client: authenticatedRPCClient),
+            discovery: discoveryRepository
         )
     )
 
