@@ -203,6 +203,12 @@ private struct StubPostClient: Post_V1_PostServiceClientInterface {
     ) async -> ResponseMessage<Post_V1_ListRecentlyDeletedResponse> {
         ResponseMessage(result: .success(Post_V1_ListRecentlyDeletedResponse()))
     }
+
+    func batchGetLikeVisibility(
+        request: Post_V1_BatchGetLikeVisibilityRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<Post_V1_BatchGetLikeVisibilityResponse> {
+        ResponseMessage(result: .success(Post_V1_BatchGetLikeVisibilityResponse()))
+    }
 }
 
 private struct StubSearchClient: Search_V1_SearchServiceClientInterface {
@@ -222,6 +228,30 @@ private struct StubSearchClient: Search_V1_SearchServiceClientInterface {
         request: Search_V1_MultiSearchRequest, headers: Connect.Headers
     ) async -> ResponseMessage<Search_V1_MultiSearchResponse> {
         ResponseMessage(result: .success(Search_V1_MultiSearchResponse()))
+    }
+
+    func recordRecentSearch(
+        request: Search_V1_RecordRecentSearchRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<Search_V1_RecentSearchesResponse> {
+        ResponseMessage(result: .success(Search_V1_RecentSearchesResponse()))
+    }
+
+    func listRecentSearches(
+        request: Search_V1_ListRecentSearchesRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<Search_V1_RecentSearchesResponse> {
+        ResponseMessage(result: .success(Search_V1_RecentSearchesResponse()))
+    }
+
+    func deleteRecentSearch(
+        request: Search_V1_DeleteRecentSearchRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<Search_V1_RecentSearchesResponse> {
+        ResponseMessage(result: .success(Search_V1_RecentSearchesResponse()))
+    }
+
+    func clearSearchHistory(
+        request: Search_V1_ClearSearchHistoryRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<Search_V1_RecentSearchesResponse> {
+        ResponseMessage(result: .success(Search_V1_RecentSearchesResponse()))
     }
 }
 

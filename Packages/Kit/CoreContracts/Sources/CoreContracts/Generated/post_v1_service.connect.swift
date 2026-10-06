@@ -35,6 +35,13 @@ public protocol Post_V1_PostServiceClientInterface: Sendable {
 
     @available(iOS 13, *)
     func `listPostsByProfile`(request: Post_V1_ListPostsByProfileRequest, headers: Connect.Headers) async -> ResponseMessage<Post_V1_ListPostsByProfileResponse>
+
+    /// MESH ONLY (#809): each post's author and whether that author hides
+    /// like counts from others, for the services that serve counts
+    /// (engagement, counter) to withhold them from anyone but the author.
+    /// At most 200 posts; unknown posts are absent.
+    @available(iOS 13, *)
+    func `batchGetLikeVisibility`(request: Post_V1_BatchGetLikeVisibilityRequest, headers: Connect.Headers) async -> ResponseMessage<Post_V1_BatchGetLikeVisibilityResponse>
 }
 
 /// Concrete implementation of `Post_V1_PostServiceClientInterface`.
@@ -85,6 +92,11 @@ public final class Post_V1_PostServiceClient: Post_V1_PostServiceClientInterface
         return await self.client.unary(path: "/post.v1.PostService/ListPostsByProfile", idempotencyLevel: .unknown, request: request, headers: headers)
     }
 
+    @available(iOS 13, *)
+    public func `batchGetLikeVisibility`(request: Post_V1_BatchGetLikeVisibilityRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Post_V1_BatchGetLikeVisibilityResponse> {
+        return await self.client.unary(path: "/post.v1.PostService/BatchGetLikeVisibility", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
     public enum Metadata {
         public enum Methods {
             public static let createPost = Connect.MethodSpec(name: "CreatePost", service: "post.v1.PostService", type: .unary)
@@ -95,6 +107,7 @@ public final class Post_V1_PostServiceClient: Post_V1_PostServiceClientInterface
             public static let listRecentlyDeleted = Connect.MethodSpec(name: "ListRecentlyDeleted", service: "post.v1.PostService", type: .unary)
             public static let getPost = Connect.MethodSpec(name: "GetPost", service: "post.v1.PostService", type: .unary)
             public static let listPostsByProfile = Connect.MethodSpec(name: "ListPostsByProfile", service: "post.v1.PostService", type: .unary)
+            public static let batchGetLikeVisibility = Connect.MethodSpec(name: "BatchGetLikeVisibility", service: "post.v1.PostService", type: .unary)
         }
     }
 }

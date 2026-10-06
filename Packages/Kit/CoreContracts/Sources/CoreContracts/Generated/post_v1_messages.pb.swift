@@ -221,11 +221,65 @@ public nonisolated struct Post_V1_PostView: @unchecked Sendable {
     set {_uniqueStorage()._visibleUntilMs = newValue}
   }
 
+  /// The author turned downloads off (#809): the reader (anyone but the
+  /// author) is not offered to save the post's media.
+  public var downloadsDisabled: Bool {
+    get {_storage._downloadsDisabled}
+    set {_uniqueStorage()._downloadsDisabled = newValue}
+  }
+
+  /// The author hides like counts from this reader (#809): counts are
+  /// withheld (engagement, counter); the app shows none.
+  public var likeCountsHidden: Bool {
+    get {_storage._likeCountsHidden}
+    set {_uniqueStorage()._likeCountsHidden = newValue}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _storage = _StorageClass.defaultInstance
+}
+
+public nonisolated struct Post_V1_BatchGetLikeVisibilityRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var postIds: [String] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Post_V1_PostLikeVisibility: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var postID: String = String()
+
+  public var authorID: String = String()
+
+  public var likeCountsHidden: Bool = false
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Post_V1_BatchGetLikeVisibilityResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var posts: [Post_V1_PostLikeVisibility] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
 }
 
 public nonisolated struct Post_V1_PostSummary: Sendable {
@@ -670,7 +724,7 @@ nonisolated extension Post_V1_MediaAttachmentView: SwiftProtobuf.Message, SwiftP
 
 nonisolated extension Post_V1_PostView: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".PostView"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}post_id\0\u{3}profile_id\0\u{1}kind\0\u{1}status\0\u{1}caption\0\u{1}attachments\0\u{3}parent_id\0\u{3}root_id\0\u{3}created_at_ms\0\u{3}updated_at_ms\0\u{3}published_at_ms\0\u{3}deleted_at_ms\0\u{3}audio_ref\0\u{1}location\0\u{1}moderation\0\u{3}allow_remix\0\u{3}allow_sound_reuse\0\u{3}outside_window\0\u{3}visible_until_ms\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}post_id\0\u{3}profile_id\0\u{1}kind\0\u{1}status\0\u{1}caption\0\u{1}attachments\0\u{3}parent_id\0\u{3}root_id\0\u{3}created_at_ms\0\u{3}updated_at_ms\0\u{3}published_at_ms\0\u{3}deleted_at_ms\0\u{3}audio_ref\0\u{1}location\0\u{1}moderation\0\u{3}allow_remix\0\u{3}allow_sound_reuse\0\u{3}outside_window\0\u{3}visible_until_ms\0\u{3}downloads_disabled\0\u{3}like_counts_hidden\0")
 
   fileprivate class _StorageClass {
     var _postID: String = String()
@@ -692,6 +746,8 @@ nonisolated extension Post_V1_PostView: SwiftProtobuf.Message, SwiftProtobuf._Me
     var _allowSoundReuse: Bool? = nil
     var _outsideWindow: Bool = false
     var _visibleUntilMs: Int64 = 0
+    var _downloadsDisabled: Bool = false
+    var _likeCountsHidden: Bool = false
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -721,6 +777,8 @@ nonisolated extension Post_V1_PostView: SwiftProtobuf.Message, SwiftProtobuf._Me
       _allowSoundReuse = source._allowSoundReuse
       _outsideWindow = source._outsideWindow
       _visibleUntilMs = source._visibleUntilMs
+      _downloadsDisabled = source._downloadsDisabled
+      _likeCountsHidden = source._likeCountsHidden
     }
   }
 
@@ -758,6 +816,8 @@ nonisolated extension Post_V1_PostView: SwiftProtobuf.Message, SwiftProtobuf._Me
         case 17: try { try decoder.decodeSingularBoolField(value: &_storage._allowSoundReuse) }()
         case 18: try { try decoder.decodeSingularBoolField(value: &_storage._outsideWindow) }()
         case 19: try { try decoder.decodeSingularInt64Field(value: &_storage._visibleUntilMs) }()
+        case 20: try { try decoder.decodeSingularBoolField(value: &_storage._downloadsDisabled) }()
+        case 21: try { try decoder.decodeSingularBoolField(value: &_storage._likeCountsHidden) }()
         default: break
         }
       }
@@ -827,6 +887,12 @@ nonisolated extension Post_V1_PostView: SwiftProtobuf.Message, SwiftProtobuf._Me
       if _storage._visibleUntilMs != 0 {
         try visitor.visitSingularInt64Field(value: _storage._visibleUntilMs, fieldNumber: 19)
       }
+      if _storage._downloadsDisabled != false {
+        try visitor.visitSingularBoolField(value: _storage._downloadsDisabled, fieldNumber: 20)
+      }
+      if _storage._likeCountsHidden != false {
+        try visitor.visitSingularBoolField(value: _storage._likeCountsHidden, fieldNumber: 21)
+      }
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -855,10 +921,112 @@ nonisolated extension Post_V1_PostView: SwiftProtobuf.Message, SwiftProtobuf._Me
         if _storage._allowSoundReuse != rhs_storage._allowSoundReuse {return false}
         if _storage._outsideWindow != rhs_storage._outsideWindow {return false}
         if _storage._visibleUntilMs != rhs_storage._visibleUntilMs {return false}
+        if _storage._downloadsDisabled != rhs_storage._downloadsDisabled {return false}
+        if _storage._likeCountsHidden != rhs_storage._likeCountsHidden {return false}
         return true
       }
       if !storagesAreEqual {return false}
     }
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Post_V1_BatchGetLikeVisibilityRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".BatchGetLikeVisibilityRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}post_ids\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedStringField(value: &self.postIds) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.postIds.isEmpty {
+      try visitor.visitRepeatedStringField(value: self.postIds, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Post_V1_BatchGetLikeVisibilityRequest, rhs: Post_V1_BatchGetLikeVisibilityRequest) -> Bool {
+    if lhs.postIds != rhs.postIds {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Post_V1_PostLikeVisibility: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".PostLikeVisibility"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}post_id\0\u{3}author_id\0\u{3}like_counts_hidden\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.postID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.authorID) }()
+      case 3: try { try decoder.decodeSingularBoolField(value: &self.likeCountsHidden) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.postID.isEmpty {
+      try visitor.visitSingularStringField(value: self.postID, fieldNumber: 1)
+    }
+    if !self.authorID.isEmpty {
+      try visitor.visitSingularStringField(value: self.authorID, fieldNumber: 2)
+    }
+    if self.likeCountsHidden != false {
+      try visitor.visitSingularBoolField(value: self.likeCountsHidden, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Post_V1_PostLikeVisibility, rhs: Post_V1_PostLikeVisibility) -> Bool {
+    if lhs.postID != rhs.postID {return false}
+    if lhs.authorID != rhs.authorID {return false}
+    if lhs.likeCountsHidden != rhs.likeCountsHidden {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Post_V1_BatchGetLikeVisibilityResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".BatchGetLikeVisibilityResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}posts\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.posts) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.posts.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.posts, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Post_V1_BatchGetLikeVisibilityResponse, rhs: Post_V1_BatchGetLikeVisibilityResponse) -> Bool {
+    if lhs.posts != rhs.posts {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

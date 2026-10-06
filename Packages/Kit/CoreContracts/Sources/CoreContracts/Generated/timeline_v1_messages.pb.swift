@@ -199,6 +199,14 @@ public nonisolated struct Timeline_V1_GetDiscoveryFeedRequest: Sendable {
   /// Server clamps to TIMELINE_MAX_PAGE_SIZE; <= 0 means 20.
   public var limit: Int32 = 0
 
+  /// The reading profile (one of the caller's): its interest tags rank a
+  /// FOR_YOU page. Empty = not personalised (a guest always is).
+  public var profileID: String = String()
+
+  /// The holder's non-personalised feed setting (#662, profile
+  /// FeedSettings.non_personalized): set, interest tags are ignored.
+  public var nonPersonalized: Bool = false
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -226,6 +234,77 @@ public nonisolated struct Timeline_V1_GetDiscoveryFeedResponse: Sendable {
 
   /// The content level actually applied.
   public var contentLevelApplied: Timeline_V1_ContentLevel = .unspecified
+
+  /// Whether the reader's interest tags ranked this page.
+  public var personalized: Bool = false
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// One interest tag (a hashtag, lowercase, without its '#') and its weight
+/// today.
+public nonisolated struct Timeline_V1_Interest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var tag: String = String()
+
+  public var weight: Double = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Timeline_V1_InterestsResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Heaviest first.
+  public var interests: [Timeline_V1_Interest] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Timeline_V1_ListInterestsRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var profileID: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Timeline_V1_RemoveInterestRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var profileID: String = String()
+
+  /// As listed (a leading '#' is accepted).
+  public var tag: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Timeline_V1_ResetInterestsRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var profileID: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -508,7 +587,7 @@ nonisolated extension Timeline_V1_GetAudioFeedResponse: SwiftProtobuf.Message, S
 
 nonisolated extension Timeline_V1_GetDiscoveryFeedRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".GetDiscoveryFeedRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}ranking\0\u{1}region\0\u{1}lat\0\u{1}lng\0\u{3}content_level\0\u{3}page_token\0\u{1}limit\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}ranking\0\u{1}region\0\u{1}lat\0\u{1}lng\0\u{3}content_level\0\u{3}page_token\0\u{1}limit\0\u{3}profile_id\0\u{3}non_personalized\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -523,6 +602,8 @@ nonisolated extension Timeline_V1_GetDiscoveryFeedRequest: SwiftProtobuf.Message
       case 5: try { try decoder.decodeSingularEnumField(value: &self.contentLevel) }()
       case 6: try { try decoder.decodeSingularStringField(value: &self.pageToken) }()
       case 7: try { try decoder.decodeSingularInt32Field(value: &self.limit) }()
+      case 8: try { try decoder.decodeSingularStringField(value: &self.profileID) }()
+      case 9: try { try decoder.decodeSingularBoolField(value: &self.nonPersonalized) }()
       default: break
       }
     }
@@ -554,6 +635,12 @@ nonisolated extension Timeline_V1_GetDiscoveryFeedRequest: SwiftProtobuf.Message
     if self.limit != 0 {
       try visitor.visitSingularInt32Field(value: self.limit, fieldNumber: 7)
     }
+    if !self.profileID.isEmpty {
+      try visitor.visitSingularStringField(value: self.profileID, fieldNumber: 8)
+    }
+    if self.nonPersonalized != false {
+      try visitor.visitSingularBoolField(value: self.nonPersonalized, fieldNumber: 9)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -565,6 +652,8 @@ nonisolated extension Timeline_V1_GetDiscoveryFeedRequest: SwiftProtobuf.Message
     if lhs.contentLevel != rhs.contentLevel {return false}
     if lhs.pageToken != rhs.pageToken {return false}
     if lhs.limit != rhs.limit {return false}
+    if lhs.profileID != rhs.profileID {return false}
+    if lhs.nonPersonalized != rhs.nonPersonalized {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -572,7 +661,7 @@ nonisolated extension Timeline_V1_GetDiscoveryFeedRequest: SwiftProtobuf.Message
 
 nonisolated extension Timeline_V1_GetDiscoveryFeedResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".GetDiscoveryFeedResponse"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}items\0\u{3}next_page_token\0\u{3}region_applied\0\u{3}content_level_applied\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}items\0\u{3}next_page_token\0\u{3}region_applied\0\u{3}content_level_applied\0\u{1}personalized\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -584,6 +673,7 @@ nonisolated extension Timeline_V1_GetDiscoveryFeedResponse: SwiftProtobuf.Messag
       case 2: try { try decoder.decodeSingularStringField(value: &self.nextPageToken) }()
       case 3: try { try decoder.decodeSingularStringField(value: &self.regionApplied) }()
       case 4: try { try decoder.decodeSingularEnumField(value: &self.contentLevelApplied) }()
+      case 5: try { try decoder.decodeSingularBoolField(value: &self.personalized) }()
       default: break
       }
     }
@@ -602,6 +692,9 @@ nonisolated extension Timeline_V1_GetDiscoveryFeedResponse: SwiftProtobuf.Messag
     if self.contentLevelApplied != .unspecified {
       try visitor.visitSingularEnumField(value: self.contentLevelApplied, fieldNumber: 4)
     }
+    if self.personalized != false {
+      try visitor.visitSingularBoolField(value: self.personalized, fieldNumber: 5)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -610,6 +703,167 @@ nonisolated extension Timeline_V1_GetDiscoveryFeedResponse: SwiftProtobuf.Messag
     if lhs.nextPageToken != rhs.nextPageToken {return false}
     if lhs.regionApplied != rhs.regionApplied {return false}
     if lhs.contentLevelApplied != rhs.contentLevelApplied {return false}
+    if lhs.personalized != rhs.personalized {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Timeline_V1_Interest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".Interest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}tag\0\u{1}weight\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.tag) }()
+      case 2: try { try decoder.decodeSingularDoubleField(value: &self.weight) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.tag.isEmpty {
+      try visitor.visitSingularStringField(value: self.tag, fieldNumber: 1)
+    }
+    if self.weight.bitPattern != 0 {
+      try visitor.visitSingularDoubleField(value: self.weight, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Timeline_V1_Interest, rhs: Timeline_V1_Interest) -> Bool {
+    if lhs.tag != rhs.tag {return false}
+    if lhs.weight != rhs.weight {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Timeline_V1_InterestsResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".InterestsResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}interests\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.interests) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.interests.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.interests, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Timeline_V1_InterestsResponse, rhs: Timeline_V1_InterestsResponse) -> Bool {
+    if lhs.interests != rhs.interests {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Timeline_V1_ListInterestsRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ListInterestsRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}profile_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.profileID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.profileID.isEmpty {
+      try visitor.visitSingularStringField(value: self.profileID, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Timeline_V1_ListInterestsRequest, rhs: Timeline_V1_ListInterestsRequest) -> Bool {
+    if lhs.profileID != rhs.profileID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Timeline_V1_RemoveInterestRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".RemoveInterestRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}profile_id\0\u{1}tag\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.profileID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.tag) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.profileID.isEmpty {
+      try visitor.visitSingularStringField(value: self.profileID, fieldNumber: 1)
+    }
+    if !self.tag.isEmpty {
+      try visitor.visitSingularStringField(value: self.tag, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Timeline_V1_RemoveInterestRequest, rhs: Timeline_V1_RemoveInterestRequest) -> Bool {
+    if lhs.profileID != rhs.profileID {return false}
+    if lhs.tag != rhs.tag {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Timeline_V1_ResetInterestsRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ResetInterestsRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}profile_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.profileID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.profileID.isEmpty {
+      try visitor.visitSingularStringField(value: self.profileID, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Timeline_V1_ResetInterestsRequest, rhs: Timeline_V1_ResetInterestsRequest) -> Bool {
+    if lhs.profileID != rhs.profileID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
