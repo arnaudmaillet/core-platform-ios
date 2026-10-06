@@ -95,6 +95,9 @@ public final class MockAuthService: @unchecked Sendable {
         bff.register(path: "/auth.v1.AuthService/StartVerification") { [self] (request: Auth_V1_StartVerificationRequest) in
             startVerification(request)
         }
+        bff.register(path: "/auth.v1.AuthService/ChangeContact") { [self] (request: Auth_V1_ChangeContactRequest, headers: Headers) in
+            changeContact(request, headers: headers)
+        }
         bff.register(path: "/auth.v1.AuthService/StartFederatedSignIn") { [self] (_: Auth_V1_StartFederatedSignInRequest) in
             startFederatedSignIn()
         }
@@ -214,6 +217,40 @@ public final class MockAuthService: @unchecked Sendable {
             response.challengeID = id
             response.expiresInSecs = 600
             response.resendAfterSecs = 30
+            return .success(response)
+        }
+    }
+
+    /// An address that belongs to another account: `ChangeContact` refuses it
+    /// (AUT-6006 / AUT-6007).
+    public static let takenEmail = "taken@example.com"
+    public static let takenPhone = "+15550000000"
+
+    /// The contract (ChangeContact, #651): a signed-in caller who stepped up
+    /// recently (PERMISSION_DENIED "step_up_required" otherwise), and a code
+    /// that proves the new address (AUT-5011 otherwise). Another account's
+    /// address is AUT-6006 / AUT-6007. The new address arrives verified.
+    private func changeContact(
+        _ request: Auth_V1_ChangeContactRequest, headers: Headers
+    ) -> Result<Auth_V1_ChangeContactResponse, ConnectError> {
+        if let refusal = settingsRefusal(headers, needsStepUp: true) { return .failure(refusal) }
+        return lock.withLock {
+            guard let challenge = challenges[request.challengeID], !challenge.used, request.code == Self.verificationCode else {
+                return .failure(ConnectError(code: .unauthenticated, message: "AUT-5011: the code is invalid or has expired"))
+            }
+            let destination = challenge.destination
+            let isEmail = destination.contains("@")
+            if isEmail, destination == Self.takenEmail {
+                return .failure(ConnectError(code: .alreadyExists, message: "AUT-6006: this email belongs to another account"))
+            }
+            if !isEmail, destination.filter({ $0.isNumber }) == Self.takenPhone.filter({ $0.isNumber }) {
+                return .failure(ConnectError(code: .alreadyExists, message: "AUT-6007: this phone number belongs to another account"))
+            }
+            challenges[request.challengeID]?.used = true
+            if isEmail { lifecycle.changeContact(email: destination) } else { lifecycle.changeContact(phone: destination) }
+            var response = Auth_V1_ChangeContactResponse()
+            response.channel = isEmail ? .email : .sms
+            response.destination = destination
             return .success(response)
         }
     }
