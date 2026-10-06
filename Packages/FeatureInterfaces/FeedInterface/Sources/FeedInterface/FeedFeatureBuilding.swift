@@ -357,6 +357,24 @@ public protocol PostSetSurface: AnyObject {
     /// grids borrowing players for tabs nobody is reading. The host knows which
     /// page is active; the surface cannot.
     func setPlaybackActive(_ active: Bool)
+
+    /// Called as the viewer nears the end of what is shown: the caller's cue
+    /// to fetch its next page and show the longer list (#579). A list that
+    /// EXTENDS the one on screen is appended — only the new posts are
+    /// hydrated, and nothing already shown moves. Nil: the set is whole.
+    var onNearEnd: (() -> Void)? { get set }
+
+    /// The footer spinner, while the caller fetches its next page.
+    func setPaging(_ paging: Bool)
+}
+
+public extension PostSetSurface {
+    var onNearEnd: (() -> Void)? {
+        get { nil }
+        set {}
+    }
+
+    func setPaging(_ paging: Bool) {}
 }
 
 /// Which of the two For You shapes the caller wants.
