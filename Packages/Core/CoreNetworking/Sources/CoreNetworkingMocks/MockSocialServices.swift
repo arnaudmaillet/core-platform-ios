@@ -63,6 +63,22 @@ public final class MockSocialServices: @unchecked Sendable {
     public static let restoreWindow: TimeInterval = 30 * 86_400
     /// `SetFeedSettings` writes, by profile (backend #731); absent is Less.
     private var feedSettings: [String: Profile_V1_FeedSettings] = [:]
+    /// Interest tags by profile (timeline #662), heaviest first. The viewer
+    /// starts with a few that match mock captions, so removing one visibly
+    /// changes For You. Nothing is learnt here: a removed or reset tag stays
+    /// gone.
+    private var interests: [String: [Timeline_V1_Interest]] = [
+        MockSocialDataset.viewerProfileID: MockSocialServices.seededInterests,
+    ]
+    /// The viewer's starting interest tags.
+    public static let seededInterests: [Timeline_V1_Interest] = [
+        ("travel", 0.92), ("foodie", 0.71), ("goldenhour", 0.44), ("sailing", 0.31), ("ramen", 0.18),
+    ].map { tag, weight in
+        var interest = Timeline_V1_Interest()
+        interest.tag = tag
+        interest.weight = weight
+        return interest
+    }
     /// `SetTabSettings` writes, by profile (backend #729): the post window
     /// visitors see, and the tab flags. Absent is the defaults.
     private var tabSettings: [String: Profile_V1_TabSettings] = [:]
@@ -147,6 +163,25 @@ public final class MockSocialServices: @unchecked Sendable {
         bff.register(path: "/timeline.v1.TimelineService/GetDiscoveryFeed") { [self] (request: Timeline_V1_GetDiscoveryFeedRequest) in
             getDiscoveryFeed(request)
         }
+        bff.register(path: "/timeline.v1.TimelineService/ListInterests") { [self] (request: Timeline_V1_ListInterestsRequest) -> Result<Timeline_V1_InterestsResponse, ConnectError> in
+            var response = Timeline_V1_InterestsResponse()
+            response.interests = lock.withLock { interests[request.profileID] ?? [] }
+            return .success(response)
+        }
+        bff.register(path: "/timeline.v1.TimelineService/RemoveInterest") { [self] (request: Timeline_V1_RemoveInterestRequest) -> Result<Timeline_V1_InterestsResponse, ConnectError> in
+            let tag = request.tag.hasPrefix("#") ? String(request.tag.dropFirst()).lowercased() : request.tag.lowercased()
+            var response = Timeline_V1_InterestsResponse()
+            response.interests = lock.withLock {
+                let remaining = (interests[request.profileID] ?? []).filter { $0.tag != tag }
+                interests[request.profileID] = remaining
+                return remaining
+            }
+            return .success(response)
+        }
+        bff.register(path: "/timeline.v1.TimelineService/ResetInterests") { [self] (request: Timeline_V1_ResetInterestsRequest) -> Result<Timeline_V1_InterestsResponse, ConnectError> in
+            lock.withLock { interests[request.profileID] = [] }
+            return .success(Timeline_V1_InterestsResponse())
+        }
         bff.register(path: "/post.v1.PostService/GetPost") { [self] (request: Post_V1_GetPostRequest) in
             getPost(request)
         }
@@ -196,7 +231,11 @@ public final class MockSocialServices: @unchecked Sendable {
             updateProfile(request)
         }
         bff.register(path: "/profile.v1.ProfileService/SetFeedSettings") { [self] (request: Profile_V1_SetFeedSettingsRequest) in
-            lock.withLock { feedSettings[request.profileID] = request.settings }
+            lock.withLock {
+                feedSettings[request.profileID] = request.settings
+                // Non-personalised erases what was learnt (timeline #662).
+                if request.settings.nonPersonalized { interests[request.profileID] = [] }
+            }
             var response = Profile_V1_CommandResponse()
             response.success = true
             return .success(response)
@@ -445,6 +484,17 @@ public final class MockSocialServices: @unchecked Sendable {
                                    uniquingKeysWith: { first, _ in first })
             pool.sort { (likes[$0.postID] ?? 0, $0.publishedAtMS) > (likes[$1.postID] ?? 0, $1.publishedAtMS) }
         }
+        // FOR_YOU for a profile that keeps personalisation on: posts tagged
+        // with one of its interests come first (timeline #662).
+        let tags = personalizingTags(for: request)
+        if !tags.isEmpty {
+            let captions = Dictionary(dataset.posts.map { ($0.postID, $0.caption.lowercased()) }, uniquingKeysWith: { first, _ in first })
+            func matches(_ postID: String) -> Bool {
+                guard let caption = captions[postID] else { return false }
+                return tags.contains { caption.contains("#" + $0) }
+            }
+            pool = pool.filter { matches($0.postID) } + pool.filter { !matches($0.postID) }
+        }
         let start = Int(request.pageToken) ?? 0
         let limit = Int(request.limit <= 0 ? 20 : min(request.limit, pageSizeCap))
         let end = min(start + limit, pool.count)
@@ -461,7 +511,24 @@ public final class MockSocialServices: @unchecked Sendable {
         }
         response.nextPageToken = end < pool.count ? String(end) : ""
         response.contentLevelApplied = request.contentLevel == .standard ? .standard : .restricted
+        response.personalized = !tags.isEmpty
         return .success(response)
+    }
+
+    /// The interest tags that rank this FOR_YOU read: none for a guest (no
+    /// profile), a read that asks not to be personalised, or a profile whose
+    /// Feed Settings turned personalisation off.
+    private func personalizingTags(for request: Timeline_V1_GetDiscoveryFeedRequest) -> [String] {
+        guard request.ranking == .forYou, !request.profileID.isEmpty, !request.nonPersonalized else { return [] }
+        return lock.withLock {
+            guard feedSettings[request.profileID]?.nonPersonalized != true else { return [] }
+            return (interests[request.profileID] ?? []).map(\.tag)
+        }
+    }
+
+    /// The interest tags a profile holds now, heaviest first.
+    public func interestTags(of profileID: String) -> [String] {
+        lock.withLock { (interests[profileID] ?? []).map(\.tag) }
     }
 
     private func getFollowingFeed(_ request: Timeline_V1_GetFollowingFeedRequest) -> Result<Timeline_V1_GetFollowingFeedResponse, ConnectError> {

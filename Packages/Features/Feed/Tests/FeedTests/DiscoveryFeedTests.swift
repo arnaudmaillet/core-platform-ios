@@ -21,7 +21,7 @@ struct DiscoveryFeedRepositoryTests {
     }
 
     private func makeDiscovery(
-        contentLevel: DiscoveryContentLevel = .restricted
+        reader: DiscoveryReader = .guest
     ) -> (DiscoveryFeedRepository, MockBFF, MockSocialDataset) {
         let dataset = MockSocialDataset()
         let bff = MockBFF()
@@ -42,7 +42,7 @@ struct DiscoveryFeedRepositoryTests {
         let discovery = DiscoveryFeedRepository(
             timelineClient: Timeline_V1_TimelineServiceClient(client: client),
             base: base,
-            contentLevel: { contentLevel },
+            reader: { reader },
             region: { "FR" },
             pageSize: 10
         )
@@ -58,6 +58,49 @@ struct DiscoveryFeedRepositoryTests {
         #expect(page.nextPageToken != nil)
         #expect(bff.recordedRequests.contains { $0.path == "/timeline.v1.TimelineService/GetDiscoveryFeed" })
         #expect(!bff.recordedRequests.contains { $0.path == "/timeline.v1.TimelineService/GetFollowingFeed" })
+    }
+
+    /// A member's page is ranked by its interest tags (#413, timeline #662):
+    /// posts tagged with one come first, and a removed tag stops pulling its
+    /// posts up — the issue's "a deleted tag stops influencing For You".
+    @Test func aRemovedInterestStopsRankingForYou() async throws {
+        let member = DiscoveryReader(contentLevel: .restricted, profileID: MockSocialDataset.viewerProfileID, nonPersonalized: false)
+        let (discovery, bff, dataset) = makeDiscovery(reader: member)
+        let captions = Dictionary(dataset.posts.map { ($0.postID, $0.caption.lowercased()) }, uniquingKeysWith: { first, _ in first })
+        func tagged(_ tag: String, _ page: FeedPage) -> [Bool] {
+            page.entries.map { captions[$0.post.id.rawValue]?.contains("#" + tag) ?? false }
+        }
+        let timeline = Timeline_V1_TimelineServiceClient(
+            client: ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: bff)
+        )
+        // Keep only #travel, so the ranking has one tag to follow.
+        for interest in MockSocialServices.seededInterests where interest.tag != "travel" {
+            var remove = Timeline_V1_RemoveInterestRequest()
+            remove.profileID = MockSocialDataset.viewerProfileID
+            remove.tag = interest.tag
+            _ = try await timeline.removeInterest(request: remove, headers: [:]).result.get()
+        }
+        let ranked = try await discovery.loadFirstPage()
+        let travel = tagged("travel", ranked)
+        #expect(travel.first == true, "a #travel post leads")
+        #expect(!travel.drop(while: { $0 }).contains(true), "every #travel post comes before the rest")
+
+        var remove = Timeline_V1_RemoveInterestRequest()
+        remove.profileID = MockSocialDataset.viewerProfileID
+        remove.tag = "#travel"
+        #expect(try await timeline.removeInterest(request: remove, headers: [:]).result.get().interests.isEmpty)
+        let unranked = try await discovery.loadFirstPage()
+        let (guest, _, _) = makeDiscovery()
+        #expect(unranked.entries.map(\.post.id) == (try await guest.loadFirstPage()).entries.map(\.post.id),
+                "with no tags left, the page is everyone's")
+    }
+
+    /// Personalised For You off: the reader's tags are ignored.
+    @Test func aNonPersonalisedReaderGetsEveryonesPage() async throws {
+        let reader = DiscoveryReader(contentLevel: .restricted, profileID: MockSocialDataset.viewerProfileID, nonPersonalized: true)
+        let (discovery, _, _) = makeDiscovery(reader: reader)
+        let (guest, _, _) = makeDiscovery()
+        #expect(try await discovery.loadFirstPage().entries.map(\.post.id) == (try await guest.loadFirstPage()).entries.map(\.post.id))
     }
 
     @Test func pagesFollowTheServersCursor() async throws {
