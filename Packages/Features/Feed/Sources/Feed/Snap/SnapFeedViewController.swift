@@ -3301,7 +3301,7 @@ final class SnapFeedViewController: UIViewController {
                 monogram: CommentsInputBar.monogram(model.authorName),
                 avatarURL: model.avatarURL,
                 metrics: model.cardMetrics
-                    ?? PostCardMetrics(reactions: model.likeCount, comments: nil)
+                    ?? PostCardMetrics(reactions: model.visibleLikeCount, comments: nil)
             )
         }
         // No close handler — a resting page is undismissable; the swipe
@@ -4775,7 +4775,7 @@ final class SnapFeedViewController: UIViewController {
         typealias Known = (thumbnailURL: URL?, caption: String?, isMedia: Bool, likes: Int64?)
         let known: (PostID) -> Known? = { [modelsByID] id in
             if let model = modelsByID[id] {
-                return (model.thumbnailURL, model.caption, model.mediaURL != nil, model.likeCount)
+                return (model.thumbnailURL, model.caption, model.mediaURL != nil, model.visibleLikeCount)
             }
             if let post = galleryPost?(id) {
                 return (

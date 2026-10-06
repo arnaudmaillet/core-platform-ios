@@ -120,6 +120,9 @@ public struct GalleryPost: Equatable, Sendable {
     public var authorAvatarURL: URL?
     public var reactionCount: Int64?
     public var commentCount: Int64?
+    /// The author hides like counts from this reader (#397): the tile shows
+    /// no count, so `reactionCount` stays nil whatever the counter says.
+    public var likeCountsHidden = false
 
     public init(
         id: PostID,

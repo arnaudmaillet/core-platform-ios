@@ -401,7 +401,8 @@ public actor FeedRepository: FeedProviding {
                     pixelHeight: Int(attachment.height)
                 )
             },
-            publishedAt: Date(timeIntervalSince1970: TimeInterval(view.publishedAtMs) / 1000)
+            publishedAt: Date(timeIntervalSince1970: TimeInterval(view.publishedAtMs) / 1000),
+            likeCountsHidden: view.likeCountsHidden
         )
     }
 }
