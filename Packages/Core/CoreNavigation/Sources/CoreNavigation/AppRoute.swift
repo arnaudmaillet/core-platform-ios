@@ -17,6 +17,10 @@ public enum AppRoute: Equatable, Sendable {
     /// compose its navigation chrome before the push animates; `nil` when the
     /// origin knows nothing beyond the id (deep links, debug args).
     case profile(ProfileID, stub: ProfileIdentityStub?)
+    /// A profile named by its handle — a tapped `@handle`, a
+    /// `wynn.cn/@handle` link (#524). The handle without its `@`; it is
+    /// looked up, and one that names no one says so instead of pushing.
+    case profileHandle(String)
     case post(PostID)
     /// A full-screen feed seeded with an ordered run of posts, opened on the
     /// FIRST of them.

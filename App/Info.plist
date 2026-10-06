@@ -7,6 +7,17 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>cn.wynn.core-platform-ios</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>wynn</string>
+			</array>
+		</dict>
+	</array>
 	<key>NSLocationDefaultAccuracyReduced</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>
