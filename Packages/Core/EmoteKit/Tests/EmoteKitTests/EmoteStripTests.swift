@@ -179,8 +179,11 @@ struct EmoteStripTests {
     /// Stopping holds each tile on the frame it reached — no jump back to
     /// the poster — and the next scroll plays on from that frame.
     @Test func stoppingHoldsTheFrameAndTheNextScrollPlaysOn() async throws {
-        // A 4 s loop of 0.1 s frames: a fifth of a second of scrolling moves a
-        // couple of frames on and never wraps round to the poster.
+        // A 4 s loop of 0.1 s frames, stopped once the tile shows a frame in
+        // the first half of it — far from the wrap back to the poster. A fixed
+        // 200 ms sleep came back after ~4 s on a CI runner whose main thread
+        // the neighbouring suites held, and read the wrapped frame 0 (the
+        // panel's twin of this test, #459).
         let frames = 40
         let (strip, window) = hosted(warmEngine(art: Self.sheetArt(frames: frames, step: 0.1)))
         defer { tearDown(window) }
@@ -189,7 +192,10 @@ struct EmoteStripTests {
         #expect(tile.player.displayedFrame == 0)
 
         strip.scrollViewWillBeginDragging(grid)
-        try await Task.sleep(for: .milliseconds(200))
+        try #require(
+            await settle { (1...frames / 2).contains(tile.player.displayedFrame ?? 0) },
+            "the tile reaches the first half of its loop"
+        )
         strip.scrollViewDidEndDecelerating(grid)
         let held = try #require(tile.player.displayedFrame)
         #expect(held > 0, "it moved while the strip scrolled")
@@ -212,11 +218,7 @@ struct EmoteStripTests {
         defer { tearDown(window) }
         strip.scrollViewWillBeginDragging(strip.collectionView)
         #expect(strip.displayedTiles.allSatisfy { $0.isAnimating })
-        let deadline = ContinuousClock.now + .seconds(3)
-        while strip.isScrolling, ContinuousClock.now < deadline {
-            try await Task.sleep(for: .milliseconds(50))
-        }
-        #expect(!strip.isScrolling)
+        try #require(await settle { !strip.isScrolling }, "the settle watch ends the scroll")
         #expect(strip.displayedTiles.allSatisfy { $0.isShowingArt && !$0.isAnimating })
     }
 
