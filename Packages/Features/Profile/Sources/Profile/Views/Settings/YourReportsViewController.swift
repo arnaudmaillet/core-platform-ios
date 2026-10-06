@@ -4,6 +4,10 @@ import UIKit
 /// Settings → Safety and Interactions → Your Reports (#399, DSA Art. 16(5)):
 /// what the viewer reported, newest first, and what became of each report.
 /// Pages in as the list scrolls.
+///
+/// A decided report can be appealed by its reporter (DSA Art. 20(1), #576):
+/// tapping it offers the appeal, and its row then follows the appeal — under
+/// review, then upheld or reversed, with the reviewer's reasons on tap.
 final class YourReportsViewController: UIViewController {
     enum Phase: Equatable {
         case loading
@@ -19,6 +23,10 @@ final class YourReportsViewController: UIViewController {
     }
 
     private let history: any ReportHistoryProviding
+    /// Files and reads appeals; nil leaves reports read-only.
+    private let appeals: (any ModerationDecisionReviewing)?
+    /// The viewer's appeals as a reporter, by decision.
+    private var appealsByDecision: [String: FiledAppeal] = [:]
     private var reports: [FiledReport] = []
     private var nextPageToken: String?
     private var phase: Phase = .loading
@@ -27,8 +35,9 @@ final class YourReportsViewController: UIViewController {
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Int, Item>!
 
-    init(history: any ReportHistoryProviding) {
+    init(history: any ReportHistoryProviding, appeals: (any ModerationDecisionReviewing)? = nil) {
         self.history = history
+        self.appeals = appeals
         super.init(nibName: nil, bundle: nil)
         title = "Your Reports"
         hidesBottomBarWhenPushed = true
@@ -52,6 +61,30 @@ final class YourReportsViewController: UIViewController {
         view.addSubview(collectionView)
         configureDataSource()
         loadPage()
+        loadAppeals()
+    }
+
+    private func loadAppeals() {
+        guard let appeals else { return }
+        Task { [weak self] in
+            guard let self, let mine = try? await appeals.myAppeals() else { return }
+            appealsByDecision = Self.reporterAppeals(mine)
+            applySnapshot()
+        }
+    }
+
+    /// The reporter's appeals, by the decision they're against.
+    static func reporterAppeals(_ appeals: [FiledAppeal]) -> [String: FiledAppeal] {
+        Dictionary(appeals.filter(\.byReporter).map { ($0.decisionID, $0) }, uniquingKeysWith: { first, _ in first })
+    }
+
+    /// "Appeal under review", "Appeal: decision stands", "Appeal: decision reversed".
+    static func appealText(_ appeal: FiledAppeal) -> String {
+        switch appeal.status {
+        case .pending: "Appeal under review"
+        case .upheld: "Appeal: decision stands"
+        case .overturned: "Appeal: decision reversed"
+        }
     }
 
     /// The first page, or the next one after `nextPageToken`.
@@ -109,20 +142,24 @@ final class YourReportsViewController: UIViewController {
     }
 
     static let explanation = "In Review: we haven't finished looking at it. Action Taken: it broke our rules and we acted on it; to protect everyone's privacy, we don't say how. No Violation: we didn't find that it broke our rules."
+    static let appealHint = "If you disagree with a decision, tap the report to appeal it."
 
     private func configureDataSource() {
-        let registration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { cell, _, item in
+        let registration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [weak self] cell, _, item in
             cell.accessories = []
             switch item {
             case .report(let report):
                 var content = UIListContentConfiguration.subtitleCell()
                 content.text = Self.title(of: report)
-                content.secondaryText = Self.detail(of: report)
+                let appeal = report.decisionID.flatMap { self?.appealsByDecision[$0] }
+                content.secondaryText = [Self.detail(of: report), appeal.map(Self.appealText)]
+                    .compactMap { $0 }.joined(separator: "\n")
                 content.secondaryTextProperties.color = .secondaryLabel
                 cell.contentConfiguration = content
                 let outcome = Self.outcome(report.outcome)
                 cell.accessories = [.label(text: outcome.text, options: .init(tintColor: outcome.color, font: .appFont(forTextStyle: .subheadline), adjustsFontForContentSizeCategory: true))]
-                cell.accessibilityLabel = "\(Self.title(of: report)), \(Self.detail(of: report)), \(outcome.text)"
+                cell.accessibilityLabel = [Self.title(of: report), Self.detail(of: report), outcome.text, appeal.map(Self.appealText)]
+                    .compactMap { $0 }.joined(separator: ", ")
             case .empty:
                 var content = UIListContentConfiguration.cell()
                 content.text = "You haven't reported anything."
@@ -149,7 +186,8 @@ final class YourReportsViewController: UIViewController {
             var content = UIListContentConfiguration.footer()
             content.text = switch self?.phase {
             case .failed: "Couldn't load your reports."
-            case .loaded where self?.reports.isEmpty == false: Self.explanation
+            case .loaded where self?.reports.isEmpty == false:
+                self?.appeals == nil ? Self.explanation : Self.explanation + " " + Self.appealHint
             default: "When you report a post or an account, you can follow it here."
             }
             view.contentConfiguration = content
@@ -177,15 +215,68 @@ final class YourReportsViewController: UIViewController {
         snapshot.reloadSections([0])
         dataSource.apply(snapshot, animatingDifferences: false)
     }
+
+    /// Whether tapping the report does anything: an appeal to file, or a
+    /// resolved one to read.
+    private func isActionable(_ report: FiledReport) -> Bool {
+        guard appeals != nil, let decisionID = report.decisionID else { return false }
+        guard let appeal = appealsByDecision[decisionID] else { return true }
+        return appeal.status != .pending
+    }
+
+    private func open(_ report: FiledReport) {
+        guard let appeals, let decisionID = report.decisionID else { return }
+        if let appeal = appealsByDecision[decisionID] {
+            guard appeal.status != .pending else { return }
+            let alert = UIAlertController(
+                title: Self.appealText(appeal),
+                message: appeal.reasons.isEmpty ? nil : appeal.reasons,
+                preferredStyle: .alert
+            )
+            alert.addAction(UIAlertAction(title: "OK", style: .default))
+            return present(alert, animated: true)
+        }
+        let subject = Self.title(of: report).lowercased()
+        let composer = AppealComposerViewController(
+            intro: Self.appealIntro(report, subject: subject)
+        ) { statement in
+            try await appeals.fileAppeal(decisionID: decisionID, statement: statement)
+        }
+        composer.onFiled = { [weak self] date in
+            guard let self else { return }
+            appealsByDecision[decisionID] = FiledAppeal(
+                id: "", decisionID: decisionID, status: .pending, filedAt: date, byReporter: true
+            )
+            applySnapshot()
+            loadAppeals()
+        }
+        present(UINavigationController(rootViewController: composer), animated: true)
+    }
+
+    static func appealIntro(_ report: FiledReport, subject: String) -> String {
+        switch report.outcome {
+        case .noViolation:
+            "We didn't find that this \(subject) broke our rules. If you think we got it wrong, tell us why and someone will look at it again."
+        default:
+            "If you think our decision on this \(subject) was wrong, tell us why and someone will look at it again."
+        }
+    }
 }
 
 extension YourReportsViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
-        dataSource.itemIdentifier(for: indexPath) == .retry
+        switch dataSource.itemIdentifier(for: indexPath) {
+        case .retry: true
+        case .report(let report): isActionable(report)
+        default: false
+        }
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         collectionView.deselectItem(at: indexPath, animated: true)
+        if case .report(let report) = dataSource.itemIdentifier(for: indexPath) {
+            return open(report)
+        }
         if dataSource.itemIdentifier(for: indexPath) == .retry {
             if phase == .failed { phase = .loading }
             loadPage()

@@ -3,6 +3,8 @@ import UIKit
 
 /// Account Status → a restriction (#390): why it was imposed — the decision's
 /// Statement of Reasons (DSA Art. 17) — and a way to appeal it (Art. 20).
+/// Once appealed, the appeal's status comes from the server (#576): under
+/// review, then upheld or reversed with the reviewer's reasons.
 final class DecisionDetailViewController: UIViewController {
     enum Phase: Equatable {
         case loading
@@ -19,7 +21,7 @@ final class DecisionDetailViewController: UIViewController {
         case detail(title: String, value: String)
         case text(String)
         case appeal
-        case appealFiled(Date)
+        case appealStatus(FiledAppeal)
         case retry
     }
 
@@ -29,7 +31,8 @@ final class DecisionDetailViewController: UIViewController {
     private var phase: Phase = .loading {
         didSet { applySnapshot() }
     }
-    private var appealFiledAt: Date?
+    /// This decision's appeal, as the server holds it; nil before one is filed.
+    private var appeal: FiledAppeal?
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
 
@@ -37,7 +40,6 @@ final class DecisionDetailViewController: UIViewController {
         self.restriction = restriction
         self.decisionID = decisionID
         self.reviewer = reviewer
-        self.appealFiledAt = FiledAppeals.filedAt(decisionID: decisionID)
         super.init(nibName: nil, bundle: nil)
         title = restriction.title
         hidesBottomBarWhenPushed = true
@@ -70,11 +72,29 @@ final class DecisionDetailViewController: UIViewController {
         Task { [weak self] in
             guard let self else { return }
             do {
-                phase = .loaded(try await reviewer.statementOfReasons(decisionID: decisionID))
+                async let appeals = try? reviewer.myAppeals()
+                let statement = try await reviewer.statementOfReasons(decisionID: decisionID)
+                appeal = await Self.appeal(for: decisionID, in: appeals ?? [])
+                phase = .loaded(statement)
             } catch {
                 phase = .failed
             }
         }
+    }
+
+    /// Re-reads the appeal after filing one: the server's word, not the
+    /// app's guess.
+    private func refreshAppeal() {
+        Task { [weak self] in
+            guard let self, let appeals = try? await reviewer.myAppeals() else { return }
+            appeal = Self.appeal(for: decisionID, in: appeals) ?? appeal
+            applySnapshot()
+        }
+    }
+
+    /// The account's own appeal on `decisionID` (a reporter's isn't theirs to see here).
+    static func appeal(for decisionID: String, in appeals: [FiledAppeal]) -> FiledAppeal? {
+        appeals.first { $0.decisionID == decisionID && !$0.byReporter }
     }
 
     private static let dateFormatter: DateFormatter = {
@@ -88,8 +108,25 @@ final class DecisionDetailViewController: UIViewController {
         automated ? "An automated system" : "A member of our safety team"
     }
 
-    static func appealFiledText(_ date: Date) -> String {
-        "Appeal sent on \(dateFormatter.string(from: date))"
+    /// The appeal row's words: what stage it is at, and when.
+    static func appealStatusText(_ appeal: FiledAppeal) -> (title: String, detail: String?) {
+        let day = { (date: Date?) in date.map { dateFormatter.string(from: $0) } }
+        switch appeal.status {
+        case .pending:
+            return ("Appeal under review", day(appeal.filedAt).map { "Sent on \($0)" })
+        case .upheld:
+            return ("Appeal reviewed: the decision stands", day(appeal.resolvedAt).map { "Decided on \($0)" })
+        case .overturned:
+            return ("Appeal reviewed: the decision was reversed", day(appeal.resolvedAt).map { "Decided on \($0)" })
+        }
+    }
+
+    static func appealFooter(_ appeal: FiledAppeal?) -> String {
+        switch appeal?.status {
+        case nil: "If you think this decision is wrong, tell us why and we'll review it again."
+        case .pending?: "We're reviewing the decision again. You'll see the outcome here."
+        case .upheld?, .overturned?: appeal.map { $0.reasons.isEmpty ? "" : "Reviewer's reasons: \($0.reasons)" } ?? ""
+        }
     }
 
     private static func headerText(_ section: Section) -> String? {
@@ -108,9 +145,7 @@ final class DecisionDetailViewController: UIViewController {
         case (.rule, .loaded(let statement)) where !statement.policyVersion.isEmpty:
             "Policy version: \(statement.policyVersion)"
         case (.appeal, .loaded):
-            appealFiledAt == nil
-                ? "If you think this decision is wrong, tell us why and we'll review it again."
-                : "We'll review the decision again. If it's lifted, it will no longer show in Account Status."
+            Self.appealFooter(appeal)
         default:
             nil
         }
@@ -144,11 +179,14 @@ final class DecisionDetailViewController: UIViewController {
                 content.text = "Appeal This Decision"
                 content.textProperties.color = .tintColor
                 cell.contentConfiguration = content
-            case .appealFiled(let date):
-                var content = UIListContentConfiguration.cell()
-                content.text = Self.appealFiledText(date)
-                content.image = UIImage(systemName: "checkmark.circle")
-                content.imageProperties.tintColor = .systemGreen
+            case .appealStatus(let appeal):
+                var content = UIListContentConfiguration.subtitleCell()
+                let text = Self.appealStatusText(appeal)
+                content.text = text.title
+                content.secondaryText = text.detail
+                content.secondaryTextProperties.color = .secondaryLabel
+                content.image = UIImage(systemName: appeal.status == .pending ? "clock" : "checkmark.circle")
+                content.imageProperties.tintColor = appeal.status == .overturned ? .systemGreen : .secondaryLabel
                 cell.contentConfiguration = content
             case .retry:
                 var content = UIListContentConfiguration.cell()
@@ -207,7 +245,7 @@ final class DecisionDetailViewController: UIViewController {
                 snapshot.appendItems([.text(statement.legalGround)], toSection: .rule)
             }
             snapshot.appendSections([.appeal])
-            snapshot.appendItems([appealFiledAt.map(Item.appealFiled) ?? .appeal], toSection: .appeal)
+            snapshot.appendItems([appeal.map(Item.appealStatus) ?? .appeal], toSection: .appeal)
         }
         snapshot.reloadSections(snapshot.sectionIdentifiers)
         dataSource.apply(snapshot, animatingDifferences: false)
@@ -221,8 +259,11 @@ final class DecisionDetailViewController: UIViewController {
             return try await reviewer.fileAppeal(decisionID: decisionID, statement: statement)
         }
         composer.onFiled = { [weak self] date in
-            self?.appealFiledAt = date
-            self?.applySnapshot()
+            guard let self else { return }
+            // Shown at once as filed; the server's own record follows.
+            appeal = FiledAppeal(id: "", decisionID: decisionID, status: .pending, filedAt: date)
+            applySnapshot()
+            refreshAppeal()
         }
         present(UINavigationController(rootViewController: composer), animated: true)
     }
@@ -253,14 +294,22 @@ final class AppealComposerViewController: UIViewController, UITextViewDelegate {
 
     var onFiled: ((Date) -> Void)?
 
-    private let restriction: AccountRestriction
+    private let intro: String
     private let file: @MainActor (String) async throws -> Date
     private let textView = UITextView()
     private let placeholder = UILabel()
     private var isSending = false
 
-    init(restriction: AccountRestriction, file: @escaping @MainActor (String) async throws -> Date) {
-        self.restriction = restriction
+    convenience init(restriction: AccountRestriction, file: @escaping @MainActor (String) async throws -> Date) {
+        self.init(
+            intro: "Tell us why you think \"\(restriction.title)\" was a mistake. Someone will review the decision again.",
+            file: file
+        )
+    }
+
+    /// `intro`: what is being appealed, and what happens next.
+    init(intro: String, file: @escaping @MainActor (String) async throws -> Date) {
+        self.intro = intro
         self.file = file
         super.init(nibName: nil, bundle: nil)
         title = "Appeal"
@@ -279,7 +328,7 @@ final class AppealComposerViewController: UIViewController, UITextViewDelegate {
         navigationItem.rightBarButtonItem = sendItem()
 
         let intro = UILabel()
-        intro.text = "Tell us why you think \"\(restriction.title)\" was a mistake. Someone will review the decision again."
+        intro.text = self.intro
         intro.font = .appFont(forTextStyle: .subheadline)
         intro.adjustsFontForContentSizeCategory = true
         intro.textColor = .secondaryLabel

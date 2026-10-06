@@ -21,14 +21,21 @@ public struct FiledReport: Hashable, Sendable {
     public let category: String
     public let outcome: Outcome
     public let reportedAt: Date?
+    /// Once the case is decided: the decision, which the reporter may appeal
+    /// (DSA Art. 20(1), backend #745). Nil while under review.
+    public let decisionID: String?
 
-    public init(id: String, subject: Subject, subjectID: String, category: String, outcome: Outcome, reportedAt: Date?) {
+    public init(
+        id: String, subject: Subject, subjectID: String, category: String, outcome: Outcome, reportedAt: Date?,
+        decisionID: String? = nil
+    ) {
         self.id = id
         self.subject = subject
         self.subjectID = subjectID
         self.category = category
         self.outcome = outcome
         self.reportedAt = reportedAt
+        self.decisionID = decisionID
     }
 
     init(_ view: Moderation_V1_ReportView) {
@@ -50,7 +57,8 @@ public struct FiledReport: Hashable, Sendable {
             subjectID: view.entityID,
             category: PolicyCategoryText.title(view.category),
             outcome: outcome,
-            reportedAt: view.hasReportedAt ? view.reportedAt.date : nil
+            reportedAt: view.hasReportedAt ? view.reportedAt.date : nil,
+            decisionID: view.decisionID.isEmpty ? nil : view.decisionID
         )
     }
 }

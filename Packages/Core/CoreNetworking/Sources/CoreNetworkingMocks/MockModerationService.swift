@@ -6,8 +6,13 @@ import SwiftProtobuf
 /// Fake of moderation.v1 — the RPCs a *user-facing* surface calls:
 /// - `SubmitReport` (the Report actions) and `ListMyReports` (Settings →
 ///   Safety → Your Reports, DSA Art. 16(5));
-/// - `GetEnforcementState`, `GetStatementOfReasons` and `FileAppeal`
-///   (Settings → Account Status, DSA Art. 17/20).
+/// - `GetEnforcementState`, `GetStatementOfReasons`, `FileAppeal` and
+///   `ListMyAppeals` (Settings → Account Status, DSA Art. 17/20). A reporter
+///   appeals the decision on their report too (backend #745).
+///
+/// With the report history seeded, the decided reports carry their decision,
+/// and the one found not violating has a reporter's appeal already resolved
+/// (upheld, with the reviewer's reasons), so a resolved appeal can be seen.
 ///
 /// `OpenCase` stays for the tests that drive it; on the fleet it is mesh-only
 /// since backend #677. The rest of the service is a moderator console
@@ -57,7 +62,21 @@ public final class MockModerationService: @unchecked Sendable {
     /// outcome, so Your Reports can be seen filled.
     public init(seedsViewerRestriction: Bool = false, seedsReportHistory: Bool = false) {
         self.seedsViewerRestriction = seedsViewerRestriction
-        if seedsReportHistory { reports = Self.reportHistory() }
+        if seedsReportHistory {
+            reports = Self.reportHistory()
+            appeals = [Self.resolvedReporterAppeal()]
+        }
+    }
+
+    /// Whether the caller may appeal a decision, and as whom: their
+    /// restriction's (false), or the one on a report they made (true,
+    /// backend #745). Nil for anyone else's: NOT_FOUND.
+    private func appealsAsReporter(_ decisionID: String) -> Bool? {
+        if seedsViewerRestriction, decisionID == Self.seededDecisionID { return false }
+        let onMyReport = lock.withLock {
+            reports.contains { $0.reporter == MockAuthService.accountID && $0.view.decisionID == decisionID }
+        }
+        return onMyReport ? true : nil
     }
 
     public func register(on bff: MockBFF) {
@@ -80,24 +99,39 @@ public final class MockModerationService: @unchecked Sendable {
             return .success(response)
         }
         bff.register(path: "/moderation.v1.ModerationService/FileAppeal") { [self] (request: Moderation_V1_FileAppealRequest) -> Result<Moderation_V1_FileAppealResponse, ConnectError> in
-            guard seedsViewerRestriction, request.decisionID == Self.seededDecisionID else {
+            guard let byReporter = appealsAsReporter(request.decisionID) else {
                 return .failure(ConnectError(code: .notFound, message: "MOD-2001: decision not found"))
             }
             guard !request.statement.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 return .failure(ConnectError(code: .invalidArgument, message: "MOD-9001: an appeal must include a statement"))
             }
-            var appeal = Moderation_V1_AppealView()
-            appeal.decisionID = request.decisionID
-            appeal.statement = request.statement
-            appeal.status = .filed
-            appeal.filedAt = .init(date: Date())
-            appeal = lock.withLock {
+            let appeal: Moderation_V1_AppealView = lock.withLock {
+                // One appeal per decision and appellant: filing again
+                // returns the existing one (backend #744).
+                if let existing = appeals.first(where: { $0.decisionID == request.decisionID }) { return existing }
+                var appeal = Moderation_V1_AppealView()
                 appeal.appealID = "appeal-\(appeals.count + 1)"
+                appeal.decisionID = request.decisionID
+                appeal.statement = request.statement
+                appeal.status = .filed
+                appeal.filedAt = .init(date: Date())
+                appeal.byReporter = byReporter
                 appeals.append(appeal)
                 return appeal
             }
             var response = Moderation_V1_FileAppealResponse()
             response.appeal = appeal
+            return .success(response)
+        }
+        // The caller's appeals, newest first (backend #744).
+        bff.register(path: "/moderation.v1.ModerationService/ListMyAppeals") { [self] (request: Moderation_V1_ListMyAppealsRequest) -> Result<Moderation_V1_ListMyAppealsResponse, ConnectError> in
+            let mine = lock.withLock { appeals }.sorted { $0.filedAt.date > $1.filedAt.date }
+            let pageSize = Int(request.pageSize <= 0 ? 20 : min(request.pageSize, 50))
+            let start = Int(request.pageToken) ?? 0
+            let end = min(start + pageSize, mine.count)
+            var response = Moderation_V1_ListMyAppealsResponse()
+            response.appeals = start < end ? Array(mine[start..<end]) : []
+            response.nextPageToken = end < mine.count ? String(end) : ""
             return .success(response)
         }
         bff.register(path: "/moderation.v1.ModerationService/SubmitReport") { [self] (request: Moderation_V1_SubmitReportRequest, headers: Headers) -> Result<Moderation_V1_SubmitReportResponse, ConnectError> in
@@ -212,8 +246,25 @@ public final class MockModerationService: @unchecked Sendable {
             view.category = category
             view.status = status
             view.reportedAt = .init(date: Date().addingTimeInterval(-daysAgo * 86_400))
+            // A decided case names its decision, which the reporter may appeal.
+            if status != .underReview { view.decisionID = "dec-report-\(id)" }
             return StoredReport(reporter: MockAuthService.accountID, view: view)
         }
+    }
+
+    /// The reporter's appeal on the post found not violating: reviewed again,
+    /// and upheld.
+    private static func resolvedReporterAppeal() -> Moderation_V1_AppealView {
+        var appeal = Moderation_V1_AppealView()
+        appeal.appealID = "appeal-seed-1"
+        appeal.decisionID = "dec-report-post-seed-reported-1"
+        appeal.status = .upheld
+        appeal.statement = "It's a scam link, it takes you to a fake bank login."
+        appeal.filedAt = .init(date: Date().addingTimeInterval(-15 * 86_400))
+        appeal.resolvedAt = .init(date: Date().addingTimeInterval(-12 * 86_400))
+        appeal.outcome = "We looked at the post again. The link goes to a real shop, so it doesn't break our spam rules."
+        appeal.byReporter = true
+        return appeal
     }
 
     // MARK: - Cases

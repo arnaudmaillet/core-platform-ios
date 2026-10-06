@@ -58,33 +58,69 @@ public enum AppealError: Error, Equatable {
     case transport(message: String)
 }
 
-/// Reads a restriction's reasons and appeals it (DSA Art. 17 and 20), both
-/// addressed by the decision that imposed it.
-public protocol ModerationDecisionReviewing: Sendable {
-    func statementOfReasons(decisionID: String) async throws -> DecisionStatement
-    /// Files an appeal and returns when it was filed.
-    func fileAppeal(decisionID: String, statement: String) async throws -> Date
+/// An appeal the viewer filed, as the server holds it (#576, backend #744):
+/// against their own restriction, or against the decision on a report they
+/// made (backend #745).
+public struct FiledAppeal: Hashable, Sendable {
+    public enum Status: Hashable, Sendable {
+        /// Filed, or being reviewed again.
+        case pending
+        /// The decision stands.
+        case upheld
+        /// The decision was reversed. For a reporter's appeal the case goes
+        /// back to review; it never reverses an enforcement on its own.
+        case overturned
+    }
+
+    public let id: String
+    public let decisionID: String
+    public let status: Status
+    public let filedAt: Date?
+    public let resolvedAt: Date?
+    /// The reviewer's reasons once resolved (DSA Art. 20(4)–(5)); empty before.
+    public let reasons: String
+    public let byReporter: Bool
+
+    public init(
+        id: String, decisionID: String, status: Status, filedAt: Date?, resolvedAt: Date? = nil,
+        reasons: String = "", byReporter: Bool = false
+    ) {
+        self.id = id
+        self.decisionID = decisionID
+        self.status = status
+        self.filedAt = filedAt
+        self.resolvedAt = resolvedAt
+        self.reasons = reasons
+        self.byReporter = byReporter
+    }
+
+    init(_ view: Moderation_V1_AppealView) {
+        let status: Status = switch view.status {
+        case .upheld: .upheld
+        case .overturned: .overturned
+        case .filed, .underReview, .unspecified, .UNRECOGNIZED: .pending
+        }
+        self.init(
+            id: view.appealID,
+            decisionID: view.decisionID,
+            status: status,
+            filedAt: view.hasFiledAt ? view.filedAt.date : nil,
+            resolvedAt: view.hasResolvedAt ? view.resolvedAt.date : nil,
+            reasons: view.outcome,
+            byReporter: view.byReporter
+        )
+    }
 }
 
-/// The appeals filed from this iPhone, by decision. `moderation.v1` has no
-/// read for an appeal (only the reviewer console resolves them), so this is
-/// how Account Status knows not to offer a second one.
-public enum FiledAppeals {
-    static let key = "moderation.appealsFiled"
-    /// Swappable for tests.
-    nonisolated(unsafe) public static var defaults: UserDefaults = .standard
-
-    public static func record(decisionID: String, at date: Date) {
-        var filed = defaults.dictionary(forKey: key) as? [String: Double] ?? [:]
-        // Date's own clock, so the value reads back equal to what was stored
-        // (a 1970-based round-trip loses the last bits of the fraction).
-        filed[decisionID] = date.timeIntervalSinceReferenceDate
-        defaults.set(filed, forKey: key)
-    }
-
-    public static func filedAt(decisionID: String) -> Date? {
-        (defaults.dictionary(forKey: key) as? [String: Double])?[decisionID].map(Date.init(timeIntervalSinceReferenceDate:))
-    }
+/// Reads a restriction's reasons and appeals it (DSA Art. 17 and 20), both
+/// addressed by the decision that imposed it — and follows the appeals.
+public protocol ModerationDecisionReviewing: Sendable {
+    func statementOfReasons(decisionID: String) async throws -> DecisionStatement
+    /// Files an appeal and returns when it was filed. Filing again for the
+    /// same decision returns the appeal already on file.
+    func fileAppeal(decisionID: String, statement: String) async throws -> Date
+    /// The viewer's appeals, newest first (`ListMyAppeals`).
+    func myAppeals() async throws -> [FiledAppeal]
 }
 
 extension AccountStatusRepository: ModerationDecisionReviewing {
@@ -108,9 +144,7 @@ extension AccountStatusRepository: ModerationDecisionReviewing {
         let response = await moderationClient.fileAppeal(request: request, headers: [:])
         switch response.result {
         case .success(let body):
-            let filedAt = body.appeal.hasFiledAt ? body.appeal.filedAt.date : Date()
-            FiledAppeals.record(decisionID: decisionID, at: filedAt)
-            return filedAt
+            return body.appeal.hasFiledAt ? body.appeal.filedAt.date : Date()
         case .failure(let error):
             let message = error.message ?? ""
             if message.contains("MOD-5003") { throw AppealError.windowClosed }
@@ -118,6 +152,29 @@ extension AccountStatusRepository: ModerationDecisionReviewing {
             if error.code == .notFound { throw AppealError.notFound }
             throw AppealError.transport(message: error.message ?? "code \(error.code)")
         }
+    }
+}
+
+extension AccountStatusRepository {
+    /// Up to 100 — far more than anyone has — in pages of 50.
+    public func myAppeals() async throws -> [FiledAppeal] {
+        var appeals: [FiledAppeal] = []
+        var token = ""
+        for _ in 0..<2 {
+            var request = Moderation_V1_ListMyAppealsRequest()
+            request.pageSize = 50
+            request.pageToken = token
+            let response = await moderationClient.listMyAppeals(request: request, headers: [:])
+            switch response.result {
+            case .success(let body):
+                appeals += body.appeals.map(FiledAppeal.init)
+                token = body.nextPageToken
+            case .failure(let error):
+                throw AccountStatusError.transport(message: error.message ?? "code \(error.code)")
+            }
+            if token.isEmpty { break }
+        }
+        return appeals
     }
 }
 
