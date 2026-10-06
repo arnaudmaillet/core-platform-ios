@@ -304,6 +304,9 @@ final class SnapFeedViewController: UIViewController {
     private let songPlayer = FeedSongPlayer()
     private var coverSpinTimer: Timer?
     private var isForeground = true
+    /// Background Play (#483): this screen's clip went on playing when the
+    /// app left the screen, and the screen was left exactly as it was.
+    private var isPlayingInBackground = false
     /// The inert page-chrome replica riding in the hero transition's flying
     /// card. Held weakly for the duration of a flight so a post that hydrates
     /// mid-flight (cold tap) can still fill in the replica's labels; the card
@@ -2415,8 +2418,48 @@ final class SnapFeedViewController: UIViewController {
     }
 
     private func setForeground(_ foreground: Bool) {
+        if !foreground, continueInBackground() {
+            // Nothing is paused or silenced: the page keeps its player, and
+            // the controller keeps it heard with the Lock Screen's controls.
+            isPlayingInBackground = true
+            return
+        }
+        if foreground, isPlayingInBackground {
+            isPlayingInBackground = false
+            videoPlayback?.endBackgroundPlayback()
+        }
         isForeground = foreground
         refreshVisibility()
+    }
+
+    /// Background Play (#483): keeps the clip this screen is being heard
+    /// through playing off screen — only when the viewer turned it on, the
+    /// feed's sound is on, and this screen (not one under it) owns the sound.
+    private func continueInBackground() -> Bool {
+        guard MediaPlaybackPolicy.playsInBackground, FeedSound.isOn, isOnScreen, !isAudioYielded,
+              let videoPlayback, let surface = ownAudibleSurface,
+              surface === videoPlayback.currentAudibleSurface
+        else { return false }
+        let model = playbackOwner.flatMap { $0 < orderedIDs.count ? modelsByID[orderedIDs[$0]] : nil }
+        guard videoPlayback.continueInBackground(surface, nowPlaying: Self.nowPlaying(for: model)) else { return false }
+        if let url = model?.thumbnailURL {
+            let pipeline = imagePipeline
+            Task { [weak videoPlayback] in
+                guard let image = try? await pipeline.image(for: url) else { return }
+                videoPlayback?.setNowPlayingArtwork(image)
+            }
+        }
+        return true
+    }
+
+    /// The Lock Screen's two lines: the caption's first line (or what the
+    /// clip is), and its author.
+    static func nowPlaying(for model: FeedItemDisplayModel?) -> NowPlayingInfo {
+        let caption = model?.caption?
+            .split(whereSeparator: \.isNewline).first
+            .map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
+        let title = caption.isEmpty ? "Video" : String(caption.prefix(80))
+        return NowPlayingInfo(title: title, artist: model?.authorName ?? "")
     }
 
     // MARK: - Rendering

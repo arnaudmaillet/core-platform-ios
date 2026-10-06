@@ -20,6 +20,8 @@ enum MediaPlaybackPolicy {
     }
     static var preloads: Bool { store.preferences.preloads(onCellular: isOnCellular()) }
     static var peakBitRate: Double { store.preferences.peakBitRate(onCellular: isOnCellular()) }
+    /// Background Play (#483): the clip being heard keeps playing off screen.
+    static var playsInBackground: Bool { store.preferences.backgroundPlay }
 }
 
 /// Whether the current network path is cellular or otherwise expensive

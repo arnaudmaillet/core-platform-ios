@@ -15,6 +15,7 @@ final class AppPreferencesViewController: UIViewController {
 
     private enum Item: Hashable {
         case autoplay, startsWithSound, dataSaver
+        case backgroundPlay
         case interfaceSounds, haptics
         case appearance, careMode, reduceMotion
         case animatedEmojis
@@ -186,7 +187,8 @@ final class AppPreferencesViewController: UIViewController {
         case .language: "The app is in English for now. When more languages arrive, you'll choose yours here and in iOS Settings."
         case .playback:
             (PowerSavingPreference.isOn ? Self.powerSavingNote + " " : "")
-                + "A video that doesn't start on its own shows its first frame with a play mark; tap it to play. Data Saver lowers stream quality and stops loading upcoming videos ahead while on cellular."
+                + "A video that doesn't start on its own shows its first frame with a play mark; tap it to play. Data Saver lowers stream quality and stops loading upcoming videos ahead while on cellular. "
+                + Self.backgroundPlayNote
         case .band: "The short reactions that scroll over videos and photos. Background darkens the strip behind them; it darkens more while you scrub through them."
         case .muted: "Comments with these words, or from these accounts, never appear in the reaction band or the subtitles. They still show in the comments."
         case .subtitles: "Comments shown as captions above the reaction band. Background is the shade behind each caption."
@@ -194,6 +196,8 @@ final class AppPreferencesViewController: UIViewController {
         case .storage: "Downloaded videos and animations, kept so they open instantly. Clearing them frees space; nothing you made is removed."
         }
     }
+
+    static let backgroundPlayNote = "With Background Play on, a video you're listening to keeps playing when you leave the app or lock your iPhone, with controls on the Lock Screen."
 
     /// What an overridden section says while Power Saving is on.
     static let powerSavingNote = "Power Saving is on, so this is set for you. Turn it off in Settings → App and Device to use your own choice."
@@ -259,7 +263,7 @@ final class AppPreferencesViewController: UIViewController {
 
     private static func items(in section: Section) -> [Item] {
         switch section {
-        case .playback: [.autoplay, .startsWithSound, .dataSaver]
+        case .playback: [.autoplay, .startsWithSound, .dataSaver, .backgroundPlay]
         case .sounds: [.interfaceSounds, .haptics]
         case .appearance: [.appearance]
         case .care: [.careMode]
@@ -353,6 +357,11 @@ final class AppPreferencesViewController: UIViewController {
             cell.contentConfiguration = Self.label("Data Saver", symbol: "antenna.radiowaves.left.and.right")
             cell.accessories = [switchAccessory(isOn: playback.preferences.dataSaver) { [weak self] isOn in
                 self?.playback.update { $0.dataSaver = isOn }
+            }]
+        case .backgroundPlay:
+            cell.contentConfiguration = Self.label("Background Play", symbol: "lock.iphone")
+            cell.accessories = [switchAccessory(isOn: playback.preferences.backgroundPlay) { [weak self] isOn in
+                self?.playback.update { $0.backgroundPlay = isOn }
             }]
         case .cacheSize:
             var content = Self.label("Media Cache", symbol: "internaldrive")

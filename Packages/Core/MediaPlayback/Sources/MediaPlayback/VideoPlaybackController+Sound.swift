@@ -141,6 +141,8 @@ extension VideoPlaybackController {
         soundBindings.removeValue(forKey: key)
         player.isMuted = true
         if surfaceHeardPlayer === player { surfaceHeardPlayer = nil }
+        // A clip given back is no longer one to keep on the Lock Screen.
+        if backgroundPlayer === player { endBackgroundPlayback() }
         if audiblePlayers.remove(key) != nil {
             settleAudioSession()
         }
@@ -153,9 +155,11 @@ extension VideoPlaybackController {
         return bound.layout
     }
 
-    private func settleAudioSession() {
+    /// `.playback` while a player is heard by name (`setMuted`) or kept
+    /// playing in the background (#483); `.ambient` otherwise.
+    func settleAudioSession() {
         let session = AVAudioSession.sharedInstance()
-        let wanted: AVAudioSession.Category = audiblePlayers.isEmpty ? .ambient : .playback
+        let wanted: AVAudioSession.Category = audiblePlayers.isEmpty && backgroundPlayer == nil ? .ambient : .playback
         guard session.category != wanted else { return }
         try? session.setCategory(wanted, mode: .moviePlayback)
     }
