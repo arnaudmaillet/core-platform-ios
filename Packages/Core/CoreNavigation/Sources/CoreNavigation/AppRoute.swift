@@ -21,6 +21,10 @@ public enum AppRoute: Equatable, Sendable {
     /// `wynn.cn/@handle` link (#524). The handle without its `@`; it is
     /// looked up, and one that names no one says so instead of pushing.
     case profileHandle(String)
+    /// A profile named by its share token — a scanned QR code or a
+    /// `wynn.cn/s/<token>` link (#412). The server resolves it; a reset or
+    /// switched-off token says so instead of pushing.
+    case profileShareToken(String)
     case post(PostID)
     /// A full-screen feed seeded with an ordered run of posts, opened on the
     /// FIRST of them.

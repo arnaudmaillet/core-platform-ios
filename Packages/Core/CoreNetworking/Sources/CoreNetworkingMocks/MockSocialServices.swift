@@ -38,6 +38,12 @@ public final class MockSocialServices: @unchecked Sendable {
     /// `SetDiscoverySettings` writes, by profile (backend #726); absent is
     /// everything on.
     private var discoverySettings: [String: Profile_V1_DiscoverySettings] = [:]
+    /// Each profile's QR / share-link token (backend #661), issued on first
+    /// ask. prof-1 holds `seededShareToken`, so a link that opens someone
+    /// else's profile can be tried without setup.
+    private var shareTokens: [String: String] = ["prof-1": MockSocialServices.seededShareToken]
+    /// prof-1's share token: `wynn.cn/s/<this>` opens its profile.
+    public static let seededShareToken = "mockShareToken-prof1_A"
     /// `SetInteractionSettings` writes, by profile (backend #714). prof-13 —
     /// public, and not followed by the viewer — takes comments from its
     /// followers only, so a refused comment can be seen without setup, and
@@ -262,6 +268,36 @@ public final class MockSocialServices: @unchecked Sendable {
             var response = Profile_V1_CommandResponse()
             response.success = true
             return .success(response)
+        }
+        bff.register(path: "/profile.v1.ProfileService/GetShareToken") { [self] (request: Profile_V1_GetShareTokenRequest) -> Result<Profile_V1_ShareTokenResponse, ConnectError> in
+            var response = Profile_V1_ShareTokenResponse()
+            response.token = lock.withLock {
+                if let token = shareTokens[request.profileID] { return token }
+                let token = Self.newShareToken()
+                shareTokens[request.profileID] = token
+                return token
+            }
+            return .success(response)
+        }
+        bff.register(path: "/profile.v1.ProfileService/RotateShareToken") { [self] (request: Profile_V1_RotateShareTokenRequest) -> Result<Profile_V1_ShareTokenResponse, ConnectError> in
+            // The old token stops resolving at once.
+            var response = Profile_V1_ShareTokenResponse()
+            response.token = Self.newShareToken()
+            lock.withLock { shareTokens[request.profileID] = response.token }
+            return .success(response)
+        }
+        bff.register(path: "/profile.v1.ProfileService/ResolveShareToken") { [self] (request: Profile_V1_ResolveShareTokenRequest) -> Result<Profile_V1_ProfileView, ConnectError> in
+            // NOT_FOUND alike for a token no one holds (reset or junk) and an
+            // owner who switched QR codes and links off.
+            let owner: String? = lock.withLock {
+                guard let holder = shareTokens.first(where: { $0.value == request.token })?.key,
+                      (discoverySettings[holder] ?? Self.defaultDiscoverySettings).byQr else { return nil }
+                return holder
+            }
+            guard let owner else { return .failure(ConnectError(code: .notFound, message: "share token not found")) }
+            var byID = Profile_V1_GetProfileByIdRequest()
+            byID.profileID = owner
+            return getProfileByID(byID)
         }
         bff.register(path: "/profile.v1.ProfileService/SetLocationSettings") { [self] (request: Profile_V1_SetLocationSettingsRequest) in
             lock.withLock { locationSettings[request.profileID] = request.settings }
@@ -541,6 +577,16 @@ public final class MockSocialServices: @unchecked Sendable {
         settings.inSuggestions = true
         return settings
     }()
+
+    /// A fresh token, as the server makes them: 128 random bits, URL-safe
+    /// base64 without padding (22 characters).
+    static func newShareToken() -> String {
+        let bytes = (0..<16).map { _ in UInt8.random(in: 0...255) }
+        return Data(bytes).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }
 
     /// Whether search may show `profileID` (backend #726: `discoverable`).
     public func isFindableInSearch(_ profileID: String) -> Bool {

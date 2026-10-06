@@ -21,6 +21,16 @@ struct DeepLinkTests {
         #expect(route("https://wynn.cn/tag/%E6%9D%B1%E4%BA%AC") == .hashtag("東京"))
     }
 
+    /// A QR code or shared link (#412): the token as issued, case kept.
+    @Test func aShareTokenLink() {
+        #expect(route("https://wynn.cn/s/Ab3_x-Yz09Qw8RtUvWxYzA") == .profileShareToken("Ab3_x-Yz09Qw8RtUvWxYzA"))
+        #expect(route("https://www.wynn.cn/s/Ab3_x-Yz09Qw8RtUvWxYzA?src=qr") == .profileShareToken("Ab3_x-Yz09Qw8RtUvWxYzA"))
+        #expect(route("wynn://s/Ab3_x-Yz09Qw8RtUvWxYzA") == .profileShareToken("Ab3_x-Yz09Qw8RtUvWxYzA"))
+        #expect(route("https://wynn.cn/s/short") == nil, "too short for a token")
+        #expect(route("https://wynn.cn/s/has+plus=padding==") == nil, "not URL-safe")
+        #expect(route("https://wynn.cn/s/") == nil)
+    }
+
     @Test func theAppsOwnScheme() {
         #expect(route("wynn://@kenji.dev") == .profileHandle("kenji.dev"))
         #expect(route("wynn:/@kenji.dev") == .profileHandle("kenji.dev"))

@@ -211,6 +211,19 @@ final class AppContainer {
         return response.error?.code == .notFound ? .missing : .unavailable
     }
 
+    /// The profile a QR code or `wynn.cn/s/<token>` link opens
+    /// (`profile.v1.ResolveShareToken`, #412). `.missing` covers a reset
+    /// token and an owner who switched links off: the server tells them apart
+    /// from no one.
+    func profileID(forShareToken token: String) async -> HandleLookup {
+        var request = Profile_V1_ResolveShareTokenRequest()
+        request.token = token
+        let response = await Profile_V1_ProfileServiceClient(client: authenticatedRPCClient)
+            .resolveShareToken(request: request, headers: [:])
+        if let view = response.message { return .found(ProfileID(view.profileID)) }
+        return response.error?.code == .notFound ? .missing : .unavailable
+    }
+
     private(set) lazy var authFeature: any AuthFeatureBuilding = AuthFeatureBuilder(
         sessionManager: sessionManager,
         // Sign-up by code (guest mode B4): the new account's profile, and its
@@ -1126,7 +1139,9 @@ final class AppContainer {
             )
         },
         // A tapped `@handle` and a `wynn.cn/@handle` link (#524).
-        lookupHandle: { [unowned self] handle in await self.profileID(forHandle: handle) }
+        lookupHandle: { [unowned self] handle in await self.profileID(forHandle: handle) },
+        // A scanned QR code and a `wynn.cn/s/<token>` link (#412).
+        lookupShareToken: { [unowned self] token in await self.profileID(forShareToken: token) }
     )
 
     var router: any Router { routeResolver }

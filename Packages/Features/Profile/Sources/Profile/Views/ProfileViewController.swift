@@ -491,6 +491,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        Task { [weak self] in await self?.viewModel.refreshShareToken() }
         // ⚠️ **AS EARLY AS THE TRANSITION ALLOWS, AND `viewDidAppear` IS NOT
         // EARLY.** Measured on a tab switch, headless: `viewWillAppear` at
         // +36ms, `viewDidAppear` at +947ms — nine hundred milliseconds of empty

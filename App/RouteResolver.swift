@@ -40,6 +40,9 @@ final class RouteResolver: Router {
     private let attachBalance: (UIViewController) -> Void
     /// The profile a handle names (`GetProfileByHandle`), for `.profileHandle`.
     private let lookupHandle: (String) async -> AppContainer.HandleLookup
+    /// The profile a share token opens (`ResolveShareToken`), for
+    /// `.profileShareToken`.
+    private let lookupShareToken: (String) async -> AppContainer.HandleLookup
     private let logger = Logger(subsystem: "cn.wynn.core-platform-ios", category: "navigation")
     /// The profile being prepared for its push — see `pushWhenReady`. One at a
     /// time: any newer route supersedes it.
@@ -51,9 +54,11 @@ final class RouteResolver: Router {
         feedFeature: @escaping () -> any FeedFeatureBuilding,
         chatFeature: @escaping () -> any ChatFeatureBuilding,
         attachBalance: @escaping (UIViewController) -> Void,
-        lookupHandle: @escaping (String) async -> AppContainer.HandleLookup = { _ in .unavailable }
+        lookupHandle: @escaping (String) async -> AppContainer.HandleLookup = { _ in .unavailable },
+        lookupShareToken: @escaping (String) async -> AppContainer.HandleLookup = { _ in .unavailable }
     ) {
         self.lookupHandle = lookupHandle
+        self.lookupShareToken = lookupShareToken
         self.searchFeature = searchFeature
         self.profileFeature = profileFeature
         self.feedFeature = feedFeature
@@ -272,6 +277,22 @@ final class RouteResolver: Router {
                     Self.toast("This account doesn\u{2019}t exist", symbol: "person.crop.circle.badge.questionmark", on: navigator)
                 case .unavailable:
                     Self.toast("Couldn\u{2019}t open @\(handle)", symbol: "wifi.exclamationmark", on: navigator)
+                }
+            }
+
+        case .profileShareToken(let token):
+            // A scanned QR code or a `wynn.cn/s/<token>` link (#412): resolved
+            // by the server, then routed like an author's profile. A token the
+            // owner reset, or links they switched off, read as no one.
+            Task { [weak self, weak navigator] in
+                guard let self else { return }
+                switch await lookupShareToken(token) {
+                case .found(let id):
+                    self.route(to: .profile(id, stub: nil))
+                case .missing:
+                    Self.toast("This link no longer works", symbol: "link", on: navigator)
+                case .unavailable:
+                    Self.toast("Couldn\u{2019}t open this link", symbol: "wifi.exclamationmark", on: navigator)
                 }
             }
 

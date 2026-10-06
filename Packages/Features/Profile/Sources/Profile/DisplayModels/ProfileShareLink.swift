@@ -27,4 +27,15 @@ enum ProfileShareLink {
         components.path = "/@" + handle
         return components.url ?? URL(string: "https://\(host)")!
     }
+
+    /// `https://wynn.cn/s/<token>` (#412): the owner's QR code and shared
+    /// link. It opens the profile only while the owner keeps "QR Code and
+    /// Shared Links" on, and stops working once they reset it.
+    static func url(shareToken token: String) -> URL {
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = host
+        components.path = "/s/" + token
+        return components.url ?? URL(string: "https://\(host)")!
+    }
 }
