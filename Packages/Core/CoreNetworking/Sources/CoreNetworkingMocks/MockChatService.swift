@@ -70,8 +70,17 @@ public final class MockChatService: @unchecked Sendable {
     }
     private let viewer = MockSocialDataset.viewerProfileID
 
-    public init(dataset: MockSocialDataset) {
+    /// Whether `sender` may message `recipient` (backend #656): with the
+    /// recipient's No One, a message is refused (CHT-1011). A narrower
+    /// audience turns it into a request on the fleet; not modelled here.
+    private let mayMessage: @Sendable (_ sender: String, _ recipient: String) -> Bool
+
+    public init(
+        dataset: MockSocialDataset,
+        mayMessage: @escaping @Sendable (_ sender: String, _ recipient: String) -> Bool = { _, _ in true }
+    ) {
         self.dataset = dataset
+        self.mayMessage = mayMessage
     }
 
     public func register(on bff: MockBFF) {
@@ -102,7 +111,12 @@ public final class MockChatService: @unchecked Sendable {
             response.messages = request.limit > 0 ? Array(all.suffix(Int(request.limit))) : all
             return .success(response)
         }
-        bff.register(path: "/chat.v1.ChatService/SendMessage") { [self] (request: Chat_V1_SendMessageRequest) in
+        bff.register(path: "/chat.v1.ChatService/SendMessage") { [self] (request: Chat_V1_SendMessageRequest) -> Result<Chat_V1_SendMessageResponse, ConnectError> in
+            let recipient = otherMember[request.conversationID]
+                ?? store.members(of: request.conversationID).first { $0 != request.senderID }
+            if let recipient, !mayMessage(request.senderID, recipient) {
+                return .failure(ConnectError(code: .permissionDenied, message: "CHT-1011: this account doesn't take messages"))
+            }
             let existing = store.messages(
                 for: request.conversationID, seed: seedHistory(for: request.conversationID)
             )
@@ -122,8 +136,10 @@ public final class MockChatService: @unchecked Sendable {
             response.conversationID = store.newConversationID()
             return .success(response)
         }
-        bff.register(path: "/chat.v1.ChatService/JoinAsMember") { (_: Chat_V1_JoinAsMemberRequest) in
-            .success(Chat_V1_CommandResponse())
+        // Remembered, so a created conversation knows who the message is for.
+        bff.register(path: "/chat.v1.ChatService/JoinAsMember") { [self] (request: Chat_V1_JoinAsMemberRequest) -> Result<Chat_V1_CommandResponse, ConnectError> in
+            store.join(request.profileID, to: request.conversationID)
+            return .success(Chat_V1_CommandResponse())
         }
         bff.register(path: "/chat.v1.ChatService/Subscribe") { (_: Chat_V1_SubscribeRequest) in
             .success(Chat_V1_CommandResponse())
@@ -332,6 +348,18 @@ public final class MockChatService: @unchecked Sendable {
         func markRead(_ messageID: String, in conversationID: String, for memberID: String) {
             guard !messageID.isEmpty else { return }
             lock.withLock { readCursors[conversationID, default: [:]][memberID] = messageID }
+        }
+
+        private var joined: [String: [String]] = [:]
+
+        func join(_ member: String, to conversationID: String) {
+            lock.withLock {
+                if joined[conversationID]?.contains(member) != true { joined[conversationID, default: []].append(member) }
+            }
+        }
+
+        func members(of conversationID: String) -> [String] {
+            lock.withLock { joined[conversationID] ?? [] }
         }
 
         func newConversationID() -> String {

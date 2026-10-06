@@ -15,6 +15,8 @@ final class PrivacySectionViewController: UIViewController {
         case followRequests
         case postWindow
         case commentAudience
+        case mentionAudience
+        case messageAudience
         case likeCounts
         case downloads
         case loading
@@ -27,7 +29,8 @@ final class PrivacySectionViewController: UIViewController {
     }
 
     private var planned: [String] {
-        (viewModel.comments == nil ? ["Who can comment, mention and message you"] : ["Who can mention and message you"])
+        (viewModel.comments == nil ? ["Who can comment on your posts"] : [])
+            + (viewModel.audiences == nil ? ["Who can mention and message you"] : [])
             + (viewModel.sharing == nil ? ["Downloads of your posts and who sees your likes"] : [])
             + (makeLocationSharing == nil ? ["Location sharing"] : [])
             + ["Hide profile tabs from others"]
@@ -93,7 +96,7 @@ final class PrivacySectionViewController: UIViewController {
     private static func footerText(_ section: Section) -> String? {
         switch section {
         case .visibility:
-            "When your profile is private, only your followers can see your posts and your lists. Older posts outside the window you choose are hidden from others, not deleted; you always see them. Comments from anyone outside the audience you choose are refused. Applies to this profile only."
+            "When your profile is private, only your followers can see your posts and your lists. Older posts outside the window you choose are hidden from others, not deleted; you always see them. Comments and mentions from anyone outside the audience you choose are refused; their messages arrive as requests, and with No One they're refused. Applies to this profile only."
         case .lists:
             nil
         case .comingSoon:
@@ -189,6 +192,19 @@ final class PrivacySectionViewController: UIViewController {
                     self?.setCommentAudience(audience)
                 }
             }), displayed: .always)]
+        case .mentionAudience, .messageAudience:
+            let kind: InteractionKind = item == .mentionAudience ? .mentions : .messages
+            content = .valueCell()
+            content.text = kind == .mentions ? "Who Can Mention" : "Who Can Message"
+            let current = kind == .mentions ? viewModel.mentionAudience : viewModel.messageAudience
+            content.secondaryText = current?.title
+            content.image = UIImage(systemName: kind == .mentions ? "at" : "paperplane")
+            content.imageProperties.tintColor = .label
+            cell.accessories = [.popUpMenu(UIMenu(children: InteractionAudience.allCases.map { audience in
+                UIAction(title: audience.title, state: audience == current ? .on : .off) { [weak self] _ in
+                    self?.setAudience(audience, for: kind)
+                }
+            }), displayed: .always)]
         case .likeCounts, .downloads:
             let isLikes = item == .likeCounts
             content.text = isLikes ? "Show Like Counts" : "Allow Downloads"
@@ -267,6 +283,10 @@ final class PrivacySectionViewController: UIViewController {
             snapshot.appendItems([.commentAudience], toSection: .visibility)
             snapshot.reconfigureItems([.commentAudience])
         }
+        if viewModel.audiences != nil, viewModel.mentionAudience != nil, viewModel.messageAudience != nil {
+            snapshot.appendItems([.mentionAudience, .messageAudience], toSection: .visibility)
+            snapshot.reconfigureItems([.mentionAudience, .messageAudience])
+        }
         if viewModel.sharing != nil, viewModel.postSharing != nil {
             snapshot.appendItems([.likeCounts, .downloads], toSection: .visibility)
             snapshot.reconfigureItems([.likeCounts, .downloads])
@@ -293,6 +313,21 @@ final class PrivacySectionViewController: UIViewController {
             } catch {
                 applySnapshot()
                 let alert = UIAlertController(title: nil, message: "Couldn't change who can comment. Try again.", preferredStyle: .alert)
+                alert.addAction(UIAlertAction(title: "OK", style: .default))
+                present(alert, animated: true)
+            }
+        }
+    }
+
+    private func setAudience(_ audience: InteractionAudience, for kind: InteractionKind) {
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await viewModel.setAudience(audience, for: kind)
+            } catch {
+                applySnapshot()
+                let what = kind == .mentions ? "who can mention you" : "who can message you"
+                let alert = UIAlertController(title: nil, message: "Couldn't change \(what). Try again.", preferredStyle: .alert)
                 alert.addAction(UIAlertAction(title: "OK", style: .default))
                 present(alert, animated: true)
             }

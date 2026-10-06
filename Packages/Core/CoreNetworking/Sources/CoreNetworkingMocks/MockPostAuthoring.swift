@@ -94,7 +94,17 @@ public final class MockPostStore: @unchecked Sendable {
 public final class MockPostAuthoringService: @unchecked Sendable {
     private let store: MockPostStore
 
-    public init(store: MockPostStore) {
+    /// Whether `author` may mention the profile a handle names (backend
+    /// #656): a post mentioning anyone who doesn't take it is refused
+    /// (PST-1009) and nothing is stored.
+    private let mayMention: @Sendable (_ author: String, _ handle: String) -> Bool
+
+    public convenience init(store: MockPostStore) {
+        self.init(store: store, mayMention: { _, _ in true })
+    }
+
+    public init(store: MockPostStore, mayMention: @escaping @Sendable (_ author: String, _ handle: String) -> Bool) {
+        self.mayMention = mayMention
         self.store = store
     }
 
@@ -111,6 +121,9 @@ public final class MockPostAuthoringService: @unchecked Sendable {
         guard !request.profileID.isEmpty else {
             return .failure(ConnectError(code: .invalidArgument, message: "profile_id required"))
         }
+        if let refused = Self.mentionedHandles(in: request.caption).first(where: { !mayMention(request.profileID, $0) }) {
+            return .failure(ConnectError(code: .permissionDenied, message: "PST-1009: @\(refused) doesn't allow mentions from you"))
+        }
         let attachment = request.attachments.first
         let media = attachment.map { (url: $0.cdnURL, width: Int($0.width), height: Int($0.height)) }
         let postID = store.create(profileID: request.profileID, caption: request.caption, media: media)
@@ -119,6 +132,20 @@ public final class MockPostAuthoringService: @unchecked Sendable {
         response.postID = postID
         response.profileID = request.profileID
         return .success(response)
+    }
+
+    /// The `@handle`s in a caption, without the `@`.
+    public static func mentionedHandles(in caption: String) -> [String] {
+        var handles: [String] = []
+        var scanner = caption[...]
+        while let at = scanner.firstIndex(of: "@") {
+            let rest = caption[caption.index(after: at)...]
+            let handle = rest.prefix { $0.isLetter || $0.isNumber || $0 == "." || $0 == "_" }
+            let trimmed = handle.hasSuffix(".") ? String(handle.dropLast()) : String(handle)
+            if !trimmed.isEmpty { handles.append(trimmed) }
+            scanner = rest
+        }
+        return handles
     }
 
     private func publishPost(_ request: Post_V1_PublishPostRequest) -> Result<Post_V1_CommandResponse, ConnectError> {

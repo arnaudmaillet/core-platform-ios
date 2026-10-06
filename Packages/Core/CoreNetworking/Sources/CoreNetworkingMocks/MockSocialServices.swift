@@ -90,7 +90,16 @@ public final class MockSocialServices: @unchecked Sendable {
         if let seeded = Self.verificationRequest(seed: verificationSeed) {
             verificationRequests[MockPostStore.viewer.profileID] = seeded
         }
+        // Takes no mentions and no messages (#397): a post mentioning it is
+        // refused, and so is a message to it. No seeded conversation has it.
+        var noContact = Self.defaultInteractionSettings
+        noContact.mentions = .noOne
+        noContact.messages = .noOne
+        interactionSettings[Self.noContactProfileID] = noContact
     }
+
+    /// The profile that takes no mentions and no messages.
+    public static let noContactProfileID = "prof-30"
 
     private static func verificationRequest(seed: String?) -> Profile_V1_VerificationRequestView? {
         let status: Profile_V1_VerificationRequestStatus
@@ -564,6 +573,23 @@ public final class MockSocialServices: @unchecked Sendable {
     /// Who may comment on `profileID`'s posts; the comment mock asks it.
     public func commentAudience(of profileID: String) -> Profile_V1_InteractionAudience {
         storedInteractionSettings(for: profileID).comments
+    }
+
+    /// Who may mention `profileID`; the post mock asks it.
+    public func mentionAudience(of profileID: String) -> Profile_V1_InteractionAudience {
+        storedInteractionSettings(for: profileID).mentions
+    }
+
+    /// Who may message `profileID`; the chat mock asks it.
+    public func messageAudience(of profileID: String) -> Profile_V1_InteractionAudience {
+        storedInteractionSettings(for: profileID).messages
+    }
+
+    /// The profile a `@handle` names, or nil.
+    public func profileID(forHandle handle: String) -> String? {
+        let handle = handle.lowercased()
+        if handle == lock.withLock({ viewerHandle }).lowercased() { return MockPostStore.viewer.profileID }
+        return dataset.authors.first { $0.handle.lowercased() == handle }?.profileID
     }
 
     /// A post older than its author's window reads as not found to visitors;

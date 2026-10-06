@@ -82,7 +82,17 @@ public struct MockBackend: Sendable {
         MockEngagementService(store: counterStore).register(on: bff)
         MockCounterService(store: counterStore).register(on: bff)
         MockMediaService(store: blobStore).register(on: bff)
-        MockPostAuthoringService(store: postStore).register(on: bff)
+        // A post mentioning someone outside their "Who Can Mention" is
+        // refused (#397), as a comment outside "Who Can Comment" is.
+        MockPostAuthoringService(store: postStore, mayMention: { author, handle in
+            guard let target = socialServices.profileID(forHandle: handle), target != author else { return true }
+            switch socialServices.mentionAudience(of: target) {
+            case .noOne: return false
+            case .followers: return socialGraph.isFollowing(author, target)
+            case .mutuals: return socialGraph.isFollowing(author, target) && socialGraph.isFollowing(target, author)
+            default: return true
+            }
+        }).register(on: bff)
         // A profile whose owner turned off "Show Up in Search" is left out (#412).
         MockSearchService(
             dataset: dataset,
@@ -108,7 +118,10 @@ public struct MockBackend: Sendable {
             // three posts for their review (#416).
             seedsHeldComments: ProcessInfo.processInfo.arguments.contains("-mock-held-comments")
         ).register(on: bff)
-        MockChatService(dataset: dataset).register(on: bff)
+        // A message to someone who takes none is refused (#397).
+        MockChatService(dataset: dataset, mayMessage: { _, recipient in
+            socialServices.messageAudience(of: recipient) != .noOne
+        }).register(on: bff)
         socialGraph.register(on: bff)
         let geoDiscovery = MockGeoDiscoveryService(dataset: dataset, spreadsHierarchy: seedsMapHierarchy)
         geoDiscovery.register(on: bff)

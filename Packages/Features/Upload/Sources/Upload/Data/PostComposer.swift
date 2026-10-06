@@ -91,7 +91,22 @@ public enum ComposeError: Error, Equatable, Sendable {
     case noViewerProfile
     case emptyPost
     case media(String)
+    /// PST-1009: someone the post mentions doesn't allow mentions from the
+    /// author ("Who Can Mention", #397). Nothing was created.
+    case mentionRefused
     case transport(String)
+}
+
+extension ComposeError: LocalizedError {
+    /// Said to the author by any screen, including those that don't import
+    /// this module (the Text Post page). Only the refused mention has words
+    /// of its own; the rest keep each screen's generic message.
+    public var errorDescription: String? {
+        switch self {
+        case .mentionRefused: "Someone you mentioned doesn't allow mentions from you. Remove the mention and try again."
+        default: nil
+        }
+    }
 }
 
 /// What the compose screens drive.
@@ -468,6 +483,7 @@ public actor PostComposer: PostComposing {
         request.attachments = attachments
 
         let response = await postClient.createPost(request: request, headers: [:])
+        if (response.error?.message ?? "").contains("PST-1009") { throw ComposeError.mentionRefused }
         let body = try unwrap(response.message, errorMessage: response.error?.message, as: ComposeError.transport)
         return PostID(body.postID)
     }

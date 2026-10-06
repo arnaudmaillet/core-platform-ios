@@ -40,6 +40,14 @@ final class PrivacySectionViewModel {
     private(set) var postSharing: PostSharing? {
         didSet { onChange?() }
     }
+    /// Who may mention and message this profile (#397); nil until read or
+    /// when the screen can't set them.
+    private(set) var mentionAudience: InteractionAudience? {
+        didSet { onChange?() }
+    }
+    private(set) var messageAudience: InteractionAudience? {
+        didSet { onChange?() }
+    }
     var onChange: (() -> Void)?
 
     private let visibility: any ProfileVisibilityManaging
@@ -47,14 +55,17 @@ final class PrivacySectionViewModel {
     let windows: (any PostWindowManaging)?
     let comments: (any CommentAudienceManaging)?
     let sharing: (any PostSharingManaging)?
+    let audiences: (any InteractionAudienceManaging)?
 
     init(
         visibility: any ProfileVisibilityManaging,
         requests: (any FollowRequestsManaging)? = nil,
         windows: (any PostWindowManaging)? = nil,
         comments: (any CommentAudienceManaging)? = nil,
-        sharing: (any PostSharingManaging)? = nil
+        sharing: (any PostSharingManaging)? = nil,
+        audiences: (any InteractionAudienceManaging)? = nil
     ) {
+        self.audiences = audiences
         self.visibility = visibility
         self.requests = requests
         self.windows = windows
@@ -82,6 +93,18 @@ final class PrivacySectionViewModel {
         commentAudience = audience
     }
 
+    /// Not optimistic: the value shown is the server's.
+    func setAudience(_ audience: InteractionAudience, for kind: InteractionKind) async throws {
+        guard let audiences else { return }
+        let current = kind == .mentions ? mentionAudience : messageAudience
+        guard audience != current else { return }
+        try await audiences.setAudience(audience, for: kind)
+        switch kind {
+        case .mentions: mentionAudience = audience
+        case .messages: messageAudience = audience
+        }
+    }
+
     /// Not optimistic: the switches show the server's values.
     func setPostSharing(_ next: PostSharing) async throws {
         guard let sharing, next != postSharing else { return }
@@ -93,6 +116,10 @@ final class PrivacySectionViewModel {
         if case .failed = phase { phase = .loading }
         if let sharing {
             Task { self.postSharing = (try? await sharing.postSharing()) ?? self.postSharing }
+        }
+        if let audiences {
+            Task { self.mentionAudience = (try? await audiences.audience(for: .mentions)) ?? self.mentionAudience }
+            Task { self.messageAudience = (try? await audiences.audience(for: .messages)) ?? self.messageAudience }
         }
         Task { await refreshRequestCount() }
         if let windows {

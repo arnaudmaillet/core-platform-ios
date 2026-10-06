@@ -7,6 +7,9 @@ import Foundation
 public enum ChatError: Error, Equatable, Sendable {
     case notAuthenticated
     case noProfileForAccount
+    /// CHT-1011: the recipient takes no messages ("Who Can Message": No
+    /// One, #397). A narrower audience makes the message a request instead.
+    case messagesRefused
     case transport(message: String)
 }
 
@@ -335,6 +338,7 @@ public actor ChatRepository: ChatProviding {
                 replyToID: replyToID
             )
         case .failure(let error):
+            if (error.message ?? "").contains("CHT-1011") { throw ChatError.messagesRefused }
             throw ChatError.transport(message: error.message ?? "code \(error.code)")
         }
     }

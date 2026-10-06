@@ -35,6 +35,39 @@ public enum CommentAudience: Equatable, Sendable, CaseIterable {
     }
 }
 
+/// The audiences `profile.v1` sets per interaction share one scale: who can
+/// comment, mention and message read the same four choices.
+public typealias InteractionAudience = CommentAudience
+
+/// Settings → Privacy → Who Can Mention and Who Can Message (#397, backend
+/// #656). Enforced by the server: a post mentioning someone outside their
+/// audience is refused (PST-1009); a message from outside it arrives as a
+/// request, and with No One it is refused (CHT-1011).
+public enum InteractionKind: Equatable, Sendable {
+    case mentions, messages
+}
+
+public protocol InteractionAudienceManaging: Sendable {
+    func audience(for kind: InteractionKind) async throws -> InteractionAudience
+    func setAudience(_ audience: InteractionAudience, for kind: InteractionKind) async throws
+}
+
+extension ProfileRepository: InteractionAudienceManaging {
+    public func audience(for kind: InteractionKind) async throws -> InteractionAudience {
+        let settings = try await fetchProfileView(id: try await resolveViewerProfileID()).interactionSettings
+        return InteractionAudience(kind == .mentions ? settings.mentions : settings.messages)
+    }
+
+    public func setAudience(_ audience: InteractionAudience, for kind: InteractionKind) async throws {
+        try await writeInteractionSettings(as: kind == .mentions ? "setMentionAudience" : "setMessageAudience") {
+            switch kind {
+            case .mentions: $0.mentions = audience.proto
+            case .messages: $0.messages = audience.proto
+            }
+        }
+    }
+}
+
 /// Settings → Privacy → Who Can Comment.
 public protocol CommentAudienceManaging: Sendable {
     func commentAudience() async throws -> CommentAudience
