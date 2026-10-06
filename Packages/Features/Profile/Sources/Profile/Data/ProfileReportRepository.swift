@@ -26,23 +26,14 @@ import Foundation
 /// verified.
 public actor ProfileReportRepository: ContentReporting {
     let moderationClient: any Moderation_V1_ModerationServiceClientInterface
-    private let authSession: any AuthSessionProviding
 
-    public init(
-        moderationClient: any Moderation_V1_ModerationServiceClientInterface,
-        authSession: any AuthSessionProviding
-    ) {
+    public init(moderationClient: any Moderation_V1_ModerationServiceClientInterface) {
         self.moderationClient = moderationClient
-        self.authSession = authSession
     }
 
+    /// Anyone may report (DSA Art. 16): a member, and a guest with their
+    /// guest token (backend #677 — the edge's `member_or_guest`).
     public func report(_ subject: ReportSubject, reason: ReportReason, surface: String) async throws {
-        // Guests may report on the fleet (backend #677); the app has no guest
-        // token yet, so a report still needs a signed-in account here.
-        guard case .authenticated = await authSession.currentState() else {
-            throw ProfileError.notAuthenticated
-        }
-
         var request = Moderation_V1_SubmitReportRequest()
         switch subject {
         case .profile(let id):

@@ -118,7 +118,7 @@ struct DecisionsAndReportsTests {
     /// under review; reporting it again doesn't list it twice.
     @Test func aReportShowsUpInYourReports() async throws {
         let service = MockModerationService()
-        let repository = ProfileReportRepository(moderationClient: moderationClient(service), authSession: Session())
+        let repository = ProfileReportRepository(moderationClient: moderationClient(service))
 
         try await repository.report(.profile(ProfileID("prof-7")), reason: .harassment, surface: "profile_menu")
         try await repository.report(.post(PostID("post-9")), reason: .spam, surface: "post_menu")
@@ -130,6 +130,31 @@ struct DecisionsAndReportsTests {
         #expect(page.reports.map(\.category) == ["Spam or scam", "Harassment or bullying"])
         #expect(page.reports.allSatisfy { $0.outcome == .underReview })
         #expect(page.nextPageToken == nil)
+    }
+
+    /// DSA Art. 16: a GUEST reports too — with their guest token, through an
+    /// edge that, like the fleet's, lets `SubmitReport` through for a guest
+    /// and refuses it to nobody-at-all (#452, backend #677).
+    @Test func aGuestReportsWithTheirGuestToken() async throws {
+        struct Token: AuthTokenProviding {
+            let token: String?
+            func validAccessToken() async throws -> String? { token }
+        }
+        let bff = MockBFF()
+        bff.enforcesEdgePolicy = true
+        MockModerationService().register(on: bff)
+        func repository(token: String?) -> ProfileReportRepository {
+            ProfileReportRepository(moderationClient: Moderation_V1_ModerationServiceClient(
+                client: ConnectClientFactory.makeAuthenticated(
+                    host: "https://mock.bff.local", tokenProvider: Token(token: token), httpClient: bff
+                )
+            ))
+        }
+
+        try await repository(token: "gt-1").report(.post(PostID("post-9")), reason: .spam, surface: "post_menu")
+        await #expect(throws: ProfileError.self) {
+            try await repository(token: nil).report(.post(PostID("post-9")), reason: .spam, surface: "post_menu")
+        }
     }
 
     @Test func eachOutcomeReadsPlainly() {
