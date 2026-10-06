@@ -31,6 +31,11 @@ public protocol Engagement_V1_EngagementServiceClientInterface: Sendable {
     /// Returns the full engagement snapshot (scores + counters) from Redis.
     @available(iOS 13, *)
     func `getPostEngagement`(request: Engagement_V1_GetPostEngagementRequest, headers: Connect.Headers) async -> ResponseMessage<Engagement_V1_PostEngagementView>
+
+    /// A profile's reactions (which posts, which reaction, when), paged by post
+    /// id. Mesh only (never on the edge): the GDPR data export (#653).
+    @available(iOS 13, *)
+    func `listReactionsByProfile`(request: Engagement_V1_ListReactionsByProfileRequest, headers: Connect.Headers) async -> ResponseMessage<Engagement_V1_ListReactionsByProfileResponse>
 }
 
 /// Concrete implementation of `Engagement_V1_EngagementServiceClientInterface`.
@@ -66,6 +71,11 @@ public final class Engagement_V1_EngagementServiceClient: Engagement_V1_Engageme
         return await self.client.unary(path: "/engagement.v1.EngagementService/GetPostEngagement", idempotencyLevel: .unknown, request: request, headers: headers)
     }
 
+    @available(iOS 13, *)
+    public func `listReactionsByProfile`(request: Engagement_V1_ListReactionsByProfileRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Engagement_V1_ListReactionsByProfileResponse> {
+        return await self.client.unary(path: "/engagement.v1.EngagementService/ListReactionsByProfile", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
     public enum Metadata {
         public enum Methods {
             public static let upsertReaction = Connect.MethodSpec(name: "UpsertReaction", service: "engagement.v1.EngagementService", type: .unary)
@@ -73,6 +83,7 @@ public final class Engagement_V1_EngagementServiceClient: Engagement_V1_Engageme
             public static let recordView = Connect.MethodSpec(name: "RecordView", service: "engagement.v1.EngagementService", type: .unary)
             public static let recordShare = Connect.MethodSpec(name: "RecordShare", service: "engagement.v1.EngagementService", type: .unary)
             public static let getPostEngagement = Connect.MethodSpec(name: "GetPostEngagement", service: "engagement.v1.EngagementService", type: .unary)
+            public static let listReactionsByProfile = Connect.MethodSpec(name: "ListReactionsByProfile", service: "engagement.v1.EngagementService", type: .unary)
         }
     }
 }

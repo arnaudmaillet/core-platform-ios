@@ -37,6 +37,26 @@ public nonisolated enum Notification_V1_NotificationKind: SwiftProtobuf.Enum, Sw
 
   /// A profile mentioned the recipient in a post or comment caption.
   case mention // = 4
+
+  /// A profile started following the recipient (subject: that profile).
+  case follow // = 5
+
+  /// A profile asked to follow the recipient's private profile (subject: the
+  /// requester; the app opens the follow-requests inbox).
+  case followRequest // = 6
+
+  /// The private profile the recipient asked to follow accepted (subject:
+  /// that profile).
+  case followAccepted // = 7
+
+  /// The recipient's appeal was decided and the decision stands (subject: the
+  /// appeal; sent by the platform, so no sender — see NotificationView).
+  /// Every profile of the appellant account is told (#744).
+  case appealUpheld // = 8
+
+  /// The recipient's appeal was decided in their favour: a sanction is lifted,
+  /// or a reporter's case goes back to review (the appeal says which).
+  case appealOverturned // = 9
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -50,6 +70,11 @@ public nonisolated enum Notification_V1_NotificationKind: SwiftProtobuf.Enum, Sw
     case 2: self = .comment
     case 3: self = .reply
     case 4: self = .mention
+    case 5: self = .follow
+    case 6: self = .followRequest
+    case 7: self = .followAccepted
+    case 8: self = .appealUpheld
+    case 9: self = .appealOverturned
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -61,6 +86,11 @@ public nonisolated enum Notification_V1_NotificationKind: SwiftProtobuf.Enum, Sw
     case .comment: return 2
     case .reply: return 3
     case .mention: return 4
+    case .follow: return 5
+    case .followRequest: return 6
+    case .followAccepted: return 7
+    case .appealUpheld: return 8
+    case .appealOverturned: return 9
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -72,6 +102,11 @@ public nonisolated enum Notification_V1_NotificationKind: SwiftProtobuf.Enum, Sw
     .comment,
     .reply,
     .mention,
+    .follow,
+    .followRequest,
+    .followAccepted,
+    .appealUpheld,
+    .appealOverturned,
   ]
 
 }
@@ -87,6 +122,13 @@ public nonisolated enum Notification_V1_SubjectKind: SwiftProtobuf.Enum, Swift.C
 
   /// The subject is a comment (comment_id stored in subject_id).
   case comment // = 2
+
+  /// The subject is a profile (profile_id stored in subject_id).
+  case profile // = 3
+
+  /// The subject is a moderation appeal (appeal_id stored in subject_id; the
+  /// app finds it with moderation's ListMyAppeals).
+  case appeal // = 4
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -98,6 +140,8 @@ public nonisolated enum Notification_V1_SubjectKind: SwiftProtobuf.Enum, Swift.C
     case 0: self = .unspecified
     case 1: self = .post
     case 2: self = .comment
+    case 3: self = .profile
+    case 4: self = .appeal
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -107,6 +151,8 @@ public nonisolated enum Notification_V1_SubjectKind: SwiftProtobuf.Enum, Swift.C
     case .unspecified: return 0
     case .post: return 1
     case .comment: return 2
+    case .profile: return 3
+    case .appeal: return 4
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -116,6 +162,8 @@ public nonisolated enum Notification_V1_SubjectKind: SwiftProtobuf.Enum, Swift.C
     .unspecified,
     .post,
     .comment,
+    .profile,
+    .appeal,
   ]
 
 }
@@ -269,11 +317,11 @@ public nonisolated enum Notification_V1_PushEnvironment: SwiftProtobuf.Enum, Swi
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 nonisolated extension Notification_V1_NotificationKind: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0NOTIFICATION_KIND_UNSPECIFIED\0\u{1}NOTIFICATION_KIND_REACTION\0\u{1}NOTIFICATION_KIND_COMMENT\0\u{1}NOTIFICATION_KIND_REPLY\0\u{1}NOTIFICATION_KIND_MENTION\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0NOTIFICATION_KIND_UNSPECIFIED\0\u{1}NOTIFICATION_KIND_REACTION\0\u{1}NOTIFICATION_KIND_COMMENT\0\u{1}NOTIFICATION_KIND_REPLY\0\u{1}NOTIFICATION_KIND_MENTION\0\u{1}NOTIFICATION_KIND_FOLLOW\0\u{1}NOTIFICATION_KIND_FOLLOW_REQUEST\0\u{1}NOTIFICATION_KIND_FOLLOW_ACCEPTED\0\u{1}NOTIFICATION_KIND_APPEAL_UPHELD\0\u{1}NOTIFICATION_KIND_APPEAL_OVERTURNED\0")
 }
 
 nonisolated extension Notification_V1_SubjectKind: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0SUBJECT_KIND_UNSPECIFIED\0\u{1}SUBJECT_KIND_POST\0\u{1}SUBJECT_KIND_COMMENT\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0SUBJECT_KIND_UNSPECIFIED\0\u{1}SUBJECT_KIND_POST\0\u{1}SUBJECT_KIND_COMMENT\0\u{1}SUBJECT_KIND_PROFILE\0\u{1}SUBJECT_KIND_APPEAL\0")
 }
 
 nonisolated extension Notification_V1_PushCategory: SwiftProtobuf._ProtoNameProviding {

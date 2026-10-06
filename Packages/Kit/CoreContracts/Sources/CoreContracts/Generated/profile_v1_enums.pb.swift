@@ -372,6 +372,54 @@ public nonisolated enum Profile_V1_LocationPrecision: SwiftProtobuf.Enum, Swift.
 
 }
 
+/// Who sees where a profile's posts were made (#657): on the map and on the
+/// post itself. On a set request, UNSPECIFIED keeps the stored audience.
+public nonisolated enum Profile_V1_LocationAudience: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+  case everyone // = 1
+
+  /// Profiles that follow the owner.
+  case followers // = 2
+
+  /// Profiles the owner follows back.
+  case mutuals // = 3
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .everyone
+    case 2: self = .followers
+    case 3: self = .mutuals
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .everyone: return 1
+    case .followers: return 2
+    case .mutuals: return 3
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [Profile_V1_LocationAudience] = [
+    .unspecified,
+    .everyone,
+    .followers,
+    .mutuals,
+  ]
+
+}
+
 /// How far back others see a profile's posts.
 public nonisolated enum Profile_V1_PostWindow: SwiftProtobuf.Enum, Swift.CaseIterable {
   public typealias RawValue = Int
@@ -531,6 +579,10 @@ nonisolated extension Profile_V1_InteractionAudience: SwiftProtobuf._ProtoNamePr
 
 nonisolated extension Profile_V1_LocationPrecision: SwiftProtobuf._ProtoNameProviding {
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0LOCATION_PRECISION_UNSPECIFIED\0\u{1}LOCATION_PRECISION_PRECISE\0\u{1}LOCATION_PRECISION_CITY\0")
+}
+
+nonisolated extension Profile_V1_LocationAudience: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0LOCATION_AUDIENCE_UNSPECIFIED\0\u{1}LOCATION_AUDIENCE_EVERYONE\0\u{1}LOCATION_AUDIENCE_FOLLOWERS\0\u{1}LOCATION_AUDIENCE_MUTUALS\0")
 }
 
 nonisolated extension Profile_V1_PostWindow: SwiftProtobuf._ProtoNameProviding {

@@ -15,11 +15,31 @@ public protocol Chat_V1_ChatServiceClientInterface: Sendable {
     @available(iOS 13, *)
     func `createConversation`(request: Chat_V1_CreateConversationRequest, headers: Connect.Headers) async -> ResponseMessage<Chat_V1_CreateConversationResponse>
 
+    /// Direct messages (#656): the conversation with one other profile, and
+    /// the recipient's answer to a message request.
+    @available(iOS 13, *)
+    func `openDirectConversation`(request: Chat_V1_OpenDirectConversationRequest, headers: Connect.Headers) async -> ResponseMessage<Chat_V1_OpenDirectConversationResponse>
+
+    @available(iOS 13, *)
+    func `respondToMessageRequest`(request: Chat_V1_RespondToMessageRequestRequest, headers: Connect.Headers) async -> ResponseMessage<Chat_V1_CommandResponse>
+
     @available(iOS 13, *)
     func `toggleVisibility`(request: Chat_V1_ToggleVisibilityRequest, headers: Connect.Headers) async -> ResponseMessage<Chat_V1_CommandResponse>
 
+    /// Joining a PRIVATE conversation requires a pending invitation (issued by
+    /// an owner/admin via InviteMember); without one the call fails NOT_FOUND,
+    /// exactly as for a conversation that does not exist. Public: open join.
     @available(iOS 13, *)
     func `joinAsMember`(request: Chat_V1_JoinAsMemberRequest, headers: Connect.Headers) async -> ResponseMessage<Chat_V1_CommandResponse>
+
+    /// A member leaves (#656): off the roster and out of its inbox; its
+    /// membership is kept with left_at for the GDPR export.
+    @available(iOS 13, *)
+    func `leaveConversation`(request: Chat_V1_LeaveConversationRequest, headers: Connect.Headers) async -> ResponseMessage<Chat_V1_CommandResponse>
+
+    /// Owner/admin invites a profile to join (expires after 7 days; consumed on join).
+    @available(iOS 13, *)
+    func `inviteMember`(request: Chat_V1_InviteMemberRequest, headers: Connect.Headers) async -> ResponseMessage<Chat_V1_CommandResponse>
 
     @available(iOS 13, *)
     func `subscribe`(request: Chat_V1_SubscribeRequest, headers: Connect.Headers) async -> ResponseMessage<Chat_V1_CommandResponse>
@@ -51,6 +71,21 @@ public protocol Chat_V1_ChatServiceClientInterface: Sendable {
     @available(iOS 13, *)
     func `listSubscriptions`(request: Chat_V1_ListSubscriptionsRequest, headers: Connect.Headers) async -> ResponseMessage<Chat_V1_ListSubscriptionsResponse>
 
+    /// The caller's inbox (#656): INBOX or REQUESTS, newest activity first.
+    @available(iOS 13, *)
+    func `listInbox`(request: Chat_V1_ListInboxRequest, headers: Connect.Headers) async -> ResponseMessage<Chat_V1_ListInboxResponse>
+
+    /// The conversations a profile is a member of (member plane), paged by
+    /// conversation id. Mesh only (never on the edge): the GDPR data export
+    /// (#653) then reads each one's history as that member (GetHistory).
+    @available(iOS 13, *)
+    func `listConversationsByMember`(request: Chat_V1_ListConversationsByMemberRequest, headers: Connect.Headers) async -> ResponseMessage<Chat_V1_ListConversationsByMemberResponse>
+
+    /// Mesh only (#653 / #656): a member's own messages, others' reduced to
+    /// their time, up to its departure if it left — the export's read.
+    @available(iOS 13, *)
+    func `getFormerMemberHistory`(request: Chat_V1_GetFormerMemberHistoryRequest, headers: Connect.Headers) async -> ResponseMessage<Chat_V1_GetHistoryResponse>
+
     /// ── Real-time streams ───────────────────────────────────────────────────
     /// Member Plane: full duplex context — messages + presence + typing + receipts.
     /// Authorization: caller must be a roster member.
@@ -77,6 +112,16 @@ public final class Chat_V1_ChatServiceClient: Chat_V1_ChatServiceClientInterface
     }
 
     @available(iOS 13, *)
+    public func `openDirectConversation`(request: Chat_V1_OpenDirectConversationRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Chat_V1_OpenDirectConversationResponse> {
+        return await self.client.unary(path: "/chat.v1.ChatService/OpenDirectConversation", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `respondToMessageRequest`(request: Chat_V1_RespondToMessageRequestRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Chat_V1_CommandResponse> {
+        return await self.client.unary(path: "/chat.v1.ChatService/RespondToMessageRequest", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
     public func `toggleVisibility`(request: Chat_V1_ToggleVisibilityRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Chat_V1_CommandResponse> {
         return await self.client.unary(path: "/chat.v1.ChatService/ToggleVisibility", idempotencyLevel: .unknown, request: request, headers: headers)
     }
@@ -84,6 +129,16 @@ public final class Chat_V1_ChatServiceClient: Chat_V1_ChatServiceClientInterface
     @available(iOS 13, *)
     public func `joinAsMember`(request: Chat_V1_JoinAsMemberRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Chat_V1_CommandResponse> {
         return await self.client.unary(path: "/chat.v1.ChatService/JoinAsMember", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `leaveConversation`(request: Chat_V1_LeaveConversationRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Chat_V1_CommandResponse> {
+        return await self.client.unary(path: "/chat.v1.ChatService/LeaveConversation", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `inviteMember`(request: Chat_V1_InviteMemberRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Chat_V1_CommandResponse> {
+        return await self.client.unary(path: "/chat.v1.ChatService/InviteMember", idempotencyLevel: .unknown, request: request, headers: headers)
     }
 
     @available(iOS 13, *)
@@ -132,6 +187,21 @@ public final class Chat_V1_ChatServiceClient: Chat_V1_ChatServiceClientInterface
     }
 
     @available(iOS 13, *)
+    public func `listInbox`(request: Chat_V1_ListInboxRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Chat_V1_ListInboxResponse> {
+        return await self.client.unary(path: "/chat.v1.ChatService/ListInbox", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `listConversationsByMember`(request: Chat_V1_ListConversationsByMemberRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Chat_V1_ListConversationsByMemberResponse> {
+        return await self.client.unary(path: "/chat.v1.ChatService/ListConversationsByMember", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `getFormerMemberHistory`(request: Chat_V1_GetFormerMemberHistoryRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Chat_V1_GetHistoryResponse> {
+        return await self.client.unary(path: "/chat.v1.ChatService/GetFormerMemberHistory", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
     public func `streamConversation`(headers: Connect.Headers = [:]) -> any Connect.ServerOnlyAsyncStreamInterface<Chat_V1_StreamConversationRequest, Chat_V1_StreamConversationResponse> {
         return self.client.serverOnlyStream(path: "/chat.v1.ChatService/StreamConversation", headers: headers)
     }
@@ -144,8 +214,12 @@ public final class Chat_V1_ChatServiceClient: Chat_V1_ChatServiceClientInterface
     public enum Metadata {
         public enum Methods {
             public static let createConversation = Connect.MethodSpec(name: "CreateConversation", service: "chat.v1.ChatService", type: .unary)
+            public static let openDirectConversation = Connect.MethodSpec(name: "OpenDirectConversation", service: "chat.v1.ChatService", type: .unary)
+            public static let respondToMessageRequest = Connect.MethodSpec(name: "RespondToMessageRequest", service: "chat.v1.ChatService", type: .unary)
             public static let toggleVisibility = Connect.MethodSpec(name: "ToggleVisibility", service: "chat.v1.ChatService", type: .unary)
             public static let joinAsMember = Connect.MethodSpec(name: "JoinAsMember", service: "chat.v1.ChatService", type: .unary)
+            public static let leaveConversation = Connect.MethodSpec(name: "LeaveConversation", service: "chat.v1.ChatService", type: .unary)
+            public static let inviteMember = Connect.MethodSpec(name: "InviteMember", service: "chat.v1.ChatService", type: .unary)
             public static let subscribe = Connect.MethodSpec(name: "Subscribe", service: "chat.v1.ChatService", type: .unary)
             public static let unsubscribe = Connect.MethodSpec(name: "Unsubscribe", service: "chat.v1.ChatService", type: .unary)
             public static let sendMessage = Connect.MethodSpec(name: "SendMessage", service: "chat.v1.ChatService", type: .unary)
@@ -155,6 +229,9 @@ public final class Chat_V1_ChatServiceClient: Chat_V1_ChatServiceClientInterface
             public static let getHistory = Connect.MethodSpec(name: "GetHistory", service: "chat.v1.ChatService", type: .unary)
             public static let listMembers = Connect.MethodSpec(name: "ListMembers", service: "chat.v1.ChatService", type: .unary)
             public static let listSubscriptions = Connect.MethodSpec(name: "ListSubscriptions", service: "chat.v1.ChatService", type: .unary)
+            public static let listInbox = Connect.MethodSpec(name: "ListInbox", service: "chat.v1.ChatService", type: .unary)
+            public static let listConversationsByMember = Connect.MethodSpec(name: "ListConversationsByMember", service: "chat.v1.ChatService", type: .unary)
+            public static let getFormerMemberHistory = Connect.MethodSpec(name: "GetFormerMemberHistory", service: "chat.v1.ChatService", type: .unary)
             public static let streamConversation = Connect.MethodSpec(name: "StreamConversation", service: "chat.v1.ChatService", type: .serverStream)
             public static let streamPublic = Connect.MethodSpec(name: "StreamPublic", service: "chat.v1.ChatService", type: .serverStream)
         }

@@ -84,6 +84,38 @@ private final class FakeAuthClient: Auth_V1_AuthServiceClientInterface, @uncheck
     ) async -> ResponseMessage<Auth_V1_StartVerificationResponse> {
         ResponseMessage(result: .success(Auth_V1_StartVerificationResponse()))
     }
+
+    func completeLogin(request: Auth_V1_CompleteLoginRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_LoginResponse> {
+        response(from: .failure(.init(code: .unimplemented, message: nil)))
+    }
+
+    func startFederatedSignIn(request: Auth_V1_StartFederatedSignInRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_StartFederatedSignInResponse> {
+        response(from: .failure(.init(code: .unimplemented, message: nil)))
+    }
+
+    func startDeviceAttestation(request: Auth_V1_StartDeviceAttestationRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_StartDeviceAttestationResponse> {
+        response(from: .failure(.init(code: .unimplemented, message: nil)))
+    }
+
+    func changeContact(request: Auth_V1_ChangeContactRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_ChangeContactResponse> {
+        response(from: .failure(.init(code: .unimplemented, message: nil)))
+    }
+
+    func startMfaEnrollment(request: Auth_V1_StartMfaEnrollmentRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_StartMfaEnrollmentResponse> {
+        response(from: .failure(.init(code: .unimplemented, message: nil)))
+    }
+
+    func confirmMfaEnrollment(request: Auth_V1_ConfirmMfaEnrollmentRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_BackupCodesResponse> {
+        response(from: .failure(.init(code: .unimplemented, message: nil)))
+    }
+
+    func disableMfa(request: Auth_V1_DisableMfaRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_DisableMfaResponse> {
+        response(from: .failure(.init(code: .unimplemented, message: nil)))
+    }
+
+    func regenerateBackupCodes(request: Auth_V1_RegenerateBackupCodesRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_BackupCodesResponse> {
+        response(from: .failure(.init(code: .unimplemented, message: nil)))
+    }
 }
 
 private func makeTokens(access: String, refresh: String, session: String = "sess-1", expiresIn: Int64 = 900) -> Auth_V1_TokenPair {

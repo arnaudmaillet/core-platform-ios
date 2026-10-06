@@ -278,6 +278,15 @@ public nonisolated struct Moderation_V1_AppealView: Sendable {
   /// Clears the value of `resolvedAt`. Subsequent reads from it will return its default value.
   public mutating func clearResolvedAt() {self._resolvedAt = nil}
 
+  /// The reviewer's reasons once resolved (UPHELD / OVERTURNED), told to the
+  /// appellant (DSA Art. 20(4)–(5)); empty before.
+  public var outcome: String = String()
+
+  /// Filed by a member who reported the content (DSA Art. 20(1)), not the
+  /// sanctioned account. Overturned, the case goes back to review; it never
+  /// reverses an enforcement.
+  public var byReporter: Bool = false
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -542,6 +551,38 @@ public nonisolated struct Moderation_V1_FileAppealResponse: Sendable {
   fileprivate var _appeal: Moderation_V1_AppealView? = nil
 }
 
+public nonisolated struct Moderation_V1_ListMyAppealsRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Default 20, capped at 50.
+  public var pageSize: Int32 = 0
+
+  /// Opaque cursor from a previous response; empty for the first page.
+  public var pageToken: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Moderation_V1_ListMyAppealsResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Newest first.
+  public var appeals: [Moderation_V1_AppealView] = []
+
+  /// Empty on the last page.
+  public var nextPageToken: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
 public nonisolated struct Moderation_V1_ResolveAppealRequest: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -593,54 +634,100 @@ public nonisolated struct Moderation_V1_ResolveAppealResponse: @unchecked Sendab
 }
 
 /// The DSA Article 17 machine-readable Statement of Reasons for a single decision.
-public nonisolated struct Moderation_V1_StatementOfReasons: Sendable {
+public nonisolated struct Moderation_V1_StatementOfReasons: @unchecked Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  public var decisionID: String = String()
+  public var decisionID: String {
+    get {_storage._decisionID}
+    set {_uniqueStorage()._decisionID = newValue}
+  }
 
   public var subject: Moderation_V1_SubjectRef {
-    get {_subject ?? Moderation_V1_SubjectRef()}
-    set {_subject = newValue}
+    get {_storage._subject ?? Moderation_V1_SubjectRef()}
+    set {_uniqueStorage()._subject = newValue}
   }
   /// Returns true if `subject` has been explicitly set.
-  public var hasSubject: Bool {self._subject != nil}
+  public var hasSubject: Bool {_storage._subject != nil}
   /// Clears the value of `subject`. Subsequent reads from it will return its default value.
-  public mutating func clearSubject() {self._subject = nil}
+  public mutating func clearSubject() {_uniqueStorage()._subject = nil}
 
-  public var category: Moderation_V1_PolicyCategory = .unspecified
+  public var category: Moderation_V1_PolicyCategory {
+    get {_storage._category}
+    set {_uniqueStorage()._category = newValue}
+  }
 
-  public var action: Moderation_V1_ActionType = .unspecified
+  public var action: Moderation_V1_ActionType {
+    get {_storage._action}
+    set {_uniqueStorage()._action = newValue}
+  }
 
-  public var policyVersion: String = String()
+  public var policyVersion: String {
+    get {_storage._policyVersion}
+    set {_uniqueStorage()._policyVersion = newValue}
+  }
 
   /// The factual basis for the decision.
-  public var facts: String = String()
+  public var facts: String {
+    get {_storage._facts}
+    set {_uniqueStorage()._facts = newValue}
+  }
 
   /// The policy/legal ground relied upon.
-  public var legalGround: String = String()
+  public var legalGround: String {
+    get {_storage._legalGround}
+    set {_uniqueStorage()._legalGround = newValue}
+  }
 
-  public var automated: Bool = false
+  public var automated: Bool {
+    get {_storage._automated}
+    set {_uniqueStorage()._automated = newValue}
+  }
 
   /// Whether the affected user was in scope of EU territorial obligations.
-  public var territorialEu: Bool = false
+  public var territorialEu: Bool {
+    get {_storage._territorialEu}
+    set {_uniqueStorage()._territorialEu = newValue}
+  }
 
   public var decidedAt: SwiftProtobuf.Google_Protobuf_Timestamp {
-    get {_decidedAt ?? SwiftProtobuf.Google_Protobuf_Timestamp()}
-    set {_decidedAt = newValue}
+    get {_storage._decidedAt ?? SwiftProtobuf.Google_Protobuf_Timestamp()}
+    set {_uniqueStorage()._decidedAt = newValue}
   }
   /// Returns true if `decidedAt` has been explicitly set.
-  public var hasDecidedAt: Bool {self._decidedAt != nil}
+  public var hasDecidedAt: Bool {_storage._decidedAt != nil}
   /// Clears the value of `decidedAt`. Subsequent reads from it will return its default value.
-  public mutating func clearDecidedAt() {self._decidedAt = nil}
+  public mutating func clearDecidedAt() {_uniqueStorage()._decidedAt = nil}
+
+  /// Until when the decision may be appealed (DSA Art. 20(1): six months at
+  /// least); unset when its category is not appealable. Past it, FileAppeal
+  /// answers MOD-5003.
+  public var appealableUntil: SwiftProtobuf.Google_Protobuf_Timestamp {
+    get {_storage._appealableUntil ?? SwiftProtobuf.Google_Protobuf_Timestamp()}
+    set {_uniqueStorage()._appealableUntil = newValue}
+  }
+  /// Returns true if `appealableUntil` has been explicitly set.
+  public var hasAppealableUntil: Bool {_storage._appealableUntil != nil}
+  /// Clears the value of `appealableUntil`. Subsequent reads from it will return its default value.
+  public mutating func clearAppealableUntil() {_uniqueStorage()._appealableUntil = nil}
+
+  /// On the client edge: the caller's appeal of this decision, if they filed
+  /// one (its status and, once resolved, its outcome).
+  public var appeal: Moderation_V1_AppealView {
+    get {_storage._appeal ?? Moderation_V1_AppealView()}
+    set {_uniqueStorage()._appeal = newValue}
+  }
+  /// Returns true if `appeal` has been explicitly set.
+  public var hasAppeal: Bool {_storage._appeal != nil}
+  /// Clears the value of `appeal`. Subsequent reads from it will return its default value.
+  public mutating func clearAppeal() {_uniqueStorage()._appeal = nil}
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
-  fileprivate var _subject: Moderation_V1_SubjectRef? = nil
-  fileprivate var _decidedAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
+  fileprivate var _storage = _StorageClass.defaultInstance
 }
 
 public nonisolated struct Moderation_V1_GetStatementOfReasonsRequest: Sendable {
@@ -784,6 +871,11 @@ public nonisolated struct Moderation_V1_ReportView: Sendable {
   public var hasReportedAt: Bool {self._reportedAt != nil}
   /// Clears the value of `reportedAt`. Subsequent reads from it will return its default value.
   public mutating func clearReportedAt() {self._reportedAt = nil}
+
+  /// Once the case is decided (actioned or dismissed): the decision, which a
+  /// member reporter may appeal with FileAppeal (DSA Art. 20(1)). Coarse on
+  /// purpose: the reporter still never learns which sanction applied.
+  public var decisionID: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -1165,7 +1257,7 @@ nonisolated extension Moderation_V1_EnforcementView: SwiftProtobuf.Message, Swif
 
 nonisolated extension Moderation_V1_AppealView: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".AppealView"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}appeal_id\0\u{3}decision_id\0\u{1}status\0\u{1}statement\0\u{3}filed_at\0\u{3}resolved_at\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}appeal_id\0\u{3}decision_id\0\u{1}status\0\u{1}statement\0\u{3}filed_at\0\u{3}resolved_at\0\u{1}outcome\0\u{3}by_reporter\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1179,6 +1271,8 @@ nonisolated extension Moderation_V1_AppealView: SwiftProtobuf.Message, SwiftProt
       case 4: try { try decoder.decodeSingularStringField(value: &self.statement) }()
       case 5: try { try decoder.decodeSingularMessageField(value: &self._filedAt) }()
       case 6: try { try decoder.decodeSingularMessageField(value: &self._resolvedAt) }()
+      case 7: try { try decoder.decodeSingularStringField(value: &self.outcome) }()
+      case 8: try { try decoder.decodeSingularBoolField(value: &self.byReporter) }()
       default: break
       }
     }
@@ -1207,6 +1301,12 @@ nonisolated extension Moderation_V1_AppealView: SwiftProtobuf.Message, SwiftProt
     try { if let v = self._resolvedAt {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
     } }()
+    if !self.outcome.isEmpty {
+      try visitor.visitSingularStringField(value: self.outcome, fieldNumber: 7)
+    }
+    if self.byReporter != false {
+      try visitor.visitSingularBoolField(value: self.byReporter, fieldNumber: 8)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -1217,6 +1317,8 @@ nonisolated extension Moderation_V1_AppealView: SwiftProtobuf.Message, SwiftProt
     if lhs.statement != rhs.statement {return false}
     if lhs._filedAt != rhs._filedAt {return false}
     if lhs._resolvedAt != rhs._resolvedAt {return false}
+    if lhs.outcome != rhs.outcome {return false}
+    if lhs.byReporter != rhs.byReporter {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -1749,6 +1851,76 @@ nonisolated extension Moderation_V1_FileAppealResponse: SwiftProtobuf.Message, S
   }
 }
 
+nonisolated extension Moderation_V1_ListMyAppealsRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ListMyAppealsRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}page_size\0\u{3}page_token\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt32Field(value: &self.pageSize) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.pageToken) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.pageSize != 0 {
+      try visitor.visitSingularInt32Field(value: self.pageSize, fieldNumber: 1)
+    }
+    if !self.pageToken.isEmpty {
+      try visitor.visitSingularStringField(value: self.pageToken, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Moderation_V1_ListMyAppealsRequest, rhs: Moderation_V1_ListMyAppealsRequest) -> Bool {
+    if lhs.pageSize != rhs.pageSize {return false}
+    if lhs.pageToken != rhs.pageToken {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Moderation_V1_ListMyAppealsResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ListMyAppealsResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}appeals\0\u{3}next_page_token\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.appeals) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.nextPageToken) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.appeals.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.appeals, fieldNumber: 1)
+    }
+    if !self.nextPageToken.isEmpty {
+      try visitor.visitSingularStringField(value: self.nextPageToken, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Moderation_V1_ListMyAppealsResponse, rhs: Moderation_V1_ListMyAppealsResponse) -> Bool {
+    if lhs.appeals != rhs.appeals {return false}
+    if lhs.nextPageToken != rhs.nextPageToken {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
 nonisolated extension Moderation_V1_ResolveAppealRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ResolveAppealRequest"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}appeal_id\0\u{1}overturn\0\u{1}rationale\0\u{3}reviewer_id\0")
@@ -1873,78 +2045,146 @@ nonisolated extension Moderation_V1_ResolveAppealResponse: SwiftProtobuf.Message
 
 nonisolated extension Moderation_V1_StatementOfReasons: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".StatementOfReasons"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}decision_id\0\u{1}subject\0\u{1}category\0\u{1}action\0\u{3}policy_version\0\u{1}facts\0\u{3}legal_ground\0\u{1}automated\0\u{3}territorial_eu\0\u{3}decided_at\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}decision_id\0\u{1}subject\0\u{1}category\0\u{1}action\0\u{3}policy_version\0\u{1}facts\0\u{3}legal_ground\0\u{1}automated\0\u{3}territorial_eu\0\u{3}decided_at\0\u{3}appealable_until\0\u{1}appeal\0")
+
+  fileprivate class _StorageClass {
+    var _decisionID: String = String()
+    var _subject: Moderation_V1_SubjectRef? = nil
+    var _category: Moderation_V1_PolicyCategory = .unspecified
+    var _action: Moderation_V1_ActionType = .unspecified
+    var _policyVersion: String = String()
+    var _facts: String = String()
+    var _legalGround: String = String()
+    var _automated: Bool = false
+    var _territorialEu: Bool = false
+    var _decidedAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
+    var _appealableUntil: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
+    var _appeal: Moderation_V1_AppealView? = nil
+
+      // This property is used as the initial default value for new instances of the type.
+      // The type itself is protecting the reference to its storage via CoW semantics.
+      // This will force a copy to be made of this reference when the first mutation occurs;
+      // hence, it is safe to mark this as `nonisolated(unsafe)`.
+      static nonisolated(unsafe) let defaultInstance = _StorageClass()
+
+    private init() {}
+
+    init(copying source: _StorageClass) {
+      _decisionID = source._decisionID
+      _subject = source._subject
+      _category = source._category
+      _action = source._action
+      _policyVersion = source._policyVersion
+      _facts = source._facts
+      _legalGround = source._legalGround
+      _automated = source._automated
+      _territorialEu = source._territorialEu
+      _decidedAt = source._decidedAt
+      _appealableUntil = source._appealableUntil
+      _appeal = source._appeal
+    }
+  }
+
+  fileprivate mutating func _uniqueStorage() -> _StorageClass {
+    if !isKnownUniquelyReferenced(&_storage) {
+      _storage = _StorageClass(copying: _storage)
+    }
+    return _storage
+  }
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    while let fieldNumber = try decoder.nextFieldNumber() {
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every case branch when no optimizations are
-      // enabled. https://github.com/apple/swift-protobuf/issues/1034
-      switch fieldNumber {
-      case 1: try { try decoder.decodeSingularStringField(value: &self.decisionID) }()
-      case 2: try { try decoder.decodeSingularMessageField(value: &self._subject) }()
-      case 3: try { try decoder.decodeSingularEnumField(value: &self.category) }()
-      case 4: try { try decoder.decodeSingularEnumField(value: &self.action) }()
-      case 5: try { try decoder.decodeSingularStringField(value: &self.policyVersion) }()
-      case 6: try { try decoder.decodeSingularStringField(value: &self.facts) }()
-      case 7: try { try decoder.decodeSingularStringField(value: &self.legalGround) }()
-      case 8: try { try decoder.decodeSingularBoolField(value: &self.automated) }()
-      case 9: try { try decoder.decodeSingularBoolField(value: &self.territorialEu) }()
-      case 10: try { try decoder.decodeSingularMessageField(value: &self._decidedAt) }()
-      default: break
+    _ = _uniqueStorage()
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      while let fieldNumber = try decoder.nextFieldNumber() {
+        // The use of inline closures is to circumvent an issue where the compiler
+        // allocates stack space for every case branch when no optimizations are
+        // enabled. https://github.com/apple/swift-protobuf/issues/1034
+        switch fieldNumber {
+        case 1: try { try decoder.decodeSingularStringField(value: &_storage._decisionID) }()
+        case 2: try { try decoder.decodeSingularMessageField(value: &_storage._subject) }()
+        case 3: try { try decoder.decodeSingularEnumField(value: &_storage._category) }()
+        case 4: try { try decoder.decodeSingularEnumField(value: &_storage._action) }()
+        case 5: try { try decoder.decodeSingularStringField(value: &_storage._policyVersion) }()
+        case 6: try { try decoder.decodeSingularStringField(value: &_storage._facts) }()
+        case 7: try { try decoder.decodeSingularStringField(value: &_storage._legalGround) }()
+        case 8: try { try decoder.decodeSingularBoolField(value: &_storage._automated) }()
+        case 9: try { try decoder.decodeSingularBoolField(value: &_storage._territorialEu) }()
+        case 10: try { try decoder.decodeSingularMessageField(value: &_storage._decidedAt) }()
+        case 11: try { try decoder.decodeSingularMessageField(value: &_storage._appealableUntil) }()
+        case 12: try { try decoder.decodeSingularMessageField(value: &_storage._appeal) }()
+        default: break
+        }
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    // The use of inline closures is to circumvent an issue where the compiler
-    // allocates stack space for every if/case branch local when no optimizations
-    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
-    // https://github.com/apple/swift-protobuf/issues/1182
-    if !self.decisionID.isEmpty {
-      try visitor.visitSingularStringField(value: self.decisionID, fieldNumber: 1)
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every if/case branch local when no optimizations
+      // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+      // https://github.com/apple/swift-protobuf/issues/1182
+      if !_storage._decisionID.isEmpty {
+        try visitor.visitSingularStringField(value: _storage._decisionID, fieldNumber: 1)
+      }
+      try { if let v = _storage._subject {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+      } }()
+      if _storage._category != .unspecified {
+        try visitor.visitSingularEnumField(value: _storage._category, fieldNumber: 3)
+      }
+      if _storage._action != .unspecified {
+        try visitor.visitSingularEnumField(value: _storage._action, fieldNumber: 4)
+      }
+      if !_storage._policyVersion.isEmpty {
+        try visitor.visitSingularStringField(value: _storage._policyVersion, fieldNumber: 5)
+      }
+      if !_storage._facts.isEmpty {
+        try visitor.visitSingularStringField(value: _storage._facts, fieldNumber: 6)
+      }
+      if !_storage._legalGround.isEmpty {
+        try visitor.visitSingularStringField(value: _storage._legalGround, fieldNumber: 7)
+      }
+      if _storage._automated != false {
+        try visitor.visitSingularBoolField(value: _storage._automated, fieldNumber: 8)
+      }
+      if _storage._territorialEu != false {
+        try visitor.visitSingularBoolField(value: _storage._territorialEu, fieldNumber: 9)
+      }
+      try { if let v = _storage._decidedAt {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 10)
+      } }()
+      try { if let v = _storage._appealableUntil {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 11)
+      } }()
+      try { if let v = _storage._appeal {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 12)
+      } }()
     }
-    try { if let v = self._subject {
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
-    } }()
-    if self.category != .unspecified {
-      try visitor.visitSingularEnumField(value: self.category, fieldNumber: 3)
-    }
-    if self.action != .unspecified {
-      try visitor.visitSingularEnumField(value: self.action, fieldNumber: 4)
-    }
-    if !self.policyVersion.isEmpty {
-      try visitor.visitSingularStringField(value: self.policyVersion, fieldNumber: 5)
-    }
-    if !self.facts.isEmpty {
-      try visitor.visitSingularStringField(value: self.facts, fieldNumber: 6)
-    }
-    if !self.legalGround.isEmpty {
-      try visitor.visitSingularStringField(value: self.legalGround, fieldNumber: 7)
-    }
-    if self.automated != false {
-      try visitor.visitSingularBoolField(value: self.automated, fieldNumber: 8)
-    }
-    if self.territorialEu != false {
-      try visitor.visitSingularBoolField(value: self.territorialEu, fieldNumber: 9)
-    }
-    try { if let v = self._decidedAt {
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 10)
-    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Moderation_V1_StatementOfReasons, rhs: Moderation_V1_StatementOfReasons) -> Bool {
-    if lhs.decisionID != rhs.decisionID {return false}
-    if lhs._subject != rhs._subject {return false}
-    if lhs.category != rhs.category {return false}
-    if lhs.action != rhs.action {return false}
-    if lhs.policyVersion != rhs.policyVersion {return false}
-    if lhs.facts != rhs.facts {return false}
-    if lhs.legalGround != rhs.legalGround {return false}
-    if lhs.automated != rhs.automated {return false}
-    if lhs.territorialEu != rhs.territorialEu {return false}
-    if lhs._decidedAt != rhs._decidedAt {return false}
+    if lhs._storage !== rhs._storage {
+      let storagesAreEqual: Bool = withExtendedLifetime((lhs._storage, rhs._storage)) { (_args: (_StorageClass, _StorageClass)) in
+        let _storage = _args.0
+        let rhs_storage = _args.1
+        if _storage._decisionID != rhs_storage._decisionID {return false}
+        if _storage._subject != rhs_storage._subject {return false}
+        if _storage._category != rhs_storage._category {return false}
+        if _storage._action != rhs_storage._action {return false}
+        if _storage._policyVersion != rhs_storage._policyVersion {return false}
+        if _storage._facts != rhs_storage._facts {return false}
+        if _storage._legalGround != rhs_storage._legalGround {return false}
+        if _storage._automated != rhs_storage._automated {return false}
+        if _storage._territorialEu != rhs_storage._territorialEu {return false}
+        if _storage._decidedAt != rhs_storage._decidedAt {return false}
+        if _storage._appealableUntil != rhs_storage._appealableUntil {return false}
+        if _storage._appeal != rhs_storage._appeal {return false}
+        return true
+      }
+      if !storagesAreEqual {return false}
+    }
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -2196,7 +2436,7 @@ nonisolated extension Moderation_V1_ListMyReportsRequest: SwiftProtobuf.Message,
 
 nonisolated extension Moderation_V1_ReportView: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ReportView"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}report_id\0\u{3}entity_type\0\u{3}entity_id\0\u{1}category\0\u{1}reason\0\u{1}status\0\u{3}reported_at\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}report_id\0\u{3}entity_type\0\u{3}entity_id\0\u{1}category\0\u{1}reason\0\u{1}status\0\u{3}reported_at\0\u{3}decision_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -2211,6 +2451,7 @@ nonisolated extension Moderation_V1_ReportView: SwiftProtobuf.Message, SwiftProt
       case 5: try { try decoder.decodeSingularStringField(value: &self.reason) }()
       case 6: try { try decoder.decodeSingularEnumField(value: &self.status) }()
       case 7: try { try decoder.decodeSingularMessageField(value: &self._reportedAt) }()
+      case 8: try { try decoder.decodeSingularStringField(value: &self.decisionID) }()
       default: break
       }
     }
@@ -2242,6 +2483,9 @@ nonisolated extension Moderation_V1_ReportView: SwiftProtobuf.Message, SwiftProt
     try { if let v = self._reportedAt {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
     } }()
+    if !self.decisionID.isEmpty {
+      try visitor.visitSingularStringField(value: self.decisionID, fieldNumber: 8)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -2253,6 +2497,7 @@ nonisolated extension Moderation_V1_ReportView: SwiftProtobuf.Message, SwiftProt
     if lhs.reason != rhs.reason {return false}
     if lhs.status != rhs.status {return false}
     if lhs._reportedAt != rhs._reportedAt {return false}
+    if lhs.decisionID != rhs.decisionID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

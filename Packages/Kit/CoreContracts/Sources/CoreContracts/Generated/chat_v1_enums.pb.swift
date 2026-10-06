@@ -29,6 +29,10 @@ public nonisolated enum Chat_V1_ConversationKind: SwiftProtobuf.Enum, Swift.Case
 
   /// asymmetric 1->N broadcast, no presence
   case channel // = 1
+
+  /// One-to-one messages between two profiles (#656), unique per pair, never
+  /// public. Opened with OpenDirectConversation, never CreateConversation.
+  case direct // = 2
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -39,6 +43,7 @@ public nonisolated enum Chat_V1_ConversationKind: SwiftProtobuf.Enum, Swift.Case
     switch rawValue {
     case 0: self = .group
     case 1: self = .channel
+    case 2: self = .direct
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -47,6 +52,7 @@ public nonisolated enum Chat_V1_ConversationKind: SwiftProtobuf.Enum, Swift.Case
     switch self {
     case .group: return 0
     case .channel: return 1
+    case .direct: return 2
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -55,6 +61,7 @@ public nonisolated enum Chat_V1_ConversationKind: SwiftProtobuf.Enum, Swift.Case
   public static let allCases: [Chat_V1_ConversationKind] = [
     .group,
     .channel,
+    .direct,
   ]
 
 }
@@ -190,10 +197,49 @@ public nonisolated enum Chat_V1_ContentType: SwiftProtobuf.Enum, Swift.CaseItera
 
 }
 
+/// A folder of a member's inbox (#656).
+public nonisolated enum Chat_V1_InboxFolder: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+
+  /// accepted direct conversations, groups, channels one writes in
+  case inbox // = 0
+
+  /// message requests to the member, unanswered
+  case requests // = 1
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .inbox
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .inbox
+    case 1: self = .requests
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .inbox: return 0
+    case .requests: return 1
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [Chat_V1_InboxFolder] = [
+    .inbox,
+    .requests,
+  ]
+
+}
+
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 nonisolated extension Chat_V1_ConversationKind: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0CONVERSATION_KIND_GROUP\0\u{1}CONVERSATION_KIND_CHANNEL\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0CONVERSATION_KIND_GROUP\0\u{1}CONVERSATION_KIND_CHANNEL\0\u{1}CONVERSATION_KIND_DIRECT\0")
 }
 
 nonisolated extension Chat_V1_Visibility: SwiftProtobuf._ProtoNameProviding {
@@ -206,4 +252,8 @@ nonisolated extension Chat_V1_Role: SwiftProtobuf._ProtoNameProviding {
 
 nonisolated extension Chat_V1_ContentType: SwiftProtobuf._ProtoNameProviding {
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0CONTENT_TYPE_TEXT\0\u{1}CONTENT_TYPE_MEDIA\0\u{1}CONTENT_TYPE_SYSTEM\0")
+}
+
+nonisolated extension Chat_V1_InboxFolder: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0INBOX_FOLDER_INBOX\0\u{1}INBOX_FOLDER_REQUESTS\0")
 }
