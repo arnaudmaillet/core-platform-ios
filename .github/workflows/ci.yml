@@ -6,9 +6,21 @@ on:
   push:
     branches: [develop]
 
+# A pull request's new push cancels its own stale run. A push to develop never
+# cancels the one in progress: it waits, and a newer push replaces it while it
+# waits, so one full run is always going and the latest develop is always the
+# next one tested.
+#
+# ⚠️ WHY develop MUST NOT CANCEL ITSELF. A pull request runs only the lanes
+# `select_packages.py` picks from its diff, so the run on develop is the ONLY
+# full-suite run. With cancel-in-progress it was the run every merge killed:
+# on 2026-10-05, nine of the twelve develop runs between 09:26 and 20:08 UTC
+# were CANCELLED, and one that did finish (70cd349) caught a break no pull
+# request run could see — #530, a Feed-only change, failing DesignSystem's
+# repo-wide font guard.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Compile-time savings that change nothing a build can catch:
 #
@@ -42,8 +54,9 @@ jobs:
       # a few seconds older and twice the size (every lane), took the macOS
       # slots first: the pull request someone is waiting on queued behind a
       # backstop nobody is. Three minutes of an Ubuntu runner (free here) puts
-      # the backstop behind it instead, and a merge landing in those three
-      # minutes cancels it before it has cost a single macOS minute.
+      # the backstop behind it instead. A merge landing meanwhile no longer
+      # cancels it (see `concurrency`): its run waits, replacing any older
+      # waiting one, and goes once this backstop has finished.
       - name: Let pull request runs go first
         if: ${{ github.event_name == 'push' }}
         run: sleep 180
