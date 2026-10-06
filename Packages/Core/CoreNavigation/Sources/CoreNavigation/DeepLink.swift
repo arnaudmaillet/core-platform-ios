@@ -5,6 +5,7 @@ import Foundation
 ///
 ///     https://wynn.cn/@kenji.dev     →  .profileHandle("kenji.dev")
 ///     https://wynn.cn/tag/travel     →  .hashtag("travel")
+///     https://wynn.cn/s/Ab3_x-…      →  .profileShareToken("Ab3_x-…")
 ///     wynn://@kenji.dev, wynn:/tag/travel   (the same paths)
 ///
 /// The web form is what `ProfileShareLink` and a place's share URL already
@@ -24,6 +25,9 @@ public extension AppRoute {
         case 2 where parts[0].lowercased() == "tag":
             guard let tag = Self.tag(parts[1]) else { return nil }
             self = .hashtag(tag)
+        case 2 where parts[0].lowercased() == "s":
+            guard let token = Self.shareToken(parts[1]) else { return nil }
+            self = .profileShareToken(token)
         default:
             return nil
         }
@@ -55,6 +59,14 @@ public extension AppRoute {
         let allowed = Set("abcdefghijklmnopqrstuvwxyz0123456789._")
         guard (2...30).contains(handle.count), handle.allSatisfy(allowed.contains) else { return nil }
         return handle
+    }
+
+    /// A share token as `profile` issues it: URL-safe base64, kept as is
+    /// (case matters). The server checks the exact shape (backend #661).
+    private static func shareToken(_ raw: String) -> String? {
+        let allowed = Set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_")
+        guard (8...64).contains(raw.count), raw.allSatisfy(allowed.contains) else { return nil }
+        return raw
     }
 
     /// A tag as search stores it: lowercased letters, digits and `_`, with a

@@ -184,6 +184,10 @@ public final class ProfileViewModel {
     /// Last-known profiles, shared app-wide. Nil in compositions without one
     /// (tests), which simply never seed.
     private let cache: ProfileCache?
+    private let shareLinks: (any ShareLinkManaging)?
+    /// The own profile's share token (#412), once fetched. Until then, and
+    /// on someone else's profile, the link is the `/@handle` one.
+    private var shareToken: String?
 
     private var phase: Phase = .loading {
         didSet { onPhaseChange?(phase) }
@@ -302,9 +306,11 @@ public final class ProfileViewModel {
         source: Source = .currentUser,
         router: (any Router)? = nil,
         cache: ProfileCache? = nil,
-        followEvents: FollowGraphEvents? = nil
+        followEvents: FollowGraphEvents? = nil,
+        shareLinks: (any ShareLinkManaging)? = nil
     ) {
         self.repository = repository
+        self.shareLinks = shareLinks
         self.mapPinning = mapPinning
         self.reporting = reporting
         self.gallery = gallery
@@ -365,14 +371,30 @@ public final class ProfileViewModel {
                 displayName: $0.displayName,
                 handle: "@" + $0.handle,
                 avatarURL: $0.avatarURL,
-                url: ProfileShareLink.url(handle: $0.handle)
+                url: shareURL(handle: $0.handle)
             )
         }
     }
 
     /// The profile's shareable link, once the handle is known.
     public var shareLink: URL? {
-        profile.map { ProfileShareLink.url(handle: $0.handle) }
+        profile.map { shareURL(handle: $0.handle) }
+    }
+
+    /// The own profile shares its token link (#412), which the owner can turn
+    /// off or reset in Activity and Discovery; any other profile, or the own
+    /// one before the token arrives, shares its `/@handle` link.
+    private func shareURL(handle: String) -> URL {
+        if isOwnProfile, let shareToken { return ProfileShareLink.url(shareToken: shareToken) }
+        return ProfileShareLink.url(handle: handle)
+    }
+
+    /// Fetches the own profile's share token. Called each time the profile
+    /// appears, so a reset in Settings is picked up on the way back. A
+    /// failure keeps the last token (or the handle link).
+    public func refreshShareToken() async {
+        guard isOwnProfile, let shareLinks else { return }
+        if let token = try? await shareLinks.shareToken() { shareToken = token }
     }
 
     /// The loaded profile's `@handle`, for naming it in confirmations.

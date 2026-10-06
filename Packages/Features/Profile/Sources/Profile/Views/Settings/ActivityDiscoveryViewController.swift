@@ -2,9 +2,10 @@ import DesignSystem
 import UIKit
 
 /// Settings → Privacy → Activity and Discovery (#406, #412): activity status
-/// and read receipts (chat withholds them, backend #727), and whether search
-/// finds this profile (backend #726). Switches save at once and snap back if
-/// the server refuses; the other ways to be found wait for a server surface.
+/// and read receipts (chat withholds them, backend #727), the ways people find
+/// this profile (backend #726), and its QR code and shared links, which the
+/// owner can turn off or reset (backend #661). Switches save at once and snap
+/// back if the server refuses.
 final class ActivityDiscoveryViewController: UIViewController {
     enum Phase: Equatable {
         case loading
@@ -13,28 +14,33 @@ final class ActivityDiscoveryViewController: UIViewController {
     }
 
     enum Section: Hashable {
-        case activity, discovery, comingSoon
+        case activity, discovery, links
     }
 
     private enum Item: Hashable {
         case toggle(ActivityDiscoverySettings.Switch)
-        case planned(String)
+        case resetLink
         case loading
         case failed
     }
 
-    static let planned = ["Find me by phone number", "Find me by email", "Find me by QR code and shared links", "Suggest me to others"]
+    static let discoverySwitches: [ActivityDiscoverySettings.Switch] = [
+        .findableInSearch, .findableByPhone, .findableByEmail, .inSuggestions,
+    ]
 
     private let manager: any ActivityDiscoveryManaging
+    private let shareLinks: (any ShareLinkManaging)?
     private var phase: Phase = .loading {
         didSet { applySnapshot() }
     }
     private var saving: Set<ActivityDiscoverySettings.Switch> = []
+    private var resetting = false
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
 
-    init(manager: any ActivityDiscoveryManaging) {
+    init(manager: any ActivityDiscoveryManaging, shareLinks: (any ShareLinkManaging)? = nil) {
         self.manager = manager
+        self.shareLinks = shareLinks
         super.init(nibName: nil, bundle: nil)
         title = "Activity and Discovery"
         hidesBottomBarWhenPushed = true
@@ -81,14 +87,24 @@ final class ActivityDiscoveryViewController: UIViewController {
         case .activityStatus: "Activity Status"
         case .readReceipts: "Read Receipts"
         case .findableInSearch: "Show Up in Search"
+        case .findableByPhone: "Find Me by Phone Number"
+        case .findableByEmail: "Find Me by Email"
+        case .reachableByLink: "QR Code and Shared Links"
+        case .inSuggestions: "Suggest My Account to Others"
         }
     }
+
+    static let resetTitle = "Reset QR Code and Link"
 
     static func symbol(_ key: ActivityDiscoverySettings.Switch) -> String {
         switch key {
         case .activityStatus: "circle.fill"
         case .readReceipts: "checkmark.message"
         case .findableInSearch: "magnifyingglass"
+        case .findableByPhone: "phone"
+        case .findableByEmail: "envelope"
+        case .reachableByLink: "qrcode"
+        case .inSuggestions: "person.2"
         }
     }
 
@@ -96,7 +112,7 @@ final class ActivityDiscoveryViewController: UIViewController {
         switch section {
         case .activity: "In Messages"
         case .discovery: "Finding You"
-        case .comingSoon: "Coming Soon"
+        case .links: "QR Code and Links"
         }
     }
 
@@ -105,9 +121,9 @@ final class ActivityDiscoveryViewController: UIViewController {
         case .activity:
             "When Activity Status is off, people in your conversations don't see when you're active. When Read Receipts is off, they don't see when you've read their messages. Applies to this profile."
         case .discovery:
-            "When this is off, your profile doesn't appear when someone searches your handle or name. People can still reach it through your posts and your followers."
-        case .comingSoon:
-            "These need a server update and aren't available yet."
+            "Turn these off to keep your profile out of search, out of contact matches for people who have your phone number or email, and out of suggestions. People can still reach it through your posts and your followers."
+        case .links:
+            "When this is off, your QR code and the links you've shared don't open your profile. Resetting gives you a new code and link; the old ones stop working right away."
         }
     }
 
@@ -132,9 +148,14 @@ final class ActivityDiscoveryViewController: UIViewController {
                     self?.set(key, to: toggle.isOn)
                 }, for: .valueChanged)
                 cell.accessories = [.customView(configuration: .init(customView: toggle, placement: .trailing(displayed: .always)))]
-            case .planned(let title):
-                content.text = title
-                content.textProperties.color = .secondaryLabel
+            case .resetLink:
+                content.text = Self.resetTitle
+                content.textProperties.color = resetting ? .secondaryLabel : .systemRed
+                if resetting {
+                    let spinner = UIActivityIndicatorView(style: .medium)
+                    spinner.startAnimating()
+                    cell.accessories = [.customView(configuration: .init(customView: spinner, placement: .trailing(displayed: .always)))]
+                }
             case .loading:
                 content.text = "Loading…"
                 content.textProperties.color = .secondaryLabel
@@ -179,11 +200,11 @@ final class ActivityDiscoveryViewController: UIViewController {
             snapshot.appendSections([.activity])
             snapshot.appendItems([.failed], toSection: .activity)
         case .loaded:
-            snapshot.appendSections([.activity, .discovery, .comingSoon])
+            snapshot.appendSections([.activity, .discovery, .links])
             snapshot.appendItems([.toggle(.activityStatus), .toggle(.readReceipts)], toSection: .activity)
-            snapshot.appendItems([.toggle(.findableInSearch)], toSection: .discovery)
-            snapshot.appendItems(Self.planned.map(Item.planned), toSection: .comingSoon)
-            snapshot.reconfigureItems(ActivityDiscoverySettings.Switch.allCases.map(Item.toggle))
+            snapshot.appendItems(Self.discoverySwitches.map(Item.toggle), toSection: .discovery)
+            snapshot.appendItems([.toggle(.reachableByLink)] + (shareLinks == nil ? [] : [.resetLink]), toSection: .links)
+            snapshot.reconfigureItems(ActivityDiscoverySettings.Switch.allCases.map(Item.toggle) + (shareLinks == nil ? [] : [.resetLink]))
         }
         dataSource.apply(snapshot, animatingDifferences: false)
     }
@@ -210,15 +231,58 @@ final class ActivityDiscoveryViewController: UIViewController {
             }
         }
     }
+
+    /// Asks first: the codes people already scanned or saved stop working.
+    private func confirmReset() {
+        guard shareLinks != nil, !resetting else { return }
+        let sheet = UIAlertController(
+            title: "Reset your QR code and link?",
+            message: "Your current QR code and the links you've shared will stop opening your profile. You'll get a new code and link.",
+            preferredStyle: .alert
+        )
+        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        sheet.addAction(UIAlertAction(title: "Reset", style: .destructive) { [weak self] _ in self?.reset() })
+        present(sheet, animated: true)
+    }
+
+    private func reset() {
+        guard let shareLinks else { return }
+        resetting = true
+        applySnapshot()
+        Task { [weak self] in
+            do {
+                _ = try await shareLinks.rotateShareToken()
+                guard let self else { return }
+                resetting = false
+                applySnapshot()
+                ToastView.present("New QR code and link ready", symbol: "qrcode", in: view)
+            } catch {
+                guard let self else { return }
+                resetting = false
+                applySnapshot()
+                let alert = UIAlertController(title: nil, message: "Couldn't reset your QR code and link. Try again.", preferredStyle: .alert)
+                alert.addAction(UIAlertAction(title: "OK", style: .default))
+                present(alert, animated: true)
+            }
+        }
+    }
 }
 
 extension ActivityDiscoveryViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
-        dataSource.itemIdentifier(for: indexPath) == .failed
+        switch dataSource.itemIdentifier(for: indexPath) {
+        case .failed: true
+        case .resetLink: !resetting
+        default: false
+        }
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         collectionView.deselectItem(at: indexPath, animated: true)
-        if dataSource.itemIdentifier(for: indexPath) == .failed { load() }
+        switch dataSource.itemIdentifier(for: indexPath) {
+        case .failed: load()
+        case .resetLink: confirmReset()
+        default: break
+        }
     }
 }

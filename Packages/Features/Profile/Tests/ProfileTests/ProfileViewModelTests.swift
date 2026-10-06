@@ -385,6 +385,42 @@ struct ProfileViewModelTests {
         #expect(viewModel.handle == "@ada")
     }
 
+    /// The own profile shares its token link (#412) once fetched, and picks
+    /// up a reset on the next refresh; someone else's keeps `/@handle`.
+    @Test func theOwnProfileSharesItsTokenLink() async {
+        let links = StubShareLinks(token: "Ab3_x-Yz09Qw8RtUvWxYzA")
+        let own = ProfileViewModel(repository: StubProfileProvider(.success(sampleProfile())), shareLinks: links)
+        own.viewDidLoad()
+        await settle()
+        #expect(own.shareLink?.absoluteString == "https://wynn.cn/@ada", "before the token arrives")
+
+        await own.refreshShareToken()
+        #expect(own.shareLink?.absoluteString == "https://wynn.cn/s/Ab3_x-Yz09Qw8RtUvWxYzA")
+        #expect(own.shareCard?.url == own.shareLink, "the QR card carries the same link")
+
+        await links.set("NewTokenAfterReset0123")
+        await own.refreshShareToken()
+        #expect(own.shareLink?.absoluteString == "https://wynn.cn/s/NewTokenAfterReset0123")
+
+        let other = ProfileViewModel(
+            repository: StubProfileProvider(.success(sampleProfile())),
+            source: .profile(ProfileID("prof-9")),
+            shareLinks: links
+        )
+        other.viewDidLoad()
+        await settle()
+        await other.refreshShareToken()
+        #expect(other.shareLink?.absoluteString == "https://wynn.cn/@ada")
+    }
+
+    private actor StubShareLinks: ShareLinkManaging {
+        private var token: String
+        init(token: String) { self.token = token }
+        func set(_ token: String) { self.token = token }
+        func shareToken() async throws -> String { token }
+        func rotateShareToken() async throws -> String { token }
+    }
+
     @Test func blockingReportsAndAsksTheScreenToLeave() async {
         let provider = StubProfileProvider(.success(sampleProfile()))
         let viewModel = ProfileViewModel(repository: provider)

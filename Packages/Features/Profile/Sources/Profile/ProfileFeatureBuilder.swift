@@ -154,7 +154,8 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                 source: .currentUser,
                 router: router,
                 cache: cache,
-                followEvents: followEvents
+                followEvents: followEvents,
+                shareLinks: repository as? any ShareLinkManaging
             ),
             imagePipeline: imagePipeline,
             videoPlayback: videoPlayback,
@@ -334,7 +335,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                             },
                                             makeDataTransparency: { DataTransparencyViewController() },
                                             makeActivityDiscovery: (repository as? any ActivityDiscoveryManaging).map { manager in
-                                                { ActivityDiscoveryViewController(manager: manager) }
+                                                { ActivityDiscoveryViewController(manager: manager, shareLinks: repository as? any ShareLinkManaging) }
                                             },
                                             makeLocationSharing: (repository as? any LocationSharingManaging).map { manager in
                                                 { LocationSharingViewController(manager: manager) }

@@ -64,6 +64,58 @@ struct ActivityDiscoveryTests {
             == ActivityDiscoverySettings(activityStatus: false, readReceipts: true, findableInSearch: true))
     }
 
+    /// The four sources added in #412 save one at a time too, each to its own
+    /// field of `SetDiscoverySettings`.
+    @Test func everySourceSavesOnItsOwn() async throws {
+        let fixture = makeFixture()
+        for key in [ActivityDiscoverySettings.Switch.findableByPhone, .findableByEmail, .reachableByLink, .inSuggestions] {
+            try await fixture.repository.setActivityDiscovery(key, to: false)
+            var expected = ActivityDiscoverySettings()
+            expected[key] = false
+            #expect(try await fixture.repository.activityDiscoverySettings() == expected)
+            try await fixture.repository.setActivityDiscovery(key, to: true)
+        }
+        #expect(try await fixture.repository.activityDiscoverySettings() == ActivityDiscoverySettings())
+    }
+
+    /// The profile's token is issued once and stays; a reset gives a new one
+    /// and the old link stops opening the profile at once (backend #661).
+    @Test func resettingTheLinkRetiresTheOldOne() async throws {
+        let fixture = makeFixture()
+        let first = try await fixture.repository.shareToken()
+        #expect(first.count == 22)
+        #expect(try await fixture.repository.shareToken() == first, "issued once")
+        #expect(try await resolve(first, in: fixture) == MockPostStore.viewer.profileID)
+
+        let next = try await fixture.repository.rotateShareToken()
+        #expect(next != first)
+        #expect(try await fixture.repository.shareToken() == next)
+        #expect(try await resolve(first, in: fixture) == nil, "the old link no longer works")
+        #expect(try await resolve(next, in: fixture) == MockPostStore.viewer.profileID)
+    }
+
+    /// With "QR Code and Shared Links" off, the current token opens nothing;
+    /// on again, it works (the token is kept).
+    @Test func switchingLinksOffClosesThem() async throws {
+        let fixture = makeFixture()
+        let token = try await fixture.repository.shareToken()
+        try await fixture.repository.setActivityDiscovery(.reachableByLink, to: false)
+        #expect(try await resolve(token, in: fixture) == nil)
+        try await fixture.repository.setActivityDiscovery(.reachableByLink, to: true)
+        #expect(try await resolve(token, in: fixture) == MockPostStore.viewer.profileID)
+        #expect(try await resolve(MockSocialServices.seededShareToken, in: fixture) == "prof-1")
+    }
+
+    /// The profile a token opens, or nil on NOT_FOUND.
+    private func resolve(_ token: String, in fixture: Fixture) async throws -> String? {
+        var request = Profile_V1_ResolveShareTokenRequest()
+        request.token = token
+        let response = await fixture.profileClient.resolveShareToken(request: request, headers: [:])
+        if let view = response.message { return view.profileID }
+        #expect(response.error?.code == .notFound)
+        return nil
+    }
+
     /// A profile that turns off "Show Up in Search" leaves search and its
     /// suggestions, and comes back when it turns it on again.
     @Test func searchLeavesOutAProfileThatAsks() async throws {
@@ -95,6 +147,9 @@ struct ActivityDiscoveryTests {
     @Test func theScreenSaysWhatEachSwitchDoes() {
         #expect(ActivityDiscoveryViewController.title(.findableInSearch) == "Show Up in Search")
         #expect(ActivityDiscoveryViewController.footer(.activity).contains("Read Receipts is off"))
-        #expect(ActivityDiscoveryViewController.planned.contains("Find me by phone number"))
+        #expect(ActivityDiscoveryViewController.title(.findableByPhone) == "Find Me by Phone Number")
+        #expect(ActivityDiscoveryViewController.title(.reachableByLink) == "QR Code and Shared Links")
+        #expect(ActivityDiscoveryViewController.discoverySwitches.count == 4)
+        #expect(ActivityDiscoveryViewController.footer(.links).contains("stop working right away"))
     }
 }
