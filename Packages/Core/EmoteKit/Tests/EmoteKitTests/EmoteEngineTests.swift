@@ -181,13 +181,13 @@ struct EmoteEngineTests {
         let heart = try emote("noto:2764_fe0f")
         let first = EmoteEngine(diskCache: disk)
         let baked = try #require(await first.art(for: heart, pixelSide: 48))
-        // The write is fire-and-forget; wait for both files.
+        // The write is fire-and-forget; the JSON lands after the PNG, so it
+        // means both are there. ⚠️ Required, on a look budget: 200 looks of
+        // 10 ms gave up silently under a loaded runner while the PNG was still
+        // encoding, and the second engine baked instead of reading.
         let stem = EmoteDiskCache.fileStem(emoteID: heart.id, side: 48, still: false)
-        for _ in 0..<200 where !FileManager.default.fileExists(
-            atPath: disk.directory.appendingPathComponent(stem + ".json").path
-        ) {
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        let json = disk.directory.appendingPathComponent(stem + ".json").path
+        try #require(await settle { FileManager.default.fileExists(atPath: json) }, "the sheet reached the disk")
         let second = EmoteEngine(diskCache: disk)
         let loaded = try #require(await second.art(for: heart, pixelSide: 48))
         #expect(second.stats.diskHits == 1)

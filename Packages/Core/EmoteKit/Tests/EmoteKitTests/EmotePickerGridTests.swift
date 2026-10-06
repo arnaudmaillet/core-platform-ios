@@ -225,10 +225,10 @@ struct EmotePickerGridTests {
         #expect(tile.player.displayedFrame == 0)
 
         panel.scrollViewWillBeginDragging(grid)
-        let deadline = ContinuousClock.now + .seconds(10)
-        while !(1...frames / 2).contains(tile.player.displayedFrame ?? 0), ContinuousClock.now < deadline {
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        try #require(
+            await settle { (1...frames / 2).contains(tile.player.displayedFrame ?? 0) },
+            "the tile reaches the first half of its loop"
+        )
         panel.scrollViewDidEndDecelerating(grid)
         let held = try #require(tile.player.displayedFrame)
         #expect(held > 0, "it moved while the grid scrolled")
@@ -250,11 +250,7 @@ struct EmotePickerGridTests {
         defer { tearDown(window) }
         panel.scrollViewWillBeginDragging(panel.collectionView)
         #expect(panel.displayedTiles.allSatisfy { $0.isAnimating })
-        let deadline = ContinuousClock.now + .seconds(3)
-        while panel.isScrolling, ContinuousClock.now < deadline {
-            try await Task.sleep(for: .milliseconds(50))
-        }
-        #expect(!panel.isScrolling)
+        try #require(await settle { !panel.isScrolling }, "the settle watch ends the scroll")
         #expect(panel.displayedTiles.allSatisfy { $0.isShowingArt && !$0.isAnimating })
     }
 
