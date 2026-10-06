@@ -132,6 +132,21 @@ public protocol Profile_V1_ProfileServiceClientInterface: Sendable {
     /// Paginated list of all profiles owned by an account.
     @available(iOS 13, *)
     func `listProfilesByAccount`(request: Profile_V1_ListProfilesByAccountRequest, headers: Connect.Headers) async -> ResponseMessage<Profile_V1_ListProfilesByAccountResponse>
+
+    /// A profile's QR code / share link (#661): a random token, revocable,
+    /// independent of the handle. The owner gets theirs (issued on first ask)
+    /// and rotates it — the old one stops resolving at once.
+    @available(iOS 13, *)
+    func `getShareToken`(request: Profile_V1_GetShareTokenRequest, headers: Connect.Headers) async -> ResponseMessage<Profile_V1_ShareTokenResponse>
+
+    @available(iOS 13, *)
+    func `rotateShareToken`(request: Profile_V1_RotateShareTokenRequest, headers: Connect.Headers) async -> ResponseMessage<Profile_V1_ShareTokenResponse>
+
+    /// Anyone resolves a scanned token to the profile, as they may see it —
+    /// NOT_FOUND for a malformed or revoked token, a profile that is not
+    /// active, or one whose owner turned "reachable by QR / shared link" off.
+    @available(iOS 13, *)
+    func `resolveShareToken`(request: Profile_V1_ResolveShareTokenRequest, headers: Connect.Headers) async -> ResponseMessage<Profile_V1_ProfileView>
 }
 
 /// Concrete implementation of `Profile_V1_ProfileServiceClientInterface`.
@@ -277,6 +292,21 @@ public final class Profile_V1_ProfileServiceClient: Profile_V1_ProfileServiceCli
         return await self.client.unary(path: "/profile.v1.ProfileService/ListProfilesByAccount", idempotencyLevel: .unknown, request: request, headers: headers)
     }
 
+    @available(iOS 13, *)
+    public func `getShareToken`(request: Profile_V1_GetShareTokenRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Profile_V1_ShareTokenResponse> {
+        return await self.client.unary(path: "/profile.v1.ProfileService/GetShareToken", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `rotateShareToken`(request: Profile_V1_RotateShareTokenRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Profile_V1_ShareTokenResponse> {
+        return await self.client.unary(path: "/profile.v1.ProfileService/RotateShareToken", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `resolveShareToken`(request: Profile_V1_ResolveShareTokenRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Profile_V1_ProfileView> {
+        return await self.client.unary(path: "/profile.v1.ProfileService/ResolveShareToken", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
     public enum Metadata {
         public enum Methods {
             public static let createProfile = Connect.MethodSpec(name: "CreateProfile", service: "profile.v1.ProfileService", type: .unary)
@@ -306,6 +336,9 @@ public final class Profile_V1_ProfileServiceClient: Profile_V1_ProfileServiceCli
             public static let getProfileByHandle = Connect.MethodSpec(name: "GetProfileByHandle", service: "profile.v1.ProfileService", type: .unary)
             public static let checkHandleAvailability = Connect.MethodSpec(name: "CheckHandleAvailability", service: "profile.v1.ProfileService", type: .unary)
             public static let listProfilesByAccount = Connect.MethodSpec(name: "ListProfilesByAccount", service: "profile.v1.ProfileService", type: .unary)
+            public static let getShareToken = Connect.MethodSpec(name: "GetShareToken", service: "profile.v1.ProfileService", type: .unary)
+            public static let rotateShareToken = Connect.MethodSpec(name: "RotateShareToken", service: "profile.v1.ProfileService", type: .unary)
+            public static let resolveShareToken = Connect.MethodSpec(name: "ResolveShareToken", service: "profile.v1.ProfileService", type: .unary)
         }
     }
 }

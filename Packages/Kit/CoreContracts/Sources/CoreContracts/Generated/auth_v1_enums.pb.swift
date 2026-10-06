@@ -90,6 +90,9 @@ public nonisolated enum Auth_V1_GrantType: SwiftProtobuf.Enum, Swift.CaseIterabl
 
   /// A one-time code sent to an email address (StartVerification).
   case verificationCode // = 4
+
+  /// A passkey assertion (#808; StartPasskeySignIn).
+  case passkey // = 5
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -103,6 +106,7 @@ public nonisolated enum Auth_V1_GrantType: SwiftProtobuf.Enum, Swift.CaseIterabl
     case 2: self = .password
     case 3: self = .idToken
     case 4: self = .verificationCode
+    case 5: self = .passkey
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -114,6 +118,7 @@ public nonisolated enum Auth_V1_GrantType: SwiftProtobuf.Enum, Swift.CaseIterabl
     case .password: return 2
     case .idToken: return 3
     case .verificationCode: return 4
+    case .passkey: return 5
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -125,6 +130,7 @@ public nonisolated enum Auth_V1_GrantType: SwiftProtobuf.Enum, Swift.CaseIterabl
     .password,
     .idToken,
     .verificationCode,
+    .passkey,
   ]
 
 }
@@ -273,7 +279,7 @@ nonisolated extension Auth_V1_SessionStatus: SwiftProtobuf._ProtoNameProviding {
 }
 
 nonisolated extension Auth_V1_GrantType: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0GRANT_TYPE_UNSPECIFIED\0\u{1}AUTHORIZATION_CODE\0\u{1}PASSWORD\0\u{1}ID_TOKEN\0\u{1}VERIFICATION_CODE\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0GRANT_TYPE_UNSPECIFIED\0\u{1}AUTHORIZATION_CODE\0\u{1}PASSWORD\0\u{1}ID_TOKEN\0\u{1}VERIFICATION_CODE\0\u{1}PASSKEY\0")
 }
 
 nonisolated extension Auth_V1_VerificationChannel: SwiftProtobuf._ProtoNameProviding {

@@ -299,6 +299,12 @@ private final class FakeSocialGraphClient: SocialGraph_V1_SocialGraphServiceClie
     ) async -> ResponseMessage<SocialGraph_V1_ListRestrictedAmongResponse> {
         ResponseMessage(result: .success(SocialGraph_V1_ListRestrictedAmongResponse()))
     }
+
+    func suggestProfiles(
+        request: SocialGraph_V1_SuggestProfilesRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<SocialGraph_V1_SuggestProfilesResponse> {
+        ResponseMessage(result: .success(SocialGraph_V1_SuggestProfilesResponse()))
+    }
 }
 
 private struct FakeViewer: ProfileViewerResolving {

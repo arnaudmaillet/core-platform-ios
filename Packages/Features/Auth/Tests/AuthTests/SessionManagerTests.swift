@@ -125,6 +125,36 @@ private final class FakeAuthClient: Auth_V1_AuthServiceClientInterface, @uncheck
     func regenerateBackupCodes(request: Auth_V1_RegenerateBackupCodesRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_BackupCodesResponse> {
         response(from: .failure(.init(code: .unimplemented, message: nil)))
     }
+
+    func startPasskeyRegistration(
+        request: Auth_V1_StartPasskeyRegistrationRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<Auth_V1_PasskeyRegistrationOptions> {
+        ResponseMessage(result: .success(Auth_V1_PasskeyRegistrationOptions()))
+    }
+
+    func finishPasskeyRegistration(
+        request: Auth_V1_FinishPasskeyRegistrationRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<Auth_V1_Passkey> {
+        ResponseMessage(result: .success(Auth_V1_Passkey()))
+    }
+
+    func startPasskeySignIn(
+        request: Auth_V1_StartPasskeySignInRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<Auth_V1_PasskeySignInOptions> {
+        ResponseMessage(result: .success(Auth_V1_PasskeySignInOptions()))
+    }
+
+    func listPasskeys(
+        request: Auth_V1_ListPasskeysRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<Auth_V1_ListPasskeysResponse> {
+        ResponseMessage(result: .success(Auth_V1_ListPasskeysResponse()))
+    }
+
+    func removePasskey(
+        request: Auth_V1_RemovePasskeyRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<Auth_V1_ListPasskeysResponse> {
+        ResponseMessage(result: .success(Auth_V1_ListPasskeysResponse()))
+    }
 }
 
 private func makeTokens(access: String, refresh: String, session: String = "sess-1", expiresIn: Int64 = 900) -> Auth_V1_TokenPair {

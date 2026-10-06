@@ -150,6 +150,36 @@ public protocol Auth_V1_AuthServiceClientInterface: Sendable {
     @available(iOS 13, *)
     func `regenerateBackupCodes`(request: Auth_V1_RegenerateBackupCodesRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_BackupCodesResponse>
 
+    /// Start registering a passkey: the options for the platform authenticator
+    /// (challenge single use, 5 minutes, bound to the caller's account). Needs
+    /// a recent credential proof. AUT-5025 when the account holds 10.
+    @available(iOS 13, *)
+    func `startPasskeyRegistration`(request: Auth_V1_StartPasskeyRegistrationRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_PasskeyRegistrationOptions>
+
+    /// The authenticator's response: verified (challenge, origin, RP id, user
+    /// verification, ES256 key) and stored. The account's email is told.
+    /// AUT-5023 bad / used / expired challenge; AUT-5024 not accepted;
+    /// AUT-5026 this authenticator's passkey is already registered.
+    @available(iOS 13, *)
+    func `finishPasskeyRegistration`(request: Auth_V1_FinishPasskeyRegistrationRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_Passkey>
+
+    /// A challenge to sign in with a passkey (single use, 5 minutes), then
+    /// Login { passkey } (first factor: no second step), CompleteLogin
+    /// { passkey } (the second step after a password) or VerifyCredentials
+    /// { passkey } (step-up). Public.
+    @available(iOS 13, *)
+    func `startPasskeySignIn`(request: Auth_V1_StartPasskeySignInRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_PasskeySignInOptions>
+
+    /// The caller's passkeys, oldest first.
+    @available(iOS 13, *)
+    func `listPasskeys`(request: Auth_V1_ListPasskeysRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_ListPasskeysResponse>
+
+    /// Removes one of the caller's passkeys (it no longer signs in) and returns
+    /// those left. Needs a recent credential proof; the account's email is
+    /// told. AUT-5027 when the account has no such passkey.
+    @available(iOS 13, *)
+    func `removePasskey`(request: Auth_V1_RemovePasskeyRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_ListPasskeysResponse>
+
     /// INTERNAL. Server-side token introspection returning the normalized
     /// principal, for callers that cannot verify edge tokens locally.
     @available(iOS 13, *)
@@ -254,6 +284,31 @@ public final class Auth_V1_AuthServiceClient: Auth_V1_AuthServiceClientInterface
     }
 
     @available(iOS 13, *)
+    public func `startPasskeyRegistration`(request: Auth_V1_StartPasskeyRegistrationRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Auth_V1_PasskeyRegistrationOptions> {
+        return await self.client.unary(path: "/auth.v1.AuthService/StartPasskeyRegistration", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `finishPasskeyRegistration`(request: Auth_V1_FinishPasskeyRegistrationRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Auth_V1_Passkey> {
+        return await self.client.unary(path: "/auth.v1.AuthService/FinishPasskeyRegistration", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `startPasskeySignIn`(request: Auth_V1_StartPasskeySignInRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Auth_V1_PasskeySignInOptions> {
+        return await self.client.unary(path: "/auth.v1.AuthService/StartPasskeySignIn", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `listPasskeys`(request: Auth_V1_ListPasskeysRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Auth_V1_ListPasskeysResponse> {
+        return await self.client.unary(path: "/auth.v1.AuthService/ListPasskeys", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `removePasskey`(request: Auth_V1_RemovePasskeyRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Auth_V1_ListPasskeysResponse> {
+        return await self.client.unary(path: "/auth.v1.AuthService/RemovePasskey", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
     public func `introspect`(request: Auth_V1_IntrospectRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Auth_V1_IntrospectResponse> {
         return await self.client.unary(path: "/auth.v1.AuthService/Introspect", idempotencyLevel: .unknown, request: request, headers: headers)
     }
@@ -282,6 +337,11 @@ public final class Auth_V1_AuthServiceClient: Auth_V1_AuthServiceClientInterface
             public static let confirmMfaEnrollment = Connect.MethodSpec(name: "ConfirmMfaEnrollment", service: "auth.v1.AuthService", type: .unary)
             public static let disableMfa = Connect.MethodSpec(name: "DisableMfa", service: "auth.v1.AuthService", type: .unary)
             public static let regenerateBackupCodes = Connect.MethodSpec(name: "RegenerateBackupCodes", service: "auth.v1.AuthService", type: .unary)
+            public static let startPasskeyRegistration = Connect.MethodSpec(name: "StartPasskeyRegistration", service: "auth.v1.AuthService", type: .unary)
+            public static let finishPasskeyRegistration = Connect.MethodSpec(name: "FinishPasskeyRegistration", service: "auth.v1.AuthService", type: .unary)
+            public static let startPasskeySignIn = Connect.MethodSpec(name: "StartPasskeySignIn", service: "auth.v1.AuthService", type: .unary)
+            public static let listPasskeys = Connect.MethodSpec(name: "ListPasskeys", service: "auth.v1.AuthService", type: .unary)
+            public static let removePasskey = Connect.MethodSpec(name: "RemovePasskey", service: "auth.v1.AuthService", type: .unary)
             public static let introspect = Connect.MethodSpec(name: "Introspect", service: "auth.v1.AuthService", type: .unary)
             public static let listSessions = Connect.MethodSpec(name: "ListSessions", service: "auth.v1.AuthService", type: .unary)
         }

@@ -62,8 +62,9 @@ public nonisolated enum Timeline_V1_FanOutMode: SwiftProtobuf.Enum, Swift.CaseIt
 
 }
 
-/// How GetDiscoveryFeed orders its pool. v1 is non-personalised: the same
-/// request returns the same order for every viewer, before the audience filter.
+/// How GetDiscoveryFeed orders its pool. The same request returns the same
+/// order for every viewer, before the audience filter, except a FOR_YOU page
+/// read for a profile with interest tags (#662), re-ranked within the page.
 public nonisolated enum Timeline_V1_DiscoveryRanking: SwiftProtobuf.Enum, Swift.CaseIterable {
   public typealias RawValue = Int
 
@@ -71,7 +72,8 @@ public nonisolated enum Timeline_V1_DiscoveryRanking: SwiftProtobuf.Enum, Swift.
   case unspecified // = 0
 
   /// Three TRENDING items for one fresh item (a recent post nobody has
-  /// engaged with yet), so new posts get a chance to be seen.
+  /// engaged with yet), so new posts get a chance to be seen; each page
+  /// re-ranked by the reader's interest tags unless non_personalized.
   case forYou // = 1
 
   /// Time-decayed popularity ("hot"): log10(popularity) plus a gravity term on

@@ -206,6 +206,10 @@ public nonisolated enum Chat_V1_InboxFolder: SwiftProtobuf.Enum, Swift.CaseItera
 
   /// message requests to the member, unanswered
   case requests // = 1
+
+  /// #810: the requests the member's hidden words or offensive filter catch
+  /// (sorted at read time with their current filter; never notified).
+  case hiddenRequests // = 2
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -216,6 +220,7 @@ public nonisolated enum Chat_V1_InboxFolder: SwiftProtobuf.Enum, Swift.CaseItera
     switch rawValue {
     case 0: self = .inbox
     case 1: self = .requests
+    case 2: self = .hiddenRequests
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -224,6 +229,7 @@ public nonisolated enum Chat_V1_InboxFolder: SwiftProtobuf.Enum, Swift.CaseItera
     switch self {
     case .inbox: return 0
     case .requests: return 1
+    case .hiddenRequests: return 2
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -232,6 +238,7 @@ public nonisolated enum Chat_V1_InboxFolder: SwiftProtobuf.Enum, Swift.CaseItera
   public static let allCases: [Chat_V1_InboxFolder] = [
     .inbox,
     .requests,
+    .hiddenRequests,
   ]
 
 }
@@ -255,5 +262,5 @@ nonisolated extension Chat_V1_ContentType: SwiftProtobuf._ProtoNameProviding {
 }
 
 nonisolated extension Chat_V1_InboxFolder: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0INBOX_FOLDER_INBOX\0\u{1}INBOX_FOLDER_REQUESTS\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0INBOX_FOLDER_INBOX\0\u{1}INBOX_FOLDER_REQUESTS\0\u{1}INBOX_FOLDER_HIDDEN_REQUESTS\0")
 }

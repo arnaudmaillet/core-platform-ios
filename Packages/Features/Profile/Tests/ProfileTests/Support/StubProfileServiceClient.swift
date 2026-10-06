@@ -231,4 +231,22 @@ final class StubProfileServiceClient: Profile_V1_ProfileServiceClientInterface, 
     ) async -> ResponseMessage<Profile_V1_CheckHandleAvailabilityResponse> {
         ResponseMessage(result: .success(Profile_V1_CheckHandleAvailabilityResponse()))
     }
+
+    func getShareToken(
+        request: Profile_V1_GetShareTokenRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<Profile_V1_ShareTokenResponse> {
+        ResponseMessage(result: .success(Profile_V1_ShareTokenResponse()))
+    }
+
+    func rotateShareToken(
+        request: Profile_V1_RotateShareTokenRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<Profile_V1_ShareTokenResponse> {
+        ResponseMessage(result: .success(Profile_V1_ShareTokenResponse()))
+    }
+
+    func resolveShareToken(
+        request: Profile_V1_ResolveShareTokenRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<Profile_V1_ProfileView> {
+        ResponseMessage(result: .success(Profile_V1_ProfileView()))
+    }
 }

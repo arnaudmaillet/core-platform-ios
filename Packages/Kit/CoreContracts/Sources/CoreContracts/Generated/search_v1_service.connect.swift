@@ -39,6 +39,24 @@ public protocol Search_V1_SearchServiceClientInterface: Sendable {
     /// positional, 1:1 with the requests).
     @available(iOS 13, *)
     func `multiSearch`(request: Search_V1_MultiSearchRequest, headers: Connect.Headers) async -> ResponseMessage<Search_V1_MultiSearchResponse>
+
+    /// ── Recent searches (#663) ──────────────────────────────────────────────
+    /// A profile's recent searches, kept server-side so every device shows the
+    /// same list: the newest 50, none older than 90 days. The app records a
+    /// search when it is submitted or a result tapped (not on every
+    /// keystroke). Edge: one of the caller's profiles. Each answers the list
+    /// as it now stands.
+    @available(iOS 13, *)
+    func `recordRecentSearch`(request: Search_V1_RecordRecentSearchRequest, headers: Connect.Headers) async -> ResponseMessage<Search_V1_RecentSearchesResponse>
+
+    @available(iOS 13, *)
+    func `listRecentSearches`(request: Search_V1_ListRecentSearchesRequest, headers: Connect.Headers) async -> ResponseMessage<Search_V1_RecentSearchesResponse>
+
+    @available(iOS 13, *)
+    func `deleteRecentSearch`(request: Search_V1_DeleteRecentSearchRequest, headers: Connect.Headers) async -> ResponseMessage<Search_V1_RecentSearchesResponse>
+
+    @available(iOS 13, *)
+    func `clearSearchHistory`(request: Search_V1_ClearSearchHistoryRequest, headers: Connect.Headers) async -> ResponseMessage<Search_V1_RecentSearchesResponse>
 }
 
 /// Concrete implementation of `Search_V1_SearchServiceClientInterface`.
@@ -64,11 +82,35 @@ public final class Search_V1_SearchServiceClient: Search_V1_SearchServiceClientI
         return await self.client.unary(path: "/search.v1.SearchService/MultiSearch", idempotencyLevel: .unknown, request: request, headers: headers)
     }
 
+    @available(iOS 13, *)
+    public func `recordRecentSearch`(request: Search_V1_RecordRecentSearchRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Search_V1_RecentSearchesResponse> {
+        return await self.client.unary(path: "/search.v1.SearchService/RecordRecentSearch", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `listRecentSearches`(request: Search_V1_ListRecentSearchesRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Search_V1_RecentSearchesResponse> {
+        return await self.client.unary(path: "/search.v1.SearchService/ListRecentSearches", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `deleteRecentSearch`(request: Search_V1_DeleteRecentSearchRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Search_V1_RecentSearchesResponse> {
+        return await self.client.unary(path: "/search.v1.SearchService/DeleteRecentSearch", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `clearSearchHistory`(request: Search_V1_ClearSearchHistoryRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Search_V1_RecentSearchesResponse> {
+        return await self.client.unary(path: "/search.v1.SearchService/ClearSearchHistory", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
     public enum Metadata {
         public enum Methods {
             public static let search = Connect.MethodSpec(name: "Search", service: "search.v1.SearchService", type: .unary)
             public static let suggest = Connect.MethodSpec(name: "Suggest", service: "search.v1.SearchService", type: .unary)
             public static let multiSearch = Connect.MethodSpec(name: "MultiSearch", service: "search.v1.SearchService", type: .unary)
+            public static let recordRecentSearch = Connect.MethodSpec(name: "RecordRecentSearch", service: "search.v1.SearchService", type: .unary)
+            public static let listRecentSearches = Connect.MethodSpec(name: "ListRecentSearches", service: "search.v1.SearchService", type: .unary)
+            public static let deleteRecentSearch = Connect.MethodSpec(name: "DeleteRecentSearch", service: "search.v1.SearchService", type: .unary)
+            public static let clearSearchHistory = Connect.MethodSpec(name: "ClearSearchHistory", service: "search.v1.SearchService", type: .unary)
         }
     }
 }

@@ -44,8 +44,10 @@ public protocol Timeline_V1_TimelineServiceClientInterface: Sendable {
     @available(iOS 13, *)
     func `getAudioFeed`(request: Timeline_V1_GetAudioFeedRequest, headers: Connect.Headers) async -> ResponseMessage<Timeline_V1_GetAudioFeedResponse>
 
-    /// Returns a page of the discovery feed: a non-personalised pool of recent
-    /// public posts that needs no follow graph (For You for guests and members).
+    /// Returns a page of the discovery feed: a pool of recent public posts that
+    /// needs no follow graph (For You for guests and members). A FOR_YOU page
+    /// read for one of the caller's profiles (profile_id) is ranked by that
+    /// profile's interest tags, unless non_personalized is set (#662).
     ///
     /// The pool holds posts published in the last TIMELINE_DISCOVERY_WINDOW_SECS
     /// (Redis), fed by post.v1.events, counter.v1.popularity and
@@ -55,6 +57,21 @@ public protocol Timeline_V1_TimelineServiceClientInterface: Sendable {
     /// unavailable the read fails (UNAVAILABLE), it never shows unchecked posts.
     @available(iOS 13, *)
     func `getDiscoveryFeed`(request: Timeline_V1_GetDiscoveryFeedRequest, headers: Connect.Headers) async -> ResponseMessage<Timeline_V1_GetDiscoveryFeedResponse>
+
+    /// Interest tags (#662): the hashtags of the posts a profile reacted to in
+    /// the discovery window, weighted (a weight halves every 30 days without a
+    /// new reaction). Owner only (edge: one of the caller's profiles).
+    @available(iOS 13, *)
+    func `listInterests`(request: Timeline_V1_ListInterestsRequest, headers: Connect.Headers) async -> ResponseMessage<Timeline_V1_InterestsResponse>
+
+    /// Drops a tag and keeps it out: later reactions no longer teach it, and it
+    /// stops ranking For You. Returns the remaining tags.
+    @available(iOS 13, *)
+    func `removeInterest`(request: Timeline_V1_RemoveInterestRequest, headers: Connect.Headers) async -> ResponseMessage<Timeline_V1_InterestsResponse>
+
+    /// Forgets every tag (removed ones included): For You starts over.
+    @available(iOS 13, *)
+    func `resetInterests`(request: Timeline_V1_ResetInterestsRequest, headers: Connect.Headers) async -> ResponseMessage<Timeline_V1_InterestsResponse>
 }
 
 /// Concrete implementation of `Timeline_V1_TimelineServiceClientInterface`.
@@ -80,11 +97,29 @@ public final class Timeline_V1_TimelineServiceClient: Timeline_V1_TimelineServic
         return await self.client.unary(path: "/timeline.v1.TimelineService/GetDiscoveryFeed", idempotencyLevel: .unknown, request: request, headers: headers)
     }
 
+    @available(iOS 13, *)
+    public func `listInterests`(request: Timeline_V1_ListInterestsRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Timeline_V1_InterestsResponse> {
+        return await self.client.unary(path: "/timeline.v1.TimelineService/ListInterests", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `removeInterest`(request: Timeline_V1_RemoveInterestRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Timeline_V1_InterestsResponse> {
+        return await self.client.unary(path: "/timeline.v1.TimelineService/RemoveInterest", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `resetInterests`(request: Timeline_V1_ResetInterestsRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Timeline_V1_InterestsResponse> {
+        return await self.client.unary(path: "/timeline.v1.TimelineService/ResetInterests", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
     public enum Metadata {
         public enum Methods {
             public static let getFollowingFeed = Connect.MethodSpec(name: "GetFollowingFeed", service: "timeline.v1.TimelineService", type: .unary)
             public static let getAudioFeed = Connect.MethodSpec(name: "GetAudioFeed", service: "timeline.v1.TimelineService", type: .unary)
             public static let getDiscoveryFeed = Connect.MethodSpec(name: "GetDiscoveryFeed", service: "timeline.v1.TimelineService", type: .unary)
+            public static let listInterests = Connect.MethodSpec(name: "ListInterests", service: "timeline.v1.TimelineService", type: .unary)
+            public static let removeInterest = Connect.MethodSpec(name: "RemoveInterest", service: "timeline.v1.TimelineService", type: .unary)
+            public static let resetInterests = Connect.MethodSpec(name: "ResetInterests", service: "timeline.v1.TimelineService", type: .unary)
         }
     }
 }

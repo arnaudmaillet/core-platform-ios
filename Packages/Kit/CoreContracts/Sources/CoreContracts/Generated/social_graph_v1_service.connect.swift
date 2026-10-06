@@ -137,6 +137,14 @@ public protocol SocialGraph_V1_SocialGraphServiceClientInterface: Sendable {
     @available(iOS 13, *)
     func `checkInteraction`(request: SocialGraph_V1_CheckInteractionRequest, headers: Connect.Headers) async -> ResponseMessage<SocialGraph_V1_CheckInteractionResponse>
 
+    /// People the caller may know (#661): friends of friends, ranked by how
+    /// many of the profiles the caller follows follow them. Never oneself, a
+    /// followed profile, a block either way, a private or hidden profile, nor
+    /// one that turned "appear in suggestions" off (a teen never turns it on).
+    /// Edge: one of the caller's profiles.
+    @available(iOS 13, *)
+    func `suggestProfiles`(request: SocialGraph_V1_SuggestProfilesRequest, headers: Connect.Headers) async -> ResponseMessage<SocialGraph_V1_SuggestProfilesResponse>
+
     /// The profiles a reader mutes for a scope. MESH-ONLY: timeline drops
     /// their posts from the reader's feeds.
     @available(iOS 13, *)
@@ -272,6 +280,11 @@ public final class SocialGraph_V1_SocialGraphServiceClient: SocialGraph_V1_Socia
     }
 
     @available(iOS 13, *)
+    public func `suggestProfiles`(request: SocialGraph_V1_SuggestProfilesRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<SocialGraph_V1_SuggestProfilesResponse> {
+        return await self.client.unary(path: "/social_graph.v1.SocialGraphService/SuggestProfiles", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
     public func `listMutedProfiles`(request: SocialGraph_V1_ListMutedProfilesRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<SocialGraph_V1_ListMutedProfilesResponse> {
         return await self.client.unary(path: "/social_graph.v1.SocialGraphService/ListMutedProfiles", idempotencyLevel: .unknown, request: request, headers: headers)
     }
@@ -306,6 +319,7 @@ public final class SocialGraph_V1_SocialGraphServiceClient: SocialGraph_V1_Socia
             public static let listBlocks = Connect.MethodSpec(name: "ListBlocks", service: "social_graph.v1.SocialGraphService", type: .unary)
             public static let checkAccess = Connect.MethodSpec(name: "CheckAccess", service: "social_graph.v1.SocialGraphService", type: .unary)
             public static let checkInteraction = Connect.MethodSpec(name: "CheckInteraction", service: "social_graph.v1.SocialGraphService", type: .unary)
+            public static let suggestProfiles = Connect.MethodSpec(name: "SuggestProfiles", service: "social_graph.v1.SocialGraphService", type: .unary)
             public static let listMutedProfiles = Connect.MethodSpec(name: "ListMutedProfiles", service: "social_graph.v1.SocialGraphService", type: .unary)
             public static let listRestrictedAmong = Connect.MethodSpec(name: "ListRestrictedAmong", service: "social_graph.v1.SocialGraphService", type: .unary)
         }
