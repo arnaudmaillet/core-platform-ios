@@ -82,6 +82,30 @@ struct GridVideoPlaybackCoordinatorTests {
         #expect(pool.surfaceCount(for: candidate.url) == 1)
     }
 
+    /// With autoplay off — the viewer's setting, or Power Saving — a grid plays
+    /// nothing, and tiles already playing give their players back on the
+    /// next reconcile (#580).
+    @Test func withAutoplayOffNoTilePlays() async {
+        let coordinator = makeVisibleCoordinator(pool: makePool(), maxConcurrent: 3)
+        var allowed = true
+        coordinator.autoplayAllowed = { allowed }
+        let candidates = [makeCandidate(0, distance: 0), makeCandidate(1, distance: 10)]
+        coordinator.update(candidates: candidates)
+        await coordinator.debugAwaitStarts()
+        #expect(coordinator.playingIDs.count == 2)
+
+        allowed = false
+        coordinator.update(candidates: candidates)
+        await coordinator.debugAwaitStarts()
+        #expect(coordinator.playingIDs.isEmpty)
+
+        let fresh = makeVisibleCoordinator(pool: makePool(), maxConcurrent: 3)
+        fresh.autoplayAllowed = { false }
+        fresh.update(candidates: [makeCandidate(2, distance: 0)])
+        await fresh.debugAwaitStarts()
+        #expect(fresh.playingIDs.isEmpty)
+    }
+
     /// A tile that is not playing has nothing to join, and must not mint a
     /// surface that would sit attached to nothing.
     @Test func noFlightSurfaceForATileThatIsNotPlaying() {

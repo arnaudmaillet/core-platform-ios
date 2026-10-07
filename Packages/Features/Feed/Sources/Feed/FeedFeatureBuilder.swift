@@ -117,6 +117,9 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         self.videoPlayback = videoPlayback
         self.wallet = wallet
         self.makeWalletSheet = makeWalletSheet
+        // Every grid's tiles follow the feed's playback policy — Autoplay,
+        // the network, Power Saving — For You's and a profile's alike (#580).
+        GridVideoPlaybackCoordinator.allowsAutoplay = { MediaPlaybackPolicy.autoplays }
     }
 
     /// A conversation, drawn by the text post's screen. Chat drives it; the

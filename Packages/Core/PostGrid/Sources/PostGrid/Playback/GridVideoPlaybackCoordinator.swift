@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import MediaPlayback
 import UIKit
 
@@ -214,6 +215,20 @@ public final class GridVideoPlaybackCoordinator {
         start(Candidate(id: id, url: url, cell: cell, distanceFromCentre: 0))
     }
 
+    /// Whether a tile may play on its own right now — the viewer's Autoplay
+    /// setting, the network, Power Saving. Feed points it at its playback
+    /// policy (`MediaPlaybackPolicy.autoplays`); until then, Power Saving.
+    ///
+    /// ⚠️ EVERY GRID ASKS THIS, and none did (#580): For You and a profile
+    /// played their tiles with Autoplay off and Power Saving on, the vertical
+    /// feed alone asked — measured as the same idle cost either way.
+    public static var allowsAutoplay: () -> Bool = { !PowerSavingPreference.isOn }
+
+    /// This grid's answer to `allowsAutoplay`, asked on every reconcile.
+    /// Swappable for tests, which must not flip the app-wide rule under
+    /// suites running beside them.
+    var autoplayAllowed: () -> Bool = { GridVideoPlaybackCoordinator.allowsAutoplay() }
+
     public init(pool: VideoPlaybackController, maxConcurrent: Int = 6) {
         self.pool = pool
         self.maxConcurrent = maxConcurrent
@@ -242,7 +257,9 @@ public final class GridVideoPlaybackCoordinator {
                 if ($0.id == focusedID) != ($1.id == focusedID) { return $0.id == focusedID }
                 return $0.distanceFromCentre < $1.distanceFromCentre
             }
-        let chosen = isSurfaceVisible ? Array(ranked.prefix(maxConcurrent)) : []
+        // No autoplay: nothing is chosen, so the stop half below hands every
+        // player back — all but the post being opened (the focus, the flight).
+        let chosen = isSurfaceVisible && autoplayAllowed() ? Array(ranked.prefix(maxConcurrent)) : []
         let chosenIDs = Set(chosen.map(\.id))
         #if DEBUG
         logRankingIfChanged(ranked, chosen: chosenIDs)

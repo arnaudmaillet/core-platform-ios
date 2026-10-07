@@ -85,6 +85,8 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         StatusBarBlurView.install(in: window)
         #if DEBUG
         FirstLayoutTrace.selfTestIfRequested(in: window)
+        // `-animation-audit`: every running animation, every 5 s (#580).
+        AnimationAudit.startIfRequested()
         // `-status-bar-blur-audit`: the band, every frame, and every blur
         // under it per screen.
         StatusBarBlurAudit.installIfRequested(in: window)
