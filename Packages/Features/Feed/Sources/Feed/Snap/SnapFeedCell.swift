@@ -2419,6 +2419,14 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             refreshMediaLoader()
             return
         }
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print(String(format: "[landing-adopt] %.3f alpha=%.2f pres=%.2f hidden=%@ anims=%@ frames=%d",
+                         CACurrentMediaTime(), view.alpha, view.layer.presentation()?.opacity ?? -1,
+                         view.isHidden ? "Y" : "N", (view.layer.animationKeys() ?? []).joined(separator: ","),
+                         view.enqueuedFrameCount))
+        }
+        #endif
         // Read BEFORE the restore: it is the surface the restore throws away,
         // and under N-surface it is the one holding this page's pool loan.
         let replaced = mediaCard.renderView

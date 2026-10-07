@@ -600,8 +600,23 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
                                // left to wait for.
                                if coverLease?.isLive == false { return true }
                                guard let destination else { return true }
-                               return destination.zoomDestinationContentIsReady
-                                   && destination.zoomDestinationMediaIsRendering
+                               // …and the cover's own surface is not halfway
+                               // through fading up: the page would adopt it at
+                               // that opacity, over its black floor (#633).
+                               guard destination.zoomDestinationContentIsReady,
+                                     destination.zoomDestinationMediaIsRendering
+                               else { return false }
+                               let surface = cover.zoomLiveMediaSurface?.layer
+                               guard !ZoomPresentSettlement.liveSurfaceIsArriving(surface) else {
+                                   #if DEBUG
+                                   if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+                                       print(String(format: "[zoom-live] %.3f cover held: its surface is fading up (shown %.2f)",
+                                                    CACurrentMediaTime(), surface?.presentation()?.opacity ?? -1))
+                                   }
+                                   #endif
+                                   return false
+                               }
+                               return true
                            }) { [weak destination = self.destination] in
                 // ⚠️ AN ENDED COVER HANDS NOTHING OVER. It was taken away
                 // because the screen moved on (a close began, the destination
