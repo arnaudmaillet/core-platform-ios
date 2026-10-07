@@ -69,17 +69,23 @@ struct PinCardBlendTests {
     /// overlap the card's corner. The pictures' order inside the content view
     /// is the contract this test has always pinned; nine since the lock veil
     /// and its glyph joined the top of it.
+    ///
+    /// Eight again since #539: the arrival cover and the preview over it ride
+    /// ONE host, the still picture the hero flies at its native aspect, so the
+    /// two stay registered with each other by construction.
     @Test func theCardStacksItsLayersInTheContractedOrder() {
         let card = makeCard()
         #expect(card.subviews == [card.debugContentView, card.debugChromeView])
         #expect(card.debugChromeView.subviews.first === card.ringView)
         let content = card.debugContentView.subviews
-        #expect(content.count == 9)
-        #expect(content.first === card.imageView)
+        #expect(content.count == 8)
+        #expect(content.first === card.debugStillMediaHost)
+        // The preview is ABOVE the arrival cover, inside the still's host.
+        #expect(card.debugStillMediaHost.subviews == [card.imageView, previewSheet(of: card)])
         #expect(content.suffix(2) == [card.debugLockVeil, card.debugLockGlyph])
         // The preview is BENEATH the departure operand, or the blend cannot be
         // seen. This is the assertion that would have caught it.
-        let previewIndex = content.firstIndex(of: previewSheet(of: card)) ?? .max
+        let previewIndex = content.firstIndex(of: card.debugStillMediaHost) ?? .max
         let departureIndex = content.firstIndex(of: departureCover(of: card)) ?? -1
         #expect(previewIndex < departureIndex)
         // And the donated surface's host is ABOVE the departure still, for the

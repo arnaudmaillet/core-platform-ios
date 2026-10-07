@@ -90,6 +90,15 @@ final class PinCardView: UIView {
     /// frozen frame for the whole flight, which is the regression the live
     /// media work exists to prevent.
     private let departureCoverView = UIImageView()
+    /// The still picture — `imageView` and, over it, `previewSheetView` — as
+    /// ONE view the hero flight poses by transform (#539).
+    ///
+    /// Full-bleed at rest, so a marker looks exactly as it did. In flight it
+    /// is laid out once at the picture's NATIVE aspect (the baked previews
+    /// keep their clip's shape) and scaled uniformly, so the card's morphing
+    /// bounds are a window onto the picture rather than a frame it is
+    /// re-cropped to on every frame — see `ZoomFlightCard.zoomStillMediaSurface`.
+    private let stillMediaHost = UIView()
     /// The text-only face, above the (empty) cover and below the ring. Hidden
     /// for every media pin, so a recycled view must be told which face to wear
     /// on every configure — see `setFace(_:)`.
@@ -213,6 +222,9 @@ final class PinCardView: UIView {
     /// that did not exist. An index is not a name.
     var debugPreviewSheetFace: UIView { previewSheetView }
     var debugDepartureCover: UIView { departureCoverView }
+    /// The still picture's host — the cover and the preview, flown together
+    /// at their native aspect (#539).
+    var debugStillMediaHost: UIView { stillMediaHost }
     var debugLiveSurface: UIView { videoRenderView }
     var debugTextFace: UIView { textFaceView }
     /// The two things the disc can DRAW — the author's picture and the fallback
@@ -247,9 +259,13 @@ final class PinCardView: UIView {
         // grey that also hid the card's own black (:145, :397) completely, and
         // a marker whose picture had not resolved was a light box.
         imageView.backgroundColor = .black
+        stillMediaHost.frame = bounds
+        stillMediaHost.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        stillMediaHost.isUserInteractionEnabled = false
+        contentView.addSubview(stillMediaHost)
         imageView.frame = bounds
         imageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        contentView.addSubview(imageView)
+        stillMediaHost.addSubview(imageView)
 
         departureCoverView.contentMode = .scaleAspectFill
         departureCoverView.clipsToBounds = true
@@ -280,7 +296,7 @@ final class PinCardView: UIView {
         previewSheetView.frame = bounds
         previewSheetView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         previewSheetView.isHidden = true
-        contentView.addSubview(previewSheetView)
+        stillMediaHost.addSubview(previewSheetView)
 
         departureCoverView.frame = bounds
         departureCoverView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -365,8 +381,8 @@ final class PinCardView: UIView {
         // and a donated surface are both centred by `ZoomFlight`, and under a
         // zero anchor `center` would move their top-left corner instead. Nor
         // for `iconFaceView`, which `layoutIconFace` centres by hand.
-        for child in [contentView, imageView, previewSheetView, departureCoverView, donatedMediaHost,
-                      textFaceView, videoRenderView, lockVeil] {
+        for child in [contentView, stillMediaHost, imageView, previewSheetView, departureCoverView,
+                      donatedMediaHost, textFaceView, videoRenderView, lockVeil] {
             child.layer.anchorPoint = .zero
             child.frame = bounds
         }
@@ -1653,6 +1669,32 @@ extension PinCardView: ZoomFlightCard {
 
     func prepareZoomLiveMediaForFlight(destinationSize: CGSize) {
         prepareVideoForFlight(destinationSize: destinationSize)
+    }
+
+    /// The still picture flies by transform (#539) — a media marker's cover
+    /// and its baked preview, whose native aspect is the cover's: under a
+    /// preview the cover IS the sheet's frame zero (`setPreviewSheet`).
+    var zoomStillMediaSurface: UIView? {
+        face == .media && imageView.image != nil ? stillMediaHost : nil
+    }
+
+    var zoomStillMediaNativeSize: CGSize? {
+        guard face == .media, let size = imageView.image?.size, size.width > 0, size.height > 0 else {
+            return nil
+        }
+        return size
+    }
+
+    /// Lays the still picture out ONCE at `destinationSize` — the native
+    /// aspect covering the page — centred, autoresizing off, so the flight's
+    /// transform and centre are the only things that move it. Its two views
+    /// fill it: at native aspect, aspect-fill crops nothing.
+    func prepareZoomStillMediaForFlight(destinationSize: CGSize) {
+        stillMediaHost.transform = .identity
+        stillMediaHost.autoresizingMask = []
+        stillMediaHost.layer.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+        stillMediaHost.bounds = CGRect(origin: .zero, size: destinationSize)
+        stillMediaHost.center = CGPoint(x: contentView.bounds.midX, y: contentView.bounds.midY)
     }
 
     /// A pin lifts off the map, so its flight carries the same drop shadow.
