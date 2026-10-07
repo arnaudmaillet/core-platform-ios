@@ -131,6 +131,11 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
             destination.zoomTransitionWillBegin(
                 flyingLivePlayer: source.zoomFlightCarriesLivePlayer
             )
+            // Same moment, same reason: the page's first start is about to
+            // happen, and it should begin where the card's picture is (#625).
+            if let time = source.zoomFlightMediaTime {
+                destination.zoomTransitionWillStartMedia(at: time)
+            }
         }
     }
 

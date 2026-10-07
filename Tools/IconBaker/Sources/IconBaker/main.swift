@@ -133,6 +133,10 @@ struct IconBaker {
         /// the sheet's own size and `columns`, so it needs neither to read it.
         var cellWidthPX: Int? = nil
         var cellHeightPX: Int? = nil
+        /// A video sheet's frame zero, as a time in its clip (ms). The client
+        /// lines a flight's sheet up with the live clip on it (#539): the
+        /// sheet's frame k IS the clip at `startMS + k * frameMS`.
+        var startMS: Int? = nil
         let columns: Int?
         /// The transparent margin inside each cell, in sheet pixels — the
         /// client has to sample INSIDE it or the margin shows as a border, so
@@ -365,6 +369,7 @@ struct IconBaker {
             frameCount: frameCount, frameMS: Int(stepMS.rounded()), cellPX: min(cell.width, cell.height),
             cellWidthPX: cell.isSquare ? nil : cell.width,
             cellHeightPX: cell.isSquare ? nil : cell.height,
+            startMS: Int((start * 1000).rounded()),
             columns: columns, gutterPX: AtlasWriter.gutter,
             scale: nil, rotation: nil, opacity: nil,
             bytes: size(of: file),

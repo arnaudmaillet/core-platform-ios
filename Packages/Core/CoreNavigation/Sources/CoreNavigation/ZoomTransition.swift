@@ -174,6 +174,16 @@ public protocol ZoomTransitionSource: AnyObject {
     /// Default `true`: a source whose landing is always a picture — a map's
     /// marker, a mosaic that adopts what it lands on — has nothing to decline.
     var zoomLandingAcceptsHero: Bool { get }
+
+    /// The time in its clip of the picture this source is showing, when it is
+    /// a clip played back as something other than a player — a map marker's
+    /// baked preview sheet (#625). The destination starts its own playback
+    /// there instead of at zero, so the live picture that takes over at the
+    /// landing is the same moment the card flew, not a different pose of it.
+    ///
+    /// ⚠️ A REQUIREMENT for the reason `zoomLiveMediaSurfaceIfReady` gives:
+    /// read through the existential. Default nil: nothing to line up.
+    var zoomFlightMediaTime: TimeInterval? { get }
 }
 
 public extension ZoomTransitionSource {
@@ -186,6 +196,7 @@ public extension ZoomTransitionSource {
     var zoomLandingMediaIsReady: Bool { true }
     func zoomFinalizeLanding() {}
     var zoomLandingAcceptsHero: Bool { true }
+    var zoomFlightMediaTime: TimeInterval? { nil }
 }
 
 /// **WHERE A DISMISSING FLIGHT IS**, in one value.
@@ -411,6 +422,13 @@ public protocol ZoomTransitionDestination: AnyObject {
     /// Default is nothing — a destination with no media has nothing to defer.
     func zoomTransitionWillBegin(flyingLivePlayer: Bool)
 
+    /// A presenting flight's picture shows its clip at `seconds`
+    /// (`ZoomTransitionSource.zoomFlightMediaTime`, #625): the page about to be
+    /// shown should start that clip there. Told right after
+    /// `zoomTransitionWillBegin`, before the page lays out and starts anything.
+    /// Default nothing.
+    func zoomTransitionWillStartMedia(at seconds: TimeInterval)
+
     /// Pay this destination's first layout and raster NOW, before the push.
     ///
     /// A pushed screen's first layout otherwise happens inside the flight's own
@@ -547,6 +565,7 @@ public extension ZoomTransitionDestination {
     func zoomReclaimLiveMediaView(_ view: UIView) {}
     func zoomAdoptLiveMediaView(_ view: UIView) {}
     func zoomTransitionWillBegin(flyingLivePlayer: Bool) {}
+    func zoomTransitionWillStartMedia(at seconds: TimeInterval) {}
     func zoomTransitionWillDepart() {}
     func zoomPrepareForPresentation(in bounds: CGRect) {}
     func setZoomDismissState(_ state: ZoomDismissState) {}

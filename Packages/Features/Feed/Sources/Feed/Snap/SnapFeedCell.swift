@@ -59,6 +59,12 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// `VideoPlaybackController`. The card and this page sharing one is the case
     /// the rule exists FOR, and they agree here because they name the same post.
     private var playbackScope: String? { representedID?.rawValue }
+    /// The post this page shows.
+    var representedPostID: PostID? { representedID }
+    /// Where this page's clip starts when a hero flight opened it mid-clip
+    /// (#625) — the moment the card's picture was showing. Spent by the first
+    /// start; nil starts at the beginning, as always.
+    var flightMediaStartTime: TimeInterval?
     private var mediaURL: URL?
     private var mediaKind: MediaKind = .image
 
@@ -2141,6 +2147,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         }
         let scope = playbackScope
         let peakBitRate = MediaPlaybackPolicy.peakBitRate
+        if let start = flightMediaStartTime, let scope {
+            flightMediaStartTime = nil
+            videoPlayback.prepareStart(of: url, scope: scope, at: start)
+        }
         Task { [weak self] in
             await videoPlayback.play(url, in: view, peakBitRate: peakBitRate, scope: scope)
             self?.holdIfAutoplayIsOff(view)
@@ -3288,6 +3298,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             videoPlayback?.stop(view)
         }
         representedID = nil
+        flightMediaStartTime = nil
         mediaURL = nil
         mediaKind = .image
         // Back to the media ground AND the media theme: a recycled cell is a

@@ -9,7 +9,8 @@
   "gutterPX": 2,
   "id": "clip-01-0",
   "kind": "sheet",
-  "note": "video: 13.1s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 13.1s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-02-0.heic",
@@ -23,7 +24,8 @@
   "gutterPX": 2,
   "id": "clip-02-0",
   "kind": "sheet",
-  "note": "video: 6.8s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 6.8s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-03-0.heic",
@@ -37,7 +39,8 @@
   "gutterPX": 2,
   "id": "clip-03-0",
   "kind": "sheet",
-  "note": "video: 15.9s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 15.9s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-04-0.heic",
@@ -51,7 +54,8 @@
   "gutterPX": 2,
   "id": "clip-04-0",
   "kind": "sheet",
-  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-05-0.heic",
@@ -65,7 +69,8 @@
   "gutterPX": 2,
   "id": "clip-05-0",
   "kind": "sheet",
-  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-06-0.heic",
@@ -79,7 +84,8 @@
   "gutterPX": 2,
   "id": "clip-06-0",
   "kind": "sheet",
-  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-07-0.heic",
@@ -93,7 +99,8 @@
   "gutterPX": 2,
   "id": "clip-07-0",
   "kind": "sheet",
-  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-08-0.heic",
@@ -107,7 +114,8 @@
   "gutterPX": 2,
   "id": "clip-08-0",
   "kind": "sheet",
-  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-09-0.heic",
@@ -121,7 +129,8 @@
   "gutterPX": 2,
   "id": "clip-09-0",
   "kind": "sheet",
-  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-10-0.heic",
@@ -135,7 +144,8 @@
   "gutterPX": 2,
   "id": "clip-10-0",
   "kind": "sheet",
-  "note": "video: 14.6s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 14.6s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-11-0.heic",
@@ -149,7 +159,8 @@
   "gutterPX": 2,
   "id": "clip-11-0",
   "kind": "sheet",
-  "note": "video: 24.0s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 24.0s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-12-0.heic",
@@ -163,7 +174,8 @@
   "gutterPX": 2,
   "id": "clip-12-0",
   "kind": "sheet",
-  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-13-0.heic",
@@ -177,7 +189,8 @@
   "gutterPX": 2,
   "id": "clip-13-0",
   "kind": "sheet",
-  "note": "video: 12.9s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 12.9s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-14-0.heic",
@@ -191,7 +204,8 @@
   "gutterPX": 2,
   "id": "clip-14-0",
   "kind": "sheet",
-  "note": "video: 13.4s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 13.4s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-15-0.heic",
@@ -205,7 +219,8 @@
   "gutterPX": 2,
   "id": "clip-15-0",
   "kind": "sheet",
-  "note": "video: 17.7s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 17.7s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-16-0.heic",
@@ -219,7 +234,8 @@
   "gutterPX": 2,
   "id": "clip-16-0",
   "kind": "sheet",
-  "note": "video: 11.7s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 11.7s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-17-0.heic",
@@ -233,7 +249,8 @@
   "gutterPX": 2,
   "id": "clip-17-0",
   "kind": "sheet",
-  "note": "video: 21.6s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 21.6s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-18-0.heic",
@@ -247,7 +264,8 @@
   "gutterPX": 2,
   "id": "clip-18-0",
   "kind": "sheet",
-  "note": "video: 12.9s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 12.9s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-19-0.heic",
@@ -261,7 +279,8 @@
   "gutterPX": 2,
   "id": "clip-19-0",
   "kind": "sheet",
-  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-20-0.heic",
@@ -275,7 +294,8 @@
   "gutterPX": 2,
   "id": "clip-20-0",
   "kind": "sheet",
-  "note": "video: 17.7s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 17.7s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-21-0.heic",
@@ -289,7 +309,8 @@
   "gutterPX": 2,
   "id": "clip-21-0",
   "kind": "sheet",
-  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-22-0.heic",
@@ -303,7 +324,8 @@
   "gutterPX": 2,
   "id": "clip-22-0",
   "kind": "sheet",
-  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-23-0.heic",
@@ -317,7 +339,8 @@
   "gutterPX": 2,
   "id": "clip-23-0",
   "kind": "sheet",
-  "note": "video: 24.8s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 24.8s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-24-0.heic",
@@ -331,7 +354,8 @@
   "gutterPX": 2,
   "id": "clip-24-0",
   "kind": "sheet",
-  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-25-0.heic",
@@ -345,7 +369,8 @@
   "gutterPX": 2,
   "id": "clip-25-0",
   "kind": "sheet",
-  "note": "video: 20.4s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 20.4s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-26-0.heic",
@@ -359,7 +384,8 @@
   "gutterPX": 2,
   "id": "clip-26-0",
   "kind": "sheet",
-  "note": "video: 24.0s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 24.0s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-27-0.heic",
@@ -373,7 +399,8 @@
   "gutterPX": 2,
   "id": "clip-27-0",
   "kind": "sheet",
-  "note": "video: 21.5s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 21.5s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-28-0.heic",
@@ -387,7 +414,8 @@
   "gutterPX": 2,
   "id": "clip-28-0",
   "kind": "sheet",
-  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-29-0.heic",
@@ -401,7 +429,8 @@
   "gutterPX": 2,
   "id": "clip-29-0",
   "kind": "sheet",
-  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-30-0.heic",
@@ -415,7 +444,8 @@
   "gutterPX": 2,
   "id": "clip-30-0",
   "kind": "sheet",
-  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-31-0.heic",
@@ -429,7 +459,8 @@
   "gutterPX": 2,
   "id": "clip-31-0",
   "kind": "sheet",
-  "note": "video: 20.5s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 20.5s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-32-0.heic",
@@ -443,7 +474,8 @@
   "gutterPX": 2,
   "id": "clip-32-0",
   "kind": "sheet",
-  "note": "video: 22.7s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 22.7s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-33-0.heic",
@@ -457,7 +489,8 @@
   "gutterPX": 2,
   "id": "clip-33-0",
   "kind": "sheet",
-  "note": "video: 15.7s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 15.7s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-34-0.heic",
@@ -471,7 +504,8 @@
   "gutterPX": 2,
   "id": "clip-34-0",
   "kind": "sheet",
-  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-35-0.heic",
@@ -485,7 +519,8 @@
   "gutterPX": 2,
   "id": "clip-35-0",
   "kind": "sheet",
-  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-36-0.heic",
@@ -499,7 +534,8 @@
   "gutterPX": 2,
   "id": "clip-36-0",
   "kind": "sheet",
-  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-37-0.heic",
@@ -513,7 +549,8 @@
   "gutterPX": 2,
   "id": "clip-37-0",
   "kind": "sheet",
-  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-38-0.heic",
@@ -527,7 +564,8 @@
   "gutterPX": 2,
   "id": "clip-38-0",
   "kind": "sheet",
-  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-39-0.heic",
@@ -541,7 +579,8 @@
   "gutterPX": 2,
   "id": "clip-39-0",
   "kind": "sheet",
-  "note": "video: 17.1s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 17.1s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-40-0.heic",
@@ -555,7 +594,8 @@
   "gutterPX": 2,
   "id": "clip-40-0",
   "kind": "sheet",
-  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-41-0.heic",
@@ -569,7 +609,8 @@
   "gutterPX": 2,
   "id": "clip-41-0",
   "kind": "sheet",
-  "note": "video: 14.8s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 14.8s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-42-0.heic",
@@ -583,7 +624,8 @@
   "gutterPX": 2,
   "id": "clip-42-0",
   "kind": "sheet",
-  "note": "video: 14.3s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 14.3s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-43-0.heic",
@@ -597,7 +639,8 @@
   "gutterPX": 2,
   "id": "clip-43-0",
   "kind": "sheet",
-  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-44-0.heic",
@@ -611,7 +654,8 @@
   "gutterPX": 2,
   "id": "clip-44-0",
   "kind": "sheet",
-  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-45-0.heic",
@@ -625,7 +669,8 @@
   "gutterPX": 2,
   "id": "clip-45-0",
   "kind": "sheet",
-  "note": "video: 17.6s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 17.6s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-46-0.heic",
@@ -639,7 +684,8 @@
   "gutterPX": 2,
   "id": "clip-46-0",
   "kind": "sheet",
-  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-47-0.heic",
@@ -653,7 +699,8 @@
   "gutterPX": 2,
   "id": "clip-47-0",
   "kind": "sheet",
-  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-48-0.heic",
@@ -667,7 +714,8 @@
   "gutterPX": 2,
   "id": "clip-48-0",
   "kind": "sheet",
-  "note": "video: 21.9s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 21.9s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-49-0.heic",
@@ -679,7 +727,8 @@
   "gutterPX": 2,
   "id": "clip-49-0",
   "kind": "sheet",
-  "note": "video: 9.2s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 9.2s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-50-0.heic",
@@ -693,7 +742,8 @@
   "gutterPX": 2,
   "id": "clip-50-0",
   "kind": "sheet",
-  "note": "video: 24.2s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 24.2s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-51-0.heic",
@@ -707,7 +757,8 @@
   "gutterPX": 2,
   "id": "clip-51-0",
   "kind": "sheet",
-  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-52-0.heic",
@@ -721,7 +772,8 @@
   "gutterPX": 2,
   "id": "clip-52-0",
   "kind": "sheet",
-  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 25.0s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  },
  {
   "asset": "clip-53-0.heic",
@@ -735,6 +787,7 @@
   "gutterPX": 2,
   "id": "clip-53-0",
   "kind": "sheet",
-  "note": "video: 14.8s source, sampled 24 frames from 1.0s over 2.0s"
+  "note": "video: 14.8s source, sampled 24 frames from 1.0s over 2.0s",
+  "startMS": 1000
  }
 ]

@@ -245,6 +245,37 @@ final class MapPinZoomSource: ZoomTransitionSource {
         Self.fliesLivePlayer(canMirror: mirrorLive != nil, isLivePreviewing: isLivePreviewing?())
     }
 
+    /// The clip time the marker's preview sheet is showing as the flight
+    /// takes off — plus the lead below — so the page starts its video there (#625): the live picture
+    /// that takes over at the landing is then the same moment the card flew,
+    /// not a different pose of it. Nil without a sheet that knows its clip.
+    var zoomFlightMediaTime: TimeInterval? {
+        guard case .sheet(let sheet)? = mapView?.wornPreview(for: annotation)?.art,
+              let frame = mapView?.wornPreviewFrame(for: annotation) else { return nil }
+        return Self.flightMediaTime(sheet: sheet, displayedFrame: frame)
+    }
+
+    /// How far ahead of the sheet's frame the video starts: about when the
+    /// live picture first shows — the flight, plus the player's first frame.
+    /// Started where the sheet IS, the video's first frame arrived that much
+    /// later at that very time, and lining the sheet up on it rewound the
+    /// sheet by as much (measured: frame 11 back to 0 at the reveal). Started
+    /// here, the residue is a frame or two, which the reveal's sync absorbs.
+    static let flightMediaLead: TimeInterval = 0.5
+    /// The latest start allowed, before the sheet's end: the video has to stay
+    /// inside the sheet's window for the whole reveal — its first frame, then
+    /// the fade (`PinCardView.syncPreviewToLiveMedia`), about 0.7 s on device.
+    /// It was 0.25 s, and a late start crossed the window's end mid-fade.
+    static let flightMediaTailMargin: TimeInterval = 0.8
+
+    /// The rule above, as arithmetic — pinnable without a map.
+    static func flightMediaTime(sheet: AnimatedIconSheet, displayedFrame: Int) -> TimeInterval? {
+        guard let start = sheet.clipTime(ofFrame: 0),
+              let shown = sheet.clipTime(ofFrame: displayedFrame) else { return nil }
+        let latest = max(start, start + sheet.loopDuration - flightMediaTailMargin)
+        return min(shown + flightMediaLead, latest)
+    }
+
     /// The rule above, as arithmetic — pinnable without an `MKMapView`, which
     /// this test target deliberately never builds (instantiating one contacts
     /// MapKit's services, the render-server work the CI doctrine keeps out).
