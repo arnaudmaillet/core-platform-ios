@@ -240,6 +240,19 @@ final class MapsViewController: UIViewController {
     private let locationControls = MapLocationControlsView()
     /// A tap asked where the device is: fly to its country once it is known.
     private var fliesToCurrentCountry = false
+
+    // MARK: Guest location lock (#564)
+
+    /// A guest without location sees a locked showcase: the whole world under
+    /// a dark veil, nothing to pan, zoom or tap — only the "See posts around
+    /// you" card above it. See `guestLocationLocked(isMember:permission:)`.
+    private(set) var isGuestLocked = false
+    /// The dark veil over the locked map, above the map and below the bars, so
+    /// the location card stays on top of it.
+    private let guestVeil = UIView()
+    /// The world view is framed once the map has a size: framed in
+    /// `viewDidLoad`, before it has one, MapKit picks a continent instead.
+    private var needsWorldView = false
     /// The bars' offset from the view's raw bottom edge; see `syncBarsPosition`.
     private var barsBottomConstraint: NSLayoutConstraint!
     /// In-flight people fetch for the sub-filter row; superseded on every
@@ -699,6 +712,7 @@ final class MapsViewController: UIViewController {
         #endif
         super.viewDidLayoutSubviews()
         syncBarsPosition()
+        frameWorldIfNeeded()
     }
 
     /// The bars' offset is DERIVED from the safe area, so it has to be
@@ -929,6 +943,8 @@ final class MapsViewController: UIViewController {
             forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated {
+                // Back from Settings with location allowed: unlocked (#564).
+                self?.updateGuestLock(animated: true)
                 guard let self, self.viewIfLoaded?.window != nil else { return }
                 self.videoCoordinator.setSurfaceVisible(true)
                 self.refreshVideoPlayback()
@@ -950,6 +966,12 @@ final class MapsViewController: UIViewController {
             forAnnotationViewWithReuseIdentifier: MapClusterAnnotationView.reuseIdentifier
         )
         mapView.pin(to: view)
+        // Above the map, below the bars (added next) — so the location card
+        // sits on top of it (#564).
+        guestVeil.backgroundColor = UIColor.black.withAlphaComponent(Self.guestVeilAlpha)
+        guestVeil.isUserInteractionEnabled = false
+        guestVeil.alpha = 0
+        guestVeil.pin(to: view)
         #if DEBUG
         installChromeTrace()
         #endif
@@ -993,6 +1015,7 @@ final class MapsViewController: UIViewController {
         NotificationCenter.default.addObserver(
             self, selector: #selector(currentCountryChanged), name: .currentCountryDidChange, object: nil
         )
+        updateGuestLock(animated: false)
         updateLocationControls()
         #if DEBUG
         // `-open-country-shop` / `-offer-country XX` / `-show-country XX`: the
@@ -1226,11 +1249,21 @@ final class MapsViewController: UIViewController {
     /// The card while nothing is open and location isn't allowed — the one
     /// thing that would open a country; the locate button otherwise.
     private func updateLocationControls() {
-        guard let locator, let countryAccess else {
+        guard let locator else {
             locationControls.apply(.none)
             return
         }
         let permission = locator.permission
+        // The locked guest map's one way out, with or without country access
+        // (the fleet has none yet) — #564.
+        if isGuestLocked {
+            locationControls.apply(.card(permission))
+            return
+        }
+        guard let countryAccess else {
+            locationControls.apply(.none)
+            return
+        }
         locationControls.apply(
             countryAccess.hasNoOpenCountry && permission != .allowed ? .card(permission) : .button(permission)
         )
@@ -1256,7 +1289,70 @@ final class MapsViewController: UIViewController {
         }
     }
 
+    /// How dark the locked guest map is (#564).
+    static let guestVeilAlpha: CGFloat = 0.55
+
+    /// Whether a viewer sees the locked guest showcase: a guest whose location
+    /// is not allowed. Members are never locked, and neither is a map with no
+    /// locator (`permission` nil): without the card there would be no way out.
+    /// Pure, for tests.
+    static func guestLocationLocked(isMember: Bool, permission: LocationPermission?) -> Bool {
+        guard !isMember, let permission else { return false }
+        return permission != .allowed
+    }
+
+    /// The map's interaction, from BOTH gates: an open transition (`inert`)
+    /// and the guest lock. Pure, for tests.
+    static func mapIsInteractive(inert: Bool, guestLocked: Bool) -> Bool {
+        !(inert || guestLocked)
+    }
+
+    /// Re-reads the lock and applies it: the veil, the world view, the map's
+    /// interaction, the pills and the compass. Unlocking fades the veil out
+    /// and flies to the current country once it is known.
+    private func updateGuestLock(animated: Bool) {
+        let locked = Self.guestLocationLocked(isMember: isMember(), permission: locator?.permission)
+        guard locked != isGuestLocked || (locked && guestVeil.alpha == 0) else { return }
+        let wasLocked = isGuestLocked
+        isGuestLocked = locked
+        applyMapInteraction()
+        mapView.showsCompass = !locked
+        // Meaningless on a locked map; the card is what matters.
+        filterBar.isHidden = locked
+        if locked {
+            subFilterBar.isHidden = true
+            pendingQuery?.cancel()
+            needsWorldView = true
+            frameWorldIfNeeded()
+        }
+        let veilAlpha: CGFloat = locked ? 1 : 0
+        if animated {
+            UIView.animate(withDuration: 0.3) { self.guestVeil.alpha = veilAlpha }
+        } else {
+            guestVeil.alpha = veilAlpha
+        }
+        updateLocationControls()
+        guard wasLocked, !locked else { return }
+        // Unlocked: to the viewer's country, as the card promised.
+        if let code = locator?.currentCountry {
+            fliesToCurrentCountry = false
+            showCountry(code)
+        } else {
+            fliesToCurrentCountry = true
+            scheduleQuery()
+        }
+    }
+
+    /// The whole world, without animation — on the first frame, so a locked
+    /// map never flashes Paris first.
+    private func frameWorldIfNeeded() {
+        guard needsWorldView, isGuestLocked, mapView.bounds.width > 0 else { return }
+        needsWorldView = false
+        mapView.setVisibleMapRect(.world, animated: false)
+    }
+
     @objc private func currentCountryChanged() {
+        updateGuestLock(animated: true)
         updateLocationControls()
         // The country left behind closes again (decision 10): it no longer
         // stands selected as if it were open — unless its offer is up.
@@ -2061,6 +2157,9 @@ final class MapsViewController: UIViewController {
 
     private func scheduleQuery() {
         pendingQuery?.cancel()
+        // Nothing to fetch for a locked showcase: the world is under the veil
+        // (#564). Unlocking flies somewhere, and that settle queries.
+        guard !isGuestLocked else { return }
         let work = DispatchWorkItem { [weak self] in self?.runQuery() }
         pendingQuery = work
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.settleDelay, execute: work)
@@ -2623,7 +2722,9 @@ final class MapsViewController: UIViewController {
     /// them, and the bell pushes onto the very stack the flight is animating.
     private func applyMapInteraction() {
         let inert = openGate.mapIsInert
-        mapView.isUserInteractionEnabled = !inert
+        // The guest lock rides the SAME write (#564): two writers of one
+        // property would undo each other.
+        mapView.isUserInteractionEnabled = Self.mapIsInteractive(inert: inert, guestLocked: isGuestLocked)
         navigationItem.leftBarButtonItems?.forEach { $0.isEnabled = !inert }
         navigationItem.rightBarButtonItems?.forEach { $0.isEnabled = !inert }
     }
@@ -4147,6 +4248,8 @@ extension MapsViewController: ArrivalInvariantReporting {
 extension MapsViewController: MapViewerRefreshing {
     /// Signed in or out: the dock and the people rows were someone else's.
     func viewerDidChange() {
+        // A guest who signed up while locked: unlocked at once (#564).
+        updateGuestLock(animated: true)
         catalogueCache.removeAll()
         peopleCache.removeAll()
         loadFavorites()
