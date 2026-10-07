@@ -91,6 +91,9 @@ public final class PostDetailViewModel {
     private var nextPageToken: String?
     /// The page being fetched — one at a time.
     private var pageLoad: Task<Void, Never>?
+    /// Bumped by every reset, so a page from before it neither lands nor
+    /// frees the slot a newer fetch holds.
+    private var pagingGeneration = 0
     /// The first page's load is out: a near-end reached meanwhile is honoured
     /// as soon as it says whether there is more.
     private var isLoadingFirstPage = false
@@ -490,38 +493,50 @@ public final class PostDetailViewModel {
             if isLoadingFirstPage { wantsNextPage = true }
             return
         }
+        let generation = pagingGeneration
         pageLoad = Task { [weak self] in
-            await self?.appendPages(after: token, for: postID, from: commentsProvider)
-            self?.pageLoad = nil
+            await self?.appendPages(after: token, for: postID, from: commentsProvider, generation: generation)
         }
     }
 
-    private func appendPages(after token: String, for postID: PostID, from provider: any CommentsProviding) async {
+    private func appendPages(
+        after token: String, for postID: PostID, from provider: any CommentsProviding, generation: Int
+    ) async {
         var token = token
+        var fresh: [CommentEntry] = []
         for _ in 0..<Self.maxEmptyPagesInARow {
             guard let page = try? await provider.loadCommentsPage(for: postID, after: token),
                   // A refresh replaced the stream while this was out.
-                  self.postID == postID, nextPageToken == token
-            else { return }
+                  pagingGeneration == generation, self.postID == postID, nextPageToken == token
+            else {
+                // A reset already emptied the slot, and may have refilled it.
+                if pagingGeneration == generation { pageLoad = nil }
+                return
+            }
             nextPageToken = page.nextPageToken
             // A comment can sit on both sides of a page boundary.
             let known = Set(comments.map(\.id))
-            let fresh = page.entries.filter { !known.contains($0.id) }
-            if let head = fresh.first(where: { $0.parentID == nil }) {
-                pageStarts.insert(head.id)
-                hasLaterPages = true
-                comments += fresh
-                emitComments()
-                return
-            }
+            fresh = page.entries.filter { !known.contains($0.id) }
             // Filtered down to nothing: nothing new to display means no row
             // reaches the end to ask again, so the next one is asked now.
-            guard let next = page.nextPageToken else { return }
+            guard !fresh.contains(where: { $0.parentID == nil }), let next = page.nextPageToken else { break }
             token = next
         }
+        // ⚠️ THE SLOT FREES BEFORE THE ROWS RENDER. A page that lands wholly on
+        // screen (a short, filtered one) asks for the next from its rows'
+        // `willDisplay` inside the apply — freed afterwards, that ask found the
+        // slot taken and was dropped, and with every row already displayed the
+        // stream stopped there (found on the inbox, #593).
+        pageLoad = nil
+        guard let head = fresh.first(where: { $0.parentID == nil }) else { return }
+        pageStarts.insert(head.id)
+        hasLaterPages = true
+        comments += fresh
+        emitComments()
     }
 
     private func resetPaging() {
+        pagingGeneration += 1
         pageLoad?.cancel()
         pageLoad = nil
         nextPageToken = nil

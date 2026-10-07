@@ -130,6 +130,31 @@ struct CommentsPagingTests {
         #expect(await provider.requests == [nil, "p2"])
     }
 
+    /// A page that lands wholly on screen asks for the next one WHILE it
+    /// renders — its rows' `willDisplay`, inside the stream's apply. That ask
+    /// must be taken, or the stream stops there: every row has displayed, and
+    /// none will ask again.
+    @Test func aPageAskingForTheNextWhileItRendersIsHeard() async {
+        let provider = PagedComments([
+            nil: CommentPage(entries: [entry("a")], nextPageToken: "p2"),
+            "p2": CommentPage(entries: [entry("b")], nextPageToken: "p3"),
+            "p3": CommentPage(entries: [entry("c")], nextPageToken: nil),
+        ])
+        let (viewModel, shown) = await load(provider)
+        let render = viewModel.onCommentsChange
+        viewModel.onCommentsChange = { state in
+            render?(state)
+            // The view's near-end rows, displayed by this very render.
+            if case .loaded(let models) = state, models.count > 1 { viewModel.loadMoreComments() }
+        }
+
+        viewModel.loadMoreComments()
+        await settle { shown.ids.count == 3 }
+
+        #expect(shown.ids == ["a", "b", "c"])
+        #expect(await provider.requests == [nil, "p2", "p3"])
+    }
+
     @Test func aPageFilteredToNothingMovesStraightOnToTheNext() async {
         let provider = PagedComments([
             nil: CommentPage(entries: [entry("a")], nextPageToken: "p2"),
