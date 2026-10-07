@@ -15,7 +15,14 @@ final class NotificationsViewController: UIViewController {
     private enum Item: Hashable {
         case row(String)
         case showMore
+        /// Under the last row while there is another page (#608): a spinner,
+        /// or "Try Again" after a failure.
+        case pageFooter
     }
+
+    /// How close to the end a row has to come into view to ask for the next
+    /// page — early enough that it usually lands before the end does.
+    static let nearEndRowCount = 5
 
     private let viewModel: NotificationsViewModel
     private let imagePipeline: ImagePipeline?
@@ -51,6 +58,10 @@ final class NotificationsViewController: UIViewController {
         configureStatusViews()
 
         viewModel.onPhaseChange = { [weak self] phase in self?.render(phase) }
+        viewModel.onPageFooterChange = { [weak self] _ in
+            guard let self, !sections.isEmpty else { return }
+            apply(sections)
+        }
         render(.loading)
         viewModel.viewDidLoad()
     }
@@ -139,6 +150,10 @@ final class NotificationsViewController: UIViewController {
             cell, _, hiddenCount in
             cell.configure(hiddenCount: hiddenCount)
         }
+        let pageFooterRegistration = UICollectionView.CellRegistration<NotificationPageFooterCell, Bool> {
+            cell, _, failed in
+            cell.configure(failed: failed)
+        }
         // The app's one section title (`SectionTitleView`): a heading, no
         // count, nothing to tap.
         let headerRegistration = UICollectionView.SupplementaryRegistration<SectionTitleSupplementaryView>(
@@ -156,6 +171,9 @@ final class NotificationsViewController: UIViewController {
             case .showMore:
                 let hidden = self?.sections.first { $0.kind == .new }?.hiddenCount ?? 0
                 return collectionView.dequeueConfiguredReusableCell(using: showMoreRegistration, for: indexPath, item: hidden)
+            case .pageFooter:
+                let failed = self?.viewModel.pageFooter == .retry
+                return collectionView.dequeueConfiguredReusableCell(using: pageFooterRegistration, for: indexPath, item: failed)
             }
         }
         dataSource.supplementaryViewProvider = { collectionView, _, indexPath in
@@ -228,6 +246,10 @@ final class NotificationsViewController: UIViewController {
                 snapshot.appendItems([.showMore], toSection: section.kind)
             }
         }
+        // The page footer closes the LAST section, whichever it is.
+        if viewModel.pageFooter != .none, let last = newSections.last {
+            snapshot.appendItems([.pageFooter], toSection: last.kind)
+        }
         // A row whose content changed under the same id (a new time, a fold
         // that added a sender) is re-drawn in place.
         let changed = modelsByID.compactMap { id, model -> Item? in
@@ -237,6 +259,9 @@ final class NotificationsViewController: UIViewController {
         snapshot.reconfigureItems(changed.filter { snapshot.indexOfItem($0) != nil })
         if snapshot.indexOfItem(.showMore) != nil {
             snapshot.reconfigureItems([.showMore])
+        }
+        if snapshot.indexOfItem(.pageFooter) != nil {
+            snapshot.reconfigureItems([.pageFooter])
         }
         dataSource.apply(snapshot, animatingDifferences: isOnScreen && !previous.isEmpty)
     }
@@ -266,8 +291,24 @@ extension NotificationsViewController: UICollectionViewDelegate {
             viewModel.didSelect(id)
         case .showMore:
             viewModel.showMore()
+        case .pageFooter:
+            viewModel.retryPage()
         case nil:
             break
         }
+    }
+
+    /// Paging (#608): one of the last rows, or the footer itself, coming into
+    /// view asks for the next page. Deferred, so the page's snapshot is never
+    /// applied from inside the display pass.
+    func collectionView(_ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
+        guard viewModel.pageFooter == .loading, let item = dataSource.itemIdentifier(for: indexPath),
+              dataSource.snapshot().itemIdentifiers.suffix(Self.nearEndRowCount).contains(item) else { return }
+        DispatchQueue.main.async { [weak self] in self?.viewModel.loadNextPageIfNeeded() }
+    }
+
+    /// Only the "Try Again" footer answers a tap; the spinner is not a button.
+    func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
+        dataSource.itemIdentifier(for: indexPath) != .pageFooter || viewModel.pageFooter == .retry
     }
 }

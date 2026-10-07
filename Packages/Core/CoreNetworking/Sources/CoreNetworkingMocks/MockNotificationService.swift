@@ -31,10 +31,24 @@ public final class MockNotificationService: @unchecked Sendable {
 
     /// Ten unread rows once the client folds rows 0 and 5 (the same like on
     /// the same post, delivered separately) — six show, "Show 4 more" holds
-    /// the rest — then six read ones. The viewer's posts cycle video, photo,
+    /// the rest — then six read ones, then an older read tail
+    /// (`olderSpecs`). The viewer's posts cycle video, photo,
     /// text (`post-me-00` video, `-01` photo, `-02` text…), so thumbnails and
     /// excerpts both appear. Authors 3, 7, 11 and 15 have no picture.
-    private static let specs: [Spec] = [
+    private static let specs: [Spec] = recentSpecs + olderSpecs
+
+    /// Weeks-old read activity, one a day: enough rows that the drawer needs
+    /// more than one page to reach the oldest (#608). Kinds rotate so
+    /// neighbours rarely fold into one row.
+    private static let olderSpecs: [Spec] = (0..<30).map { index in
+        let kinds: [Notification_V1_NotificationKind] = [.reaction, .comment, .mention, .reply]
+        return Spec(
+            sender: (index * 7) % 20, kind: kinds[index % kinds.count], post: index,
+            senderCount: 1, samples: [], minutesAgo: 60 * 24 * Int64(10 + index), isRead: true
+        )
+    }
+
+    private static let recentSpecs: [Spec] = [
         Spec(sender: 0, kind: .reaction, post: 0, senderCount: 1, samples: [], minutesAgo: 2, isRead: false),
         Spec(sender: 5, kind: .comment, post: 1, senderCount: 1, samples: [], minutesAgo: 9, isRead: false),
         Spec(sender: 2, kind: .reaction, post: 2, senderCount: 5, samples: [6, 9], minutesAgo: 25, isRead: false),
@@ -157,9 +171,15 @@ public final class MockNotificationService: @unchecked Sendable {
             return view
         }
 
+        // Paged (#608): at most `limit` from where `page_token` left off, with
+        // a token while there are more. The token is an offset here — opaque
+        // to the client either way.
         var response = Notification_V1_ListNotificationsResponse()
         let limit = request.limit > 0 ? Int(request.limit) : notifications.count
-        response.notifications = Array(notifications.prefix(limit))
+        let start = min(max(Int(request.pageToken) ?? 0, 0), notifications.count)
+        let end = min(start + limit, notifications.count)
+        response.notifications = Array(notifications[start..<end])
+        response.nextPageToken = end < notifications.count ? String(end) : ""
         response.readHorizonMs = nowMs
         return .success(response)
     }

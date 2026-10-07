@@ -15,10 +15,10 @@ private actor StubProvider: NotificationsProviding {
         self.loadError = loadError
     }
 
-    func loadNotifications(limit: Int32) async throws -> [NotificationItem] {
+    func loadNotifications(limit: Int32, after pageToken: String?) async throws -> NotificationsPage {
         loadCalls += 1
         if let loadError { throw loadError }
-        return items
+        return NotificationsPage(items: items, nextPageToken: nil)
     }
     func markAllRead() async throws {
         markAllReadCalls += 1

@@ -111,13 +111,35 @@ public struct NotificationItem: Equatable, Sendable, Identifiable {
     }
 }
 
+/// One page of the viewer's notifications, most recent first, and where the
+/// next one starts (#608).
+public struct NotificationsPage: Equatable, Sendable {
+    public let items: [NotificationItem]
+    /// Nil when there are no more.
+    public let nextPageToken: String?
+
+    public init(items: [NotificationItem], nextPageToken: String?) {
+        self.items = items
+        self.nextPageToken = nextPageToken
+    }
+}
+
 /// What the notifications UI consumes; implemented by `NotificationsRepository`,
 /// faked in view-model tests.
 public protocol NotificationsProviding: Sendable {
-    func loadNotifications(limit: Int32) async throws -> [NotificationItem]
+    /// A page of at most `limit` notifications: the first when `pageToken` is
+    /// nil, otherwise the one that token starts (#608).
+    func loadNotifications(limit: Int32, after pageToken: String?) async throws -> NotificationsPage
     func markAllRead() async throws
     /// The viewer's unread notification count, for the tab badge.
     func unreadCount() async throws -> Int
+}
+
+extension NotificationsProviding {
+    /// The first page's rows.
+    public func loadNotifications(limit: Int32) async throws -> [NotificationItem] {
+        try await loadNotifications(limit: limit, after: nil).items
+    }
 }
 
 /// Reads the viewer's activity from notification.v1, hydrating what the
@@ -163,23 +185,27 @@ public actor NotificationsRepository: NotificationsProviding {
 
     // MARK: - NotificationsProviding
 
-    public func loadNotifications(limit: Int32) async throws -> [NotificationItem] {
+    public func loadNotifications(limit: Int32, after pageToken: String?) async throws -> NotificationsPage {
         let viewer = try await resolveViewerProfileID()
 
         var request = Notification_V1_ListNotificationsRequest()
         request.profileID = viewer.rawValue
         request.limit = limit
+        request.pageToken = pageToken ?? ""
         let response = await notificationClient.listNotifications(request: request, headers: [:])
         let views: [Notification_V1_NotificationView]
+        let nextToken: String
         switch response.result {
-        case .success(let body): views = body.notifications
+        case .success(let body):
+            views = body.notifications
+            nextToken = body.nextPageToken
         case .failure(let error): throw NotificationsError.transport(message: error.message ?? "code \(error.code)")
         }
 
         // Two independent hydrations: people, and the posts they acted on.
         await hydrateActors(for: views)
         await hydratePreviews(for: views)
-        return views.map(makeItem)
+        return NotificationsPage(items: views.map(makeItem), nextPageToken: nextToken.isEmpty ? nil : nextToken)
     }
 
     public func markAllRead() async throws {
