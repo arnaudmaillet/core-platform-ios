@@ -72,6 +72,22 @@ final class DiscoverGalleryViewController: UIViewController {
     /// number, because this is For You's mosaic.
     private static let seedWindow = 40
 
+    /// Whether the host has another page past what it rendered — set by the
+    /// host, read by a feed opened from here to know when to stop (#638).
+    var hasMore: () -> Bool = { false }
+    /// The answer to a feed opened from one of these posts (#638).
+    private lazy var feedContinuation = GridFeedContinuation(
+        ids: { [weak self] in self?.page.posts.map(\.id) ?? [] },
+        hasMore: { [weak self] in self?.hasMore() ?? false },
+        askMore: { [weak self] in self?.onNearEnd?() }
+    )
+
+    /// The ids after `id` in this list's order, for a feed opened from it —
+    /// see `GridFeedContinuation`.
+    func postIDs(after id: PostID) async -> [PostID]? {
+        await feedContinuation.postIDs(after: id)
+    }
+
     /// - Parameter staking: where the tiles' hearts read the viewer's stake
     ///   (red once staked) — For You's own, so the gallery and the list
     ///   behind it agree. The hearts are readouts; nothing here spends.
@@ -115,10 +131,12 @@ final class DiscoverGalleryViewController: UIViewController {
     func render(_ state: ForYouViewModel.PageState) {
         loadViewIfNeeded()
         page.render(state)
+        feedContinuation.answered()
     }
 
     func setPaging(_ paging: Bool) {
         page.setPaging(paging)
+        if !paging { feedContinuation.answered() }
     }
 
     func endRefreshing() {
@@ -244,7 +262,10 @@ final class DiscoverGalleryViewController: UIViewController {
             // A tile's heart flies red once the viewer has staked.
             viewerStake: { [weak page] in page?.viewerStake(on: tapped.id) ?? 0 },
             // Pinned since the tap; the close measures a mosaic holding still.
-            willStageDismissal: { [weak page] in page?.pinForPushedClose() }
+            willStageDismissal: { [weak page] in page?.pinForPushedClose() },
+            // On past the window into the mosaic's next posts, then
+            // Discover's next page (#638).
+            continuation: { [weak self] after in await self?.postIDs(after: after) }
         )
         page.openHoldingStill(from: self) { openPost(self, origin, stream.map(\.id)) }
     }

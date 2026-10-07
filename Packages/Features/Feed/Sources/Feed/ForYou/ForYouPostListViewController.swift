@@ -105,6 +105,22 @@ final class ForYouPostListViewController: UIViewController {
     /// How many posts follow the tapped one into the feed — For You's number.
     private static let seedWindow = 40
 
+    /// Whether the host has another page past what it rendered — set by the
+    /// host, read by a feed opened from here to know when to stop (#638).
+    var hasMore: () -> Bool = { false }
+    /// The answer to a feed opened from one of these posts (#638).
+    private lazy var feedContinuation = GridFeedContinuation(
+        ids: { [weak self] in self?.page.posts.map(\.id) ?? [] },
+        hasMore: { [weak self] in self?.hasMore() ?? false },
+        askMore: { [weak self] in self?.onNearEnd?() }
+    )
+
+    /// The ids after `id` in this list's order, for a feed opened from it —
+    /// see `GridFeedContinuation`.
+    func postIDs(after id: PostID) async -> [PostID]? {
+        await feedContinuation.postIDs(after: id)
+    }
+
     init(
         kind: Kind,
         imagePipeline: ImagePipeline,
@@ -154,10 +170,12 @@ final class ForYouPostListViewController: UIViewController {
         loadViewIfNeeded()
         page.setNewPosts(newPosts)
         page.render(state)
+        feedContinuation.answered()
     }
 
     func setPaging(_ paging: Bool) {
         page.setPaging(paging)
+        if !paging { feedContinuation.answered() }
     }
 
     func endRefreshing() {
@@ -277,7 +295,10 @@ final class ForYouPostListViewController: UIViewController {
             // card's strip is often not the first — and the row following the
             // post's carousel back, so the close lands on the page left open.
             mediaPage: page.currentMediaPage(atIndex: index),
-            followMediaPage: { [weak page] id, mediaPage in page?.setMediaPage(mediaPage, for: id) }
+            followMediaPage: { [weak page] id, mediaPage in page?.setMediaPage(mediaPage, for: id) },
+            // On past the window into the list's next posts, then the
+            // timeline's next page (#638).
+            continuation: { [weak self] after in await self?.postIDs(after: after) }
         )
         page.openHoldingStill(from: self) { openPost(self, origin, stream.map(\.id)) }
     }
