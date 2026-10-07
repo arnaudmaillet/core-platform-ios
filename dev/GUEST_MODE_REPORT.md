@@ -227,7 +227,7 @@ This is the `GatedAction` enum the code would carry (§6.3). Each case maps to o
 ## 5. Sign-up prompt and conversion
 
 **The sheet.**
-- A half sheet (medium detent, expandable) with a contextual title from the gated action.
+- A sheet exactly as tall as the step it shows, with a contextual title from the gated action. It has one content-sized detent, capped at the screen's height (taller content scrolls), and it cannot be dragged taller than its content. Pushing or popping a step animates it to that step's height (#563).
 - Below the title: Continue with Apple, Continue with Google, then Continue with email / phone (decision 2).
 - Footer: "Already have an account? Log in".
 - It is dismissible by swipe or ✕, and dismissing does nothing else: no nag, no counter.

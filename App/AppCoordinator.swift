@@ -327,24 +327,26 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         let signIn = SignInSheetContainer(content: flow) { [weak self] in
             self?.finishSignUp(signedIn: false)
         }
-        // A sheet over what the guest was doing, not a screen instead of it:
-        // tall enough for the methods, growing to full height for a credential
-        // step (the flow asks for that itself).
+        // A sheet over what the guest was doing, not a screen instead of it,
+        // exactly as tall as the step it shows (#563): one content-sized
+        // detent, capped at the screen, never draggable taller than its
+        // content. A push or a pop animates it to the next step's height.
         if let sheet = signIn.sheetPresentationController {
-            sheet.detents = [Self.signUpMethodsDetent, .large()]
+            if let fitting = flow as? ContentFittingNavigationController {
+                fitting.fit(sheet, fallback: Self.signUpFallbackHeight)
+            } else {
+                sheet.detents = [.large()]
+            }
             sheet.prefersGrabberVisible = true
         }
         presentedSignIn = signIn
         StakeShop.topPresenter(over: shell).present(signIn, animated: true)
     }
 
-    /// The sign-up sheet's resting height: the methods and the way to log in,
-    /// with the screen behind it still in view.
-    private static let signUpMethodsDetent = UISheetPresentationController.Detent.custom(
-        identifier: .init("signUpMethods")
-    ) { context in
-        min(context.maximumDetentValue, 540)
-    }
+    /// The sheet's height while a step has none to give yet (it has not been
+    /// laid out, or it is not a table) — the methods screen's old resting
+    /// height.
+    private static let signUpFallbackHeight: CGFloat = 540
 
     /// The sheet's headline: the action's own, except where the welcome gift
     /// is the point — a like or a claim names the likes waiting (report §3.2).

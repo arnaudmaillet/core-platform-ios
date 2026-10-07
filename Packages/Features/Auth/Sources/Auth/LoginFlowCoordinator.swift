@@ -154,7 +154,8 @@ final class LoginFlowCoordinator {
         }
         methodSelection.flowToolbarItems = flowToolbarItems
 
-        let navigation = UINavigationController(rootViewController: methodSelection)
+        // Sized to its top step when presented as a sheet (#563).
+        let navigation = ContentFittingNavigationController(rootViewController: methodSelection)
         // The language toolbar blends with the canvas instead of drawing bar
         // chrome of its own.
         let toolbarAppearance = UIToolbarAppearance()
@@ -214,9 +215,10 @@ final class LoginFlowCoordinator {
             verification.qaAutoVerify = "123456"
         }
         #endif
-        let sheet = UINavigationController(rootViewController: verification)
+        // As tall as the code card, like the flow's own sheet (#563).
+        let sheet = ContentFittingNavigationController(rootViewController: verification)
         if let presentation = sheet.sheetPresentationController {
-            presentation.detents = [.medium()]
+            sheet.fit(presentation, fallback: 280)
             presentation.prefersGrabberVisible = true
         }
         navigationController?.present(sheet, animated: true)
@@ -594,15 +596,11 @@ final class LoginFlowCoordinator {
         }
     }
 
-    /// Pushes a step of the flow. A credential step needs the keyboard and
-    /// the whole height, so a sheet resting at its shorter detent grows first.
+    /// Pushes a step of the flow. The sheet follows the step's own height
+    /// (`ContentFittingNavigationController`, #563) — it no longer jumps to
+    /// full height for a credential step and stays there after the pop.
     private func push(_ screen: UIViewController) {
-        guard let navigationController else { return }
-        if let sheet = navigationController.sheetPresentationController,
-           sheet.selectedDetentIdentifier != .large {
-            sheet.animateChanges { sheet.selectedDetentIdentifier = .large }
-        }
-        navigationController.pushViewController(screen, animated: true)
+        navigationController?.pushViewController(screen, animated: true)
     }
 
     /// The account-creation steps (code, date of birth, handle) land here once
