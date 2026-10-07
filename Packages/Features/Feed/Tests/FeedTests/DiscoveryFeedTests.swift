@@ -137,6 +137,27 @@ private final class TwoCorporaProvider: ForYouProviding, @unchecked Sendable {
     func discoveryPage(after token: String) async throws -> ForYouPage? { discovery[token] }
 }
 
+/// Records which corpus each page was asked of (#566). In the app's
+/// `ForYouRepository`, `page(after:)` is `GetFollowingFeed` with that token and
+/// `discoveryPage(after:)` is `GetDiscoveryFeed`.
+private final class RecordingCorporaProvider: ForYouProviding, @unchecked Sendable {
+    private(set) var followingTokens: [String] = []
+    private(set) var discoveryTokens: [String] = []
+    var followingPages: [String: ForYouPage] = [:]
+    var followingFirst = ForYouPage(posts: [], nextPageToken: nil)
+    var discoveryFirst = ForYouPage(posts: [], nextPageToken: nil)
+    func firstPage() async throws -> ForYouPage { followingFirst }
+    func page(after token: String) async throws -> ForYouPage {
+        followingTokens.append(token)
+        return followingPages[token] ?? ForYouPage(posts: [], nextPageToken: nil)
+    }
+    func discoveryFirstPage() async throws -> ForYouPage? { discoveryFirst }
+    func discoveryPage(after token: String) async throws -> ForYouPage? {
+        discoveryTokens.append(token)
+        return ForYouPage(posts: [], nextPageToken: nil)
+    }
+}
+
 /// Runs `action` and returns once the model says a load settled — the
 /// callback the view closes its refresh control on — rather than guessing a
 /// number of yields.
@@ -199,6 +220,39 @@ struct ForYouDiscoveryCorpusTests {
         #expect(snapshot?.rails.following.isEmpty == true)
     }
 
+    /// #566: with discovery wired (always, in the app), the end of a pushed
+    /// Following or Friends list pages the FOLLOWING timeline with its own
+    /// token — not Discover — and only the lists' footer follows that load.
+    @Test func theFollowingListPagesTheFollowingTimeline() async {
+        let provider = RecordingCorporaProvider()
+        provider.followingFirst = ForYouPage(posts: [tile("f1", author: "followed")], nextPageToken: "f2")
+        provider.followingPages["f2"] = ForYouPage(posts: [tile("f3", author: "followed")], nextPageToken: nil)
+        provider.discoveryFirst = ForYouPage(posts: [tile("d1"), tile("d2")], nextPageToken: "d2")
+        let model = ForYouViewModel(repository: provider, unreadStore: ForYouUnreadStore(defaults: UserDefaults(suiteName: UUID().uuidString)!))
+        var followingFooter: [Bool] = []
+        var discoverFooter: [Bool] = []
+        model.onFollowingPagingChange = { followingFooter.append($0) }
+        model.onPagingChange = { discoverFooter.append($0) }
+        await loading(model) { model.viewDidLoad() }
+        #expect(model.hasMoreFollowingPages)
+
+        await loading(model) { model.loadNextPageIfNeeded(.following) }
+
+        #expect(provider.followingTokens == ["f2"], "GetFollowingFeed with the following token")
+        #expect(provider.discoveryTokens.isEmpty, "never GetDiscoveryFeed")
+        #expect(followingFooter == [true, false], "the lists' footer follows the load")
+        #expect(discoverFooter.isEmpty, "Discover's footer stays out of it")
+        #expect(!model.hasMoreFollowingPages, "stops once next_page_token is empty")
+
+        model.loadNextPageIfNeeded(.following)
+        #expect(provider.followingTokens == ["f2"], "nothing more to ask")
+
+        // Discover's grid and "View all" still page Discover.
+        await loading(model) { model.loadNextPageIfNeeded(.discover) }
+        #expect(provider.discoveryTokens == ["d2"])
+        #expect(provider.followingTokens == ["f2"])
+    }
+
     /// Paging appends the pool in order and drops a post served twice (it
     /// moved between rankings, which the contract allows).
     @Test func pagingAppendsThePoolOnce() async {
@@ -213,7 +267,7 @@ struct ForYouDiscoveryCorpusTests {
         await loading(model) { model.viewDidLoad() }
         #expect(model.hasMorePages)
 
-        await loading(model) { model.loadNextPageIfNeeded() }
+        await loading(model) { model.loadNextPageIfNeeded(.discover) }
 
         #expect(content(snapshot?.discover ?? .loading) == ["d1", "d2", "d3"])
         #expect(!model.hasMorePages)
