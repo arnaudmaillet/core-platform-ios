@@ -192,6 +192,9 @@ final class SnapAuthorIdentityView: UIView {
     /// the blur (`BarItemContentTransition.setScrubBlur`).
     func setScrubBlur(_ amount: CGFloat) { contentTransition.setScrubBlur(amount) }
 
+    /// How blurred the pill SHOWS: the scroll's blur, or a swap's envelope.
+    var shownScrubBlur: CGFloat { contentTransition.scrubBlur }
+
     /// Renders the blurred still a scroll may need, before the page moves.
     func prepareScrub() { contentTransition.prepareScrub() }
 

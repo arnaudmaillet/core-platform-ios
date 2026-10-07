@@ -78,9 +78,11 @@ private func post(by author: String) -> FeedEntry {
 @MainActor
 struct HeldCommentsTests {
     @discardableResult
+    /// Looks, not wall-clock time: a 10 s deadline expired on a starved
+    /// runner while the suite took 159 s (seen on #627's local run) — a budget
+    /// of looks spends nothing while the process is not scheduled.
     private func settle(until condition: () -> Bool) async -> Bool {
-        let deadline = ContinuousClock.now + .seconds(10)
-        while ContinuousClock.now < deadline {
+        for _ in 0..<2_000 {
             await Task.yield()
             if condition() { return true }
             try? await Task.sleep(for: .milliseconds(5))

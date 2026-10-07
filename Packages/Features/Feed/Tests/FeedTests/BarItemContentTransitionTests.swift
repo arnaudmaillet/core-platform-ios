@@ -202,14 +202,169 @@ struct BarItemContentTransitionTests {
         #expect(host.content.alpha == 1)
         #expect(host.transition.isRunning == false)
 
+        // A scrub that swapped: its envelope runs out on the clock first.
+        let clock = Clock()
+        host.transition.now = { clock.time }
+        host.transition.ticksOnDisplay = false
         host.transition.setScrubBlur(1)
         host.transition.perform(animated: true) { host.label.text = "New" }
         host.transition.setScrubBlur(1)
         host.transition.setScrubBlur(0.3)
         host.transition.setScrubBlur(0)
+        #expect(settled == 0, "landed while the swap's envelope still blurs it")
+        clock.time += BarItemContentTransition.swapHold + BarItemContentTransition.swapRelease
+        host.transition.tick()
         #expect(settled == 1)
         #expect(host.stills.isEmpty)
         #expect(host.content.alpha == 1)
+    }
+
+    // MARK: - A swap is always seen blurred (#627)
+
+    /// A clock the test winds by hand.
+    @MainActor
+    final class Clock {
+        var time: CFTimeInterval = 1_000
+    }
+
+    private func onTheClock(_ host: Host) -> Clock {
+        let clock = Clock()
+        host.transition.now = { clock.time }
+        host.transition.ticksOnDisplay = false
+        return clock
+    }
+
+    @Test func theEnvelopeHoldsThenReleases() {
+        let hold = BarItemContentTransition.swapHold
+        let release = BarItemContentTransition.swapRelease
+        #expect(BarItemContentTransition.swapEnvelope(after: 0) == 1)
+        #expect(BarItemContentTransition.swapEnvelope(after: hold * 0.9) == 1)
+        #expect(abs(BarItemContentTransition.swapEnvelope(after: hold + release / 2) - 0.5) < 1e-6)
+        #expect(BarItemContentTransition.swapEnvelope(after: hold + release) == 0)
+        #expect(hold + release >= 0.15, "the agreed minimum is ~150 ms of blur after a swap")
+    }
+
+    /// The swap frame is FULL blur whatever the scroll's blur was, and the
+    /// blur outlives a scroll that has already stopped: it is released on
+    /// the clock, with the stills kept until it is gone.
+    @Test func aSwapIsMadeUnderFullBlurAndOutlivesTheScroll() {
+        let host = Host()
+        let window = Self.window(showing: host)
+        defer { window.isHidden = true }
+        let clock = onTheClock(host)
+        var settled = 0
+        host.transition.didSettle = { settled += 1 }
+
+        // A fast frame: the scroll's blur is only 0.3 when the swap comes.
+        host.transition.setScrubBlur(0.3)
+        host.transition.perform(animated: true) { host.label.text = "New" }
+        host.transition.setScrubBlur(0.3)
+        #expect(host.label.text == "New")
+        #expect(host.transition.scrubBlur == 1, "the swap was made with sharp content showing")
+        #expect(host.content.alpha == 0)
+
+        // The page lands on the next frame: the scroll says 0.
+        host.transition.setScrubBlur(0)
+        #expect(host.transition.scrubBlur == 1, "the blur ended with the scroll")
+        #expect(host.transition.isRunning)
+        if !UIAccessibility.isReduceMotionEnabled { #expect(!host.stills.isEmpty) }
+
+        clock.time += BarItemContentTransition.swapHold + BarItemContentTransition.swapRelease / 2
+        host.transition.tick()
+        #expect(abs(host.transition.scrubBlur - 0.5) < 1e-6)
+        #expect(abs(host.content.alpha - 0.5) < 1e-6)
+        #expect(settled == 0)
+
+        clock.time += BarItemContentTransition.swapRelease
+        host.transition.tick()
+        #expect(host.transition.scrubBlur == 0)
+        #expect(host.content.alpha == 1)
+        #expect(host.stills.isEmpty)
+        #expect(settled == 1)
+        #expect(!host.transition.isRunning)
+    }
+
+    /// A fling, sampled as a display would: few frames per page. Every swap
+    /// is made under full blur, and the pill stays blurred at least the
+    /// agreed minimum after it, at 60 and 120 Hz up to 9,000 pt/s.
+    @Test(arguments: [(60.0, 6_000.0), (60.0, 9_000.0), (120.0, 6_000.0), (120.0, 9_000.0)])
+    func aFlingIsSeenBlurred(hz: Double, speed: Double) {
+        let host = Host()
+        let window = Self.window(showing: host)
+        defer { window.isHidden = true }
+        let clock = onTheClock(host)
+        let page = 874.0
+        var scrub = BarPillScrub()
+        scrub.settle(at: 0)
+        var swapBlur: CGFloat?
+        var swapTime: CFTimeInterval?
+        var lastBlurred: CFTimeInterval?
+
+        // From rest on page 0 to rest on page 1, then a few frames at rest.
+        var offset = 0.0
+        while true {
+            offset = min(offset + speed / hz, page)
+            let position = CGFloat(offset / page)
+            let blur = BarPillScrub.frame(position: position, itemCount: 2)?.blur ?? 0
+            host.transition.setScrubBlur(blur)
+            if scrub.update(position: position, itemCount: 2) != nil {
+                host.transition.perform(animated: true) { host.label.text = "New" }
+                host.transition.setScrubBlur(blur)
+                swapBlur = host.transition.scrubBlur
+                swapTime = clock.time
+            }
+            host.transition.tick()
+            if host.transition.scrubBlur > 0 { lastBlurred = clock.time }
+            clock.time += 1 / hz
+            if offset >= page, !host.transition.isRunning { break }
+            if clock.time > 1_010 { break }
+        }
+
+        #expect(host.label.text == "New")
+        // The window jumped in one frame at the fastest speeds: the swap then
+        // runs on the clock's timeline instead (`aFrameThatJumpsTheWindow…`).
+        if let swapBlur, let swapTime, let lastBlurred {
+            #expect(swapBlur == 1, "swapped at blur \(swapBlur)")
+            #expect(lastBlurred - swapTime >= 0.15, "blurred \((lastBlurred - swapTime) * 1000) ms after the swap")
+        }
+    }
+
+    /// One frame jumps the whole blur window (a fling's dropped frame): the
+    /// scroll's blur is 0 on the swap frame, so the change takes the clock's
+    /// timeline — and the frame's second call at 0 no longer flushes it to a
+    /// hard cut.
+    @Test func aFrameThatJumpsTheWindowStillBlursOnTheClock() {
+        let host = Host()
+        let window = Self.window(showing: host)
+        defer { window.isHidden = true }
+
+        host.transition.setScrubBlur(0)
+        host.transition.perform(animated: true) { host.label.text = "New" }
+        host.transition.setScrubBlur(0)
+
+        #expect(host.label.text == "Old", "the change was cut in sharp")
+        #expect(host.transition.isRunning, "no blur ran for the change")
+    }
+
+    /// A slow drag still follows the finger: a held finger keeps the full
+    /// blur, and once the envelope is spent the blur is exactly the scroll's.
+    @Test func aSlowDragFollowsTheFinger() {
+        let host = Host()
+        let window = Self.window(showing: host)
+        defer { window.isHidden = true }
+        let clock = onTheClock(host)
+
+        host.transition.setScrubBlur(1)
+        host.transition.perform(animated: true) { host.label.text = "New" }
+        host.transition.setScrubBlur(1)
+        clock.time += 1
+        host.transition.setScrubBlur(1)
+        #expect(host.transition.scrubBlur == 1, "a held finger lost its blur")
+
+        let drawn = BarPillScrub.blur(coverage: 0.6)
+        host.transition.setScrubBlur(drawn)
+        #expect(abs(host.transition.scrubBlur - drawn) < 1e-6)
+        #expect(abs(host.content.alpha - (1 - drawn)) < 1e-6)
     }
 
     /// A still prepared at a drag's start is the one the scrub shows, and a

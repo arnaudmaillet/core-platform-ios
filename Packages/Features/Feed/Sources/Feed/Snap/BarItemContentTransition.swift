@@ -98,7 +98,7 @@ final class BarItemContentTransition {
     }
 
     /// Whether a swap is under way.
-    var isRunning: Bool { isFadingOut || !stills.isEmpty || scrubBlur > 0 }
+    var isRunning: Bool { isFadingOut || !stills.isEmpty || scrubBlur > 0 || swapAt != nil }
 
     /// Applies `change` to the live content — through the blur when `animated`
     /// and the host is on screen, at once otherwise.
@@ -181,13 +181,50 @@ final class BarItemContentTransition {
         stills = []
         scrubStill = nil
         scrubBlur = 0
+        scrollBlur = 0
+        swapAt = nil
+        stopTicking()
         scrubSwapped = false
     }
 
     // MARK: - Scroll-driven
 
-    /// How blurred the content is under the scroll right now (`setScrubBlur`).
+    /// How blurred the content SHOWS under the scroll right now: what the
+    /// scroll asks (`setScrubBlur`), or the swap's envelope when that is
+    /// more (`swapEnvelope`).
     private(set) var scrubBlur: CGFloat = 0
+    /// What the scroll last asked for.
+    private var scrollBlur: CGFloat = 0
+    /// When the last scroll-driven swap landed: the start of its envelope.
+    private var swapAt: CFTimeInterval?
+    /// The clock the envelope runs on. Swappable for tests, which wind it by
+    /// hand and call `tick()` rather than racing a display link.
+    var now: () -> CFTimeInterval = { CACurrentMediaTime() }
+    /// Whether the envelope runs on a display link. Off in tests.
+    var ticksOnDisplay = true
+    private var displayLink: CADisplayLink?
+
+    /// ⚠️ **A SWAP IS ALWAYS SEEN BLURRED, FOR AT LEAST THIS LONG (#627).**
+    /// The scroll's blur is a function of position alone, so its length is
+    /// distance over speed: about 40–60 ms at fling speed, much of it a
+    /// double exposure rather than a blur — and a frame moving further than
+    /// the ±0.02 plateau swapped on the falling ramp, at 0.69 or as low as
+    /// 0.08 (measured over the shipped curve at 60/120 Hz). So the swap frame
+    /// is FULL blur, held `swapHold`, then released over `swapRelease` on the
+    /// clock, and what shows is the more blurred of that and the scroll: a
+    /// slow drag, whose own blur outlasts it, is unchanged; a fling gets
+    /// `swapHold + swapRelease` of blur after the swap, whatever its speed.
+    static let swapHold: TimeInterval = 0.06
+    static let swapRelease: TimeInterval = fadeInDuration
+
+    /// The envelope `t` seconds after a scroll-driven swap: 1, held, then a
+    /// linear release to 0.
+    static func swapEnvelope(after t: TimeInterval) -> CGFloat {
+        if t < swapHold { return 1 }
+        let released = (t - swapHold) / swapRelease
+        // A hair short of 1 is 1: `hold + release` must end it, rounding or not.
+        return released >= 1 - 1e-9 ? 0 : CGFloat(1 - released)
+    }
     /// The blurred still of what the live content draws while the scroll owns
     /// the blur — rendered ONCE per content (when the scrub begins, when the
     /// drag that may start one begins, or at a swap), never per frame.
@@ -235,7 +272,18 @@ final class BarItemContentTransition {
     /// to its end first: one owner at a time.
     func setScrubBlur(_ amount: CGFloat) {
         let amount = min(max(amount, 0), 1)
-        guard amount != scrubBlur || !pending.isEmpty || (amount == 0 && scrubStill != nil) else { return }
+        // ⚠️ A TIMED SWAP THE SCROLL DID NOT START RUNS ON ITS OWN CLOCK. A
+        // frame that jumps the whole blur window (a fling, a dropped frame)
+        // swaps with the scroll's blur at 0, so the change took the timed
+        // path — and the caller's second call of the frame, at 0, used to
+        // flush its pending change at once: a hard cut (#627). Nothing is
+        // blurred by the scroll, so there is nothing for it to settle here.
+        if amount == 0, scrubBlur == 0, isFadingOut {
+            scrollBlur = 0
+            return
+        }
+        guard amount != scrollBlur || !pending.isEmpty || (amount == 0 && scrubStill != nil && swapAt == nil)
+        else { return }
         guard let host, let content else { return }
         if amount > 0, scrubBlur == 0 {
             // A timed swap mid-flight gives way to a fresh start from the
@@ -245,7 +293,27 @@ final class BarItemContentTransition {
             if scrubStill == nil { scrubStill = still(of: content) }
             scrubSwapped = false
         }
-        commitScrub(to: amount)
+        scrollBlur = amount
+        commitScrub()
+    }
+
+    /// One frame of the swap's envelope: the shown blur follows the clock
+    /// while the scroll has nothing more to say (it may have stopped).
+    func tick() {
+        guard swapAt != nil else { return stopTicking() }
+        commitScrub()
+    }
+
+    private func startTicking() {
+        guard ticksOnDisplay, displayLink == nil else { return }
+        let link = CADisplayLink(target: DisplayLinkProxy(self), selector: #selector(DisplayLinkProxy.step))
+        link.add(to: .main, forMode: .common)
+        displayLink = link
+    }
+
+    private func stopTicking() {
+        displayLink?.invalidate()
+        displayLink = nil
     }
 
     private func scheduleScrubCommit() {
@@ -257,21 +325,26 @@ final class BarItemContentTransition {
             guard let self else { return }
             self.scrubCommitScheduled = false
             guard !self.pending.isEmpty else { return }
-            self.commitScrub(to: self.scrubBlur)
+            self.commitScrub()
         }
     }
 
-    private func commitScrub(to amount: CGFloat) {
+    private func commitScrub() {
         guard let host, let content else { return }
         if !pending.isEmpty {
             let changes = pending
             pending = []
+            // Under a blur (the scroll's, or a previous swap's envelope): the
+            // swap is made under FULL blur, and its envelope starts.
+            let underBlur = scrollBlur > 0 || scrubBlur > 0
             changes.forEach { $0() }
             scrubSwapped = true
             // The scroll drives only fixed-width pills (the snap feed's), so
             // this does nothing there; a hugging host lands its width at once.
             remeasure?(nil)
-            if amount > 0 {
+            if underBlur {
+                swapAt = now()
+                startTicking()
                 host.layoutIfNeeded()
                 let previous = scrubStill
                 let next = still(of: content)
@@ -281,21 +354,31 @@ final class BarItemContentTransition {
                     options: [.curveEaseInOut, .allowUserInteraction]
                 ) {
                     previous?.alpha = 0
-                    next?.alpha = amount
+                    next?.alpha = 1
                 } completion: { [weak self] _ in
                     previous?.removeFromSuperview()
                     self?.stills.removeAll { $0 === previous }
                 }
             }
         }
-        scrubBlur = amount
+        var shown = scrollBlur
+        if let swapAt {
+            let envelope = Self.swapEnvelope(after: now() - swapAt)
+            if envelope > 0 {
+                shown = max(shown, envelope)
+            } else {
+                self.swapAt = nil
+                stopTicking()
+            }
+        }
+        scrubBlur = shown
         UIView.performWithoutAnimation {
-            content.alpha = 1 - amount
+            content.alpha = 1 - shown
             // A still being cross-faded in keeps its fade: an alpha written
             // under a running animation is what it lands on.
-            scrubStill?.alpha = amount
+            scrubStill?.alpha = shown
         }
-        guard amount == 0 else { return }
+        guard shown == 0 else { return }
         stills.forEach { $0.removeFromSuperview() }
         stills = []
         scrubStill = nil
@@ -488,5 +571,19 @@ enum BarItemRemeasure {
         UIView.animate(withDuration: duration, delay: 0, options: [.curveEaseInOut, .allowUserInteraction]) {
             host.layoutIfNeeded()
         }
+    }
+}
+
+/// Holds a transition for its display link without keeping it alive: a
+/// display link retains its target. Main-actor: the link runs on the main
+/// run loop.
+@MainActor
+private final class DisplayLinkProxy: NSObject {
+    weak var owner: BarItemContentTransition?
+    init(_ owner: BarItemContentTransition) { self.owner = owner }
+
+    @objc func step(_ link: CADisplayLink) {
+        guard let owner else { return link.invalidate() }
+        owner.tick()
     }
 }
