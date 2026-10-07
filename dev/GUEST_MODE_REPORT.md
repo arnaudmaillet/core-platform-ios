@@ -149,7 +149,15 @@ What we take from it:
 
 **Rule.** When the person allows location (guest or member), the country the device is in is unlocked on the map, for free. Every other country stays locked: a member unlocks it with gems, while a guest who taps one gets the sign-up sheet.
 
-Today the app has no location code at all: no `CLLocationManager`, and no `NSLocationWhenInUseUsageDescription` in `App/Info.plist`. The home country is hard-coded to `"FR"` in mock mode (`App/AppContainer.swift:494`). Against the fleet, `countryAccess` is `nil`, so every country is open (`AppContainer.swift:473-499`).
+Location is implemented by `CurrentCountryProvider` (Maps, CoreLocation, reduced accuracy). Against the fleet, `countryAccess` is still `nil`, so every country is open to members.
+
+**Guest map without location (#564).** While a guest has not allowed location (never asked, or denied), the map is a locked showcase:
+- the whole world, at the widest zoom MapKit allows;
+- a dark veil over it;
+- no pan, zoom, rotate, pitch, marker or country tap;
+- no filter pills and no compass.
+
+The "See posts around you" card sits above the veil and stays usable. When location is allowed, the veil fades, the map unlocks and flies to the current country. That happens from the card, or from iOS Settings and back. A guest who signs up while locked is unlocked at once. Members are never locked. The location provider reaches the map on the fleet too, so the lock can unlock there.
 
 How it works:
 
