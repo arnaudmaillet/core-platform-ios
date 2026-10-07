@@ -35,8 +35,19 @@ private actor PagedComments: CommentsProviding {
     private var pages: [String?: CommentPage]
     private var failuresLeft: [String: Int] = [:]
     private(set) var requests: [String?] = []
+    /// Tokens whose pages wait for `release`, in the order they were asked.
+    private var gated: Set<String> = []
+    private var waiting: [(token: String, resume: CheckedContinuation<Void, Never>)] = []
 
     init(_ pages: [String?: CommentPage]) { self.pages = pages }
+
+    func gate(_ token: String) { gated.insert(token) }
+    func waitingCount(_ token: String) -> Int { waiting.count { $0.token == token } }
+    /// Lets the OLDEST ask held for `token` answer.
+    func releaseOldest(_ token: String) {
+        guard let index = waiting.firstIndex(where: { $0.token == token }) else { return }
+        waiting.remove(at: index).resume.resume()
+    }
 
     func setPage(_ page: CommentPage, for token: String?) { pages[token] = page }
     func failOnce(_ token: String) { failuresLeft[token] = 1 }
@@ -47,6 +58,9 @@ private actor PagedComments: CommentsProviding {
 
     func loadCommentsPage(for postID: PostID, after pageToken: String?) async throws -> CommentPage {
         requests.append(pageToken)
+        if let token = pageToken, gated.contains(token) {
+            await withCheckedContinuation { waiting.append((token, $0)) }
+        }
         if let token = pageToken, let left = failuresLeft[token], left > 0 {
             failuresLeft[token] = left - 1
             throw CommentsError.transport(message: "offline")
@@ -153,6 +167,39 @@ struct CommentsPagingTests {
 
         #expect(shown.ids == ["a", "b", "c"])
         #expect(await provider.requests == [nil, "p2", "p3"])
+    }
+
+    /// A page from before a reset neither lands nor frees the slot of the
+    /// fetch that started after it: the stale answer arrives FIRST, while the
+    /// new fetch is still out, and a further near-end ask must still find the
+    /// slot taken — one request, not two, and the page lands once.
+    @Test func aPageFromBeforeAResetNeitherLandsNorFreesTheNewFetch() async {
+        let provider = PagedComments([
+            nil: CommentPage(entries: [entry("a")], nextPageToken: "p2"),
+            "p2": CommentPage(entries: [entry("b")], nextPageToken: nil),
+        ])
+        await provider.gate("p2")
+        let (viewModel, shown) = await load(provider)
+
+        viewModel.loadMoreComments() // the stale fetch
+        await settle(untilAsync: { await provider.waitingCount("p2") == 1 })
+        viewModel.resetPaging()
+        viewModel.refresh() // the first page again, and its token
+        await settle(untilAsync: { await provider.requests.count == 3 })
+        await settle()
+        viewModel.loadMoreComments() // the new fetch
+        await settle(untilAsync: { await provider.waitingCount("p2") == 2 })
+
+        await provider.releaseOldest("p2") // the stale page answers first
+        await settle()
+        #expect(shown.ids == ["a"])
+        viewModel.loadMoreComments() // the slot is still the new fetch's
+        await settle()
+        #expect(await provider.requests == [nil, "p2", nil, "p2"])
+
+        await provider.releaseOldest("p2")
+        await settle { shown.ids.count == 2 }
+        #expect(shown.ids == ["a", "b"])
     }
 
     @Test func aPageFilteredToNothingMovesStraightOnToTheNext() async {

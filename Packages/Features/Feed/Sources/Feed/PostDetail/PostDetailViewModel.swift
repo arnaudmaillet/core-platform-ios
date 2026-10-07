@@ -535,7 +535,10 @@ public final class PostDetailViewModel {
         emitComments()
     }
 
-    private func resetPaging() {
+    /// Internal, not private, for the one test that races a page against it:
+    /// in the app only a draft becoming a post resets, and a draft pages
+    /// nothing before that.
+    func resetPaging() {
         pagingGeneration += 1
         pageLoad?.cancel()
         pageLoad = nil
