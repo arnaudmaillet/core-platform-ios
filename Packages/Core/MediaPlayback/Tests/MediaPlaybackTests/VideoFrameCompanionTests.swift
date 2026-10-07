@@ -118,10 +118,8 @@ struct VideoFrameCompanionTests {
     }
 
     private func waitFor(within limit: Double = 30, _ condition: () -> Bool) async throws {
-        let deadline = CACurrentMediaTime() + limit
-        while !condition(), CACurrentMediaTime() < deadline {
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        // Counted in LOOKS, not wall clock (#599): a descheduled runner spends none.
+        _ = try await TimingTolerance.settle(looks: Int(limit * 100), step: .milliseconds(10), condition)
     }
 
     @Test func aPlayingSurfaceTellsItsCompanionEachFrameAheadAndThenWithTheFrame() async throws {
@@ -142,9 +140,16 @@ struct VideoFrameCompanionTests {
                 "guard: \(recorder.presented.count) frames presented, \(surface.enqueuedFrameCount) enqueued")
         #expect(recorder.mismatches.isEmpty, "\(recorder.mismatches.prefix(5))")
         // Ahead by at least most of a refresh: never made in the turn it shows.
+        //
+        // ⚠️ THE MEDIAN, AND ALMOST EVERY FRAME — NOT THE SHORTEST (#599). A
+        // runner that stalls the main thread folds a prepare into its present
+        // once in a while: CI read a shortest lead of 0.3 ms on code that leads
+        // by a refresh. A companion prepared in the turn it shows leads by ~0 on
+        // every frame, and fails this (`TimingToleranceTests`).
         let lead = recorder.leads.sorted()
         let median = lead.isEmpty ? 0 : lead[lead.count / 2]
-        #expect((lead.first ?? 0) > 0.004, "shortest lead \(lead.first ?? 0)s, median \(median)s")
+        #expect(TimingTolerance.mostlyAbove(recorder.leads, 0.004),
+                "leads: shortest \(lead.first ?? 0)s, median \(median)s, \(lead.filter { $0 <= 0.004 }.count) of \(lead.count) under 4 ms")
         #expect(recorder.presented == recorder.presented.sorted(), "frames presented out of order")
     }
 
