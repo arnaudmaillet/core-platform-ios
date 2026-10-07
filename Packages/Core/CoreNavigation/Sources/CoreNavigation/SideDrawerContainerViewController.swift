@@ -178,6 +178,15 @@ public final class SideDrawerContainerViewController: UIViewController {
     private var settleGeneration = 0
     private var pendingCloseCompletions: [() -> Void] = []
     private var statusBarFollowsDrawer = false
+    /// #561: the main screen blurs as it slides away — none at rest, full
+    /// with the drawer open. Between `mainHost` and `dimView`, moved with
+    /// them, so it blurs the LIVE main screen (video, map, glass bars) and the
+    /// dim keeps the tap and VoiceOver's close on top.
+    private let blurView = ProgressBlurView(style: .systemThinMaterial)
+    /// Drives the blur through a settle, frame by frame from the main
+    /// screen's presentation: a blur's strength does not animate inside the
+    /// spring's `UIView.animate`.
+    private var blurLink: CADisplayLink?
 
     public init(main: UIViewController, drawer: UIViewController) {
         self.mainViewController = main
@@ -225,6 +234,15 @@ public final class SideDrawerContainerViewController: UIViewController {
         dimView.addGestureRecognizer(dimTap)
         view.addSubview(dimView)
 
+        blurView.layer.cornerCurve = .continuous
+        blurView.clipsToBounds = true
+        blurView.accessibilityIdentifier = "side-drawer-main-blur"
+        view.insertSubview(blurView, belowSubview: dimView)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(reduceTransparencyChanged),
+            name: UIAccessibility.reduceTransparencyStatusDidChangeNotification, object: nil
+        )
+
         view.addGestureRecognizer(edgePan)
         view.addGestureRecognizer(closePan)
     }
@@ -233,7 +251,7 @@ public final class SideDrawerContainerViewController: UIViewController {
         super.viewDidLayoutSubviews()
         let bounds = view.bounds
         let centre = CGPoint(x: bounds.midX, y: bounds.midY)
-        for host in [drawerHost, mainHost, dimView] as [UIView] {
+        for host in [drawerHost, mainHost, blurView, dimView] as [UIView] {
             if host.bounds.size != bounds.size { host.bounds = CGRect(origin: .zero, size: bounds.size) }
             if host.center != centre { host.center = centre }
         }
@@ -248,6 +266,7 @@ public final class SideDrawerContainerViewController: UIViewController {
         if mainHost.layer.cornerRadius != radius {
             mainHost.layer.cornerRadius = radius
             dimView.layer.cornerRadius = radius
+            blurView.layer.cornerRadius = radius
         }
         // A width change (rotation, a resize) moves the drawer's edge.
         applyProgress(progress)
@@ -439,13 +458,22 @@ public final class SideDrawerContainerViewController: UIViewController {
             finish()
             return
         }
+        // The blur follows the slide on screen, frame by frame, and lands on
+        // the target with it — no pop at the end.
+        startBlurLink()
+        let landed: () -> Void = { [weak self] in
+            guard let self, generation == settleGeneration else { return }
+            stopBlurLink()
+            blurView.setStrength(Self.blurStrength(forProgress: target))
+            finish()
+        }
         if MotionPreference.reducesMotion {
             UIView.animate(
                 withDuration: Self.reducedMotionDuration, delay: 0,
                 options: [.curveEaseInOut, .allowUserInteraction]
             ) {
-                self.applyProgress(target)
-            } completion: { _ in finish() }
+                self.applyProgress(target, drivesBlur: false)
+            } completion: { _ in landed() }
         } else {
             let springVelocity = SideDrawerMotion.initialSpringVelocity(
                 from: from, to: target, velocity: velocity, drawerWidth: drawerWidth
@@ -454,9 +482,43 @@ public final class SideDrawerContainerViewController: UIViewController {
                 springDuration: Self.settleDuration, bounce: 0, initialSpringVelocity: springVelocity,
                 delay: 0, options: [.allowUserInteraction]
             ) {
-                self.applyProgress(target)
-            } completion: { _ in finish() }
+                self.applyProgress(target, drivesBlur: false)
+            } completion: { _ in landed() }
         }
+    }
+
+    // MARK: - Blur
+
+    /// The blur's strength for a drawer at `progress`: the reveal itself,
+    /// full past open (the rubber band), and none at all with Reduce
+    /// Transparency on — the dim alone then.
+    static func blurStrength(forProgress progress: CGFloat, reducesTransparency: Bool = UIAccessibility.isReduceTransparencyEnabled) -> CGFloat {
+        reducesTransparency ? 0 : min(max(progress, 0), 1)
+    }
+
+    /// The blur's strength now — for tests and probes.
+    var mainScreenBlurStrength: CGFloat { blurView.strength }
+
+    private func startBlurLink() {
+        stopBlurLink()
+        let link = CADisplayLink(target: BlurLinkTarget(self), selector: #selector(BlurLinkTarget.tick))
+        link.add(to: .main, forMode: .common)
+        blurLink = link
+    }
+
+    private func stopBlurLink() {
+        blurLink?.invalidate()
+        blurLink = nil
+    }
+
+    /// One frame of a settle: the blur at the slide the screen shows.
+    fileprivate func blurFrame() {
+        guard drawerWidth > 0, let presentation = mainHost.layer.presentation() else { return }
+        blurView.setStrength(Self.blurStrength(forProgress: presentation.affineTransform().tx / drawerWidth))
+    }
+
+    @objc private func reduceTransparencyChanged() {
+        blurView.setStrength(Self.blurStrength(forProgress: progress))
     }
 
     private func finishSettle(open: Bool) {
@@ -485,10 +547,12 @@ public final class SideDrawerContainerViewController: UIViewController {
             progress
         }
         settleGeneration += 1
-        for layer in [mainHost.layer, dimView.layer, drawerHost.layer] {
+        stopBlurLink()
+        for layer in [mainHost.layer, blurView.layer, dimView.layer, drawerHost.layer] {
             layer.removeAllAnimations()
         }
         progress = max(0, current)
+        // The blur carries on from the slide the screen showed.
         applyProgress(progress)
     }
 
@@ -496,11 +560,15 @@ public final class SideDrawerContainerViewController: UIViewController {
 
     /// Places everything for `progress`. Animatable properties only — what is
     /// not animatable (visibility, clipping, accessibility) is `setRevealed`.
-    private func applyProgress(_ progress: CGFloat) {
+    /// `drivesBlur` is false inside a settle's animation, where the blur is
+    /// driven frame by frame instead (`blurFrame`).
+    private func applyProgress(_ progress: CGFloat, drivesBlur: Bool = true) {
         let width = drawerWidth
         let slide = CGAffineTransform(translationX: progress * width, y: 0)
         mainHost.transform = slide
+        blurView.transform = slide
         dimView.transform = slide
+        if drivesBlur { blurView.setStrength(Self.blurStrength(forProgress: progress)) }
         let reveal = min(max(progress, 0), 1)
         let parallax = MotionPreference.reducesMotion ? 0 : Self.drawerParallax
         drawerHost.transform = CGAffineTransform(translationX: -(1 - reveal) * width * parallax, y: 0)
@@ -738,5 +806,20 @@ private final class DimmingView: UIView {
 
     override func accessibilityPerformEscape() -> Bool {
         accessibilityActivate()
+    }
+}
+
+/// Breaks the display link → controller retain cycle. Main-actor: the link
+/// runs on the main run loop.
+@MainActor
+private final class BlurLinkTarget: NSObject {
+    weak var container: SideDrawerContainerViewController?
+    init(_ container: SideDrawerContainerViewController) { self.container = container }
+    @objc func tick(_ link: CADisplayLink) {
+        guard let container else {
+            link.invalidate()
+            return
+        }
+        container.blurFrame()
     }
 }

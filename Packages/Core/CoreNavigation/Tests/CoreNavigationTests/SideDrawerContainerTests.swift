@@ -142,6 +142,72 @@ struct SideDrawerContainerTests {
         }
     }
 
+    // MARK: - Blur (#561)
+
+    /// The main screen blurs with its slide: none at rest, half at half, full
+    /// open — and it shrinks back with the finger.
+    @Test func theMainScreenBlursWithItsSlide() {
+        hosting { container, _, _ in
+            let width = container.drawerWidth
+            #expect(container.mainScreenBlurStrength == 0, "none at rest")
+            container.beginTracking()
+            container.updateTracking(translation: width * 0.5)
+            let half = SideDrawerContainerViewController.blurStrength(forProgress: 0.5)
+            #expect(abs(container.mainScreenBlurStrength - half) < 0.0001)
+            container.updateTracking(translation: width)
+            #expect(abs(container.mainScreenBlurStrength - SideDrawerContainerViewController.blurStrength(forProgress: 1)) < 0.0001)
+            container.updateTracking(translation: width * 0.2)
+            #expect(abs(container.mainScreenBlurStrength - SideDrawerContainerViewController.blurStrength(forProgress: 0.2)) < 0.0001,
+                    "dragged back, it shrinks")
+            container.endTracking(velocity: 0, animated: false)
+            #expect(container.mainScreenBlurStrength == 0, "closed: none")
+        }
+    }
+
+    /// The strength is the reveal, clamped: full past open (the rubber band),
+    /// none at all with Reduce Transparency.
+    @Test func theBlurStaysFullPastOpenAndOffWithReduceTransparency() {
+        #expect(SideDrawerContainerViewController.blurStrength(forProgress: 0, reducesTransparency: false) == 0)
+        #expect(SideDrawerContainerViewController.blurStrength(forProgress: 0.5, reducesTransparency: false) == 0.5)
+        #expect(SideDrawerContainerViewController.blurStrength(forProgress: 1, reducesTransparency: false) == 1)
+        #expect(SideDrawerContainerViewController.blurStrength(forProgress: 1.08, reducesTransparency: false) == 1)
+        #expect(SideDrawerContainerViewController.blurStrength(forProgress: 0.7, reducesTransparency: true) == 0)
+        hosting { container, _, _ in
+            container.open(animated: false)
+            container.beginTracking()
+            container.updateTracking(translation: 300) // the rubber band
+            #expect(container.progress > 1)
+            #expect(container.mainScreenBlurStrength == SideDrawerContainerViewController.blurStrength(forProgress: 1))
+            container.endTracking(velocity: 0, animated: false)
+        }
+    }
+
+    /// Rapid opens and closes, animated, interrupting each other: the blur
+    /// lands where the drawer does and nothing throws on the way.
+    @Test func rapidOpenAndCloseLandsTheBlurWithTheDrawer() async throws {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        let container = SideDrawerContainerViewController(main: UIViewController(), drawer: UIViewController())
+        window.rootViewController = container
+        window.makeKeyAndVisible()
+        window.layoutIfNeeded()
+        defer {
+            window.rootViewController = nil
+            window.isHidden = true
+            window.layoutIfNeeded()
+        }
+        for _ in 0..<5 {
+            container.open()
+            try await Task.sleep(for: .milliseconds(60))
+            container.close()
+            try await Task.sleep(for: .milliseconds(60))
+        }
+        container.open()
+        for _ in 0..<60 where container.phase != .open { try await Task.sleep(for: .milliseconds(25)) }
+        #expect(container.phase == .open)
+        #expect(container.mainScreenBlurStrength == SideDrawerContainerViewController.blurStrength(forProgress: 1),
+                "landed with the spring, no pop")
+    }
+
     @Test func aCancelledDragReturnsWhereItBegan() {
         hosting { container, _, _ in
             container.open(animated: false)
