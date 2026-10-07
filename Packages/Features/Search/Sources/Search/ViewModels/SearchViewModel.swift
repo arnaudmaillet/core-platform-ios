@@ -66,6 +66,19 @@ public final class SearchViewModel {
     /// apart, and it is one edit away from being false. This says it outright.
     private var submittedQuery = ""
     private var postsTask: Task<Void, Never>?
+
+    // MARK: Paging (#612)
+
+    /// Where each answer's next page starts; nil when it has no more.
+    private var postsNextToken: String?
+    private var peopleNextToken: String?
+    /// The page each answer is fetching — one at a time per answer.
+    private var postsPageLoad: Task<Void, Never>?
+    private var peoplePageLoad: Task<Void, Never>?
+    /// A page that adds nothing new (every row already shown, or no picture
+    /// for the Media tab) leaves no new row to ask again, so the next one is
+    /// asked at once — at most this many in a row.
+    static let maxEmptyPagesInARow = 5
     /// Whether the Recent section is showing everything or just the first
     /// window of it. Sticky for the life of the screen: a viewer who expanded
     /// the list has said they want the long version, and collapsing it again
@@ -212,6 +225,16 @@ public final class SearchViewModel {
     /// posts and no people showed an empty Posts tab. Filmed on "harbour",
     /// which is exactly that query.
     public var onPostResultsChange: (([PostID]) -> Void)?
+
+    /// A next page of POSTS starting (true) and landing (false) — the Posts
+    /// and Media tabs' footer spinner (#612).
+    public var onPostsPagingChange: ((Bool) -> Void)?
+    /// The same for PEOPLE — the Users tab's footer spinner (#612).
+    public var onPeoplePagingChange: ((Bool) -> Void)?
+    /// Whether the posts answer has another page.
+    public var hasMorePosts: Bool { postsNextToken != nil }
+    /// Whether the people answer has another page.
+    public var hasMorePeople: Bool { peopleNextToken != nil }
 
     /// What the screen is showing right now, for a view that arrives AFTER the
     /// phase it needs. The results screen is pushed once the answer is already
@@ -835,6 +858,11 @@ public final class SearchViewModel {
 
     private func runSearch(_ trimmed: String) async {
         phase = .loading
+        // A new question: the pages of the old answer are no longer wanted,
+        // and its cursors no longer mean anything (#612).
+        cancelPageLoads()
+        postsNextToken = nil
+        peopleNextToken = nil
         postResults = []
         mediaResults = []
         // ⚠️ ITS OWN TASK, deliberately unawaited by the people search. The two
@@ -845,25 +873,29 @@ public final class SearchViewModel {
         postsTask?.cancel()
         postsTask = Task { [weak self] in
             guard let self else { return }
-            let hits = (try? await self.repository.searchPosts(
-                matching: trimmed, sort: self.sortOrder, limit: self.pageSize
-            )) ?? []
+            let page = try? await self.repository.searchPostsPage(
+                matching: trimmed, sort: self.sortOrder, limit: self.pageSize, pageToken: nil
+            )
+            let hits = page?.hits ?? []
             guard !Task.isCancelled, self.submittedQuery == trimmed else { return }
+            self.postsNextToken = page?.nextPageToken
             // ⚠️ MEDIA FIRST, because `postResults` announces and the screen
             // reads both in that announcement.
             self.mediaResults = hits.filter(\.hasMedia).map(\.id)
             self.postResults = hits.map(\.id)
         }
         do {
-            let results = try await repository.searchProfiles(
-                matching: trimmed, sort: sortOrder, limit: pageSize
+            let page = try await repository.searchProfilesPage(
+                matching: trimmed, sort: sortOrder, limit: pageSize, pageToken: nil
             )
+            let results = page.results
             // A late response for a superseded query must not overwrite newer
             // state. ⚠️ Against `submittedQuery`, not `query`: `query` follows
             // the field, so a re-run triggered by a filter change while the
             // viewer had typed something new would be discarded here — the
             // spinner would stay up forever, on a screen with no error.
             guard !Task.isCancelled, submittedQuery == trimmed else { return }
+            peopleNextToken = page.nextPageToken
             if results.isEmpty {
                 phase = .empty(query: trimmed)
             } else {
@@ -878,6 +910,110 @@ public final class SearchViewModel {
         } catch {
             guard !Task.isCancelled else { return }
             phase = .failed(message: "Couldn't search. Please try again.")
+        }
+    }
+
+    // MARK: - Paging (#612)
+
+    /// The viewer neared the end of the Posts tab (or, with `untilMedia`, the
+    /// Media tab): the next page of posts, if there is one and none is on its
+    /// way. Appended, never reordering what is shown; a failure is retried on
+    /// the next approach.
+    ///
+    /// `untilMedia`: the Media tab shows only the posts with a picture, so a
+    /// page of text posts adds nothing to it and no new tile would ask again.
+    /// Pages are read on until one brings a picture.
+    public func loadMorePosts(untilMedia: Bool = false) {
+        guard postsPageLoad == nil, let token = postsNextToken, !submittedQuery.isEmpty else { return }
+        let query = submittedQuery
+        let sort = sortOrder
+        postsPageLoad = Task { [weak self] in
+            guard let self else { return }
+            var token = token
+            var fresh: [PostSearchHit] = []
+            for _ in 0..<Self.maxEmptyPagesInARow {
+                guard let page = try? await self.repository.searchPostsPage(
+                    matching: query, sort: sort, limit: self.pageSize, pageToken: token
+                ), !Task.isCancelled, self.submittedQuery == query else {
+                    // Superseded: the new search already freed the slot.
+                    guard !Task.isCancelled, self.submittedQuery == query else { return }
+                    self.postsPageLoad = nil
+                    self.onPostsPagingChange?(false)
+                    return
+                }
+                self.postsNextToken = page.nextPageToken
+                // A post can sit on both sides of a page boundary.
+                var known = Set(self.postResults + fresh.map(\.id))
+                for hit in page.hits where known.insert(hit.id).inserted { fresh.append(hit) }
+                let enough = untilMedia ? fresh.contains(where: \.hasMedia) : !fresh.isEmpty
+                guard !enough, let next = page.nextPageToken else { break }
+                token = next
+            }
+            // ⚠️ The slot frees BEFORE the rows announce: showing them can
+            // bring the end back into view, and that ask must find it free.
+            self.postsPageLoad = nil
+            self.onPostsPagingChange?(false)
+            guard !fresh.isEmpty else { return }
+            // Media first, because `postResults` announces (see `runSearch`).
+            self.mediaResults += fresh.filter(\.hasMedia).map(\.id)
+            self.postResults += fresh.map(\.id)
+        }
+        // Announced after the slot is taken: the spinner's layout pass can ask
+        // again, and that ask must find the slot taken.
+        onPostsPagingChange?(true)
+    }
+
+    /// The viewer neared the end of the Users tab: the next page of people,
+    /// if there is one and none is on its way. The new rows go through the
+    /// same scope and the same metadata resolution as the first page.
+    public func loadMorePeople() {
+        guard peoplePageLoad == nil, let token = peopleNextToken, !submittedQuery.isEmpty else { return }
+        let query = submittedQuery
+        let sort = sortOrder
+        peoplePageLoad = Task { [weak self] in
+            guard let self else { return }
+            var token = token
+            var fresh: [ProfileSearchResult] = []
+            for _ in 0..<Self.maxEmptyPagesInARow {
+                guard let page = try? await self.repository.searchProfilesPage(
+                    matching: query, sort: sort, limit: self.pageSize, pageToken: token
+                ), !Task.isCancelled, self.submittedQuery == query else {
+                    guard !Task.isCancelled, self.submittedQuery == query else { return }
+                    self.peoplePageLoad = nil
+                    self.onPeoplePagingChange?(false)
+                    return
+                }
+                self.peopleNextToken = page.nextPageToken
+                var known = Set(self.unfilteredResults.map(\.id) + fresh.map(\.id))
+                for result in page.results where known.insert(result.id).inserted { fresh.append(result) }
+                guard fresh.isEmpty, let next = page.nextPageToken else { break }
+                token = next
+            }
+            self.peoplePageLoad = nil
+            self.onPeoplePagingChange?(false)
+            guard !fresh.isEmpty else { return }
+            let models = fresh.map { self.withResolvedMetadata(SearchResultDisplayModel(result: $0)) }
+            self.unfilteredResults += models
+            // Only onto an answer that is showing: a refine screen typing over
+            // it has the phase, and `restoreSubmittedAnswer` publishes these
+            // rows when it hands the answer back.
+            if case .results = self.phase { self.publishResults() }
+            self.resolveAvatars(for: self.unfilteredResults.filter { self.resolvedMetadata[$0.id] == nil }.map(\.id))
+        }
+        onPeoplePagingChange?(true)
+    }
+
+    /// Drops both answers' pages in flight, and their spinners.
+    private func cancelPageLoads() {
+        if postsPageLoad != nil {
+            postsPageLoad?.cancel()
+            postsPageLoad = nil
+            onPostsPagingChange?(false)
+        }
+        if peoplePageLoad != nil {
+            peoplePageLoad?.cancel()
+            peoplePageLoad = nil
+            onPeoplePagingChange?(false)
         }
     }
 }

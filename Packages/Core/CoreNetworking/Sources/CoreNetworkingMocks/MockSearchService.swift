@@ -113,7 +113,19 @@ public final class MockSearchService: @unchecked Sendable {
                 },
                 by: request.sort
             )
-            response.hits += matches.map { author in
+            // Paged like posts (#612): a people-only request with a page size
+            // reads `page_size` people from where `page_token` says, with a
+            // token for the rest. A federated one keeps every match.
+            let page: ArraySlice<MockSocialDataset.Author>
+            if request.pageSize > 0, request.entityTypes == [.profile] {
+                let start = min(Self.postOffset(from: request.pageToken), matches.count)
+                let end = min(start + Int(request.pageSize), matches.count)
+                page = matches[start..<end]
+                if end < matches.count { response.nextPageToken = Self.postToken(offset: end) }
+            } else {
+                page = matches[...]
+            }
+            response.hits += page.map { author in
                 var hit = Search_V1_SearchHit()
                 hit.entityType = .profile
                 hit.id = author.profileID

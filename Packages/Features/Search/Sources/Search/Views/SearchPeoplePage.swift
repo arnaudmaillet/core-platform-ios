@@ -22,6 +22,14 @@ final class SearchPeoplePage: UIViewController {
     }
 
     var onSelect: ((ProfileID) -> Void)?
+    /// One of the last rows came into view: the cue to fetch the next page of
+    /// people, which arrives as a longer `.results` (#612).
+    var onNearEnd: (() -> Void)?
+    /// How close to the end a row has to come into view to ask for more —
+    /// early enough that the page usually lands before the end does.
+    static let nearEndRowCount = 5
+    /// A next page is on its way: the list ends on a spinner.
+    private var isPaging = false
 
     private let imagePipeline: ImagePipeline
     private var collectionView: UICollectionView!
@@ -52,9 +60,15 @@ final class SearchPeoplePage: UIViewController {
     }
 
     private func configureCollectionView() {
-        var configuration = UICollectionLayoutListConfiguration(appearance: .plain)
-        configuration.showsSeparators = false
-        let layout = UICollectionViewCompositionalLayout.list(using: configuration)
+        // A provider rather than one fixed list: the footer (the paging
+        // spinner, #612) exists only while a page is on its way, and a
+        // footer that stayed would leave a blank band under the last row.
+        let layout = UICollectionViewCompositionalLayout { [weak self] _, environment in
+            var configuration = UICollectionLayoutListConfiguration(appearance: .plain)
+            configuration.showsSeparators = false
+            configuration.footerMode = self?.isPaging == true ? .supplementary : .none
+            return NSCollectionLayoutSection.list(using: configuration, layoutEnvironment: environment)
+        }
 
         collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
         collectionView.delegate = self
@@ -87,7 +101,24 @@ final class SearchPeoplePage: UIViewController {
         ) { view, indexPath, id in
             view.dequeueConfiguredReusableCell(using: registration, for: indexPath, item: id)
         }
+        let footer = UICollectionView.SupplementaryRegistration<SearchPagingFooterView>(
+            elementKind: UICollectionView.elementKindSectionFooter
+        ) { _, _, _ in }
+        dataSource.supplementaryViewProvider = { view, _, indexPath in
+            view.dequeueConfiguredReusableSupplementary(using: footer, for: indexPath)
+        }
     }
+
+    /// The footer spinner, while a next page is fetched (#612).
+    func setPaging(_ paging: Bool) {
+        guard paging != isPaging else { return }
+        isPaging = paging
+        guard isViewLoaded else { return }
+        collectionView.collectionViewLayout.invalidateLayout()
+    }
+
+    /// Whether the list currently ends on the paging spinner.
+    var isPagingForTesting: Bool { isPaging }
 
     private func configureStatusViews() {
         for subview in [spinner, statusView] {
@@ -241,9 +272,51 @@ final class SearchPeoplePage: UIViewController {
 }
 
 extension SearchPeoplePage: UICollectionViewDelegate {
+    /// Paging (#612): one of the last rows coming into view asks for more.
+    /// The view model ignores the ask when there is no next page, or one is
+    /// already on its way.
+    func collectionView(_ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
+        guard let id = dataSource.itemIdentifier(for: indexPath),
+              dataSource.snapshot().itemIdentifiers.suffix(Self.nearEndRowCount).contains(id) else { return }
+        // Deferred: the next page's snapshot must not be applied from inside
+        // this display pass.
+        DispatchQueue.main.async { [weak self] in self?.onNearEnd?() }
+    }
+
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         collectionView.deselectItem(at: indexPath, animated: true)
         guard let id = dataSource.itemIdentifier(for: indexPath) else { return }
         onSelect?(id)
+    }
+}
+
+/// The Users tab's footer while a next page is on its way: a spinner where
+/// the next rows will be (#612).
+final class SearchPagingFooterView: UICollectionReusableView {
+    private let spinner = UIActivityIndicatorView(style: .medium)
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        spinner.color = .tertiaryLabel
+        spinner.startAnimating()
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(spinner)
+        let height = heightAnchor.constraint(equalToConstant: 56)
+        height.priority = .required - 1
+        NSLayoutConstraint.activate([
+            height,
+            spinner.centerXAnchor.constraint(equalTo: centerXAnchor),
+            spinner.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
+        isAccessibilityElement = true
+        accessibilityLabel = "Loading more people"
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        spinner.startAnimating()
     }
 }

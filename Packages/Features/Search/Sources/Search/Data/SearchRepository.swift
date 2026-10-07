@@ -79,6 +79,18 @@ public struct PostSearchHit: Equatable, Sendable, Identifiable {
     }
 }
 
+/// One page of people, and where the next one starts (#612).
+public struct ProfileSearchPage: Equatable, Sendable {
+    public let results: [ProfileSearchResult]
+    /// Nil when there is no next page.
+    public let nextPageToken: String?
+
+    public init(results: [ProfileSearchResult], nextPageToken: String?) {
+        self.results = results
+        self.nextPageToken = nextPageToken
+    }
+}
+
 /// One page of post hits, and where the next one starts (#579).
 public struct PostSearchPage: Equatable, Sendable {
     public let hits: [PostSearchHit]
@@ -164,6 +176,12 @@ public protocol SearchProviding: Sendable {
     func searchPostsPage(
         matching query: String, sort: SearchSortOrder, limit: Int32, pageToken: String?
     ) async throws -> PostSearchPage
+
+    /// One page of `searchProfiles`: `pageToken` nil for the first, then the
+    /// `nextPageToken` of the page before (#612).
+    func searchProfilesPage(
+        matching query: String, sort: SearchSortOrder, limit: Int32, pageToken: String?
+    ) async throws -> ProfileSearchPage
 }
 
 public extension SearchProviding {
@@ -177,6 +195,17 @@ public extension SearchProviding {
     ) async throws -> PostSearchPage {
         guard pageToken == nil else { return PostSearchPage(hits: [], nextPageToken: nil) }
         return PostSearchPage(hits: try await searchPosts(matching: query, sort: sort, limit: limit), nextPageToken: nil)
+    }
+
+    /// One page holding `searchProfiles`' answer, and no next one — for a
+    /// fake that does not page.
+    func searchProfilesPage(
+        matching query: String, sort: SearchSortOrder, limit: Int32, pageToken: String?
+    ) async throws -> ProfileSearchPage {
+        guard pageToken == nil else { return ProfileSearchPage(results: [], nextPageToken: nil) }
+        return ProfileSearchPage(
+            results: try await searchProfiles(matching: query, sort: sort, limit: limit), nextPageToken: nil
+        )
     }
 }
 
@@ -192,19 +221,29 @@ public actor SearchRepository: SearchProviding {
     public func searchProfiles(
         matching query: String, sort: SearchSortOrder, limit: Int32
     ) async throws -> [ProfileSearchResult] {
+        try await searchProfilesPage(matching: query, sort: sort, limit: limit, pageToken: nil).results
+    }
+
+    public func searchProfilesPage(
+        matching query: String, sort: SearchSortOrder, limit: Int32, pageToken: String?
+    ) async throws -> ProfileSearchPage {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return [] }
+        guard !trimmed.isEmpty else { return ProfileSearchPage(results: [], nextPageToken: nil) }
 
         var request = Search_V1_SearchRequest()
         request.query = trimmed
         request.entityTypes = [.profile]
         request.sort = Self.wireSort(sort)
         request.pageSize = limit
+        request.pageToken = pageToken ?? ""
 
         let response = await searchClient.search(request: request, headers: [:])
         switch response.result {
         case .success(let body):
-            return body.hits.compactMap(Self.makeResult)
+            return ProfileSearchPage(
+                results: body.hits.compactMap(Self.makeResult),
+                nextPageToken: body.nextPageToken.isEmpty ? nil : body.nextPageToken
+            )
         case .failure(let error):
             throw SearchError.transport(message: error.message ?? "code \(error.code)")
         }
