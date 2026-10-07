@@ -150,16 +150,12 @@ struct SignUpFlowTests {
         return (navigation, try #require(navigation.topViewController as? EmailEntryViewController))
     }
 
-    /// Waits (bounded) for a call to land a step of `type` on top.
+    /// Waits (on a look budget) for a call to land a step of `type` on top.
     private func top<T: UIViewController>(
         _ navigation: UINavigationController, is type: T.Type
     ) async throws -> T {
-        for _ in 0..<200 {
-            if let step = navigation.topViewController as? T { return step }
-            try await Task.sleep(for: .milliseconds(10))
-        }
-        Issue.record("\(T.self) never reached the top")
-        throw CancellationError()
+        try #require(await settle { navigation.topViewController is T }, "\(T.self) never reached the top")
+        return try #require(navigation.topViewController as? T)
     }
 
     /// With codes, "email" asks for an address rather than a password, and
@@ -193,10 +189,10 @@ struct SignUpFlowTests {
         let code = try await top(navigation, is: VerificationCodeViewController.self)
 
         code.onSubmit?("123456")
-        try await Task.sleep(for: .milliseconds(200))
+        try #require(await settle { await signUp.signedInAccount == pendingAccount },
+                     "the account becomes the session")
 
         #expect(navigation.topViewController === code)
-        #expect(await signUp.signedInAccount == pendingAccount, "the account becomes the session")
     }
 
     /// Two-step sign-in on (#383): the emailed code leads to the app's code,
@@ -212,10 +208,7 @@ struct SignUpFlowTests {
         #expect(await signUp.signedInAccount == nil, "not signed in before the second step")
 
         second.onSubmit?("654321")
-        for _ in 0..<200 {
-            if await signUp.signedInAccount != nil { break }
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        try #require(await settle { await signUp.signedInAccount != nil })
         #expect(await signUp.secondStepCodes == ["654321"])
         #expect(await signUp.signedInAccount == pendingAccount)
     }
@@ -234,10 +227,7 @@ struct SignUpFlowTests {
         #expect(profile.navigationItem.hidesBackButton)
 
         profile.onCreate?("half.done", "")
-        for _ in 0..<200 {
-            if await signUp.completed != nil { break }
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        try #require(await settle { await signUp.completed != nil })
         #expect(await setup.created?.handle == "half.done")
         #expect(await signUp.completed == pendingAccount)
     }
@@ -264,10 +254,7 @@ struct SignUpFlowTests {
         #expect(profile.navigationItem.hidesBackButton)
 
         profile.onCreate?("nina", "Nina")
-        for _ in 0..<200 {
-            if await signUp.completed != nil { break }
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        try #require(await settle { await signUp.completed != nil })
         #expect(await setup.created?.handle == "nina")
         #expect(await signUp.completed == pendingAccount)
     }
@@ -281,10 +268,7 @@ struct SignUpFlowTests {
         let apple = FakeApple()
         let navigation = try pick(.provider(.apple), signUp, apple: apple)
 
-        for _ in 0..<200 {
-            if await signUp.signedInWith != nil { break }
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        try #require(await settle { await signUp.signedInWith != nil })
 
         #expect(apple.nonce == "nonce-1")
         #expect(await signUp.signedInWith == .idToken(.apple, token: "apple-token", nonce: "nonce-1"))
@@ -316,7 +300,11 @@ struct SignUpFlowTests {
         apple.cancels = true
         let navigation = try pick(.provider(.apple), signUp, apple: apple)
 
-        try await Task.sleep(for: .milliseconds(200))
+        // On STATE first: the sheet was asked for, and closed. Then a few turns
+        // for anything the cancel could wrongly set off — a miss here would be
+        // a false pass, never a flake.
+        try #require(await settle { apple.nonce != nil }, "Apple's sheet was never asked for")
+        await settle(looks: 40) { false }
 
         #expect(await signUp.signedInWith == nil)
         #expect(navigation.topViewController is MethodSelectionViewController)
