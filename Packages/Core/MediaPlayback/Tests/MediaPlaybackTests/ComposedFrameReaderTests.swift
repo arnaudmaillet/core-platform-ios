@@ -50,12 +50,8 @@ struct ComposedFrameReaderTests {
     private func poll(
         _ reader: ComposedFrameReader, at seconds: Double, within limit: Double = 5
     ) async throws -> (buffer: CVPixelBuffer, time: CMTime)? {
-        let deadline = CACurrentMediaTime() + limit
-        while CACurrentMediaTime() < deadline {
-            if let frame = reader.frame(at: time(seconds)) { return frame }
-            try await Task.sleep(for: .milliseconds(5))
-        }
-        return nil
+        // Counted in LOOKS, not wall clock (#599): a descheduled runner spends none.
+        try await TimingTolerance.firstAnswer(looks: Int(limit * 200)) { reader.frame(at: time(seconds)) }
     }
 
     /// Asks for `seconds` until the frame handed out is the one AT it, and
@@ -68,9 +64,9 @@ struct ComposedFrameReaderTests {
     private func pollUntilReached(
         _ reader: ComposedFrameReader, _ seconds: Double, within limit: Double = 2
     ) async throws -> CMTime? {
-        let deadline = CACurrentMediaTime() + limit
         var last: CMTime?
-        while CACurrentMediaTime() < deadline {
+        // Counted in LOOKS, not wall clock (#599): a descheduled runner spends none.
+        for _ in 0..<Int(limit * 200) {
             if let frame = reader.frame(at: time(seconds)) {
                 last = frame.time
                 if frame.time == time(seconds) { break }
@@ -91,10 +87,10 @@ struct ComposedFrameReaderTests {
     @discardableResult
     private func settle(_ reader: ComposedFrameReader, within limit: Double = 10) async throws -> Double {
         let started = CACurrentMediaTime()
-        while CACurrentMediaTime() < started + limit {
+        // Counted in LOOKS, not wall clock (#599): a descheduled runner spends none.
+        _ = try await TimingTolerance.settle(looks: Int(limit * 200)) {
             let state = reader.debugState
-            if state.frames >= ComposedFrameReader.lookahead || !state.reading { break }
-            try await Task.sleep(for: .milliseconds(5))
+            return state.frames >= ComposedFrameReader.lookahead || !state.reading
         }
         return CACurrentMediaTime() - started
     }
@@ -346,10 +342,8 @@ struct ComposedFrameReaderTests {
         // has settled, and the clock then advances at the pace it plays.
         var answered: [Double] = []
         if let frame = reader.frame(at: time(2.5)) { answered.append(frame.time.seconds) }
-        let deadline = CACurrentMediaTime() + 5
-        while reader.debugState.reading, CACurrentMediaTime() < deadline {
-            try await Task.sleep(for: .milliseconds(5))
-        }
+        // Counted in LOOKS, not wall clock (#599): a descheduled runner spends none.
+        _ = try await TimingTolerance.settle(looks: 1000) { !reader.debugState.reading }
         #expect(!reader.debugState.reading, "the reader is still reading after the end")
 
         let generation = reader.debugState.generation

@@ -629,11 +629,21 @@ struct TransitionPreviewTests {
             player.play()
             var frames = 0
             var backed = 0
-            // ⚠️ SIX SECONDS, NOT ONE AND A HALF: a composed reader's first frame
-            // waits for a decode from the keyframe, and with other suites
-            // exporting alongside it that took longer than 1.5s.
-            for _ in 0..<600 where frames < 10 {
+            // ⚠️ A LOOK BUDGET, AND THE CLIP KEPT PLAYING (#599). A composed
+            // reader's first frame waits for a decode from the keyframe; on a
+            // starved runner the two-second item had already PLAYED OUT before
+            // the test looked again, and the guard read 1 frame, then 0 — with
+            // nothing wrong. The item is rewound at its end, so frames keep
+            // coming for as long as the budget lasts; a source that never hands
+            // a frame still fails the guard.
+            player.actionAtItemEnd = .none
+            let duration = try await arranged.asset.load(.duration)
+            for _ in 0..<3000 where frames < 10 {
                 try await Task.sleep(for: .milliseconds(10))
+                if duration.isNumeric, item.currentTime() >= duration - CMTime(value: 1, timescale: 30) {
+                    await player.seek(to: .zero)
+                    player.play()
+                }
                 guard let frame = source.copyFrame(atHostTime: CACurrentMediaTime()) else { continue }
                 frames += 1
                 if CVPixelBufferGetIOSurface(frame.buffer) != nil { backed += 1 }

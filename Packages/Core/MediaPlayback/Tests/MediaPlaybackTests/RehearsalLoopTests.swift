@@ -66,7 +66,11 @@ struct RehearsalLoopTests {
         let low = try #require(taken.dropFirst(5).min())
         let high = try #require(taken.max())
         #expect(low >= 0.99, "the rehearsal played before its range: \(low)")
-        #expect(high <= 2.0 + 1.0 / 30 + 0.01, "the rehearsal played past its range: \(high)")
+        // ⚠️ ONE LATE READING IS THE SAMPLER, NOT THE LOOP (#599): a starved
+        // runner reads the playhead a few ms after the wrap was due. A loop
+        // that overshoots does so on every wrap (`TimingToleranceTests`).
+        #expect(TimingTolerance.withinBoundButOne(taken, 2.0 + 1.0 / 30 + 0.01, hardLimit: 2.1),
+                "the rehearsal played past its range: \(high), \(taken.filter { $0 > 2.0 + 1.0 / 30 + 0.01 })")
     }
 
     @Test func aWrapLandsOnTheRangeStart() async throws {
@@ -97,7 +101,9 @@ struct RehearsalLoopTests {
         let taken = try await samples(controller, view, for: 3.5)
 
         #expect(wraps(taken).count >= 2, "guard: it did not loop twice")
-        #expect((taken.max() ?? 9) <= 1.5 + 1.0 / 30 + 0.01, "it played past its range: \(taken.max() ?? -1)")
+        // One late reading is the sampler (#599); see `aRehearsalStaysInsideItsRange`.
+        #expect(TimingTolerance.withinBoundButOne(taken, 1.5 + 1.0 / 30 + 0.01, hardLimit: 1.6),
+                "it played past its range: \(taken.filter { $0 > 1.5 + 1.0 / 30 + 0.01 })")
         #expect((taken.dropFirst(5).min() ?? -1) >= 0.49, "it played before its range")
     }
 
