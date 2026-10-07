@@ -43,18 +43,23 @@ private actor FolderedInbox: ChatProviding {
 
 @MainActor
 struct HiddenRequestsTests {
-    /// A ceiling, not a pace: returns as soon as `condition` holds.
-    private func settle(until condition: () async -> Bool) async {
-        let deadline = ContinuousClock.now.advanced(by: .seconds(60))
-        while !(await condition()), ContinuousClock.now < deadline {
+    /// Whether `condition` came to hold within `looks` looks. A budget of
+    /// LOOKS, not of wall-clock time: a starved runner that deschedules the
+    /// process spends none of it (#528, #556, #599). Returns as soon as the
+    /// condition holds.
+    private func settle(looks: Int = 3_000, until condition: () async -> Bool) async -> Bool {
+        for _ in 0..<looks {
+            await Task.yield()
+            if await condition() { return true }
             try? await Task.sleep(for: .milliseconds(10))
         }
+        return await condition()
     }
 
-    private func loaded(_ provider: FolderedInbox) async -> InboxCatalog {
+    private func loaded(_ provider: FolderedInbox) async throws -> InboxCatalog {
         let catalog = InboxCatalog(repository: provider)
         catalog.reload()
-        await settle { catalog.snapshot.phase == .loaded }
+        try #require(await settle { catalog.snapshot.phase == .loaded })
         return catalog
     }
 
@@ -71,9 +76,9 @@ struct HiddenRequestsTests {
         .hiddenRequests: [nil: InboxPage(conversations: [row("h1", at: 30), row("h2", at: 20)], nextPageToken: nil)],
     ]
 
-    @Test func aLoadReadsTheHiddenFolderApartFromRequests() async {
+    @Test func aLoadReadsTheHiddenFolderApartFromRequests() async throws {
         let provider = FolderedInbox(Self.everyFolder)
-        let catalog = await loaded(provider)
+        let catalog = try await loaded(provider)
 
         #expect(ids(catalog.snapshot.hiddenRequests) == ["h1", "h2"])
         #expect(ids(catalog.snapshot.requests) == ["r1"])
@@ -84,8 +89,8 @@ struct HiddenRequestsTests {
     /// The Requests list ends on the Hidden requests row when the hidden
     /// folder holds any, and a hidden request announces nothing: Requests'
     /// badge counts only its own.
-    @Test func requestsEndOnTheHiddenRowAndCountOnlyTheirOwn() async {
-        let catalog = await loaded(FolderedInbox(Self.everyFolder))
+    @Test func requestsEndOnTheHiddenRowAndCountOnlyTheirOwn() async throws {
+        let catalog = try await loaded(FolderedInbox(Self.everyFolder))
         let requests = MessageRequestsViewModel(catalog: catalog, now: { Date(timeIntervalSince1970: 0) })
 
         #expect(requests.showsHiddenRequestsRow)
@@ -93,10 +98,10 @@ struct HiddenRequestsTests {
         #expect(requests.newCount == 1)
     }
 
-    @Test func noHiddenRequestsMeansNoRow() async {
+    @Test func noHiddenRequestsMeansNoRow() async throws {
         var pages = Self.everyFolder
         pages[.hiddenRequests] = nil
-        let catalog = await loaded(FolderedInbox(pages))
+        let catalog = try await loaded(FolderedInbox(pages))
         let requests = MessageRequestsViewModel(catalog: catalog)
 
         #expect(!requests.showsHiddenRequestsRow)
@@ -105,10 +110,10 @@ struct HiddenRequestsTests {
 
     /// No visible request but hidden ones: the list still shows, empty, so
     /// its Hidden requests row stays reachable — not the "No requests" state.
-    @Test func onlyHiddenRequestsStillReachTheRow() async {
+    @Test func onlyHiddenRequestsStillReachTheRow() async throws {
         var pages = Self.everyFolder
         pages[.requests] = nil
-        let catalog = await loaded(FolderedInbox(pages))
+        let catalog = try await loaded(FolderedInbox(pages))
         let requests = MessageRequestsViewModel(catalog: catalog)
 
         #expect(requests.showsHiddenRequestsRow)
@@ -117,8 +122,8 @@ struct HiddenRequestsTests {
 
     /// The hidden list: its folder's rows, in one unheaded section (no New
     /// split, no badge), and no row leading further.
-    @Test func theHiddenListShowsTheHiddenFolderAndAnnouncesNothing() async {
-        let catalog = await loaded(FolderedInbox(Self.everyFolder))
+    @Test func theHiddenListShowsTheHiddenFolderAndAnnouncesNothing() async throws {
+        let catalog = try await loaded(FolderedInbox(Self.everyFolder))
         let hidden = MessageRequestsViewModel(
             catalog: catalog, folder: .hiddenRequests, now: { Date(timeIntervalSince1970: 0) }
         )
@@ -132,10 +137,10 @@ struct HiddenRequestsTests {
         #expect(sections.all.allSatisfy { $0.isUnread })
     }
 
-    @Test func theHiddenListIsEmptyWhenTheFolderIs() async {
+    @Test func theHiddenListIsEmptyWhenTheFolderIs() async throws {
         var pages = Self.everyFolder
         pages[.hiddenRequests] = nil
-        let catalog = await loaded(FolderedInbox(pages))
+        let catalog = try await loaded(FolderedInbox(pages))
         let hidden = MessageRequestsViewModel(catalog: catalog, folder: .hiddenRequests)
 
         #expect(hidden.phase == .empty)
@@ -144,8 +149,8 @@ struct HiddenRequestsTests {
     /// Accepting one works like any request: it leaves the hidden list and
     /// joins All. Declining one drops it from the hidden list, and the row
     /// leaves Requests once the folder is empty.
-    @Test func acceptingAndDecliningWorkLikeAnyRequest() async {
-        let catalog = await loaded(FolderedInbox(Self.everyFolder))
+    @Test func acceptingAndDecliningWorkLikeAnyRequest() async throws {
+        let catalog = try await loaded(FolderedInbox(Self.everyFolder))
         let requests = MessageRequestsViewModel(catalog: catalog)
         let hidden = MessageRequestsViewModel(catalog: catalog, folder: .hiddenRequests)
 
@@ -162,8 +167,8 @@ struct HiddenRequestsTests {
 
     /// Replying to a hidden request answers it: it moves to All ahead of the
     /// next load, as a reply to any request does.
-    @Test func aReplyFilesAHiddenRequestInTheInbox() async {
-        let catalog = await loaded(FolderedInbox(Self.everyFolder))
+    @Test func aReplyFilesAHiddenRequestInTheInbox() async throws {
+        let catalog = try await loaded(FolderedInbox(Self.everyFolder))
         let reply = ChatMessage(id: "m1", senderID: ProfileID("me"), body: "hey", createdAt: Date(timeIntervalSince1970: 60), isMine: true)
 
         catalog.recordSentMessage(reply, in: ConversationID("h2"))
@@ -173,19 +178,19 @@ struct HiddenRequestsTests {
     }
 
     /// The hidden folder pages on its own cursor, like the other two.
-    @Test func theHiddenFolderPagesOnItsOwn() async {
+    @Test func theHiddenFolderPagesOnItsOwn() async throws {
         var pages = Self.everyFolder
         pages[.hiddenRequests] = [
             nil: InboxPage(conversations: [row("h1", at: 30)], nextPageToken: "h2"),
             "h2": InboxPage(conversations: [row("h2", at: 20)], nextPageToken: nil),
         ]
         let provider = FolderedInbox(pages)
-        let catalog = await loaded(provider)
+        let catalog = try await loaded(provider)
         let hidden = MessageRequestsViewModel(catalog: catalog, folder: .hiddenRequests)
         #expect(hidden.hasMore)
 
         hidden.loadMore()
-        await settle { catalog.snapshot.hiddenRequests.count == 2 }
+        try #require(await settle { catalog.snapshot.hiddenRequests.count == 2 })
 
         #expect(rowIDs(hidden.phase) == ["h1", "h2"])
         #expect(!hidden.hasMore)
