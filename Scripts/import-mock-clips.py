@@ -2,6 +2,10 @@
 """Imports a folder of downloaded clips + sounds as the mock BFF's video corpus.
 
     Scripts/import-mock-clips.py ~/Downloads/medias_video_with_audio [more.mp4 more.mp3 ...]
+    Scripts/import-mock-clips.py --rebake-sheets
+
+`--rebake-sheets` re-bakes every committed clip's preview sheet and nothing
+else — no sources needed, nothing re-encoded.
 
 Sources are folders and/or loose files. Pairs every video with its sound (the full track a post is set to — usually
 longer than the clip), re-encodes both small enough to live in the repo, grabs
@@ -128,8 +132,12 @@ def bake_sheets(clip_ids):
     scratch.mkdir(exist_ok=True)
     baked = []
     for clip_id in clip_ids:
+        # `--native-aspect` (#539): cells keep the clip's shape, 172px on the
+        # short side, so the hero opening a marker can reveal the whole
+        # picture rather than stretch a square crop of it into the page.
         result = subprocess.run([str(BAKER), "--out", str(scratch), "--manifest", f"{clip_id}.json",
-                                 "--square", "--cell", "172", "--max-frames", "24", "--segments", "1",
+                                 "--square", "--native-aspect", "--cell", "172", "--max-frames", "24",
+                                 "--segments", "1",
                                  "--id", clip_id, str(OUT / f"{clip_id}.mp4")],
                                 check=True, capture_output=True, text=True)
         entries = json.loads((scratch / f"{clip_id}.json").read_text())
@@ -161,6 +169,13 @@ def bake_sheets(clip_ids):
 def main():
     if len(sys.argv) < 2:
         sys.exit(__doc__)
+    if "--rebake-sheets" in sys.argv:
+        if not BAKER.exists():
+            subprocess.run(["swift", "build", "--package-path", str(ROOT / "Tools/IconBaker"),
+                            "-c", "release"], check=True)
+        clips = json.loads((OUT / "clips.json").read_text())
+        bake_sheets([clip["id"] for clip in clips])
+        return
     sources = [Path(arg).expanduser() for arg in sys.argv[1:] if not arg.startswith("--")]
     if not BAKER.exists():
         subprocess.run(["swift", "build", "--package-path", str(ROOT / "Tools/IconBaker"),

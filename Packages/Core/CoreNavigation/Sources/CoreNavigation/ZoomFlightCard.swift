@@ -86,6 +86,25 @@ public protocol ZoomFlightCard: UIView {
     /// Nil falls back to the viewport, which is the previous behaviour.
     var zoomLiveMediaNativeSize: CGSize? { get }
 
+    /// The card's STILL picture — its cover and, on a map marker, the baked
+    /// preview animating over it — as one view the flight can pose by
+    /// transform, exactly as it poses the live surface (#539).
+    ///
+    /// ⚠️ WHY A STILL NEEDS IT TOO. Left full-bleed and aspect-filled, a still
+    /// is re-cropped by every frame of the card's morph: a marker's square
+    /// crop of a 9:16 clip, stretched into a portrait page, zooms further and
+    /// further into the face and lands on a framing the page does not have.
+    /// Laid out once at the picture's native aspect and scaled uniformly, the
+    /// card's bounds are the only crop in the flight, and both ends are that
+    /// end's own aspect-fill.
+    ///
+    /// Nil keeps the still full-bleed and aspect-filled, as before.
+    var zoomStillMediaSurface: UIView? { get }
+
+    /// The still picture's native aspect — what `zoomStillMediaSurface` is
+    /// laid out at when no live surface states one.
+    var zoomStillMediaNativeSize: CGSize? { get }
+
     /// The radius the card rests at on its source (a pin's 12pt, a mosaic
     /// brick's 10pt). The flight sweeps between this and the display's own
     /// corner radius.
@@ -258,6 +277,10 @@ public protocol ZoomFlightCard: UIView {
     /// the crop morph.
     func prepareZoomLiveMediaForFlight(destinationSize: CGSize)
 
+    /// `prepareZoomLiveMediaForFlight` for the still surface (#539): laid out
+    /// once at `destinationSize`, centred, and posed by transform from here on.
+    func prepareZoomStillMediaForFlight(destinationSize: CGSize)
+
     /// Draws the card's resting drop shadow onto `layer`. The card clips, so it
     /// cannot cast one itself; the flight puts a stand-in behind it. Defaults
     /// to nothing — a mosaic brick rests flat against its neighbours, and the
@@ -288,6 +311,9 @@ public extension ZoomFlightCard {
     func setZoomContentBlend(_ t: CGFloat) {}
     func setZoomLandingLiveMedia(_ view: UIView) {}
     func prepareZoomLiveMediaForFlight(destinationSize: CGSize) {}
+    var zoomStillMediaSurface: UIView? { nil }
+    var zoomStillMediaNativeSize: CGSize? { nil }
+    func prepareZoomStillMediaForFlight(destinationSize: CGSize) {}
     func applyZoomRestingShadow(to layer: CALayer) {}
     func zoomLiveMediaDidStall() {}
 }

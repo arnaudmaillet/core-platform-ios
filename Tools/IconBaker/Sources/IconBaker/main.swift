@@ -65,6 +65,12 @@ struct IconBaker {
         var manifest = "catalog.json"
         var fit: Rasteriser.Fit = .inscribe
         var shape: AtlasWriter.Shape = .disc
+        /// Video previews only: cells keep the CLIP's aspect, `--cell` being
+        /// the short side (#539). The marker still aspect-fills its square, so
+        /// it shows the same crop a square cell held; the hero that opens it
+        /// then has the whole picture to reveal instead of a square crop to
+        /// stretch into a portrait page.
+        var nativeAspect = false
     }
 
     static func parse(_ arguments: [String]) throws -> Options {
@@ -89,6 +95,7 @@ struct IconBaker {
             case "--png": options.heic = false
             case "--fill": options.fit = .fill
             case "--square": options.shape = .square; options.fit = .fill
+            case "--native-aspect": options.nativeAspect = true
             case "--plate":
                 let hex = try next()
                 options.plate = try colour(from: hex)
@@ -121,6 +128,11 @@ struct IconBaker {
         let frameCount: Int
         let frameMS: Int
         let cellPX: Int
+        /// A non-square cell's size (`--native-aspect`, #539); absent for a
+        /// square one, whose side is `cellPX`. The client derives the grid from
+        /// the sheet's own size and `columns`, so it needs neither to read it.
+        var cellWidthPX: Int? = nil
+        var cellHeightPX: Int? = nil
         let columns: Int?
         /// The transparent margin inside each cell, in sheet pixels — the
         /// client has to sample INSIDE it or the margin shows as a border, so
@@ -308,29 +320,39 @@ struct IconBaker {
     ) async throws -> Entry {
         let frameCount = options.maxFrames
 
+        // A native cell's long side is up to twice `--cell`: the generator
+        // scales to FIT its maximum size, and the cell is then FILLED.
         let frames = try await document.frames(
-            count: frameCount, start: start, window: window, side: options.cellPixels
+            count: frameCount, start: start, window: window,
+            side: options.nativeAspect ? options.cellPixels * 2 : options.cellPixels
         )
         guard !frames.isEmpty else { throw BakeError("\(id): no frames") }
 
         let columns = 4
         let rows = Int(ceil(Double(frameCount) / Double(columns)))
-        let cell = options.cellPixels
-        guard let canvas = AtlasWriter.canvas(width: cell * columns, height: cell * rows) else {
+        // The DISPLAYED shape: the generator applies the track's preferred
+        // transform, so a rotated phone clip's frames are already upright.
+        let cell = options.nativeAspect
+            ? AtlasWriter.CellSize.native(
+                side: options.cellPixels,
+                aspect: CGSize(width: frames[0].width, height: frames[0].height)
+            )
+            : AtlasWriter.CellSize(side: options.cellPixels)
+        guard let canvas = AtlasWriter.canvas(width: cell.width * columns, height: cell.height * rows) else {
             throw BakeError("\(id): cannot allocate sheet")
         }
         for (index, frame) in frames.enumerated() {
             AtlasWriter.drawCell(
                 frame, into: canvas,
-                at: AtlasWriter.origin(frame: index, columns: columns, rows: rows, cellPixels: cell),
-                cellPixels: cell, plate: options.plate, shape: options.shape
+                at: AtlasWriter.origin(frame: index, columns: columns, rows: rows, cell: cell),
+                cell: cell, plate: options.plate, shape: options.shape
             )
         }
         guard let sheet = canvas.makeImage() else {
             throw BakeError("\(id): cannot flatten sheet")
         }
         let empty = AtlasWriter.emptyCells(
-            in: sheet, frameCount: frameCount, columns: columns, cellPixels: cell
+            in: sheet, frameCount: frameCount, columns: columns, cell: cell
         )
         guard empty.isEmpty else {
             throw BakeError("\(id): cells \(empty) are transparent")
@@ -340,7 +362,9 @@ struct IconBaker {
         try AtlasWriter.write(sheet, to: file, heic: options.heic)
         return Entry(
             id: id, kind: "sheet", asset: asset,
-            frameCount: frameCount, frameMS: Int(stepMS.rounded()), cellPX: cell,
+            frameCount: frameCount, frameMS: Int(stepMS.rounded()), cellPX: min(cell.width, cell.height),
+            cellWidthPX: cell.isSquare ? nil : cell.width,
+            cellHeightPX: cell.isSquare ? nil : cell.height,
             columns: columns, gutterPX: AtlasWriter.gutter,
             scale: nil, rotation: nil, opacity: nil,
             bytes: size(of: file),
@@ -492,7 +516,7 @@ struct IconBaker {
             guard !options.inputs.isEmpty else {
                 print("usage: IconBaker <file.lottie|file.json>… --out <dir> "
                       + "[--cell 136] [--max-frames 24] [--max-keys 240] [--fps N] "
-                      + "[--png] [--fill] [--square] [--plate #RRGGBB] [--manifest name.json]")
+                      + "[--png] [--fill] [--square] [--native-aspect] [--plate #RRGGBB] [--manifest name.json]")
                 exit(2)
             }
             var entries: [Entry] = []

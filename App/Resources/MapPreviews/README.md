@@ -27,14 +27,21 @@ own clips.
 that only the Lottie paths read. Omitting it masks every cell into a DISC, which
 is right for an icon and wrong for a preview.
 
-Cells are square and most clips are not, so `AtlasWriter.drawCell` aspect-FILLS
-and the clip crops the overflow — the same crop the marker and the page draw
-media with. It did not always: until 94db33a it stretched, and every sheet was
-too narrow (or too short) in its own pixels.
+Cells keep the CLIP's aspect (`--native-aspect`, #539): 172px on the short
+side, the long side proportional — 172x306 for a 9:16 clip. The marker
+aspect-fills its square, so it shows exactly the crop a square cell held, and
+the hero that opens it has the whole picture to reveal at its own aspect
+instead of a square crop to stretch into a portrait page. Re-bake with
+`Scripts/import-mock-clips.py --rebake-sheets`.
+
+Before #539 the cells were square and `AtlasWriter.drawCell` aspect-FILLED
+each frame into them; before 94db33a it stretched them.
 
 ## Cost
 
-53 clip sheets (~11 MB), 172pt cells, 24 frames each. That is the whole
+53 clip sheets (~19 MB; ~11 MB while the cells were square), 172px on the
+short side, 24 frames each. A 9:16 sheet is 5.1 MB resident (2.8 MB square);
+the 7-9 measured resident fit the 64 MB cache. That is the whole
 budget: sprite sheets at this size were measured against the alternatives in
 [[animated-map-icons]] (9 MB decomposed vs 217 MB projected for full sheets at
 128 icons), and the map's marker count is bounded by clustering to ~19.
