@@ -428,12 +428,19 @@ struct ZoomFlight {
             // are never both opaque — the replica is at zero wherever the
             // resting chrome is at one — so the order only decides which of
             // two half-faded layers is on top mid-flight.
+            //
+            // Inside the card's CLIPPING container (#539): a pin's root lets its
+            // ring overhang and clips nothing, so a replica added there drew its
+            // scrim as a square-cornered veil past the window's rounded corners.
+            // The container shares the card's coordinate space, and sits under
+            // the resting chrome when that lives outside it.
+            let container = card.zoomChromeContainer
             if let window {
                 window.addSubview(chrome)
-            } else if let resting = card.zoomRestingChrome {
-                card.insertSubview(chrome, belowSubview: resting)
+            } else if let resting = card.zoomRestingChrome, resting.superview === container {
+                container.insertSubview(chrome, belowSubview: resting)
             } else {
-                card.addSubview(chrome)
+                container.addSubview(chrome)
             }
         }
 

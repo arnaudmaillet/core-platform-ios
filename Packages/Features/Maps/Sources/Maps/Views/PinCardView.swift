@@ -1414,6 +1414,11 @@ extension PinCardView: ZoomFlightCard {
     /// The pin's furniture — ring, flag border and badge — which must not
     /// survive into the page pose.
     var zoomRestingChrome: UIView? { chromeView }
+    /// The replica rides the clipping content view (#539): the root lets the
+    /// ring and badge overhang, so it clips nothing. The content view is
+    /// rounded with the card every frame (`setCornerRadius`) and sits under
+    /// `chromeView`, so the resting chrome stays on top.
+    var zoomChromeContainer: UIView { contentView }
 
     /// The surface the flight poses — a donated one first, because when a page
     /// has handed its picture over that IS what the card is flying.
