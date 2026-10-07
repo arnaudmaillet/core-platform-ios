@@ -58,12 +58,12 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
 
     /// See `PostSetSurface.setHasMore` — whether the caller has another page.
     private(set) var hasMore = false
-    /// A feed opened from here waiting for the caller's next page (#638):
-    /// resumed by the next answer, whatever it says.
-    private var pageWaiters: [CheckedContinuation<Void, Never>] = []
-    /// How long a feed waits on the caller for a page before asking again
-    /// later — a caller that never answers must not hold the feed's slot.
-    static let pageWaitLimit: Duration = .seconds(10)
+    /// The answer to a feed opened from one of these tiles (#638).
+    private lazy var feedContinuation = GridFeedContinuation(
+        ids: { [weak self] in self?.shownIDs ?? [] },
+        hasMore: { [weak self] in self?.hasMore ?? false },
+        askMore: { [weak self] in self?.onNearEnd?() }
+    )
 
     /// Opens a post WITH a flight. Supplied by the builder, which owns the
     /// snap feed and the transition — the same closure the place profile is
@@ -115,47 +115,18 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
         page.setPaging(paging)
         // A page that ended without growing the list (a failure) is an
         // answer too: the waiting feed hears it and asks again later.
-        if !paging { resumePageWaiters() }
+        if !paging { feedContinuation.answered() }
     }
 
     func setHasMore(_ hasMore: Bool) {
         self.hasMore = hasMore
-        if !hasMore { resumePageWaiters() }
+        if !hasMore { feedContinuation.answered() }
     }
-
-    // MARK: - The feed's continuation (#638)
 
     /// The ids after `id` in this surface's order, for a full-screen feed
-    /// opened from it — the caller's next page when the shown ones run out.
-    /// `nil`: nothing follows and nothing more will. Empty: none yet (the
-    /// page failed, or took too long); the feed asks again on its next
-    /// approach.
+    /// opened from it (#638) — see `GridFeedContinuation`.
     func postIDs(after id: PostID) async -> [PostID]? {
-        for _ in 0..<2 {
-            guard let index = shownIDs.firstIndex(of: id) else { return nil }
-            let following = shownIDs[(index + 1)...]
-            if !following.isEmpty { return Array(following.prefix(Self.seedWindow)) }
-            guard hasMore, let onNearEnd else { return nil }
-            onNearEnd()
-            await nextAnswer()
-        }
-        return []
-    }
-
-    /// Suspends until the caller's next answer, or `pageWaitLimit`.
-    private func nextAnswer() async {
-        let limit = Task { [weak self] in
-            try? await Task.sleep(for: Self.pageWaitLimit)
-            self?.resumePageWaiters()
-        }
-        await withCheckedContinuation { pageWaiters.append($0) }
-        limit.cancel()
-    }
-
-    private func resumePageWaiters() {
-        let waiting = pageWaiters
-        pageWaiters = []
-        for waiter in waiting { waiter.resume() }
+        await feedContinuation.postIDs(after: id)
     }
 
     /// The departure, described for the flight machinery.
@@ -307,7 +278,7 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
         loadViewIfNeeded()
         // Whatever the answer, a feed waiting on the next page hears it — it
         // re-reads `shownIDs`, which is set below before it gets to run.
-        defer { resumePageWaiters() }
+        defer { feedContinuation.answered() }
         switch state {
         case .loading:
             shownIDs = []

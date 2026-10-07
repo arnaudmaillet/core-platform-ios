@@ -1134,6 +1134,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             openPost: openPostHero
         )
         gallery.onNearEnd = { [weak self] in self?.viewModel.loadNextPageIfNeeded(.discover) }
+        gallery.hasMore = { [weak self] in self?.viewModel.hasMorePages ?? false }
         gallery.onRefresh = { [weak self] in self?.viewModel.refresh() }
         // What is loaded NOW, so the push shows the mosaic rather than a
         // skeleton waiting for the next publish.
@@ -2232,6 +2233,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         )
         // The FOLLOWING timeline's next page, never Discover's (#566).
         list.onNearEnd = { [weak self] in self?.viewModel.loadNextPageIfNeeded(.following) }
+        list.hasMore = { [weak self] in self?.viewModel.hasMoreFollowingPages ?? false }
         list.onRefresh = { [weak self] in self?.viewModel.refresh() }
         list.onAuthorTapped = { [weak self] post in self?.openAuthor(of: post) }
         list.onWarmRequested = { [weak self] posts in self?.warmVisible(posts) }

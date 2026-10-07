@@ -122,6 +122,55 @@ struct FeedContinuationTests {
         #expect(first.nextPageToken == nil)
     }
 
+    // MARK: - The shared grid continuation (For You's lists and Discover)
+
+    @Test func aGridHandsOnWhatItHoldsThenAsksItsCaller() async {
+        var held = ids("a", "b")
+        var more = true
+        var asks = 0
+        let continuation = GridFeedContinuation(
+            ids: { held }, hasMore: { more }, askMore: { asks += 1 }
+        )
+
+        #expect(await continuation.postIDs(after: PostID("a")) == ids("b"))
+
+        // At its end, the grid asks; the caller's page lands and is answered.
+        let pending = Task { await continuation.postIDs(after: PostID("b")) }
+        await settleUntil { asks == 1 }
+        held = ids("a", "b", "c")
+        more = false
+        continuation.answered()
+        #expect(await pending.value == ids("c"))
+
+        // The end: nothing more, said at once.
+        #expect(await continuation.postIDs(after: PostID("c")) == nil)
+        #expect(asks == 1)
+    }
+
+    /// An answer that brings nothing (a failed page) is "nothing yet".
+    @Test func aGridAnswerWithNothingNewIsNothingYet() async {
+        var asks = 0
+        let continuation = GridFeedContinuation(
+            ids: { ids("a") }, hasMore: { true }, askMore: { asks += 1 }
+        )
+        let pending = Task { await continuation.postIDs(after: PostID("a")) }
+        await settleUntil { asks == 1 }
+        continuation.answered()
+        await settleUntil { asks == 2 }
+        continuation.answered()
+
+        #expect(await pending.value == [])
+    }
+
+    /// Looks, not wall-clock time — see the Profile suites' note (#636).
+    private func settleUntil(_ condition: () -> Bool) async {
+        for _ in 0..<2_000 {
+            await Task.yield()
+            if condition() { return }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+    }
+
     // MARK: - A search/hashtag surface as the source
 
     private func makeSurface(showing shown: [PostID]) -> PostSetSurfaceViewController {
