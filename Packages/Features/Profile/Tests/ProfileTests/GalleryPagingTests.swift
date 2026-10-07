@@ -73,11 +73,21 @@ struct GalleryPagingTests {
         var snapshot: ProfileViewModel.GallerySnapshot?
     }
 
-    private func settle(until condition: () async -> Bool) async {
-        let deadline = ContinuousClock.now.advanced(by: .seconds(60))
-        while !(await condition()), ContinuousClock.now < deadline {
-            try? await Task.sleep(for: .milliseconds(10))
+    /// Waits for STATE, counted in looks rather than wall-clock time — the
+    /// pattern of Profile's other suites (`FollowRequestsTests`). A loaded CI
+    /// runner can freeze this process for longer than any deadline: a
+    /// wall-clock budget then expires while the wait never even ran, and the
+    /// test reads the screen before the view model has published (#636's
+    /// first run). A frozen process spends no looks. The waits the rest of a
+    /// test stands on are `#require`d, so a wait that gives up says so.
+    @discardableResult
+    private func settle(until condition: () async -> Bool) async -> Bool {
+        for _ in 0..<2_000 {
+            await Task.yield()
+            if await condition() { return true }
+            try? await Task.sleep(for: .milliseconds(5))
         }
+        return await condition()
     }
 
     /// Grace for "nothing more should happen".
@@ -90,30 +100,30 @@ struct GalleryPagingTests {
         return posts.map(\.id.rawValue)
     }
 
-    private func open(_ gallery: PagedGallery) async -> (ProfileViewModel, Shown) {
+    private func open(_ gallery: PagedGallery) async throws -> (ProfileViewModel, Shown) {
         let viewModel = ProfileViewModel(repository: OneProfile(), gallery: gallery, source: .profile(ProfileID("prof-1")))
         let shown = Shown()
         viewModel.onGalleryChange = { shown.snapshot = $0 }
         viewModel.viewDidLoad()
-        await settle {
+        try #require(await settle {
             if case .loading = shown.snapshot?.activity { return false }
             return shown.snapshot != nil
-        }
+        })
         return (viewModel, shown)
     }
 
-    @Test func nearingTheEndAppendsTheNextPageOnceAndStopsAtTheEnd() async {
+    @Test func nearingTheEndAppendsTheNextPageOnceAndStopsAtTheEnd() async throws {
         let gallery = PagedGallery(authored: [
             nil: GalleryPage(posts: [post("a", at: 60), post("b", at: 50)], nextPageToken: "a2"),
             "a2": GalleryPage(posts: [post("c", at: 40)], nextPageToken: nil),
         ])
-        let (viewModel, shown) = await open(gallery)
+        let (viewModel, shown) = try await open(gallery)
         viewModel.setGallerySource(.posts)
         #expect(ids(shown.snapshot?.activity) == ["a", "b"])
 
         viewModel.loadMoreGallery()
         viewModel.loadMoreGallery() // the same approach, reported twice
-        await settle { ids(shown.snapshot?.activity).count == 3 }
+        try #require(await settle { ids(shown.snapshot?.activity).count == 3 })
         #expect(ids(shown.snapshot?.activity) == ["a", "b", "c"])
 
         viewModel.loadMoreGallery() // the end: nothing left to ask
@@ -123,7 +133,7 @@ struct GalleryPagingTests {
 
     /// All merges two corpora that page on their own: it shows only down to
     /// where both are known, so the next page only ever adds below.
-    @Test func allStopsAtTheFrontierAndOnlyEverAppends() async {
+    @Test func allStopsAtTheFrontierAndOnlyEverAppends() async throws {
         let gallery = PagedGallery(
             authored: [
                 nil: GalleryPage(posts: [post("a", at: 100), post("b", at: 90)], nextPageToken: "a2"),
@@ -131,29 +141,29 @@ struct GalleryPagingTests {
             ],
             tagged: [nil: GalleryPage(posts: [post("t1", at: 95), post("t2", at: 10)], nextPageToken: nil)]
         )
-        let (viewModel, shown) = await open(gallery)
+        let (viewModel, shown) = try await open(gallery)
         // t2 (10) is older than what the authored corpus has reached (90):
         // an authored post could still land between them, so it waits.
         #expect(ids(shown.snapshot?.activity) == ["a", "t1", "b"])
 
         viewModel.loadMoreGallery()
-        await settle { ids(shown.snapshot?.activity).count == 5 }
+        try #require(await settle { ids(shown.snapshot?.activity).count == 5 })
 
         #expect(ids(shown.snapshot?.activity) == ["a", "t1", "b", "c", "t2"])
     }
 
     /// Short shows only text: a page of photos adds nothing to it, and with
     /// no tile coming on screen to ask, the next page is asked at once.
-    @Test func aTabThatAPageLeavesUnchangedKeepsLoading() async {
+    @Test func aTabThatAPageLeavesUnchangedKeepsLoading() async throws {
         let gallery = PagedGallery(authored: [
             nil: GalleryPage(posts: [post("p1", at: 60)], nextPageToken: "a2"),
             "a2": GalleryPage(posts: [post("p2", at: 50)], nextPageToken: "a3"),
             "a3": GalleryPage(posts: [post("x", .text, at: 40)], nextPageToken: nil),
         ])
-        let (viewModel, shown) = await open(gallery)
+        let (viewModel, shown) = try await open(gallery)
 
         viewModel.setGalleryFormat(.short)
-        await settle { ids(shown.snapshot?.short) == ["x"] }
+        try #require(await settle { ids(shown.snapshot?.short) == ["x"] })
 
         #expect(ids(shown.snapshot?.short) == ["x"])
         #expect(await gallery.authoredAsks == [nil, "a2", "a3"])
@@ -161,45 +171,45 @@ struct GalleryPagingTests {
 
     /// A tab whose next page fails says so rather than asking again in a
     /// loop; the viewer's next approach retries.
-    @Test func aFailingPageUnderAnEmptyTabWaitsForTheViewer() async {
+    @Test func aFailingPageUnderAnEmptyTabWaitsForTheViewer() async throws {
         let gallery = PagedGallery(authored: [
             nil: GalleryPage(posts: [post("p1", at: 60)], nextPageToken: "a2"),
             "a2": GalleryPage(posts: [post("x", .text, at: 40)], nextPageToken: nil),
         ])
         await gallery.fail("a2")
-        let (viewModel, shown) = await open(gallery)
+        let (viewModel, shown) = try await open(gallery)
 
         viewModel.setGalleryFormat(.short)
-        await settle {
+        try #require(await settle {
             if case .failed = shown.snapshot?.short { return true }
             return false
-        }
+        })
         await settle()
         #expect(await gallery.authoredAsks == [nil, "a2"])
 
         await gallery.heal("a2")
         viewModel.loadMoreGallery()
-        await settle { ids(shown.snapshot?.short) == ["x"] }
+        try #require(await settle { ids(shown.snapshot?.short) == ["x"] })
         #expect(ids(shown.snapshot?.short) == ["x"])
     }
 
     /// A revisit or a pull revalidates: the fresh first page goes over the
     /// old one and the pages below it stay.
-    @Test func aRevalidationKeepsThePagesBelowTheFirst() async {
+    @Test func aRevalidationKeepsThePagesBelowTheFirst() async throws {
         let gallery = PagedGallery(authored: [
             nil: GalleryPage(posts: [post("a", at: 60), post("b", at: 50)], nextPageToken: "a2"),
             "a2": GalleryPage(posts: [post("c", at: 40), post("d", at: 30)], nextPageToken: nil),
         ])
-        let (viewModel, shown) = await open(gallery)
+        let (viewModel, shown) = try await open(gallery)
         viewModel.setGallerySource(.posts)
         viewModel.loadMoreGallery()
-        await settle { ids(shown.snapshot?.activity).count == 4 }
+        try #require(await settle { ids(shown.snapshot?.activity).count == 4 })
 
         await gallery.setAuthored(
             GalleryPage(posts: [post("new", at: 70), post("a", at: 60)], nextPageToken: "a2"), for: nil
         )
         viewModel.refresh()
-        await settle { ids(shown.snapshot?.activity).first == "new" }
+        try #require(await settle { ids(shown.snapshot?.activity).first == "new" })
 
         // "b" slid out of the first page: older than its oldest, kept.
         #expect(ids(shown.snapshot?.activity) == ["new", "a", "b", "c", "d"])
