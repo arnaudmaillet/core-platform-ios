@@ -80,6 +80,11 @@ final class ConversationThreadViewController: UIViewController {
         maskLocations: SnapCommentsLayout.footerFrostMaskLocations
     )
     private let statusLabel = UILabel()
+    /// Under the bar while older history is on its way (#600): pinned to the
+    /// screen rather than to the content, so it is where the reader is
+    /// looking — at the top — whatever the scroll. Turns only while a page
+    /// is out; an idle spinner redraws the screen every frame (#580).
+    private let olderSpinner = UIActivityIndicatorView(style: .medium)
     private let peerPill = SnapAuthorIdentityView()
     private let walletBadge = WalletBadgeButton()
     private var walletBadgeItem: UIBarButtonItem?
@@ -147,6 +152,7 @@ final class ConversationThreadViewController: UIViewController {
         }
         configureNavigationItem()
         configureStatusLabel()
+        configureOlderSpinner()
         bindDriver()
         applySnapshot(animated: false)
         driver.viewDidLoad()
@@ -443,7 +449,27 @@ final class ConversationThreadViewController: UIViewController {
         driver.onReplyStateChange = { [weak self] draft in self?.renderReply(draft) }
         driver.onActionNotice = { [weak self] title, message in self?.presentNotice(title, message) }
         driver.onPinnedChange = { [weak self] pinned in self?.renderPinned(pinned) }
+        driver.onLoadingOlderChange = { [weak self] loading in self?.setLoadingOlder(loading) }
     }
+
+    private func configureOlderSpinner() {
+        olderSpinner.hidesWhenStopped = true
+        olderSpinner.color = .secondaryLabel
+        olderSpinner.isUserInteractionEnabled = false
+        olderSpinner.constrain(in: view) { parent in
+            olderSpinner.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
+            olderSpinner.topAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.topAnchor, constant: Spacing.sm)
+        }
+    }
+
+    /// Never in a peek, which pages nothing.
+    private func setLoadingOlder(_ loading: Bool) {
+        guard mode == .full else { return }
+        if loading { olderSpinner.startAnimating() } else { olderSpinner.stopAnimating() }
+    }
+
+    /// Whether the top of the thread says older history is on its way.
+    var isShowingOlderSpinner: Bool { olderSpinner.isAnimating }
 
     // MARK: - Render
 
