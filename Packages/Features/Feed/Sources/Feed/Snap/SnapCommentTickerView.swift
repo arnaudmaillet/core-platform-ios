@@ -62,6 +62,8 @@ final class SnapCommentTickerView: UIView {
     /// The backdrop's resting opacity (0 = none, the default), read with the
     /// speed. A scrub raises the wash from here and the release returns it.
     private(set) static var restingBackdropOpacity: CGFloat = 0
+    /// "Don't Cover People" (#484), read with the speed.
+    private(set) static var avoidsPeople = false
     static var laneSpeeds: [CGFloat] { baseLaneSpeeds.map { $0 * speedScale } }
 
     /// Reads the band's appearance from the device preferences.
@@ -70,6 +72,7 @@ final class SnapCommentTickerView: UIView {
         speedScale = CGFloat(preferences.bandSpeed.scale)
         bubbleOpacity = CGFloat(preferences.bandOpacity)
         restingBackdropOpacity = CGFloat(preferences.bandBackgroundOpacity)
+        avoidsPeople = preferences.avoidsPeople
     }
     /// Per-lane phase, in seconds of travel. The pre-fill shifts each lane's
     /// bubble train left by `phase × speed` points — as if that lane had

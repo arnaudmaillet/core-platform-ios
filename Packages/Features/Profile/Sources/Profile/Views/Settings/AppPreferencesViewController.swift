@@ -19,7 +19,7 @@ final class AppPreferencesViewController: UIViewController {
         case interfaceSounds, haptics
         case appearance, careMode, reduceMotion
         case animatedEmojis
-        case bandSwitch, opacity, bandBackground, speed
+        case bandSwitch, opacity, bandBackground, speed, dontCoverPeople
         case mutedWords, mutedAccounts
         case subtitlesSwitch, subtitleBackground
         case commentsBackdrop
@@ -189,7 +189,7 @@ final class AppPreferencesViewController: UIViewController {
             (PowerSavingPreference.isOn ? Self.powerSavingNote + " " : "")
                 + "A video that doesn't start on its own shows its first frame with a play mark; tap it to play. Data Saver lowers stream quality and stops loading upcoming videos ahead while on cellular. "
                 + Self.backgroundPlayNote
-        case .band: "The short reactions that scroll over videos and photos. Background darkens the strip behind them; it darkens more while you scrub through them."
+        case .band: "The short reactions that scroll over videos and photos. Background darkens the strip behind them; it darkens more while you scrub through them. Don't Cover People lets reactions pass behind the people in a playing video; it pauses in Low Power Mode, with Power Saving on, or when your iPhone is hot."
         case .muted: "Comments with these words, or from these accounts, never appear in the reaction band or the subtitles. They still show in the comments."
         case .subtitles: "Comments shown as captions above the reaction band. Background is the shade behind each caption."
         case .commentsScreen: "How dark a video or photo gets behind its comments when you open them. Darker reads more easily; lighter keeps more of the post."
@@ -269,7 +269,7 @@ final class AppPreferencesViewController: UIViewController {
         case .care: [.careMode]
         case .motion: [.reduceMotion]
         case .emojis: [.animatedEmojis]
-        case .band: [.bandSwitch, .opacity, .bandBackground, .speed]
+        case .band: [.bandSwitch, .opacity, .bandBackground, .speed, .dontCoverPeople]
         case .muted: [.mutedWords, .mutedAccounts]
         case .subtitles: [.subtitlesSwitch, .subtitleBackground]
         case .commentsScreen: [.commentsBackdrop]
@@ -376,7 +376,14 @@ final class AppPreferencesViewController: UIViewController {
             cell.contentConfiguration = Self.label("Show Reaction Band", symbol: "text.bubble")
             cell.accessories = [switchAccessory(isOn: preferences.showsReactionBand) { [weak self] isOn in
                 self?.store.update { $0.showsReactionBand = isOn }
-                self?.reconfigure([.opacity, .bandBackground, .speed])
+                self?.reconfigure([.opacity, .bandBackground, .speed, .dontCoverPeople])
+            }]
+        case .dontCoverPeople:
+            cell.contentConfiguration = Self.label("Don't Cover People", symbol: "person.crop.rectangle")
+            cell.accessories = [switchAccessory(
+                isOn: preferences.avoidsPeople, isEnabled: preferences.showsReactionBand
+            ) { [weak self] isOn in
+                self?.store.update { $0.avoidsPeople = isOn }
             }]
         case .opacity:
             installSlider(

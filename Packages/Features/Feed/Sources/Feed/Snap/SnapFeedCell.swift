@@ -97,6 +97,47 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     }
     /// Paused by `setCoveredBySheet`, and owed a resume by it.
     private var isSheetPaused = false
+    /// "Don't Cover People" (#484): segments this page's clip while it owns
+    /// the screen, and masks the band where people are.
+    private let personOcclusion = PersonOcclusionDriver()
+    private var isChromeHeldForFlight = false
+
+    /// Starts or stops "Don't Cover People" for this page. Asked whenever the
+    /// page's activity, its clip or a flight changes; what can change between
+    /// those (a pause, the band emptying, power and heat) the driver asks on
+    /// every beat (`occlusionDecision`).
+    private func refreshPersonOcclusion() {
+        // Read from the store, not the band's cached appearance: the band
+        // reads it when it starts streaming, which can come after this page
+        // became active.
+        guard isActive, playsVideo, !isChromeHeldForFlight, let surface = audibleSurface,
+              MediaCommentPreferencesStore.standard.preferences.avoidsPeople
+        else {
+            personOcclusion.stop()
+            return
+        }
+        personOcclusion.decide = { [weak self] in self?.occlusionDecision() ?? .clear }
+        personOcclusion.run(surface: surface, band: chrome.personOcclusionTicker)
+    }
+
+    /// The gate, asked eight times a second while the driver runs.
+    private func occlusionDecision() -> PersonOcclusionDriver.Decision {
+        let process = ProcessInfo.processInfo
+        let inputs = PersonOcclusionGate.Inputs(
+            enabled: SnapCommentTickerView.avoidsPeople,
+            bandShown: chrome.isPersonOcclusionBandShown,
+            pageActive: isActive,
+            playing: isClipAdvancing,
+            inFlight: isChromeHeldForFlight,
+            powerSaving: PowerSavingPreference.isOn,
+            lowPowerMode: process.isLowPowerModeEnabled,
+            thermalState: process.thermalState
+        )
+        #if DEBUG
+        if PersonOcclusionDriver.traces, !PersonOcclusionGate.isOpen(inputs) { print("[occlusion] gate \(inputs)") }
+        #endif
+        return PersonOcclusionDriver.decision(for: inputs)
+    }
 
     /// The surface the viewer should HEAR when this page owns the screen: the
     /// clip on the page under the finger, nil on a photograph or a text page.
@@ -2694,6 +2735,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// joined its clip from a grid tile, which is every post opened from a card.
     private func updatePlayheadFeed() {
         let wanted = isActive && playsVideo
+        defer { refreshPersonOcclusion() }
         guard wanted else {
             stopPlayheadFeed()
             return
@@ -2913,6 +2955,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     }
 
     func setChromeHeldForFlight(_ held: Bool) {
+        isChromeHeldForFlight = held
+        defer { refreshPersonOcclusion() }
         chrome.setTickerHeldForFlight(held)
         if held {
             chrome.alpha = 0

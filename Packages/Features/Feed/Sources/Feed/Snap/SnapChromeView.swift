@@ -1122,6 +1122,12 @@ final class SnapChromeView: UIView {
         commentTicker.setActive(active)
     }
 
+    /// "Don't Cover People" (#484): the band to mask — always the same view,
+    /// shown or not (it appears once its comments arrive).
+    var personOcclusionTicker: UIView { commentTicker }
+    /// Whether that band is on screen now.
+    var isPersonOcclusionBandShown: Bool { !commentTicker.isHidden && commentTicker.window != nil }
+
     /// The image pipeline the comment surfaces load author avatars through —
     /// forwarded to the ticker and the subtitle zone (both render an avatar
     /// leading their comment content). Set at configure, before any stream

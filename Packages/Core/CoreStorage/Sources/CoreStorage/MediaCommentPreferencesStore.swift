@@ -50,6 +50,9 @@ public struct MediaCommentPreferences: Codable, Equatable, Sendable {
     public var mutedKeywords: [String]
     /// Lowercased handles without "@"; their comments are never shown on media.
     public var mutedHandles: [String]
+    /// "Don't Cover People" (#484): the band flows behind the people in a
+    /// playing clip. Off by default.
+    public var avoidsPeople: Bool
 
     public init(
         showsReactionBand: Bool = true,
@@ -60,7 +63,8 @@ public struct MediaCommentPreferences: Codable, Equatable, Sendable {
         subtitleBackgroundOpacity: Double = 0.45,
         commentsBackdropOpacity: Double = 0.8,
         mutedKeywords: [String] = [],
-        mutedHandles: [String] = []
+        mutedHandles: [String] = [],
+        avoidsPeople: Bool = false
     ) {
         self.showsReactionBand = showsReactionBand
         self.bandOpacity = Self.clamp(bandOpacity, to: Self.opacityRange)
@@ -71,12 +75,13 @@ public struct MediaCommentPreferences: Codable, Equatable, Sendable {
         self.commentsBackdropOpacity = Self.clamp(commentsBackdropOpacity, to: Self.commentsBackdropRange)
         self.mutedKeywords = mutedKeywords
         self.mutedHandles = mutedHandles
+        self.avoidsPeople = avoidsPeople
     }
 
     private enum CodingKeys: String, CodingKey {
         case showsReactionBand, bandOpacity, bandSpeed, bandBackgroundOpacity
         case showsSubtitles, subtitleBackgroundOpacity, commentsBackdropOpacity
-        case mutedKeywords, mutedHandles
+        case mutedKeywords, mutedHandles, avoidsPeople
     }
 
     /// Every key is optional: preferences saved by an older build (before a
@@ -97,7 +102,8 @@ public struct MediaCommentPreferences: Codable, Equatable, Sendable {
             commentsBackdropOpacity: try container.decodeIfPresent(Double.self, forKey: .commentsBackdropOpacity)
                 ?? defaults.commentsBackdropOpacity,
             mutedKeywords: try container.decodeIfPresent([String].self, forKey: .mutedKeywords) ?? defaults.mutedKeywords,
-            mutedHandles: try container.decodeIfPresent([String].self, forKey: .mutedHandles) ?? defaults.mutedHandles
+            mutedHandles: try container.decodeIfPresent([String].self, forKey: .mutedHandles) ?? defaults.mutedHandles,
+            avoidsPeople: try container.decodeIfPresent(Bool.self, forKey: .avoidsPeople) ?? defaults.avoidsPeople
         )
     }
 
