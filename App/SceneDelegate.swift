@@ -23,6 +23,9 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         ScrollIndicatorStyle.hideAppWide()
 
         let window = UIWindow(windowScene: windowScene)
+        // Taps in a bar's area never reach the content under it; pans still
+        // scroll it (#562).
+        window.addGestureRecognizer(BarTapShield())
         self.window = window
         // Settings → App and Device → Display: light, dark or following iOS.
         // Applied before the first frame so the app never flashes the other
