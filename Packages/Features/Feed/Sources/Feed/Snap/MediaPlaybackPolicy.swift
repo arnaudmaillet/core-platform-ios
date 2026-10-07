@@ -22,6 +22,8 @@ enum MediaPlaybackPolicy {
     static var peakBitRate: Double { store.preferences.peakBitRate(onCellular: isOnCellular()) }
     /// Background Play (#483): the clip being heard keeps playing off screen.
     static var playsInBackground: Bool { store.preferences.backgroundPlay }
+    /// Picture in Picture (#483): the playing clip floats when the app leaves.
+    static var floatsInPictureInPicture: Bool { store.preferences.pictureInPicture }
 }
 
 /// Whether the current network path is cellular or otherwise expensive

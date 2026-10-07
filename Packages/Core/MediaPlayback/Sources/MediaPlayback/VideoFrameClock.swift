@@ -25,6 +25,19 @@ final class VideoFrameClock {
     /// so a renderer detaching mid-tick cannot mutate the table underneath us.
     private let renderers = NSHashTable<VideoFrameRenderer>.weakObjects()
     private var link: CADisplayLink?
+    /// Picture in Picture (#483): the app is off screen, where a display link
+    /// does not fire, yet the floating window needs frames. A plain timer on
+    /// the main queue ticks every renderer at 60 Hz meanwhile. Pulls are gated
+    /// by `hasNewPixelBuffer`, so a link that also fires costs nothing more.
+    var pacesWithoutDisplay = false {
+        didSet {
+            guard pacesWithoutDisplay != oldValue else { return }
+            pacesWithoutDisplay ? startTimer() : stopTimer()
+        }
+    }
+    private var timer: DispatchSourceTimer?
+    /// Whether the fallback timer is running (tests).
+    var isPacingWithoutDisplay: Bool { timer != nil }
     #if DEBUG
     private var lastTickTimestamp: CFTimeInterval = 0
     #endif
@@ -56,6 +69,29 @@ final class VideoFrameClock {
         guard renderers.count == 0 else { return }
         link?.invalidate()
         link = nil
+    }
+
+    private func startTimer() {
+        guard timer == nil else { return }
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        let interval = 1.0 / 60
+        timer.schedule(deadline: .now(), repeating: interval, leeway: .milliseconds(2))
+        timer.setEventHandler { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let now = CACurrentMediaTime()
+                for renderer in self.renderers.allObjects {
+                    renderer.render(atHostTime: now + interval, refreshInterval: interval)
+                }
+            }
+        }
+        timer.resume()
+        self.timer = timer
+    }
+
+    private func stopTimer() {
+        timer?.cancel()
+        timer = nil
     }
 
     @objc private func tick(_ link: CADisplayLink) {

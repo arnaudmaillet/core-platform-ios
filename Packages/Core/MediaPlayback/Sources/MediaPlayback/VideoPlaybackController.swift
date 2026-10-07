@@ -214,6 +214,10 @@ public final class VideoPlaybackController {
     /// while the app is off screen. See `continueInBackground`.
     weak var backgroundSurface: VideoRenderView?
     weak var backgroundPlayer: AVPlayer?
+    /// Picture in Picture (#483): the clip readied for the floating window,
+    /// and who hears it open and close. See `armPictureInPicture`.
+    var pictureInPicture: PictureInPictureSession?
+    var pictureInPictureObserver: ((Bool) -> Void)?
 
     /// How many players may be bound to surfaces at once.
     ///
@@ -972,6 +976,8 @@ public final class VideoPlaybackController {
     @discardableResult
     public func setPaused(_ paused: Bool, in view: VideoRenderView) -> Bool {
         guard let player = watchedPlayer(in: view) else { return false }
+        // The floating window shows its own play / pause; it is told.
+        defer { if pictureInPicture?.surface === view { refreshPictureInPictureState() } }
         if paused {
             // ⚠️ WHERE THE PICTURE WAS, remembered — because an adaptive stream
             // does not necessarily come back to it.

@@ -15,7 +15,7 @@ final class AppPreferencesViewController: UIViewController {
 
     private enum Item: Hashable {
         case autoplay, startsWithSound, dataSaver
-        case backgroundPlay
+        case backgroundPlay, pictureInPicture
         case interfaceSounds, haptics
         case appearance, careMode, reduceMotion
         case animatedEmojis
@@ -197,7 +197,7 @@ final class AppPreferencesViewController: UIViewController {
         }
     }
 
-    static let backgroundPlayNote = "With Background Play on, a video you're listening to keeps playing when you leave the app or lock your iPhone, with controls on the Lock Screen."
+    static let backgroundPlayNote = "With Background Play on, a video you're listening to keeps playing when you leave the app or lock your iPhone, with controls on the Lock Screen. With Picture in Picture on, a playing video moves into a small window over your other apps, and videos play their sound even when your iPhone is on silent."
 
     /// What an overridden section says while Power Saving is on.
     static let powerSavingNote = "Power Saving is on, so this is set for you. Turn it off in Settings → App and Device to use your own choice."
@@ -263,7 +263,7 @@ final class AppPreferencesViewController: UIViewController {
 
     private static func items(in section: Section) -> [Item] {
         switch section {
-        case .playback: [.autoplay, .startsWithSound, .dataSaver, .backgroundPlay]
+        case .playback: [.autoplay, .startsWithSound, .dataSaver, .backgroundPlay, .pictureInPicture]
         case .sounds: [.interfaceSounds, .haptics]
         case .appearance: [.appearance]
         case .care: [.careMode]
@@ -362,6 +362,11 @@ final class AppPreferencesViewController: UIViewController {
             cell.contentConfiguration = Self.label("Background Play", symbol: "lock.iphone")
             cell.accessories = [switchAccessory(isOn: playback.preferences.backgroundPlay) { [weak self] isOn in
                 self?.playback.update { $0.backgroundPlay = isOn }
+            }]
+        case .pictureInPicture:
+            cell.contentConfiguration = Self.label("Picture in Picture", symbol: "pip")
+            cell.accessories = [switchAccessory(isOn: playback.preferences.pictureInPicture) { [weak self] isOn in
+                self?.playback.update { $0.pictureInPicture = isOn }
             }]
         case .cacheSize:
             var content = Self.label("Media Cache", symbol: "internaldrive")
