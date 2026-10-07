@@ -124,6 +124,32 @@ final class MapsViewController: UIViewController {
     /// How long a touch that ended without opening keeps its warm player: the
     /// tap is recognised on touch-up, in the same turn or the next.
     static let warmOpenWindow: TimeInterval = 0.6
+    /// Prerolls ONE post page player, paused on its first frame (#654).
+    private let prerollPlayback: (PostID, TimeInterval?) -> (any FeedPlaybackWarm)?
+    /// The one prerolled player: the marker nearest the centre at the last
+    /// idle settle. Promoted to `playbackWarm` when that marker is touched.
+    private var idlePreroll: (postID: PostID, warm: any FeedPlaybackWarm)?
+    private var idlePrerollWork: DispatchWorkItem?
+    /// How long the map has to rest before a player is spent on it.
+    static let idlePrerollDelay: TimeInterval = 0.6
+    /// How long a preroll waits for its tap before it is let go (#654).
+    ///
+    /// ⚠️ PAUSED IS NOT FREE. Nothing decodes, but its renderer stays on the
+    /// shared video clock (`VideoFrameClock`), which ticks at the screen's
+    /// rate while any renderer is registered — a cheap "new frame?" check,
+    /// still a wake per refresh. A map left alone gets 20 s of it, then
+    /// nothing until the viewer moves it or comes back to it.
+    static let idlePrerollLifetime: TimeInterval = 20
+    private var idlePrerollExpiry: DispatchWorkItem?
+    /// Set when a preroll timed out; cleared by the next settle or return, so
+    /// a map left alone is not re-prerolled every 20 s by stray refreshes.
+    private var idlePrerollRested = false
+    /// Tries left this rest when the feed had nothing to preroll yet — the
+    /// map warms its visible posts' data on the same settle, so the first ask
+    /// can beat it (measured: `hydrated=false`, then nothing for 25 s).
+    private var idlePrerollRetries = 0
+    static let idlePrerollRetryLimit = 3
+    static let idlePrerollRetryDelay: TimeInterval = 1.5
     /// Runaway guard: clustering already bounds the visible set to a handful, but
     /// cap the sweep in case it runs during a pre-cluster frame.
     private static let prewarmCap = 16
@@ -390,6 +416,7 @@ final class MapsViewController: UIViewController {
         ) -> UIViewController,
         prewarm: @escaping ([PostID]) async -> Void,
         warmPlayback: @escaping (PostID, TimeInterval?) -> (any FeedPlaybackWarm)? = { _, _ in nil },
+        prerollPlayback: @escaping (PostID, TimeInterval?) -> (any FeedPlaybackWarm)? = { _, _ in nil },
         openProfile: @escaping (ProfileID, ProfileIdentityStub?) -> Void,
         openConversation: @escaping (ProfileID) -> Void,
         countryAccess: (any CountryAccess)? = nil,
@@ -418,6 +445,7 @@ final class MapsViewController: UIViewController {
         self.makeClusterGallery = makeClusterGallery
         self.prewarm = prewarm
         self.warmPlayback = warmPlayback
+        self.prerollPlayback = prerollPlayback
         self.openProfile = openProfile
         self.openConversation = openConversation
         super.init(nibName: nil, bundle: nil)
@@ -880,7 +908,9 @@ final class MapsViewController: UIViewController {
             return
         }
         videoCoordinator.setSurfaceVisible(true)
+        idlePrerollRested = false
         refreshVideoPlayback()
+        scheduleIdlePreroll()
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -889,6 +919,7 @@ final class MapsViewController: UIViewController {
         // presentSnapFeed already covered the surface (keeping the donor).
         guard activeTransition == nil else { return }
         videoCoordinator.setSurfaceVisible(false)
+        endIdlePreroll()
     }
 
     /// Re-reads the people rail whenever the pinned set changes — including
@@ -947,7 +978,10 @@ final class MapsViewController: UIViewController {
         appObservers.add(center.addObserver(
             forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.videoCoordinator.setSurfaceVisible(false) }
+            MainActor.assumeIsolated {
+                self?.videoCoordinator.setSurfaceVisible(false)
+                self?.endIdlePreroll()
+            }
         })
         appObservers.add(center.addObserver(
             forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main
@@ -2655,6 +2689,9 @@ final class MapsViewController: UIViewController {
     /// LONE pins (a clustered post isn't its own marker), ranked by closeness
     /// to the viewport center.
     private func refreshVideoPlayback() {
+        // The same moments decide the one preroll (#654): markers arrived, the
+        // map settled, came back into view.
+        scheduleIdlePreroll()
         let center = mapView.centerCoordinate
         let visibleRect = mapView.visibleMapRect
         var scored: [(distance: Double, candidate: MapVideoPlaybackCoordinator.Candidate)] = []
@@ -2925,6 +2962,7 @@ extension MapsViewController: MKMapViewDelegate {
     func mapView(_ mapView: MKMapView, regionWillChangeAnimated animated: Bool) {
         // A zoom/pan started: hold annotation mutations until it settles.
         isRegionTransitioning = true
+        idlePrerollWork?.cancel()
         #if DEBUG
         OfferLog.note("region will change")
         #endif
@@ -2941,6 +2979,9 @@ extension MapsViewController: MKMapViewDelegate {
         reconcileClustersForSettle()
         flushPendingDiffs()
         scheduleQuery()
+        idlePrerollRested = false
+        idlePrerollRetries = 0
+        scheduleIdlePreroll()
     }
 
     func mapView(_ mapView: MKMapView, didAdd views: [MKAnnotationView]) {
@@ -3136,6 +3177,16 @@ extension MapsViewController: MKMapViewDelegate {
                 return resolve(shown(mapView)) != nil
             }) { [weak self] in
                 guard let self, let target = resolve(shown(mapView)) else { return }
+                // `-maps-open-delay <ms>`: the map rests that long before the
+                // tap — the idle preroll's window, measurable (#654).
+                if let delay = Self.debugArgumentValue("-maps-open-delay").flatMap(Double.init), delay > 0 {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + delay / 1000) { [weak self] in
+                        guard let self, let target = resolve(shown(mapView)) else { return }
+                        willSelect?(target)
+                        mapView.selectAnnotation(target, animated: true)
+                    }
+                    return
+                }
                 willSelect?(target)
                 // `-maps-touch-lead <ms>`: a finger rests on the marker that
                 // long before the tap — the touch-down warm, measurable (#646).
@@ -3275,6 +3326,8 @@ extension MapsViewController: MKMapViewDelegate {
         view?.onDressed = { [weak self, weak view] in
             guard let self, let view else { return }
             popChoreographer.release(view)
+            // Its preview sheet is on now: a candidate for the preroll (#654).
+            scheduleIdlePreroll()
         }
         view?.onReappear = { [weak self] view in self?.countryLayer.giveWay(to: view.frame) }
         return view
@@ -3303,12 +3356,12 @@ extension MapsViewController: MKMapViewDelegate {
         // the feed gives it (`FlightPlaybackWarm.warmableClip`).
         guard openGate.canOpen, playbackWarm?.postID != annotation.pin.postID else { return }
         endPlaybackWarm(opened: false)
-        let time: TimeInterval? = {
-            guard case .sheet(let sheet)? = mapView.wornPreview(for: annotation)?.art,
-                  let frame = mapView.wornPreviewFrame(for: annotation) else { return nil }
-            return MapPinZoomSource.flightMediaTime(sheet: sheet, displayedFrame: frame,
-                                                    lead: MapPinZoomSource.warmMediaLead)
-        }()
+        let time = warmMediaTime(for: annotation)
+        // The marker the map prerolled: its player is already decoded and
+        // paused — it plays on from the moment the marker shows now (#654).
+        if promoteIdlePreroll(for: annotation.pin.postID, at: time) { return }
+        // ONE player: a touch elsewhere spends the preroll's.
+        endIdlePreroll()
         guard let warm = warmPlayback(annotation.pin.postID, time) else {
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
@@ -3341,6 +3394,128 @@ extension MapsViewController: MKMapViewDelegate {
         guard let warm = playbackWarm else { return }
         playbackWarm = nil
         warm.warm.end(opened: opened)
+    }
+
+    /// The clip time a warm for this marker should play from: the frame its
+    /// sheet shows, plus the player's start-up.
+    private func warmMediaTime(for annotation: MapAnnotation) -> TimeInterval? {
+        guard case .sheet(let sheet)? = mapView.wornPreview(for: annotation)?.art,
+              let frame = mapView.wornPreviewFrame(for: annotation) else { return nil }
+        return MapPinZoomSource.flightMediaTime(sheet: sheet, displayedFrame: frame,
+                                                lead: MapPinZoomSource.warmMediaLead)
+    }
+
+    // MARK: - Idle preroll (#654)
+
+    /// The map came to rest: in `idlePrerollDelay`, preroll the player of the
+    /// marker nearest the centre. A pan starting first cancels it.
+    private func scheduleIdlePreroll() {
+        idlePrerollWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.updateIdlePreroll() }
+        idlePrerollWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.idlePrerollDelay, execute: work)
+    }
+
+    /// ⚠️ ONE PLAYER, AND IT IS THE PAGE'S. The owner's call (2026-10-07):
+    /// the marker nearest the centre gets its post's page player decoded to
+    /// its first frame and paused, so a tap of any length flies live video
+    /// from take-off. Nothing plays behind a marker
+    /// (`GeoDiscoveryRepository.previewVideoURL`'s rule stands), and a paused
+    /// player decodes nothing at rest.
+    private func updateIdlePreroll() {
+        guard !idlePrerollRested else { return }
+        guard view.window != nil, activeTransition == nil, playbackWarm == nil, !isRegionTransitioning,
+              UIApplication.shared.applicationState == .active else {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+                print("[zoom-live] idle preroll: not now (window=\(view.window != nil) transition=\(activeTransition != nil) "
+                      + "warm=\(playbackWarm != nil) moving=\(isRegionTransitioning) "
+                      + "active=\(UIApplication.shared.applicationState == .active))")
+            }
+            #endif
+            return endIdlePreroll()
+        }
+        let visible = mapView.visibleMapRect
+        let candidates: [(id: PostID, point: MKMapPoint, annotation: MapAnnotation)] = mapView.annotations
+            .compactMap { $0 as? MapAnnotation }
+            .compactMap { annotation in
+                let point = MKMapPoint(annotation.coordinate)
+                guard visible.contains(point), mapView.view(for: annotation) != nil,
+                      case .sheet? = mapView.wornPreview(for: annotation)?.art,
+                      Self.markerTap(for: dress(for: annotation), countryCode: countryCode(of: annotation.pin)) == .open
+                else { return nil }
+                return (annotation.pin.postID, point, annotation)
+            }
+        let center = MKMapPoint(mapView.centerCoordinate)
+        guard let chosen = Self.prerollCandidate(center: center, pins: candidates.map { ($0.id, $0.point) }),
+              let annotation = candidates.first(where: { $0.id == chosen })?.annotation else {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+                print("[zoom-live] idle preroll: no sheet-wearing marker in view")
+            }
+            #endif
+            return endIdlePreroll()
+        }
+        guard idlePreroll?.postID != chosen else { return }
+        endIdlePreroll()
+        guard let warm = prerollPlayback(chosen, warmMediaTime(for: annotation)) else {
+            guard idlePrerollRetries < Self.idlePrerollRetryLimit else { return }
+            idlePrerollRetries += 1
+            let retry = DispatchWorkItem { [weak self] in self?.updateIdlePreroll() }
+            idlePrerollWork = retry
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.idlePrerollRetryDelay, execute: retry)
+            return
+        }
+        idlePreroll = (chosen, warm)
+        let expiry = DispatchWorkItem { [weak self] in
+            guard let self, idlePreroll?.warm === warm else { return }
+            endIdlePreroll()
+            idlePrerollRested = true
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+                print("[zoom-live] idle preroll \(chosen.rawValue) let go: the map rested \(Int(Self.idlePrerollLifetime)) s")
+            }
+            #endif
+        }
+        idlePrerollExpiry = expiry
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.idlePrerollLifetime, execute: expiry)
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print("[zoom-live] idle preroll \(chosen.rawValue) of \(candidates.count) candidate(s)")
+        }
+        #endif
+    }
+
+    /// Hands the prerolled player to a touch or an open of its marker:
+    /// playing on from `time`. False when the preroll is another marker's.
+    private func promoteIdlePreroll(for postID: PostID, at time: TimeInterval?) -> Bool {
+        guard let preroll = idlePreroll, preroll.postID == postID else { return false }
+        idlePreroll = nil
+        idlePrerollExpiry?.cancel()
+        idlePrerollExpiry = nil
+        preroll.warm.resume(at: time)
+        playbackWarm = preroll
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print("[zoom-live] preroll promoted \(postID.rawValue) at \(time.map { String(format: "%.2fs", $0) } ?? "-")")
+        }
+        #endif
+        return true
+    }
+
+    private func endIdlePreroll() {
+        idlePrerollWork?.cancel()
+        idlePrerollWork = nil
+        idlePrerollExpiry?.cancel()
+        idlePrerollExpiry = nil
+        guard let preroll = idlePreroll else { return }
+        idlePreroll = nil
+        preroll.warm.end(opened: false)
+    }
+
+    /// The marker a preroll goes to: the one nearest the centre. Pure, for tests.
+    static func prerollCandidate(center: MKMapPoint, pins: [(id: PostID, point: MKMapPoint)]) -> PostID? {
+        pins.min { center.distance(to: $0.point) < center.distance(to: $1.point) }?.id
     }
 
     private func openAnnotation(_ annotation: any MKAnnotation, thumbnail: UIImage?) {
@@ -3570,6 +3745,12 @@ extension MapsViewController: MKMapViewDelegate {
         // The page about to open joins the player its touch-down started
         // (#646); any other post's warm has nothing to hand over. One with a
         // picture already FLIES: the card carries it from its first frame.
+        // An open with no touch-down (VoiceOver, a programmatic select) still
+        // takes the marker's preroll (#654); any other post's goes.
+        if playbackWarm == nil, let pin = annotation as? MapAnnotation {
+            _ = promoteIdlePreroll(for: pin.pin.postID, at: warmMediaTime(for: pin))
+        }
+        endIdlePreroll()
         let warm = playbackWarm.flatMap { postIDs.first == $0.postID ? $0.warm : nil }
         let warmFlies = warm?.hasPicture ?? false
         endPlaybackWarm(opened: warm != nil)
@@ -3736,7 +3917,9 @@ extension MapsViewController: MKMapViewDelegate {
             }
             self.tabBarController?.showTabBarNativelyNextTurn()
             self.videoCoordinator.setSurfaceVisible(true)
+            self.idlePrerollRested = false
             self.refreshVideoPlayback()
+            self.scheduleIdlePreroll()
             // The flight froze the bars' inset (`syncBarsPosition` stands down
             // while one is up); the screen is at rest again.
             self.syncBarsPosition()

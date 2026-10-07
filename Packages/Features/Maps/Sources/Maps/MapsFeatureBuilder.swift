@@ -256,6 +256,7 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
             },
             prewarm: { ids in await feedFeature().prewarmPosts(ids) },
             warmPlayback: { id, seconds in feedFeature().warmPlayback(of: id, at: seconds) },
+            prerollPlayback: { id, seconds in feedFeature().prerollPlayback(of: id, at: seconds) },
             openProfile: openProfile,
             openConversation: openConversation,
             countryAccess: countryAccess,

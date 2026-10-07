@@ -55,6 +55,18 @@ struct FlightPlaybackWarmTests {
         #expect(pool.playerCountByURL[clip] == nil)
     }
 
+    @Test("A preroll spends a player only when the viewer and the device can afford it (#654)")
+    func prerollGates() {
+        #expect(FlightPlaybackWarm.prerollAllowed(preloads: true, autoplays: true, lowPower: false, thermal: .nominal))
+        #expect(FlightPlaybackWarm.prerollAllowed(preloads: true, autoplays: true, lowPower: false, thermal: .fair))
+        #expect(!FlightPlaybackWarm.prerollAllowed(preloads: false, autoplays: true, lowPower: false, thermal: .nominal),
+                "preloading off — which is what cellular turns off")
+        #expect(!FlightPlaybackWarm.prerollAllowed(preloads: true, autoplays: false, lowPower: false, thermal: .nominal))
+        #expect(!FlightPlaybackWarm.prerollAllowed(preloads: true, autoplays: true, lowPower: true, thermal: .nominal))
+        #expect(!FlightPlaybackWarm.prerollAllowed(preloads: true, autoplays: true, lowPower: false, thermal: .serious))
+        #expect(!FlightPlaybackWarm.prerollAllowed(preloads: true, autoplays: true, lowPower: false, thermal: .critical))
+    }
+
     private struct StubSource: VideoSource {
         func playableURL(for url: URL) async throws -> URL {
             FileManager.default.temporaryDirectory.appendingPathComponent("stub.mp4")
