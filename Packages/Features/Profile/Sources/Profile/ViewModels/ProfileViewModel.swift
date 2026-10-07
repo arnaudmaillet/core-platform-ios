@@ -1034,6 +1034,33 @@ public final class ProfileViewModel {
     /// every corpus its source reads, if any has one and none is on its way
     /// (#634). Appended below what is shown; a failure is retried on the next
     /// approach.
+    /// The posts after `id` on the tab the viewer is on, for a full-screen
+    /// feed opened from the grid (#638): what the grid holds past it, then
+    /// its next pages, under the same source — the same order the grid
+    /// shows, so a post the feed reaches is a tile the grid also has.
+    ///
+    /// `nil`: nothing follows and the corpora have no more. EMPTY: none yet
+    /// (a page failed, or the first load is still out); the feed asks again
+    /// on its next approach.
+    public func galleryPostIDs(after id: PostID) async -> [PostID]? {
+        for _ in 0..<Self.maxUnchangedGalleryPages {
+            let tiles = galleryTiles(galleryFilter.format)
+            guard let index = tiles.firstIndex(where: { $0.id == id }) else { return nil }
+            let following = tiles[(index + 1)...]
+            if !following.isEmpty { return following.prefix(Self.continuationWindow).map(\.id) }
+            guard galleryTokensToFollow() != (nil, nil) else { return nil }
+            if galleryMoreLoad == nil { loadMoreGallery() }
+            // Not started: the first load is still out.
+            guard let round = galleryMoreLoad else { return [] }
+            await round.value
+            if galleryMorePausedByFailure { return [] }
+        }
+        return []
+    }
+
+    /// How many posts a feed opened from the grid is handed per step.
+    static let continuationWindow = 12
+
     public func loadMoreGallery() {
         galleryMorePausedByFailure = false
         startGalleryPages()

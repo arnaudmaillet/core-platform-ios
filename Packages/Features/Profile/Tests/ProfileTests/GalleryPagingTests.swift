@@ -215,6 +215,41 @@ struct GalleryPagingTests {
         #expect(ids(shown.snapshot?.activity) == ["new", "a", "b", "c", "d"])
     }
 
+    // MARK: - A feed opened from the grid going on (#638)
+
+    /// What the grid holds past a post, then its next page, then the end.
+    @Test func aFeedFromTheGridGoesOnIntoItsNextPages() async throws {
+        let gallery = PagedGallery(authored: [
+            nil: GalleryPage(posts: [post("a", at: 60), post("b", at: 50)], nextPageToken: "a2"),
+            "a2": GalleryPage(posts: [post("c", at: 40)], nextPageToken: nil),
+        ])
+        let (viewModel, shown) = try await open(gallery)
+        viewModel.setGallerySource(.posts)
+
+        #expect(await viewModel.galleryPostIDs(after: PostID("a")) == [PostID("b")])
+        #expect(await viewModel.galleryPostIDs(after: PostID("b")) == [PostID("c")])
+        #expect(await viewModel.galleryPostIDs(after: PostID("c")) == nil)
+        // The grid paged with the feed: the post it reached is a tile too.
+        #expect(ids(shown.snapshot?.activity) == ["a", "b", "c"])
+        #expect(await gallery.authoredAsks == [nil, "a2"])
+    }
+
+    /// A failed page is "nothing yet": the feed keeps its place.
+    @Test func aFeedFromTheGridHearsNothingYetOnAFailure() async throws {
+        let gallery = PagedGallery(authored: [
+            nil: GalleryPage(posts: [post("a", at: 60)], nextPageToken: "a2"),
+            "a2": GalleryPage(posts: [post("b", at: 50)], nextPageToken: nil),
+        ])
+        await gallery.fail("a2")
+        let (viewModel, _) = try await open(gallery)
+        viewModel.setGallerySource(.posts)
+
+        #expect(await viewModel.galleryPostIDs(after: PostID("a")) == [])
+
+        await gallery.heal("a2")
+        #expect(await viewModel.galleryPostIDs(after: PostID("a")) == [PostID("b")])
+    }
+
     @Test func mergingAFreshFirstPageOverLaterPages() {
         let shown = [post("gone", at: 65), post("a", at: 60), post("b", at: 50), post("c", at: 40)]
         let fresh = [post("new", at: 70), post("a", at: 60)]
