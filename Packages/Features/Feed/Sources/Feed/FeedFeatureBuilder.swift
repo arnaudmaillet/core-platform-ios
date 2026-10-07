@@ -173,6 +173,30 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         return found.mapValues(ForYouRepository.galleryPost(from:))
     }
 
+    /// Starts `postID`'s page player now, at `seconds` into its clip — a finger
+    /// has landed on its map marker (#646). Nil when the post is not hydrated
+    /// yet (the map warms visible posts' DATA on every settle, so it usually
+    /// is), when it is not a single clip, when autoplay is off, or without a
+    /// player pool. The caller ends it: see `FlightPlaybackWarm.end(opened:)`.
+    @MainActor
+    public func warmPlayback(of postID: PostID, at seconds: TimeInterval?) -> (any FeedPlaybackWarm)? {
+        let entry = repository.peekPost(postID)
+        guard let videoPlayback, MediaPlaybackPolicy.autoplays, let entry,
+              let clip = FlightPlaybackWarm.warmableClip(of: entry) else {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+                print("[zoom-live] warm refused \(postID.rawValue): pool=\(videoPlayback != nil) "
+                      + "autoplay=\(MediaPlaybackPolicy.autoplays) hydrated=\(entry != nil) "
+                      + "attachments=\(entry?.post.attachments.map { $0.mimeType } ?? [])")
+            }
+            #endif
+            return nil
+        }
+        let warm = FlightPlaybackWarm(pool: videoPlayback, url: clip.url, scope: clip.scope)
+        warm.start(at: seconds)
+        return warm
+    }
+
     public func prewarmPosts(_ ids: [PostID]) async {
         #if DEBUG
         // See `isColdOpenForced`: a warmed corpus seeds synchronously and the

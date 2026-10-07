@@ -205,6 +205,14 @@ public protocol FeedFeatureBuilding: ConversationThreadScreenBuilding, TextPostS
     /// the network — used by Maps to prefetch the visible pins on viewport
     /// settle, eliminating the metadata desync on tap. Safe for ids never opened.
     func prewarmPosts(_ ids: [PostID]) async
+    /// Starts `postID`'s page player NOW, at `seconds` into its clip, because a
+    /// finger has landed on that post's map marker (#646): when the post opens,
+    /// its page joins the running player and has a frame at once. Nil when
+    /// there is nothing to warm. The caller ends it — see `FeedPlaybackWarm`.
+    ///
+    /// ⚠️ A REQUIREMENT, read through `any FeedFeatureBuilding`; the default
+    /// warms nothing.
+    func warmPlayback(of postID: PostID, at seconds: TimeInterval?) -> (any FeedPlaybackWarm)?
     /// Builds the place gallery that sits BENEATH a semantic-cluster feed
     /// (city/country/region — the cluster-gallery milestone's Case B): a grid
     /// of the cluster's members ranked by engagement, titled `title`
@@ -325,7 +333,24 @@ public struct PlaceIdentity {
     }
 }
 
+/// A post's page player started ahead of its open (#646).
+@MainActor
+public protocol FeedPlaybackWarm: AnyObject {
+    /// Lets go. `opened`: the post opened, and its page is joining the player.
+    /// Anything else stops it and leaves no resume position behind.
+    func end(opened: Bool)
+    /// Whether the player has decoded a picture yet — what decides that a
+    /// flight can carry it from its first frame.
+    var hasPicture: Bool { get }
+    /// Puts the player's picture on `surface` too — a flight card's own render
+    /// surface — the way a grid tile's live player rides its flight. False
+    /// when the surface is not one the player can draw on.
+    func mirror(onto surface: UIView) -> Bool
+}
+
 extension FeedFeatureBuilding {
+    public func warmPlayback(of postID: PostID, at seconds: TimeInterval?) -> (any FeedPlaybackWarm)? { nil }
+
     /// A place with no rank and no flag to show.
     public func makeClusterGallery(
         postIDs: [PostID],

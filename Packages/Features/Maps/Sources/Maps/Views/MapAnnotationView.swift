@@ -144,6 +144,27 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing
 
     @objc private func handleTap() { onSelect?() }
 
+    /// A finger landed on the marker — before the tap is recognised, which is
+    /// only on touch-up (#646). Intent enough to start the post's page player.
+    var onTouchDown: (() -> Void)?
+    /// The touch ended (`cancelled`: the map took it as a pan or pinch).
+    var onTouchEnd: ((_ cancelled: Bool) -> Void)?
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesBegan(touches, with: event)
+        onTouchDown?()
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesEnded(touches, with: event)
+        onTouchEnd?(false)
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesCancelled(touches, with: event)
+        onTouchEnd?(true)
+    }
+
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 

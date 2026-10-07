@@ -68,6 +68,21 @@ struct MapFlightMediaSyncTests {
         #expect(MapPinZoomSource.flightMediaTailMargin >= 0.7)
     }
 
+    @Test("A touch-down warm leads by the player's start-up only, under the same tail cap (#646)")
+    func theWarmLead() throws {
+        let time = try #require(MapPinZoomSource.flightMediaTime(sheet: sheet(), displayedFrame: 2,
+                                                                 lead: MapPinZoomSource.warmMediaLead))
+        #expect(abs(time - (1.2 + MapPinZoomSource.warmMediaLead)) < 1e-9)
+        #expect(MapPinZoomSource.warmMediaLead < MapPinZoomSource.flightMediaLead)
+    }
+
+    @Test("Over a lined-up sheet the live video comes up fast; a card without one keeps its fade (#646)")
+    func theRevealFade() {
+        #expect(PinCardView.liveRevealFade(requested: 0.6, wearsSheet: true) == PinCardView.sheetRevealFadeCap)
+        #expect(PinCardView.liveRevealFade(requested: 0.1, wearsSheet: true) == 0.1)
+        #expect(PinCardView.liveRevealFade(requested: 0.6, wearsSheet: false) == 0.6)
+    }
+
     @Test("The focus pull starts at the sheet's resolution on the video's surface")
     func theSheetsResolution() throws {
         // A 168x300 cell covering a 402x874 surface: the tighter axis decides,
