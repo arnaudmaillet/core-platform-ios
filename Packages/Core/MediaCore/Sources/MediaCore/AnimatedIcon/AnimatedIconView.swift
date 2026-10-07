@@ -45,7 +45,9 @@ public final class AnimatedIconView: UIView {
     }
 
     public static var devicePolicy: MotionPolicy {
-        if MotionPreference.reducesMotion { return .still }
+        // Decoration: still under Reduce Motion and Power Saving, and while
+        // the app rests (`IdleCalm`, #580).
+        if MotionPreference.stillsDecoration { return .still }
         if ProcessInfo.processInfo.thermalState.rawValue
             >= ProcessInfo.ThermalState.serious.rawValue { return .still }
         if ProcessInfo.processInfo.isLowPowerModeEnabled { return .reduced }
@@ -69,7 +71,8 @@ public final class AnimatedIconView: UIView {
         [
             Notification.Name.NSProcessInfoPowerStateDidChange,
             UIAccessibility.reduceMotionStatusDidChangeNotification,
-            ProcessInfo.thermalStateDidChangeNotification
+            ProcessInfo.thermalStateDidChangeNotification,
+            Notification.Name.decorativeMotionDidChange
         ].map { name in
             NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { _ in
                 MainActor.assumeIsolated { onChange() }
