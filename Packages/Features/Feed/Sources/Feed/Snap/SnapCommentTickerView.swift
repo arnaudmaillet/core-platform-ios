@@ -201,6 +201,12 @@ final class SnapCommentTickerView: UIView {
     /// The kinetic wash behind the band: a black view whose alpha is the
     /// intensity. Hidden (zero render cost) whenever its alpha is 0.
     private let backdropView = UIView()
+    /// #560 (`CommentBlur`): the same backdrop on a blur material. Set before
+    /// the band joins a window; tests set it per view.
+    var usesBlur = CommentBlur.isEnabled
+    /// The blur backdrop, made on first use (never at init: a blur effect
+    /// built eagerly stalls headless CI).
+    private var blurBackdrop: CommentBlurView?
     /// Where the band reads its appearance when a stream starts — the app's
     /// store; a test hands its own.
     var appearanceStore: MediaCommentPreferencesStore = .standard
@@ -382,6 +388,7 @@ final class SnapCommentTickerView: UIView {
         super.layoutSubviews()
         layer.cornerRadius = bounds.height / 2 // capsule end (see init)
         backdropView.frame = bounds
+        blurBackdrop?.frame = bounds
         // ⚠️ **A TRAIN LAID AT ONE WIDTH IS RE-LAID AT ANOTHER.** The pre-fill
         // spreads the bubbles across `bounds.width` once, when the stream
         // starts — and a page flying in, a cell being reused, a chrome
@@ -909,6 +916,8 @@ final class SnapCommentTickerView: UIView {
     /// The wash's opacity on screen: the interaction's, or the resting level
     /// when that is higher.
     var currentBackdropOpacity: CGFloat { backdropView.isHidden ? 0 : backdropView.alpha }
+    /// The blur's strength (0…1) when `usesBlur` — 0 otherwise.
+    var currentBlurStrength: CGFloat { blurBackdrop?.strength ?? 0 }
 
     /// When the coast began, in `CACurrentMediaTime()`'s clock.
     ///
@@ -930,9 +939,25 @@ final class SnapCommentTickerView: UIView {
     }
 
     private func showBackdrop(_ fraction: CGFloat) {
+        if usesBlur {
+            blur().setStrength(CommentBlur.bandStrength(
+                fraction: fraction, resting: Self.restingBackdropOpacity, ceiling: Self.maxBackdropOpacity
+            ))
+            return
+        }
         let opacity = max(fraction, Self.restingBackdropOpacity)
         backdropView.alpha = opacity
         backdropView.isHidden = opacity <= 0
+    }
+
+    private func blur() -> CommentBlurView {
+        if let blurBackdrop { return blurBackdrop }
+        let view = CommentBlurView(style: .systemThickMaterialDark)
+        view.accessibilityIdentifier = "ticker-kinetic-blur"
+        view.frame = bounds
+        insertSubview(view, at: 0)
+        blurBackdrop = view
+        return view
     }
 
     /// Ends the interaction's feedback with a short fade back to the resting
@@ -944,6 +969,17 @@ final class SnapCommentTickerView: UIView {
         guard kineticFraction > 0 else { return }
         kineticFraction = 0
         let resting = Self.restingBackdropOpacity
+        if usesBlur {
+            // The same 0.25 s ease-out back to the resting level, on the
+            // material instead of an alpha (an effect view's alpha must
+            // never be faded).
+            let target = CommentBlur.bandStrength(fraction: 0, resting: resting, ceiling: Self.maxBackdropOpacity)
+            blur().tween(to: target, duration: 0.25) { [weak self] in
+                guard let self, self.kineticFraction == 0 else { return }
+                self.showBackdrop(0)
+            }
+            return
+        }
         UIView.animate(withDuration: 0.25, delay: 0, options: [.beginFromCurrentState, .curveEaseOut]) { [backdropView] in
             backdropView.alpha = resting
         } completion: { [weak self] finished in
