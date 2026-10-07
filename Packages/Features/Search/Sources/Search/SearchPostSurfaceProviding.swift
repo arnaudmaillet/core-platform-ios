@@ -54,6 +54,10 @@ public protocol SearchPostSurface: AnyObject {
 
     /// The footer spinner, while a next page is fetched.
     func setPaging(_ paging: Bool)
+
+    /// Whether there is another page past what was shown, so a post opened
+    /// from this surface can page on into it (#638).
+    func setHasMore(_ hasMore: Bool)
 }
 
 public extension SearchPostSurface {
@@ -63,6 +67,7 @@ public extension SearchPostSurface {
     }
 
     func setPaging(_ paging: Bool) {}
+    func setHasMore(_ hasMore: Bool) {}
 }
 
 /// What a post surface is being asked to show.

@@ -288,7 +288,9 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // Discover, search) did not, so a double tap pushed two feeds, and the
         // second captured the first flight as the delegate to restore.
         guard Self.canOpen(from: presenter, on: nav) else { return }
-        let destination = makeSnapFeedViewController(postIDs: postIDs)
+        let destination = makeSnapFeedViewController(
+            postIDs: postIDs, ownsInteractiveDismissal: true, continuation: origin.continuation
+        )
         // Hand over the projection the origin is already showing, on BOTH
         // presentations. The flight used to hide the cost of not doing this —
         // the card carries the tile's own pixels, so the destination behind it
@@ -1122,9 +1124,19 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         postIDs: [PostID],
         ownsInteractiveDismissal: Bool
     ) -> UIViewController {
+        makeSnapFeedViewController(postIDs: postIDs, ownsInteractiveDismissal: ownsInteractiveDismissal, continuation: nil)
+    }
+
+    /// The feed over a window of posts — and, with `continuation`, on past it
+    /// into the source's next posts (#638).
+    func makeSnapFeedViewController(
+        postIDs: [PostID],
+        ownsInteractiveDismissal: Bool,
+        continuation: SnapFeedContinuation?
+    ) -> UIViewController {
         let feed = makeSnapFeed(
             viewModel: FeedViewModel(
-                repository: FixedPostsFeedProvider(base: repository, ids: postIDs),
+                repository: FixedPostsFeedProvider(base: repository, ids: postIDs, continuation: continuation),
                 engagementProvider: engagementProvider,
                 commentsProvider: commentsProvider,
                 router: router

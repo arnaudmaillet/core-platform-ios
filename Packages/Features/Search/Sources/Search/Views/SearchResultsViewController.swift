@@ -989,8 +989,11 @@ final class SearchResultsViewController: UIViewController {
             self.showPosts(self.postState(for: self.viewModel.currentPhase))
         }
         viewModel.onPostsPagingChange = { [weak self] paging in
-            self?.postsPage.setPaging(paging)
-            self?.mediaPage.setPaging(paging)
+            guard let self else { return }
+            self.postsPage.setPaging(paging)
+            self.mediaPage.setPaging(paging)
+            // A page has landed (or failed): whether there is another.
+            if !paging { self.publishHasMorePosts() }
         }
         viewModel.onPeoplePagingChange = { [weak self] paging in self?.peoplePage.setPaging(paging) }
     }
@@ -1013,6 +1016,15 @@ final class SearchResultsViewController: UIViewController {
     private func showPosts(_ state: SearchPostSurfaceState) {
         postsPage.show(state)
         mediaPage.show(mediaState(from: state))
+        publishHasMorePosts()
+    }
+
+    /// Both post tabs read one result list, so they share its next page
+    /// (#638). Media's next page IS the posts' — it pages them until media
+    /// turns up.
+    private func publishHasMorePosts() {
+        postsPage.setHasMore(viewModel.hasMorePosts)
+        mediaPage.setHasMore(viewModel.hasMorePosts)
     }
 
     private func mediaState(from state: SearchPostSurfaceState) -> SearchPostSurfaceState {

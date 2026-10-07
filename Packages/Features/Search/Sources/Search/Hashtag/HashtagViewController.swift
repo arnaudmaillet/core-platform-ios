@@ -134,6 +134,8 @@ final class HashtagViewController: UIViewController {
         recentPage.show(viewModel.recent)
         topPage.setPaging(viewModel.isLoadingMore(.top))
         recentPage.setPaging(viewModel.isLoadingMore(.recent))
+        topPage.setHasMore(viewModel.hasMore(.top))
+        recentPage.setHasMore(viewModel.hasMore(.recent))
     }
 
     /// The page in front plays, and only while this screen is up.

@@ -1,4 +1,5 @@
 import CoreModels
+import FeedInterface
 import Foundation
 
 /// A `FeedProviding` whose "first page" is a fixed, ordered set of post ids —
@@ -8,8 +9,9 @@ import Foundation
 /// It reuses the real repository's single-post hydration (`loadPost`, which pulls
 /// the post + author + like count off post.v1/profile.v1/counter.v1), so the map
 /// feed shows genuine image/video media — not the Radar thumbnail — and inherits
-/// every feed behaviour unchanged. There is no pagination: the set is exactly the
-/// tapped posts.
+/// every feed behaviour unchanged. With no continuation the set is exactly the
+/// tapped posts; with one, the feed pages on into the source's next posts as
+/// the viewer nears its end (#638).
 /// A fixed provider that can be re-aimed at a different window of posts.
 ///
 /// The point is upstream of the data: a screen whose corpus can be replaced
@@ -24,16 +26,31 @@ protocol RepointableFeedProviding: FeedProviding {
 actor FixedPostsFeedProvider: FeedProviding, RepointableFeedProviding {
     private let base: any FeedProviding
     private var ids: [PostID]
+    /// The source's next posts after a given one — see `SnapFeedContinuation`.
+    private var continuation: SnapFeedContinuation?
+    /// The last post served, where the continuation picks up.
+    private var lastServed: PostID?
+    /// The token a page hands back while the source may have more. Opaque to
+    /// the feed; this provider keeps its own place (`lastServed`).
+    static let continuationToken = "continue"
+    /// Continuation steps whose posts ALL fail to hydrate, walked through in a
+    /// row: such a page brings no row to come on screen and ask again.
+    static let maxEmptySteps = 5
 
-    init(base: any FeedProviding, ids: [PostID]) {
+    init(base: any FeedProviding, ids: [PostID], continuation: SnapFeedContinuation? = nil) {
         self.base = base
         self.ids = ids
+        self.continuation = continuation
     }
 
     /// Aims this provider at a different set. The next `loadFirstPage` serves
-    /// it; nothing is cached here, so there is nothing else to invalidate.
+    /// it; nothing is cached here, so there is nothing else to invalidate. A
+    /// re-aimed window is a whole set: whatever followed the old one does not
+    /// follow this one.
     func repoint(to ids: [PostID]) {
         self.ids = ids
+        continuation = nil
+        lastServed = nil
     }
 
     func cachedFirstPage() async -> [FeedEntry]? { nil }
@@ -43,9 +60,43 @@ actor FixedPostsFeedProvider: FeedProviding, RepointableFeedProviding {
     nonisolated func peekPost(_ id: PostID) -> FeedEntry? { base.peekPost(id) }
 
     func loadFirstPage() async throws -> FeedPage {
-        // Hydrate concurrently, preserving the tapped order. A post that fails to
-        // hydrate (deleted, expired) is dropped rather than failing the whole
-        // set — one missing pin must not blank the feed.
+        lastServed = ids.last
+        let entries = await hydrate(ids)
+        return FeedPage(
+            entries: entries,
+            nextPageToken: continuation == nil ? nil : Self.continuationToken,
+            isCold: false
+        )
+    }
+
+    /// The source's next posts, hydrated (#638).
+    ///
+    /// ⚠️ An EMPTY step throws: the source had nothing right now (a failed
+    /// page), and a throw is what keeps the feed's token, so its next approach
+    /// asks again. Only `nil` — the source has no more — ends the feed.
+    func loadPage(afterToken token: String) async throws -> FeedPage {
+        guard let continuation, var after = lastServed else {
+            return FeedPage(entries: [], nextPageToken: nil, isCold: false)
+        }
+        for _ in 0..<Self.maxEmptySteps {
+            guard let next = await continuation(after) else {
+                return FeedPage(entries: [], nextPageToken: nil, isCold: false)
+            }
+            guard let last = next.last else { throw FeedContinuationError.nothingYet }
+            after = last
+            lastServed = last
+            let entries = await hydrate(next)
+            if !entries.isEmpty {
+                return FeedPage(entries: entries, nextPageToken: Self.continuationToken, isCold: false)
+            }
+        }
+        throw FeedContinuationError.nothingYet
+    }
+
+    /// Hydrates concurrently, preserving the given order. A post that fails
+    /// to hydrate (deleted, expired) is dropped rather than failing the whole
+    /// set — one missing pin must not blank the feed.
+    private func hydrate(_ ids: [PostID]) async -> [FeedEntry] {
         let base = base
         let hydrated = await withTaskGroup(of: (Int, FeedEntry)?.self) { group in
             for (index, id) in ids.enumerated() {
@@ -60,12 +111,7 @@ actor FixedPostsFeedProvider: FeedProviding, RepointableFeedProviding {
             }
             return collected
         }
-        let entries = hydrated.sorted { $0.0 < $1.0 }.map(\.1)
-        return FeedPage(entries: entries, nextPageToken: nil, isCold: false)
-    }
-
-    func loadPage(afterToken token: String) async throws -> FeedPage {
-        FeedPage(entries: [], nextPageToken: nil, isCold: false)
+        return hydrated.sorted { $0.0 < $1.0 }.map(\.1)
     }
 
     func loadPost(_ id: PostID) async throws -> FeedEntry {
@@ -76,4 +122,10 @@ actor FixedPostsFeedProvider: FeedProviding, RepointableFeedProviding {
     func remember(_ entry: FeedEntry) async {
         await base.remember(entry)
     }
+}
+
+/// The source had no posts to give right now — a failed page. The feed keeps
+/// its place and asks again on its next approach.
+enum FeedContinuationError: Error {
+    case nothingYet
 }
