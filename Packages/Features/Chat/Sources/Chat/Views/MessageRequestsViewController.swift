@@ -10,6 +10,9 @@ import UIKit
 /// It renders from the same `InboxCatalog` as the conversation list, so a
 /// decision here lands in All without a refetch, and the header's badge is
 /// driven by the same projection that fills this table.
+///
+/// Pushed on its own over the HIDDEN REQUESTS folder, it is also the **Hidden
+/// requests** list (#552) that the Requests list's last row opens.
 final class MessageRequestsViewController: UIViewController {
     private let viewModel: MessageRequestsViewModel
 
@@ -27,6 +30,9 @@ final class MessageRequestsViewController: UIViewController {
     private let statusView = InboxStatusView()
     /// Under the last row while another page is there to load (#593).
     private let pagingFooter = PagingSpinnerFooterView()
+    /// Under the last row once every page has loaded and the hidden folder
+    /// holds requests (#552).
+    private let hiddenRequestsRow = HiddenRequestsRowView()
 
     private var dataSource: SectionedConversationDataSource!
     private var modelsByID: [ConversationID: ConversationDisplayModel] = [:]
@@ -48,6 +54,9 @@ final class MessageRequestsViewController: UIViewController {
     /// composition root, exactly as the All tab's is — the peek is the real
     /// screen in `.preview` mode, not a facsimile.
     var threadPreviewProvider: ((ConversationID) -> UIViewController)?
+    /// Builds the Hidden requests list the last row pushes (#552). Supplied
+    /// by the composition root, which owns the shared catalog.
+    var hiddenRequestsProvider: (() -> UIViewController)?
     private let imagePipeline: ImagePipeline?
     private let avatars: (any PeerAvatarProviding)?
 
@@ -74,15 +83,55 @@ final class MessageRequestsViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
+        if viewModel.folder == .hiddenRequests {
+            title = "Hidden requests"
+            navigationItem.largeTitleDisplayMode = .never
+        }
         configureTableView()
         configureStatusViews()
+        hiddenRequestsRow.addTarget(self, action: #selector(openHiddenRequests), for: .touchUpInside)
 
         viewModel.onPhaseChange = { [weak self] phase in self?.render(phase) }
         viewModel.onHasMoreChange = { [weak self] _ in self?.updatePagingFooter() }
+        viewModel.onShowsHiddenRequestsRowChange = { [weak self] _ in self?.updatePagingFooter() }
         updatePagingFooter()
         // Whatever the view model holds now — the catalog may have answered
         // before this view was asked for.
         render(viewModel.phase)
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        // The hidden folder is sorted with the viewer's CURRENT filter when it
+        // is read (#552): opening the list reads it again, so hidden words
+        // edited since the inbox loaded are reflected. The Requests page asks
+        // the same through `surfaceDidBecomeActive`.
+        if viewModel.folder == .hiddenRequests { viewModel.refresh() }
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        sizeHiddenRequestsRow()
+    }
+
+    /// A table footer keeps the frame it is given: the row is measured at the
+    /// table's width, and handed back whenever its height changes (a text
+    /// size change, the first layout).
+    private func sizeHiddenRequestsRow() {
+        guard tableView.tableFooterView === hiddenRequestsRow, tableView.bounds.width > 0 else { return }
+        let height = hiddenRequestsRow.systemLayoutSizeFitting(
+            CGSize(width: tableView.bounds.width, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        ).height.rounded(.up)
+        guard hiddenRequestsRow.frame.height != height || hiddenRequestsRow.frame.width != tableView.bounds.width else { return }
+        hiddenRequestsRow.frame = CGRect(x: 0, y: 0, width: tableView.bounds.width, height: height)
+        tableView.tableFooterView = hiddenRequestsRow
+    }
+
+    @objc private func openHiddenRequests() {
+        guard let hidden = hiddenRequestsProvider?() else { return }
+        navigationController?.pushViewController(hidden, animated: true)
     }
 
     private func configureTableView() {
@@ -178,6 +227,15 @@ final class MessageRequestsViewController: UIViewController {
             // come back in reach before it turns again.
             pagingFooter.setSpinning(false)
             revealContent()
+        case .empty where viewModel.folder == .hiddenRequests:
+            skeletonView.isHidden = true
+            tableView.isHidden = true
+            statusView.configure(
+                symbol: "eye.slash",
+                title: "No hidden requests",
+                message: "Requests that match your hidden words will wait here."
+            )
+            statusView.isHidden = false
         case .empty:
             skeletonView.isHidden = true
             tableView.isHidden = true
@@ -230,10 +288,19 @@ final class MessageRequestsViewController: UIViewController {
     }
     #endif
 
-    /// The spinner hangs under the last row only while there is more to load.
+    /// The spinner hangs under the last row while there is more to load;
+    /// once there isn't, the Hidden requests row closes the list (#552) —
+    /// at the very end, never between two pages.
     private func updatePagingFooter() {
         pagingFooter.setSpinning(false)
-        tableView.tableFooterView = viewModel.hasMore ? pagingFooter : nil
+        if viewModel.hasMore {
+            tableView.tableFooterView = pagingFooter
+        } else if viewModel.showsHiddenRequestsRow {
+            tableView.tableFooterView = hiddenRequestsRow
+            sizeHiddenRequestsRow()
+        } else {
+            tableView.tableFooterView = nil
+        }
     }
 }
 

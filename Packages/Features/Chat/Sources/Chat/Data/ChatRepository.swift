@@ -151,6 +151,10 @@ public enum InboxFolder: Sendable, Hashable {
     case inbox
     /// Unanswered message requests to the viewer — the Requests tab.
     case requests
+    /// Requests caught by the viewer's hidden words or offensive filter,
+    /// sorted at read time with the CURRENT filter (#552) — the Hidden
+    /// requests row at the bottom of Requests.
+    case hiddenRequests
 }
 
 /// One page of a conversation's history, oldest first, and where the OLDER
@@ -295,7 +299,11 @@ public actor ChatRepository: ChatProviding {
         let viewer = try await resolveViewerProfileID()
         var request = Chat_V1_ListInboxRequest()
         request.profileID = viewer.rawValue
-        request.folder = folder == .inbox ? .inbox : .requests
+        request.folder = switch folder {
+        case .inbox: .inbox
+        case .requests: .requests
+        case .hiddenRequests: .hiddenRequests
+        }
         request.limit = inboxPageSize
         request.pageToken = pageToken ?? ""
         let response = await chatClient.listInbox(request: request, headers: [:])

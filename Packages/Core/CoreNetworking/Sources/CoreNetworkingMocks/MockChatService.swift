@@ -34,7 +34,7 @@ public final class MockChatService: @unchecked Sendable {
     /// answered conversation is never a request, whoever the viewer follows.
     private var otherMember: [String: String] {
         var members: [String: String] = [:]
-        for (offset, id) in Self.requestIDs.enumerated() {
+        for (offset, id) in (Self.requestIDs + Self.hiddenRequestIDs).enumerated() {
             members[id] = dataset.authors[16 + offset].profileID
         }
         for index in 0..<16 {
@@ -69,9 +69,21 @@ public final class MockChatService: @unchecked Sendable {
     public static let longHistoryConversationID = "conv-5"
     public static let longHistoryOlderCount = 120
 
+    /// Requests the viewer's hidden words caught (#552): `ListInbox` files
+    /// them in HIDDEN_REQUESTS, not REQUESTS, until the viewer replies. Two,
+    /// so the Hidden requests list shows a list rather than a lone row.
+    private static let hiddenRequests: [(id: String, opener: String, closer: String, minutesAgo: Int64)] = [
+        ("conv-hidden-0", "Want 10k followers by Friday? DM me for a deal 💸",
+         "Limited spots, act fast!!", 50),
+        ("conv-hidden-1", "Congrats, you've been selected for a crypto giveaway 🎁",
+         "Just send your wallet address to claim.", 2 * 24 * 60)
+    ]
+
+    private static let hiddenRequestIDs = hiddenRequests.map(\.id)
+
     /// Every seeded conversation id, newest activity first.
     private var conversationIDs: [String] {
-        (0..<16).map { "conv-\($0)" } + Self.requestIDs
+        (0..<16).map { "conv-\($0)" } + Self.requestIDs + Self.hiddenRequestIDs
     }
     private let viewer = MockSocialDataset.viewerProfileID
 
@@ -180,10 +192,13 @@ public final class MockChatService: @unchecked Sendable {
         let members = otherMember
         return conversationIDs.compactMap { id -> Chat_V1_InboxEntryView? in
             let history = store.messages(for: id, seed: seedHistory(for: id))
-            let isRequest = Self.requestIDs.contains(id) && !history.contains { $0.senderID == viewer }
+            let isRequest = (Self.requestIDs + Self.hiddenRequestIDs).contains(id)
+                && !history.contains { $0.senderID == viewer }
+            let isHidden = Self.hiddenRequestIDs.contains(id)
             switch folder {
             case .inbox: guard !isRequest else { return nil }
-            case .requests: guard isRequest else { return nil }
+            case .requests: guard isRequest, !isHidden else { return nil }
+            case .hiddenRequests: guard isRequest, isHidden else { return nil }
             default: return nil
             }
             var entry = Chat_V1_InboxEntryView()
@@ -260,7 +275,7 @@ public final class MockChatService: @unchecked Sendable {
         // Request threads are inbound-only and unanswered by construction —
         // a viewer reply seeded here would answer the request and file it in
         // the INBOX instead.
-        if let request = Self.requests.first(where: { $0.id == conversationID }) {
+        if let request = (Self.requests + Self.hiddenRequests).first(where: { $0.id == conversationID }) {
             let inbound: [(String, String, Int64)] = [
                 (other, request.opener, request.minutesAgo + 2),
                 (other, request.closer, request.minutesAgo)
