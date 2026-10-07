@@ -2,8 +2,10 @@
 import UIKit
 
 /// `-bar-touch-audit` (#562): every 3 s, probes points across each visible
-/// bar's area (tab bar, navigation bars, toolbars) and prints how many would
-/// reach the screen's content WITHOUT the guard and WITH it.
+/// bar's area (tab bar, navigation bars, toolbars) and prints how many a TAP
+/// would reach in the screen's content WITHOUT the shield ("raw") and WITH it
+/// ("guarded": points the shield does not follow). Pans are not the shield's:
+/// `BarTapShieldUITests` checks a pan from the tab bar band still scrolls.
 ///
 ///     [bar-touch] tab bar {{0, 791}, {402, 83}} 60 probes: content raw=34 guarded=0 (MKMapView…)
 ///
@@ -17,7 +19,7 @@ enum BarTouchAudit {
         guard ProcessInfo.processInfo.arguments.contains("-bar-touch-audit"), timer == nil else { return }
         let timer = Timer(timeInterval: 3, repeats: true) { [weak window] _ in
             MainActor.assumeIsolated {
-                guard let window = window as? BarGuardWindow else { return }
+                guard let window else { return }
                 report(in: window)
             }
         }
@@ -33,20 +35,21 @@ enum BarTouchAudit {
         var area: CGRect?
     }
 
-    static func report(in window: BarGuardWindow) {
+    static func report(in window: UIWindow) {
         for probe in probes(in: window) {
             let frame = probe.area ?? probe.bar.convert(probe.bar.bounds, to: window)
             var raw = 0, guarded = 0, total = 0
             var leaked: Set<String> = []
             for point in samples(in: frame) {
                 total += 1
-                guard let hit = window.unguardedHitTest(point) else { continue }
-                let redirected = BarTouchGuard.bar(replacing: hit, at: point, in: window) ?? hit
+                guard let hit = window.hitTest(point, with: nil) else { continue }
+                // A tap starting here reaches content unless the shield follows it.
+                let shielded = BarTouchGuard.bar(replacing: hit, at: point, in: window) != nil
                 if hit.isDescendant(of: probe.content) {
                     raw += 1
                     leaked.insert(String(describing: type(of: hit)))
+                    if !shielded { guarded += 1 }
                 }
-                if redirected.isDescendant(of: probe.content) { guarded += 1 }
             }
             print("[bar-touch] \(probe.name) \(frame.integral) \(total) probes: content raw=\(raw) guarded=\(guarded)"
                 + (leaked.isEmpty ? "" : " (\(leaked.sorted().prefix(4).joined(separator: ", ")))"))

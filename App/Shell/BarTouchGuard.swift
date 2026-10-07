@@ -8,21 +8,19 @@ import UIKit
 /// bar band off its buttons, or beside a toolbar platter fell through to the
 /// cell, button or map marker underneath, and triggered it.
 ///
-/// One guard for the whole app rather than one per screen: the main window
-/// asks `BarTouchGuard` about every touch, and a touch that would land on a
-/// screen's CONTENT while starting inside a visible bar of that screen's own
-/// navigation or tab controller is handed to the bar instead, which does
-/// nothing with it. Bar items, their glass and the tab bar's own overlays
-/// are hit first and never rerouted.
+/// One guard for the whole app rather than one per screen, and it only takes
+/// TAPS and LONG PRESSES: a finger that starts in a bar's area and moves still
+/// scrolls the content under it. `BarTouchGuard` says whether a touch starts
+/// over a screen's CONTENT inside one of that screen's visible bars;
+/// `BarTapShield`, a gesture recogniser on the main window, follows such a
+/// touch and swallows it only if it ends without moving (a tap) or rests long
+/// enough to be a long press. Bar items, their glass and the tab bar's own
+/// overlays are never content, so they are never followed.
 ///
 /// Exceptions, by construction:
 /// - the left edge (`edgeInset`): the drawer's edge swipe and the back swipe
 ///   start there;
-/// - non-touch events and VoiceOver (it activates elements without
-///   hit-testing a finger).
-///
-/// A pan that starts in a bar's area no longer scrolls the content under it:
-/// the price of a guard that hit-testing alone can decide.
+/// - VoiceOver (it activates elements without a finger on screen).
 enum BarTouchGuard {
     /// The strip along the left edge left alone, for edge-swipe gestures.
     static let edgeInset: CGFloat = 28
@@ -108,18 +106,112 @@ enum BarTouchGuard {
     }
 }
 
-/// The app's main window: every touch goes past `BarTouchGuard`.
-final class BarGuardWindow: UIWindow {
-    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        let hit = super.hitTest(point, with: event)
-        guard let hit, event?.type == .touches else { return hit }
-        return BarTouchGuard.bar(replacing: hit, at: point, in: self) ?? hit
+/// Swallows the taps and long presses that start inside a bar's area over a
+/// screen's content (#562), and lets everything else through.
+///
+/// - A touch elsewhere fails it at once: nothing waits on it.
+/// - A finger that moves more than `slop` fails it too, so a pan that starts
+///   under a bar scrolls as before.
+/// - A finger lifted before then is a tap, and one held still for
+///   `longPressDelay` a long press: the recogniser succeeds, and with
+///   `cancelsTouchesInView` the content's views get `touchesCancelled`
+///   instead of their tap — a button never fires, a cell never selects.
+/// - The content's own tap and long-press recognisers wait for it to fail
+///   (`shouldBeRequiredToFail(by:)`), so none of them fires first.
+final class BarTapShield: UIGestureRecognizer, UIGestureRecognizerDelegate {
+    /// How far a finger may drift and still be a tap.
+    static let slop: CGFloat = 10
+    /// How long a still finger takes to become a long press — under the
+    /// content's own (0.5 s for menus), so the shield always answers first.
+    static let longPressDelay: TimeInterval = 0.35
+
+    /// What a followed touch turns out to be.
+    enum Outcome: Equatable {
+        /// Still deciding.
+        case undecided
+        /// Swallowed: a tap or a long press.
+        case swallowed
+        /// Let through: it moved, so it is a pan.
+        case passed
     }
 
-    #if DEBUG
-    /// What a finger would reach WITHOUT the guard — for the audit.
-    func unguardedHitTest(_ point: CGPoint) -> UIView? {
-        super.hitTest(point, with: nil)
+    /// The decision, pure: how far the finger has gone, how long it has been
+    /// down, and whether it has lifted.
+    static func outcome(moved distance: CGFloat, after elapsed: TimeInterval, lifted: Bool) -> Outcome {
+        if distance > slop { return .passed }
+        if lifted || elapsed >= longPressDelay { return .swallowed }
+        return .undecided
     }
-    #endif
+
+    private var start: CGPoint = .zero
+    private var began: TimeInterval = 0
+    private var timer: Timer?
+
+    init() {
+        super.init(target: nil, action: nil)
+        cancelsTouchesInView = true
+        delaysTouchesBegan = false
+        delaysTouchesEnded = true
+        delegate = self
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        guard touches.count == 1, numberOfTouches <= 1, let touch = touches.first,
+              let window = view as? UIWindow, let hit = touch.view else {
+            state = .failed
+            return
+        }
+        let point = touch.location(in: window)
+        guard BarTouchGuard.bar(replacing: hit, at: point, in: window) != nil else {
+            state = .failed
+            return
+        }
+        start = point
+        began = touch.timestamp
+        let timer = Timer(timeInterval: Self.longPressDelay, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.state == .possible else { return }
+                self.state = .recognized
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+        guard state == .possible, let touch = touches.first, let window = view else { return }
+        let point = touch.location(in: window)
+        let outcome = Self.outcome(moved: hypot(point.x - start.x, point.y - start.y),
+                                   after: touch.timestamp - began, lifted: false)
+        if outcome == .passed { state = .failed }
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        guard state == .possible, let touch = touches.first, let window = view else { return }
+        let point = touch.location(in: window)
+        let outcome = Self.outcome(moved: hypot(point.x - start.x, point.y - start.y),
+                                   after: touch.timestamp - began, lifted: true)
+        state = outcome == .swallowed ? .recognized : .failed
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+        state = .failed
+    }
+
+    override func reset() {
+        super.reset()
+        timer?.invalidate()
+        timer = nil
+    }
+
+    /// The content's taps and long presses wait for the shield to fail.
+    /// Everything else — scroll views' pans, the edge swipes — runs as before.
+    override func shouldBeRequiredToFail(by other: UIGestureRecognizer) -> Bool {
+        other is UITapGestureRecognizer || other is UILongPressGestureRecognizer
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+        // Never blocks a pan, a pinch or a system gesture.
+        !(other is UITapGestureRecognizer || other is UILongPressGestureRecognizer)
+    }
 }
