@@ -77,6 +77,7 @@ public struct MockBackend: Sendable {
         let socialGraph = MockSocialGraphService(
             dataset: dataset,
             isPrivate: { socialServices.isPrivate($0) },
+            isSuggestible: { socialServices.isSuggestible($0) },
             seedsFollowRequests: ProcessInfo.processInfo.arguments.contains("-mock-follow-requests")
         )
         MockEngagementService(store: counterStore).register(on: bff)

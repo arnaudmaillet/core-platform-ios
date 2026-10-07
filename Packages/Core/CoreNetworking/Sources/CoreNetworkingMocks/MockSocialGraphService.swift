@@ -37,6 +37,9 @@ public final class MockSocialGraphService: @unchecked Sendable {
     private var requests: [Edge: Date] = [:]
     /// Whether a profile is private right now; profile.v1 owns that flag.
     private let isPrivate: @Sendable (String) -> Bool
+    /// Whether a profile turned "appear in suggestions" on; profile.v1 owns
+    /// that flag too.
+    private let isSuggestible: @Sendable (String) -> Bool
     /// Restrictions, owner → restricted, with when (backend #724).
     private var restrictions: [Edge: Date] = [:]
     /// Mutes, muter → muted, with their scopes and when (backend #722).
@@ -61,11 +64,13 @@ public final class MockSocialGraphService: @unchecked Sendable {
         dataset: MockSocialDataset,
         pageSizeCap: Int32 = 50,
         isPrivate: @escaping @Sendable (String) -> Bool = { _ in false },
+        isSuggestible: @escaping @Sendable (String) -> Bool = { _ in true },
         seedsFollowRequests: Bool = false
     ) {
         self.dataset = dataset
         self.pageSizeCap = pageSizeCap
         self.isPrivate = isPrivate
+        self.isSuggestible = isSuggestible
         self.viewerProfileIDs = Set(dataset.profileIDs(inAccount: MockAuthService.accountID))
         // One public author the viewer doesn't follow keeps their following
         // list to themself, so a hidden list can be seen without setup.
@@ -114,6 +119,11 @@ public final class MockSocialGraphService: @unchecked Sendable {
             view.targetFollowersCount = Int64(followers(of: request.targetID).count)
             view.targetFollowingCount = Int64(following(of: request.targetID).count)
             return .success(view)
+        }
+        bff.register(path: "/social_graph.v1.SocialGraphService/SuggestProfiles") { [self] (request: SocialGraph_V1_SuggestProfilesRequest) in
+            var response = SocialGraph_V1_SuggestProfilesResponse()
+            response.profiles = suggestions(for: subject(request.profileID), limit: request.limit)
+            return .success(response)
         }
         bff.register(path: "/social_graph.v1.SocialGraphService/Follow") { [self] (request: SocialGraph_V1_FollowRequest) -> Result<SocialGraph_V1_CommandResponse, ConnectError> in
             var response = SocialGraph_V1_CommandResponse()
@@ -363,9 +373,9 @@ public final class MockSocialGraphService: @unchecked Sendable {
     /// This is load-bearing, not lenient parsing: `MapFavoritesRepository` has
     /// no viewer resolver yet and deliberately sends empty ids, documenting
     /// that the mock serves the seeded graph for them (on the fleet those
-    /// sections stay hidden). Honouring a *specified* id — which the inbox's
-    /// friend-of-friend suggestions need for their second hop — must not take
-    /// that away.
+    /// sections stay hidden). Honouring a *specified* id — which a profile's
+    /// relationship lists and `SuggestProfiles` need — must not take that
+    /// away.
     private func subject(_ profileID: String) -> String {
         profileID.isEmpty ? MockSocialDataset.viewerProfileID : profileID
     }
@@ -498,6 +508,37 @@ public final class MockSocialGraphService: @unchecked Sendable {
             let pending = lock.withLock { requests[Edge(follower: actorID, followee: targetID)] != nil }
             return pending ? .requested : .none
         }
+    }
+
+    /// `SuggestProfiles` as the fleet answers it (backend #661): the profiles
+    /// the profiles `profileID` follows follow, ranked by how many of them do,
+    /// ties on id; without oneself, those already followed, a block either
+    /// way, private profiles, and anyone with "appear in suggestions" off. At
+    /// most 50; 0 means 20.
+    private func suggestions(for profileID: String, limit: Int32) -> [SocialGraph_V1_SuggestedProfile] {
+        let size = limit == 0 ? 20 : Int(min(max(limit, 1), 50))
+        let followed = following(of: profileID)
+        var counts: [String: UInt32] = [:]
+        for source in followed {
+            for candidate in following(of: source) { counts[candidate, default: 0] += 1 }
+        }
+        return counts
+            .filter { candidate, _ in
+                candidate != profileID
+                    && !followed.contains(candidate)
+                    && !isBlocking(actorID: profileID, targetID: candidate)
+                    && !isBlocking(actorID: candidate, targetID: profileID)
+                    && !isPrivate(candidate)
+                    && isSuggestible(candidate)
+            }
+            .sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }
+            .prefix(size)
+            .map { candidate, mutuals in
+                var suggestion = SocialGraph_V1_SuggestedProfile()
+                suggestion.profileID = candidate
+                suggestion.mutualCount = mutuals
+                return suggestion
+            }
     }
 
     /// Who follows `profileID`, inverted from the same follow graph — the

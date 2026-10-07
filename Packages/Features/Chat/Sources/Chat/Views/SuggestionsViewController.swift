@@ -7,8 +7,8 @@ import UIKit
 /// The inbox's "Suggestions" surface: accounts worth following, each with an
 /// inline follow and a dismiss.
 ///
-/// Loads lazily — a viewer who never swipes this far never pays for the social
-/// graph fan-out behind it.
+/// Loads lazily — a viewer who never swipes this far never pays for the
+/// suggestions behind it — and asks for the rest of the list at its end.
 final class SuggestionsViewController: UIViewController {
     fileprivate enum Section { case main }
 
@@ -176,6 +176,14 @@ extension SuggestionsViewController: UITableViewDelegate {
         let spacer = UIView()
         spacer.backgroundColor = .clear
         return spacer
+    }
+
+    /// A row near the end asks for the rest of the list (#644).
+    func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) {
+        guard let id = dataSource.itemIdentifier(for: indexPath),
+              dataSource.snapshot().itemIdentifiers.suffix(InboxPaging.nearEndRowCount).contains(id)
+        else { return }
+        viewModel.loadMore()
     }
 
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
