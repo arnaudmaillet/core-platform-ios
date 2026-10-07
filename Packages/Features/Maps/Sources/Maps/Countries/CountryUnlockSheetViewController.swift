@@ -250,6 +250,12 @@ final class CountryUnlockSheetViewController: UIViewController {
         unlockButton.accessibilityIdentifier = "country.unlock.button"
         unlockButton.addAction(UIAction { [weak self] _ in
             guard let self else { return }
+            guard !access.purchasesRestricted else {
+                let alert = UIAlertController(title: nil, message: PurchaseRestriction.message, preferredStyle: .alert)
+                alert.addAction(UIAlertAction(title: "OK", style: .default))
+                present(alert, animated: true)
+                return
+            }
             MemberGates.perform(.unlockCountry, from: self) { [weak self] in self?.unlock() }
         }, for: .primaryActionTriggered)
         unlockButton.setContentHuggingPriority(.init(1), for: .horizontal)

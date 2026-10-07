@@ -1,4 +1,5 @@
 import CoreContracts
+import CoreStorage
 import Foundation
 
 /// A calendar date of birth — a day, not an instant: no time zone can move
@@ -107,7 +108,10 @@ extension AccountRepository: AccountBirthDateSetting {
         let response = await accountClient.setDateOfBirth(request: request, headers: [:])
         switch response.result {
         case .success(let view):
-            return AgeBracket(view.ageBracket)
+            let bracket = AgeBracket(view.ageBracket)
+            // A date just given can make the account a teen (#401).
+            teenProtections.record(account: request.accountID, isMinor: bracket.isTeen)
+            return bracket
         case .failure(let error):
             let message = error.message ?? ""
             if message.contains("ACC-2004") { throw BirthDateError.underMinimumAge }

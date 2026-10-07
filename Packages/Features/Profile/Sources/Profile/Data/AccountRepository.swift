@@ -2,6 +2,7 @@ import AuthInterface
 import Connect
 import CoreContracts
 import CoreModels
+import CoreStorage
 import Foundation
 
 public enum AccountError: Error, Equatable, Sendable {
@@ -98,13 +99,18 @@ public enum AccountDeletionPolicy {
 public actor AccountRepository: AccountProviding, AccountLifecycleManaging, AccountDeactivating {
     let accountClient: any Account_V1_AccountServiceClientInterface
     private let authSession: any AuthSessionProviding
+    /// Where the account's age bracket is recorded for the device's teen
+    /// protections (#401).
+    let teenProtections: TeenProtections
 
     public init(
         accountClient: any Account_V1_AccountServiceClientInterface,
-        authSession: any AuthSessionProviding
+        authSession: any AuthSessionProviding,
+        teenProtections: TeenProtections = .shared
     ) {
         self.accountClient = accountClient
         self.authSession = authSession
+        self.teenProtections = teenProtections
     }
 
     public func currentAccount() async throws -> AccountDetails {
@@ -117,6 +123,8 @@ public actor AccountRepository: AccountProviding, AccountLifecycleManaging, Acco
         let response = await accountClient.getAccountByID(request: request, headers: [:])
         switch response.result {
         case .success(let view):
+            // Teen protections (#401) the device applies follow every read.
+            teenProtections.record(account: accountID.rawValue, isMinor: AgeBracket(view.ageBracket).isTeen)
             return AccountDetails(
                 email: view.email,
                 emailVerified: view.emailVerified,

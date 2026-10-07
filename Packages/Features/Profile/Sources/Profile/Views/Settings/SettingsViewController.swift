@@ -294,6 +294,8 @@ final class SettingsViewController: UIViewController {
 
     func open(_ section: SettingsSection, animated: Bool = true) {
         let destination = makeDestination(section) ?? SettingsComingSoonViewController(section: section)
+        // A page that points at other sections opens them through here.
+        (destination as? SettingsSectionLinking)?.openSection = { [weak self] section in self?.open(section) }
         navigationController?.pushViewController(destination, animated: animated)
     }
 

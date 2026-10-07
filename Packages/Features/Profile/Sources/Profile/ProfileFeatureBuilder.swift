@@ -344,6 +344,10 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                             imagePipeline: imagePipeline
                                         )
                                     }
+                                case .familyAndTeens:
+                                    FamilyAndTeensViewController(isTeen: {
+                                        (try? await account.currentAccount().ageBracket.isTeen) ?? false
+                                    })
                                 case .whatYouSee:
                                     (repository as? any FeedPreferencesManaging).map { preferences in
                                         WhatYouSeeViewController(preferences: preferences, interestTags: interestTags, isTeen: {
