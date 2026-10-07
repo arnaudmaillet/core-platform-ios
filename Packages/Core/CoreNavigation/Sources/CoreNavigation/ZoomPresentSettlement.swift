@@ -1,4 +1,5 @@
 import Foundation
+import QuartzCore
 
 /// How a landed PRESENT is settled: what runs on the animation's clock, and
 /// what waits for the page to have something to show.
@@ -81,5 +82,38 @@ enum ZoomPresentSettlement {
     /// - `cardHasLiveSurface`: a cover-only card has nothing to hand over.
     static func whenDestinationReady(cardHasLiveSurface: Bool) -> [Action] {
         (cardHasLiveSurface ? [.adoptSurfaceToDestination] : []) + [.dropCover]
+    }
+
+    /// Whether the cover's live surface is still fading UP over the cover's
+    /// picture — and the cover must therefore stay (#633).
+    ///
+    /// ⚠️ THE PAGE ADOPTS THE SURFACE AS IT IS, MID-FADE INCLUDED. A card that
+    /// adopted the page's player mid-flight fades its surface in on the
+    /// player's FIRST frame (`VideoRenderView.fadeInOnFirstFrame`). When that
+    /// frame is late — after the landing — the same frame also makes the page
+    /// report rendering, so the gate opened in the very tick the fade began:
+    /// the page took a surface whose presented opacity was 0.00 (probed:
+    /// `alpha=1.00 pres=0.00 anims=opacity frames=1`), the cover went, and the
+    /// viewer saw the page's black floor with the video fading up out of it.
+    /// Held until the fade is done, the blend from the sheet to the video
+    /// happens on the cover, where it was meant to, and the drop shows nothing.
+    ///
+    /// Only a RISING fade holds: a surface with no frame (alpha 0, nothing
+    /// animating) is not arriving and never will be on its own, and the drop
+    /// has always gone ahead over it.
+    static func liveSurfaceIsArriving(hasOpacityAnimation: Bool, shownOpacity: Float,
+                                      modelOpacity: Float) -> Bool {
+        hasOpacityAnimation && shownOpacity < 0.99 && modelOpacity > shownOpacity
+    }
+
+    /// `liveSurfaceIsArriving`, read off the surface's layer. "opacity" is the
+    /// key a UIView alpha animation lands under.
+    static func liveSurfaceIsArriving(_ layer: CALayer?) -> Bool {
+        guard let layer else { return false }
+        return liveSurfaceIsArriving(
+            hasOpacityAnimation: layer.animation(forKey: "opacity") != nil,
+            shownOpacity: layer.presentation()?.opacity ?? layer.opacity,
+            modelOpacity: layer.opacity
+        )
     }
 }

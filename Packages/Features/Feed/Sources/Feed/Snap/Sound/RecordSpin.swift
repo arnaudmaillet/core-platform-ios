@@ -9,10 +9,11 @@ extension CALayer {
     /// removed, so the next play turns it on from there instead of snapping
     /// back upright. Shared by the sound sheet's artwork and the feed's cover.
     ///
-    /// Still under Reduce Motion and Power Saving (#580): an endless turn
-    /// keeps the screen redrawing every frame for as long as the sound plays.
+    /// Still under Reduce Motion and Power Saving, and while the app rests
+    /// (`IdleCalm`) (#580): an endless turn keeps the screen redrawing every
+    /// frame for as long as the sound plays. The sound itself goes on.
     @MainActor
-    func setRecordSpinning(_ spinning: Bool, reducesMotion: Bool = MotionPreference.reducesMotion) {
+    func setRecordSpinning(_ spinning: Bool, reducesMotion: Bool = MotionPreference.stillsDecoration) {
         let spinning = spinning && !reducesMotion
         if spinning {
             if animation(forKey: Self.recordSpinKey) == nil {

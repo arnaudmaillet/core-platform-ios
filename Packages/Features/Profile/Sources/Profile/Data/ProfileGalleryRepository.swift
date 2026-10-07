@@ -5,6 +5,18 @@ import CoreNetworking
 import Foundation
 import PostGrid
 
+/// One page of a gallery corpus, newest first, and where the next one starts.
+public struct GalleryPage: Equatable, Sendable {
+    public let posts: [GalleryPost]
+    /// Nil when the corpus has no more.
+    public let nextPageToken: String?
+
+    public init(posts: [GalleryPost], nextPageToken: String?) {
+        self.posts = posts
+        self.nextPageToken = nextPageToken
+    }
+}
+
 /// What the gallery UI consumes; implemented by `ProfileGalleryRepository`,
 /// faked in view-model tests.
 public protocol ProfileGalleryProviding: Sendable {
@@ -23,6 +35,24 @@ public protocol ProfileGalleryProviding: Sendable {
     /// a saved pile is ordered by when you saved it and nothing on the wire
     /// knows that.
     func posts(ids: [String]) async throws -> [GalleryPost]
+    /// A page of the profile's own posts: the first when `pageToken` is nil,
+    /// otherwise the one that token starts (#634).
+    func authoredPage(for profileID: ProfileID, after pageToken: String?) async throws -> GalleryPage
+    /// A page of the posts by others that mention `handle`, newest first.
+    func taggedPage(for profileID: ProfileID, handle: String, after pageToken: String?) async throws -> GalleryPage
+}
+
+public extension ProfileGalleryProviding {
+    /// Providers that don't page: everything they have, once.
+    func authoredPage(for profileID: ProfileID, after pageToken: String?) async throws -> GalleryPage {
+        guard pageToken == nil else { return GalleryPage(posts: [], nextPageToken: nil) }
+        return GalleryPage(posts: try await authoredPosts(for: profileID), nextPageToken: nil)
+    }
+
+    func taggedPage(for profileID: ProfileID, handle: String, after pageToken: String?) async throws -> GalleryPage {
+        guard pageToken == nil else { return GalleryPage(posts: [], nextPageToken: nil) }
+        return GalleryPage(posts: try await taggedPosts(for: profileID, handle: handle), nextPageToken: nil)
+    }
 }
 
 /// Reads the gallery from post.v1 (listing + hydration) and search.v1 (tagged).
@@ -46,7 +76,8 @@ public actor ProfileGalleryRepository: ProfileGalleryProviding {
     /// cached as nothing known, deliberately: retrying it per page would turn
     /// one unreachable person into a request per render.
     private var authors: [ProfileID: GalleryAuthor?] = [:]
-    /// One page today; the grid paginates when profiles outgrow it.
+    /// Posts per page, for both corpora (#634). Each page is hydrated one
+    /// `GetPost` per post, so a page is a burst of that many reads.
     private let pageLimit: Int32
 
     public init(
@@ -54,7 +85,7 @@ public actor ProfileGalleryRepository: ProfileGalleryProviding {
         searchClient: any Search_V1_SearchServiceClientInterface,
         counterClient: any Counter_V1_CounterServiceClientInterface,
         profileClient: (any Profile_V1_ProfileServiceClientInterface)? = nil,
-        pageLimit: Int32 = 90
+        pageLimit: Int32 = 30
     ) {
         self.postClient = postClient
         self.searchClient = searchClient
@@ -64,30 +95,48 @@ public actor ProfileGalleryRepository: ProfileGalleryProviding {
     }
 
     public func authoredPosts(for profileID: ProfileID) async throws -> [GalleryPost] {
+        try await authoredPage(for: profileID, after: nil).posts
+    }
+
+    public func taggedPosts(for profileID: ProfileID, handle: String) async throws -> [GalleryPost] {
+        try await taggedPage(for: profileID, handle: handle, after: nil).posts
+    }
+
+    /// ⚠️ FOLLOW THE TOKEN, NEVER THE COUNT: a hydration that fails drops its
+    /// tile, so a page can come back short with more behind it.
+    public func authoredPage(for profileID: ProfileID, after pageToken: String?) async throws -> GalleryPage {
         var request = Post_V1_ListPostsByProfileRequest()
         request.profileID = profileID.rawValue
         request.limit = pageLimit
+        request.pageToken = pageToken ?? ""
         let response = await postClient.listPostsByProfile(request: request, headers: [:])
         switch response.result {
         case .success(let body):
-            return await withCounters(withAuthors(hydrate(postIDs: body.posts.map(\.postID))))
+            let posts = await withCounters(withAuthors(hydrate(postIDs: body.posts.map(\.postID))))
+            return GalleryPage(posts: posts, nextPageToken: body.nextToken.isEmpty ? nil : body.nextToken)
         case .failure(let error):
             throw ProfileError.transport(message: error.message ?? "code \(error.code)")
         }
     }
 
-    public func taggedPosts(for profileID: ProfileID, handle: String) async throws -> [GalleryPost] {
+    /// Sorted by RECENCY: the gallery's All merges this corpus with the
+    /// authored one by date, which only holds if both page in date order.
+    public func taggedPage(for profileID: ProfileID, handle: String, after pageToken: String?) async throws -> GalleryPage {
         var request = Search_V1_SearchRequest()
         request.query = "@" + handle
         request.entityTypes = [.post]
+        request.sort = .recency
+        request.pageSize = pageLimit
+        request.pageToken = pageToken ?? ""
         let response = await searchClient.search(request: request, headers: [:])
         switch response.result {
         case .success(let body):
             let ids = body.hits.filter { $0.entityType == .post }.map(\.id)
             // Self-mentions aren't "tagged by others"; drop own posts.
-            return await withCounters(
+            let posts = await withCounters(
                 withAuthors(hydrate(postIDs: ids).filter { $0.authorProfileID != profileID })
             )
+            return GalleryPage(posts: posts, nextPageToken: body.nextPageToken.isEmpty ? nil : body.nextPageToken)
         case .failure(let error):
             throw ProfileError.transport(message: error.message ?? "code \(error.code)")
         }

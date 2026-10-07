@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import Foundation
 import MediaPlayback
 import Testing
@@ -104,6 +105,37 @@ struct GridVideoPlaybackCoordinatorTests {
         fresh.update(candidates: [makeCandidate(2, distance: 0)])
         await fresh.debugAwaitStarts()
         #expect(fresh.playingIDs.isEmpty)
+    }
+
+    /// The app resting (`IdleCalm`, #580) stops the tiles where they are,
+    /// and waking starts them again — with no scroll to ask for a reconcile.
+    @Test func restingStopsTheTilesAndWakingStartsThemWithoutAScroll() async {
+        let coordinator = makeVisibleCoordinator(pool: makePool(), maxConcurrent: 3)
+        var resting = false
+        coordinator.autoplayAllowed = { !resting }
+        coordinator.update(candidates: [makeCandidate(0, distance: 0), makeCandidate(1, distance: 10)])
+        await coordinator.debugAwaitStarts()
+        #expect(coordinator.playingIDs.count == 2, "guard: the tiles play")
+
+        resting = true
+        NotificationCenter.default.post(name: .decorativeMotionDidChange, object: nil)
+        await settle { coordinator.playingIDs.isEmpty }
+        #expect(coordinator.playingIDs.isEmpty, "a resting grid kept playing")
+
+        resting = false
+        NotificationCenter.default.post(name: .decorativeMotionDidChange, object: nil)
+        await settle { coordinator.playingIDs.count == 2 }
+        await coordinator.debugAwaitStarts()
+        #expect(coordinator.playingIDs.count == 2, "waking left the grid still")
+    }
+
+    /// Looks, not wall-clock time — a starved runner spends none of it.
+    private func settle(_ condition: () -> Bool) async {
+        for _ in 0..<2_000 {
+            await Task.yield()
+            if condition() { return }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
     }
 
     /// A tile that is not playing has nothing to join, and must not mint a

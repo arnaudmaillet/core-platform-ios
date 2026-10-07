@@ -56,6 +56,15 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
     /// See `PostSetSurface.onNearEnd`.
     var onNearEnd: (() -> Void)?
 
+    /// See `PostSetSurface.setHasMore` — whether the caller has another page.
+    private(set) var hasMore = false
+    /// The answer to a feed opened from one of these tiles (#638).
+    private lazy var feedContinuation = GridFeedContinuation(
+        ids: { [weak self] in self?.shownIDs ?? [] },
+        hasMore: { [weak self] in self?.hasMore ?? false },
+        askMore: { [weak self] in self?.onNearEnd?() }
+    )
+
     /// Opens a post WITH a flight. Supplied by the builder, which owns the
     /// snap feed and the transition — the same closure the place profile is
     /// handed, and for the same reason: this file describes a departure, and
@@ -104,6 +113,20 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
     func setPaging(_ paging: Bool) {
         loadViewIfNeeded()
         page.setPaging(paging)
+        // A page that ended without growing the list (a failure) is an
+        // answer too: the waiting feed hears it and asks again later.
+        if !paging { feedContinuation.answered() }
+    }
+
+    func setHasMore(_ hasMore: Bool) {
+        self.hasMore = hasMore
+        if !hasMore { feedContinuation.answered() }
+    }
+
+    /// The ids after `id` in this surface's order, for a full-screen feed
+    /// opened from it (#638) — see `GridFeedContinuation`.
+    func postIDs(after id: PostID) async -> [PostID]? {
+        await feedContinuation.postIDs(after: id)
     }
 
     /// The departure, described for the flight machinery.
@@ -157,7 +180,10 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
             donateLiveMedia: { [weak page] in page?.liveFlightSurface(for: tapped.id) },
             opensComments: false,
             depthView: { [weak page] in page },
-            textReveal: nil
+            textReveal: nil,
+            // On past the window into what this surface holds, then into the
+            // caller's next page (#638).
+            continuation: { [weak self] after in await self?.postIDs(after: after) }
         )
         openPost(self, origin, stream.map(\.id))
     }
@@ -250,6 +276,9 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
 
     func show(_ state: PostSetSurfaceState) {
         loadViewIfNeeded()
+        // Whatever the answer, a feed waiting on the next page hears it — it
+        // re-reads `shownIDs`, which is set below before it gets to run.
+        defer { feedContinuation.answered() }
         switch state {
         case .loading:
             shownIDs = []

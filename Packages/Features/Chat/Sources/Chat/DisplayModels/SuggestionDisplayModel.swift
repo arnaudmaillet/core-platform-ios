@@ -28,7 +28,15 @@ public struct SuggestionDisplayModel: Equatable, Sendable, Identifiable {
         case .followsYou:
             return "Follows you"
         case .followedBy(let names, let total):
-            guard let first = names.first else { return "Suggested for you" }
+            // `SuggestProfiles` says how many of the viewer's follows follow
+            // this account, not who (#644): the count is the reason.
+            guard let first = names.first else {
+                switch total {
+                case ...0: return "Suggested for you"
+                case 1: return "1 mutual connection"
+                default: return "\(total) mutual connections"
+                }
+            }
             let others = total - names.count
             return others > 0 ? "Followed by \(first) + \(others)" : "Followed by \(first)"
         case .suggestedForYou:

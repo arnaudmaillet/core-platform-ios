@@ -295,6 +295,23 @@ public final class ProfileViewModel {
     private var authoredFailed = false
     private var taggedFailed = false
     private var galleryLoad: Task<Void, Never>?
+    /// Where each corpus's next page starts; nil when it has no more, or
+    /// before its first page answered (#634).
+    private var authoredToken: String?
+    private var taggedToken: String?
+    /// Pages beyond the first are loaded: a revalidation merges its first
+    /// page over them rather than cutting the corpus back to one page.
+    private var authoredHasLaterPages = false
+    private var taggedHasLaterPages = false
+    /// The next page(s) on their way — one round at a time.
+    private var galleryMoreLoad: Task<Void, Never>?
+    /// Pages walked through in a row that add nothing to the tab on screen
+    /// (Short over a run of photos) before waiting for the next approach.
+    static let maxUnchangedGalleryPages = 5
+    /// The last next-page round failed: the grid stops asking on its own
+    /// (an empty tab would otherwise retry in a tight loop) until the viewer
+    /// approaches the end again, or pulls to refresh.
+    private var galleryMorePausedByFailure = false
 
     public init(
         repository: any ProfileProviding,
@@ -947,6 +964,8 @@ public final class ProfileViewModel {
     public func setGalleryFormat(_ format: GalleryFilter.Format) {
         galleryFilter.format = format
         galleryPreferences?.filter = galleryFilter
+        // A tab the loaded pages leave empty fills itself as it arrives.
+        fillEmptyGalleryTab()
     }
 
     /// The global source modifier: recomputes every page locally, without
@@ -966,16 +985,23 @@ public final class ProfileViewModel {
         if reset {
             galleryLoad?.cancel()
             galleryLoad = nil
+            galleryMoreLoad?.cancel()
+            galleryMoreLoad = nil
             authoredCache = nil
             taggedCache = nil
             authoredFailed = false
             taggedFailed = false
+            authoredToken = nil
+            taggedToken = nil
+            authoredHasLaterPages = false
+            taggedHasLaterPages = false
         }
         guard galleryLoad == nil else { return }
+        galleryMorePausedByFailure = false
         renderGallery() // all pages report loading — or, revalidating, what they hold
         galleryLoad = Task { [weak self] in
-            async let authoredFetch = gallery.authoredPosts(for: profile.id)
-            async let taggedFetch = gallery.taggedPosts(for: profile.id, handle: profile.handle)
+            async let authoredFetch = gallery.authoredPage(for: profile.id, after: nil)
+            async let taggedFetch = gallery.taggedPage(for: profile.id, handle: profile.handle, after: nil)
 
             // The two fetches fail independently: one page family degrading
             // must not blank the other.
@@ -983,13 +1009,187 @@ public final class ProfileViewModel {
             let tagged = try? await taggedFetch
             guard let self, !Task.isCancelled else { return }
 
-            self.authoredCache = authored
-            self.authoredFailed = authored == nil
-            self.taggedCache = tagged
-            self.taggedFailed = tagged == nil
-            self.renderGallery()
+            // A revalidation over pages beyond the first merges into them —
+            // and, failing, leaves them as they are rather than blanking them.
+            if self.authoredHasLaterPages, let shown = self.authoredCache {
+                if let authored { self.authoredCache = Self.mergingGallery(firstPage: authored.posts, over: shown) }
+            } else {
+                self.authoredCache = authored?.posts
+                self.authoredFailed = authored == nil
+                self.authoredToken = authored?.nextPageToken
+            }
+            if self.taggedHasLaterPages, let shown = self.taggedCache {
+                if let tagged { self.taggedCache = Self.mergingGallery(firstPage: tagged.posts, over: shown) }
+            } else {
+                self.taggedCache = tagged?.posts
+                self.taggedFailed = tagged == nil
+                self.taggedToken = tagged?.nextPageToken
+            }
             self.galleryLoad = nil
+            self.renderGallery()
         }
+    }
+
+    /// The viewer neared the end of the grid on screen: the next page of
+    /// every corpus its source reads, if any has one and none is on its way
+    /// (#634). Appended below what is shown; a failure is retried on the next
+    /// approach.
+    /// The posts after `id` on the tab the viewer is on, for a full-screen
+    /// feed opened from the grid (#638): what the grid holds past it, then
+    /// its next pages, under the same source — the same order the grid
+    /// shows, so a post the feed reaches is a tile the grid also has.
+    ///
+    /// `nil`: nothing follows and the corpora have no more. EMPTY: none yet
+    /// (a page failed, or the first load is still out); the feed asks again
+    /// on its next approach.
+    public func galleryPostIDs(after id: PostID) async -> [PostID]? {
+        for _ in 0..<Self.maxUnchangedGalleryPages {
+            let tiles = galleryTiles(galleryFilter.format)
+            guard let index = tiles.firstIndex(where: { $0.id == id }) else { return nil }
+            let following = tiles[(index + 1)...]
+            if !following.isEmpty { return following.prefix(Self.continuationWindow).map(\.id) }
+            guard galleryTokensToFollow() != (nil, nil) else { return nil }
+            if galleryMoreLoad == nil { loadMoreGallery() }
+            // Not started: the first load is still out.
+            guard let round = galleryMoreLoad else { return [] }
+            await round.value
+            if galleryMorePausedByFailure { return [] }
+        }
+        return []
+    }
+
+    /// How many posts a feed opened from the grid is handed per step.
+    static let continuationWindow = 12
+
+    public func loadMoreGallery() {
+        galleryMorePausedByFailure = false
+        startGalleryPages()
+    }
+
+    /// A tab on screen that the loaded pages leave empty has no tile to come
+    /// on screen and ask for more: it asks here — unless the last round
+    /// failed, which waits for the viewer.
+    private func fillEmptyGalleryTab() {
+        guard !galleryMorePausedByFailure, galleryTiles(galleryFilter.format).isEmpty else { return }
+        startGalleryPages()
+    }
+
+    private func startGalleryPages() {
+        guard let gallery, let profile, galleryLoad == nil, galleryMoreLoad == nil,
+              galleryTokensToFollow() != (nil, nil)
+        else { return }
+        galleryMoreLoad = Task { [weak self] in
+            await self?.appendGalleryPages(from: gallery, for: profile)
+        }
+    }
+
+    /// The tokens the active source reads through: authored for Posts and
+    /// Reposts, tagged for Tagged, both for All.
+    private func galleryTokensToFollow() -> (authored: String?, tagged: String?) {
+        let source = galleryFilter.source
+        return (
+            source == .tagged ? nil : authoredToken,
+            source == .all || source == .tagged ? taggedToken : nil
+        )
+    }
+
+    private func appendGalleryPages(from gallery: any ProfileGalleryProviding, for profile: UserProfile) async {
+        for _ in 0..<Self.maxUnchangedGalleryPages {
+            let tokens = galleryTokensToFollow()
+            guard tokens != (nil, nil) else { break }
+            let before = galleryTiles(galleryFilter.format).count
+            async let authoredFetch = Self.page(of: tokens.authored) { token in
+                try await gallery.authoredPage(for: profile.id, after: token)
+            }
+            async let taggedFetch = Self.page(of: tokens.tagged) { token in
+                try await gallery.taggedPage(for: profile.id, handle: profile.handle, after: token)
+            }
+            let (authored, tagged) = await (authoredFetch, taggedFetch)
+            // A reset since — another profile, a pull that started over —
+            // owns the grid now, and the slot with it.
+            guard !Task.isCancelled, self.profile?.id == profile.id else { return }
+            var failed = false
+            if let token = tokens.authored {
+                if let page = authored {
+                    if authoredToken == token {
+                        authoredToken = page.nextPageToken
+                        if let grown = Self.appending(page.posts, to: authoredCache) {
+                            authoredCache = grown
+                            authoredHasLaterPages = true
+                        }
+                    }
+                } else { failed = true }
+            }
+            if let token = tokens.tagged {
+                if let page = tagged {
+                    if taggedToken == token {
+                        taggedToken = page.nextPageToken
+                        if let grown = Self.appending(page.posts, to: taggedCache) {
+                            taggedCache = grown
+                            taggedHasLaterPages = true
+                        }
+                    }
+                } else { failed = true }
+            }
+            // The tab on screen gained tiles: they come on screen and ask
+            // again. It gained none (Short over a run of photos): no tile will
+            // ask, so the next page is asked now — within a bound.
+            if failed { galleryMorePausedByFailure = true }
+            if failed || galleryTiles(galleryFilter.format).count > before { break }
+        }
+        // ⚠️ THE SLOT FREES BEFORE THE TILES RENDER: a page that lands wholly
+        // on screen asks for the next one while it renders (#596).
+        galleryMoreLoad = nil
+        renderGallery()
+    }
+
+    private static func page(
+        of token: String?, _ fetch: @Sendable (String) async throws -> GalleryPage
+    ) async -> GalleryPage? {
+        guard let token else { return nil }
+        return try? await fetch(token)
+    }
+
+    /// `shown` with the page's new posts below it, or nil when it brings
+    /// none — a post can sit on both sides of a page boundary.
+    private static func appending(_ page: [GalleryPost], to shown: [GalleryPost]?) -> [GalleryPost]? {
+        let known = Set((shown ?? []).map(\.id))
+        let fresh = page.filter { !known.contains($0.id) }
+        return fresh.isEmpty ? nil : (shown ?? []) + fresh
+    }
+
+    /// A revalidated first page over a corpus that runs past it: the page
+    /// replaces every post at least as recent as its oldest, and every older
+    /// post stays. Both corpora page newest first, so a post missing from the
+    /// fresh page either slid down (older: kept) or went away (newer:
+    /// dropped). Pure, for tests.
+    static func mergingGallery(firstPage: [GalleryPost], over shown: [GalleryPost]) -> [GalleryPost] {
+        guard let oldest = firstPage.map(\.publishedAtMS).min() else { return shown }
+        let fresh = Set(firstPage.map(\.id))
+        return firstPage + shown.filter { !fresh.contains($0.id) && $0.publishedAtMS < oldest }
+    }
+
+    /// The tiles a tab shows under the active source.
+    ///
+    /// ⚠️ ALL STOPS AT THE FRONTIER. It merges two corpora that page on their
+    /// own; a post older than what one of them has reached may still be
+    /// followed by newer ones from it, and showing it now would have the next
+    /// page land ABOVE tiles already on screen. So All shows only down to the
+    /// later of the unfinished corpora's oldest posts — where both are known
+    /// — and every page from then on only adds below.
+    private func galleryTiles(_ format: GalleryFilter.Format) -> [GalleryPost] {
+        let filter = GalleryFilter(format: format, source: galleryFilter.source)
+        let tiles = filter.tiles(authored: authoredCache ?? [], tagged: taggedCache ?? [])
+        guard galleryFilter.source == .all, let frontier = allFrontier else { return tiles }
+        return tiles.filter { $0.publishedAtMS >= frontier }
+    }
+
+    /// The later of the unfinished corpora's oldest loaded posts; nil when
+    /// neither has more to load.
+    private var allFrontier: Int64? {
+        [(authoredToken, authoredCache), (taggedToken, taggedCache)]
+            .compactMap { token, cache in token == nil ? nil : cache?.map(\.publishedAtMS).min() }
+            .max()
     }
 
     /// Recomputes the full three-page snapshot from the caches and the global
@@ -1011,10 +1211,13 @@ public final class ProfileViewModel {
                 return .loading
             }
             let filter = GalleryFilter(format: format, source: source)
-            let tiles = filter.tiles(authored: authoredCache ?? [], tagged: taggedCache ?? [])
-            return tiles.isEmpty
-                ? .empty(message: Self.emptyMessage(for: filter))
-                : .content(tiles)
+            let tiles = galleryTiles(format)
+            guard tiles.isEmpty else { return .content(tiles) }
+            // Nothing YET is not nothing: with pages still to load, a tab
+            // that none of the loaded posts fill is still loading — or, its
+            // last page having failed, says so.
+            if galleryTokensToFollow() == (nil, nil) { return .empty(message: Self.emptyMessage(for: filter)) }
+            return galleryMorePausedByFailure ? .failed(message: "Couldn't load. Pull to retry.") : .loading
         }
 
         let snapshot = GallerySnapshot(
@@ -1023,6 +1226,7 @@ public final class ProfileViewModel {
             short: page(.short),
             saved: savedPage
         )
+        fillEmptyGalleryTab()
         // The same pages again is no news: a revalidation that agrees with
         // the screen must cost the screen nothing.
         guard snapshot != publishedGallery else { return }

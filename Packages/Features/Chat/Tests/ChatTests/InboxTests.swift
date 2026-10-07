@@ -253,67 +253,6 @@ struct ConversationOrderingTests {
     }
 }
 
-// MARK: - Suggestion ranking
-
-struct SuggestionRankerTests {
-    private func input(
-        followers: [String] = [],
-        following: [String] = [],
-        secondHop: [String: [String]] = [:],
-        dismissed: [String] = []
-    ) -> SuggestionRanker.Input {
-        SuggestionRanker.Input(
-            viewer: ProfileID("me"),
-            followers: Set(followers.map { ProfileID($0) }),
-            following: Set(following.map { ProfileID($0) }),
-            followingOfFollowing: secondHop.reduce(into: [:]) { partial, pair in
-                partial[ProfileID(pair.key)] = Set(pair.value.map { ProfileID($0) })
-            },
-            dismissed: Set(dismissed.map { ProfileID($0) })
-        )
-    }
-
-    /// Someone who already chose the viewer outranks any number of shared
-    /// connections.
-    @Test func followersOutrankFriendsOfFriends() {
-        let ranked = SuggestionRanker.rank(input(
-            followers: ["p-follower"],
-            following: ["f1", "f2", "f3"],
-            secondHop: ["f1": ["p-popular"], "f2": ["p-popular"], "f3": ["p-popular"]]
-        ))
-        #expect(ranked.map(\.id) == [ProfileID("p-follower"), ProfileID("p-popular")])
-        #expect(ranked[0].followsViewer)
-        #expect(ranked[1].connectors.count == 3)
-    }
-
-    @Test func friendsOfFriendsRankByConnectorCount() {
-        let ranked = SuggestionRanker.rank(input(
-            following: ["f1", "f2"],
-            secondHop: ["f1": ["p-one", "p-two"], "f2": ["p-two"]]
-        ))
-        #expect(ranked.map(\.id) == [ProfileID("p-two"), ProfileID("p-one")])
-    }
-
-    @Test func accountsAlreadyFollowedTheViewerAndDismissalsAreExcluded() {
-        let ranked = SuggestionRanker.rank(input(
-            followers: ["f1", "me", "p-hidden"],
-            following: ["f1", "f2"],
-            secondHop: ["f2": ["f1", "me", "p-hidden", "p-ok"]],
-            dismissed: ["p-hidden"]
-        ))
-        #expect(ranked.map(\.id) == [ProfileID("p-ok")])
-    }
-
-    /// Equal scores break on id, so reloading can't reshuffle the list.
-    @Test func tiesBreakDeterministicallyAndTheLimitHolds() {
-        let ranked = SuggestionRanker.rank(
-            input(followers: ["p-c", "p-a", "p-b"]),
-            limit: 2
-        )
-        #expect(ranked.map(\.id) == [ProfileID("p-a"), ProfileID("p-b")])
-    }
-}
-
 // MARK: - Catalog
 
 @MainActor
@@ -1565,7 +1504,10 @@ struct SuggestionDisplayModelTests {
         #expect(SuggestionDisplayModel.reasonText(.followedBy(names: ["Ava"], total: 1)) == "Followed by Ava")
         #expect(SuggestionDisplayModel.reasonText(.followedBy(names: ["Ava"], total: 3)) == "Followed by Ava + 2")
         // A connector list that never resolved a name is not a reason.
-        #expect(SuggestionDisplayModel.reasonText(.followedBy(names: [], total: 4)) == "Suggested for you")
+        // `SuggestProfiles` gives a count, not names (#644).
+        #expect(SuggestionDisplayModel.reasonText(.followedBy(names: [], total: 4)) == "4 mutual connections")
+        #expect(SuggestionDisplayModel.reasonText(.followedBy(names: [], total: 1)) == "1 mutual connection")
+        #expect(SuggestionDisplayModel.reasonText(.followedBy(names: [], total: 0)) == "Suggested for you")
     }
 
     @Test func handleIsPrefixedAndEmptyHandlesStayEmpty() {

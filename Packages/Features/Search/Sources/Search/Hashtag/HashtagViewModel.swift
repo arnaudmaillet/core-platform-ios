@@ -65,6 +65,11 @@ final class HashtagViewModel {
     func state(of tab: Tab) -> SearchPostSurfaceState { tab == .top ? top : recent }
 
     /// Whether `tab` is fetching its next page — the footer spinner.
+    /// Whether `tab` has a page past what it shows (#638).
+    func hasMore(_ tab: Tab) -> Bool {
+        paging[tab]?.nextPageToken != nil
+    }
+
     func isLoadingMore(_ tab: Tab) -> Bool {
         paging[tab]?.isLoading == true && !(paging[tab]?.ids.isEmpty ?? true)
     }

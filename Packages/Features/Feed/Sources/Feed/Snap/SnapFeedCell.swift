@@ -2405,6 +2405,13 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// the page has nothing to wait for. The parked player is claimed here too,
     /// which is what makes the deferred start unnecessary — there is no
     /// separate `play` to blank the screen.
+    /// Whether a landing keeps this page's own surface instead of adopting the
+    /// card's (#639): the card's has nothing to continue, and this page is
+    /// already showing something. Pure, for tests.
+    static func keepsOwnSurface(incomingHasFrame: Bool, ownIsShowing: Bool) -> Bool {
+        !incomingHasFrame && ownIsShowing
+    }
+
     func adoptLiveRenderView(_ view: VideoRenderView) {
         defersPlaybackForFlight = false
         // ⚠️ ASKED BEFORE THE SWAP, not after. A card can land carrying a
@@ -2416,6 +2423,33 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // own surface, which is already rendering or about to.
         if VideoRenderFlags.usesSampleBufferLayer, let videoPlayback,
            !videoPlayback.canAdoptSurface(view) {
+            refreshMediaLoader()
+            return
+        }
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print(String(format: "[landing-adopt] %.3f alpha=%.2f pres=%.2f hidden=%@ anims=%@ frames=%d",
+                         CACurrentMediaTime(), view.alpha, view.layer.presentation()?.opacity ?? -1,
+                         view.isHidden ? "Y" : "N", (view.layer.animationKeys() ?? []).joined(separator: ","),
+                         view.enqueuedFrameCount))
+        }
+        #endif
+        // ⚠️ A SURFACE WITH NO FRAME HANDS NOTHING OVER (#639). The landing
+        // adopts the card's surface to continue the frame it was showing; a card
+        // whose mirror never drew has no frame to continue. Swapped in anyway,
+        // it replaced a page that was already showing its poster — the gate
+        // opens on that poster — and the viewer got black and the spinner for
+        // as long as the adopted surface took to draw (probed: `frames=0` at
+        // the gate, 0.4 s of black filmed). The page keeps its own surface: it
+        // is joined to the same player and draws the next frame itself.
+        if Self.keepsOwnSurface(incomingHasFrame: view.isReadyForDisplay,
+                                ownIsShowing: mediaCard.renderView.isCompositingContent) {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+                print(String(format: "[landing-adopt] %.3f refused: the card's surface has no frame, the page shows its own",
+                             CACurrentMediaTime()))
+            }
+            #endif
             refreshMediaLoader()
             return
         }

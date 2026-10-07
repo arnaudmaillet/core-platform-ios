@@ -366,6 +366,11 @@ public protocol PostSetSurface: AnyObject {
 
     /// The footer spinner, while the caller fetches its next page.
     func setPaging(_ paging: Bool)
+
+    /// Whether the caller has another page past what it showed — what lets a
+    /// full-screen feed opened from a tile go on into it, and know when to
+    /// stop (#638). Set it with every answer; false until said otherwise.
+    func setHasMore(_ hasMore: Bool)
 }
 
 public extension PostSetSurface {
@@ -375,6 +380,7 @@ public extension PostSetSurface {
     }
 
     func setPaging(_ paging: Bool) {}
+    func setHasMore(_ hasMore: Bool) {}
 }
 
 /// Which of the two For You shapes the caller wants.

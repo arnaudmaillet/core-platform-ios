@@ -53,6 +53,12 @@ final class ProfileGalleryGridView: UIView {
     /// page's.
     var onVerticalScroll: ((CGFloat) -> Void)?
     var onPullToRefresh: (() -> Void)?
+    /// One of the grid's last tiles came on screen: time for the next page
+    /// (#634).
+    var onNearEnd: (() -> Void)?
+    /// How close to the end a tile has to be for its coming on screen to ask
+    /// for the next page — three rows of tiles.
+    static let nearEndTileCount = 9
     /// The post to bring clear of the chrome once this page is out of sight.
     /// An ID, not an index: the corpus can change while the post is open.
     private var pendingRevealPostID: PostID?
@@ -201,7 +207,7 @@ final class ProfileGalleryGridView: UIView {
     /// no glyph and no headline, which reads as a screen that failed rather than
     /// as an answer, and which said nothing about WHICH tab was empty.
     private let emptyStateView = EmptyStateView()
-    private let tab: ProfileTab
+    let tab: ProfileTab
 
     init(
         imagePipeline: ImagePipeline,
@@ -409,6 +415,25 @@ final class ProfileGalleryGridView: UIView {
             debugRecountedItems += countsOnly.count
             debugReconfiguredItems += reconfigured.count
             #endif
+            return
+        }
+        // ⚠️ A PAGE APPENDED BELOW INSERTS, IT DOES NOT RELOAD (#634). A reload
+        // rebuilt every tile on screen — media re-dressed, playing tiles
+        // handed back and restarted — for posts that had not moved.
+        if !showsSkeleton, !skeleton, posts.count > self.posts.count, !self.posts.isEmpty,
+           zip(self.posts, posts).allSatisfy({ $0.id == $1.id }) {
+            let changed = self.posts.indices.filter { self.posts[$0] != posts[$0] }
+            let added = (self.posts.count..<posts.count).map { IndexPath(item: $0, section: 0) }
+            self.posts = posts
+            UIView.performWithoutAnimation {
+                collectionView.performBatchUpdates {
+                    collectionView.insertItems(at: added)
+                    if !changed.isEmpty {
+                        collectionView.reconfigureItems(at: changed.map { IndexPath(item: $0, section: 0) })
+                    }
+                }
+            }
+            collectionView.invalidateIntrinsicContentSize()
             return
         }
         // Hydration retires the skeleton with a cross-dissolve: the shimmer
@@ -992,6 +1017,15 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
                 cover.top, cover.bottom, topGap, bottomGap))
         }
         #endif
+    }
+
+    func collectionView(
+        _ collectionView: UICollectionView,
+        willDisplay cell: UICollectionViewCell,
+        forItemAt indexPath: IndexPath
+    ) {
+        guard !showsSkeleton, indexPath.item >= posts.count - Self.nearEndTileCount else { return }
+        onNearEnd?()
     }
 
     func collectionView(
