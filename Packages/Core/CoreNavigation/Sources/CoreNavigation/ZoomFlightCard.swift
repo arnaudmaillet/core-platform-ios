@@ -101,6 +101,14 @@ public protocol ZoomFlightCard: UIView {
     /// source's own, over everything.
     var zoomRestingChrome: UIView? { get }
 
+    /// Where the destination's chrome replica rides (#539): a view that
+    /// CLIPS to the card's current rounded shape, in the card's own
+    /// coordinate space. A card whose root cannot clip — the map's pin lets
+    /// its flag border and badge overhang — hands its clipping content view
+    /// here, or the replica's legibility scrim draws a square-cornered veil
+    /// past the window's rounded corners. Defaults to the card itself.
+    var zoomChromeContainer: UIView { get }
+
 
 
     /// The surface live media renders on — non-nil only while the card is
@@ -265,6 +273,7 @@ public protocol ZoomFlightCard: UIView {
 }
 
 public extension ZoomFlightCard {
+    var zoomChromeContainer: UIView { self }
     var zoomLiveMediaIsDrawing: Bool { true }
     var zoomLiveMediaDebugState: String { "" }
     var zoomCoverSurface: UIView? { nil }
