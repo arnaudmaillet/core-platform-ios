@@ -171,7 +171,7 @@ struct EmotePickerGridTests {
     /// From the drag's start to the end of the glide every displayed tile
     /// plays — the whole screen of them, the ones scrolled in meanwhile too;
     /// once the grid stops, none.
-    @Test func displayedTilesPlayOnlyWhileTheGridScrolls() throws {
+    @Test func displayedTilesPlayOnlyWhileTheGridScrolls() async throws {
         let engine = warmEngine()
         let (panel, window) = hosted(engine)
         defer { tearDown(window) }
@@ -197,28 +197,23 @@ struct EmotePickerGridTests {
         #expect(panel.displayedTiles.allSatisfy { $0.isAnimating }, "the glide still plays")
         panel.scrollViewDidEndDecelerating(grid)
         #expect(!panel.isScrolling)
-        #expect(panel.displayedTiles.allSatisfy { $0.isShowingArt && !$0.isAnimating }, "stopped, nothing plays")
+        // #559: each emote finishes its loop first, then rests.
+        try #require(await settle { panel.displayedTiles.allSatisfy { $0.isShowingArt && !$0.isAnimating } },
+                     "stopped once their loops end, nothing plays")
         #expect(engine.playingTileCount == 0)
 
         // A drag let go without a glide stops it as well.
         panel.scrollViewWillBeginDragging(grid)
         #expect(panel.displayedTiles.allSatisfy { $0.isAnimating })
         panel.scrollViewDidEndDragging(grid, willDecelerate: false)
-        #expect(panel.displayedTiles.allSatisfy { !$0.isAnimating })
+        try #require(await settle { panel.displayedTiles.allSatisfy { !$0.isAnimating } })
     }
 
-    /// Stopping holds each tile on the frame it reached — no reset to the
-    /// poster — and the next scroll plays on from there.
-    ///
-    /// ⚠️ **WAIT FOR A FRAME, NOT FOR A DURATION.** The frame follows the
-    /// wall clock round a 4 s loop. A fixed 200 ms sleep came back after ~4 s
-    /// on a CI runner whose main thread the neighbouring suites held, and the
-    /// loop had wrapped to frame 0 (`held → 0`, run 37143240022). So the
-    /// tile is stopped once it shows a frame in the first half of the loop —
-    /// far from the wrap, whenever the main thread gets back here.
-    @Test func stoppingHoldsTheFrameAndTheNextScrollPlaysOn() async throws {
-        let frames = 40
-        let (panel, window) = hosted(warmEngine(art: EmoteStripTests.sheetArt(frames: frames, step: 0.1)))
+    @Test func aScrollThatEndsLetsEachEmoteFinishItsLoop() async throws {
+        // #559: an emote never stops posed mid-gesture. A 0.6 s loop keeps
+        // the wait short; frames are waited for, never timed.
+        let frames = 20
+        let (panel, window) = hosted(warmEngine(art: EmoteStripTests.sheetArt(frames: frames, step: 0.03)))
         defer { tearDown(window) }
         let grid = panel.collectionView
         let tile = try #require(panel.displayedTiles.first)
@@ -230,16 +225,30 @@ struct EmotePickerGridTests {
             "the tile reaches the first half of its loop"
         )
         panel.scrollViewDidEndDecelerating(grid)
-        let held = try #require(tile.player.displayedFrame)
-        #expect(held > 0, "it moved while the grid scrolled")
-        #expect(!tile.isAnimating)
+        #expect(tile.isAnimating, "it plays out its loop instead of freezing")
+        #expect(tile.player.isFinishingLoop)
 
-        try await Task.sleep(for: .milliseconds(300))
-        #expect(tile.player.displayedFrame == held, "held where it stopped, not reset")
+        try #require(await settle { !tile.isAnimating }, "the loop ends")
+        #expect(tile.player.displayedFrame == 0, "it rests on its poster frame")
+    }
+
+    /// Scrolling again before the loop ends just carries on: no restart.
+    @Test func scrollingAgainBeforeTheLoopEndsCarriesOn() async throws {
+        let frames = 20
+        let (panel, window) = hosted(warmEngine(art: EmoteStripTests.sheetArt(frames: frames, step: 0.03)))
+        defer { tearDown(window) }
+        let grid = panel.collectionView
+        let tile = try #require(panel.displayedTiles.first)
 
         panel.scrollViewWillBeginDragging(grid)
-        let resumed = try #require(tile.player.displayedFrame)
-        #expect(resumed == held || resumed == (held + 1) % frames, "plays on from \(held): \(resumed)")
+        try #require(await settle { (1...frames / 2).contains(tile.player.displayedFrame ?? 0) })
+        panel.scrollViewDidEndDecelerating(grid)
+        let before = try #require(tile.player.displayedFrame)
+        panel.scrollViewWillBeginDragging(grid)
+        #expect(!tile.player.isFinishingLoop, "the finish is dropped")
+        #expect(tile.isAnimating, "still playing")
+        let after = try #require(tile.player.displayedFrame)
+        #expect(after == before || after == (before + 1) % frames, "no restart: \(before) → \(after)")
         panel.scrollViewDidEndDecelerating(grid)
     }
 
@@ -251,7 +260,8 @@ struct EmotePickerGridTests {
         panel.scrollViewWillBeginDragging(panel.collectionView)
         #expect(panel.displayedTiles.allSatisfy { $0.isAnimating })
         try #require(await settle { !panel.isScrolling }, "the settle watch ends the scroll")
-        #expect(panel.displayedTiles.allSatisfy { $0.isShowingArt && !$0.isAnimating })
+        try #require(await settle { panel.displayedTiles.allSatisfy { $0.isShowingArt && !$0.isAnimating } },
+                     "each emote rests once its loop ends")
     }
 
     // MARK: - A tap

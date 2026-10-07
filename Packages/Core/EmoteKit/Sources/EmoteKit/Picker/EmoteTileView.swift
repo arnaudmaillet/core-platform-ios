@@ -132,20 +132,44 @@ public final class EmoteTileView: UIView {
 
     /// Starts or stops the art where it is: stopping holds the frame
     /// on show, starting plays on from it.
-    public func setPlaying(_ playing: Bool) {
+    ///
+    /// `finishingLoop` (#559): the art plays out its current loop and rests
+    /// on its poster frame instead of freezing mid-gesture; the engine slot
+    /// is given back once it rests. Playing again before then just carries on.
+    public func setPlaying(_ playing: Bool, finishingLoop: Bool = false) {
         guard playing != isPlaying else { return }
         isPlaying = playing
-        if playing { play() } else { hold() }
+        if playing {
+            play()
+        } else if finishingLoop {
+            finish()
+        } else {
+            hold()
+        }
     }
 
-    /// Plays on from the frame on show, if a slot is free.
+    /// Plays on from the frame on show, if a slot is free. A loop being
+    /// finished keeps its slot and simply goes on.
     private func play() {
         guard isShowingArt, artMoves, let engine else { return }
+        player.cancelFinish()
         if !holdsSlot {
             guard engine.acquireTileSlot() else { return }
             holdsSlot = true
         }
         player.resume()
+    }
+
+    /// Plays the loop out, then rests and gives the slot back.
+    private func finish() {
+        guard isShowingArt, holdsSlot else {
+            hold()
+            return
+        }
+        player.finishLoop { [weak self] in
+            guard let self, !self.isPlaying else { return }
+            self.releaseSlot()
+        }
     }
 
     /// Holds the frame on show, and gives the slot back.

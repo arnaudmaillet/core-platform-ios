@@ -143,7 +143,7 @@ struct EmoteStripTests {
 
     /// From the drag's start to the end of the glide every displayed tile
     /// plays, the ones scrolled in meanwhile too; once the strip stops, none.
-    @Test func displayedTilesPlayOnlyWhileTheStripScrolls() throws {
+    @Test func displayedTilesPlayOnlyWhileTheStripScrolls() async throws {
         let engine = warmEngine(art: Self.sheetArt(frames: 8, step: 0.1))
         let (strip, window) = hosted(engine)
         defer { tearDown(window) }
@@ -166,26 +166,23 @@ struct EmoteStripTests {
         #expect(strip.displayedTiles.allSatisfy { $0.isAnimating }, "the glide still plays")
         strip.scrollViewDidEndDecelerating(grid)
         #expect(!strip.isScrolling)
-        #expect(strip.displayedTiles.allSatisfy { $0.isShowingArt && !$0.isAnimating }, "stopped, nothing plays")
+        // #559: each emote finishes its loop first, then rests.
+        try #require(await settle { strip.displayedTiles.allSatisfy { $0.isShowingArt && !$0.isAnimating } },
+                     "stopped once their loops end, nothing plays")
         #expect(engine.playingTileCount == 0, "a still tile gives its slot back")
 
         // A drag let go without a glide stops it as well.
         strip.scrollViewWillBeginDragging(grid)
         #expect(strip.displayedTiles.allSatisfy { $0.isAnimating })
         strip.scrollViewDidEndDragging(grid, willDecelerate: false)
-        #expect(strip.displayedTiles.allSatisfy { !$0.isAnimating })
+        try #require(await settle { strip.displayedTiles.allSatisfy { !$0.isAnimating } })
     }
 
-    /// Stopping holds each tile on the frame it reached — no jump back to
-    /// the poster — and the next scroll plays on from that frame.
-    @Test func stoppingHoldsTheFrameAndTheNextScrollPlaysOn() async throws {
-        // A 4 s loop of 0.1 s frames, stopped once the tile shows a frame in
-        // the first half of it — far from the wrap back to the poster. A fixed
-        // 200 ms sleep came back after ~4 s on a CI runner whose main thread
-        // the neighbouring suites held, and read the wrapped frame 0 (the
-        // panel's twin of this test, #459).
-        let frames = 40
-        let (strip, window) = hosted(warmEngine(art: Self.sheetArt(frames: frames, step: 0.1)))
+    @Test func aScrollThatEndsLetsEachEmoteFinishItsLoop() async throws {
+        // #559: an emote never stops posed mid-gesture. A 0.6 s loop keeps
+        // the wait short; frames are waited for, never timed.
+        let frames = 20
+        let (strip, window) = hosted(warmEngine(art: Self.sheetArt(frames: frames, step: 0.03)))
         defer { tearDown(window) }
         let grid = strip.collectionView
         let tile = try #require(strip.displayedTiles.first)
@@ -197,16 +194,68 @@ struct EmoteStripTests {
             "the tile reaches the first half of its loop"
         )
         strip.scrollViewDidEndDecelerating(grid)
-        let held = try #require(tile.player.displayedFrame)
-        #expect(held > 0, "it moved while the strip scrolled")
-        #expect(!tile.isAnimating)
+        #expect(tile.isAnimating, "it plays out its loop instead of freezing")
+        #expect(tile.player.isFinishingLoop)
 
-        try await Task.sleep(for: .milliseconds(300))
-        #expect(tile.player.displayedFrame == held, "held where it stopped, not reset")
+        try #require(await settle { !tile.isAnimating }, "the loop ends")
+        #expect(tile.player.displayedFrame == 0, "it rests on its poster frame")
+    }
+
+    /// Slots come back once each loop ends, whatever the number of scrolls,
+    /// and never exceed `maxPlayingTiles` meanwhile — here fewer slots than
+    /// tiles on screen.
+    @Test func slotsComeBackAfterManyScrolls() async throws {
+        let engine = warmEngine(art: Self.sheetArt(frames: 10, step: 0.03))
+        engine.maxPlayingTiles = 3
+        let (strip, window) = hosted(engine)
+        defer { tearDown(window) }
+        let grid = strip.collectionView
+        try #require(strip.displayedTiles.count > 3, "more tiles than slots")
+        for _ in 0..<8 {
+            strip.scrollViewWillBeginDragging(grid)
+            #expect(engine.playingTileCount <= engine.maxPlayingTiles)
+            strip.scrollViewDidEndDecelerating(grid)
+            #expect(engine.playingTileCount <= engine.maxPlayingTiles)
+        }
+        try #require(await settle { engine.playingTileCount == 0 }, "every slot is back once the loops end")
+    }
+
+    /// A scroll that ends finishes the loops (the slots are kept meanwhile);
+    /// leaving the window is a hard stop that frees them at once.
+    @Test func endingAScrollFinishesButLeavingTheWindowStops() throws {
+        let engine = warmEngine(art: Self.sheetArt(frames: 20, step: 0.05))
+        let (strip, window) = hosted(engine)
+        defer { tearDown(window) }
+        let grid = strip.collectionView
+        strip.scrollViewWillBeginDragging(grid)
+        let playing = engine.playingTileCount
+        try #require(playing > 0)
+        strip.scrollViewDidEndDecelerating(grid)
+        #expect(engine.playingTileCount == playing, "finishing: the slots are still held")
 
         strip.scrollViewWillBeginDragging(grid)
-        let resumed = try #require(tile.player.displayedFrame)
-        #expect(resumed == held || resumed == (held + 1) % frames, "plays on from \(held), not from the poster: \(resumed)")
+        strip.removeFromSuperview()
+        #expect(engine.playingTileCount == 0, "a hard stop gives every slot back at once")
+        #expect(!strip.isScrolling)
+    }
+
+    /// Scrolling again before the loop ends just carries on: no restart.
+    @Test func scrollingAgainBeforeTheLoopEndsCarriesOn() async throws {
+        let frames = 20
+        let (strip, window) = hosted(warmEngine(art: Self.sheetArt(frames: frames, step: 0.03)))
+        defer { tearDown(window) }
+        let grid = strip.collectionView
+        let tile = try #require(strip.displayedTiles.first)
+
+        strip.scrollViewWillBeginDragging(grid)
+        try #require(await settle { (1...frames / 2).contains(tile.player.displayedFrame ?? 0) })
+        strip.scrollViewDidEndDecelerating(grid)
+        let before = try #require(tile.player.displayedFrame)
+        strip.scrollViewWillBeginDragging(grid)
+        #expect(!tile.player.isFinishingLoop, "the finish is dropped")
+        #expect(tile.isAnimating, "still playing")
+        let after = try #require(tile.player.displayedFrame)
+        #expect(after == before || after == (before + 1) % frames, "no restart: \(before) → \(after)")
         strip.scrollViewDidEndDecelerating(grid)
     }
 
@@ -219,7 +268,8 @@ struct EmoteStripTests {
         strip.scrollViewWillBeginDragging(strip.collectionView)
         #expect(strip.displayedTiles.allSatisfy { $0.isAnimating })
         try #require(await settle { !strip.isScrolling }, "the settle watch ends the scroll")
-        #expect(strip.displayedTiles.allSatisfy { $0.isShowingArt && !$0.isAnimating })
+        try #require(await settle { strip.displayedTiles.allSatisfy { $0.isShowingArt && !$0.isAnimating } },
+                     "each emote rests once its loop ends")
     }
 
     /// A tap hands the emote over and files it under Recent.

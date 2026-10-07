@@ -10,9 +10,11 @@ import UIKit
 /// when it was dressed at rest (first appearance, a layout change, a jump
 /// set in code). The displayed tiles play while the grid SCROLLS — from the
 /// drag's start to the end of its glide — and a tile scrolled in meanwhile
-/// plays from its first appearance. When the grid stops, each tile stops on
-/// the frame it is on (no jump back to the poster, no flash); the next scroll
-/// plays on from there. A still tile is a posed layer with no animation on
+/// plays from its first appearance. When the grid stops, each tile plays out
+/// its current loop and rests on its poster frame (#559) — never posed
+/// mid-gesture; a loop longer than `AnimatedIconView.maxFinishWait` holds
+/// where it is instead. A scroll that starts again before then just carries
+/// on. Leaving the window (`stop()`) is a hard stop: every tile holds at once. A still tile is a posed layer with no animation on
 /// it, so a grid at rest costs the render server nothing
 /// (`AnimatedIconView.pause` says why it is not a stopped layer clock).
 ///
@@ -49,24 +51,27 @@ public final class EmoteScrollPlayback {
     }
 
     public func didEndDragging(willDecelerate decelerate: Bool) {
-        if !decelerate { setScrolling(false) }
+        if !decelerate { setScrolling(false, finishingLoops: true) }
     }
 
     /// The glide ended, or a scroll animation set in code did.
     public func didEndScrolling() {
-        setScrolling(false)
+        setScrolling(false, finishingLoops: true)
     }
 
+    /// A hard stop (leaving the window, new emotes): every tile holds where
+    /// it is, now.
     public func stop() {
-        setScrolling(false)
+        setScrolling(false, finishingLoops: false)
     }
 
-    /// Plays or stills every displayed tile.
-    private func setScrolling(_ scrolling: Bool) {
+    /// Plays or stills every displayed tile. A scroll that ENDS lets each
+    /// emote finish its loop and rest on its poster frame (#559).
+    private func setScrolling(_ scrolling: Bool, finishingLoops: Bool = false) {
         guard scrolling != isScrolling else { return }
         isScrolling = scrolling
         for tile in displayedTiles() {
-            tile.setPlaying(scrolling)
+            tile.setPlaying(scrolling, finishingLoop: finishingLoops)
         }
         settleWatch?.cancel()
         settleWatch = nil
@@ -83,7 +88,7 @@ public final class EmoteScrollPlayback {
                     return
                 }
                 if !grid.isTracking, !grid.isDragging, !grid.isDecelerating {
-                    self.setScrolling(false)
+                    self.setScrolling(false, finishingLoops: true)
                 }
             }
         }
