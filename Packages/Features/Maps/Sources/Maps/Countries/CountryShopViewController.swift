@@ -482,7 +482,10 @@ public final class CountryShopViewController: UIViewController {
             guard let self else { return }
             MemberGates.perform(.shop, from: self) { [weak self] in self?.buyStakePack() }
         }
-        if gems < offer.price {
+        if access.purchasesRestricted {
+            buy.attributes = .disabled
+            buy.subtitle = PurchaseRestriction.message
+        } else if gems < offer.price {
             buy.attributes = .disabled
             buy.subtitle = "\(offer.price - gems) more gems needed"
         }
@@ -500,7 +503,7 @@ public final class CountryShopViewController: UIViewController {
     /// raised in one.
     @discardableResult
     func buyStakePack() -> StakePackPurchase? {
-        guard let stakePacks else { return nil }
+        guard let stakePacks, !access.purchasesRestricted else { return nil }
         let outcome = stakePacks.buyPack()
         switch outcome {
         case .bought:

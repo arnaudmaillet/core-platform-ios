@@ -13,6 +13,7 @@ struct CountryShopViewControllerTests {
     private final class FakeAccess: CountryAccess {
         let homeCountry: String? = "FR"
         var gems = 40
+        var purchasesRestricted = false
         var unlocked: Set<String> = ["FR", "US", "ES"]
         let all: [CountryStanding] = ["US", "CN", "IN", "ES", "FR", "DE", "IT"].enumerated().map { index, code in
             CountryStanding(
@@ -301,6 +302,21 @@ struct CountryShopViewControllerTests {
     @Test func noSellerNoBoosts() {
         let shop = makeShop()
         #expect(shop.dataSource.snapshot().sectionIdentifiers.contains(.boosts) == false)
+    }
+
+    /// Teen protections (#401): an account aged 13–17 buys nothing, and its
+    /// gems stay where they are.
+    @Test func aTeenAccountCannotBuyThePack() {
+        let access = FakeAccess()
+        access.gems = 70
+        access.purchasesRestricted = true
+        let packs = FakePacks(access: access)
+        let shop = CountryShopViewController(access: access, stakePacks: packs)
+        shop.loadViewIfNeeded()
+
+        #expect(shop.buyStakePack() == nil)
+        #expect(access.gems == 70)
+        #expect(PurchaseRestriction.message.contains("under 18"))
     }
 
     /// Buying spends the gems and turns the price into "Active — 10 left";

@@ -173,10 +173,14 @@ final class AppContainer {
         switch state {
         case .unauthenticated:
             scope.owner = .guest
+            TeenProtections.shared.clear()
         case .authenticated(let account):
             // The same account keeps the profile it already resolved.
             if case .member(account.rawValue, _) = scope.owner { return }
             scope.owner = .member(account: account.rawValue, profile: nil)
+            // Teen protections (#401): reading the account records its age
+            // bracket on this device (`AccountRepository.currentAccount`).
+            Task { [weak self] in _ = try? await self?.accountRepository.currentAccount() }
         }
         observeStorageScope()
     }

@@ -87,11 +87,23 @@ public protocol CountryAccess: AnyObject {
     /// ⚠️ Declared HERE, in the protocol body, so a conformer's own answer is
     /// dispatched through the existential (the default below is not).
     func hasPosts(in code: String) -> Bool
+    /// Teen protections (#401): no purchases for an account aged 13–17 —
+    /// neither unlocking a country nor buying a pack with gems. Declared in
+    /// the body for the same reason as `hasPosts`.
+    var purchasesRestricted: Bool { get }
+}
+
+/// What a refused purchase says (#401).
+public enum PurchaseRestriction {
+    public static let message = "Purchases aren't available on accounts under 18."
 }
 
 public extension CountryAccess {
     /// No location by default.
     var currentCountry: String? { nil }
+
+    /// Nothing is restricted by default.
+    var purchasesRestricted: Bool { false }
 
     /// Whether nothing at all is open — a guest without location (decision
     /// 9). The map's "See posts around you" card stands then.

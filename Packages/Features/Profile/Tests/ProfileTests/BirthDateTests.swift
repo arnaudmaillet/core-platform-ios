@@ -3,6 +3,7 @@ import CoreContracts
 import CoreModels
 import CoreNetworking
 import CoreNetworkingMocks
+import CoreStorage
 import Foundation
 import Testing
 @testable import Profile
@@ -57,11 +58,79 @@ struct BirthDateTests {
         func logout() async {}
     }
 
-    private func repository() -> AccountRepository {
+    private func repository(teen: TeenProtections = Self.isolatedTeenProtections()) -> AccountRepository {
         let bff = MockBFF()
         MockAccountService().register(on: bff)
         let client = ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: bff)
-        return AccountRepository(accountClient: Account_V1_AccountServiceClient(client: client), authSession: Session())
+        return AccountRepository(
+            accountClient: Account_V1_AccountServiceClient(client: client), authSession: Session(), teenProtections: teen
+        )
+    }
+
+    /// Never the app's own defaults: a test teen must not set this host's
+    /// daily limit.
+    private static func isolatedTeenProtections() -> TeenProtections {
+        let defaults = UserDefaults(suiteName: "teen-\(UUID().uuidString)")!
+        return TeenProtections(defaults: defaults, screenTime: ScreenTimeStore(defaults: defaults))
+    }
+
+    /// Teen protections (#401) on the device follow the account: a 15-year-old
+    /// is recorded as a minor (no purchases) and starts with a 60-minute
+    /// daily limit, once; a limit the teen changes is never put back.
+    @Test func aTeenAccountTurnsTheDevicesProtectionsOn() async throws {
+        let defaults = UserDefaults(suiteName: "teen-\(UUID().uuidString)")!
+        let screenTime = ScreenTimeStore(defaults: defaults)
+        let teen = TeenProtections(defaults: defaults, screenTime: screenTime)
+        let repository = repository(teen: teen)
+
+        _ = try await repository.currentAccount()
+        #expect(!teen.isMinor, "no date of birth is not a teen")
+        #expect(screenTime.settings.dailyLimitMinutes == nil)
+
+        let fifteen = BirthDate(date: Calendar.current.date(byAdding: .year, value: -15, to: Date())!)
+        _ = try await repository.setDateOfBirth(fifteen)
+        #expect(teen.isMinor)
+        #expect(teen.restrictsPurchases)
+        #expect(screenTime.settings.dailyLimitMinutes == TeenProtections.defaultDailyLimitMinutes)
+
+        screenTime.updateSettings { $0.dailyLimitMinutes = nil }
+        _ = try await repository.currentAccount()
+        #expect(screenTime.settings.dailyLimitMinutes == nil, "the teen turned it off; it stays off")
+
+        teen.clear()
+        #expect(!teen.isMinor)
+    }
+
+    /// A limit already chosen is kept; an adult gets none.
+    @Test func theTeenLimitNeverReplacesAChoice() {
+        let defaults = UserDefaults(suiteName: "teen-\(UUID().uuidString)")!
+        let screenTime = ScreenTimeStore(defaults: defaults)
+        let teen = TeenProtections(defaults: defaults, screenTime: screenTime)
+        screenTime.updateSettings { $0.dailyLimitMinutes = 30 }
+        teen.record(account: "acc-1", isMinor: true)
+        #expect(screenTime.settings.dailyLimitMinutes == 30)
+
+        let adultDefaults = UserDefaults(suiteName: "teen-\(UUID().uuidString)")!
+        let adultScreenTime = ScreenTimeStore(defaults: adultDefaults)
+        let adult = TeenProtections(defaults: adultDefaults, screenTime: adultScreenTime)
+        adult.record(account: "acc-2", isMinor: false)
+        #expect(!adult.restrictsPurchases)
+        #expect(adultScreenTime.settings.dailyLimitMinutes == nil)
+    }
+
+    /// Settings → Family and Teens lists each protection, and where to change it.
+    @Test func familyAndTeensNamesEachProtection() {
+        let protections = FamilyAndTeensViewController.protections(dailyLimitMinutes: 60)
+        #expect(protections.map(\.title) == [
+            "Private Account", "Messages and Mentions", "Location", "Sensitive Content",
+            "Daily Limit", "Quiet Hours", "Purchases",
+        ])
+        #expect(protections.first { $0.title == "Daily Limit" }?.detail.contains("60 minutes") == true)
+        #expect(protections.first { $0.title == "Quiet Hours" }?.detail.contains("22:00 to 07:00") == true)
+        #expect(protections.first { $0.title == "Purchases" }?.section == nil, "nothing to change before 18")
+        #expect(FamilyAndTeensViewController.protections(dailyLimitMinutes: nil)
+            .first { $0.title == "Daily Limit" }?.detail.contains("Off") == true)
+        #expect(FamilyAndTeensViewController.header(.protections, teen: false) == "For Accounts Aged 13 to 17")
     }
 
     /// Under 13 is refused and nothing is stored; an adult date is stored
