@@ -19,27 +19,22 @@ extension Conversation {
     }
 }
 
-/// Whether the viewer follows given peers — the single social signal the
-/// request partition needs. Separate from `ChatProviding` because it is
-/// answered by `social_graph.v1`, and because a surface that can't reach it
-/// must still work (see `InboxCatalog.load`).
-public protocol PeerRelationProviding: Sendable {
-    /// The subset of `peers` the viewer follows. Implementations should cache:
-    /// this is called on every inbox reload.
-    func followedPeers(among peers: [ProfileID]) async throws -> Set<ProfileID>
-}
-
-/// The inbox's shared source of truth: it loads the viewer's conversations
-/// **once**, partitions them into active threads and pending requests, and
-/// owns the session-local management state both surfaces mutate.
+/// The inbox's shared source of truth: it loads the viewer's two inbox
+/// folders — the conversations (All) and the message requests (Requests) —
+/// and owns the session-local management state both surfaces mutate.
 ///
 /// Why a shared object rather than a view model per tab doing its own fetch:
-/// `loadConversations()` costs a `ListMembers` + `GetHistory` round trip *per
-/// conversation* (`ChatRepository.hydrateConversation`), so two independent
-/// loaders would double the inbox's entire network cost to render the same
-/// rows twice. The catalog owns loading and truth; each surface's view model
-/// still owns its own phases, ordering, and display models — the tabs share
-/// data, not presentation.
+/// accepting a request moves it from one list to the other, and a
+/// conversation the viewer answers leaves Requests — one owner for both
+/// folders keeps those moves atomic. The catalog owns loading and truth; each
+/// surface's view model still owns its own phases, ordering, and display
+/// models — the tabs share data, not presentation.
+///
+/// ⚠️ REQUESTS ARE THE SERVER'S FOLDER (#593). They used to be a client-side
+/// guess (an unfollowed peer the viewer hadn't answered), from the days
+/// chat.v1 had no request plane. `ListInbox` sorts
+/// them itself now, so a conversation the viewer started or answered is
+/// never a request, whoever they follow.
 ///
 /// Pin/mute/delete/accept/decline are IN-SESSION ONLY by design, the same
 /// contract `ConversationListViewModel` shipped with: `chat.v1` has no plane
@@ -85,11 +80,11 @@ final class InboxCatalog {
     private(set) var snapshot = Snapshot()
 
     private let repository: any ChatProviding
-    private let relations: (any PeerRelationProviding)?
     private let directory: ConversationDirectory?
 
+    /// The INBOX folder's rows and the REQUESTS folder's, as loaded.
     private var conversations: [Conversation] = []
-    private var followedPeers: Set<ProfileID> = []
+    private var requestRows: [Conversation] = []
     private var observers: [UUID: (Snapshot) -> Void] = [:]
     private var load: Task<Void, Never>?
     private var loadGeneration = 0
@@ -110,13 +105,8 @@ final class InboxCatalog {
     private var accepted: Set<ConversationID> = []
     private var declined: Set<ConversationID> = []
 
-    init(
-        repository: any ChatProviding,
-        relations: (any PeerRelationProviding)? = nil,
-        directory: ConversationDirectory? = nil
-    ) {
+    init(repository: any ChatProviding, directory: ConversationDirectory? = nil) {
         self.repository = repository
-        self.relations = relations
         self.directory = directory
     }
 
@@ -147,7 +137,12 @@ final class InboxCatalog {
             // let `refresh()` start a duplicate.
             defer { if self.loadGeneration == generation { self.load = nil } }
             do {
-                let loaded = try await self.repository.loadConversations()
+                // Both folders at once. Requests are best-effort: a failure
+                // there keeps the requests already shown rather than failing
+                // the whole inbox over its smaller half.
+                async let inbox = self.repository.loadInbox(.inbox, after: nil)
+                async let requests = try? self.repository.loadInbox(.requests, after: nil)
+                let (inboxPage, requestPage) = try await (inbox, requests)
                 // A superseded load must not touch state. Cancellation is
                 // best-effort — the work may already have produced a partial
                 // result — so being current is checked after EVERY await
@@ -155,15 +150,13 @@ final class InboxCatalog {
                 // here is what made returning from a thread flash a
                 // near-empty inbox before the real load landed.
                 guard self.loadGeneration == generation else { return }
-                let peers = await self.resolveFollowedPeers(in: loaded)
-                guard self.loadGeneration == generation else { return }
 
-                // Rows and the peer set land TOGETHER: the request partition
-                // reads both, so assigning one before awaiting the other opens
-                // a window where any concurrent `emit()` classifies new rows
-                // against stale follow state.
-                self.conversations = loaded
-                self.followedPeers = peers
+                // Both folders land TOGETHER: accepting moves a row from one
+                // to the other, so one assigned before the other could show a
+                // conversation in both lists, or in neither.
+                self.conversations = inboxPage.conversations
+                if let requestPage { self.requestRows = requestPage.conversations }
+                let loaded = self.conversations + self.requestRows
                 // Retire the bridge for every conversation the server now
                 // agrees is read; keep it only where it is still catching up.
                 self.readAheadOfServer.formIntersection(loaded.filter(\.isUnread).map(\.id))
@@ -194,7 +187,7 @@ final class InboxCatalog {
         load = nil
         loadGeneration += 1
         conversations = []
-        followedPeers = []
+        requestRows = []
         pinned = []
         muted = []
         readAheadOfServer = []
@@ -210,22 +203,6 @@ final class InboxCatalog {
     func refresh() {
         guard load == nil else { return }
         reload()
-    }
-
-    /// Follow edges for every DM peer in the inbox.
-    ///
-    /// A failure here (or no relation provider at all) resolves to "the viewer
-    /// follows everyone", which collapses Requests to empty rather than
-    /// quarantining real conversations behind a tab the user may never open.
-    /// Failing open is the only safe direction for a heuristic partition.
-    private func resolveFollowedPeers(in conversations: [Conversation]) async -> Set<ProfileID> {
-        let peers = conversations.compactMap(\.directPeerID)
-        guard let relations, !peers.isEmpty else { return Set(peers) }
-        do {
-            return try await relations.followedPeers(among: peers)
-        } catch {
-            return Set(peers)
-        }
     }
 
     // MARK: - Correspondents
@@ -250,15 +227,14 @@ final class InboxCatalog {
     /// what this list already knows.
     ///
     /// Searched over every conversation the load returned, NOT `snapshot.active`.
-    /// The projection is about what the inbox *displays*: an unfollowed peer
-    /// whose message the viewer hasn't answered sits in Requests, and a
-    /// conversation deleted or declined this session is hidden entirely — but
-    /// all three still exist, still have history, and are exactly what
-    /// find-or-create would hand back. Asking the projection instead was why
-    /// picking someone with a real thread opened a blank draft and then made
-    /// their history appear a moment later.
+    /// The projection is about what the inbox *displays*: a request sits in
+    /// Requests, and a conversation deleted or declined this session is
+    /// hidden entirely — but all of them still exist, still have history,
+    /// and are exactly what find-or-create would hand back. Asking the
+    /// projection instead was why picking someone with a real thread opened
+    /// a blank draft and then made their history appear a moment later.
     func directConversationID(with peer: ProfileID) -> ConversationID? {
-        conversations.first { $0.directPeerID == peer }?.id
+        (conversations + requestRows).first { $0.directPeerID == peer }?.id
     }
 
     // MARK: - Management
@@ -293,8 +269,8 @@ final class InboxCatalog {
     }
 
     /// Dismisses a request. It leaves the inbox entirely — the conversation
-    /// still exists server-side (there is no decline RPC), it simply stops
-    /// being surfaced.
+    /// still exists server-side (`RespondToMessageRequest` isn't wired yet),
+    /// it simply stops being surfaced.
     func decline(_ id: ConversationID) {
         accepted.remove(id)
         declined.insert(id)
@@ -310,7 +286,13 @@ final class InboxCatalog {
     /// which on any real network is after the back swipe has finished. The
     /// row is re-sorted here exactly as `loadConversations` would order it, so
     /// the optimistic state matches what the next load will return.
+    ///
+    /// A reply to a REQUEST answers it: the server moves it to the INBOX
+    /// folder, and so does this, ahead of the next load saying so.
     func recordSentMessage(_ message: ChatMessage, in id: ConversationID) {
+        if let index = requestRows.firstIndex(where: { $0.id == id }) {
+            conversations.append(requestRows.remove(at: index))
+        }
         guard let index = conversations.firstIndex(where: { $0.id == id }) else { return }
         conversations[index] = conversations[index].sending(message)
         conversations.sort(by: Conversation.isOrderedBefore)
@@ -341,23 +323,25 @@ final class InboxCatalog {
 
     // MARK: - Projection
 
-    /// One projection of the loaded conversations through every piece of
+    /// One projection of the loaded folders through every piece of
     /// management state. Pinning reorders only the active list — a pinned
     /// request is not a concept.
     private func emit() {
-        let partition = MessageRequestPolicy.partition(
-            conversations,
-            followedPeers: followedPeers,
-            accepted: accepted,
-            declined: declined,
-            deleted: deleted
-        )
-        let active = partition.active
+        let hidden = deleted.union(declined)
+        // A request accepted this session reads as a conversation until the
+        // server has a word for it.
+        let acceptedRequests = requestRows.filter { accepted.contains($0.id) }
+        var active = conversations.filter { !hidden.contains($0.id) }
+        if !acceptedRequests.isEmpty {
+            active = (active + acceptedRequests.filter { !hidden.contains($0.id) }).sorted(by: Conversation.isOrderedBefore)
+        }
         snapshot.active = active.filter { pinned.contains($0.id) } + active.filter { !pinned.contains($0.id) }
         // Sorted here rather than inherited from whatever order the load
         // happened to produce: the Requests projection states its own key, so
         // its row order can't drift with an upstream change.
-        snapshot.requests = partition.requests.sorted(by: Conversation.isOrderedBefore)
+        snapshot.requests = requestRows
+            .filter { !hidden.contains($0.id) && !accepted.contains($0.id) }
+            .sorted(by: Conversation.isOrderedBefore)
         let readAhead = readAheadOfServer
         snapshot.unreadIDs = Set(
             (snapshot.active + snapshot.requests).lazy

@@ -24,14 +24,14 @@ public final class MockChatService: @unchecked Sendable {
     /// the Unread tab entirely, which hides whether a read row actually
     /// leaves a still-populated list.
     ///
-    /// `conv-req-0`/`conv-req-1` are with authors the viewer does NOT follow
-    /// and has never answered, which is exactly what `MessageRequestPolicy`
-    /// partitions into the Requests tab.
+    /// `conv-req-0`..`conv-req-4` are message requests: with authors the
+    /// viewer does NOT follow, and never answered — `ListInbox` files them in
+    /// REQUESTS until the viewer replies, which moves them to INBOX.
     /// Sixteen active conversations, so the compose picker's Recent section is
     /// full enough to hit its fifteen-row cap and the inbox itself scrolls.
     /// `conv-0`..`conv-11` are with authors the viewer follows; `conv-12`..
-    /// `conv-15` are with authors they do NOT follow but HAVE answered, which
-    /// keeps them out of Requests by the other half of the partition rule.
+    /// `conv-15` are with authors they do NOT follow but HAVE answered — an
+    /// answered conversation is never a request, whoever the viewer follows.
     private var otherMember: [String: String] {
         var members: [String: String] = [:]
         for (offset, id) in Self.requestIDs.enumerated() {
@@ -87,6 +87,20 @@ public final class MockChatService: @unchecked Sendable {
         bff.register(path: "/chat.v1.ChatService/ListSubscriptions") { [self] (_: Chat_V1_ListSubscriptionsRequest) in
             var response = Chat_V1_ListSubscriptionsResponse()
             response.conversationIds = conversationIDs
+            return .success(response)
+        }
+        // One folder of the viewer's inbox, newest activity first, page by
+        // page (#593): at most `limit` (clamped to 100; unset reads as 20)
+        // from where `page_token` left off. The token is an offset here —
+        // opaque to the client either way.
+        bff.register(path: "/chat.v1.ChatService/ListInbox") { [self] (request: Chat_V1_ListInboxRequest) in
+            let entries = inboxEntries(in: request.folder)
+            let size = request.limit > 0 ? Int(min(request.limit, 100)) : 20
+            let start = min(max(Int(request.pageToken) ?? 0, 0), entries.count)
+            let end = min(start + size, entries.count)
+            var response = Chat_V1_ListInboxResponse()
+            response.entries = Array(entries[start..<end])
+            response.nextPageToken = end < entries.count ? String(end) : ""
             return .success(response)
         }
         bff.register(path: "/chat.v1.ChatService/ListMembers") { [self] (request: Chat_V1_ListMembersRequest) in
@@ -146,6 +160,44 @@ public final class MockChatService: @unchecked Sendable {
         }
     }
 
+    /// The viewer's conversations in `folder`, as `ListInbox` lists them: a
+    /// request is one the viewer has never written in; everything else is the
+    /// INBOX. Unread as the server reads it — the last message is someone
+    /// else's and past the viewer's cursor; a request is unread until answered.
+    private func inboxEntries(in folder: Chat_V1_InboxFolder) -> [Chat_V1_InboxEntryView] {
+        let members = otherMember
+        return conversationIDs.compactMap { id -> Chat_V1_InboxEntryView? in
+            let history = store.messages(for: id, seed: seedHistory(for: id))
+            let isRequest = Self.requestIDs.contains(id) && !history.contains { $0.senderID == viewer }
+            switch folder {
+            case .inbox: guard !isRequest else { return nil }
+            case .requests: guard isRequest else { return nil }
+            default: return nil
+            }
+            var entry = Chat_V1_InboxEntryView()
+            entry.conversationID = id
+            entry.kind = .direct
+            entry.peerID = members[id] ?? ""
+            let latest = history.max { $0.createdAtMs < $1.createdAtMs }
+            entry.lastActivityMs = latest?.createdAtMs ?? nowMs
+            if let latest {
+                var preview = Chat_V1_MessagePreview()
+                preview.messageID = latest.messageID
+                preview.senderID = latest.senderID
+                preview.contentType = .text
+                preview.preview = String(latest.body.prefix(100))
+                entry.lastMessage = preview
+                entry.unread = latest.senderID != viewer && (isRequest || viewerLastRead(in: id) != latest.messageID)
+            }
+            return entry
+        }
+        .sorted {
+            $0.lastActivityMs != $1.lastActivityMs
+                ? $0.lastActivityMs > $1.lastActivityMs
+                : $0.conversationID < $1.conversationID
+        }
+    }
+
     /// Where the viewer's read cursor sits: what `MarkRead` recorded, or — for
     /// a thread they have never opened in this session — their own newest
     /// message.
@@ -194,8 +246,8 @@ public final class MockChatService: @unchecked Sendable {
         let morning: Int64 = 25 * 60
         let midday: Int64 = 24 * 60 + 30
         // Request threads are inbound-only and unanswered by construction —
-        // that IS the partition rule, so seeding a viewer reply here would
-        // quietly move the row into the active inbox.
+        // a viewer reply seeded here would answer the request and file it in
+        // the INBOX instead.
         if let request = Self.requests.first(where: { $0.id == conversationID }) {
             let inbound: [(String, String, Int64)] = [
                 (other, request.opener, request.minutesAgo + 2),

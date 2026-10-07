@@ -5,13 +5,11 @@ import Foundation
 /// The inbox's global search: one query answered across every category at once,
 /// plus the wider directory.
 ///
-/// **Global, not per-tab.** The three inbox tabs are a *partition of one
-/// dataset* — `InboxCatalog` loads once and `MessageRequestPolicy` splits it,
-/// with the follow-graph lookup deliberately failing open. Scoping search to
-/// whichever tab happened to be showing would make "can I find Sofía?" depend
-/// on a client-side heuristic the viewer can't see, didn't choose, and which is
-/// documented as approximate. Someone typing a name wants the thread, not a quiz
-/// about its classification — so the query runs over everything and the answer
+/// **Global, not per-tab.** The inbox tabs are folders of one inbox —
+/// `InboxCatalog` loads the conversations and the requests together. Scoping
+/// search to whichever tab happened to be showing would make "can I find
+/// Sofía?" depend on a classification the viewer can't see and didn't choose.
+/// Someone typing a name wants the thread, not a quiz about its classification — so the query runs over everything and the answer
 /// says which section it came from.
 ///
 /// **Three sources, deliberately unequal in cost.** Messages and Requests are

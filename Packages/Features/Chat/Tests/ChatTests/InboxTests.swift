@@ -50,7 +50,17 @@ private actor StubInboxProvider: ChatProviding {
     private var markReadGateIsOpen = true
     private var pendingMarkReads = 0
 
-    init(conversations: [Conversation]) { self.conversations = conversations }
+    /// The REQUESTS folder; `conversations` is the INBOX.
+    var requests: [Conversation]
+    private var failsRequests = false
+
+    init(conversations: [Conversation], requests: [Conversation] = []) {
+        self.conversations = conversations
+        self.requests = requests
+    }
+
+    /// The REQUESTS folder can't be read.
+    func setFailsRequests(_ fails: Bool) { failsRequests = fails }
 
     /// The write is accepted but never reflected by later loads — replication
     /// lag, the exact condition the read bridge exists for.
@@ -68,6 +78,7 @@ private actor StubInboxProvider: ChatProviding {
     /// load reports everything as read.
     func markEverythingRead() {
         conversations = conversations.map { $0.read() }
+        requests = requests.map { $0.read() }
     }
 
     /// Payloads handed out one per `loadConversations` call, so a test can make
@@ -81,6 +92,16 @@ private actor StubInboxProvider: ChatProviding {
     func setLoadGate(open isOpen: Bool) { loadGateIsOpen = isOpen }
 
     func viewerProfileID() async throws -> ProfileID { ProfileID("me") }
+
+    func loadInbox(_ folder: InboxFolder, after pageToken: String?) async throws -> InboxPage {
+        switch folder {
+        case .inbox:
+            return InboxPage(conversations: try await loadConversations(), nextPageToken: nil)
+        case .requests:
+            if failsRequests { throw StubError() }
+            return InboxPage(conversations: requests, nextPageToken: nil)
+        }
+    }
 
     func loadConversations() async throws -> [Conversation] {
         // The payload is claimed in call order, THEN the call blocks — so two
@@ -119,18 +140,9 @@ private actor StubInboxProvider: ChatProviding {
         // Only THIS conversation's cursor moves — a write that lands for one
         // row must not quietly mark its neighbours read too.
         conversations = conversations.map { $0.id == conversationID ? $0.read() : $0 }
+        requests = requests.map { $0.id == conversationID ? $0.read() : $0 }
     }
     func directConversation(with profileID: ProfileID) async throws -> ConversationID { ConversationID("dm") }
-}
-
-private struct StubRelations: PeerRelationProviding {
-    var followed: Set<ProfileID> = []
-    var failure: (any Error)?
-
-    func followedPeers(among peers: [ProfileID]) async throws -> Set<ProfileID> {
-        if let failure { throw failure }
-        return Set(peers).intersection(followed)
-    }
 }
 
 private struct StubError: Error {}
@@ -199,67 +211,6 @@ private func account(_ id: String, reason: SuggestedAccount.Reason = .followsYou
 }
 
 // MARK: - Request partition
-
-struct MessageRequestPolicyTests {
-    @Test func unansweredMessageFromAnUnfollowedPeerIsARequest() {
-        let partition = MessageRequestPolicy.partition([conversation("c1")], followedPeers: [])
-        #expect(partition.requests.map(\.id) == [ConversationID("c1")])
-        #expect(partition.active.isEmpty)
-    }
-
-    @Test func aFollowedPeerIsNeverARequest() {
-        let partition = MessageRequestPolicy.partition(
-            [conversation("c1", peer: "peer-1")], followedPeers: [ProfileID("peer-1")]
-        )
-        #expect(partition.active.map(\.id) == [ConversationID("c1")])
-        #expect(partition.requests.isEmpty)
-    }
-
-    /// Having replied answers the ask, follow or no follow.
-    @Test func aConversationTheViewerAnsweredIsNotARequest() {
-        let partition = MessageRequestPolicy.partition(
-            [conversation("c1", lastMessageIsMine: true)], followedPeers: []
-        )
-        #expect(partition.active.map(\.id) == [ConversationID("c1")])
-    }
-
-    @Test func anEmptyConversationIsNotARequest() {
-        let partition = MessageRequestPolicy.partition(
-            [conversation("c1", hasActivity: false)], followedPeers: []
-        )
-        #expect(partition.active.map(\.id) == [ConversationID("c1")])
-    }
-
-    /// "The sender" isn't a single account the viewer can vet.
-    @Test func groupConversationsAreNeverRequests() {
-        let partition = MessageRequestPolicy.partition(
-            [conversation("c1", peers: ["peer-1", "peer-2"])], followedPeers: []
-        )
-        #expect(partition.active.map(\.id) == [ConversationID("c1")])
-    }
-
-    @Test func acceptedRequestsJoinTheActiveInboxAndDeclinedOnesLeaveEntirely() {
-        let conversations = [conversation("c1"), conversation("c2"), conversation("c3")]
-        let partition = MessageRequestPolicy.partition(
-            conversations,
-            followedPeers: [],
-            accepted: [ConversationID("c1")],
-            declined: [ConversationID("c2")]
-        )
-        #expect(partition.active.map(\.id) == [ConversationID("c1")])
-        #expect(partition.requests.map(\.id) == [ConversationID("c3")])
-    }
-
-    @Test func deletedConversationsLeaveBothLists() {
-        let partition = MessageRequestPolicy.partition(
-            [conversation("c1"), conversation("c2", lastMessageIsMine: true)],
-            followedPeers: [],
-            deleted: [ConversationID("c1"), ConversationID("c2")]
-        )
-        #expect(partition.active.isEmpty)
-        #expect(partition.requests.isEmpty)
-    }
-}
 
 // MARK: - Row ordering
 
@@ -394,13 +345,55 @@ struct InboxCatalogTests {
         }
     }
 
-    @Test func loadPartitionsActiveConversationsFromRequests() async {
+    /// The Requests folder is the smaller half: failing to read it keeps the
+    /// inbox on screen rather than failing the whole surface (#593).
+    @Test func aRequestsFolderFailureKeepsTheInbox() async {
+        let provider = StubInboxProvider(
+            conversations: [conversation("active", peer: "friend")],
+            requests: [conversation("request", peer: "stranger")]
+        )
+        await provider.setFailsRequests(true)
+        let catalog = InboxCatalog(repository: provider)
+        var latest: InboxCatalog.Snapshot?
+        let token = catalog.observe { latest = $0 }
+        catalog.reload()
+        await settle()
+
+        #expect(latest?.phase == .loaded)
+        #expect(latest?.active.map(\.id) == [ConversationID("active")])
+        #expect(latest?.requests.isEmpty == true)
+        _ = token
+    }
+
+    /// Replying answers a request: it leaves Requests for the inbox at once,
+    /// as the server's next load will file it.
+    @Test func replyingToARequestMovesItToTheInbox() async {
+        let catalog = InboxCatalog(repository: StubInboxProvider(
+            conversations: [conversation("active", peer: "friend")],
+            requests: [conversation("request", peer: "stranger", activityAt: Date(timeIntervalSince1970: 10))]
+        ))
+        var latest: InboxCatalog.Snapshot?
+        let token = catalog.observe { latest = $0 }
+        catalog.reload()
+        await settle()
+
+        catalog.recordSentMessage(
+            ChatMessage(id: "m", senderID: ProfileID("me"), body: "hey", createdAt: Date(timeIntervalSince1970: 20), isMine: true),
+            in: ConversationID("request")
+        )
+
+        #expect(latest?.active.map(\.id) == [ConversationID("request"), ConversationID("active")])
+        #expect(latest?.requests.isEmpty == true)
+        _ = token
+    }
+
+    @Test func loadReadsTheInboxAndTheRequestsFolders() async {
         let catalog = InboxCatalog(
             repository: StubInboxProvider(conversations: [
-                conversation("active", peer: "friend", lastMessageIsMine: false),
+                conversation("active", peer: "friend", lastMessageIsMine: false)
+            ], requests: [
                 conversation("request", peer: "stranger")
-            ]),
-            relations: StubRelations(followed: [ProfileID("friend")])
+            ])
         )
         var snapshots: [InboxCatalog.Snapshot] = []
         let token = catalog.observe { snapshots.append($0) }
@@ -414,8 +407,9 @@ struct InboxCatalogTests {
 
     @Test func acceptingARequestMovesItIntoTheActiveInbox() async {
         let catalog = InboxCatalog(
-            repository: StubInboxProvider(conversations: [conversation("request", peer: "stranger")]),
-            relations: StubRelations()
+            repository: StubInboxProvider(conversations: [], requests: [
+                conversation("request", peer: "stranger")
+            ])
         )
         var latest: InboxCatalog.Snapshot?
         let token = catalog.observe { latest = $0 }
@@ -430,8 +424,9 @@ struct InboxCatalogTests {
 
     @Test func decliningARequestRemovesItFromBothLists() async {
         let catalog = InboxCatalog(
-            repository: StubInboxProvider(conversations: [conversation("request", peer: "stranger")]),
-            relations: StubRelations()
+            repository: StubInboxProvider(conversations: [], requests: [
+                conversation("request", peer: "stranger")
+            ])
         )
         var latest: InboxCatalog.Snapshot?
         let token = catalog.observe { latest = $0 }
@@ -440,24 +435,6 @@ struct InboxCatalogTests {
 
         catalog.decline(ConversationID("request"))
         #expect(latest?.active.isEmpty == true)
-        #expect(latest?.requests.isEmpty == true)
-        _ = token
-    }
-
-    /// The partition is a heuristic, so an unreachable relation service must
-    /// fail OPEN — quarantining real conversations behind a tab the user may
-    /// never open is the worse failure by a wide margin.
-    @Test func aRelationLookupFailureLeavesEverythingInTheActiveInbox() async {
-        let catalog = InboxCatalog(
-            repository: StubInboxProvider(conversations: [conversation("c1", peer: "stranger")]),
-            relations: StubRelations(failure: StubError())
-        )
-        var latest: InboxCatalog.Snapshot?
-        let token = catalog.observe { latest = $0 }
-        catalog.reload()
-        await settle()
-
-        #expect(latest?.active.map(\.id) == [ConversationID("c1")])
         #expect(latest?.requests.isEmpty == true)
         _ = token
     }
@@ -483,8 +460,7 @@ struct InboxCatalogTests {
         await provider.setLoadPayloads([[conversation("a", peer: "friend")], full])
         await provider.setLoadGate(open: false)
         let catalog = InboxCatalog(
-            repository: provider,
-            relations: StubRelations(followed: [ProfileID("friend")])
+            repository: provider
         )
         var loadedCounts: [Int] = []
         var loadedUnreadCounts: [Int] = []
@@ -510,8 +486,7 @@ struct InboxCatalogTests {
     /// and the loaded phase all go, so the next viewer never sees them.
     @Test func resetForgetsThePreviousViewersInbox() async {
         let catalog = InboxCatalog(
-            repository: StubInboxProvider(conversations: [conversation("a", peer: "friend")]),
-            relations: StubRelations(followed: [ProfileID("friend")])
+            repository: StubInboxProvider(conversations: [conversation("a", peer: "friend")])
         )
         var latest: InboxCatalog.Snapshot?
         let token = catalog.observe { latest = $0 }
@@ -532,8 +507,7 @@ struct InboxCatalogTests {
         let provider = StubInboxProvider(conversations: [conversation("a", peer: "friend")])
         await provider.setLoadGate(open: false)
         let catalog = InboxCatalog(
-            repository: provider,
-            relations: StubRelations(followed: [ProfileID("friend")])
+            repository: provider
         )
         var loaded = false
         let token = catalog.observe { if $0.phase == .loaded { loaded = true } }
@@ -554,12 +528,12 @@ struct InboxCatalogTests {
     @Test func aReloadKeepsTheCurrentRowsUntilTheNewOnesArrive() async {
         let provider = StubInboxProvider(conversations: [
             conversation("a", peer: "friend"),
-            conversation("b", peer: "friend", isUnread: true),
+            conversation("b", peer: "friend", isUnread: true)
+        ], requests: [
             conversation("r1", peer: "stranger")
         ])
         let catalog = InboxCatalog(
-            repository: provider,
-            relations: StubRelations(followed: [ProfileID("friend")])
+            repository: provider
         )
         catalog.reload()
         await settle()
@@ -587,10 +561,10 @@ struct InboxCatalogTests {
         let catalog = InboxCatalog(
             repository: StubInboxProvider(conversations: [
                 conversation("read", peer: "friend"),
-                conversation("unread", peer: "friend", isUnread: true),
+                conversation("unread", peer: "friend", isUnread: true)
+            ], requests: [
                 conversation("unread-request", peer: "stranger", isUnread: true)
-            ]),
-            relations: StubRelations(followed: [ProfileID("friend")])
+            ])
         )
         var latest: InboxCatalog.Snapshot?
         let token = catalog.observe { latest = $0 }
@@ -620,8 +594,7 @@ struct InboxCatalogTests {
         // The server hasn't caught up: every load still says both are unread.
         await provider.setIgnoresMarkRead(true)
         let catalog = InboxCatalog(
-            repository: provider,
-            relations: StubRelations(followed: [ProfileID("friend")])
+            repository: provider
         )
         var latest: InboxCatalog.Snapshot?
         let token = catalog.observe { latest = $0 }
@@ -656,11 +629,11 @@ struct InboxCatalogTests {
             repository: StubInboxProvider(conversations: [
                 conversation("a", peer: "friend"),
                 conversation("b", peer: "friend"),
-                conversation("unread", peer: "friend", isUnread: true),
+                conversation("unread", peer: "friend", isUnread: true)
+            ], requests: [
                 conversation("r1", peer: "stranger"),
                 conversation("r2", peer: "stranger")
-            ]),
-            relations: StubRelations(followed: [ProfileID("friend")])
+            ])
         )
         var latest: InboxCatalog.Snapshot?
         let token = catalog.observe { latest = $0 }
@@ -708,8 +681,7 @@ struct InboxCatalogTests {
             repository: StubInboxProvider(conversations: [
                 conversation("top", peer: "friend"),
                 conversation("bottom", peer: "friend", isUnread: true)
-            ]),
-            relations: StubRelations(followed: [ProfileID("friend")])
+            ])
         )
         var latest: InboxCatalog.Snapshot?
         let token = catalog.observe { latest = $0 }
@@ -740,8 +712,7 @@ struct InboxCatalogTests {
 
     @Test func aSentMessageInAnUnknownConversationIsIgnored() async {
         let catalog = InboxCatalog(
-            repository: StubInboxProvider(conversations: [conversation("a", peer: "friend")]),
-            relations: StubRelations(followed: [ProfileID("friend")])
+            repository: StubInboxProvider(conversations: [conversation("a", peer: "friend")])
         )
         var latest: InboxCatalog.Snapshot?
         let token = catalog.observe { latest = $0 }
@@ -768,8 +739,7 @@ struct InboxCatalogTests {
         ])
         await provider.setMarkReadGate(open: false) // the write cannot complete
         let catalog = InboxCatalog(
-            repository: provider,
-            relations: StubRelations(followed: [ProfileID("friend")])
+            repository: provider
         )
         var latest: InboxCatalog.Snapshot?
         let token = catalog.observe { latest = $0 }
@@ -795,8 +765,7 @@ struct InboxCatalogTests {
         let provider = StubInboxProvider(conversations: [conversation("u1", peer: "friend", isUnread: true)])
         await provider.setMarkReadFailure(for: ConversationID("u1"))
         let catalog = InboxCatalog(
-            repository: provider,
-            relations: StubRelations(followed: [ProfileID("friend")])
+            repository: provider
         )
         var latest: InboxCatalog.Snapshot?
         let token = catalog.observe { latest = $0 }
@@ -819,8 +788,7 @@ struct InboxCatalogTests {
         let provider = StubInboxProvider(conversations: [conversation("u1", peer: "friend", isUnread: true)])
         await provider.setIgnoresMarkRead(true)
         let catalog = InboxCatalog(
-            repository: provider,
-            relations: StubRelations(followed: [ProfileID("friend")])
+            repository: provider
         )
         var latest: InboxCatalog.Snapshot?
         let token = catalog.observe { latest = $0 }
@@ -840,8 +808,7 @@ struct InboxCatalogTests {
         let provider = StubInboxProvider(conversations: [conversation("u1", peer: "friend", isUnread: true)])
         await provider.setIgnoresMarkRead(true)
         let catalog = InboxCatalog(
-            repository: provider,
-            relations: StubRelations(followed: [ProfileID("friend")])
+            repository: provider
         )
         var emissions = 0
         let token = catalog.observe { _ in emissions += 1 }
@@ -864,12 +831,12 @@ struct InboxCatalogTests {
     /// hand back a different arrangement each load.
     @Test func requestOrderIsIdenticalAcrossReloads() async {
         let shared = Date(timeIntervalSince1970: 500)
-        let provider = StubInboxProvider(conversations: [
+        let provider = StubInboxProvider(conversations: [], requests: [
             conversation("r-c", peer: "stranger-c", activityAt: shared),
             conversation("r-a", peer: "stranger-a", activityAt: shared),
             conversation("r-b", peer: "stranger-b", activityAt: shared)
         ])
-        let catalog = InboxCatalog(repository: provider, relations: StubRelations())
+        let catalog = InboxCatalog(repository: provider)
         var latest: InboxCatalog.Snapshot?
         let token = catalog.observe { latest = $0 }
 
@@ -896,8 +863,7 @@ struct InboxCatalogTests {
         let catalog = InboxCatalog(
             repository: StubInboxProvider(conversations: [
                 conversation("c1", peer: "friend"), conversation("c2", peer: "friend")
-            ]),
-            relations: StubRelations(followed: [ProfileID("friend")])
+            ])
         )
         var latest: InboxCatalog.Snapshot?
         let token = catalog.observe { latest = $0 }
@@ -935,8 +901,9 @@ struct InboxSurfaceViewModelTests {
     /// decision on one surface lands on the other with no refetch.
     @Test func acceptingInRequestsPublishesToTheConversationList() async {
         let catalog = InboxCatalog(
-            repository: StubInboxProvider(conversations: [conversation("request", peer: "stranger")]),
-            relations: StubRelations()
+            repository: StubInboxProvider(conversations: [], requests: [
+                conversation("request", peer: "stranger")
+            ])
         )
         let list = ConversationListViewModel(catalog: catalog)
         let requests = MessageRequestsViewModel(catalog: catalog)
@@ -975,8 +942,7 @@ struct InboxSurfaceViewModelTests {
             conversation("unread", peer: "friend", isUnread: true)
         ])
         let catalog = InboxCatalog(
-            repository: provider,
-            relations: StubRelations(followed: [ProfileID("friend")])
+            repository: provider
         )
         let list = ConversationListViewModel(catalog: catalog)
         var phase: ConversationListViewModel.Phase?
@@ -1003,8 +969,7 @@ struct InboxSurfaceViewModelTests {
             conversation("b", peer: "friend", isUnread: true)
         ])
         let catalog = InboxCatalog(
-            repository: provider,
-            relations: StubRelations(followed: [ProfileID("friend")])
+            repository: provider
         )
         let list = ConversationListViewModel(catalog: catalog)
         var phase: ConversationListViewModel.Phase?
@@ -1030,10 +995,10 @@ struct InboxSurfaceViewModelTests {
     /// fixtures' activity is what makes them read as having arrived since.
     @Test func theRequestsBadgeCountsArrivalsAndHoldsThem() async {
         let catalog = InboxCatalog(
-            repository: StubInboxProvider(conversations: [
-                conversation("r1", peer: "a"), conversation("r2", peer: "b")
-            ]),
-            relations: StubRelations()
+            repository: StubInboxProvider(conversations: [], requests: [
+                conversation("r1", peer: "a"),
+                conversation("r2", peer: "b")
+            ])
         )
         let requests = MessageRequestsViewModel(
             catalog: catalog, now: { Date(timeIntervalSince1970: -1) }
@@ -1063,10 +1028,10 @@ struct InboxSurfaceViewModelTests {
     /// different question with a different answer.
     @Test func theBadgeAndItsSectionSurviveWhileTheTabIsOpen() async {
         let catalog = InboxCatalog(
-            repository: StubInboxProvider(conversations: [
-                conversation("r1", peer: "a"), conversation("r2", peer: "b")
-            ]),
-            relations: StubRelations()
+            repository: StubInboxProvider(conversations: [], requests: [
+                conversation("r1", peer: "a"),
+                conversation("r2", peer: "b")
+            ])
         )
         let clock = MovableClock(Date(timeIntervalSince1970: -1))
         let requests = MessageRequestsViewModel(catalog: catalog, now: { clock.now })
@@ -1089,11 +1054,10 @@ struct InboxSurfaceViewModelTests {
     /// with no count on its avatar — exactly what an All row does.
     @Test func readingARequestClearsItsBoldPreviewAndCount() async {
         let catalog = InboxCatalog(
-            repository: StubInboxProvider(conversations: [
+            repository: StubInboxProvider(conversations: [], requests: [
                 conversation("r1", peer: "a", isUnread: true, unreadCount: 3),
                 conversation("r2", peer: "b", isUnread: true, unreadCount: 2)
-            ]),
-            relations: StubRelations()
+            ])
         )
         let requests = MessageRequestsViewModel(catalog: catalog)
         var phase: MessageRequestsViewModel.Phase?
@@ -1145,8 +1109,9 @@ struct InboxSurfaceViewModelTests {
     @Test func openingARequestRoutesToItsThread() async {
         let router = SpyRouter()
         let catalog = InboxCatalog(
-            repository: StubInboxProvider(conversations: [conversation("r1", peer: "a")]),
-            relations: StubRelations()
+            repository: StubInboxProvider(conversations: [], requests: [
+                conversation("r1", peer: "a")
+            ])
         )
         let requests = MessageRequestsViewModel(catalog: catalog, router: router)
         requests.refresh()
@@ -1331,10 +1296,10 @@ struct InboxListSectionTests {
     /// they cannot disagree — this is the assertion that says so out loud.
     @Test func theFirstSectionHoldsExactlyWhatTheBadgeCounts() async {
         let catalog = InboxCatalog(
-            repository: StubInboxProvider(conversations: [
-                conversation("r1", peer: "a"), conversation("r2", peer: "b")
-            ]),
-            relations: StubRelations()
+            repository: StubInboxProvider(conversations: [], requests: [
+                conversation("r1", peer: "a"),
+                conversation("r2", peer: "b")
+            ])
         )
         let requests = MessageRequestsViewModel(
             catalog: catalog, now: { Date(timeIntervalSince1970: -1) }
@@ -1355,10 +1320,10 @@ struct InboxListSectionTests {
     /// Nothing new means ONE section, not an empty header over the list.
     @Test func anInboxWithNoArrivalsIsASingleSection() async {
         let catalog = InboxCatalog(
-            repository: StubInboxProvider(conversations: [
-                conversation("r1", peer: "a"), conversation("r2", peer: "b")
-            ]),
-            relations: StubRelations()
+            repository: StubInboxProvider(conversations: [], requests: [
+                conversation("r1", peer: "a"),
+                conversation("r2", peer: "b")
+            ])
         )
         // A `now` after the fixtures' activity: they were already there.
         let requests = MessageRequestsViewModel(

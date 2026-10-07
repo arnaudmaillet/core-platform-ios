@@ -91,7 +91,7 @@ public protocol PeerAvatarProviding: Sendable {
     func avatarURLs(for ids: [ProfileID]) async -> [ProfileID: URL]
 }
 
-public actor SocialConnectionsRepository: SuggestionsProviding, PeerRelationProviding, PeerAvatarProviding {
+public actor SocialConnectionsRepository: SuggestionsProviding, PeerAvatarProviding {
     /// How many of the viewer's follows are expanded for friend-of-friend
     /// candidates. Each costs one `ListFollowing`, so the fan-out is bounded
     /// rather than proportional to how social the viewer is.
@@ -130,16 +130,6 @@ public actor SocialConnectionsRepository: SuggestionsProviding, PeerRelationProv
         self.viewer = viewer
         self.pageSize = pageSize
         self.followEvents = followEvents
-    }
-
-    // MARK: - PeerRelationProviding
-
-    /// Answered from the viewer's own follow list rather than one
-    /// `GetRelationStatus` per peer: a single request covers an inbox of any
-    /// size, and the same cached set is what the ranker needs anyway.
-    public func followedPeers(among peers: [ProfileID]) async throws -> Set<ProfileID> {
-        let following = try await viewerFollowing()
-        return Set(peers).intersection(following)
     }
 
     // MARK: - SuggestionsProviding
