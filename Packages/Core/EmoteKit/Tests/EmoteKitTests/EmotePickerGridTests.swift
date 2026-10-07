@@ -239,6 +239,12 @@ struct EmotePickerGridTests {
         defer { tearDown(window) }
         let grid = panel.collectionView
         let tile = try #require(panel.displayedTiles.first)
+        // ⚠️ THE GRID COUNTS AS MOVING for the length of this hand-driven
+        // scroll (#621). Without it the settle watch sees no gesture, ends the
+        // scroll after 250 ms, and the tile plays out and rests on frame 0 —
+        // so on a starved runner that misses frames 1…10 first, the wait
+        // below can never hold. Moving, the tile loops and the window recurs.
+        panel.scrollPlaybackForTesting.gridIsMoving = { _ in true }
 
         panel.scrollViewWillBeginDragging(grid)
         try #require(await settle { (1...frames / 2).contains(tile.player.displayedFrame ?? 0) })

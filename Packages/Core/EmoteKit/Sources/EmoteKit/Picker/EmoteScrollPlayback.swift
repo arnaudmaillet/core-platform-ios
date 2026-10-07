@@ -33,6 +33,13 @@ public final class EmoteScrollPlayback {
     /// While scrolling: ends it when a touch stopped the glide, which tells
     /// the delegate nothing.
     private var settleWatch: Task<Void, Never>?
+    /// Whether the grid is still moving — what the settle watch asks before
+    /// it ends a scroll. A seam: tests drive the delegate calls by hand, with
+    /// no gesture behind them, and a watch ending their "scroll" mid-test made
+    /// a frame they wait for impossible (#621).
+    var gridIsMoving: @MainActor (UIScrollView) -> Bool = { grid in
+        grid.isTracking || grid.isDragging || grid.isDecelerating
+    }
 
     public init(scrollView: UIScrollView, displayedTiles: @escaping @MainActor () -> [EmoteTileView]) {
         self.scrollView = scrollView
@@ -87,7 +94,7 @@ public final class EmoteScrollPlayback {
                     self.setScrolling(false)
                     return
                 }
-                if !grid.isTracking, !grid.isDragging, !grid.isDecelerating {
+                if !self.gridIsMoving(grid) {
                     self.setScrolling(false, finishingLoops: true)
                 }
             }

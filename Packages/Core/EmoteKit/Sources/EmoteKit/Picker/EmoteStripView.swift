@@ -68,6 +68,8 @@ public final class EmoteStripView: UIView {
     private let playback: EmoteScrollPlayback
     /// From a drag's start to the end of its glide.
     var isScrolling: Bool { playback.isScrolling }
+    /// The scroll playback, for tests that drive a scroll by hand (#621).
+    var scrollPlaybackForTesting: EmoteScrollPlayback { playback }
 
     public init(
         engine: EmoteEngine = .shared,

@@ -60,6 +60,8 @@ public final class EmotePickerView: UIInputView {
     private let playback: EmoteScrollPlayback
     /// From a drag's start to the end of its glide.
     var isScrolling: Bool { playback.isScrolling }
+    /// The scroll playback, for tests that drive a scroll by hand (#621).
+    var scrollPlaybackForTesting: EmoteScrollPlayback { playback }
     /// The section bar's glass, FLOATING over the grid: the grid is the
     /// panel's whole height and scrolls under it, the way the app's other
     /// bars float over their content. Glass, never an opaque slab. The
