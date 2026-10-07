@@ -275,7 +275,7 @@ struct ForYouViewModelTests {
         await settle()
         let before = viewModel.discoverPosts.map(\.id.rawValue)
 
-        viewModel.loadNextPageIfNeeded()
+        viewModel.loadNextPageIfNeeded(.discover)
         await settle()
 
         let after = viewModel.discoverPosts.map(\.id.rawValue)
@@ -285,7 +285,7 @@ struct ForYouViewModelTests {
         #expect(after == before + ["m3"])
 
         // The corpus is exhausted; further requests must not hit the network.
-        viewModel.loadNextPageIfNeeded()
+        viewModel.loadNextPageIfNeeded(.discover)
         await settle()
         #expect(provider.pagedLoads == 1)
     }
@@ -312,7 +312,7 @@ struct ForYouViewModelTests {
         await settle()
         let before = viewModel.discoverPosts.map(\.id.rawValue)
 
-        viewModel.loadNextPageIfNeeded()
+        viewModel.loadNextPageIfNeeded(.discover)
         await settle()
 
         let after = viewModel.discoverPosts.map(\.id.rawValue)
@@ -341,9 +341,9 @@ struct ForYouViewModelTests {
         viewModel.onPagingChange = { [weak viewModel] starting in
             guard starting, !reentered else { return }
             reentered = true
-            viewModel?.loadNextPageIfNeeded()
+            viewModel?.loadNextPageIfNeeded(.discover)
         }
-        viewModel.loadNextPageIfNeeded()
+        viewModel.loadNextPageIfNeeded(.discover)
         await settle()
 
         #expect(reentered)
@@ -363,7 +363,7 @@ struct ForYouViewModelTests {
         let (viewModel, _) = makeViewModel(provider)
         viewModel.viewDidLoad()
         await settle()
-        viewModel.loadNextPageIfNeeded()
+        viewModel.loadNextPageIfNeeded(.discover)
         await settle()
 
         viewModel.setSource(.recent)
@@ -378,7 +378,7 @@ struct ForYouViewModelTests {
     @Test func pagingIsIgnoredBeforeTheFirstPageLands() async {
         let provider = StubForYouProvider(first: ForYouPage(posts: mixed, nextPageToken: "p2"))
         let (viewModel, _) = makeViewModel(provider)
-        viewModel.loadNextPageIfNeeded() // nothing loaded yet
+        viewModel.loadNextPageIfNeeded(.discover) // nothing loaded yet
         await settle()
         #expect(provider.pagedLoads == 0)
     }

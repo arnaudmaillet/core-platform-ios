@@ -101,6 +101,9 @@ public final class ForYouViewModel {
     /// Discover decide the chunk at its tail instead of holding the posts
     /// behind it back for a page that is never coming.
     public var hasMorePages: Bool { hasDiscovery ? discoveryToken != nil : nextPageToken != nil }
+    /// Whether the FOLLOWING timeline (the Friends and Following lists) has
+    /// another page (#566).
+    public var hasMoreFollowingPages: Bool { nextPageToken != nil }
 
     public var onSnapshotChange: ((Snapshot) -> Void)?
     /// Fires when a NEXT-PAGE fetch starts and again when it settles.
@@ -110,6 +113,9 @@ public final class ForYouViewModel {
     /// spinner needs the leading edge. Also distinct from the first load, which
     /// the pages already render as skeletons.
     public var onPagingChange: ((Bool) -> Void)?
+    /// The FOLLOWING timeline's page load starting and ending — the Friends
+    /// and Following lists' footer (#566). Discover's is `onPagingChange`.
+    public var onFollowingPagingChange: ((Bool) -> Void)?
     /// Fires when a load settles, however it settled — the view closes out its
     /// refresh control on this rather than inferring it from a snapshot that
     /// may be identical to the last one.
@@ -195,6 +201,9 @@ public final class ForYouViewModel {
     private var nextPageToken: String?
     private var load: Task<Void, Never>?
     private var pageLoad: Task<Void, Never>?
+    /// The following timeline's page in flight, apart from Discover's
+    /// (`pageLoad`): each corpus pages on its own cursor (#566).
+    private var followingPageLoad: Task<Void, Never>?
 
     /// Where the viewer stands with each author — what splits FRIENDS from
     /// FOLLOWING. Nil (a test, a composition without the graph) leaves every
@@ -451,24 +460,49 @@ public final class ForYouViewModel {
         }
     }
 
-    /// Called as the list nears its end. A no-op when a page is already in
-    /// flight, when the corpus is exhausted, or before the first page landed.
-    public func loadNextPageIfNeeded() {
-        if hasDiscovery {
+    /// The two corpora that page on their own cursors (#566).
+    public enum Corpus: Sendable {
+        /// Discover's grid and its "View all": `GetDiscoveryFeed` (the
+        /// following timeline when no discovery is wired).
+        case discover
+        /// The Friends and Following rows and their pushed lists:
+        /// `GetFollowingFeed`, always.
+        case following
+    }
+
+    /// Called as a list nears its end. A no-op when that corpus already has a
+    /// page in flight, is exhausted, or has not landed its first page.
+    ///
+    /// ⚠️ BY CORPUS (#566). One entry point used to page Discover whenever
+    /// discovery was wired — always, in the app — so a pushed Following or
+    /// Friends list scrolled to its end fetched DISCOVER pages and stayed on
+    /// the first twenty following posts forever.
+    public func loadNextPageIfNeeded(_ corpus: Corpus) {
+        switch corpus {
+        case .discover where hasDiscovery:
             loadNextDiscoveryPageIfNeeded()
-            return
+        case .discover:
+            // Without discovery, Discover IS the following timeline.
+            loadNextFollowingPageIfNeeded { [weak self] paging in self?.onPagingChange?(paging) }
+        case .following:
+            loadNextFollowingPageIfNeeded { [weak self] paging in self?.onFollowingPagingChange?(paging) }
         }
-        guard pageLoad == nil, load == nil, corpus != nil, let token = nextPageToken else { return }
+    }
+
+    /// The following timeline's next page; `announce` tells the surfaces
+    /// paging on it that a load starts (true) and ends (false).
+    private func loadNextFollowingPageIfNeeded(announce: @escaping (Bool) -> Void) {
+        guard followingPageLoad == nil, load == nil, corpus != nil, let token = nextPageToken else { return }
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
             print("[foryou-page] fetch after=\(token)")
         }
         #endif
-        pageLoad = Task { [weak self] in
+        followingPageLoad = Task { [weak self] in
             guard let self else { return }
             defer {
-                self.pageLoad = nil
-                self.onPagingChange?(false)
+                self.followingPageLoad = nil
+                announce(false)
             }
             guard let page = try? await repository.page(after: token), !Task.isCancelled else { return }
             // The rows are split by the graph from the page's first frame.
@@ -503,13 +537,13 @@ public final class ForYouViewModel {
             publish()
             onLoadSettled?()
         }
-        // Announced only past the guard, and only AFTER `pageLoad` is assigned.
+        // Announced only past the guard, and only AFTER the task is assigned.
         // Showing the footer runs a layout pass, a layout pass can fire
         // `onNearEnd`, and a re-entrant call arriving before the assignment
-        // passed the `pageLoad == nil` guard and started a SECOND fetch with
-        // the same token — the whole second page appended twice, and the next
-        // tile tap trapping on the duplicate id.
-        onPagingChange?(true)
+        // passed the in-flight guard and started a SECOND fetch with the same
+        // token — the whole second page appended twice, and the next tile tap
+        // trapping on the duplicate id.
+        announce(true)
     }
 
     /// Discover's next page: appended in the server's order, de-duplicated
@@ -550,6 +584,13 @@ public final class ForYouViewModel {
                 onPagingChange?(false)
             }
             pageLoad = nil
+            if followingPageLoad != nil {
+                followingPageLoad?.cancel()
+                // Same as above: a cancelled task's `defer` does not run.
+                onFollowingPagingChange?(false)
+                onPagingChange?(false)
+            }
+            followingPageLoad = nil
             corpus = nil
             discovery = nil
             discoveryToken = nil

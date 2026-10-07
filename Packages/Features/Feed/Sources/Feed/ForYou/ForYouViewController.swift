@@ -358,7 +358,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             self?.openFeed(at: index, showingComments: true)
         }
         page.onWarmRequested = { [weak self] posts in self?.warmVisible(posts) }
-        page.onNearEnd = { [weak self] in self?.viewModel.loadNextPageIfNeeded() }
+        page.onNearEnd = { [weak self] in self?.viewModel.loadNextPageIfNeeded(.discover) }
         page.onRefresh = { [weak self] in self?.viewModel.refresh() }
         // An ordinary push onto whatever stack this screen is on — the app's
         // one profile destination, reached the way every other author tap
@@ -398,9 +398,14 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             self?.followingList?.endRefreshing()
             self?.friendsList?.endRefreshing()
         }
+        // Each surface's footer follows ITS corpus (#566): Discover's grid and
+        // gallery page Discover; the Friends and Following lists the following
+        // timeline.
         viewModel.onPagingChange = { [weak self] paging in
             self?.page.setPaging(paging)
             self?.discoverGallery?.setPaging(paging)
+        }
+        viewModel.onFollowingPagingChange = { [weak self] paging in
             self?.followingList?.setPaging(paging)
             self?.friendsList?.setPaging(paging)
         }
@@ -1128,7 +1133,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             staking: staking,
             openPost: openPostHero
         )
-        gallery.onNearEnd = { [weak self] in self?.viewModel.loadNextPageIfNeeded() }
+        gallery.onNearEnd = { [weak self] in self?.viewModel.loadNextPageIfNeeded(.discover) }
         gallery.onRefresh = { [weak self] in self?.viewModel.refresh() }
         // What is loaded NOW, so the push shows the mosaic rather than a
         // skeleton waiting for the next publish.
@@ -2225,7 +2230,8 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             kind: kind, imagePipeline: imagePipeline, videoPlayback: videoPlayback,
             staking: staking, header: makePushedHeader(), openPost: openPostHero
         )
-        list.onNearEnd = { [weak self] in self?.viewModel.loadNextPageIfNeeded() }
+        // The FOLLOWING timeline's next page, never Discover's (#566).
+        list.onNearEnd = { [weak self] in self?.viewModel.loadNextPageIfNeeded(.following) }
         list.onRefresh = { [weak self] in self?.viewModel.refresh() }
         list.onAuthorTapped = { [weak self] post in self?.openAuthor(of: post) }
         list.onWarmRequested = { [weak self] posts in self?.warmVisible(posts) }

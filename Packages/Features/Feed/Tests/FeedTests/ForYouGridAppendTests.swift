@@ -167,7 +167,7 @@ struct ForYouCorpusResetTests {
         await settleReset()
         var resets = 0
         model.onCorpusReset = { resets += 1 }
-        model.loadNextPageIfNeeded()
+        model.loadNextPageIfNeeded(.discover)
         await settleReset()
         #expect(resets == 0)
     }
