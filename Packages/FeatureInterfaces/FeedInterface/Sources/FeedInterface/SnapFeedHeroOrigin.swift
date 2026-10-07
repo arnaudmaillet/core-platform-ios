@@ -239,6 +239,14 @@ public struct TextRevealOrigin {
 /// different moment — the frame at departure AND again at landing, the
 /// concealment twice per flight — and a caller should not have to own an object
 /// to answer four of them.
+/// The posts that follow `after` in a source's own order — its next page when
+/// it has to fetch one — for a full-screen feed that runs on past the window it
+/// was opened on (#638).
+///
+/// `nil`: the source has no more, and the feed ends. An EMPTY list: nothing
+/// right now (a failed page); the feed asks again on its next approach.
+public typealias SnapFeedContinuation = @MainActor @Sendable (_ after: PostID) async -> [PostID]?
+
 @MainActor
 public struct SnapFeedHeroOrigin {
     /// The post itself. The card is built from the same model the origin drew
@@ -404,6 +412,10 @@ public struct SnapFeedHeroOrigin {
     /// the source follows it and the close lands on the page the viewer is
     /// looking at. `nil`: the source does not follow.
     public let followMediaPage: ((PostID, Int) -> Void)?
+    /// How the feed goes on past `stream` — the source's next posts, in its
+    /// order (#638). `nil`: the window is the whole set (a place, a sound, a
+    /// claim), and the feed ends where it does.
+    public let continuation: SnapFeedContinuation?
 
     public init(
         post: GalleryPost,
@@ -428,7 +440,8 @@ public struct SnapFeedHeroOrigin {
         viewerStake: @escaping () -> Int = { 0 },
         willStageDismissal: @escaping () -> Void = {},
         mediaPage: Int? = nil,
-        followMediaPage: ((PostID, Int) -> Void)? = nil
+        followMediaPage: ((PostID, Int) -> Void)? = nil,
+        continuation: SnapFeedContinuation? = nil
     ) {
         self.post = post
         self.stream = stream
@@ -453,5 +466,6 @@ public struct SnapFeedHeroOrigin {
         self.willStageDismissal = willStageDismissal
         self.mediaPage = mediaPage
         self.followMediaPage = followMediaPage
+        self.continuation = continuation
     }
 }

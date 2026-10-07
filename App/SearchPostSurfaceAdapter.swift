@@ -55,6 +55,8 @@ struct SearchPostSurfaceAdapter: SearchPostSurfaceProviding {
 
         func setPaging(_ paging: Bool) { surface.setPaging(paging) }
 
+        func setHasMore(_ hasMore: Bool) { surface.setHasMore(hasMore) }
+
         func show(_ state: SearchPostSurfaceState) {
             let translated: PostSetSurfaceState = switch state {
             case .loading: .loading
