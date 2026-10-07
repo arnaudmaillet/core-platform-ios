@@ -193,6 +193,37 @@ public final class VideoRenderView: UIView {
         layoutPoster()
     }
 
+    /// Applies `change` to this surface's geometry and lays the picture out
+    /// NOW, with CoreAnimation's implicit actions off.
+    ///
+    /// ⚠️ FOR A SURFACE COMING BACK FROM A FLIGHT. A flight poses the surface
+    /// at its own size (the clip's native aspect covering the page, by
+    /// transform); the page then puts it back at the page's bounds. The
+    /// backing layer follows without animating, but the sample-buffer layer
+    /// re-lays its OWN content sublayer out — and ANIMATES it there.
+    ///
+    /// ⚠️ EXPLICIT ANIMATIONS, NOT IMPLICIT ACTIONS, so disabling actions does
+    /// not stop them. Probed (`-landing-surface-probe`): right after the
+    /// relayout, `AVSampleBufferDisplayLayerContentLayer` carries
+    /// `sublayerTransform`, `position` and `bounds` animations that AVFoundation
+    /// added itself, running ~0.3 s from the flight's rect to the page's.
+    /// Filmed on a framed (landscape) post: at the hand-over the video appeared
+    /// at its flight size pinned to the top and slid into the centre. Laid out
+    /// now and stripped of those animations, it lands where it belongs in the
+    /// same frame.
+    public func settleGeometry(_ change: () -> Void) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        change()
+        layoutIfNeeded()
+        layer.layoutIfNeeded()
+        layer.sublayers?.forEach { sublayer in
+            sublayer.layoutIfNeeded()
+            sublayer.removeAllAnimations()
+        }
+        CATransaction.commit()
+    }
+
     /// Places the poster — see `posterAspect`.
     private func layoutPoster() {
         if videoGravity == .resizeAspect, let aspect = posterAspect,
