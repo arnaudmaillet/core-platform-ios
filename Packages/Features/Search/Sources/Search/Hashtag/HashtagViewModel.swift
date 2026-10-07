@@ -2,9 +2,9 @@ import CoreModels
 import DesignSystem
 import Foundation
 
-/// The posts carrying one `#tag` (#524): its most liked with a picture, and
-/// all of them newest first, and how many there are — each tab page by page
-/// as the viewer scrolls (#579).
+/// The posts carrying one `#tag` (#524), laid out like For You (#629): its
+/// top posts as the page's list, its newest as a row above it, and how many
+/// there are — each page by page as the viewer scrolls (#579).
 ///
 /// ⚠️ FROM `search.v1`, until a posts-by-tag endpoint exists: a `#tag` query
 /// over posts, sorted by POPULARITY for Top and RECENCY for Recent. The
@@ -13,13 +13,29 @@ import Foundation
 @MainActor
 final class HashtagViewModel {
     enum Tab: CaseIterable {
-        /// The gallery, so posts WITH a picture — a text post has no tile.
+        /// The page's list, ranked: For You's "For you" slot. Every post — a
+        /// text post is a card, and the list tiles media into its mosaic
+        /// slices itself.
         case top
-        /// Every post, cards, newest first.
+        /// Newest first: the row above the list, and the whole list its title
+        /// opens — For You's "Following" slot.
         case recent
 
         var sort: SearchSortOrder { self == .top ? .popularity : .recency }
     }
+
+    /// What the row and the list are called.
+    ///
+    /// ⚠️ "TOP", NOT "TRENDING", until the backend ranks by trend
+    /// (core-platform-backend#830): today the sort is search POPULARITY,
+    /// relevance on the fleet and all-time engagement once wired. Decided by
+    /// the owner, 2026-10-07. "Recent", not "New": "New" in this app means
+    /// unseen since the last visit.
+    static let rowTitle = "Recent"
+    static let listTitle = "Top"
+    /// How many of the newest posts the row shows — For You's Following row's
+    /// number (`ForYouViewModel.railLimit`).
+    static let rowLimit = 20
 
     /// The tag, lowercased and without its `#`.
     let tag: String
@@ -32,10 +48,6 @@ final class HashtagViewModel {
 
     /// Six rows of a three-column gallery.
     static let pageSize: Int32 = 18
-    /// How many pages Top reads in a row to find posts with a picture before
-    /// it waits for the viewer again: a page of text posts adds no tile, so
-    /// the end the viewer reached would not move.
-    static let maxEmptyHops = 3
 
     private let repository: any SearchProviding
 
@@ -63,6 +75,14 @@ final class HashtagViewModel {
     }
 
     func state(of tab: Tab) -> SearchPostSurfaceState { tab == .top ? top : recent }
+
+    /// The row above the list: the newest posts, at most `rowLimit` — or
+    /// nothing while Recent is still loading, empty or failed (the list says
+    /// those for the page).
+    var recentRow: SearchPostSurfaceState {
+        guard case .posts(let ids) = recent else { return .empty(query: title) }
+        return .posts(Array(ids.prefix(Self.rowLimit)))
+    }
 
     /// Whether `tab` is fetching its next page — the footer spinner.
     /// Whether `tab` has a page past what it shows (#638).
@@ -97,56 +117,43 @@ final class HashtagViewModel {
     }
 
     private func loadPage(_ tab: Tab, first: Bool) async {
-        var hops = 0
-        while true {
-            var state = paging[tab] ?? Paging()
-            guard !state.isLoading, first ? state.ids.isEmpty : state.nextPageToken != nil else { return }
-            state.isLoading = true
-            paging[tab] = state
-            if !first { onChange?() }
-            let page: PostSearchPage
-            do {
-                page = try await repository.searchPostsPage(
-                    matching: title, sort: tab.sort, limit: Self.pageSize,
-                    pageToken: first && hops == 0 ? nil : state.nextPageToken
-                )
-            } catch {
-                paging[tab]?.isLoading = false
-                if paging[tab]?.ids.isEmpty ?? true {
-                    set(tab, .failed(message: "Couldn\u{2019}t load \(title)."))
-                }
-                onChange?()
-                return
-            }
-            var added = page.hits
-            if tab == .top { added = added.filter(\.hasMedia) }
-            let known = Set(state.ids)
-            state.ids += added.map(\.id).filter { !known.contains($0) }
-            state.nextPageToken = page.nextPageToken
-            state.isLoading = false
-            paging[tab] = state
-            #if DEBUG
-            // What QA reads with `log show`: one line per page landed.
-            NSLog("[hashtag] %@ %@ +%d → %d, next=%@", title, "\(tab)", added.count, state.ids.count,
-                  page.nextPageToken ?? "none")
-            #endif
-            if tab == .recent, first, hops == 0, page.nextPageToken == nil {
-                // A first page with no next one is every post there is.
-                postCount = page.hits.count
-            }
-            // A page that added nothing to Top (all text) moves no end the
-            // viewer could reach: read on, a few pages at most.
-            let readsOn = tab == .top && added.isEmpty && page.nextPageToken != nil
-                && hops + 1 < Self.maxEmptyHops
-            if !state.ids.isEmpty {
-                set(tab, .posts(state.ids))
-            } else if !readsOn {
-                set(tab, .empty(query: title))
+        var state = paging[tab] ?? Paging()
+        guard !state.isLoading, first ? state.ids.isEmpty : state.nextPageToken != nil else { return }
+        state.isLoading = true
+        paging[tab] = state
+        if !first { onChange?() }
+        let page: PostSearchPage
+        do {
+            page = try await repository.searchPostsPage(
+                matching: title, sort: tab.sort, limit: Self.pageSize,
+                pageToken: first ? nil : state.nextPageToken
+            )
+        } catch {
+            paging[tab]?.isLoading = false
+            if paging[tab]?.ids.isEmpty ?? true {
+                set(tab, .failed(message: "Couldn\u{2019}t load \(title)."))
             }
             onChange?()
-            hops += 1
-            guard readsOn else { return }
+            return
         }
+        // Every post: the list draws a text post as a card (#629), so there
+        // is no page to skip for want of a picture.
+        let known = Set(state.ids)
+        state.ids += page.hits.map(\.id).filter { !known.contains($0) }
+        state.nextPageToken = page.nextPageToken
+        state.isLoading = false
+        paging[tab] = state
+        #if DEBUG
+        // What QA reads with `log show`: one line per page landed.
+        NSLog("[hashtag] %@ %@ +%d → %d, next=%@", title, "\(tab)", page.hits.count, state.ids.count,
+              page.nextPageToken ?? "none")
+        #endif
+        if tab == .recent, first, page.nextPageToken == nil {
+            // A first page with no next one is every post there is.
+            postCount = page.hits.count
+        }
+        set(tab, state.ids.isEmpty ? .empty(query: title) : .posts(state.ids))
+        onChange?()
     }
 
     private func set(_ tab: Tab, _ state: SearchPostSurfaceState) {

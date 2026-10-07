@@ -2,37 +2,37 @@ import CoreNavigation
 import DesignSystem
 import UIKit
 
-/// One `#tag`'s posts (#524): Top, a gallery of its most liked posts with a
-/// picture, and Recent, every post as cards, newest first.
+/// One `#tag`'s posts (#524), on one page laid out like For You (#629):
 ///
 ///     navigation bar   [back]   #travel / 12 posts
-///     bottom band      [Top | Recent]
+///     Recent ›         a row of its newest posts, as cards
+///     Top              its ranked posts: cards with slices of the media
+///                      mosaic between them, "View all" on each slice
 ///
 /// The tag is the title and its count the subtitle — the bar's own two
 /// lines, so the header is UIKit's and rides a push like any other.
 ///
-/// The two pages and the band are the search results screen's, minus what a
-/// tag has no use for (a query field, filters, people): the same opaque
-/// `SearchPostSurface`s filled from Feed — so a tile opens the post the way
-/// For You does — and the same `SelectorAccessory` at the foot, for the
-/// reasons `SearchResultsViewController` documents (the strip in the band,
-/// the strip winning the touch it is under, the stack's pans suspended while
-/// it does).
+/// It is For You's page, not a copy of it: one opaque `SearchPostSurface` in
+/// the `.discover` style, filled from Feed, so a card opens the post the way
+/// For You's do, "View all" pushes For You's media gallery, and the row is
+/// For You's Following row. "Recent ›" pushes the whole newest-first list
+/// (`HashtagRecentViewController`), as "Following ›" does there.
+///
+/// It replaced a Top (media gallery) / Recent (cards) pager (#557), built on
+/// the two post-set styles that existed before For You became one list.
 @MainActor
 final class HashtagViewController: UIViewController {
     private let viewModel: HashtagViewModel
-    private let tabBar = PagedTabBar(titles: ["Top", "Recent"], style: .navigationTitle)
-    private var pager: HorizontalPagerView!
-    let topPage: any SearchPostSurface
-    let recentPage: any SearchPostSurface
-    private(set) var selectorAccessory: SelectorAccessory?
+    private let postSurfaces: (any SearchPostSurfaceProviding)?
+    let page: any SearchPostSurface
     private var hasLoaded = false
+    /// The whole Recent list while it is pushed, so later pages reach it.
+    private weak var recentScreen: HashtagRecentViewController?
 
     init(viewModel: HashtagViewModel, postSurfaces: (any SearchPostSurfaceProviding)?) {
         self.viewModel = viewModel
-        topPage = postSurfaces?.makePostSurface(style: .gallery)
-            ?? SearchPendingSurfaceViewController(kind: .media)
-        recentPage = postSurfaces?.makePostSurface(style: .cards)
+        self.postSurfaces = postSurfaces
+        page = postSurfaces?.makePostSurface(style: .discover)
             ?? SearchPendingSurfaceViewController(kind: .posts)
         super.init(nibName: nil, bundle: nil)
         // In the initialiser, as on the results screen: the navigation
@@ -48,21 +48,13 @@ final class HashtagViewController: UIViewController {
         view.backgroundColor = .systemBackground
         navigationItem.title = viewModel.title
         navigationItem.largeTitleDisplayMode = .never
-        configurePages()
-        selectorAccessory = SelectorAccessory(strip: tabBar)
-        selectorTouchProbe.attach(to: tabBar)
+        configurePage()
         viewModel.onChange = { [weak self] in self?.render() }
         render()
     }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        installBottomChromeWhenAppearing(
-            handsOver: tabBarController?.bottomAccessory != nil
-        ) { [weak self] in
-            guard let self else { return }
-            selectorAccessory?.install(into: tabBarController, alongside: transitionCoordinator)
-        }
         guard !hasLoaded else { return }
         hasLoaded = true
         Task { [weak self] in await self?.viewModel.load() }
@@ -70,110 +62,113 @@ final class HashtagViewController: UIViewController {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        selectorAccessory?.install(into: tabBarController)
-        updatePlayback()
+        page.setPlaybackActive(true)
     }
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        selectorAccessory?.remove(from: tabBarController, alongside: transitionCoordinator)
-        setPageScrollEnabled(true)
-        topPage.setPlaybackActive(false)
-        recentPage.setPlaybackActive(false)
+        page.setPlaybackActive(false)
     }
 
-    // MARK: - Pages
-
-    private func configurePages() {
-        tabBar.addAction(UIAction { [weak self] _ in
-            guard let self else { return }
-            pager.setActivePage(tabBar.selectedIndex, animated: true)
-        }, for: .valueChanged)
-        for page in [topPage.viewController, recentPage.viewController] {
-            addChild(page)
-            page.didMove(toParent: self)
-        }
-        // Each tab asks for its next page as the viewer nears its end (#579).
-        topPage.onNearEnd = { [weak self] in
+    private func configurePage() {
+        let child = page.viewController
+        addChild(child)
+        child.view.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(child.view)
+        // To the top of the VIEW, under the translucent bar: the page's own
+        // insets keep its first row clear.
+        NSLayoutConstraint.activate([
+            child.view.topAnchor.constraint(equalTo: view.topAnchor),
+            child.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            child.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            child.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+        child.didMove(toParent: self)
+        page.setSectionTitles(row: HashtagViewModel.rowTitle, list: HashtagViewModel.listTitle)
+        // The list asks for its next page as the viewer nears its end (#579).
+        page.onNearEnd = { [weak self] in
             guard let self else { return }
             Task { await self.viewModel.loadMore(.top) }
         }
-        recentPage.onNearEnd = { [weak self] in
-            guard let self else { return }
-            Task { await self.viewModel.loadMore(.recent) }
-        }
-        pager = HorizontalPagerView(
-            pages: [topPage.viewController.view, recentPage.viewController.view],
-            initialIndex: 0
-        )
-        pager.translatesAutoresizingMaskIntoConstraints = false
-        pager.onActiveScrollViewChanged = { [weak self] scroller in
-            self?.setContentScrollView(scroller, for: .bottom)
-        }
-        pager.onProgress = { [weak self] progress in self?.tabBar.setProgress(progress) }
-        tabBar.onScrub = { [weak self] progress in self?.pager.scrub(to: progress) }
-        tabBar.onScrubEnd = { [weak self] velocity in self?.pager.settleAfterScrub(velocityInPages: velocity) }
-        pager.onSettled = { [weak self] index in
-            self?.tabBar.select(index)
-            self?.updatePlayback()
-        }
-        view.addSubview(pager)
-        // To the top of the VIEW, under the translucent bar, as on the results
-        // screen: the pages' own insets keep their first row clear.
-        NSLayoutConstraint.activate([
-            pager.topAnchor.constraint(equalTo: view.topAnchor),
-            pager.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            pager.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            pager.bottomAnchor.constraint(equalTo: view.bottomAnchor)
-        ])
+        page.onLeadRowTitleTapped = { [weak self] in self?.pushRecent() }
     }
 
     private func render() {
         navigationItem.subtitle = viewModel.countText
-        topPage.show(viewModel.top)
-        recentPage.show(viewModel.recent)
-        topPage.setPaging(viewModel.isLoadingMore(.top))
-        recentPage.setPaging(viewModel.isLoadingMore(.recent))
-        topPage.setHasMore(viewModel.hasMore(.top))
-        recentPage.setHasMore(viewModel.hasMore(.recent))
+        page.show(viewModel.top)
+        page.showLeadRow(viewModel.recentRow)
+        page.setPaging(viewModel.isLoadingMore(.top))
+        page.setHasMore(viewModel.hasMore(.top))
+        recentScreen?.render()
     }
 
-    /// The page in front plays, and only while this screen is up.
-    private func updatePlayback() {
-        let active = isViewLoaded && view.window != nil
-        topPage.setPlaybackActive(active && tabBar.selectedIndex == 0)
-        recentPage.setPlaybackActive(active && tabBar.selectedIndex == 1)
+    /// "Recent ›": every post carrying the tag, newest first.
+    private func pushRecent() {
+        guard let navigationController, navigationController.topViewController === self,
+              navigationController.transitionCoordinator == nil else { return }
+        let screen = HashtagRecentViewController(viewModel: viewModel, postSurfaces: postSurfaces)
+        recentScreen = screen
+        navigationController.pushViewController(screen, animated: true)
+    }
+}
+
+/// A tag's whole Recent list, newest first — what "Recent ›" opens on the
+/// tag's page (#629), as "Following ›" opens For You's whole Following list.
+/// Cards, page by page, on the same view model as the page under it.
+@MainActor
+final class HashtagRecentViewController: UIViewController {
+    private let viewModel: HashtagViewModel
+    let list: any SearchPostSurface
+
+    init(viewModel: HashtagViewModel, postSurfaces: (any SearchPostSurfaceProviding)?) {
+        self.viewModel = viewModel
+        list = postSurfaces?.makePostSurface(style: .cards)
+            ?? SearchPendingSurfaceViewController(kind: .posts)
+        super.init(nibName: nil, bundle: nil)
+        hidesBottomBarWhenPushed = true
     }
 
-    // MARK: - The strip wins the touch it is under
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    private lazy var selectorTouchProbe = SelectorTouchProbe { [weak self] isTouching in
-        self?.setPageScrollEnabled(!isTouching)
-    }
-
-    private var isPageScrollEnabled = true
-    private var suspendedPans: [(UIGestureRecognizer, Bool)] = []
-
-    /// The pages' pans and the stack's back swipes stand down while a finger
-    /// is on the selector — `SearchResultsViewController.setPageScrollEnabled`
-    /// and `setPopGestureEnabled` say why it is the pans and not
-    /// `isScrollEnabled`, and why every pan on the stack's view.
-    private func setPageScrollEnabled(_ isEnabled: Bool) {
-        guard isEnabled != isPageScrollEnabled else { return }
-        isPageScrollEnabled = isEnabled
-        func walk(_ view: UIView) {
-            (view as? UIScrollView)?.panGestureRecognizer.isEnabled = isEnabled
-            view.subviews.forEach(walk)
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .systemBackground
+        navigationItem.title = HashtagViewModel.rowTitle
+        navigationItem.subtitle = viewModel.title
+        navigationItem.largeTitleDisplayMode = .never
+        let child = list.viewController
+        addChild(child)
+        child.view.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(child.view)
+        NSLayoutConstraint.activate([
+            child.view.topAnchor.constraint(equalTo: view.topAnchor),
+            child.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            child.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            child.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+        child.didMove(toParent: self)
+        list.onNearEnd = { [weak self] in
+            guard let self else { return }
+            Task { await self.viewModel.loadMore(.recent) }
         }
-        walk(pager)
-        if isEnabled {
-            for (recogniser, wasEnabled) in suspendedPans { recogniser.isEnabled = wasEnabled }
-            suspendedPans = []
-        } else if navigationController?.topViewController === self, suspendedPans.isEmpty,
-                  let host = navigationController?.view {
-            let pans = (host.gestureRecognizers ?? []).filter { $0 is UIPanGestureRecognizer }
-            suspendedPans = pans.map { ($0, $0.isEnabled) }
-            for recogniser in pans { recogniser.isEnabled = false }
-        }
+        render()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        list.setPlaybackActive(true)
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        list.setPlaybackActive(false)
+    }
+
+    func render() {
+        guard isViewLoaded else { return }
+        list.show(viewModel.recent)
+        list.setPaging(viewModel.isLoadingMore(.recent))
+        list.setHasMore(viewModel.hasMore(.recent))
     }
 }

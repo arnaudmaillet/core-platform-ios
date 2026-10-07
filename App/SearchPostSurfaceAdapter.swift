@@ -29,9 +29,16 @@ struct SearchPostSurfaceAdapter: SearchPostSurfaceProviding {
     }
 
     func makePostSurface(style: SearchPostSurfaceStyle) -> any SearchPostSurface {
-        SurfaceBridge(
-            surface: feed.makePostSetSurface(style: style == .gallery ? .gallery : .cards)
-        )
+        SurfaceBridge(surface: feed.makePostSetSurface(style: Self.feedStyle(for: style)))
+    }
+
+    /// Search's name for each shape, in Feed's vocabulary.
+    static func feedStyle(for style: SearchPostSurfaceStyle) -> PostSetSurfaceStyle {
+        switch style {
+        case .cards: .cards
+        case .gallery: .gallery
+        case .discover: .discover
+        }
     }
 
     /// One object wearing both protocols, so neither package has to know the
@@ -57,8 +64,19 @@ struct SearchPostSurfaceAdapter: SearchPostSurfaceProviding {
 
         func setHasMore(_ hasMore: Bool) { surface.setHasMore(hasMore) }
 
-        func show(_ state: SearchPostSurfaceState) {
-            let translated: PostSetSurfaceState = switch state {
+        func showLeadRow(_ state: SearchPostSurfaceState) { surface.showLeadRow(Self.translate(state)) }
+
+        func setSectionTitles(row: String, list: String) { surface.setSectionTitles(row: row, list: list) }
+
+        var onLeadRowTitleTapped: (() -> Void)? {
+            get { surface.onLeadRowTitleTapped }
+            set { surface.onLeadRowTitleTapped = newValue }
+        }
+
+        func show(_ state: SearchPostSurfaceState) { surface.show(Self.translate(state)) }
+
+        private static func translate(_ state: SearchPostSurfaceState) -> PostSetSurfaceState {
+            switch state {
             case .loading: .loading
             case .posts(let ids): .posts(ids)
             // ⚠️ The people search's sentence is dropped on purpose. An empty
@@ -68,7 +86,6 @@ struct SearchPostSurfaceAdapter: SearchPostSurfaceProviding {
             case .empty: .empty(message: "")
             case .failed(let message): .failed(message: message)
             }
-            surface.show(translated)
         }
     }
 }
