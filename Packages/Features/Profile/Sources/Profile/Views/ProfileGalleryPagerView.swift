@@ -68,6 +68,9 @@ final class ProfileGalleryPagerView: UIView {
     /// The active page bounced past its top and let go — the profile's
     /// pull-to-refresh.
     var onPullToRefresh: (() -> Void)?
+    /// The page on screen neared its end — only the format pages, whose
+    /// corpora page (#634). Saved and Liked are lists the client already holds.
+    var onNearEnd: (() -> Void)?
     /// A drag on the active page ended, with its overscroll distance.
     var onPullReleased: ((CGFloat) -> Void)?
     /// A row's author was tapped, on whichever page is showing.
@@ -159,6 +162,12 @@ final class ProfileGalleryPagerView: UIView {
                 onVerticalScroll?(offset)
             }
             page.onPullToRefresh = { [weak self] in self?.onPullToRefresh?() }
+            if case .format = page.tab {
+                page.onNearEnd = { [weak self] in
+                    guard let self, page === pages[activeIndex] else { return }
+                    onNearEnd?()
+                }
+            }
             page.onAuthorTapped = { [weak self] post in self?.onAuthorTapped?(post) }
             page.authorMenuActions = { [weak self] context in
                 self?.authorMenuActions?(context) ?? []
