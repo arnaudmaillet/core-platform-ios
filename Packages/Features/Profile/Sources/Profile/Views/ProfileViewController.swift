@@ -3133,7 +3133,10 @@ extension ProfileViewController {
                         #endif
                     }
                 }
-            )
+            ),
+            // On past the tiles loaded at the tap into the gallery's next
+            // pages, under the tab and source the viewer opened it from (#638).
+            continuation: { [weak self] after in await self?.viewModel.galleryPostIDs(after: after) }
         )
         feedHero(window.map(\.id), self, origin)
     }
