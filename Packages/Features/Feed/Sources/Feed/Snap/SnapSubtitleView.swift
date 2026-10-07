@@ -89,6 +89,16 @@ final class SnapSubtitleView: UIView {
     /// One persistent pill: hard cuts swap text on the visible label, so
     /// there is nothing to double-buffer.
     private let label = SubtitlePillLabel()
+    /// #560 (`CommentBlur`): the pill reads on a blur instead of its black
+    /// fill. Set before the first cue; tests set it per view.
+    var usesBlur = CommentBlur.isEnabled {
+        didSet { label.usesClearFill = usesBlur }
+    }
+    /// The blur behind the pill, made on the first cue. A SIBLING under the
+    /// label, never inside it: the cue fade animates the label's opacity, and
+    /// an effect view under a faded ancestor stops rendering. The blur follows
+    /// the fade on its own strength instead.
+    private var pillBlur: CommentBlurView?
     /// The author avatar leading the cue — a compact round image at the
     /// zone's leading edge, pinned (via its wrapper) to the ZONE'S fixed
     /// center so it never moves as the cue grows from one line to two; the
@@ -339,6 +349,7 @@ final class SnapSubtitleView: UIView {
     private func stopCycle() {
         generation += 1
         isCycling = false
+        pillBlur?.setStrength(0)
         avatarTask?.cancel()
         avatarTask = nil
         label.layer.removeAllAnimations()
@@ -376,6 +387,17 @@ final class SnapSubtitleView: UIView {
         // exposes that model value in between.
         label.layer.opacity = 0
         label.layer.add(Self.segmentAnimation(fadingIn: fadingIn), forKey: "subtitle-cue")
+        if usesBlur {
+            // The blur rises with the pill's own envelope — lead-in then
+            // ramp on an entrance, at once on an instant one — and holds
+            // through every hard cut, like the label's filled segment.
+            let blur = blurBehindPill()
+            let target = CommentBlur.pillStrength(fill: SubtitlePillLabel.fillOpacity)
+            if blur.strength != target {
+                blur.tween(to: target, duration: fadingIn ? Self.fadeDuration : 0,
+                           delay: fadingIn ? Self.leadInDelay : 0)
+            }
+        }
         // The avatar rises ONCE, alongside the first cue and with the same
         // entrance kind, then its filled animation clamps it visible for the
         // page's whole visible life. Handoffs swap its image but never touch
@@ -396,6 +418,29 @@ final class SnapSubtitleView: UIView {
         }
         CATransaction.commit()
     }
+
+    private func blurBehindPill() -> CommentBlurView {
+        if let pillBlur { return pillBlur }
+        let blur = CommentBlurView(style: .systemMaterialDark)
+        blur.accessibilityIdentifier = "subtitle-pill-blur"
+        blur.clipsToBounds = true
+        blur.layer.cornerCurve = .continuous
+        blur.translatesAutoresizingMaskIntoConstraints = false
+        insertSubview(blur, belowSubview: label)
+        NSLayoutConstraint.activate([
+            blur.leadingAnchor.constraint(equalTo: label.leadingAnchor),
+            blur.trailingAnchor.constraint(equalTo: label.trailingAnchor),
+            blur.topAnchor.constraint(equalTo: label.topAnchor),
+            blur.bottomAnchor.constraint(equalTo: label.bottomAnchor),
+        ])
+        label.onCornerRadiusChange = { [weak blur] radius in blur?.layer.cornerRadius = radius }
+        blur.layer.cornerRadius = label.layer.cornerRadius
+        pillBlur = blur
+        return blur
+    }
+
+    /// The blur's strength behind the pill (0…1); 0 without the flag.
+    var pillBlurStrength: CGFloat { pillBlur?.strength ?? 0 }
 
     /// Swaps the avatar to `url`'s author. Clears to the placeholder first so
     /// a handoff never shows the previous author under the new cue, then
@@ -521,6 +566,14 @@ final class SubtitlePillLabel: EmoteLabel {
         fillOpacity = CGFloat(store.preferences.subtitleBackgroundOpacity)
     }
 
+    /// #560: a blur behind the pill (`SnapSubtitleView.usesBlur`) replaces
+    /// the black fill.
+    var usesClearFill = false {
+        didSet { applyFill() }
+    }
+    /// Told whenever the corner changes, so a blur behind keeps the shape.
+    var onCornerRadiusChange: ((CGFloat) -> Void)?
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         applyFill()
@@ -541,7 +594,9 @@ final class SubtitlePillLabel: EmoteLabel {
     }
 
     private func applyFill() {
-        layer.backgroundColor = UIColor.black.withAlphaComponent(Self.fillOpacity).cgColor
+        layer.backgroundColor = usesClearFill
+            ? UIColor.clear.cgColor
+            : UIColor.black.withAlphaComponent(Self.fillOpacity).cgColor
     }
 
     /// A pill is never narrower than it is tall. A one-grapheme cue ("W")
@@ -565,6 +620,7 @@ final class SubtitlePillLabel: EmoteLabel {
         layer.cornerRadius = rendersOneLine
             ? bounds.height / 2
             : min(Self.blockCornerRadius, bounds.height / 2)
+        onCornerRadiusChange?(layer.cornerRadius)
     }
 
     /// Measured, not counted: the text is attributed (fonts ride inside the
