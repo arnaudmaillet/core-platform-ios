@@ -23,6 +23,18 @@ public struct DirectoryPerson: Equatable, Sendable, Identifiable {
     }
 }
 
+/// One page of directory people, and where the next one starts (#614).
+public struct DirectoryPage: Equatable, Sendable {
+    public let people: [DirectoryPerson]
+    /// Nil when there is no next page.
+    public let nextPageToken: String?
+
+    public init(people: [DirectoryPerson], nextPageToken: String?) {
+        self.people = people
+        self.nextPageToken = nextPageToken
+    }
+}
+
 public enum PeopleDirectoryError: Error, Equatable, Sendable {
     case transport(message: String)
 }
@@ -37,6 +49,18 @@ public protocol PeopleDirectoryProviding: Sendable {
     /// People matching `query`. The backend token-matches, so callers pass
     /// whole terms rather than prefixes.
     func searchPeople(matching query: String, limit: Int32) async throws -> [DirectoryPerson]
+    /// One page of `searchPeople`: `pageToken` nil for the first, then the
+    /// `nextPageToken` of the page before (#614).
+    func searchPeoplePage(matching query: String, limit: Int32, pageToken: String?) async throws -> DirectoryPage
+}
+
+extension PeopleDirectoryProviding {
+    /// One page holding `searchPeople`'s answer, and no next one — for a
+    /// directory that does not page.
+    public func searchPeoplePage(matching query: String, limit: Int32, pageToken: String?) async throws -> DirectoryPage {
+        guard pageToken == nil else { return DirectoryPage(people: [], nextPageToken: nil) }
+        return DirectoryPage(people: try await searchPeople(matching: query, limit: limit), nextPageToken: nil)
+    }
 }
 
 /// Reads people from `search.v1`, scoped to the PROFILE entity type.
@@ -54,24 +78,32 @@ public actor PeopleDirectoryRepository: PeopleDirectoryProviding {
     }
 
     public func searchPeople(matching query: String, limit: Int32) async throws -> [DirectoryPerson] {
+        try await searchPeoplePage(matching: query, limit: limit, pageToken: nil).people
+    }
+
+    public func searchPeoplePage(matching query: String, limit: Int32, pageToken: String?) async throws -> DirectoryPage {
         // The sigil is stripped HERE, at the adapter, because it is a fact about
         // the index rather than about any one screen: `search.v1` stores handles
         // bare, so "@sofia" is a term that matches nothing. Doing it here also
         // keeps it off every caller — the inbox's search and the compose picker
         // both get it, and neither has to remember to.
         let trimmed = TextMatch.normalize(query)
-        guard !trimmed.isEmpty else { return [] }
+        guard !trimmed.isEmpty else { return DirectoryPage(people: [], nextPageToken: nil) }
 
         var request = Search_V1_SearchRequest()
         request.query = trimmed
         request.entityTypes = [.profile]
         request.sort = .relevance
         request.pageSize = limit
+        request.pageToken = pageToken ?? ""
 
         let response = await searchClient.search(request: request, headers: [:])
         switch response.result {
         case .success(let body):
-            return body.hits.compactMap(Self.makePerson)
+            return DirectoryPage(
+                people: body.hits.compactMap(Self.makePerson),
+                nextPageToken: body.nextPageToken.isEmpty ? nil : body.nextPageToken
+            )
         case .failure(let error):
             throw PeopleDirectoryError.transport(message: error.message ?? "code \(error.code)")
         }

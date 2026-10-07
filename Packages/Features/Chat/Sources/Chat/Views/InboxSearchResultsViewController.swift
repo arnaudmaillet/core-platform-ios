@@ -35,6 +35,12 @@ final class InboxSearchResultsViewController: UIViewController {
     private var visibleSections: [Section] = []
     private var sectionTitles: [Section: String] = [:]
     private var hasRenderedContent = false
+    /// The People section's next page is on its way: the section ends on a
+    /// spinner (#614).
+    private var isPeoplePaging = false
+    /// How close to the end of People a row has to come into view to ask for
+    /// the next page — early enough that it usually lands first.
+    static let nearEndRowCount = 5
 
     /// Fired the instant a row is picked, BEFORE the route is emitted.
     ///
@@ -70,6 +76,7 @@ final class InboxSearchResultsViewController: UIViewController {
         configureStatusView()
 
         viewModel.onPhaseChange = { [weak self] phase in self?.render(phase) }
+        viewModel.onPeoplePagingChange = { [weak self] paging in self?.setPeoplePaging(paging) }
         render(.prompt)
     }
 
@@ -82,11 +89,16 @@ final class InboxSearchResultsViewController: UIViewController {
         // at the top of the list there is nothing above to separate from. The
         // others leave the app's one section gap (`Spacing.section` to the
         // next title's line — `SectionHeaderPillButton.sectionGap`).
-        let layout = UICollectionViewCompositionalLayout { index, environment in
+        let layout = UICollectionViewCompositionalLayout { [weak self] index, environment in
             var configuration = UICollectionLayoutListConfiguration(appearance: .plain)
             // No hairlines — see the compose picker and the search screen.
             configuration.showsSeparators = false
             configuration.headerMode = .supplementary
+            // The paging spinner closes People only while a page is on its
+            // way (#614); a footer that stayed would leave a blank band.
+            if let self, self.isPeoplePaging, self.visibleSections[safe: index] == .people {
+                configuration.footerMode = .supplementary
+            }
             configuration.headerTopPadding = index == 0
                 ? 0
                 : SectionHeaderPillButton.sectionGap(traits: environment.traitCollection)
@@ -166,9 +178,22 @@ final class InboxSearchResultsViewController: UIViewController {
                 )
             }
         }
-        dataSource.supplementaryViewProvider = { collectionView, _, indexPath in
-            collectionView.dequeueConfiguredReusableSupplementary(using: headerRegistration, for: indexPath)
+        let footerRegistration = UICollectionView.SupplementaryRegistration<PeoplePagingFooterView>(
+            elementKind: UICollectionView.elementKindSectionFooter
+        ) { _, _, _ in }
+        dataSource.supplementaryViewProvider = { collectionView, kind, indexPath in
+            kind == UICollectionView.elementKindSectionFooter
+                ? collectionView.dequeueConfiguredReusableSupplementary(using: footerRegistration, for: indexPath)
+                : collectionView.dequeueConfiguredReusableSupplementary(using: headerRegistration, for: indexPath)
         }
+    }
+
+    /// The People footer spinner, while a next page is fetched (#614).
+    private func setPeoplePaging(_ paging: Bool) {
+        guard paging != isPeoplePaging else { return }
+        isPeoplePaging = paging
+        guard isViewLoaded else { return }
+        collectionView.collectionViewLayout.invalidateLayout()
     }
 
     private func configureStatusView() {
@@ -278,6 +303,19 @@ final class InboxSearchResultsViewController: UIViewController {
 }
 
 extension InboxSearchResultsViewController: UICollectionViewDelegate {
+    /// Paging (#614): one of the last People rows coming into view asks for
+    /// the next page. The view model ignores it when there is none, or one is
+    /// already on its way.
+    func collectionView(_ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
+        guard case .person = dataSource.itemIdentifier(for: indexPath),
+              visibleSections[safe: indexPath.section] == .people,
+              indexPath.item >= collectionView.numberOfItems(inSection: indexPath.section) - Self.nearEndRowCount
+        else { return }
+        // Deferred: the next page's snapshot must not be applied from inside
+        // this display pass.
+        DispatchQueue.main.async { [weak self] in self?.viewModel.loadMorePeople() }
+    }
+
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         collectionView.deselectItem(at: indexPath, animated: true)
         guard let row = dataSource.itemIdentifier(for: indexPath) else { return }
@@ -322,5 +360,36 @@ private extension Array {
     /// configure can land after a section has gone away.
     subscript(safe index: Int) -> Element? {
         indices.contains(index) ? self[index] : nil
+    }
+}
+
+/// The People section's footer while a next page is on its way: a spinner
+/// where the next rows will be (#614).
+final class PeoplePagingFooterView: UICollectionReusableView {
+    private let spinner = UIActivityIndicatorView(style: .medium)
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        spinner.color = .tertiaryLabel
+        spinner.startAnimating()
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(spinner)
+        let height = heightAnchor.constraint(equalToConstant: 56)
+        height.priority = .required - 1
+        NSLayoutConstraint.activate([
+            height,
+            spinner.centerXAnchor.constraint(equalTo: centerXAnchor),
+            spinner.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
+        isAccessibilityElement = true
+        accessibilityLabel = "Loading more people"
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        spinner.startAnimating()
     }
 }
