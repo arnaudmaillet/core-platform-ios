@@ -2219,6 +2219,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
             self.viewModel.refresh()
         }
         galleryPager.onPullToRefresh = { [weak self] in self?.viewModel.refresh() }
+        galleryPager.onNearEnd = { [weak self] in self?.viewModel.loadMoreGallery() }
         // The band's minimize rides whichever page is in front. The pager is
         // what knows, and it is what says so — see `onActiveScrollViewChanged`.
         galleryPager.onActiveScrollViewChanged = { [weak self] scroller in

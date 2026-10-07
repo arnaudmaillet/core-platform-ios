@@ -929,8 +929,24 @@ final class AppContainer {
         // full-screen page a tile opens into is seeded from the tile's model,
         // and without this that page arrives with an anonymous author capsule
         // until its own fetch answers.
-        profileClient: Profile_V1_ProfileServiceClient(client: authenticatedRPCClient)
+        profileClient: Profile_V1_ProfileServiceClient(client: authenticatedRPCClient),
+        pageLimit: Self.galleryPageSize
     )
+
+    /// Posts per profile gallery page (#634).
+    ///
+    /// `-gallery-page-size <n>` (DEBUG): smaller pages, so a mock profile's
+    /// gallery pages on the simulator at all — at the real size most fit in one.
+    private static var galleryPageSize: Int32 {
+        #if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        if let index = arguments.firstIndex(of: "-gallery-page-size"), index + 1 < arguments.count,
+           let size = Int32(arguments[index + 1]), size > 0 {
+            return size
+        }
+        #endif
+        return 30
+    }
 
     /// The share sheet's quick-send row: mutuals first, then the rest of the
     /// follow list. Reuses `profileRepository` as the viewer resolver so the
