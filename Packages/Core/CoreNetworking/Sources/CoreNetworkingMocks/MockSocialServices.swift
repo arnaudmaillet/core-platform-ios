@@ -655,6 +655,12 @@ public final class MockSocialServices: @unchecked Sendable {
             .replacingOccurrences(of: "=", with: "")
     }
 
+    /// Whether suggestions may show `profileID`: "appear in suggestions"
+    /// (`in_suggestions`), read by social_graph's `SuggestProfiles` (#644).
+    public func isSuggestible(_ profileID: String) -> Bool {
+        (lock.withLock { discoverySettings[profileID] } ?? Self.defaultDiscoverySettings).inSuggestions
+    }
+
     /// Whether search may show `profileID` (backend #726: `discoverable`).
     public func isFindableInSearch(_ profileID: String) -> Bool {
         (lock.withLock { discoverySettings[profileID] } ?? Self.defaultDiscoverySettings).byHandleSearch

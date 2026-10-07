@@ -7,8 +7,15 @@ import Foundation
 ///
 /// Unlike All and Requests it owns its own loading rather than sharing the
 /// inbox catalog — it reads the social graph, not the conversation list, and
-/// it loads lazily so a viewer who never swipes this far never pays for the
-/// fan-out.
+/// it loads lazily so a viewer who never swipes this far never pays for it.
+///
+/// ⚠️ **TWO PAGES, AND THE SECOND IS THE WHOLE LIST (#644).**
+/// `SuggestProfiles` has no cursor yet (backend #834): it answers the `limit`
+/// best, at most `SocialConnectionsRepository.suggestionLimit`. So the first
+/// page asks for `limit`, and the end of the list asks once for the most the
+/// server gives; the same graph answers the same order, so the longer list
+/// starts with the rows already shown. A refresh asks for as many as are held,
+/// so it never takes back rows the viewer scrolled to.
 @MainActor
 public final class SuggestionsViewModel {
     public nonisolated enum Phase: Equatable, Sendable {
@@ -23,6 +30,8 @@ public final class SuggestionsViewModel {
     private let repository: any SuggestionsProviding
     private let router: (any Router)?
     private let limit: Int
+    /// The most one ask can bring: the whole list, as far as the server goes.
+    private let fullLimit: Int
 
     private var accounts: [SuggestedAccount] = []
     private var following: Set<ProfileID> = []
@@ -31,22 +40,34 @@ public final class SuggestionsViewModel {
     /// landed (the inbox no longer loads every surface up front) and must
     /// render what is current, not `.loading`.
     public private(set) var phase: Phase = .loading { didSet { onPhaseChange?(phase) } }
+    /// Whether the end of the list can bring more: the first page came back
+    /// full, and the whole list was not asked for yet.
+    public private(set) var hasMore = false
+    /// How many the list asks for: `limit`, then `fullLimit` once the viewer
+    /// reached the end.
+    private var reach: Int
     private var load: Task<Void, Never>?
+    private var loadingMore: Task<Void, Never>?
+    /// Bumped by every reload, so an answer to a superseded one is dropped.
+    private var generation = 0
     private var hasLoaded = false
 
     public init(
         repository: any SuggestionsProviding,
         router: (any Router)? = nil,
-        limit: Int = 20
+        limit: Int = 20,
+        fullLimit: Int = SocialConnectionsRepository.suggestionLimit
     ) {
         self.repository = repository
         self.router = router
         self.limit = limit
+        self.fullLimit = max(fullLimit, limit)
+        self.reach = limit
     }
 
     /// First activation loads; later ones are free. Suggestions age slowly —
-    /// re-ranking the graph every time the user swipes past would spend a
-    /// fan-out of requests to redraw the same rows.
+    /// re-ranking the graph every time the user swipes past would spend
+    /// requests to redraw the same rows.
     public func loadIfNeeded() {
         guard !hasLoaded else { return }
         hasLoaded = true
@@ -58,17 +79,53 @@ public final class SuggestionsViewModel {
         reload()
     }
 
+    /// The end of the list came into view: ask once for the whole list.
+    ///
+    /// ⚠️ **THE SLOT IS FREED BEFORE THE ROWS ARE EMITTED** — rows that land
+    /// wholly on screen ask again from `willDisplay`, and a slot still held
+    /// would turn that away (`paging-slot-before-render`, #594).
+    public func loadMore() {
+        guard hasMore, load == nil, loadingMore == nil else { return }
+        let current = generation
+        let asked = fullLimit
+        loadingMore = Task { [weak self] in
+            guard let self else { return }
+            let more = try? await self.repository.suggestions(limit: asked)
+            guard current == self.generation else { return }
+            self.loadingMore = nil
+            // A failed ask keeps `hasMore`: the next approach asks again.
+            guard let more else { return }
+            self.reach = asked
+            self.hasMore = false
+            // The rows on screen keep their places; the server's order puts
+            // them first anyway, and a graph that moved meanwhile must not
+            // shuffle them under the finger.
+            let held = Set(self.accounts.map(\.id))
+            self.accounts += more.filter { !held.contains($0.id) }
+            self.emit()
+        }
+    }
+
     private func reload() {
         load?.cancel()
+        loadingMore?.cancel()
+        loadingMore = nil
+        generation += 1
+        let current = generation
+        let asked = reach
         load = Task { [weak self] in
             guard let self else { return }
-            defer { self.load = nil }
             do {
-                self.accounts = try await self.repository.suggestions(limit: self.limit)
+                let accounts = try await self.repository.suggestions(limit: asked)
+                guard current == self.generation else { return }
+                self.load = nil
+                self.accounts = accounts
+                self.hasMore = accounts.count >= asked && asked < self.fullLimit
                 self.emit()
-            } catch is CancellationError {
-                // Superseded.
             } catch {
+                guard current == self.generation else { return }
+                self.load = nil
+                if error is CancellationError { return }
                 if case .content = self.phase {} else {
                     self.phase = .failed(message: "Couldn't load suggestions. Pull to retry.")
                 }
