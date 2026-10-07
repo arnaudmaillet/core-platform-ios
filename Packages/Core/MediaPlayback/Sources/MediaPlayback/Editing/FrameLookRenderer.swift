@@ -139,6 +139,25 @@ public enum FrameLookRenderer {
     /// size is what still saves a third of that.
     static let blurDownsamplesAbove = 8.0
 
+    /// ⚠️ **NO BLUR IS EVER ASKED FOR UNDER THIS RADIUS: IT WOULD BE HANDED TO
+    /// METAL PERFORMANCE SHADERS.** Core Image draws a `CIGaussianBlur` of
+    /// about 0.4 to 1.1 pixels as a `CIConvolutionProcessor`, which encodes an
+    /// `MPSImageConvolution` (measured in the iOS 27 simulator by hooking
+    /// MPS's initialisers and encoders: 5×5 below 0.5, 7×7 up to 1.1; under
+    /// 0.4 nothing is drawn, and from 1.15 Core Image uses its own kernels).
+    /// Under memory pressure that processor can be handed a NIL input
+    /// texture, and MPS does not fail softly: it asserts and takes the whole
+    /// process down (#623, the Upload test job: the effect cards dressing a
+    /// 40×30 test picture, a 0.9-pixel blur). In the app, it is the Blur
+    /// effect at a few percent on any preview.
+    ///
+    /// Raised to the floor rather than skipped: the blur is mixed by its
+    /// intensity, so where the floor matters — a faint blur, or a picture a
+    /// few dozen pixels wide — the difference is a pixel's worth of softness.
+    /// The margin over 1.15 is for other OS versions' thresholds, which were
+    /// not measured. `noLookReachesMetalPerformanceShaders` reads MPS itself.
+    static let blurRadiusFloor = 1.5
+
     // MARK: - Colour spaces
 
     /// Runs `body` on ENCODED values, whichever context renders the result.
@@ -346,10 +365,11 @@ public enum FrameLookRenderer {
         return mix.outputImage ?? image
     }
 
-    /// A Gaussian blur that does not darken the edges, drawn at a quarter of
-    /// the size once it is wider than `blurDownsamplesAbove`. Infinite: the
-    /// caller crops.
-    private static func blurred(_ image: CIImage, radius: Double) -> CIImage {
+    /// A Gaussian blur that does not darken the edges, never narrower than
+    /// `blurRadiusFloor`, drawn at a quarter of the size once it is wider than
+    /// `blurDownsamplesAbove`. Infinite: the caller crops.
+    private static func blurred(_ image: CIImage, radius asked: Double) -> CIImage {
+        let radius = max(asked, blurRadiusFloor)
         let clamped = image.clampedToExtent()
         func gaussian(_ source: CIImage, _ radius: Double) -> CIImage {
             let filter = CIFilter.gaussianBlur()
