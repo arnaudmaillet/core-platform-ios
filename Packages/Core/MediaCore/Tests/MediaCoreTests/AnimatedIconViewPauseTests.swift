@@ -87,6 +87,56 @@ struct AnimatedIconViewPauseTests {
         #expect(view.isAnimating, "no restart, no hold")
     }
 
+    /// The time left is the loop minus how far the clock is into it, on the
+    /// same grid `displayedFrame` reads.
+    @Test func theRemainingTimeIsWhatIsLeftOfTheLoop() throws {
+        AnimatedIconView.forcedPolicy = .full
+        defer { AnimatedIconView.forcedPolicy = nil }
+        let view = AnimatedIconView(frame: CGRect(x: 0, y: 0, width: 40, height: 40))
+        view.setArt(art(frames: 10, step: 0.1), phase: 0) // a 1 s loop
+        let remaining = try #require(view.remainingLoopTime)
+        let frame = try #require(view.displayedFrame)
+        #expect(remaining > 0 && remaining <= 1)
+        // Frame k shows during [k, k+1) × 0.1 s of the loop.
+        let elapsed = 1 - remaining
+        #expect(Int((elapsed / 0.1).rounded(.down)) == frame || Int((elapsed / 0.1).rounded(.up)) == frame,
+                "elapsed \(elapsed) s is on frame \(frame)")
+        view.pause()
+        #expect(view.remainingLoopTime == nil, "nothing plays")
+    }
+
+    /// Low Power decimates the keys (stride 2), not the loop's duration: the
+    /// finish still ends on the last key and rests on the dressed frame.
+    @Test func aDecimatedLoopFinishesWhereItsKeysEnd() async throws {
+        AnimatedIconView.forcedPolicy = .reduced
+        defer { AnimatedIconView.forcedPolicy = nil }
+        let view = AnimatedIconView(frame: CGRect(x: 0, y: 0, width: 40, height: 40))
+        view.setArt(art(frames: 8, step: 0.05), phase: 4) // 0.4 s, four keys of 0.1 s
+        let remaining = try #require(view.remainingLoopTime)
+        #expect(remaining > 0 && remaining <= 0.4, "the loop keeps its duration")
+        var finished = false
+        view.finishLoop { finished = true }
+        for _ in 0..<40 where !finished { try await Task.sleep(for: .milliseconds(25)) }
+        #expect(finished)
+        #expect(view.displayedFrame == 4)
+    }
+
+    /// A loop longer than `maxFinishWait` is not waited for: it holds where
+    /// it is at once, as a stop always did.
+    @Test func aLongLoopHoldsAtOnce() throws {
+        AnimatedIconView.forcedPolicy = .full
+        defer { AnimatedIconView.forcedPolicy = nil }
+        let view = AnimatedIconView(frame: CGRect(x: 0, y: 0, width: 40, height: 40))
+        view.setArt(art(frames: 100, step: 0.1), phase: 0) // a 10 s loop
+        let remaining = try #require(view.remainingLoopTime)
+        try #require(remaining > AnimatedIconView.maxFinishWait, "this run sits early enough in the loop")
+        var finished = false
+        view.finishLoop { finished = true }
+        #expect(finished, "completed at once")
+        #expect(view.isPaused)
+        #expect(!view.isFinishingLoop)
+    }
+
     /// Nothing playing: the finish completes at once.
     @Test func aPausedViewFinishesAtOnce() {
         let view = AnimatedIconView(frame: CGRect(x: 0, y: 0, width: 40, height: 40))

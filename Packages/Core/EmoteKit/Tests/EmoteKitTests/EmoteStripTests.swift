@@ -201,6 +201,44 @@ struct EmoteStripTests {
         #expect(tile.player.displayedFrame == 0, "it rests on its poster frame")
     }
 
+    /// Slots come back once each loop ends, whatever the number of scrolls,
+    /// and never exceed `maxPlayingTiles` meanwhile — here fewer slots than
+    /// tiles on screen.
+    @Test func slotsComeBackAfterManyScrolls() async throws {
+        let engine = warmEngine(art: Self.sheetArt(frames: 10, step: 0.03))
+        engine.maxPlayingTiles = 3
+        let (strip, window) = hosted(engine)
+        defer { tearDown(window) }
+        let grid = strip.collectionView
+        try #require(strip.displayedTiles.count > 3, "more tiles than slots")
+        for _ in 0..<8 {
+            strip.scrollViewWillBeginDragging(grid)
+            #expect(engine.playingTileCount <= engine.maxPlayingTiles)
+            strip.scrollViewDidEndDecelerating(grid)
+            #expect(engine.playingTileCount <= engine.maxPlayingTiles)
+        }
+        try #require(await settle { engine.playingTileCount == 0 }, "every slot is back once the loops end")
+    }
+
+    /// A scroll that ends finishes the loops (the slots are kept meanwhile);
+    /// leaving the window is a hard stop that frees them at once.
+    @Test func endingAScrollFinishesButLeavingTheWindowStops() throws {
+        let engine = warmEngine(art: Self.sheetArt(frames: 20, step: 0.05))
+        let (strip, window) = hosted(engine)
+        defer { tearDown(window) }
+        let grid = strip.collectionView
+        strip.scrollViewWillBeginDragging(grid)
+        let playing = engine.playingTileCount
+        try #require(playing > 0)
+        strip.scrollViewDidEndDecelerating(grid)
+        #expect(engine.playingTileCount == playing, "finishing: the slots are still held")
+
+        strip.scrollViewWillBeginDragging(grid)
+        strip.removeFromSuperview()
+        #expect(engine.playingTileCount == 0, "a hard stop gives every slot back at once")
+        #expect(!strip.isScrolling)
+    }
+
     /// Scrolling again before the loop ends just carries on: no restart.
     @Test func scrollingAgainBeforeTheLoopEndsCarriesOn() async throws {
         let frames = 20

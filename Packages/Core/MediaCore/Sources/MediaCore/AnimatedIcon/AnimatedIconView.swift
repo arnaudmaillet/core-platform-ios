@@ -238,6 +238,23 @@ public final class AnimatedIconView: UIView {
     private var finishGeneration = 0
     /// Whether the view is playing out its current loop before holding.
     public private(set) var isFinishingLoop = false
+    /// The longest a finish waits for its loop to end. A long emote would
+    /// otherwise keep its engine slot for seconds after the scroll stopped;
+    /// past this it simply holds where it is, as a stop always did.
+    public static let maxFinishWait: TimeInterval = 1.5
+
+    /// How long until the loop on screen ends; nil when nothing plays.
+    /// Keyed like `displayedFrame` (`keying`): a Low Power decimated loop
+    /// keeps its duration, with fewer, longer keys.
+    public var remainingLoopTime: TimeInterval? {
+        guard let art, art.frameCount > 1, isAnimating, !isPaused else { return nil }
+        let (_, keys, keyDuration) = Self.keying(art)
+        let loop = keyDuration * CFTimeInterval(keys)
+        var elapsed = (sheetView.layer.convertTime(CACurrentMediaTime(), from: nil) - Self.epoch + clockShift)
+            .truncatingRemainder(dividingBy: loop)
+        if elapsed < 0 { elapsed += loop }
+        return loop - elapsed
+    }
 
     /// Lets the loop on screen run to its end, then holds the RESTING frame —
     /// the one the art was dressed on (`phase`), which is where every loop
@@ -252,16 +269,16 @@ public final class AnimatedIconView: UIView {
     /// the same way (`keying`), so a Low Power decimated loop ends where its
     /// last key does.
     public func finishLoop(completion: @escaping @MainActor () -> Void) {
-        guard let art, art.frameCount > 1, isAnimating, !isPaused else {
+        guard let remaining = remainingLoopTime else {
             completion()
             return
         }
-        let (_, keys, keyDuration) = Self.keying(art)
-        let loop = keyDuration * CFTimeInterval(keys)
-        var elapsed = (sheetView.layer.convertTime(CACurrentMediaTime(), from: nil) - Self.epoch + clockShift)
-            .truncatingRemainder(dividingBy: loop)
-        if elapsed < 0 { elapsed += loop }
-        let remaining = loop - elapsed
+        // A loop too long to wait for holds where it is, now.
+        guard remaining <= Self.maxFinishWait else {
+            pause()
+            completion()
+            return
+        }
         finishGeneration += 1
         let generation = finishGeneration
         isFinishingLoop = true
