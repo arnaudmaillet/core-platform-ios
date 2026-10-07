@@ -1835,7 +1835,23 @@ final class PostDetailViewController: UIViewController {
             snapshot.reconfigureItems([.emptyState])
         }
         hasAppliedStream = true
+        nearEndItems = Self.nearEndItems(of: snapshot.itemIdentifiers)
         streamDataSource.apply(snapshot, animatingDifferences: animated) { completion?() }
+    }
+
+    /// The stream's last few rows: one of them coming on screen asks for the
+    /// next page of comments (#589), early enough that it usually lands
+    /// before the viewer reaches the end.
+    private var nearEndItems: Set<StreamItem> = []
+    static let nearEndRowCount = 5
+
+    private static func nearEndItems(of items: [StreamItem]) -> Set<StreamItem> {
+        Set(items.filter {
+            switch $0 {
+            case .comment, .seam: return true
+            default: return false
+            }
+        }.suffix(nearEndRowCount))
     }
 
     /// The empty stream's words: an invitation to write while this is a
@@ -2343,6 +2359,13 @@ final class PostDetailViewController: UIViewController {
 // MARK: - Interactive pull-down dismissal
 
 extension PostDetailViewController: UICollectionViewDelegate {
+    /// Paging, not dismissal: one of the stream's last rows coming on screen
+    /// asks for the next page of comments (#589).
+    func collectionView(_ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
+        guard let item = streamDataSource.itemIdentifier(for: indexPath), nearEndItems.contains(item) else { return }
+        viewModel.loadMoreComments()
+    }
+
     /// The list's OVERSHOOT past its top drives the collapse back to the
     /// media layout, continuously and in both directions.
     ///
