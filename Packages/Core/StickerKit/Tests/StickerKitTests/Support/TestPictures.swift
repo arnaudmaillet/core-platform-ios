@@ -68,15 +68,23 @@ enum TestPictures {
     }
 }
 
-/// Waits until `condition` holds or `timeout` passes, whichever is first.
+/// Waits until `condition` holds or `looks` looks have passed, whichever is
+/// first.
 ///
-/// ⚠️ **RETURNS SILENTLY ON TIMEOUT.** Follow it with a `#require` on the
-/// condition, or a test that never landed reads like one that did.
+/// ⚠️ **A BUDGET OF LOOKS, NOT OF WALL-CLOCK TIME** (#619). It was a 10 s
+/// deadline, and a starved CI runner that descheduled the process burned it
+/// without a single look: `aLoopViewLoopsAfterItsLoad` failed at 23.7 s on a
+/// load that would have landed. Each look yields, checks, and sleeps briefly,
+/// so time spent descheduled costs nothing — the same remedy as #528, #556
+/// and #599. 500 looks of 20 ms keep the old 10 s for a healthy run.
+///
+/// ⚠️ **RETURNS SILENTLY WHEN THE LOOKS RUN OUT.** Follow it with a `#require`
+/// on the condition, or a test that never landed reads like one that did.
 @MainActor
-func settle(timeout: Duration = .seconds(10), until condition: () -> Bool) async throws {
-    let clock = ContinuousClock()
-    let deadline = clock.now + timeout
-    while !condition(), clock.now < deadline {
+func settle(looks: Int = 500, until condition: () -> Bool) async throws {
+    for _ in 0..<looks {
+        await Task.yield()
+        if condition() { return }
         try await Task.sleep(for: .milliseconds(20))
     }
 }
