@@ -798,6 +798,83 @@ final class PinCardView: UIView {
 
     private(set) var wornPreview: (art: AnimatedIconArt, phase: Int)?
 
+    /// The frame the preview sheet is showing right now; nil without one.
+    var previewDisplayedFrame: Int? {
+        wornPreview == nil ? nil : previewSheetView.displayedFrame
+    }
+
+    /// Puts the flight's preview sheet on the frame the live video is showing,
+    /// still playing, so the two pictures the reveal blends are the same moment
+    /// of the clip (#625). The page started its video where the sheet was
+    /// (`MapPinZoomSource.zoomFlightMediaTime`); this absorbs what the player's
+    /// first frame took. A no-op when the video is outside the sheet's window
+    /// or there is no sheet.
+    func syncPreviewToLiveMedia() {
+        guard face == .media, let preview = wornPreview, case .sheet(let sheet) = preview.art,
+              let time = videoRenderView.displayedClipTime,
+              let target = sheet.frame(atClipTime: time),
+              let shown = previewSheetView.displayedFrame else { return }
+        let phase = Self.phase(showing: target, now: shown, currentPhase: preview.phase, frameCount: sheet.frameCount)
+        guard phase != preview.phase else { return }
+        wornPreview = (preview.art, phase)
+        previewSheetView.setArt(preview.art, phase: phase)
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print(String(format: "[zoom-live] sheet synced video=%.3fs frame %d -> %d", time, shown, target))
+        }
+        #endif
+    }
+
+    // MARK: - Focus pull (#625)
+
+    /// How long the live video takes to come into focus over the sheet.
+    static let focusPullDuration: TimeInterval = 0.3
+
+    /// Starts the live video at the sheet's resolution and raises it
+    /// (`VideoRenderView.pullFocus`): the reveal hands over between two
+    /// pictures that match, then sharpens, instead of ghosting a sharp picture
+    /// over a soft one.
+    func beginFocusPull() {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-no-focus-pull") { return }
+        #endif
+        guard let start = sheetPixelsPerPoint() else { return }
+        var duration = Self.focusPullDuration
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-focus-pull-slow") { duration = 2 }
+        #endif
+        let pulled = videoRenderView.pullFocus(fromPixelsPerPoint: start, over: duration)
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print(String(format: "[zoom-live] focus pull from %.2f px/pt: %@", start, pulled ? "yes" : "no"))
+        }
+        #endif
+    }
+
+    /// The sheet's resolution on the video's surface, in pixels per point: its
+    /// cell covering the surface the video is laid out on. Nil without a sheet.
+    private func sheetPixelsPerPoint() -> CGFloat? {
+        guard let preview = wornPreview, case .sheet(let sheet) = preview.art,
+              let pixels = sheet.sheet.cgImage, let rect = sheet.frameRects.first else { return nil }
+        let cell = CGSize(width: CGFloat(pixels.width) * rect.width, height: CGFloat(pixels.height) * rect.height)
+        return Self.sheetPixelsPerPoint(cell: cell, covering: videoRenderView.bounds.size)
+    }
+
+    /// A `cell`-pixel picture covering `surface`, in pixels per point. Pure,
+    /// for tests.
+    static func sheetPixelsPerPoint(cell: CGSize, covering surface: CGSize) -> CGFloat? {
+        guard cell.width > 0, cell.height > 0, surface.width > 0, surface.height > 0 else { return nil }
+        return min(cell.width / surface.width, cell.height / surface.height)
+    }
+
+    /// The phase that puts frame `target` on screen now, given that phase
+    /// `currentPhase` shows `now`. Every sheet runs on one shared clock, and a
+    /// phase only rotates which frame that clock lands on. Pure, for tests.
+    static func phase(showing target: Int, now shown: Int, currentPhase: Int, frameCount: Int) -> Int {
+        guard frameCount > 0 else { return currentPhase }
+        return ((currentPhase + target - shown) % frameCount + frameCount) % frameCount
+    }
+
     func reinstallPreviewPlayback() {
         previewSheetView.reinstall()
     }
@@ -1587,6 +1664,20 @@ extension PinCardView: ZoomFlightCard {
         // 0, revealed when there is a frame), so it lifts the hold's hide as
         // part of the arrival rather than beside it.
         videoRenderView.setPoster(nil)
+        // Lined up on the video before it shows (#625): now when it already
+        // has a frame, else on its first one.
+        VideoRenderView.prewarmFocusPull()
+        if videoRenderView.isReadyForDisplay {
+            syncPreviewToLiveMedia()
+            beginFocusPull()
+        } else {
+            videoRenderView.onPictureAvailabilityChange = { [weak self] available in
+                guard available, let self else { return }
+                self.videoRenderView.onPictureAvailabilityChange = nil
+                self.syncPreviewToLiveMedia()
+                self.beginFocusPull()
+            }
+        }
         videoRenderView.fadeInOnFirstFrame(over: duration)
         // A DONATED surface arrives on its host, and the host's alpha is the
         // blend's. Releasing the hold inside an animation is what turns the

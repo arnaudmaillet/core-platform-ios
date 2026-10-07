@@ -196,6 +196,9 @@ final class SnapFeedViewController: UIViewController {
     /// True between `zoomTransitionWillBegin` and `zoomTransitionDidEnd`. Cells
     /// realized inside that window inherit the playback deferral, so a page
     /// activating mid-flight cannot steal the render slot from the flying card.
+    /// The clip time a presenting flight's picture showed, for the entry page
+    /// (#625) — see `zoomTransitionWillStartMedia(at:)`.
+    private var flightMediaStart: (postID: PostID, seconds: TimeInterval)?
     private var isAwaitingZoomPresentation = false {
         didSet {
             // The flight is over, one way or another: a text page that stood
@@ -4278,6 +4281,7 @@ final class SnapFeedViewController: UIViewController {
                 at: IndexPath(item: activate, section: 0)
             ) as? SnapFeedCell {
                 snapCell.defersPlaybackForFlight = defersPlaybackForStagingFlight
+                stampFlightMediaStart(on: snapCell)
                 // The chrome's hold takes the same net, for the same reason:
                 // stamped on `activeSnapCell` alone it reached nobody, and
                 // the ticker laid its train unheld, off-window, mid-flight
@@ -5224,6 +5228,7 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         // layout pass the presentation triggers. Stamping only in `apply` left
         // the flag false exactly when it mattered.
         (cell as? SnapFeedCell)?.defersPlaybackForFlight = defersPlaybackForStagingFlight
+        if let snapCell = cell as? SnapFeedCell { stampFlightMediaStart(on: snapCell) }
         // The same net, for the picture: a page can be handed the screen while
         // it is still being realized, and the hand-over reaches nothing. The
         // page that owns the viewport is a fact about the SCROLL, so it is
@@ -6265,6 +6270,23 @@ extension SnapFeedViewController: ZoomTransitionDestination {
                          defersPlaybackForStagingFlight ? "Y" : "N"))
         }
         #endif
+    }
+
+    /// The clip time the presenting flight's picture shows (#625), for the
+    /// page it opens on. Handed to that page's cell as it is realised and
+    /// spent by its first start.
+    public func zoomTransitionWillStartMedia(at seconds: TimeInterval) {
+        guard let postID = activePostID else { return }
+        flightMediaStart = (postID, seconds)
+        if let cell = activeSnapCell { stampFlightMediaStart(on: cell) }
+    }
+
+    /// Gives the entry page its start position — once, and only to the page
+    /// showing the post the flight carried.
+    private func stampFlightMediaStart(on cell: SnapFeedCell) {
+        guard let start = flightMediaStart, cell.representedPostID == start.postID else { return }
+        cell.flightMediaStartTime = start.seconds
+        flightMediaStart = nil
     }
 
     /// **OPTION B.** Opens the thread's window on the same spring the card

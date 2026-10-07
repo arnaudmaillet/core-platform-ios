@@ -224,6 +224,27 @@ public final class VideoRenderView: UIView {
         CATransaction.commit()
     }
 
+    // MARK: - Focus pull (#625)
+
+    private var focusPull: VideoFocusPull?
+
+    /// Shows this surface's picture at `pixelsPerPoint` and raises it to the
+    /// screen's over `duration` — see `VideoFocusPull`. For a picture taking
+    /// over from a lower-resolution copy of itself. False, and nothing
+    /// changes, when there is no decoded frame to draw from yet, or the start
+    /// is already near the screen's resolution.
+    @discardableResult
+    public func pullFocus(fromPixelsPerPoint pixelsPerPoint: CGFloat, over duration: TimeInterval) -> Bool {
+        focusPull?.cancel()
+        focusPull = VideoFocusPull(surface: self, from: pixelsPerPoint, over: duration) { [weak self] in
+            self?.focusPull = nil
+        }
+        return focusPull != nil
+    }
+
+    /// True while a focus pull is drawing over the live picture.
+    public var isPullingFocus: Bool { focusPull != nil }
+
     /// Places the poster — see `posterAspect`.
     private func layoutPoster() {
         if videoGravity == .resizeAspect, let aspect = posterAspect,
@@ -288,6 +309,18 @@ public final class VideoRenderView: UIView {
     /// apply the track's `preferredTransform`, so a reader that wants to match
     /// the picture on screen must not rotate this either.
     public var currentFrameBuffer: CVPixelBuffer? { renderer?.currentFrameBuffer }
+
+    /// Where in its clip the picture on screen is, in seconds: the decoded
+    /// frame's item time, or the bound player's playhead under
+    /// `-avplayer-render`. Nil with nothing bound (#625).
+    public var displayedClipTime: TimeInterval? {
+        if let time = renderer?.currentFrameTime, time.isValid, time.seconds.isFinite {
+            return time.seconds
+        }
+        guard let player = boundPlayer, player.currentItem != nil else { return nil }
+        let time = player.currentTime()
+        return time.isValid && time.seconds.isFinite ? time.seconds : nil
+    }
 
     /// Something drawn from this surface's frames that must change on the same
     /// refresh as its picture — see `VideoFrameCompanion`. Weak: the companion
@@ -556,6 +589,7 @@ public final class VideoRenderView: UIView {
         #endif
         renderer?.removeSurface(self)
         renderer = nil
+        focusPull?.cancel()
         // ⚠️ A BARE `flush()` DOES NOT EMPTY THE LAYER, and this comment used
         // to say it did.
         //

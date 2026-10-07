@@ -77,6 +77,10 @@ final class VideoFrameRenderer {
     /// identical question a joining surface asks, and answering it twice would
     /// be two frames that could differ.
     var currentFrameBuffer: CVPixelBuffer? { lastFrame?.buffer }
+    /// The item time of the frame on screen — which also tells a frame of a
+    /// playing clip from the same moment drawn again (tests), and where the
+    /// clip is for a flight lining its preview up on it (#625).
+    var currentFrameTime: CMTime? { lastFrame?.itemTime }
 
     /// The arrangement the frames are composed from, if they are.
     var composedVideo: ComposedVideo? { source.composedVideo }
@@ -694,10 +698,6 @@ final class VideoFrameRenderer {
     }
 
     #if DEBUG
-    /// Internal for tests: the item time of `currentFrameBuffer` — which tells
-    /// a frame of a playing clip from the same moment drawn again.
-    var currentFrameTime: CMTime? { lastFrame?.itemTime }
-
     /// Whether this renderer is currently being ticked. Asserted per-renderer
     /// rather than by counting the clock's subscribers, because the test bundle
     /// runs suites in parallel and under `AVSBDL_RENDER=1` the controller suite

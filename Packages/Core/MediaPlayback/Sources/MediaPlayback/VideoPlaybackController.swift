@@ -134,6 +134,13 @@ public final class VideoPlaybackController {
         ))
     }
 
+    /// The next fresh player for `url` under `scope` starts at `seconds`
+    /// instead of the beginning — the hero flight's picture was showing that
+    /// moment of the clip (#625). Spent by that start, like a resume.
+    public func prepareStart(of url: URL, scope: String, at seconds: TimeInterval) {
+        rememberResume(scope: scope, url: url, at: CMTime(seconds: seconds, preferredTimescale: 600))
+    }
+
     /// The playhead a fresh player for this post should start from, if any.
     /// Consumed, not read: a resume answers once, and a clip the viewer has
     /// since watched to the end must not be dragged back to a stale position by

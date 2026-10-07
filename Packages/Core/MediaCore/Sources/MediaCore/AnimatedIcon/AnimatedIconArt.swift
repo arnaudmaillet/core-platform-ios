@@ -154,15 +154,33 @@ public struct AnimatedIconSheet: Sendable, Equatable {
     /// the marker being resized between its pin, cluster and flight sizes
     /// without recomputation.
     public let frameRects: [CGRect]
+    /// For a sheet sampled from a video, where frame zero sits in the clip;
+    /// frame k is the clip at `startTime + k * frameDuration`. Nil for artwork
+    /// that is not a clip (#539).
+    public let startTime: TimeInterval?
 
     public var loopDuration: CFTimeInterval { frameDuration * CFTimeInterval(frameCount) }
+
+    /// The clip time frame `index` shows, when this sheet is a clip's.
+    public func clipTime(ofFrame index: Int) -> TimeInterval? {
+        startTime.map { $0 + frameDuration * TimeInterval(index) }
+    }
+
+    /// The frame showing the clip at `time`, when this sheet covers it; nil
+    /// before its first frame or past its last (#539).
+    public func frame(atClipTime time: TimeInterval) -> Int? {
+        guard let startTime, frameDuration > 0 else { return nil }
+        let index = Int(((time - startTime) / frameDuration).rounded(.down))
+        return (0..<frameCount).contains(index) ? index : nil
+    }
     public var byteCost: Int { sheet.cgImage.map { $0.bytesPerRow * $0.height } ?? 0 }
 
     /// - Parameter gutterPX: the transparent margin the baker leaves INSIDE
     ///   each cell, in sheet pixels. Sampled out — see `frameRects`.
     public init(sheet: UIImage, frameCount: Int, columns: Int,
-                frameDuration: CFTimeInterval, gutterPX: Int = 0) {
+                frameDuration: CFTimeInterval, gutterPX: Int = 0, startTime: TimeInterval? = nil) {
         self.sheet = sheet
+        self.startTime = startTime
         self.frameCount = frameCount
         self.columns = columns
         self.frameDuration = frameDuration
