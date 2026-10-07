@@ -65,6 +65,10 @@ final class InboxCatalog {
         var unreadIDs: Set<ConversationID> = []
         /// Pending requests, most recent first.
         var requests: [Conversation] = []
+        /// Pending requests the viewer's hidden words or offensive filter
+        /// caught (#552), most recent first. Never counted in a badge and
+        /// never searched: the server sends no push for them either.
+        var hiddenRequests: [Conversation] = []
         var pinned: Set<ConversationID> = []
         var muted: Set<ConversationID> = []
         /// The folders with another page to load (#593).
@@ -84,9 +88,13 @@ final class InboxCatalog {
     private let repository: any ChatProviding
     private let directory: ConversationDirectory?
 
-    /// The INBOX folder's rows and the REQUESTS folder's, as loaded.
+    /// The INBOX folder's rows, the REQUESTS folder's and the HIDDEN
+    /// REQUESTS folder's, as loaded.
     private var conversations: [Conversation] = []
     private var requestRows: [Conversation] = []
+    private var hiddenRequestRows: [Conversation] = []
+    /// Every loaded row, whichever folder it sits in.
+    private var allRows: [Conversation] { conversations + requestRows + hiddenRequestRows }
     private var observers: [UUID: (Snapshot) -> Void] = [:]
     private var load: Task<Void, Never>?
     private var loadGeneration = 0
@@ -149,6 +157,9 @@ final class InboxCatalog {
             // finishing late would otherwise mark the fresh one as done and
             // let `refresh()` start a duplicate.
             defer { if self.loadGeneration == generation { self.load = nil } }
+            // The hidden requests alongside (#552), best-effort like Requests:
+            // a failure keeps the ones already shown.
+            async let hidden = try? self.repository.loadInbox(.hiddenRequests, after: nil)
             do {
                 // Both folders at once. Requests are best-effort: a failure
                 // there keeps the requests already shown rather than failing
@@ -170,13 +181,16 @@ final class InboxCatalog {
                 // here is what made returning from a thread flash a
                 // near-empty inbox before the real load landed.
                 guard self.loadGeneration == generation else { return }
+                let hiddenPage = await hidden
+                guard self.loadGeneration == generation else { return }
 
                 // Both folders land TOGETHER: accepting moves a row from one
                 // to the other, so one assigned before the other could show a
                 // conversation in both lists, or in neither.
                 self.adopt(firstPage: inboxPage, of: .inbox)
                 if let requestPage { self.adopt(firstPage: requestPage, of: .requests) }
-                let loaded = self.conversations + self.requestRows
+                if let hiddenPage { self.adopt(firstPage: hiddenPage, of: .hiddenRequests) }
+                let loaded = self.allRows
                 // Retire the bridge for every conversation the server now
                 // agrees is read; keep it only where it is still catching up.
                 self.readAheadOfServer.formIntersection(loaded.filter(\.isUnread).map(\.id))
@@ -212,6 +226,7 @@ final class InboxCatalog {
         hasLaterPages = []
         conversations = []
         requestRows = []
+        hiddenRequestRows = []
         pinned = []
         muted = []
         readAheadOfServer = []
@@ -268,7 +283,7 @@ final class InboxCatalog {
             nextTokens[folder] = page.nextPageToken
             // A conversation can sit on both sides of a page boundary, or
             // have moved folders since the first page.
-            let known = Set((conversations + requestRows).map(\.id))
+            let known = Set(allRows.map(\.id))
             fresh = page.conversations.filter { !known.contains($0.id) }
             // Filtered down to nothing: no new row reaches the end to ask
             // again, so the next page is asked now.
@@ -291,11 +306,19 @@ final class InboxCatalog {
     }
 
     private func rows(of folder: InboxFolder) -> [Conversation] {
-        folder == .inbox ? conversations : requestRows
+        switch folder {
+        case .inbox: conversations
+        case .requests: requestRows
+        case .hiddenRequests: hiddenRequestRows
+        }
     }
 
     private func setRows(_ rows: [Conversation], of folder: InboxFolder) {
-        if folder == .inbox { conversations = rows } else { requestRows = rows }
+        switch folder {
+        case .inbox: conversations = rows
+        case .requests: requestRows = rows
+        case .hiddenRequests: hiddenRequestRows = rows
+        }
     }
 
     /// A refreshed first page over a list that runs past it: the page
@@ -340,7 +363,7 @@ final class InboxCatalog {
     /// projection instead was why picking someone with a real thread opened
     /// a blank draft and then made their history appear a moment later.
     func directConversationID(with peer: ProfileID) -> ConversationID? {
-        (conversations + requestRows).first { $0.directPeerID == peer }?.id
+        allRows.first { $0.directPeerID == peer }?.id
     }
 
     // MARK: - Management
@@ -366,8 +389,9 @@ final class InboxCatalog {
         emit()
     }
 
-    /// Lets a request through: it leaves Requests and joins the active inbox,
-    /// permanently for the session even though the peer stays unfollowed.
+    /// Lets a request through: it leaves Requests (or Hidden requests) and
+    /// joins the active inbox, permanently for the session even though the
+    /// peer stays unfollowed.
     func accept(_ id: ConversationID) {
         declined.remove(id)
         accepted.insert(id)
@@ -398,6 +422,8 @@ final class InboxCatalog {
     func recordSentMessage(_ message: ChatMessage, in id: ConversationID) {
         if let index = requestRows.firstIndex(where: { $0.id == id }) {
             conversations.append(requestRows.remove(at: index))
+        } else if let index = hiddenRequestRows.firstIndex(where: { $0.id == id }) {
+            conversations.append(hiddenRequestRows.remove(at: index))
         }
         guard let index = conversations.firstIndex(where: { $0.id == id }) else { return }
         // To the top, as the next load will list it — and ONLY it moves: the
@@ -438,7 +464,7 @@ final class InboxCatalog {
         let hidden = deleted.union(declined)
         // A request accepted this session reads as a conversation until the
         // server has a word for it.
-        let acceptedRequests = requestRows.filter { accepted.contains($0.id) }
+        let acceptedRequests = (requestRows + hiddenRequestRows).filter { accepted.contains($0.id) }
         var active = conversations.filter { !hidden.contains($0.id) }
         if !acceptedRequests.isEmpty {
             active = (active + acceptedRequests.filter { !hidden.contains($0.id) }).sorted(by: Conversation.isOrderedBefore)
@@ -450,9 +476,15 @@ final class InboxCatalog {
         snapshot.requests = requestRows
             .filter { !hidden.contains($0.id) && !accepted.contains($0.id) }
             .sorted(by: Conversation.isOrderedBefore)
+        snapshot.hiddenRequests = hiddenRequestRows
+            .filter { !hidden.contains($0.id) && !accepted.contains($0.id) }
+            .sorted(by: Conversation.isOrderedBefore)
         let readAhead = readAheadOfServer
+        // Hidden requests included: their rows wear the same unread treatment
+        // when opened from Hidden requests. Nothing counts this set into a
+        // badge, so they still announce nothing.
         snapshot.unreadIDs = Set(
-            (snapshot.active + snapshot.requests).lazy
+            (snapshot.active + snapshot.requests + snapshot.hiddenRequests).lazy
                 .filter { $0.isUnread && !readAhead.contains($0.id) }
                 .map(\.id)
         )

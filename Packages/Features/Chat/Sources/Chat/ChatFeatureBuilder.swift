@@ -108,6 +108,17 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
             avatars: connections as? any PeerAvatarProviding
         )
         requests.threadPreviewProvider = makeThreadPreview
+        // The Hidden requests list (#552): the same screen over the hidden
+        // folder of the same catalog, so accepting one there lands in All.
+        requests.hiddenRequestsProvider = { [self] in
+            let hidden = MessageRequestsViewController(
+                viewModel: MessageRequestsViewModel(catalog: catalog, router: router, folder: .hiddenRequests),
+                imagePipeline: imagePipeline,
+                avatars: connections as? any PeerAvatarProviding
+            )
+            hidden.threadPreviewProvider = makeThreadPreview
+            return hidden
+        }
         let suggestions = SuggestionsViewController(
             viewModel: SuggestionsViewModel(
                 repository: connections ?? EmptySuggestionsRepository(),

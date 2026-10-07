@@ -236,6 +236,29 @@ struct ChatRepositoryInboxTests {
         #expect(requests.allSatisfy { $0.isUnread })
     }
 
+    /// The hidden requests are their own folder (#552): `ListInbox` with
+    /// HIDDEN_REQUESTS lists the requests the hidden words caught, which
+    /// neither Requests nor the inbox lists; answering one files it in the
+    /// inbox, as any request.
+    @Test func hiddenRequestsAreTheServersHiddenRequestsFolder() async throws {
+        let (repository, _) = makeRepository()
+
+        let hidden = try await repository.loadInbox(.hiddenRequests, after: nil).conversations
+        let requests = try await repository.loadInbox(.requests, after: nil).conversations
+        let inbox = try await repository.loadInbox(.inbox, after: nil).conversations
+
+        let hiddenIDs = Set((0..<2).map { ConversationID("conv-hidden-\($0)") })
+        #expect(Set(hidden.map(\.id)) == hiddenIDs)
+        #expect((requests + inbox).allSatisfy { !hiddenIDs.contains($0.id) })
+        #expect(hidden.allSatisfy { $0.isUnread && !$0.title.isEmpty })
+
+        _ = try await repository.send("Not interested", to: ConversationID("conv-hidden-0"))
+        let hiddenAfter = try await repository.loadInbox(.hiddenRequests, after: nil).conversations
+        let inboxAfter = try await repository.loadInbox(.inbox, after: nil).conversations
+        #expect(hiddenAfter.map(\.id) == [ConversationID("conv-hidden-1")])
+        #expect(inboxAfter.contains { $0.id == ConversationID("conv-hidden-0") })
+    }
+
     /// The first page sends a page size, every next one the token the last
     /// returned, newest activity first throughout, until there is no token.
     @Test func theInboxFollowsTheTokenAcrossPages() async throws {

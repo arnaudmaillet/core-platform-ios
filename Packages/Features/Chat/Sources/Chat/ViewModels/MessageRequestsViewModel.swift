@@ -5,6 +5,12 @@ import Foundation
 /// The "Requests" surface's view model: conversations from accounts the viewer
 /// doesn't follow and hasn't answered.
 ///
+/// It also drives the **Hidden requests** list (#552), the same screen over
+/// the HIDDEN REQUESTS folder: requests the viewer's hidden words or offensive
+/// filter caught. Opening, accepting and declining one work like any request;
+/// what differs is that a hidden request announces nothing (no badge, no New
+/// section) and the list has no row leading further.
+///
 /// It shares `InboxCatalog` with the conversation list, so the inbox is
 /// fetched once and a request accepted here appears in All immediately — the
 /// two tabs are two projections of one truth, never two copies of it.
@@ -32,6 +38,8 @@ public final class MessageRequestsViewModel {
     private let catalog: InboxCatalog
     private let router: (any Router)?
     private let now: @Sendable () -> Date
+    /// `.requests` or `.hiddenRequests` — which folder this list shows.
+    public let folder: InboxFolder
 
     /// Readable, because a surface's view can be built after the first phase
     /// landed (the inbox no longer loads every surface up front) and must
@@ -43,10 +51,12 @@ public final class MessageRequestsViewModel {
     init(
         catalog: InboxCatalog,
         router: (any Router)? = nil,
+        folder: InboxFolder = .requests,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.catalog = catalog
         self.router = router
+        self.folder = folder
         self.now = now
         watermark = InboxTabWatermark(openedAt: Self.openingBaseline(now()))
         observation = catalog.observe { [weak self] snapshot in self?.project(snapshot) }
@@ -57,14 +67,24 @@ public final class MessageRequestsViewModel {
     public convenience init(
         repository: any ChatProviding,
         router: (any Router)? = nil,
+        folder: InboxFolder = .requests,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.init(
             catalog: InboxCatalog(repository: repository),
             router: router,
+            folder: folder,
             now: now
         )
     }
+
+    /// Whether the Requests list ends on the **Hidden requests** row (#552):
+    /// the hidden folder holds at least one request. Always false on the
+    /// hidden list itself.
+    public private(set) var showsHiddenRequestsRow = false {
+        didSet { if showsHiddenRequestsRow != oldValue { onShowsHiddenRequestsRowChange?(showsHiddenRequestsRow) } }
+    }
+    public var onShowsHiddenRequestsRowChange: ((Bool) -> Void)?
 
     /// Another page is there to load (#593): the list wears its spinner at
     /// the bottom until it lands.
@@ -75,7 +95,7 @@ public final class MessageRequestsViewModel {
 
     /// The viewer neared the end of the list.
     public func loadMore() {
-        catalog.loadMore(.requests)
+        catalog.loadMore(folder)
     }
 
     public func refresh() {
@@ -127,16 +147,24 @@ public final class MessageRequestsViewModel {
     }
 
     private func project(_ snapshot: InboxCatalog.Snapshot) {
-        hasMore = snapshot.hasMore.contains(.requests)
-        publishNewCount(watermark.newCount(in: snapshot.requests))
+        let isHiddenFolder = folder == .hiddenRequests
+        let requests = isHiddenFolder ? snapshot.hiddenRequests : snapshot.requests
+        hasMore = snapshot.hasMore.contains(folder)
+        // A hidden request announces nothing: the server sends no push for it,
+        // and the badge would point at a list it isn't on.
+        publishNewCount(isHiddenFolder ? 0 : watermark.newCount(in: requests))
+        showsHiddenRequestsRow = !isHiddenFolder
+            && (!snapshot.hiddenRequests.isEmpty || snapshot.hasMore.contains(.hiddenRequests))
         switch snapshot.phase {
         case .loading:
             phase = .loading
         case .failed(let message):
             phase = .failed(message: message)
         case .loaded:
-            guard !snapshot.requests.isEmpty else {
-                phase = .empty
+            guard !requests.isEmpty else {
+                // No visible request, but hidden ones: the list still shows,
+                // empty, so its Hidden requests row stays reachable.
+                phase = showsHiddenRequestsRow ? .content(InboxListSections()) : .empty
                 return
             }
             let now = now()
@@ -153,9 +181,9 @@ public final class MessageRequestsViewModel {
             // cursor. `isUnread` used to be the watermark here, which meant a
             // request stayed marked after being read.
             let isNew = Dictionary(
-                uniqueKeysWithValues: snapshot.requests.map { ($0.id, watermark.isNewOnRow($0)) }
+                uniqueKeysWithValues: requests.map { ($0.id, !isHiddenFolder && watermark.isNewOnRow($0)) }
             )
-            let models = snapshot.requests.map {
+            let models = requests.map {
                 ConversationDisplayModel(
                     conversation: $0,
                     now: now,
