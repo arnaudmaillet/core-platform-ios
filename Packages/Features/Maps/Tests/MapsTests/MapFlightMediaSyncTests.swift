@@ -11,10 +11,10 @@ import UIKit
 /// numbers live.
 @MainActor
 struct MapFlightMediaSyncTests {
-    /// 12 frames of 0.1 s cut from 1.0 s into the clip: a 1.2 s window.
+    /// 24 frames of 0.1 s cut from 1.0 s into the clip: a 2.4 s window.
     private func sheet(startTime: TimeInterval? = 1.0) -> AnimatedIconSheet {
         let image = UIGraphicsImageRenderer(size: CGSize(width: 40, height: 30)).image { _ in }
-        return AnimatedIconSheet(sheet: image, frameCount: 12, columns: 4, frameDuration: 0.1, startTime: startTime)
+        return AnimatedIconSheet(sheet: image, frameCount: 24, columns: 4, frameDuration: 0.1, startTime: startTime)
     }
 
     @Test("The page starts a lead ahead of the marker's frame, for what the flight and the first decode take")
@@ -25,8 +25,8 @@ struct MapFlightMediaSyncTests {
 
     @Test("Never past the sheet's end, so the video lands inside the window the card can line up on")
     func theStartStaysInsideTheWindow() throws {
-        let time = try #require(MapPinZoomSource.flightMediaTime(sheet: sheet(), displayedFrame: 11))
-        #expect(abs(time - (1.0 + 1.2 - MapPinZoomSource.flightMediaTailMargin)) < 1e-9)
+        let time = try #require(MapPinZoomSource.flightMediaTime(sheet: sheet(), displayedFrame: 20))
+        #expect(abs(time - (1.0 + 2.4 - MapPinZoomSource.flightMediaTailMargin)) < 1e-9)
     }
 
     @Test("A sheet with no clip start gives the page nothing: it starts at zero, as before")
@@ -40,6 +40,32 @@ struct MapFlightMediaSyncTests {
         #expect(PinCardView.phase(showing: 2, now: 10, currentPhase: 3, frameCount: 12) == 7)
         #expect(PinCardView.phase(showing: 5, now: 5, currentPhase: 4, frameCount: 12) == 4)
         #expect(PinCardView.phase(showing: 1, now: 0, currentPhase: 4, frameCount: 0) == 4)
+    }
+
+    @Test("A lined-up sheet plays to its last frame and holds it, instead of looping back under the video")
+    func theSheetHoldsItsEnd() throws {
+        // Video at 1.53 s: frame 5 of 24, so 18 frames (1.8 s) to the last one.
+        let plan = try #require(PinCardView.previewHold(videoTime: 1.53, sheet: sheet()))
+        #expect(plan.frame == 23)
+        #expect(abs(plan.after - 1.8) < 1e-9)
+    }
+
+    @Test("A video already past the window gets the sheet's last frame at once — the nearest moment it has")
+    func aVideoPastTheWindowHoldsTheLastFrameNow() throws {
+        let plan = try #require(PinCardView.previewHold(videoTime: 3.5, sheet: sheet()))
+        #expect(plan.frame == 23)
+        #expect(plan.after == 0)
+    }
+
+    @Test("Before the window, or without a clip start, there is nothing to hold")
+    func nothingToHold() {
+        #expect(PinCardView.previewHold(videoTime: 0.5, sheet: sheet()) == nil)
+        #expect(PinCardView.previewHold(videoTime: 1.5, sheet: sheet(startTime: nil)) == nil)
+    }
+
+    @Test("The latest start leaves the reveal room inside the window")
+    func theLatestStartLeavesRoom() {
+        #expect(MapPinZoomSource.flightMediaTailMargin >= 0.7)
     }
 
     @Test("The focus pull starts at the sheet's resolution on the video's surface")

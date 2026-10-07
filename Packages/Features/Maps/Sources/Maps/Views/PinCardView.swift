@@ -796,7 +796,12 @@ final class PinCardView: UIView {
         }
     }
 
-    private(set) var wornPreview: (art: AnimatedIconArt, phase: Int)?
+    private(set) var wornPreview: (art: AnimatedIconArt, phase: Int)? {
+        didSet { previewHoldGeneration += 1 }
+    }
+    /// Bumped whenever the preview changes, so a scheduled hold on the end of
+    /// the sheet (`syncPreviewToLiveMedia`) never lands on another picture.
+    private var previewHoldGeneration = 0
 
     /// The frame the preview sheet is showing right now; nil without one.
     var previewDisplayedFrame: Int? {
@@ -807,22 +812,59 @@ final class PinCardView: UIView {
     /// still playing, so the two pictures the reveal blends are the same moment
     /// of the clip (#625). The page started its video where the sheet was
     /// (`MapPinZoomSource.zoomFlightMediaTime`); this absorbs what the player's
-    /// first frame took. A no-op when the video is outside the sheet's window
-    /// or there is no sheet.
+    /// first frame took. A no-op without a sheet.
+    ///
+    /// ⚠️ AND IT STOPS AT THE SHEET'S END INSTEAD OF LOOPING. The sheet is a
+    /// 2 s window of the clip on a loop; the video plays straight on. A video
+    /// that crossed the window's end during the fade had the sheet jump back to
+    /// the window's START under it — two unrelated moments blended, filmed on
+    /// device as a ghost of the other shot sliding over the picture (the Duomo
+    /// clip, whose window ends right after a cut). Lined up, the sheet plays to
+    /// its last frame and holds it; a video already past the window gets that
+    /// last frame at once — the nearest moment the sheet has.
     func syncPreviewToLiveMedia() {
         guard face == .media, let preview = wornPreview, case .sheet(let sheet) = preview.art,
               let time = videoRenderView.displayedClipTime,
-              let target = sheet.frame(atClipTime: time),
-              let shown = previewSheetView.displayedFrame else { return }
-        let phase = Self.phase(showing: target, now: shown, currentPhase: preview.phase, frameCount: sheet.frameCount)
-        guard phase != preview.phase else { return }
-        wornPreview = (preview.art, phase)
-        previewSheetView.setArt(preview.art, phase: phase)
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
-            print(String(format: "[zoom-live] sheet synced video=%.3fs frame %d -> %d", time, shown, target))
+              let plan = Self.previewHold(videoTime: time, sheet: sheet) else { return }
+        if let target = sheet.frame(atClipTime: time), let shown = previewSheetView.displayedFrame {
+            let phase = Self.phase(showing: target, now: shown, currentPhase: preview.phase, frameCount: sheet.frameCount)
+            if phase != preview.phase {
+                wornPreview = (preview.art, phase)
+                previewSheetView.setArt(preview.art, phase: phase)
+            }
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+                print(String(format: "[zoom-live] sheet synced video=%.3fs frame %d -> %d, holds %d in %.2fs",
+                             time, shown, target, plan.frame, plan.after))
+            }
+            #endif
         }
-        #endif
+        holdPreview(on: plan.frame, after: plan.after)
+    }
+
+    /// Puts the preview sheet still on `frame` after `delay` — unless the
+    /// preview has changed by then.
+    private func holdPreview(on frame: Int, after delay: TimeInterval) {
+        let generation = previewHoldGeneration
+        let hold = { [weak self] in
+            guard let self, self.previewHoldGeneration == generation,
+                  let art = self.wornPreview?.art else { return }
+            self.previewSheetView.setArt(art, phase: frame, paused: true)
+        }
+        guard delay > 0 else { return hold() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: hold)
+    }
+
+    /// When the lined-up sheet must stop, and on which frame: its last, once
+    /// it has played up to it — `after` is the time until frame `last` is on
+    /// screen, which is inside that frame whatever part of the current one has
+    /// gone by. A video past the window holds the last frame now. Nil for a
+    /// video before the window, or a sheet with no clip start. Pure, for tests.
+    static func previewHold(videoTime: TimeInterval, sheet: AnimatedIconSheet) -> (frame: Int, after: TimeInterval)? {
+        guard let start = sheet.clipTime(ofFrame: 0), sheet.frameCount > 0, videoTime >= start else { return nil }
+        let last = sheet.frameCount - 1
+        guard let target = sheet.frame(atClipTime: videoTime) else { return (last, 0) }
+        return (last, TimeInterval(last - target) * sheet.frameDuration)
     }
 
     // MARK: - Focus pull (#625)

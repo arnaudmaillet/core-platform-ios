@@ -262,10 +262,11 @@ final class MapPinZoomSource: ZoomTransitionSource {
     /// sheet by as much (measured: frame 11 back to 0 at the reveal). Started
     /// here, the residue is a frame or two, which the reveal's sync absorbs.
     static let flightMediaLead: TimeInterval = 0.5
-    /// The latest start allowed, before the sheet's last frame: the video has
-    /// to be inside the sheet's window when the card lines its sheet up on it
-    /// (`PinCardView.syncPreviewToLiveMedia`).
-    static let flightMediaTailMargin: TimeInterval = 0.25
+    /// The latest start allowed, before the sheet's end: the video has to stay
+    /// inside the sheet's window for the whole reveal — its first frame, then
+    /// the fade (`PinCardView.syncPreviewToLiveMedia`), about 0.7 s on device.
+    /// It was 0.25 s, and a late start crossed the window's end mid-fade.
+    static let flightMediaTailMargin: TimeInterval = 0.8
 
     /// The rule above, as arithmetic — pinnable without a map.
     static func flightMediaTime(sheet: AnimatedIconSheet, displayedFrame: Int) -> TimeInterval? {
