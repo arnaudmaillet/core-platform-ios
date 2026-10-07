@@ -4,7 +4,9 @@ import UIKit
 @testable import Notifications
 
 private actor EmptyProvider: NotificationsProviding {
-    func loadNotifications(limit: Int32) async throws -> [NotificationItem] { [] }
+    func loadNotifications(limit: Int32, after pageToken: String?) async throws -> NotificationsPage {
+        NotificationsPage(items: [], nextPageToken: nil)
+    }
     func markAllRead() async throws {}
     func unreadCount() async throws -> Int { 0 }
 }

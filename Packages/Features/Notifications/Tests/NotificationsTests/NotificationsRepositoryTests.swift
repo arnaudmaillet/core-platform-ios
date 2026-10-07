@@ -78,6 +78,30 @@ struct NotificationsRepositoryTests {
         #expect(items.allSatisfy { $0.subjectPreview == nil })
     }
 
+    /// Page by page (#608): the first page sends the page size, the next the
+    /// token the last returned, until there is none — and the pages add up to
+    /// the whole list, in order, with nothing twice.
+    @Test func pagesFollowTheTokenToTheEnd() async throws {
+        let repository = makeRepository()
+
+        let whole = try await repository.loadNotifications(limit: 500, after: nil)
+        #expect(whole.nextPageToken == nil)
+        #expect(whole.items.count > 20) // the fixture needs more than one drawer page
+
+        var paged: [NotificationItem] = []
+        var token: String?
+        var pages = 0
+        repeat {
+            let page = try await repository.loadNotifications(limit: 20, after: token)
+            #expect(page.items.count <= 20)
+            paged += page.items
+            token = page.nextPageToken
+            pages += 1
+        } while token != nil && pages < 10
+        #expect(pages >= 2)
+        #expect(paged.map(\.id) == whole.items.map(\.id))
+    }
+
     @Test func markAllReadClearsTheCountAndTheList() async throws {
         let repository = makeRepository()
 
