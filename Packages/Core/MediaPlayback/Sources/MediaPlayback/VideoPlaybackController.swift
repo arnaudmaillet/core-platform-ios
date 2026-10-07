@@ -188,6 +188,10 @@ public final class VideoPlaybackController {
     /// heard for it — see `setAudibleSurface`.
     weak var audibleSurface: VideoRenderView?
     weak var surfaceHeardPlayer: AVPlayer?
+    /// Background Play (#483): the surface, and its player, kept playing
+    /// while the app is off screen. See `continueInBackground`.
+    weak var backgroundSurface: VideoRenderView?
+    weak var backgroundPlayer: AVPlayer?
 
     /// How many players may be bound to surfaces at once.
     ///

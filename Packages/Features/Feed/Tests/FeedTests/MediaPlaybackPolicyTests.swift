@@ -1,5 +1,6 @@
 import CoreStorage
 import Foundation
+import MediaPlayback
 import Testing
 @testable import Feed
 
@@ -32,6 +33,31 @@ struct MediaPlaybackPolicyTests {
         #expect(saver.peakBitRate(onCellular: true) == MediaPlaybackPreferences.dataSaverPeakBitRate)
         #expect(saver.peakBitRate(onCellular: false) == 0)
         #expect(MediaPlaybackPreferences().peakBitRate(onCellular: true) == 0)
+    }
+
+    /// Background Play (#483) is off unless turned on, and preferences saved
+    /// before it existed keep everything they held.
+    @Test func backgroundPlayIsOffByDefaultAndOldPreferencesStillRead() throws {
+        #expect(!MediaPlaybackPreferences().backgroundPlay)
+        let defaults = UserDefaults(suiteName: "playback-\(UUID().uuidString)")!
+        let saved = #"{"autoplay":"never","startsWithSound":false,"dataSaver":true}"#
+        defaults.set(Data(saved.utf8), forKey: "mediaPlaybackPreferences")
+        let store = MediaPlaybackPreferencesStore(defaults: defaults)
+        #expect(store.preferences == MediaPlaybackPreferences(autoplay: .never, startsWithSound: false, dataSaver: true))
+
+        store.update { $0.backgroundPlay = true }
+        #expect(MediaPlaybackPreferencesStore(defaults: defaults).preferences.backgroundPlay)
+        #expect(MediaPlaybackPreferencesStore(defaults: defaults).preferences.autoplay == .never)
+
+        let previousStore = MediaPlaybackPolicy.store
+        defer { MediaPlaybackPolicy.store = previousStore }
+        MediaPlaybackPolicy.store = store
+        #expect(MediaPlaybackPolicy.playsInBackground)
+    }
+
+    /// The Lock Screen's lines: the caption's first line and the author.
+    @Test func theLockScreenNamesTheClipAndItsAuthor() {
+        #expect(SnapFeedViewController.nowPlaying(for: nil) == NowPlayingInfo(title: "Video", artist: ""))
     }
 
     @Test func thePolicyReadsTheStoreAndTheNetwork() {

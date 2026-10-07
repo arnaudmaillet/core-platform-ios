@@ -12,11 +12,33 @@ public struct MediaPlaybackPreferences: Codable, Equatable, Sendable {
     public var startsWithSound: Bool
     /// On cellular: cap the stream quality and don't preload upcoming videos.
     public var dataSaver: Bool
+    /// Background Play (#483): a video being heard keeps playing when the app
+    /// leaves the screen, with controls on the Lock Screen. Off by default.
+    public var backgroundPlay: Bool
 
-    public init(autoplay: Autoplay = .always, startsWithSound: Bool = true, dataSaver: Bool = false) {
+    public init(
+        autoplay: Autoplay = .always, startsWithSound: Bool = true, dataSaver: Bool = false,
+        backgroundPlay: Bool = false
+    ) {
         self.autoplay = autoplay
         self.startsWithSound = startsWithSound
         self.dataSaver = dataSaver
+        self.backgroundPlay = backgroundPlay
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case autoplay, startsWithSound, dataSaver, backgroundPlay
+    }
+
+    /// Field by field, each with its default: preferences saved before a
+    /// field existed keep everything else they held.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let defaults = MediaPlaybackPreferences()
+        autoplay = try container.decodeIfPresent(Autoplay.self, forKey: .autoplay) ?? defaults.autoplay
+        startsWithSound = try container.decodeIfPresent(Bool.self, forKey: .startsWithSound) ?? defaults.startsWithSound
+        dataSaver = try container.decodeIfPresent(Bool.self, forKey: .dataSaver) ?? defaults.dataSaver
+        backgroundPlay = try container.decodeIfPresent(Bool.self, forKey: .backgroundPlay) ?? defaults.backgroundPlay
     }
 
     /// Whether a video may start on its own, given the network it is on.
