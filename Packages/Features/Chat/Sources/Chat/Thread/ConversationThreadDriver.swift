@@ -101,6 +101,7 @@ final class ConversationThreadDriver: ConversationThreadDriving {
     }
 
     func refresh() { viewModel.refresh() }
+    func loadOlder() { viewModel.loadOlder() }
     func send(_ text: String) { viewModel.send(text) }
     func beginReply(to messageID: String) { viewModel.beginReply(to: messageID) }
     func cancelReply() { viewModel.cancelReply() }

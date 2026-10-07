@@ -153,9 +153,16 @@ final class InboxCatalog {
                 // Both folders at once. Requests are best-effort: a failure
                 // there keeps the requests already shown rather than failing
                 // the whole inbox over its smaller half.
-                async let inbox = self.repository.loadInbox(.inbox, after: nil)
+                //
+                // ⚠️ The inbox is asked from THIS task, not an `async let`: a
+                // child task runs on the concurrent executor, so two reloads in
+                // a row asked in either order — and the superseded one could
+                // be served the newer state while the current one got the
+                // older (the flaky `aSupersededLoadNeverPublishesItsTruncatedResult`).
+                // From the main actor, reloads ask in the order they were made.
                 async let requests = try? self.repository.loadInbox(.requests, after: nil)
-                let (inboxPage, requestPage) = try await (inbox, requests)
+                let inboxPage = try await self.repository.loadInbox(.inbox, after: nil)
+                let requestPage = await requests
                 // A superseded load must not touch state. Cancellation is
                 // best-effort — the work may already have produced a partial
                 // result — so being current is checked after EVERY await

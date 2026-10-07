@@ -93,6 +93,14 @@ public final class ConversationViewModel {
     private var resolution: Task<ConversationID?, Never>?
 
     private var messages: [ChatMessage] = []
+    /// Where the next OLDER page of history starts; nil when there is none,
+    /// or before the newest page has answered (#600).
+    private var olderPageToken: String?
+    /// The older page being fetched — one at a time.
+    private var olderLoad: Task<Void, Never>?
+    /// Pages older than the newest are on screen: a reload merges its page
+    /// under them rather than cutting the transcript back to one page.
+    private var hasOlderPages = false
     private var phase: Phase = .loading { didSet { onPhaseChange?(phase) } }
     private var isSending = false
     private var load: Task<Void, Never>?
@@ -332,8 +340,17 @@ public final class ConversationViewModel {
         load = Task { [weak self] in
             guard let self else { return }
             do {
-                let loaded = try await self.repository.loadMessages(in: conversationID)
-                self.messages = loaded
+                let page = try await self.repository.loadMessagesPage(in: conversationID, before: nil)
+                let loaded = page.messages
+                if self.hasOlderPages {
+                    // Older pages are on screen: the fresh newest page goes
+                    // over the old one and everything older stays, so a
+                    // refresh never yanks the reader out of the past.
+                    self.messages = Self.merging(newestPage: loaded, over: self.messages)
+                } else {
+                    self.messages = loaded
+                    self.olderPageToken = page.olderPageToken
+                }
                 self.emit()
                 if let last = loaded.last {
                     await self.markRead(conversationID, upTo: last.id)
@@ -347,6 +364,46 @@ public final class ConversationViewModel {
             }
             self.load = nil
         }
+    }
+
+    /// The reader neared the top of the thread: the page of history before
+    /// the oldest message shown, if there is one and none is on its way
+    /// (#600). Prepended — the thread reads downward — and a failure is
+    /// retried on the next approach.
+    public func loadOlder() {
+        guard olderLoad == nil, let conversationID, let token = olderPageToken else { return }
+        olderLoad = Task { [weak self] in
+            await self?.prependOlder(in: conversationID, before: token)
+        }
+    }
+
+    private func prependOlder(in conversationID: ConversationID, before token: String) async {
+        let page = try? await repository.loadMessagesPage(in: conversationID, before: token)
+        // ⚠️ The slot frees BEFORE the rows render: a page that lands wholly
+        // on screen asks for the next one while it renders (#596).
+        olderLoad = nil
+        // A failure waits for the next approach; a reload that replaced the
+        // transcript meanwhile owns the cursor now.
+        guard let page, self.conversationID == conversationID, olderPageToken == token else { return }
+        olderPageToken = page.olderPageToken
+        // A message can sit on both sides of a page boundary.
+        let known = Set(messages.map(\.id))
+        let fresh = page.messages.filter { !known.contains($0.id) }
+        guard !fresh.isEmpty else { return }
+        hasOlderPages = true
+        messages = fresh + messages
+        emit()
+    }
+
+    /// A reloaded newest page over a transcript that runs further back: the
+    /// page replaces every message at least as recent as its oldest, and every
+    /// older message stays. History lists newest first, so a message missing
+    /// from the fresh page either slid back (older: kept) or went away (newer:
+    /// dropped). Pure, for tests.
+    static func merging(newestPage: [ChatMessage], over shown: [ChatMessage]) -> [ChatMessage] {
+        guard let oldest = newestPage.map(\.createdAt).min() else { return shown }
+        let fresh = Set(newestPage.map(\.id))
+        return shown.filter { !fresh.contains($0.id) && $0.createdAt < oldest } + newestPage
     }
 
     /// Tapping the header identity opens the correspondent's profile —
