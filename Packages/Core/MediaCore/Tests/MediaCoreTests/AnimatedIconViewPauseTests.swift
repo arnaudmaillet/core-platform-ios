@@ -54,6 +54,49 @@ struct AnimatedIconViewPauseTests {
         #expect(resumed == held || resumed == (held + 1) % frames, "from \(held), got \(resumed)")
     }
 
+    /// Finishing the loop (#559) plays out the loop on screen, then rests on
+    /// the frame the art was dressed on — never mid-gesture.
+    @Test func finishingTheLoopRestsOnTheDressedFrame() async throws {
+        AnimatedIconView.forcedPolicy = .full
+        defer { AnimatedIconView.forcedPolicy = nil }
+        let view = AnimatedIconView(frame: CGRect(x: 0, y: 0, width: 40, height: 40))
+        view.setArt(art(frames: 8, step: 0.05), phase: 2) // a 0.4 s loop
+        try await Task.sleep(for: .milliseconds(120))
+        var finished = false
+        view.finishLoop { finished = true }
+        #expect(view.isFinishingLoop)
+        #expect(!view.isPaused, "still playing out the loop")
+        for _ in 0..<40 where !finished { try await Task.sleep(for: .milliseconds(25)) }
+        #expect(finished)
+        #expect(view.isPaused)
+        #expect(view.displayedFrame == 2, "rests on the frame it was dressed on")
+    }
+
+    /// Asked to play again before the loop ends, it just carries on.
+    @Test func cancellingTheFinishKeepsItPlaying() async throws {
+        AnimatedIconView.forcedPolicy = .full
+        defer { AnimatedIconView.forcedPolicy = nil }
+        let view = AnimatedIconView(frame: CGRect(x: 0, y: 0, width: 40, height: 40))
+        view.setArt(art(frames: 8, step: 0.05), phase: 0)
+        var finished = false
+        view.finishLoop { finished = true }
+        view.cancelFinish()
+        try await Task.sleep(for: .milliseconds(600))
+        #expect(!finished)
+        #expect(!view.isPaused)
+        #expect(view.isAnimating, "no restart, no hold")
+    }
+
+    /// Nothing playing: the finish completes at once.
+    @Test func aPausedViewFinishesAtOnce() {
+        let view = AnimatedIconView(frame: CGRect(x: 0, y: 0, width: 40, height: 40))
+        view.setArt(art(frames: 4, step: 0.1), phase: 1, paused: true)
+        var finished = false
+        view.finishLoop { finished = true }
+        #expect(finished)
+        #expect(view.displayedFrame == 1)
+    }
+
     /// A reinstall (foreground, policy change) keeps a paused view paused.
     @Test func reinstallKeepsAPausedViewPaused() {
         let view = AnimatedIconView(frame: CGRect(x: 0, y: 0, width: 40, height: 40))

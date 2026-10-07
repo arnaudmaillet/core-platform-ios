@@ -49,24 +49,27 @@ public final class EmoteScrollPlayback {
     }
 
     public func didEndDragging(willDecelerate decelerate: Bool) {
-        if !decelerate { setScrolling(false) }
+        if !decelerate { setScrolling(false, finishingLoops: true) }
     }
 
     /// The glide ended, or a scroll animation set in code did.
     public func didEndScrolling() {
-        setScrolling(false)
+        setScrolling(false, finishingLoops: true)
     }
 
+    /// A hard stop (leaving the window, new emotes): every tile holds where
+    /// it is, now.
     public func stop() {
-        setScrolling(false)
+        setScrolling(false, finishingLoops: false)
     }
 
-    /// Plays or stills every displayed tile.
-    private func setScrolling(_ scrolling: Bool) {
+    /// Plays or stills every displayed tile. A scroll that ENDS lets each
+    /// emote finish its loop and rest on its poster frame (#559).
+    private func setScrolling(_ scrolling: Bool, finishingLoops: Bool = false) {
         guard scrolling != isScrolling else { return }
         isScrolling = scrolling
         for tile in displayedTiles() {
-            tile.setPlaying(scrolling)
+            tile.setPlaying(scrolling, finishingLoop: finishingLoops)
         }
         settleWatch?.cancel()
         settleWatch = nil
@@ -83,7 +86,7 @@ public final class EmoteScrollPlayback {
                     return
                 }
                 if !grid.isTracking, !grid.isDragging, !grid.isDecelerating {
-                    self.setScrolling(false)
+                    self.setScrolling(false, finishingLoops: true)
                 }
             }
         }

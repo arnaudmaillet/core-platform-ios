@@ -159,6 +159,7 @@ public final class AnimatedIconView: UIView {
     /// `paused` dresses it STILL on frame `phase`: `resume()` plays on from
     /// that frame.
     public func setArt(_ art: AnimatedIconArt?, phase: Int = 0, paused: Bool = false) {
+        cancelFinish()
         self.art = art
         self.phase = phase
         clockShift = 0
@@ -225,8 +226,63 @@ public final class AnimatedIconView: UIView {
     /// animations and poses the MODEL on the frame — the one thing every
     /// renderer agrees on, and a paused icon costs nothing at all.
     public func pause() {
+        cancelFinish()
         guard !isPaused, let frame = displayedFrame else { return }
         hold(frame)
+    }
+
+    // MARK: - Finishing the loop
+
+    /// Bumped by every finish asked for and every cancel, so a stale
+    /// deadline never holds a frame.
+    private var finishGeneration = 0
+    /// Whether the view is playing out its current loop before holding.
+    public private(set) var isFinishingLoop = false
+
+    /// Lets the loop on screen run to its end, then holds the RESTING frame —
+    /// the one the art was dressed on (`phase`), which is where every loop
+    /// starts again — and calls `completion` (#559). An emote never stops
+    /// posed mid-gesture.
+    ///
+    /// `cancelFinish()`, `pause()` or new art before the end drop the finish:
+    /// the loop simply plays on, with no restart and no jump. Nothing playing
+    /// (paused, still art, motion off) completes at once.
+    ///
+    /// The deadline comes from the same clock `displayedFrame` reads, keyed
+    /// the same way (`keying`), so a Low Power decimated loop ends where its
+    /// last key does.
+    public func finishLoop(completion: @escaping @MainActor () -> Void) {
+        guard let art, art.frameCount > 1, isAnimating, !isPaused else {
+            completion()
+            return
+        }
+        let (_, keys, keyDuration) = Self.keying(art)
+        let loop = keyDuration * CFTimeInterval(keys)
+        var elapsed = (sheetView.layer.convertTime(CACurrentMediaTime(), from: nil) - Self.epoch + clockShift)
+            .truncatingRemainder(dividingBy: loop)
+        if elapsed < 0 { elapsed += loop }
+        let remaining = loop - elapsed
+        finishGeneration += 1
+        let generation = finishGeneration
+        isFinishingLoop = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + remaining) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.finishGeneration == generation, self.isFinishingLoop,
+                      let art = self.art else { return }
+                self.isFinishingLoop = false
+                let count = art.frameCount
+                self.hold(((self.phase % count) + count) % count)
+                completion()
+            }
+        }
+    }
+
+    /// Keeps playing: a finish asked for is dropped, and the loop goes on
+    /// from where it is.
+    public func cancelFinish() {
+        guard isFinishingLoop else { return }
+        isFinishingLoop = false
+        finishGeneration += 1
     }
 
     /// Plays on from the held frame. The animations go back on the shared
