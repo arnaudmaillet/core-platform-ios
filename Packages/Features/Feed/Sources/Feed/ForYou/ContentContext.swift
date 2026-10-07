@@ -15,8 +15,8 @@ import PostGrid
 /// looking for its words in the caption, which is a keyword search wearing a
 /// product's clothes: it will miss a gaming post that never says "game" and
 /// will claim a work post that mentions one. It is quarantined here, in one
-/// pure file, exactly like `MessageRequestPolicy` — see `dev/BACKEND_GAPS.md`
-/// §16 for what the server would need to answer this properly.
+/// pure file — see `dev/BACKEND_GAPS.md` §16 for what the server would need
+/// to answer this properly.
 ///
 /// **`.all` is its own case rather than a mood that happens to match
 /// everything.** An earlier cut made Entertainment the default AND the

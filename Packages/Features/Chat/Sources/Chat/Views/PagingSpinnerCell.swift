@@ -35,3 +35,38 @@ final class PagingSpinnerCell: UICollectionViewListCell {
         spinner.stopAnimating()
     }
 }
+
+/// How close to the end of an inbox list a row has to be for its coming on
+/// screen to ask for the next page (#593).
+enum InboxPaging {
+    static let nearEndRowCount = 5
+}
+
+/// The same quiet spinner as a table's footer: the inbox lists are tables, and
+/// it sits under their last row while another page is there to load (#593).
+///
+/// It turns only while the end of the list is in reach — the owner starts it
+/// when a row near the end comes on screen and stops it when the list changes
+/// under it. An endless spinner under rows the viewer is not looking at still
+/// redraws the screen every frame (#580).
+final class PagingSpinnerFooterView: UIView {
+    private let spinner = UIActivityIndicatorView(style: .medium)
+
+    init() {
+        super.init(frame: CGRect(x: 0, y: 0, width: 0, height: 56))
+        isUserInteractionEnabled = false
+        spinner.hidesWhenStopped = false
+        spinner.color = .tertiaryLabel
+        spinner.constrain(in: self) { parent in
+            spinner.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
+            spinner.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
+        }
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    func setSpinning(_ spinning: Bool) {
+        if spinning { spinner.startAnimating() } else { spinner.stopAnimating() }
+    }
+}

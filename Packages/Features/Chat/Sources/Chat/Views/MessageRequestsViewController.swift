@@ -25,6 +25,8 @@ final class MessageRequestsViewController: UIViewController {
     }()
     private let skeletonView = ConversationListSkeletonView()
     private let statusView = InboxStatusView()
+    /// Under the last row while another page is there to load (#593).
+    private let pagingFooter = PagingSpinnerFooterView()
 
     private var dataSource: SectionedConversationDataSource!
     private var modelsByID: [ConversationID: ConversationDisplayModel] = [:]
@@ -76,6 +78,8 @@ final class MessageRequestsViewController: UIViewController {
         configureStatusViews()
 
         viewModel.onPhaseChange = { [weak self] phase in self?.render(phase) }
+        viewModel.onHasMoreChange = { [weak self] _ in self?.updatePagingFooter() }
+        updatePagingFooter()
         // Whatever the view model holds now — the catalog may have answered
         // before this view was asked for.
         render(viewModel.phase)
@@ -170,6 +174,9 @@ final class MessageRequestsViewController: UIViewController {
             // its animation after the next transition.
             dataSource.apply(snapshot, animatingDifferences: hasRenderedContent && view.window != nil)
             hasRenderedContent = true
+            // The list moved under the spinner: it waits for the end to
+            // come back in reach before it turns again.
+            pagingFooter.setSpinning(false)
             revealContent()
         case .empty:
             skeletonView.isHidden = true
@@ -222,9 +229,24 @@ final class MessageRequestsViewController: UIViewController {
         }
     }
     #endif
+
+    /// The spinner hangs under the last row only while there is more to load.
+    private func updatePagingFooter() {
+        pagingFooter.setSpinning(false)
+        tableView.tableFooterView = viewModel.hasMore ? pagingFooter : nil
+    }
 }
 
 extension MessageRequestsViewController: UITableViewDelegate {
+    /// Paging: one of the last rows coming on screen asks for the next page
+    /// (#593), early enough that it usually lands before the end does.
+    func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) {
+        guard viewModel.hasMore, let id = dataSource.itemIdentifier(for: indexPath),
+              dataSource.snapshot().itemIdentifiers.suffix(InboxPaging.nearEndRowCount).contains(id) else { return }
+        pagingFooter.setSpinning(true)
+        viewModel.loadMore()
+    }
+
     // MARK: - Section headers
 
     /// The glass pill, and the tap that scrolls to the section it names.

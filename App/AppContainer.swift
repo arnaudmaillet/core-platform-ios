@@ -1094,13 +1094,29 @@ final class AppContainer {
         chatClient: Chat_V1_ChatServiceClient(client: authenticatedRPCClient),
         profileClient: Profile_V1_ProfileServiceClient(client: authenticatedRPCClient),
         authSession: sessionManager,
-        viewer: viewerSession
+        viewer: viewerSession,
+        inboxPageSize: Self.inboxPageSize
     )
 
-    /// Answers both social questions the inbox asks — "do I follow this peer"
-    /// (the Requests partition) and "who should I follow next" (Suggestions) —
-    /// off the viewer identity `chatRepository` has already resolved and
-    /// cached, so neither surface pays for a second lookup.
+    /// Conversations per inbox page (#593).
+    ///
+    /// `-inbox-page-size <n>` (DEBUG): smaller pages, so the mock's sixteen
+    /// conversations and five requests page on the simulator at all — at the
+    /// real size they fit in one.
+    private static var inboxPageSize: Int32 {
+        #if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        if let index = arguments.firstIndex(of: "-inbox-page-size"), index + 1 < arguments.count,
+           let size = Int32(arguments[index + 1]), size > 0 {
+            return size
+        }
+        #endif
+        return 20
+    }
+
+    /// Answers "who should I follow next" (Suggestions) off the viewer
+    /// identity `chatRepository` has already resolved and cached, so the
+    /// surface pays for no second lookup.
     private lazy var socialConnectionsRepository = SocialConnectionsRepository(
         socialGraphClient: SocialGraph_V1_SocialGraphServiceClient(client: authenticatedRPCClient),
         profileClient: Profile_V1_ProfileServiceClient(client: authenticatedRPCClient),
