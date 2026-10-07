@@ -526,6 +526,12 @@ final class SearchResultsViewController: UIViewController {
         // routes with the identity stub the row already holds, so the profile
         // opens on a name and a face rather than on a spinner.
         peoplePage.onSelect = { [weak self] id in self?.viewModel.didSelectResult(id) }
+        // Each tab's near-end asks for ITS answer's next page (#612). Media
+        // reads on until a page brings a picture — a page of text posts adds
+        // no tile to it.
+        postsPage.onNearEnd = { [weak self] in self?.viewModel.loadMorePosts() }
+        mediaPage.onNearEnd = { [weak self] in self?.viewModel.loadMorePosts(untilMedia: true) }
+        peoplePage.onNearEnd = { [weak self] in self?.viewModel.loadMorePeople() }
 
         for page in [postsPage.viewController, mediaPage.viewController, peoplePage] {
             addChild(page)
@@ -982,6 +988,11 @@ final class SearchResultsViewController: UIViewController {
             guard let self else { return }
             self.showPosts(self.postState(for: self.viewModel.currentPhase))
         }
+        viewModel.onPostsPagingChange = { [weak self] paging in
+            self?.postsPage.setPaging(paging)
+            self?.mediaPage.setPaging(paging)
+        }
+        viewModel.onPeoplePagingChange = { [weak self] paging in self?.peoplePage.setPaging(paging) }
     }
 
     /// Exactly ONE surface plays: the tab that is showing, and only while this
