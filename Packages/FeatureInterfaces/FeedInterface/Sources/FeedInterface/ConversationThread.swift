@@ -106,6 +106,9 @@ public protocol ConversationThreadDriving: AnyObject {
     /// while there is no conversation to pin (a draft whose conversation has
     /// not resolved yet). Fired on every change, wherever it was made.
     var onPinnedChange: ((Bool?) -> Void)? { get set }
+    /// An older page of history is on its way (true) or has answered (false):
+    /// the screen shows it at the top of the thread (#600).
+    var onLoadingOlderChange: ((Bool) -> Void)? { get set }
 
     func viewDidLoad()
     func refresh()

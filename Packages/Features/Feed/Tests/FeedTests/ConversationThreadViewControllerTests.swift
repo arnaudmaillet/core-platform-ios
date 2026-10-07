@@ -19,6 +19,7 @@ struct ConversationThreadViewControllerTests {
         var onReplyStateChange: ((ConversationThreadReplyDraft?) -> Void)?
         var onActionNotice: ((String, String) -> Void)?
         var onPinnedChange: ((Bool?) -> Void)?
+        var onLoadingOlderChange: ((Bool) -> Void)?
 
         var initial: ConversationThreadPhase
         private(set) var sent: [String] = []
@@ -111,6 +112,23 @@ struct ConversationThreadViewControllerTests {
         #expect(stream.numberOfItems(inSection: 0) == 2)
         #expect(stream.numberOfItems(inSection: 1) == 2)
         #expect(stream.cellForItem(at: IndexPath(item: 0, section: 0)) is ThreadRowCell)
+    }
+
+    /// Older history on its way shows at the top of the thread, and only
+    /// while it is on its way (#600); a peek, which pages nothing, never shows it.
+    @Test func olderHistoryOnItsWayShowsAtTheTop() {
+        let (screen, driver, _, window) = makeScreen()
+        #expect(!screen.isShowingOlderSpinner)
+
+        driver.onLoadingOlderChange?(true)
+        #expect(screen.isShowingOlderSpinner)
+        driver.onLoadingOlderChange?(false)
+        #expect(!screen.isShowingOlderSpinner)
+
+        let (peek, peekDriver, _, peekWindow) = makeScreen(mode: .preview)
+        peekDriver.onLoadingOlderChange?(true)
+        #expect(!peek.isShowingOlderSpinner)
+        _ = (window, peekWindow)
     }
 
     /// ⚠️ The system's own edge effect would draw under the nav bar — a fade

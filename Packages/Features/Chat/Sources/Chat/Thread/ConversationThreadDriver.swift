@@ -17,6 +17,7 @@ final class ConversationThreadDriver: ConversationThreadDriving {
     var onReplyStateChange: ((ConversationThreadReplyDraft?) -> Void)?
     var onActionNotice: ((String, String) -> Void)?
     var onPinnedChange: ((Bool?) -> Void)?
+    var onLoadingOlderChange: ((Bool) -> Void)?
 
     /// What the viewer's own rows are signed with.
     ///
@@ -68,6 +69,7 @@ final class ConversationThreadDriver: ConversationThreadDriving {
             })
         }
         viewModel.onActionNotice = { [weak self] title, message in self?.onActionNotice?(title, message) }
+        viewModel.onLoadingOlderChange = { [weak self] loading in self?.onLoadingOlderChange?(loading) }
         // Every catalog change re-reads this conversation's pin — a toggle
         // from here or from the inbox's own menu, and a draft resolving into
         // a conversation (the builder refreshes the catalog when it does).

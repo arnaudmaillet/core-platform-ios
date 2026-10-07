@@ -72,6 +72,9 @@ public final class ConversationViewModel {
     /// A draft's conversation now exists. The inbox listens so a thread the
     /// viewer started from the compose picker appears in the list behind them.
     public var onDidResolveConversation: ((ConversationID) -> Void)?
+    /// An older page of history is on its way (true) or has answered (false)
+    /// — the thread says so at its top (#600).
+    public var onLoadingOlderChange: ((Bool) -> Void)?
 
     private let target: ConversationTarget
     private let repository: any ChatProviding
@@ -375,6 +378,7 @@ public final class ConversationViewModel {
         olderLoad = Task { [weak self] in
             await self?.prependOlder(in: conversationID, before: token)
         }
+        onLoadingOlderChange?(true)
     }
 
     private func prependOlder(in conversationID: ConversationID, before token: String) async {
@@ -382,6 +386,9 @@ public final class ConversationViewModel {
         // ⚠️ The slot frees BEFORE the rows render: a page that lands wholly
         // on screen asks for the next one while it renders (#596).
         olderLoad = nil
+        // Said before the rows land, so the indicator is gone the moment they
+        // are there to read.
+        onLoadingOlderChange?(false)
         // A failure waits for the next approach; a reload that replaced the
         // transcript meanwhile owns the cursor now.
         guard let page, self.conversationID == conversationID, olderPageToken == token else { return }

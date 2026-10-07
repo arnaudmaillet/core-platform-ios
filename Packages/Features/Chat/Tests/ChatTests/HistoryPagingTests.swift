@@ -96,6 +96,24 @@ struct HistoryPagingTests {
         #expect(await provider.requests == [nil, "p2"])
     }
 
+    /// The top of the thread says an older page is on its way, and stops
+    /// saying it as soon as the page has answered — landed or failed.
+    @Test func loadingOlderIsAnnouncedAroundEachPage() async {
+        let provider = PagedHistory([
+            nil: MessagePage(messages: [message("b", at: 20)], olderPageToken: "p2"),
+            "p2": MessagePage(messages: [message("a", at: 10)], olderPageToken: nil),
+        ])
+        let (viewModel, shown) = await open(provider)
+        var loading: [Bool] = []
+        viewModel.onLoadingOlderChange = { loading.append($0) }
+
+        viewModel.loadOlder()
+        await settle { shown.ids.count == 2 }
+        viewModel.loadOlder() // nothing older: nothing announced
+
+        #expect(loading == [true, false])
+    }
+
     @Test func aFailedPageKeepsTheTranscriptAndIsRetriedOnTheNextApproach() async {
         let provider = PagedHistory([
             nil: MessagePage(messages: [message("b", at: 20)], olderPageToken: "p2"),
