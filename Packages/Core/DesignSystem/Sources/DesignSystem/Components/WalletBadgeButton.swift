@@ -137,11 +137,13 @@ public final class WalletBadgeButton: UIButton {
         layer.addSublayer(ringLayer)
 
         update(balance: 0, claimAvailable: false)
-        // Power Saving posts this too (`PowerSavingPreference`).
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(motionPreferenceChanged),
-            name: UIAccessibility.reduceMotionStatusDidChangeNotification, object: nil
-        )
+        // Power Saving posts the first too (`PowerSavingPreference`); the
+        // second is the app resting or waking (`IdleCalm`, #580).
+        for name in [UIAccessibility.reduceMotionStatusDidChangeNotification, .decorativeMotionDidChange] {
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(motionPreferenceChanged), name: name, object: nil
+            )
+        }
     }
 
     @available(*, unavailable)
@@ -288,14 +290,14 @@ public final class WalletBadgeButton: UIButton {
     private static let pulseKey = "wallet.pulse"
 
     /// Whether the breath stands still — Reduce Motion, the app's or iOS's,
-    /// and Power Saving. Swappable for tests.
-    var reducesMotion: () -> Bool = { MotionPreference.reducesMotion }
+    /// Power Saving, and an app at rest (`IdleCalm`). Swappable for tests.
+    var reducesMotion: () -> Bool = { MotionPreference.stillsDecoration }
     /// Test seams: the breath and the glow as they are on screen.
     var isBreathing: Bool { coinView.layer.animation(forKey: Self.pulseKey) != nil }
     var isGlowing: Bool { coinView.layer.shadowOpacity > 0 }
 
-    /// Reduce Motion or Power Saving changed: the breath follows, the glow
-    /// stays.
+    /// Reduce Motion, Power Saving or the app's rest changed: the breath
+    /// follows, the glow stays.
     @objc private func motionPreferenceChanged() {
         guard wantsPulse else { return }
         coinView.layer.removeAnimation(forKey: Self.pulseKey)

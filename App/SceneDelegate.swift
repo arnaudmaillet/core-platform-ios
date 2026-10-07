@@ -26,6 +26,16 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         // Taps in a bar's area never reach the content under it; pans still
         // scroll it (#562).
         window.addGestureRecognizer(BarTapShield())
+        // Endless decoration rests once nobody has touched the app for a
+        // while, and wakes on the next touch (#580). `-idle-calm-off` keeps it
+        // moving for QA that watches an animation without touching.
+        var restsWhenIdle = true
+        #if DEBUG
+        restsWhenIdle = !ProcessInfo.processInfo.arguments.contains("-idle-calm-off")
+        #endif
+        if restsWhenIdle {
+            IdleCalmMonitor.shared.install(on: window)
+        }
         self.window = window
         // Settings → App and Device → Display: light, dark or following iOS.
         // Applied before the first frame so the app never flashes the other

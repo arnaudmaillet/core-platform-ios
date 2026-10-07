@@ -4640,15 +4640,26 @@ final class SnapFeedViewController: UIViewController {
     /// The sound of a page with no clip — a photograph, a collection of
     /// them, a text post — played while that page owns the screen, under the
     /// same rules as a clip's (see `FeedSongPlayer`).
+    ///
+    /// ⚠️ **NOTHING UNDER POWER SAVING (#580).** A clip under Power Saving
+    /// does not start on its own; a photograph's song is the same thing
+    /// without a picture, so it is silent too — the viewer's decision.
     private func refreshSong() {
         var song: URL?
-        if FeedSound.isOn, isOnScreen, isForeground, !isAudioYielded,
+        if Self.pageSongPlays(soundOn: FeedSound.isOn, powerSaving: PowerSavingPreference.isOn),
+           isOnScreen, isForeground, !isAudioYielded,
            let owner = playbackOwner, orderedIDs.indices.contains(owner),
            let model = modelsByID[orderedIDs[owner]],
            !(model.mediaKind == .video || model.extraMedia.contains { $0.videoURL != nil }) {
             song = sound(for: model)?.previewURL
         }
         songPlayer.play(song)
+    }
+
+    /// Whether a page's song may be heard at all: the feed's sound on, and
+    /// Power Saving off (#580).
+    static func pageSongPlays(soundOn: Bool, powerSaving: Bool) -> Bool {
+        soundOn && !powerSaving
     }
 
     /// Turns the attribution's cover while the page's media plays — a clip

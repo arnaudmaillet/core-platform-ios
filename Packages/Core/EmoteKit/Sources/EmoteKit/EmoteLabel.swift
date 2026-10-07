@@ -471,6 +471,7 @@ open class EmoteLabel: UILabel {
         for name in [
             UIAccessibility.reduceMotionStatusDidChangeNotification,
             Notification.Name.emoteAnimationPreferenceDidChange,
+            Notification.Name.decorativeMotionDidChange,
             Notification.Name.NSProcessInfoPowerStateDidChange,
             ProcessInfo.thermalStateDidChangeNotification
         ] {
