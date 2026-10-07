@@ -67,6 +67,8 @@ final class InboxCatalog {
         var requests: [Conversation] = []
         var pinned: Set<ConversationID> = []
         var muted: Set<ConversationID> = []
+        /// The folders with another page to load (#593).
+        var hasMore: Set<InboxFolder> = []
     }
 
     /// Cancels the registration when it is released — surfaces hold one for
@@ -88,6 +90,17 @@ final class InboxCatalog {
     private var observers: [UUID: (Snapshot) -> Void] = [:]
     private var load: Task<Void, Never>?
     private var loadGeneration = 0
+
+    /// Where each folder's next page starts; absent when it has no more.
+    private var nextTokens: [InboxFolder: String] = [:]
+    /// The page each folder is fetching — one at a time per folder.
+    private var pageLoads: [InboxFolder: Task<Void, Never>] = [:]
+    /// Folders showing pages beyond the first: a reload merges its first
+    /// page over them rather than cutting the list back to one page.
+    private var hasLaterPages: Set<InboxFolder> = []
+    /// A page filtered down to nothing still carries a token; this many in a
+    /// row are walked through before waiting for the next approach.
+    static let maxEmptyPagesInARow = 5
 
     private var pinned: Set<ConversationID> = []
     private var muted: Set<ConversationID> = []
@@ -154,8 +167,8 @@ final class InboxCatalog {
                 // Both folders land TOGETHER: accepting moves a row from one
                 // to the other, so one assigned before the other could show a
                 // conversation in both lists, or in neither.
-                self.conversations = inboxPage.conversations
-                if let requestPage { self.requestRows = requestPage.conversations }
+                self.adopt(firstPage: inboxPage, of: .inbox)
+                if let requestPage { self.adopt(firstPage: requestPage, of: .requests) }
                 let loaded = self.conversations + self.requestRows
                 // Retire the bridge for every conversation the server now
                 // agrees is read; keep it only where it is still catching up.
@@ -186,6 +199,10 @@ final class InboxCatalog {
         load?.cancel()
         load = nil
         loadGeneration += 1
+        for task in pageLoads.values { task.cancel() }
+        pageLoads = [:]
+        nextTokens = [:]
+        hasLaterPages = []
         conversations = []
         requestRows = []
         pinned = []
@@ -203,6 +220,88 @@ final class InboxCatalog {
     func refresh() {
         guard load == nil else { return }
         reload()
+    }
+
+    // MARK: - Paging
+
+    /// A first page landing: the folder's rows, or — with later pages on
+    /// screen — merged over them, the cursor past the last page kept.
+    private func adopt(firstPage page: InboxPage, of folder: InboxFolder) {
+        if hasLaterPages.contains(folder) {
+            setRows(Self.merging(firstPage: page.conversations, over: rows(of: folder)), of: folder)
+        } else {
+            setRows(page.conversations, of: folder)
+            nextTokens[folder] = page.nextPageToken
+        }
+    }
+
+    /// The viewer neared the end of `folder`'s list: its next page, if it
+    /// has one and none is already on the way. Appended, never reordering
+    /// what is shown; a failure is retried on the next approach.
+    func loadMore(_ folder: InboxFolder) {
+        guard pageLoads[folder] == nil, let token = nextTokens[folder] else { return }
+        let generation = loadGeneration
+        pageLoads[folder] = Task { [weak self] in
+            await self?.appendPages(of: folder, after: token, generation: generation)
+        }
+    }
+
+    private func appendPages(of folder: InboxFolder, after token: String, generation: Int) async {
+        var token = token
+        var fresh: [Conversation] = []
+        for _ in 0..<Self.maxEmptyPagesInARow {
+            guard let page = try? await repository.loadInbox(folder, after: token),
+                  // A reset forgot the list, or a reload replaced it.
+                  loadGeneration == generation, nextTokens[folder] == token
+            else {
+                // A reset already emptied the slot, and may have refilled it.
+                if loadGeneration == generation { pageLoads[folder] = nil }
+                return
+            }
+            nextTokens[folder] = page.nextPageToken
+            // A conversation can sit on both sides of a page boundary, or
+            // have moved folders since the first page.
+            let known = Set((conversations + requestRows).map(\.id))
+            fresh = page.conversations.filter { !known.contains($0.id) }
+            // Filtered down to nothing: no new row reaches the end to ask
+            // again, so the next page is asked now.
+            guard fresh.isEmpty, let next = page.nextPageToken else { break }
+            token = next
+        }
+        // ⚠️ THE SLOT FREES BEFORE THE ROWS RENDER. They render inside
+        // `emit()`, and a page that lands wholly on screen asks for the next
+        // one right there, from the rows' `willDisplay` — freed afterwards, that
+        // ask found the slot taken and was dropped, and with every row already
+        // displayed nothing ever asked again: the list stopped short under a
+        // spinning footer.
+        pageLoads[folder] = nil
+        if !fresh.isEmpty {
+            hasLaterPages.insert(folder)
+            setRows(rows(of: folder) + fresh, of: folder)
+            directory?.remember(fresh)
+        }
+        emit()
+    }
+
+    private func rows(of folder: InboxFolder) -> [Conversation] {
+        folder == .inbox ? conversations : requestRows
+    }
+
+    private func setRows(_ rows: [Conversation], of folder: InboxFolder) {
+        if folder == .inbox { conversations = rows } else { requestRows = rows }
+    }
+
+    /// A refreshed first page over a list that runs past it: the page
+    /// replaces every row at least as recent as its oldest, and every older
+    /// row stays where it is. The server lists newest activity first, so a
+    /// row missing from the fresh page either slid down (older: kept) or went
+    /// away (newer: dropped). Pure, for tests.
+    static func merging(firstPage: [Conversation], over shown: [Conversation]) -> [Conversation] {
+        let fresh = Set(firstPage.map(\.id))
+        // No dated row on the fresh page says nothing about where it ends:
+        // everything below stays.
+        let oldest = firstPage.compactMap(\.lastActivityAt).min() ?? .distantFuture
+        return firstPage + shown.filter { !fresh.contains($0.id) && ($0.lastActivityAt ?? .distantPast) < oldest }
     }
 
     // MARK: - Correspondents
@@ -294,8 +393,10 @@ final class InboxCatalog {
             conversations.append(requestRows.remove(at: index))
         }
         guard let index = conversations.firstIndex(where: { $0.id == id }) else { return }
-        conversations[index] = conversations[index].sending(message)
-        conversations.sort(by: Conversation.isOrderedBefore)
+        // To the top, as the next load will list it — and ONLY it moves: the
+        // rows keep the server's order, which a full re-sort would not (a
+        // conversation with no message sorts last on the client).
+        conversations.insert(conversations.remove(at: index).sending(message), at: 0)
         emit()
     }
 
@@ -350,6 +451,7 @@ final class InboxCatalog {
         )
         snapshot.pinned = pinned
         snapshot.muted = muted
+        snapshot.hasMore = Set(nextTokens.keys)
         for observer in observers.values { observer(snapshot) }
     }
 }

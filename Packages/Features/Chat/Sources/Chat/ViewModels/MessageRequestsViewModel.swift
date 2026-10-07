@@ -66,6 +66,18 @@ public final class MessageRequestsViewModel {
         )
     }
 
+    /// Another page is there to load (#593): the list wears its spinner at
+    /// the bottom until it lands.
+    public private(set) var hasMore = false {
+        didSet { if hasMore != oldValue { onHasMoreChange?(hasMore) } }
+    }
+    public var onHasMoreChange: ((Bool) -> Void)?
+
+    /// The viewer neared the end of the list.
+    public func loadMore() {
+        catalog.loadMore(.requests)
+    }
+
     public func refresh() {
         catalog.refresh()
     }
@@ -115,6 +127,7 @@ public final class MessageRequestsViewModel {
     }
 
     private func project(_ snapshot: InboxCatalog.Snapshot) {
+        hasMore = snapshot.hasMore.contains(.requests)
         publishNewCount(watermark.newCount(in: snapshot.requests))
         switch snapshot.phase {
         case .loading:
