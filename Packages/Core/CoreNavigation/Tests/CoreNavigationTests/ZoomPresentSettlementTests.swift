@@ -1,3 +1,4 @@
+import QuartzCore
 import Testing
 @testable import CoreNavigation
 
@@ -74,6 +75,42 @@ struct ZoomPresentSettlementTests {
     func theCoverIsDroppedExactlyOnce(live: Bool) {
         let plan = ZoomPresentSettlement.whenDestinationReady(cardHasLiveSurface: live)
         #expect(plan.filter { $0 == .dropCover }.count == 1)
+    }
+
+    // MARK: - The cover outlives its surface's fade (#633)
+
+    /// The late first frame: the cover's surface began fading up in the same
+    /// tick the page reported rendering. Dropped then, the page took it at a
+    /// presented opacity of 0.00 and showed its black floor.
+    @Test func aSurfaceFadingUpHoldsTheCover() {
+        #expect(ZoomPresentSettlement.liveSurfaceIsArriving(
+            hasOpacityAnimation: true, shownOpacity: 0, modelOpacity: 1))
+        #expect(ZoomPresentSettlement.liveSurfaceIsArriving(
+            hasOpacityAnimation: true, shownOpacity: 0.6, modelOpacity: 1))
+    }
+
+    /// Done fading — the blend happened on the cover, and the drop shows nothing.
+    @Test func aSurfaceUpOrNearlyUpLetsTheCoverGo() {
+        #expect(!ZoomPresentSettlement.liveSurfaceIsArriving(
+            hasOpacityAnimation: true, shownOpacity: 0.995, modelOpacity: 1))
+        #expect(!ZoomPresentSettlement.liveSurfaceIsArriving(
+            hasOpacityAnimation: false, shownOpacity: 1, modelOpacity: 1))
+    }
+
+    /// A surface with no frame sits at alpha 0 with nothing animating: it is
+    /// not arriving, and holding for it would hold to the ceiling. A fade
+    /// DOWN is not an arrival either.
+    @Test func onlyARisingFadeHolds() {
+        #expect(!ZoomPresentSettlement.liveSurfaceIsArriving(
+            hasOpacityAnimation: false, shownOpacity: 0, modelOpacity: 0))
+        #expect(!ZoomPresentSettlement.liveSurfaceIsArriving(
+            hasOpacityAnimation: true, shownOpacity: 0.5, modelOpacity: 0))
+    }
+
+    /// Read off a real layer: no surface, or one with nothing animating, never holds.
+    @Test func theLayerReading() {
+        #expect(!ZoomPresentSettlement.liveSurfaceIsArriving(nil))
+        #expect(!ZoomPresentSettlement.liveSurfaceIsArriving(CALayer()))
     }
 
     private typealias Action = ZoomPresentSettlement.Action
