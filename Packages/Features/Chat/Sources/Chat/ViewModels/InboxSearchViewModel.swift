@@ -116,6 +116,22 @@ final class InboxSearchViewModel {
     private var searchTask: Task<Void, Never>?
     private var hasResolvedViewer = false
 
+    // MARK: People paging (#614)
+
+    /// Where the People section's next page starts; nil when it has no more.
+    private var peopleNextToken: String?
+    /// The People page on its way — one at a time.
+    private var peoplePageLoad: Task<Void, Never>?
+    /// A page that adds nobody new leaves no new row to ask again, so the next
+    /// one is asked at once — at most this many in a row.
+    static let maxEmptyPagesInARow = 5
+
+    /// A next page of people starting (true) and landing (false) — the
+    /// list's footer spinner.
+    var onPeoplePagingChange: ((Bool) -> Void)?
+    /// Whether the People section has another page.
+    var hasMorePeople: Bool { peopleNextToken != nil }
+
     init(
         catalog: InboxCatalog,
         viewer: any ViewerIdentityProviding,
@@ -154,6 +170,8 @@ final class InboxSearchViewModel {
     func queryChanged(_ text: String) {
         query = text
         searchTask?.cancel()
+        // A new query: the old one's people pages are no longer wanted (#614).
+        cancelPeoplePaging()
         // Deferred to the first keystroke rather than construction: the viewer's
         // id is only needed to exclude them from results, and most inbox
         // sessions never open search at all.
@@ -198,11 +216,12 @@ final class InboxSearchViewModel {
             return
         }
         do {
-            let found = try await people.searchPeople(matching: trimmed, limit: pageSize)
+            let page = try await people.searchPeoplePage(matching: trimmed, limit: pageSize, pageToken: nil)
             // A late response for a superseded query must not overwrite newer
             // state — the same guard every other search surface carries.
             guard !Task.isCancelled, isCurrent(trimmed) else { return }
-            searchState = .results(query: trimmed, found)
+            peopleNextToken = page.nextPageToken
+            searchState = .results(query: trimmed, page.people)
             emit()
         } catch {
             guard !Task.isCancelled, isCurrent(trimmed) else { return }
@@ -212,6 +231,58 @@ final class InboxSearchViewModel {
             searchState = .failed(message: "Couldn't search for people. Please try again.")
             emit()
         }
+    }
+
+    /// The viewer neared the end of the People section: its next page, if it
+    /// has one and none is on its way. Appended, never reordering what is
+    /// shown; a failure is retried on the next approach.
+    func loadMorePeople() {
+        guard peoplePageLoad == nil, let people, let token = peopleNextToken,
+              case .results(let trimmed, _) = searchState else { return }
+        peoplePageLoad = Task { [weak self] in
+            guard let self else { return }
+            var token = token
+            var fresh: [DirectoryPerson] = []
+            for _ in 0..<Self.maxEmptyPagesInARow {
+                guard let page = try? await people.searchPeoplePage(
+                    matching: trimmed, limit: self.pageSize, pageToken: token
+                ), !Task.isCancelled, self.isCurrent(trimmed) else {
+                    // Superseded: the new query already freed the slot.
+                    guard !Task.isCancelled, self.isCurrent(trimmed) else { return }
+                    self.peoplePageLoad = nil
+                    self.onPeoplePagingChange?(false)
+                    return
+                }
+                self.peopleNextToken = page.nextPageToken
+                guard case .results(_, let shown) = self.searchState else { return }
+                // A person can sit on both sides of a page boundary.
+                var known = Set(shown.map(\.id) + fresh.map(\.id))
+                for person in page.people where known.insert(person.id).inserted { fresh.append(person) }
+                // Rows the section will actually show: not the viewer, not a
+                // peer already listed as a conversation.
+                let adds = fresh.contains { $0.id != self.viewerID && !self.matchedPeerIDs.contains($0.id) }
+                guard !adds, let next = page.nextPageToken else { break }
+                token = next
+            }
+            // ⚠️ The slot frees BEFORE the rows render: rendering them can
+            // bring the end back into view, and that ask must find it free.
+            self.peoplePageLoad = nil
+            self.onPeoplePagingChange?(false)
+            guard !fresh.isEmpty, case .results(let query, let shown) = self.searchState else { return }
+            self.searchState = .results(query: query, shown + fresh)
+            self.emit()
+        }
+        // Announced after the slot is taken: the spinner's layout pass can ask
+        // again, and that ask must find the slot taken.
+        onPeoplePagingChange?(true)
+    }
+
+    private func cancelPeoplePaging() {
+        peopleNextToken = nil
+        guard peoplePageLoad != nil else { return }
+        peoplePageLoad?.cancel()
+        peoplePageLoad = nil
+        onPeoplePagingChange?(false)
     }
 
     private func isCurrent(_ trimmed: String) -> Bool {
