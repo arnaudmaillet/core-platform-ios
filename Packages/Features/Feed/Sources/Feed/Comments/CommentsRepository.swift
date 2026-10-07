@@ -104,10 +104,27 @@ public struct ViewerIdentity: Equatable, Sendable {
     }
 }
 
+/// One page of a post's comments, in thread order (each top-level comment
+/// followed by its replies), and where the next one starts.
+public struct CommentPage: Equatable, Sendable {
+    public let entries: [CommentEntry]
+    /// The cursor for the next page; nil when the server has no more.
+    public let nextPageToken: String?
+
+    public init(entries: [CommentEntry], nextPageToken: String?) {
+        self.entries = entries
+        self.nextPageToken = nextPageToken
+    }
+}
+
 /// What the comments UI consumes; implemented by `CommentsRepository`, faked in
 /// view-model tests.
 public protocol CommentsProviding: Sendable {
+    /// The first page's entries — what the snap feed's comment streams carry.
     func loadComments(for postID: PostID) async throws -> [CommentEntry]
+    /// A page of top-level comments, with their replies: the first one when
+    /// `pageToken` is nil, otherwise the one that token starts (#589).
+    func loadCommentsPage(for postID: PostID, after pageToken: String?) async throws -> CommentPage
     /// Loads the first page of top-level comments into a cache the panel can
     /// read WITHOUT awaiting, so a post opened later renders its comments on
     /// frame one instead of a skeleton. Idempotent and best-effort.
@@ -142,6 +159,11 @@ public protocol CommentsProviding: Sendable {
 }
 
 public extension CommentsProviding {
+    /// Providers that do not page answer with everything they have, once.
+    func loadCommentsPage(for postID: PostID, after pageToken: String?) async throws -> CommentPage {
+        guard pageToken == nil else { return CommentPage(entries: [], nextPageToken: nil) }
+        return CommentPage(entries: try await loadComments(for: postID), nextPageToken: nil)
+    }
     /// Providers that do not prefetch simply keep the old behaviour: the
     /// panel awaits its load and shows a skeleton meanwhile.
     func prefetchTopComments(for postID: PostID) async {}
@@ -209,13 +231,24 @@ public actor CommentsRepository: CommentsProviding {
     }
 
     public func loadComments(for postID: PostID) async throws -> [CommentEntry] {
+        try await loadCommentsPage(for: postID, after: nil).entries
+    }
+
+    /// ⚠️ FOLLOW THE TOKEN, NEVER THE COUNT: comment.v1 filters each page
+    /// after reading it (blocks, hidden words, held comments), so a page can
+    /// come back short, or empty, with more behind it.
+    public func loadCommentsPage(for postID: PostID, after pageToken: String?) async throws -> CommentPage {
         var request = Comment_V1_ListTopLevelRequest()
         request.postID = postID.rawValue
         request.limit = pageSize
+        request.pageToken = pageToken ?? ""
         let response = await commentClient.listTopLevel(request: request, headers: [:])
         let views: [Comment_V1_CommentView]
+        let nextToken: String
         switch response.result {
-        case .success(let body): views = body.comments
+        case .success(let body):
+            views = body.comments
+            nextToken = body.nextToken
         case .failure(let error): throw CommentsError.transport(message: error.message ?? "code \(error.code)")
         }
 
@@ -251,11 +284,11 @@ public actor CommentsRepository: CommentsProviding {
         let thread = Self.threaded(topLevel: views, repliesByParent: repliesByParent)
         await hydrateAuthors(for: thread.map { ProfileID($0.authorID) })
         let entries = thread.map(makeEntry)
-        // Every load fills the cache, not just an explicit prefetch: a page
-        // opened once and returned to should render instantly the second time
-        // for the same reason it should the first.
-        topPages.set(entries, for: postID)
-        return entries
+        // Every first-page load fills the cache, not just an explicit
+        // prefetch: a page opened once and returned to should render
+        // instantly the second time for the same reason it should the first.
+        if pageToken == nil { topPages.set(entries, for: postID) }
+        return CommentPage(entries: entries, nextPageToken: nextToken.isEmpty ? nil : nextToken)
     }
 
     public func addComment(_ body: String, to postID: PostID, parentID: String?) async throws -> CommentEntry {

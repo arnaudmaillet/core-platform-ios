@@ -86,6 +86,25 @@ public final class PostDetailViewModel {
     private let now: @Sendable () -> Date
 
     private var comments: [CommentEntry] = []
+    /// Where the next page of comments starts; nil when there is none, or
+    /// before the first page has answered (#589).
+    private var nextPageToken: String?
+    /// The page being fetched — one at a time.
+    private var pageLoad: Task<Void, Never>?
+    /// The first page's load is out: a near-end reached meanwhile is honoured
+    /// as soon as it says whether there is more.
+    private var isLoadingFirstPage = false
+    private var wantsNextPage = false
+    /// Pages beyond the first are on screen: a refresh merges its first page
+    /// over them rather than replacing the stream.
+    private var hasLaterPages = false
+    /// The first top-level comment of each page appended after the first —
+    /// Trending ranks threads WITHIN a page, so rows already on screen never
+    /// move when one lands.
+    private var pageStarts: Set<String> = []
+    /// A page filtered down to nothing still carries a token; this many in a
+    /// row are walked through before giving up until the next approach.
+    static let maxEmptyPagesInARow = 5
     /// The stream's sort order — Recent is the repository's chronology,
     /// Trending reorders THREADS by engagement (see `sortedForDisplay`).
     private var commentSort: CommentSortOrder = .recent
@@ -319,6 +338,7 @@ public final class PostDetailViewModel {
         engagement = EngagementState(likeCount: entry.likeCount, isLiked: false, countHidden: entry.post.likeCountsHidden)
         phase = .content(PostDetailDisplayModel(entry: entry, now: now()))
         comments = []
+        resetPaging()
         emitComments()
         onEngagementChange?(engagement)
         onPublished?(entry)
@@ -423,11 +443,33 @@ public final class PostDetailViewModel {
             onCommentsChange?(.loading)
         }
         let didShowPrefetch = prefetched != nil
+        isLoadingFirstPage = true
         // Refreshed regardless: the cache is a head start, not the truth. A
         // page prefetched a minute ago can have missed a comment since.
         Task { [weak self] in
             guard let self else { return }
-            let loaded = (try? await commentsProvider.loadComments(for: postID)) ?? []
+            let page = try? await commentsProvider.loadCommentsPage(for: postID, after: nil)
+            self.isLoadingFirstPage = false
+            defer {
+                if self.wantsNextPage {
+                    self.wantsNextPage = false
+                    self.loadMoreComments()
+                }
+            }
+            // Pages below the first are on screen: the fresh first page goes
+            // over the old one and the rest stays — a refresh, or the check
+            // after a review, must not cut the stream under the viewer. A
+            // failure leaves it all as it is.
+            if self.hasLaterPages {
+                guard let page else { return }
+                let merged = Self.merging(firstPage: page.entries, over: self.comments)
+                guard merged != self.comments else { return }
+                self.comments = merged
+                self.emitComments()
+                return
+            }
+            let loaded = page?.entries ?? []
+            self.nextPageToken = page?.nextPageToken
             // The equality skip applies ONLY when a prefetched page is already
             // on screen. Without one the view is sitting in `.loading` and has
             // to be told, even when the answer is the empty list it started
@@ -437,6 +479,72 @@ public final class PostDetailViewModel {
             self.comments = loaded
             self.emitComments()
         }
+    }
+
+    /// The viewer neared the end of the stream: the next page, if there is
+    /// one and none is already on its way (#589). Appended, never reordering
+    /// what is on screen; a failure is retried on the next approach.
+    func loadMoreComments() {
+        guard let commentsProvider, let postID, pageLoad == nil else { return }
+        guard let token = nextPageToken else {
+            if isLoadingFirstPage { wantsNextPage = true }
+            return
+        }
+        pageLoad = Task { [weak self] in
+            await self?.appendPages(after: token, for: postID, from: commentsProvider)
+            self?.pageLoad = nil
+        }
+    }
+
+    private func appendPages(after token: String, for postID: PostID, from provider: any CommentsProviding) async {
+        var token = token
+        for _ in 0..<Self.maxEmptyPagesInARow {
+            guard let page = try? await provider.loadCommentsPage(for: postID, after: token),
+                  // A refresh replaced the stream while this was out.
+                  self.postID == postID, nextPageToken == token
+            else { return }
+            nextPageToken = page.nextPageToken
+            // A comment can sit on both sides of a page boundary.
+            let known = Set(comments.map(\.id))
+            let fresh = page.entries.filter { !known.contains($0.id) }
+            if let head = fresh.first(where: { $0.parentID == nil }) {
+                pageStarts.insert(head.id)
+                hasLaterPages = true
+                comments += fresh
+                emitComments()
+                return
+            }
+            // Filtered down to nothing: nothing new to display means no row
+            // reaches the end to ask again, so the next one is asked now.
+            guard let next = page.nextPageToken else { return }
+            token = next
+        }
+    }
+
+    private func resetPaging() {
+        pageLoad?.cancel()
+        pageLoad = nil
+        nextPageToken = nil
+        hasLaterPages = false
+        pageStarts = []
+        wantsNextPage = false
+    }
+
+    /// A refreshed first page over a stream that runs past it: the page
+    /// replaces every thread at least as new as its oldest, and every older
+    /// thread stays where it is. The server lists newest first, so an old
+    /// first-page thread missing from the new page either slid down (older:
+    /// kept) or went away (newer: dropped). Pure, for tests.
+    static func merging(firstPage: [CommentEntry], over shown: [CommentEntry]) -> [CommentEntry] {
+        guard let oldest = firstPage.filter({ $0.parentID == nil }).map(\.createdAt).min() else { return shown }
+        let fresh = Set(firstPage.map(\.id))
+        var kept: [CommentEntry] = []
+        var keepsThread = false
+        for entry in shown {
+            if entry.parentID == nil { keepsThread = !fresh.contains(entry.id) && entry.createdAt < oldest }
+            if keepsThread, !fresh.contains(entry.id) { kept.append(entry) }
+        }
+        return firstPage + kept
     }
 
     /// The composer's avatar identity — its own task, not chained to the
@@ -481,7 +589,7 @@ public final class PostDetailViewModel {
 
     private func emitComments() {
         let now = now()
-        let ordered = Self.sortedForDisplay(comments, order: commentSort, liked: likedComments)
+        let ordered = Self.sortedForDisplay(comments, order: commentSort, liked: likedComments, pageStarts: pageStarts)
         let canReview = isViewerPostOwner && commentsProvider is any HeldCommentReviewing
         onCommentsChange?(.loaded(ordered.map {
             CommentDisplayModel(entry: $0, now: now, canReview: canReview && !reviewing.contains($0.id))
@@ -556,10 +664,15 @@ public final class PostDetailViewModel {
     /// plus the session's likes anywhere in the thread — highest first
     /// (stable: ties keep chronology); real like counts slot into the
     /// score when the contract grows them. Pure and static, for tests.
+    ///
+    /// `pageStarts`: the first thread of each page loaded after the first.
+    /// Threads are ranked within their page, never across: a page landing
+    /// at the bottom must not lift a thread above rows already on screen.
     static func sortedForDisplay(
         _ entries: [CommentEntry],
         order: CommentSortOrder,
-        liked: Set<String>
+        liked: Set<String>,
+        pageStarts: Set<String> = []
     ) -> [CommentEntry] {
         guard order == .trending else { return entries }
         var threads: [(parent: CommentEntry, replies: [CommentEntry])] = []
@@ -575,14 +688,21 @@ public final class PostDetailViewModel {
                 + (liked.contains(thread.parent.id) ? 1 : 0)
                 + thread.replies.filter { liked.contains($0.id) }.count
         }
-        return threads
-            .enumerated()
-            .sorted { lhs, rhs in
-                let l = score(lhs.element)
-                let r = score(rhs.element)
-                return l == r ? lhs.offset < rhs.offset : l > r
-            }
-            .flatMap { [$0.element.parent] + $0.element.replies }
+        var pages: [[(parent: CommentEntry, replies: [CommentEntry])]] = []
+        for thread in threads {
+            if pages.isEmpty || pageStarts.contains(thread.parent.id) { pages.append([]) }
+            pages[pages.count - 1].append(thread)
+        }
+        return pages.flatMap { page in
+            page
+                .enumerated()
+                .sorted { lhs, rhs in
+                    let l = score(lhs.element)
+                    let r = score(rhs.element)
+                    return l == r ? lhs.offset < rhs.offset : l > r
+                }
+                .flatMap { [$0.element.parent] + $0.element.replies }
+        }
     }
 
     private func setComposing(_ composing: Bool) {

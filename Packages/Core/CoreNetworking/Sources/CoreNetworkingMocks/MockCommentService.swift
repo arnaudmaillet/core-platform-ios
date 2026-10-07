@@ -75,8 +75,13 @@ public final class MockCommentService: @unchecked Sendable {
 
     public func register(on bff: MockBFF) {
         bff.register(path: "/comment.v1.CommentService/ListTopLevel") { [self] (request: Comment_V1_ListTopLevelRequest) in
+            let page = Self.page(
+                store.comments(for: request.postID, seed: seedComments(for: request.postID)),
+                limit: request.limit, token: request.pageToken
+            )
             var response = Comment_V1_ListCommentsResponse()
-            response.comments = filtered(store.comments(for: request.postID, seed: seedComments(for: request.postID)), postID: request.postID)
+            response.comments = filtered(page.comments, postID: request.postID)
+            response.nextToken = page.nextToken
             return .success(response)
         }
         // The post's owner approves (it shows to everyone) or declines (it is
@@ -94,12 +99,17 @@ public final class MockCommentService: @unchecked Sendable {
             return .success(Comment_V1_CommandResponse())
         }
         bff.register(path: "/comment.v1.CommentService/ListReplies") { [self] (request: Comment_V1_ListRepliesRequest) in
+            let page = Self.page(
+                store.replies(
+                    for: request.commentID,
+                    postID: request.postID,
+                    seed: seedReplies(for: request.postID)[request.commentID] ?? []
+                ),
+                limit: request.limit, token: request.pageToken
+            )
             var response = Comment_V1_ListCommentsResponse()
-            response.comments = filtered(store.replies(
-                for: request.commentID,
-                postID: request.postID,
-                seed: seedReplies(for: request.postID)[request.commentID] ?? []
-            ), postID: request.postID)
+            response.comments = filtered(page.comments, postID: request.postID)
+            response.nextToken = page.nextToken
             return .success(response)
         }
         bff.register(path: "/comment.v1.CommentService/CreateComment") { [self] (request: Comment_V1_CreateCommentRequest) -> Result<Comment_V1_CreateCommentResponse, ConnectError> in
@@ -116,6 +126,27 @@ public final class MockCommentService: @unchecked Sendable {
             return .success(response)
         }
     }
+
+    /// One page of `comments`, as comment.v1 pages them (#589): at most
+    /// `limit` (clamped to 100; unset reads as 50), from where `token` left
+    /// off, and a token for the rest while there is a rest. The token is an
+    /// offset here — opaque to the client either way. Filtering (hidden
+    /// words) runs on the page AFTER it is cut, as the server's read gate
+    /// does, so a page can come back short with more behind it.
+    static func page(
+        _ comments: [Comment_V1_CommentView], limit: Int32, token: String
+    ) -> (comments: [Comment_V1_CommentView], nextToken: String) {
+        let size = limit > 0 ? Int(min(limit, 100)) : 50
+        let start = min(max(Int(token) ?? 0, 0), comments.count)
+        let end = min(start + size, comments.count)
+        return (Array(comments[start..<end]), end < comments.count ? String(end) : "")
+    }
+
+    /// A post with a long conversation — more top-level comments than one
+    /// page holds — so the comments stream's paging (#589) is exercised in
+    /// mock mode. A text page (index % 3 == 2), clear of every other seed set.
+    public static let longConversationPostIDs: Set<String> = ["post-0011"]
+    public static let longConversationCount = 120
 
     /// Posts deliberately seeded with a dense comment set (18 micro-reactions
     /// + 6 semantic sentences), so both snap-feed comment surfaces — the
@@ -291,7 +322,20 @@ public final class MockCommentService: @unchecked Sendable {
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
 
         let raw: [Comment_V1_CommentView]
-        if Self.reactionOnlySparsePostIDs.contains(postID) {
+        if Self.longConversationPostIDs.contains(postID) {
+            // Newest first, a minute apart, as the server lists them; the
+            // number in each body says where a page boundary fell.
+            let bank = Self.semanticCommentBank + Self.sparsePairs.flatMap { [$0.0, $0.1] }
+            raw = (0..<Self.longConversationCount).map { position in
+                makeComment(
+                    id: "\(postID)-long-\(position)",
+                    postID: postID,
+                    author: authors[position % authors.count].profileID,
+                    body: "#\(position + 1) \(bank[position % bank.count])",
+                    ageMs: Int64(position + 1) * 60_000
+                )
+            }
+        } else if Self.reactionOnlySparsePostIDs.contains(postID) {
             let offset = Self.idOffset(postID)
             raw = Self.reactionOnlySparseBank.indices.map { position in
                 makeComment(
