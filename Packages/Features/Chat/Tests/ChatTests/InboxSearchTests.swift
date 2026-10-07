@@ -11,8 +11,8 @@ private func conversation(
     title: String,
     peerHandle: String? = nil,
     activityAt: TimeInterval = 0,
-    /// `true` means the viewer has replied, which keeps the conversation OUT of
-    /// the request partition regardless of follow state.
+    /// `true` means the viewer has replied: an answered conversation is never
+    /// a request.
     answered: Bool = false
 ) -> Conversation {
     Conversation(
@@ -37,14 +37,23 @@ private func person(_ id: String, handle: String) -> DirectoryPerson {
 private actor StubChatProvider: ChatProviding {
     private let conversations: [Conversation]
     private let viewer: ProfileID
+    /// Files every unanswered conversation in REQUESTS, as the server does
+    /// with one from someone the viewer doesn't follow.
+    private let unansweredAreRequests: Bool
 
-    init(conversations: [Conversation] = [], viewer: String = "me") {
+    init(conversations: [Conversation] = [], viewer: String = "me", unansweredAreRequests: Bool = false) {
         self.conversations = conversations
         self.viewer = ProfileID(viewer)
+        self.unansweredAreRequests = unansweredAreRequests
     }
 
     func viewerProfileID() async throws -> ProfileID { viewer }
     func loadConversations() async throws -> [Conversation] { conversations }
+    func loadInbox(_ folder: InboxFolder, after pageToken: String?) async throws -> InboxPage {
+        let isRequest = { (c: Conversation) in self.unansweredAreRequests && !c.lastMessageIsMine }
+        let rows = conversations.filter { isRequest($0) == (folder == .requests) }
+        return InboxPage(conversations: rows, nextPageToken: nil)
+    }
     func loadMessages(in conversationID: ConversationID) async throws -> [ChatMessage] { [] }
     func markRead(_ conversationID: ConversationID, upTo messageID: String) async throws {}
 
@@ -55,12 +64,6 @@ private actor StubChatProvider: ChatProviding {
     func directConversation(with profileID: ProfileID) async throws -> ConversationID {
         ConversationID("created-\(profileID.rawValue)")
     }
-}
-
-/// The viewer follows nobody, so every unanswered inbound conversation
-/// partitions into Requests.
-private actor StubFollowsNobody: PeerRelationProviding {
-    func followedPeers(among peers: [ProfileID]) async throws -> Set<ProfileID> { [] }
 }
 
 private actor StubPeopleDirectory: PeopleDirectoryProviding {
@@ -99,11 +102,8 @@ private final class PhaseBox {
 
 @MainActor
 struct InboxSearchViewModelTests {
-    private func makeCatalog(
-        _ repository: StubChatProvider,
-        relations: (any PeerRelationProviding)? = nil
-    ) async -> InboxCatalog {
-        let catalog = InboxCatalog(repository: repository, relations: relations)
+    private func makeCatalog(_ repository: StubChatProvider) async -> InboxCatalog {
+        let catalog = InboxCatalog(repository: repository)
         catalog.reload()
         for _ in 0..<500 {
             if catalog.snapshot.phase == .loaded { break }
@@ -155,8 +155,8 @@ struct InboxSearchViewModelTests {
             conversation("c-1", peer: "p-1", title: "Sofía Reyes", answered: true),
             conversation("c-2", peer: "p-2", title: "Marc Dubois", answered: true),
             conversation("c-3", peer: "p-3", title: "Sofia Klein")
-        ])
-        let catalog = await makeCatalog(repository, relations: StubFollowsNobody())
+        ], unansweredAreRequests: true)
+        let catalog = await makeCatalog(repository)
         let (viewModel, box) = makeViewModel(repository: repository, catalog: catalog)
 
         viewModel.queryChanged("sofia")
@@ -228,8 +228,8 @@ struct InboxSearchViewModelTests {
     @Test func aDeclinedRequestDoesNotComeBackThroughSearch() async {
         let repository = StubChatProvider(conversations: [
             conversation("c-1", peer: "p-1", title: "Sofia Klein")
-        ])
-        let catalog = await makeCatalog(repository, relations: StubFollowsNobody())
+        ], unansweredAreRequests: true)
+        let catalog = await makeCatalog(repository)
         let (viewModel, box) = makeViewModel(repository: repository, catalog: catalog)
 
         viewModel.queryChanged("sofia")
@@ -248,8 +248,8 @@ struct InboxSearchViewModelTests {
     @Test func pickingSomeoneWhoseThreadIsHiddenOpensThatThread() async {
         let repository = StubChatProvider(conversations: [
             conversation("c-1", peer: "p-1", title: "Sofia Klein")
-        ])
-        let catalog = await makeCatalog(repository, relations: StubFollowsNobody())
+        ], unansweredAreRequests: true)
+        let catalog = await makeCatalog(repository)
         let (viewModel, box) = makeViewModel(
             repository: repository,
             catalog: catalog,

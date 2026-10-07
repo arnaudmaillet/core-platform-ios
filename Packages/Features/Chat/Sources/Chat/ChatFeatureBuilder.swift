@@ -11,7 +11,7 @@ import UIKit
 @MainActor
 public struct ChatFeatureBuilder: ChatFeatureBuilding {
     private let repository: any ChatProviding
-    private let connections: (any SuggestionsProviding & PeerRelationProviding)?
+    private let connections: (any SuggestionsProviding)?
     /// The compose picker's search backing. Optional like `connections`: a
     /// composition without it still opens the picker, which then browses
     /// recents and suggestions and simply finds nothing when typed into.
@@ -36,7 +36,7 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
 
     public init(
         repository: any ChatProviding,
-        connections: (any SuggestionsProviding & PeerRelationProviding)? = nil,
+        connections: (any SuggestionsProviding)? = nil,
         people: (any PeopleDirectoryProviding)? = nil,
         imagePipeline: ImagePipeline? = nil,
         router: (any Router)? = nil,
@@ -46,7 +46,7 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         self.threadScreens = threadScreens
         let directory = ConversationDirectory()
         self.directory = directory
-        catalog = InboxCatalog(repository: repository, relations: connections, directory: directory)
+        catalog = InboxCatalog(repository: repository, directory: directory)
         self.repository = repository
         self.connections = connections
         self.people = people

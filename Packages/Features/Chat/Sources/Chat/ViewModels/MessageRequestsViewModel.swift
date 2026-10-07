@@ -56,12 +56,11 @@ public final class MessageRequestsViewModel {
     /// catalog so All and Requests agree on one load.
     public convenience init(
         repository: any ChatProviding,
-        relations: (any PeerRelationProviding)? = nil,
         router: (any Router)? = nil,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.init(
-            catalog: InboxCatalog(repository: repository, relations: relations),
+            catalog: InboxCatalog(repository: repository),
             router: router,
             now: now
         )

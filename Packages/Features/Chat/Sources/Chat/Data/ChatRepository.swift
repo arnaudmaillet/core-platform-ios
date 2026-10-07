@@ -32,8 +32,7 @@ public struct Conversation: Equatable, Sendable, Identifiable {
     /// title already returns it.
     public let directPeerHandle: String?
     /// Whether `lastMessage` is the viewer's own. Free at hydration time (the
-    /// sender is already in hand) and the signal `MessageRequestPolicy` reads
-    /// to tell a pending request from a conversation the viewer answered.
+    /// inbox entry's preview names its sender).
     public let lastMessageIsMine: Bool
     /// The newest message's id, or empty for a conversation with no messages.
     /// Carried because marking a thread read means moving the read cursor
@@ -146,8 +145,34 @@ public protocol ViewerIdentityProviding: Sendable {
     func viewerProfileID() async throws -> ProfileID
 }
 
+/// A folder of the viewer's inbox (chat.v1 `InboxFolder`, #593).
+public enum InboxFolder: Sendable, Hashable {
+    /// Accepted conversations — the All tab.
+    case inbox
+    /// Unanswered message requests to the viewer — the Requests tab.
+    case requests
+}
+
+/// One page of one inbox folder, newest activity first, and where the next
+/// one starts.
+public struct InboxPage: Equatable, Sendable {
+    public let conversations: [Conversation]
+    /// Nil when the folder has no more.
+    public let nextPageToken: String?
+
+    public init(conversations: [Conversation], nextPageToken: String?) {
+        self.conversations = conversations
+        self.nextPageToken = nextPageToken
+    }
+}
+
 public protocol ChatProviding: ViewerIdentityProviding {
+    /// The first page of both folders, newest activity first — for a lookup
+    /// that needs to know a conversation, not for the inbox's lists.
     func loadConversations() async throws -> [Conversation]
+    /// A page of one folder: the first when `pageToken` is nil, otherwise the
+    /// one that token starts (#593).
+    func loadInbox(_ folder: InboxFolder, after pageToken: String?) async throws -> InboxPage
     func loadMessages(in conversationID: ConversationID) async throws -> [ChatMessage]
     /// Sends `body`, optionally as a threaded reply to `replyToID` (chat.v1
     /// `reply_to`). Returns the created, viewer-owned message.
@@ -159,6 +184,12 @@ public protocol ChatProviding: ViewerIdentityProviding {
 }
 
 extension ChatProviding {
+    /// Providers with no folders: everything is the inbox, in one page.
+    public func loadInbox(_ folder: InboxFolder, after pageToken: String?) async throws -> InboxPage {
+        guard folder == .inbox, pageToken == nil else { return InboxPage(conversations: [], nextPageToken: nil) }
+        return InboxPage(conversations: try await loadConversations(), nextPageToken: nil)
+    }
+
     /// The thread's header context (title + peer). Default rides
     /// `loadConversations`; conformances can override with a leaner query
     /// once chat.v1 exposes a single-conversation lookup.
@@ -181,6 +212,8 @@ public actor ChatRepository: ChatProviding {
     private let profileClient: any Profile_V1_ProfileServiceClientInterface
     private let authSession: any AuthSessionProviding
     private let pageSize: Int32
+    /// Conversations per inbox page (#593).
+    private let inboxPageSize: Int32
 
     /// Who is signed in, and as which profile — shared with every other
     /// repository (`ViewerSession`), so a switch or a sign-out reaches all of them.
@@ -193,7 +226,8 @@ public actor ChatRepository: ChatProviding {
         profileClient: any Profile_V1_ProfileServiceClientInterface,
         authSession: any AuthSessionProviding,
         viewer: (any ViewerProviding)? = nil,
-        pageSize: Int32 = 50
+        pageSize: Int32 = 50,
+        inboxPageSize: Int32 = 20
     ) {
         self.chatClient = chatClient
         self.profileClient = profileClient
@@ -205,6 +239,7 @@ public actor ChatRepository: ChatProviding {
                 .map { ProfileID($0) }
         }
         self.pageSize = pageSize
+        self.inboxPageSize = inboxPageSize
     }
 
     // MARK: - Conversations
@@ -214,86 +249,123 @@ public actor ChatRepository: ChatProviding {
     }
 
     public func loadConversations() async throws -> [Conversation] {
-        let viewer = try await resolveViewerProfileID()
-
-        var request = Chat_V1_ListSubscriptionsRequest()
-        request.subscriberID = viewer.rawValue
-        request.limit = pageSize
-        let response = await chatClient.listSubscriptions(request: request, headers: [:])
-        let ids: [String]
-        switch response.result {
-        case .success(let body): ids = body.conversationIds
-        case .failure(let error): throw ChatError.transport(message: error.message ?? "code \(error.code)")
-        }
-
-        var conversations: [Conversation] = []
-        for id in ids {
-            // A cancelled load must REPORT cancellation, not hand back what it
-            // managed to hydrate first. Cancelling in-flight Connect calls
-            // makes them fail rather than throw, and `hydrateConversation`
-            // skips failures — so without this check a superseded load returns
-            // a truncated inbox that looks exactly like a real, shorter one.
-            try Task.checkCancellation()
-            if let conversation = await hydrateConversation(ConversationID(id), viewer: viewer) {
-                conversations.append(conversation)
-            }
-        }
-        try Task.checkCancellation()
-        // Most recent activity first; conversations without messages sink.
-        return conversations.sorted(by: Conversation.isOrderedBefore)
+        async let inbox = loadInbox(.inbox, after: nil)
+        async let requests = loadInbox(.requests, after: nil)
+        return try await (inbox.conversations + requests.conversations).sorted(by: Conversation.isOrderedBefore)
     }
 
-    private func hydrateConversation(_ id: ConversationID, viewer: ProfileID) async -> Conversation? {
-        // Members → the title (the other participant(s)).
-        var membersRequest = Chat_V1_ListMembersRequest()
-        membersRequest.conversationID = id.rawValue
-        membersRequest.requesterID = viewer.rawValue
-        let membersResponse = await chatClient.listMembers(request: membersRequest, headers: [:])
-        guard let members = membersResponse.message?.members else { return nil }
-        let otherIDs = members.map { ProfileID($0.profileID) }.filter { $0 != viewer }
+    /// One `ListInbox` page, the rows built from the entries themselves.
+    ///
+    /// ⚠️ This replaced `ListSubscriptions` plus a `ListMembers` AND a
+    /// `GetHistory` for every conversation — 1 + 2N calls for an inbox
+    /// capped at 50. The entry carries the peer, the preview, the activity
+    /// time and whether it is unread, so a read direct conversation now
+    /// costs nothing beyond its peer's name (cached across pages). Two
+    /// shapes still read more, each for one thing the entry lacks: a GROUP
+    /// its members (the title), and an UNREAD row its read cursor and a
+    /// history window (the count on its avatar).
+    ///
+    /// Rows keep the server's order — newest activity first — so a page
+    /// appended below never reorders the ones above it. The server filters
+    /// each page after reading it: follow the token, never the count.
+    public func loadInbox(_ folder: InboxFolder, after pageToken: String?) async throws -> InboxPage {
+        let viewer = try await resolveViewerProfileID()
+        var request = Chat_V1_ListInboxRequest()
+        request.profileID = viewer.rawValue
+        request.folder = folder == .inbox ? .inbox : .requests
+        request.limit = inboxPageSize
+        request.pageToken = pageToken ?? ""
+        let response = await chatClient.listInbox(request: request, headers: [:])
+        let entries: [Chat_V1_InboxEntryView]
+        let nextToken: String
+        switch response.result {
+        case .success(let body):
+            entries = body.entries
+            nextToken = body.nextPageToken
+        case .failure(let error):
+            throw ChatError.transport(message: error.message ?? "code \(error.code)")
+        }
 
-        // Last message → preview + activity time. And the tail behind it →
-        // how many messages are waiting.
-        //
-        // ⚠️ The limit was 1. It is a WINDOW now, and the difference is payload,
-        // not round trips: this call already happens once per conversation
-        // (which is why the inbox is expensive at all), so counting the unread
-        // tail costs a bigger page rather than another request. The window is
-        // what bounds the count — see `Conversation.unreadCount`.
-        var historyRequest = Chat_V1_GetHistoryRequest()
-        historyRequest.conversationID = id.rawValue
-        historyRequest.requesterID = viewer.rawValue
-        historyRequest.limit = Int32(Self.unreadWindow)
-        let historyResponse = await chatClient.getHistory(request: historyRequest, headers: [:])
-        let window = historyResponse.message?.messages ?? []
-        let latest = window.max { $0.createdAtMs < $1.createdAtMs }
+        let details = await Self.fetchDetails(for: entries, viewer: viewer, client: chatClient)
+        // A cancelled load must REPORT cancellation, not hand back what it
+        // managed to resolve: cancelled Connect calls fail rather than throw,
+        // and a row whose details failed is still built — so without this a
+        // superseded load returns rows that look real and are not.
+        try Task.checkCancellation()
+        let peers = entries.flatMap { entry in
+            entry.peerID.isEmpty
+                ? (details[entry.conversationID]?.members ?? []).map { ProfileID($0.profileID) }
+                : [ProfileID(entry.peerID)]
+        }
+        await hydrateNames(for: peers.filter { $0 != viewer })
+        try Task.checkCancellation()
+        let conversations = entries.map { conversation(from: $0, detail: details[$0.conversationID], viewer: viewer) }
+        return InboxPage(conversations: conversations, nextPageToken: nextToken.isEmpty ? nil : nextToken)
+    }
 
-        await hydrateNames(for: otherIDs)
-        let title = otherIDs.isEmpty
-            ? "Conversation"
-            : otherIDs.compactMap { nameCache[$0] }.joined(separator: ", ")
+    /// What an entry doesn't carry, read only where it is needed: a group's
+    /// members (its title), an unread row's members (its read cursor) and
+    /// history window (its count). Concurrently — a page's unread rows don't
+    /// wait on each other.
+    private struct EntryDetail: Sendable {
+        var members: [Chat_V1_MemberView]?
+        var window: [Chat_V1_MessageView] = []
+    }
 
-        let latestIsMine = latest.map { ProfileID($0.senderID) == viewer } ?? false
-        // The viewer's own membership carries how far they have read. Both
-        // sides of the comparison come from calls this hydration already
-        // makes, so unread costs no extra traffic.
-        let viewerLastRead = members.first { ProfileID($0.profileID) == viewer }?.lastRead
+    private static func fetchDetails(
+        for entries: [Chat_V1_InboxEntryView],
+        viewer: ProfileID,
+        client: any Chat_V1_ChatServiceClientInterface
+    ) async -> [String: EntryDetail] {
+        await withTaskGroup(of: (String, EntryDetail).self) { group in
+            for entry in entries where entry.peerID.isEmpty || entry.unread {
+                let id = entry.conversationID
+                let readsHistory = entry.unread
+                group.addTask {
+                    var membersRequest = Chat_V1_ListMembersRequest()
+                    membersRequest.conversationID = id
+                    membersRequest.requesterID = viewer.rawValue
+                    var detail = EntryDetail()
+                    detail.members = (await client.listMembers(request: membersRequest, headers: [:])).message?.members
+                    if readsHistory {
+                        // The count is bounded by this window — see `unreadCount`.
+                        var historyRequest = Chat_V1_GetHistoryRequest()
+                        historyRequest.conversationID = id
+                        historyRequest.requesterID = viewer.rawValue
+                        historyRequest.limit = Int32(unreadWindow)
+                        detail.window = (await client.getHistory(request: historyRequest, headers: [:])).message?.messages ?? []
+                    }
+                    return (id, detail)
+                }
+            }
+            return await group.reduce(into: [:]) { $0[$1.0] = $1.1 }
+        }
+    }
 
+    private func conversation(from entry: Chat_V1_InboxEntryView, detail: EntryDetail?, viewer: ProfileID) -> Conversation {
+        let otherIDs = entry.peerID.isEmpty
+            ? (detail?.members ?? []).map { ProfileID($0.profileID) }.filter { $0 != viewer }
+            : [ProfileID(entry.peerID)]
+        let title = otherIDs.compactMap { nameCache[$0] }.joined(separator: ", ")
+        let last = entry.hasLastMessage ? entry.lastMessage : nil
+        let viewerLastRead = detail?.members?.first { ProfileID($0.profileID) == viewer }?.lastRead
         return Conversation(
-            id: id,
+            id: ConversationID(entry.conversationID),
             title: title.isEmpty ? "Conversation" : title,
-            lastMessage: latest?.body ?? "",
-            lastActivityAt: latest.map { Date(timeIntervalSince1970: TimeInterval($0.createdAtMs) / 1000) },
+            lastMessage: last?.preview ?? "",
+            // Only a delivered message is activity on the row: an entry with
+            // none dates from when the viewer joined, which is no news.
+            lastActivityAt: last.map { _ in Date(timeIntervalSince1970: TimeInterval(entry.lastActivityMs) / 1000) },
             otherMemberIDs: otherIDs,
             directPeerHandle: otherIDs.count == 1 ? handleCache[otherIDs[0]] : nil,
-            lastMessageIsMine: latestIsMine,
-            lastMessageID: latest?.messageID ?? "",
-            isUnread: Self.isUnread(latest: latest, viewerLastRead: viewerLastRead, latestIsMine: latestIsMine),
+            lastMessageIsMine: last.map { ProfileID($0.senderID) == viewer } ?? false,
+            lastMessageID: last?.messageID ?? "",
+            isUnread: entry.unread,
             unreadCount: Self.unreadCount(
-                in: window,
+                in: detail?.window ?? [],
                 viewer: viewer,
                 viewerLastRead: viewerLastRead,
-                isUnread: Self.isUnread(latest: latest, viewerLastRead: viewerLastRead, latestIsMine: latestIsMine)
+                isUnread: entry.unread
             )
         )
     }
@@ -437,20 +509,8 @@ public actor ChatRepository: ChatProviding {
         }
     }
 
-    /// A conversation is unread when its newest message is someone else's and
-    /// the viewer's read cursor hasn't reached it. An empty cursor means the
-    /// viewer has never read the thread, which is unread by definition.
-    private static func isUnread(
-        latest: Chat_V1_MessageView?,
-        viewerLastRead: String?,
-        latestIsMine: Bool
-    ) -> Bool {
-        guard let latest, !latestIsMine else { return false }
-        return viewerLastRead != latest.messageID
-    }
-
-    /// How many messages the inbox reads per conversation, and so how far the
-    /// unread count can see. Twenty is well past the point where a badge stops
+    /// How many messages the inbox reads per unread conversation, and so how
+    /// far the unread count can see. Twenty is well past the point where a badge stops
     /// being a number anyone reads and starts being "a lot".
     static let unreadWindow = 20
 

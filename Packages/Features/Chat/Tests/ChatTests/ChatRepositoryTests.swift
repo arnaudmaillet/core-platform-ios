@@ -203,3 +203,88 @@ struct UnreadCountTests {
         #expect(count(window, lastRead: "", isUnread: false) == 0)
     }
 }
+
+// MARK: - The inbox, by folder (#593)
+
+struct ChatRepositoryInboxTests {
+    private func makeRepository(inboxPageSize: Int32 = 20) -> (ChatRepository, MockBFF) {
+        let dataset = MockSocialDataset()
+        let bff = MockBFF()
+        MockSocialServices(dataset: dataset).register(on: bff)
+        MockChatService(dataset: dataset).register(on: bff)
+        let client = ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: bff)
+        let repository = ChatRepository(
+            chatClient: Chat_V1_ChatServiceClient(client: client),
+            profileClient: Profile_V1_ProfileServiceClient(client: client),
+            authSession: AuthenticatedSessionStub(),
+            inboxPageSize: inboxPageSize
+        )
+        return (repository, bff)
+    }
+
+    /// Requests are the server's folder: the mock's five unanswered requests,
+    /// and nothing else — and none of them in the inbox.
+    @Test func requestsAreTheServersRequestsFolder() async throws {
+        let (repository, _) = makeRepository()
+
+        let requests = try await repository.loadInbox(.requests, after: nil).conversations
+        let inbox = try await repository.loadInbox(.inbox, after: nil).conversations
+
+        let requestIDs = Set((0..<5).map { ConversationID("conv-req-\($0)") })
+        #expect(Set(requests.map(\.id)) == requestIDs)
+        #expect(inbox.allSatisfy { !requestIDs.contains($0.id) })
+        #expect(requests.allSatisfy { $0.isUnread })
+    }
+
+    /// The first page sends a page size, every next one the token the last
+    /// returned, newest activity first throughout, until there is no token.
+    @Test func theInboxFollowsTheTokenAcrossPages() async throws {
+        let (repository, _) = makeRepository(inboxPageSize: 5)
+
+        var pages = [try await repository.loadInbox(.inbox, after: nil)]
+        while let token = pages.last?.nextPageToken, pages.count < 10 {
+            pages.append(try await repository.loadInbox(.inbox, after: token))
+        }
+
+        #expect(pages.map(\.conversations.count) == [5, 5, 5, 1])
+        let rows = pages.flatMap(\.conversations)
+        #expect(Set(rows.map(\.id)).count == 16)
+        let times = rows.map { $0.lastActivityAt ?? .distantPast }
+        #expect(times == times.sorted(by: >))
+    }
+
+    /// ⚠️ The N+1 is gone: a read direct conversation costs no `ListMembers`
+    /// and no `GetHistory`. Only unread rows read them, for their count.
+    @Test func onlyUnreadRowsReadMembersAndHistory() async throws {
+        let (repository, bff) = makeRepository()
+
+        let page = try await repository.loadInbox(.inbox, after: nil)
+
+        let paths = bff.recordedRequests.map(\.path)
+        let unread = page.conversations.filter(\.isUnread).count
+        #expect(unread > 0 && unread < page.conversations.count)
+        #expect(paths.count { $0.hasSuffix("/ListInbox") } == 1)
+        #expect(paths.count { $0.hasSuffix("/ListMembers") } == unread)
+        #expect(paths.count { $0.hasSuffix("/GetHistory") } == unread)
+        #expect(!paths.contains { $0.hasSuffix("/ListSubscriptions") })
+        // The count still reads as a number: conv-4's burst runs to two digits.
+        let burst = try #require(page.conversations.first { $0.id == ConversationID("conv-4") })
+        #expect(burst.unreadCount >= 10)
+    }
+
+    /// A row is built from its entry: the peer's name and handle, the preview
+    /// and who sent it.
+    @Test func rowsAreBuiltFromTheEntry() async throws {
+        let (repository, _) = makeRepository()
+
+        let rows = try await repository.loadInbox(.inbox, after: nil).conversations
+
+        let mine = try #require(rows.first { $0.id == ConversationID("conv-0") })
+        #expect(mine.lastMessageIsMine)
+        #expect(!mine.isUnread)
+        #expect(mine.lastMessage == "Will do")
+        #expect(mine.otherMemberIDs.count == 1)
+        #expect(mine.title != "Conversation")
+        #expect(mine.directPeerHandle?.isEmpty == false)
+    }
+}

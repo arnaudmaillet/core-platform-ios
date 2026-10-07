@@ -32,7 +32,7 @@ public enum PeopleDirectoryError: Error, Equatable, Sendable {
 /// Declared here rather than reused from the Search feature because features
 /// never import each other: Chat states the shape it needs, and the
 /// composition root points it at whatever answers it. Same arrangement as
-/// `SuggestionsProviding` and `PeerRelationProviding` above it.
+/// `SuggestionsProviding`.
 public protocol PeopleDirectoryProviding: Sendable {
     /// People matching `query`. The backend token-matches, so callers pass
     /// whole terms rather than prefixes.
