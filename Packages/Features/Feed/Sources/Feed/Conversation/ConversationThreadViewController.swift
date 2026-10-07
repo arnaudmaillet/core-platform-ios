@@ -95,6 +95,9 @@ final class ConversationThreadViewController: UIViewController {
     private var owesTailPin = false
     private var hasEstablishedClearance = false
     private var newestID: String?
+    /// The oldest message shown — older history landing above it is told
+    /// apart from new messages landing below (#600).
+    private var oldestID: String?
     private var pendingFlashID: String?
     private var lastPreviewSize: CGSize = .zero
 
@@ -458,9 +461,14 @@ final class ConversationThreadViewController: UIViewController {
         }
 
         let isFirstContent = !hasRenderedContent
-        applySnapshot(animated: hasRenderedContent)
+        // Older history landing above (#600): applied without animation and
+        // with the message under the reader's eye held where it is.
+        let anchor = olderHistoryAnchor(for: phase)
+        applySnapshot(animated: hasRenderedContent && anchor == nil)
+        if let anchor { hold(anchor) }
         guard case .content(let messages) = phase else { return }
         hasRenderedContent = true
+        oldestID = messages.first?.id
 
         let newest = messages.last
         let newestChanged = newest?.id != newestID
@@ -626,6 +634,33 @@ final class ConversationThreadViewController: UIViewController {
     }
 
     // MARK: - Scrolling
+
+    /// The topmost message on screen and its distance from the top of the
+    /// viewport — when `phase` brings older history above the oldest message
+    /// shown, and only then.
+    private func olderHistoryAnchor(for phase: ConversationThreadPhase) -> (id: String, offset: CGFloat)? {
+        guard hasRenderedContent, case .content(let messages) = phase,
+              let oldestID, messages.first?.id != oldestID,
+              messages.contains(where: { $0.id == oldestID })
+        else { return nil }
+        for indexPath in collectionView.indexPathsForVisibleItems.sorted() {
+            guard case .message(let id) = dataSource.itemIdentifier(for: indexPath),
+                  let frame = collectionView.layoutAttributesForItem(at: indexPath)?.frame
+            else { continue }
+            return (id, frame.minY - collectionView.contentOffset.y)
+        }
+        return nil
+    }
+
+    /// Puts the anchored message back where it was on screen, once the rows
+    /// above it exist.
+    private func hold(_ anchor: (id: String, offset: CGFloat)) {
+        collectionView.layoutIfNeeded()
+        guard let indexPath = dataSource.indexPath(for: .message(anchor.id)),
+              let frame = collectionView.layoutAttributesForItem(at: indexPath)?.frame
+        else { return }
+        collectionView.contentOffset.y = frame.minY - anchor.offset
+    }
 
     private var isNearBottom: Bool {
         let insets = collectionView.adjustedContentInset
@@ -831,6 +866,17 @@ final class ConversationThreadViewController: UIViewController {
 }
 
 extension ConversationThreadViewController: UICollectionViewDelegate {
+    /// Paging, backwards (#600): the reader scrolling within a screen of the
+    /// top asks for the history before it. Only the reader's own scroll asks —
+    /// the screen's programmatic moves (the tail pin, a quote jump) never do —
+    /// and never in a peek.
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        guard mode == .full, hasRenderedContent, scrollView.isTracking || scrollView.isDecelerating,
+              scrollView.contentOffset.y + scrollView.adjustedContentInset.top < scrollView.bounds.height
+        else { return }
+        driver.loadOlder()
+    }
+
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
         contextMenu.endTextSelection()
         // The reader took over: a flash landing after their own scroll would

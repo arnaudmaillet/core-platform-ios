@@ -153,6 +153,19 @@ public enum InboxFolder: Sendable, Hashable {
     case requests
 }
 
+/// One page of a conversation's history, oldest first, and where the OLDER
+/// page before it starts (#600).
+public struct MessagePage: Equatable, Sendable {
+    public let messages: [ChatMessage]
+    /// Nil when there is nothing older.
+    public let olderPageToken: String?
+
+    public init(messages: [ChatMessage], olderPageToken: String?) {
+        self.messages = messages
+        self.olderPageToken = olderPageToken
+    }
+}
+
 /// One page of one inbox folder, newest activity first, and where the next
 /// one starts.
 public struct InboxPage: Equatable, Sendable {
@@ -174,6 +187,10 @@ public protocol ChatProviding: ViewerIdentityProviding {
     /// one that token starts (#593).
     func loadInbox(_ folder: InboxFolder, after pageToken: String?) async throws -> InboxPage
     func loadMessages(in conversationID: ConversationID) async throws -> [ChatMessage]
+    /// A page of a conversation's history, oldest first: the newest messages
+    /// when `pageToken` is nil, otherwise the older ones that token starts
+    /// (#600).
+    func loadMessagesPage(in conversationID: ConversationID, before pageToken: String?) async throws -> MessagePage
     /// Sends `body`, optionally as a threaded reply to `replyToID` (chat.v1
     /// `reply_to`). Returns the created, viewer-owned message.
     func send(_ body: String, to conversationID: ConversationID, replyingTo replyToID: String?) async throws -> ChatMessage
@@ -184,6 +201,12 @@ public protocol ChatProviding: ViewerIdentityProviding {
 }
 
 extension ChatProviding {
+    /// Providers that don't page: everything they have, once.
+    public func loadMessagesPage(in conversationID: ConversationID, before pageToken: String?) async throws -> MessagePage {
+        guard pageToken == nil else { return MessagePage(messages: [], olderPageToken: nil) }
+        return MessagePage(messages: try await loadMessages(in: conversationID), olderPageToken: nil)
+    }
+
     /// Providers with no folders: everything is the inbox, in one page.
     public func loadInbox(_ folder: InboxFolder, after pageToken: String?) async throws -> InboxPage {
         guard folder == .inbox, pageToken == nil else { return InboxPage(conversations: [], nextPageToken: nil) }
@@ -373,18 +396,26 @@ public actor ChatRepository: ChatProviding {
     // MARK: - Messages
 
     public func loadMessages(in conversationID: ConversationID) async throws -> [ChatMessage] {
+        try await loadMessagesPage(in: conversationID, before: nil).messages
+    }
+
+    /// chat.v1 lists history newest first; each `next_page_token` reads
+    /// strictly OLDER messages. A page that isn't full carries none.
+    public func loadMessagesPage(in conversationID: ConversationID, before pageToken: String?) async throws -> MessagePage {
         let viewer = try await resolveViewerProfileID()
         var request = Chat_V1_GetHistoryRequest()
         request.conversationID = conversationID.rawValue
         request.requesterID = viewer.rawValue
         request.limit = pageSize
+        request.pageToken = pageToken ?? ""
         let response = await chatClient.getHistory(request: request, headers: [:])
         switch response.result {
         case .success(let body):
             // Oldest first (newest at the bottom of the thread).
-            return body.messages
+            let messages = body.messages
                 .sorted { $0.createdAtMs < $1.createdAtMs }
                 .map { Self.makeMessage(from: $0, viewer: viewer) }
+            return MessagePage(messages: messages, olderPageToken: body.nextPageToken.isEmpty ? nil : body.nextPageToken)
         case .failure(let error):
             throw ChatError.transport(message: error.message ?? "code \(error.code)")
         }

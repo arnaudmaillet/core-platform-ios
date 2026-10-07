@@ -64,6 +64,11 @@ public final class MockChatService: @unchecked Sendable {
 
     private static let requestIDs = requests.map(\.id)
 
+    /// A conversation whose history runs to several pages (#600): this many
+    /// messages older than its everyday thread.
+    public static let longHistoryConversationID = "conv-5"
+    public static let longHistoryOlderCount = 120
+
     /// Every seeded conversation id, newest activity first.
     private var conversationIDs: [String] {
         (0..<16).map { "conv-\($0)" } + Self.requestIDs
@@ -122,7 +127,14 @@ public final class MockChatService: @unchecked Sendable {
             // because it counts the unread tail inside it — answering that with
             // the whole history would make the mock the only place the count is
             // unbounded.
-            response.messages = request.limit > 0 ? Array(all.suffix(Int(request.limit))) : all
+            //
+            // And paged (#600): `page_token` reads the `limit` messages just
+            // OLDER than the last page, as chat.v1 does, with a token while
+            // there are more. The token is an index here — opaque to the client.
+            let end = min(max(Int(request.pageToken) ?? all.count, 0), all.count)
+            let start = request.limit > 0 ? max(0, end - Int(request.limit)) : 0
+            response.messages = Array(all[start..<end])
+            response.nextPageToken = start > 0 ? String(start) : ""
             return .success(response)
         }
         bff.register(path: "/chat.v1.ChatService/SendMessage") { [self] (request: Chat_V1_SendMessageRequest) -> Result<Chat_V1_SendMessageResponse, ConnectError> in
@@ -307,6 +319,18 @@ public final class MockChatService: @unchecked Sendable {
                 (other, openers[index % openers.count], base + 12),
                 (viewer, replies[index % replies.count], base + 6)
             ]
+            // The LONG history (#600): older than a page reaches, so the
+            // thread pages upward in mock mode. Before the opener, numbered so
+            // a page boundary can be read off the screen.
+            if conversationID == Self.longHistoryConversationID {
+                let older = (0..<Self.longHistoryOlderCount).map { position -> (String, String, Int64) in
+                    let sender = position.isMultiple(of: 3) ? viewer : other
+                    let line = openers[position % openers.count]
+                    let age = base + 12 + Int64(Self.longHistoryOlderCount - position) * 20
+                    return (sender, "#\(position + 1) \(line)", age)
+                }
+                thread = older + thread
+            }
             if !answered {
                 // `conv-3` lands its reply as a live arrival; the rest sit in
                 // the past. Three arrivals total, so the All badge reads "3"

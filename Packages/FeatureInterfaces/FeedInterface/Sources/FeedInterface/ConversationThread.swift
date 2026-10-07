@@ -109,6 +109,10 @@ public protocol ConversationThreadDriving: AnyObject {
 
     func viewDidLoad()
     func refresh()
+    /// The reader neared the top: the history before the oldest message
+    /// shown, prepended to the next `.content` (#600). A no-op when there is
+    /// none, or while a page is on its way.
+    func loadOlder()
     func send(_ text: String)
     func beginReply(to messageID: String)
     func cancelReply()
@@ -118,6 +122,11 @@ public protocol ConversationThreadDriving: AnyObject {
     /// Pins the conversation, or unpins it. A no-op while there is nothing to
     /// pin (`onPinnedChange` said nil).
     func togglePinned()
+}
+
+public extension ConversationThreadDriving {
+    /// Drivers with no older history to page through.
+    func loadOlder() {}
 }
 
 /// What sits in the footer where a post shows its music: for a conversation,
