@@ -209,9 +209,10 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
                 )
             },
             // The same feed, arrived at by the platform's own slide — what a
-            // marker with no cover to fly opens with.
+            // marker opens with under Reduce Motion. A complete set too (#674):
+            // every route a marker opens by knows its last post is the end.
             pushPlainSnapFeed: { postIDs, presenter in
-                feedFeature().pushSnapFeed(postIDs: postIDs, from: presenter)
+                feedFeature().pushSnapFeed(postIDs: postIDs, from: presenter, sourceIsComplete: true)
             },
             // The same feed again, opened as a window growing out of a text
             // marker's disc — what a marker with no cover to fly opens with now.
@@ -220,7 +221,7 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
             // one does.
             revealSnapFeed: { postIDs, presenter, origin, beneath in
                 feedFeature().revealSnapFeed(
-                    postIDs: postIDs, from: presenter, origin: origin, beneath: beneath
+                    postIDs: postIDs, from: presenter, origin: origin, beneath: beneath, sourceIsComplete: true
                 )
             },
             // The same window asked for at CLOSE time: a feed opened by a hero

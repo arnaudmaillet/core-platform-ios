@@ -171,6 +171,74 @@ struct SnapFeedEndOfSourceTests {
 
     /// Looks, not wall-clock time.
     @discardableResult
+    // MARK: - The map's two other routes (#674)
+
+    /// A marker that does not fly opens through `pushSnapFeed` (Reduce Motion)
+    /// or `revealSnapFeed` (a text- or icon-faced marker, a city or country
+    /// with its place page beneath). Asked for a complete set, both build a
+    /// feed that knows its last post is the end; asked plainly — For You,
+    /// search, profile — they still don't.
+    @Test func theMapsPushAndRevealBuildACompleteSet() async throws {
+        let (push, pushStack) = try await routed { builder, presenter in
+            builder.pushSnapFeed(postIDs: ids("a", "b", "c"), from: presenter, sourceIsComplete: true)
+        }
+        page(push, to: 2)
+        #expect(push.isAtEndOfSource, "the map's plain push lost the upward grab")
+
+        let (reveal, revealStack) = try await routed { builder, presenter in
+            builder.revealSnapFeed(
+                postIDs: ids("a", "b", "c"), from: presenter, origin: Self.revealOrigin,
+                beneath: nil, sourceIsComplete: true
+            )
+        }
+        page(reveal, to: 2)
+        #expect(reveal.isAtEndOfSource, "the map's reveal lost the upward grab")
+        withExtendedLifetime((pushStack, revealStack)) {}
+    }
+
+    @Test func aPlainPushOrRevealIsStillAWindow() async throws {
+        let (push, pushStack) = try await routed { builder, presenter in
+            builder.pushSnapFeed(postIDs: ids("a", "b", "c"), from: presenter)
+        }
+        page(push, to: 2)
+        #expect(!push.isAtEndOfSource)
+
+        let (reveal, revealStack) = try await routed { builder, presenter in
+            builder.revealSnapFeed(
+                postIDs: ids("a", "b", "c"), from: presenter, origin: Self.revealOrigin, beneath: nil
+            )
+        }
+        page(reveal, to: 2)
+        #expect(!reveal.isAtEndOfSource)
+        withExtendedLifetime((pushStack, revealStack)) {}
+    }
+
+    private static var revealOrigin: TextRevealOrigin {
+        TextRevealOrigin(rowFrame: { _ in CGRect(x: 16, y: 300, width: 370, height: 120) }, captionEnd: nil)
+    }
+
+    /// Opens a feed the way `open` does from a presenter on a stack in a
+    /// window, and returns it loaded — with what must stay alive around it.
+    private func routed(
+        _ open: (FeedFeatureBuilder, UIViewController) -> Void
+    ) async throws -> (SnapFeedViewController, [Any]) {
+        let builder = FeedFeatureBuilder(repository: Photos(), imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()))
+        let presenter = UIViewController()
+        let nav = UINavigationController(rootViewController: presenter)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = nav
+        window.isHidden = false
+        window.layoutIfNeeded()
+        open(builder, presenter)
+        let feed = try #require(nav.viewControllers.last as? SnapFeedViewController, "nothing was pushed")
+        feed.loadViewIfNeeded()
+        feed.view.frame = window.bounds
+        feed.view.layoutIfNeeded()
+        try #require(await settle { feed.debugPageCount > 0 }, "the feed never loaded")
+        feed.view.layoutIfNeeded()
+        return (feed, [builder, window])
+    }
+
     private func settle(looks: Int = 2_000, _ condition: () -> Bool) async -> Bool {
         for _ in 0..<looks {
             if condition() { return true }
