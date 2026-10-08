@@ -1891,6 +1891,10 @@ final class SnapFeedViewController: UIViewController {
     func setFollowRelation(_ relation: FollowRelation, for author: ProfileID) {
         guard followRelationsByAuthor[author] != relation else { return }
         followRelationsByAuthor[author] = relation
+        // The pill's badge is part of what a pair of pages draws: a cached
+        // "the same" from before this answer would leave the scroll's swap
+        // unblurred (#627).
+        barPillScrubPair = nil
         followRelationDidChange(for: author)
     }
 
@@ -2477,6 +2481,9 @@ final class SnapFeedViewController: UIViewController {
             !notInterestedIDs.contains($0) || $0 == activePostID
         }
         modelsByID = Dictionary(uniqueKeysWithValues: state.items.map { ($0.id, $0) })
+        // A neighbour's model may have arrived or changed: what the pills draw
+        // for a pair of pages is asked again (#627).
+        barPillScrubPair = nil
         // ⚠️ BEFORE `dataSource.apply`. `willDisplay` fires inside the apply's
         // own layout pass and asks for a resting panel, so the parked one has
         // to already be in the slot by then.
@@ -2999,7 +3006,15 @@ final class SnapFeedViewController: UIViewController {
         let page = collectionView.bounds.height
         let start = collectionView.contentOffset.y
         let target = min(start + page, CGFloat(reachableCeiling()) * page)
-        let steps = 24
+        // `-snap-fling-steps N`: frames per page, one every 1/60 s. 24 is a
+        // gentle 0.4 s page; 3 is a fling (about 17,000 pt/s on a 874 pt
+        // page), the speed #627 is about.
+        var steps = 24
+        let arguments = ProcessInfo.processInfo.arguments
+        if let index = arguments.firstIndex(of: "-snap-fling-steps"), index + 1 < arguments.count,
+           let asked = Int(arguments[index + 1]), asked > 0 {
+            steps = asked
+        }
         print("[fling] begin from=\(Int(start)) to=\(Int(target))")
         func step(_ index: Int) {
             guard index <= steps else {
@@ -4505,12 +4520,18 @@ final class SnapFeedViewController: UIViewController {
         // its width (`setSoundShown`).
         setSoundShown(sound(for: model) != nil)
         showAttribution(model, sound: attribution.sound, cover: attribution.cover)
+        // Lands the swap under the blur, at FULL blur, and starts its
+        // envelope (`BarItemContentTransition.swapEnvelope`). A frame that
+        // jumped the whole window swaps with the scroll's blur at 0: the
+        // change then took the clock's timeline, which this call leaves to
+        // run (#627).
         authorIdentityView.setScrubBlur(authorBlur)
         mediaAttributionView.setScrubBlur(attributionBlur)
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-pill-probe") {
-            print(String(format: "[pill-probe] scrub swap -> %d at %.3f blur=%.2f/%.2f",
-                         index, position, authorBlur, attributionBlur))
+            print(String(format: "[pill-probe] scrub swap -> %d at %.3f blur=%.2f/%.2f shown=%.2f/%.2f",
+                         index, position, authorBlur, attributionBlur,
+                         authorIdentityView.shownScrubBlur, mediaAttributionView.shownScrubBlur))
         }
         #endif
     }
