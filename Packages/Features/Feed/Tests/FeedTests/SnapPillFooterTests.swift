@@ -76,29 +76,32 @@ struct SnapPillFooterTests {
 
     // MARK: - The sound bubble's face
 
-    /// A media post with no audio wears a greyed bubble; a text post with no
-    /// sound has none; the flag off, nobody has one.
+    /// A post with no sound — media or text — keeps its bubble, greyed, with
+    /// the struck-through note (#683).
     @Test func whoGetsASoundBubble() {
         do {
             let feed = feed()
             let photo = feed.soundFace(for: Self.photo())
             #expect(photo?.isAvailable == false, "a photograph with no audio is not greyed")
-            #expect(feed.soundFace(for: Self.text()) == nil, "a text post with no sound grew a bubble")
+            let text = feed.soundFace(for: Self.text())
+            #expect(text?.isAvailable == false, "a text post with no sound lost its slot")
+            #expect(text?.cachedCover === SnapSoundFace.noSoundImage)
         }
     }
 
     /// The bubble stands on the repost bubble's frame, which it replaces; a
-    /// tap mutes, a hold opens the sheet, and the badge says when it is muted.
+    /// tap opens the sheet, a hold mutes (#683), and the badge says when it is
+    /// muted.
     @Test func theBubbleTakesTheRepostsPlace() {
         do {
             let chrome = Layout.chrome()
             let bubble = chrome.debugSoundBubble
             #expect(bubble.isHidden, "a bubble with no face")
 
-            var taps = 0
-            var holds = 0
-            chrome.onSoundTapped = { taps += 1 }
-            chrome.onSoundSheetRequested = { holds += 1 }
+            var sheets = 0
+            var mutes = 0
+            chrome.onSoundSheetRequested = { sheets += 1 }
+            chrome.onSoundToggleRequested = { mutes += 1 }
             chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false))
             chrome.layoutIfNeeded()
             #expect(!bubble.isHidden)
@@ -106,16 +109,21 @@ struct SnapPillFooterTests {
             #expect(!bubble.debugIsMutedBadgeShown)
 
             bubble.sendActions(for: .primaryActionTriggered)
-            #expect(taps == 1)
+            #expect(sheets == 1, "a tap did not open the sheet")
+            #expect(mutes == 0)
             bubble.onLongPress?()
-            #expect(holds == 1)
+            #expect(mutes == 1, "a hold did not mute")
+            #expect(sheets == 1)
 
             chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: true))
             #expect(bubble.debugIsMutedBadgeShown)
 
-            chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: false, isMuted: false))
+            chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: false, isMuted: true))
             #expect(!bubble.isEnabled, "a post with no audio took the mute")
             #expect(bubble.alpha < 1)
+            #expect(!bubble.isHidden, "a post with no sound lost its bubble")
+            #expect(bubble.debugCoverImage === SnapSoundFace.noSoundImage, "no struck-through note")
+            #expect(!bubble.debugIsMutedBadgeShown, "a post with no sound says it is muted")
         }
     }
 

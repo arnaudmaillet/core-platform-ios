@@ -1615,7 +1615,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             guard let self, let id = self.representedID else { return }
             self.onRequestBoostUndo?(id)
         }
-        chrome.onSoundTapped = { [weak self] in self?.onRequestSoundToggle?() }
+        chrome.onSoundToggleRequested = { [weak self] in self?.onRequestSoundToggle?() }
         chrome.onSoundSheetRequested = { [weak self] in self?.onRequestSoundSheet?() }
         #if DEBUG
         // Which projection fields are present the moment the page is

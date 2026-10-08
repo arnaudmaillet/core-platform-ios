@@ -2613,11 +2613,11 @@ final class SnapFeedViewController: UIViewController {
     /// a spend (or a claim on another screen) enables/disables the control
     /// and updates the menu it will build on its next long-press.
     /// What the sound bubble and the composer's rail slot draw for `model`
-    /// (#671): the sound's cover, the mute state, greyed for a media post
-    /// with no audio. Nil — no bubble — for a text post with no sound.
+    /// (#671): the sound's cover and the mute state — and for a post with no
+    /// sound, media or text, a greyed `music.note.slash` that keeps the slot
+    /// (#683).
     func soundFace(for model: FeedItemDisplayModel) -> SnapSoundFace? {
         let postSound = sound(for: model)
-        guard postSound != nil || model.mediaURL != nil else { return nil }
         return SnapSoundFace(
             coverURL: SnapMediaAttributionView.coverURL(for: model, cover: attributionContent(for: model).cover),
             isAvailable: postSound != nil,
@@ -2639,8 +2639,8 @@ final class SnapFeedViewController: UIViewController {
     }
 
     /// The composer's rail slot wears the sound's cover (#671) — on the sound
-    /// bubble's frame — and answers as the bubble does: a tap mutes, a hold
-    /// opens the sound sheet (#680). Internal for tests.
+    /// bubble's frame — and answers as the bubble does: a tap opens the sound
+    /// sheet, a hold mutes (#683). Internal for tests.
     func applySoundRail(to panel: UIViewController?) {
         guard let detail = panel as? PostDetailViewController,
               let id = detail.postID, let model = modelsByID[id] else { return }
@@ -2655,9 +2655,10 @@ final class SnapFeedViewController: UIViewController {
                 detail?.redrawRailSoundFace()
             }
         }
+        // A tap opens the sound sheet, a hold mutes — the bubble's (#683).
         detail.setRailSoundActions(
-            tap: { [weak self] in self?.toggleSound() },
-            hold: { [weak self] in self?.presentSoundSheet() }
+            tap: { [weak self] in self?.presentSoundSheet() },
+            hold: { [weak self] in self?.toggleSound() }
         )
     }
 
@@ -4605,8 +4606,9 @@ final class SnapFeedViewController: UIViewController {
     /// look at the player is one rule where wiring every door would be six.
     private func refreshCoverSpin() {
         let playing = isOnScreen && ((activeSnapCell?.isClipAdvancing ?? false) || songPlayer.isPlaying)
-        // The sound bubble's record turns while the post plays (#671).
-        activeSnapCell?.setSoundSpinning(playing)
+        // The sound bubble's record turns while the post plays AUDIBLY: the
+        // player's play and pause, and the mute (#683).
+        activeSnapCell?.setSoundSpinning(playing && FeedSound.isOn)
     }
 
     private func setCoverSpinWatch(_ on: Bool) {
@@ -4625,6 +4627,7 @@ final class SnapFeedViewController: UIViewController {
         refreshAudibleSurface()
         // The page's sound bubble and the panel's slot wear the new state.
         refreshVisibleSoundFaces()
+        refreshCoverSpin()
     }
 
     /// Silences this screen's sound while something else is heard over it —
@@ -6523,6 +6526,9 @@ extension SnapFeedViewController: ZoomTransitionDestination {
             chrome.setMediaPageCount(1, current: 0, clipPages: [0])
         }
         chrome.updateCommentStreams(viewModel.commentStreams(for: model.id))
+        // And the sound bubble, so it flies in with the page rather than
+        // appearing at the landing (#683).
+        chrome.setSoundFace(soundFace(for: model))
         // The replica's boost anchor wears the same face as the live one —
         // a boosted post must not flash back to the glyph mid-flight.
         chrome.setBoostTotal(wallet?.boostTotal(forTarget: model.id.rawValue) ?? 0)

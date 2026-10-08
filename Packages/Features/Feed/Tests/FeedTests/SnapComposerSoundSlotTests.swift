@@ -6,9 +6,9 @@ import UIKit
 @testable import Feed
 
 /// The composer's rail slot wears the post's sound (#671) and answers as the
-/// page's sound bubble does (#680): a TAP toggles the feed's sound, a LONG
-/// PRESS opens the sound sheet. On a text page the slot is the only place the
-/// sound lives, so a slot that drew the cover and did nothing was the bug.
+/// page's sound bubble does: a TAP opens the sound sheet, a LONG PRESS toggles
+/// the feed's sound (#683, swapped from #680). On a text page the slot is the
+/// only place the sound lives.
 @MainActor
 struct SnapComposerSoundSlotTests {
     private typealias Layout = SnapActionColumnLayoutTests
@@ -24,8 +24,8 @@ struct SnapComposerSoundSlotTests {
         #expect(taps == 1)
     }
 
-    /// A hold reaches the host only from a sound the post plays: a greyed
-    /// sound (a clip with no audio) and the other faces ignore it.
+    /// A hold (the mute) reaches the host only from a sound the post plays: a
+    /// greyed sound and the other faces ignore it.
     @Test func aHoldOpensTheSheetOnlyFromAnAvailableSound() throws {
         let bar = CommentsInputBar()
         var holds = 0
@@ -40,10 +40,10 @@ struct SnapComposerSoundSlotTests {
         #expect(holds == 1)
         bar.railFace = .sound(SnapSoundFace(coverURL: nil, isAvailable: false, isMuted: false))
         bar.debugHoldRail()
-        #expect(holds == 1, "a sound the post does not play opened the sheet")
+        #expect(holds == 1, "a sound the post does not play took the mute")
         bar.railFace = .pin(isPinned: false)
         bar.debugHoldRail()
-        #expect(holds == 1, "the pin opened the sound sheet")
+        #expect(holds == 1, "the pin took the mute")
     }
 
     /// The post screen hands both to its composer.
@@ -61,8 +61,8 @@ struct SnapComposerSoundSlotTests {
         #expect(holds == 1)
     }
 
-    /// ⚠️ THE TEXT PAGE (#680): the snap feed wires its panel's slot to the
-    /// feed's own sound — a tap flips `FeedSound` — and to the sound sheet.
+    /// ⚠️ THE TEXT PAGE: the snap feed wires its panel's slot to the feed's
+    /// own sound — a HOLD flips `FeedSound` (#683) — and a tap to the sheet.
     @Test func aTextPagesSlotTogglesTheFeedsSound() throws {
         let feed = SnapFeedViewController(
             viewModel: FeedViewModel(repository: SlotSilentProvider()),
@@ -82,12 +82,12 @@ struct SnapComposerSoundSlotTests {
         feed.applySoundRail(to: panel)
         let bar = try Layout.composerColumn(in: panel.view, space: window).bar
         #expect(bar.debugRailSymbol == CommentsInputBar.soundRailSymbol, "the text page's slot does not wear its sound")
-        #expect(bar.onRailLongPress != nil, "the hold is not wired to the sound sheet")
+        #expect(bar.onRailAction != nil, "the tap is not wired to the sound sheet")
 
         let before = FeedSound.isOn
-        bar.debugRailButton.sendActions(for: .primaryActionTriggered)
-        #expect(FeedSound.isOn != before, "the slot's tap did not toggle the sound")
-        bar.debugRailButton.sendActions(for: .primaryActionTriggered)
+        bar.debugHoldRail()
+        #expect(FeedSound.isOn != before, "the slot's hold did not toggle the sound")
+        bar.debugHoldRail()
         #expect(FeedSound.isOn == before)
     }
 

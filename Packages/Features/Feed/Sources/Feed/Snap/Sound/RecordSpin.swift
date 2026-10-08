@@ -2,7 +2,7 @@ import DesignSystem
 import QuartzCore
 
 extension CALayer {
-    private static let recordSpinKey = "sound.recordSpin"
+    static let recordSpinKey = "sound.recordSpin"
 
     /// Turns the layer like a record while its sound plays — one turn in
     /// eight seconds — and stops it WHERE IT IS: paused in place rather than

@@ -13,7 +13,8 @@ import UIKit
 /// ⚠️ **DECORATION ONLY, NOT CONTENT.** What rests: the wallet badge's breath,
 /// animated emotes and map icons, grid tiles playing on their own, the record
 /// turning under a song. What does NOT: the feed's own clip, the backdrop that
-/// follows it, its song, its comment band — someone watching a post without
+/// follows it, its song, its comment band, the sound bubble's record, which
+/// says the post is playing aloud (#683) — someone watching a post without
 /// touching it is the whole point of a feed. Read through
 /// `MotionPreference.stillsDecoration`, never this alone.
 ///
