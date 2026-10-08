@@ -701,6 +701,24 @@ private final class PagerScrollView: UIScrollView {
             // the viewport-relative x the edge zone is defined in.
             let viewportX = gestureRecognizer.location(in: self).x - contentOffset.x
             if viewportX <= Self.popEdgeZone { return false }
+            // ⚠️ AND A CAROUSEL WITH SOMEWHERE TO GO KEEPS ITS DRAG (#691) — the
+            // shared pager's rule (`HorizontalPagerScrollView.shouldYield`): a
+            // rightward drag on photograph 2/3 goes to 1/3, not to the previous
+            // tab; a leftward drag on the LAST photograph has nowhere to go
+            // and turns the tab. Asked at the drag's origin, in the direction
+            // it is going.
+            let pan = panGestureRecognizer
+            let velocity = pan.velocity(in: self)
+            if abs(velocity.x) > abs(velocity.y) {
+                let location = pan.location(in: self)
+                let translation = pan.translation(in: self)
+                let origin = CGPoint(x: location.x - translation.x, y: location.y - translation.y)
+                if !MediaCarouselTouchRouting.dragPassesThroughCarousel(
+                    at: origin, in: self, towardsPageDelta: velocity.x > 0 ? -1 : 1
+                ) {
+                    return false
+                }
+            }
         }
         return super.gestureRecognizerShouldBegin(gestureRecognizer)
     }

@@ -33,4 +33,14 @@ enum ProfileDismissalPolicy {
     static func allowsEdgeDismissal(isPushed: Bool) -> Bool {
         PagedScreenDismissalPolicy.allowsEdgeDismissal(isPushed: isPushed)
     }
+
+    /// Whether a rightward drag that began at `originX` may close the
+    /// profile, given the carousel under it (#691): the edge strip always
+    /// may; anywhere else only a drag that passes THROUGH the carousel —
+    /// none under the finger, or one already on its first photograph. A
+    /// carousel with a photograph to the left keeps the drag, and the
+    /// profile does not move. The place page's and the snap feed's rule.
+    static func dragMayDismiss(originX: CGFloat, passesThroughCarousel: () -> Bool) -> Bool {
+        originX <= PagedScreenDismissalPolicy.edgeZone || passesThroughCarousel()
+    }
 }

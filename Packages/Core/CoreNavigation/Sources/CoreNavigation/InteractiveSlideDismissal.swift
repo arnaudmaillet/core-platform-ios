@@ -134,6 +134,13 @@ public final class InteractiveSlideDismissal: NSObject {
     /// Nil means no veto, which is the behaviour every existing caller had.
     public var canBeginDismissal: (() -> Bool)?
 
+    /// A veto that needs to know WHERE the drag began and which way it goes
+    /// — for an owner that is not a `ZoomTransitionDestination`, which would
+    /// answer through `permitsDismissalGrab` instead (#691: a pushed
+    /// profile's carousels). Asked with the drag's ORIGIN in the screen's
+    /// view, after `canBeginDismissal`. Nil means no veto.
+    public var permitsDrag: ((_ origin: CGPoint, _ axis: ZoomDismissAxis, _ view: UIView) -> Bool)?
+
     /// Whether a hero grab is attached to the same screen and the two must
     /// divide the work between them.
     ///
@@ -799,6 +806,7 @@ extension InteractiveSlideDismissal: UIGestureRecognizerDelegate {
             return false
         }
         if let canBeginDismissal, !canBeginDismissal() { return false }
+        if let permitsDrag, !permitsDrag(pan.dragOrigin(in: view), axis, view) { return false }
         // ⚠️ AND THE SCREEN'S TENANTS, ON BOTH AXES, ALWAYS — through the same
         // predicate the zoom grab asks (`permitsDismissalGrab`), never a copy.
         //
