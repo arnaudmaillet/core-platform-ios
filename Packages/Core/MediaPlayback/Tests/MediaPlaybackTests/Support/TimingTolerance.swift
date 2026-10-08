@@ -92,4 +92,45 @@ enum TimingTolerance {
             hardLimit: range.upperBound + (range.upperBound - range.lowerBound)
         )
     }
+
+    /// How much film a looping item played between two playhead readings.
+    ///
+    /// ⚠️ **A SMALL STEP BACK IS NOT A WRAP** (#599). A composed reader that
+    /// fell behind restarts, and the playhead it reports can step back a few
+    /// hundredths; reading every step back as a whole loop added a period of
+    /// "film" in one look, and the frames read ahead BEFORE the change counted
+    /// as played after it (CI: two red frames at 0.033 s and 0.067 s in
+    /// `aLiveLookReachesThePlayingFrames`). Only a step back of more than half
+    /// the period is the end wrapping to the start; a smaller one adds nothing.
+    static func filmAdvanced(from last: Double, to head: Double, period: Double) -> Double {
+        if head >= last { return head - last }
+        return last - head > period / 2 ? head + period - last : 0
+    }
+
+    /// Whether a looping item's `reading` is where playing on from `start`
+    /// puts it after some time inside `elapsed`, within `slack`, modulo
+    /// `period`.
+    ///
+    /// ⚠️ **A STARVED SLEEP CAN WRAP THE LOOP** (#599): a "300 ms" sleep that
+    /// ran ~2.4 s put a 3 s clip resumed at 2.25 s back at 1.68 s, and
+    /// `fraction > 0.6` read that as the scrub being undone. Measured instead
+    /// against the wall clock the test actually spent: a clip dragged back to
+    /// where a scrub STARTED is still off by the scrub's length, at any
+    /// elapsed time short of a whole period.
+    static func isOnLoop(
+        _ reading: Double, start: Double, elapsed: ClosedRange<Double>, period: Double, slack: Double
+    ) -> Bool {
+        let low = max(0, elapsed.lowerBound - slack)
+        let high = elapsed.upperBound + slack
+        // Any elapsed time of a whole period or more puts it anywhere.
+        guard high - low < period else { return true }
+        var advance = (reading - start).truncatingRemainder(dividingBy: period)
+        if advance < 0 { advance += period }
+        var candidate = advance
+        while candidate <= high {
+            if candidate >= low { return true }
+            candidate += period
+        }
+        return false
+    }
 }

@@ -47,6 +47,10 @@ struct ScrubWhilePausedTests {
         return (controller, surface)
     }
 
+    private static func seconds(_ duration: Duration) -> Double {
+        Double(duration.components.seconds) + Double(duration.components.attoseconds) / 1e18
+    }
+
     @Test func aSeekMovesAPausedPlayer() async throws {
         let (controller, surface) = try await bound(try await clip())
         _ = try #require(controller.playhead(in: surface), "guard: the item reported a length")
@@ -73,12 +77,22 @@ struct ScrubWhilePausedTests {
         let scrubbed = try #require(controller.playhead(in: surface)).fraction
         #expect(abs(scrubbed - 0.75) < 0.12, "guard: the scrub landed before we resumed")
 
+        let resumed = ContinuousClock.now
         controller.setPaused(false, in: surface)
         try await Task.sleep(for: .milliseconds(300))
-
+        let readFrom = ContinuousClock.now - resumed
         let head = try #require(controller.playhead(in: surface))
-        #expect(head.fraction > 0.6,
-                "resuming dragged the clip back to where the scrub started: \(head)")
+        let readBy = ContinuousClock.now - resumed
+
+        // ⚠️ AGAINST THE TIME THE TEST ACTUALLY SPENT, not `fraction > 0.6`
+        // (#599): a starved "300 ms" ran ~2.4 s on CI and wrapped the 3 s loop
+        // back to 0.56. Dragged back to where the scrub started, the clip is
+        // off by the scrub's length whatever the elapsed time.
+        let duration = 3.0
+        #expect(TimingTolerance.isOnLoop(
+            head.fraction * duration, start: scrubbed * duration,
+            elapsed: Self.seconds(readFrom)...Self.seconds(readBy), period: duration, slack: 0.25
+        ), "resuming dragged the clip back to where the scrub started: \(head) after \(readFrom)…\(readBy)")
     }
 
     /// The witness: with no seek in between, the anchor still does its job. A

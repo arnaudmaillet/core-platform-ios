@@ -455,8 +455,9 @@ struct LiveLookTests {
             looks += 1
             try await Task.sleep(for: .milliseconds(10))
             if let head = controller.playheadSeconds(in: view) {
-                // The whole four-second item loops: a step back is a wrap.
-                played += head >= last ? head - last : head + 4 - last
+                // The whole four-second item loops: a step back past half of
+                // it is a wrap; a restart's few hundredths are not (#599).
+                played += TimingTolerance.filmAdvanced(from: last, to: head, period: 4)
                 last = head
             }
             let now = renderer.currentFrameTime
