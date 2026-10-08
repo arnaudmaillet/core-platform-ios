@@ -134,6 +134,28 @@ public final class VideoPlaybackController {
         ))
     }
 
+    /// The next fresh player for `url` under `scope` starts at `seconds`
+    /// instead of the beginning — the hero flight's picture was showing that
+    /// moment of the clip (#625). Spent by that start, like a resume.
+    ///
+    /// ⚠️ NOTHING WHEN THAT POST'S CLIP IS ALREADY RUNNING. The next `play`
+    /// then JOINS that player instead of minting one, so a start filed here
+    /// would never be spent — and the post's next cold start, opened from
+    /// anywhere, would seek to it. A map marker warms its page's player at
+    /// touch-down (#646); the page asks again at take-off and must not leave
+    /// that second answer lying in the ledger.
+    public func prepareStart(of url: URL, scope: String, at seconds: TimeInterval) {
+        guard sharedActivePlayer(playing: url, scope: scope) == nil else { return }
+        rememberResume(scope: scope, url: url, at: CMTime(seconds: seconds, preferredTimescale: 600))
+    }
+
+    /// Drops whatever start position is filed for `url` under `scope` — a
+    /// prepared start that was never spent, or the position a stop filed for
+    /// a clip nobody watched (#646).
+    public func forgetStart(of url: URL, scope: String) {
+        _ = takeResume(scope: scope, url: url)
+    }
+
     /// The playhead a fresh player for this post should start from, if any.
     /// Consumed, not read: a resume answers once, and a clip the viewer has
     /// since watched to the end must not be dragged back to a stale position by
@@ -281,20 +303,23 @@ public final class VideoPlaybackController {
             return
         }
 
-        // ⚠️ ONE ASSET, ONE PLAYER — including one that is already ACTIVE.
-        //
-        // The branch above adopts a PARKED player, which is the handoff. It
-        // left a second case open: a player running this same asset for another
-        // surface. That happens by construction now — a card holds a clip
-        // paused on its page while the post opens the same clip — and minting a
-        // second one gives the asset two decoders on two clocks. The codebase
-        // has met that before (see `startDeferredPlayback`'s note on the
-        // cold-open race): the surface a viewer is looking at ends up bound to
-        // whichever of them a lookup happens to find, and a paused one behind a
-        // visible surface is a picture that has stopped for no visible reason.
-        //
-        // Joining is cheap and synchronous — no resolution, no await — so it
-        // also removes a start-up delay on the second surface.
+        // ⚠️ ALREADY ON THIS CLIP: CARRY ON. "Safe to call repeatedly" was
+        // true only while a start awaited its resolution — a second call
+        // bumped the token and the first dropped out. A JOIN completes with no
+        // await, so a second call found this view's player as "shared", fell
+        // through and minted a fresh one at zero over it. A post page starts
+        // from two doors two milliseconds apart (viewport, activation), and a
+        // map marker's touch-down warm (#646) makes its page's start a join:
+        // filmed as `JOIN`, then `STOP` + `MINT start=0` 3 ms later, the warm
+        // and the flight's start position both thrown away. A view bound to a
+        // live player on this clip and post is playing what was asked.
+        if let current = activePlayers[key], playingURL[key] == mediaURL, playingScope[key] == scope,
+           current.currentItem.map({ $0.status != .failed }) ?? false {
+            current.currentItem?.preferredPeakBitRate = peakBitRate
+            current.play()
+            return
+        }
+
         // ⚠️ ONE ASSET, ONE PLAYER — including one that is already ACTIVE.
         //
         // The branch above adopts a PARKED player, which is the handoff. It

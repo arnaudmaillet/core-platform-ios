@@ -193,6 +193,10 @@ final class SnapFeedViewController: UIViewController {
     private var orderedIDs: [PostID] = []
 
     private var lifecycle = SnapLifecycleDispatcher()
+    /// The clip time a presenting flight's picture showed, for the entry page
+    /// (#625) — see `zoomTransitionWillStartMedia(at:)`. A nil post is the
+    /// entry page of a feed that had no posts yet when the flight took off.
+    private var flightMediaStart: (postID: PostID?, seconds: TimeInterval)?
     /// True between `zoomTransitionWillBegin` and `zoomTransitionDidEnd`. Cells
     /// realized inside that window inherit the playback deferral, so a page
     /// activating mid-flight cannot steal the render slot from the flying card.
@@ -4293,6 +4297,7 @@ final class SnapFeedViewController: UIViewController {
                 at: IndexPath(item: activate, section: 0)
             ) as? SnapFeedCell {
                 snapCell.defersPlaybackForFlight = defersPlaybackForStagingFlight
+                stampFlightMediaStart(on: snapCell)
                 // The chrome's hold takes the same net, for the same reason:
                 // stamped on `activeSnapCell` alone it reached nobody, and
                 // the ticker laid its train unheld, off-window, mid-flight
@@ -5245,6 +5250,7 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         // layout pass the presentation triggers. Stamping only in `apply` left
         // the flag false exactly when it mattered.
         (cell as? SnapFeedCell)?.defersPlaybackForFlight = defersPlaybackForStagingFlight
+        if let snapCell = cell as? SnapFeedCell { stampFlightMediaStart(on: snapCell) }
         // The same net, for the picture: a page can be handed the screen while
         // it is still being realized, and the hand-over reaches nothing. The
         // page that owns the viewport is a fact about the SCROLL, so it is
@@ -6271,6 +6277,9 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// poster-then-black at the landing. The source says which flight this is.
     public func zoomTransitionWillBegin(flyingLivePlayer: Bool) {
         isAwaitingZoomPresentation = true
+        // A start position belongs to ONE flight: this one tells its own, after
+        // this, or none (#625).
+        flightMediaStart = nil
         flightCarriesActivePlayer = flyingLivePlayer
         activeSnapCell?.defersPlaybackForFlight = defersPlaybackForStagingFlight
         // Reaches a cell only when this screen is being re-presented over a
@@ -6286,6 +6295,39 @@ extension SnapFeedViewController: ZoomTransitionDestination {
                          defersPlaybackForStagingFlight ? "Y" : "N"))
         }
         #endif
+    }
+
+    /// The clip time the presenting flight's picture shows (#625), for the
+    /// page it opens on. Handed to that page's cell as it is realised and
+    /// spent by its first start.
+    ///
+    /// ⚠️ A COLD OPEN HAS NO POST YET. The feed is pushed before its posts
+    /// arrive, so `activePostID` is nil at take-off and the time used to be
+    /// dropped — the page started at zero on exactly the opens whose first frame
+    /// is late (#633). It is kept for the entry page instead: the first page
+    /// `activePostID` names once it can, by the same fallback rule.
+    public func zoomTransitionWillStartMedia(at seconds: TimeInterval) {
+        flightMediaStart = (activePostID, seconds)
+        if let cell = activeSnapCell { stampFlightMediaStart(on: cell) }
+    }
+
+    /// Gives the entry page its start position — once, and only to the page
+    /// showing the post the flight carried.
+    private func stampFlightMediaStart(on cell: SnapFeedCell) {
+        guard let start = flightMediaStart,
+              let shown = cell.representedPostID,
+              Self.isFlightEntryPage(shown, carried: start.postID, entry: activePostID)
+        else { return }
+        cell.flightMediaStartTime = start.seconds
+        flightMediaStart = nil
+    }
+
+    /// Whether the page showing `shown` is the one a flight's start position is
+    /// for: the post the flight named, or — when it took off before the feed
+    /// had posts — the entry page. Pure, for tests.
+    static func isFlightEntryPage(_ shown: PostID, carried: PostID?, entry: PostID?) -> Bool {
+        if let carried { return shown == carried }
+        return shown == entry
     }
 
     /// **OPTION B.** Opens the thread's window on the same spring the card

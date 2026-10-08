@@ -110,5 +110,10 @@ final class ZoomPageWindowCard: UIView, ZoomFlightCard {
     func prepareZoomLiveMediaForFlight(destinationSize: CGSize) {
         media.prepareZoomLiveMediaForFlight(destinationSize: destinationSize)
     }
+    var zoomStillMediaSurface: UIView? { media.zoomStillMediaSurface }
+    var zoomStillMediaNativeSize: CGSize? { media.zoomStillMediaNativeSize }
+    func prepareZoomStillMediaForFlight(destinationSize: CGSize) {
+        media.prepareZoomStillMediaForFlight(destinationSize: destinationSize)
+    }
     func applyZoomRestingShadow(to layer: CALayer) { media.applyZoomRestingShadow(to: layer) }
 }

@@ -33,6 +33,9 @@ public final class AnimatedIconCatalog: NSObject, AnimatedIconProviding {
         /// contract's integer ladder — the only way to express 60 fps, since
         /// 1/60 s is 16.67 ms and `frame_ms` is a `uint32`.
         let stepMS: Double?
+        /// A video sheet's frame zero, as a time in its clip (ms) — absent on
+        /// icons and on manifests baked before #539.
+        let startMS: Int?
     }
 
     private final class Box {
@@ -164,7 +167,8 @@ public final class AnimatedIconCatalog: NSObject, AnimatedIconProviding {
             return .sheet(AnimatedIconSheet(
                 sheet: image, frameCount: entry.frameCount,
                 columns: entry.columns ?? 4, frameDuration: step,
-                gutterPX: entry.gutterPX ?? 0
+                gutterPX: entry.gutterPX ?? 0,
+                startTime: entry.startMS.map { TimeInterval($0) / 1000 }
             ))
         }.value
     }

@@ -34,10 +34,47 @@ enum AtlasWriter {
     /// `UIGraphicsImageRenderer`, which is already top-left. Two bakers, two
     /// coordinate conventions, one grid format between them.
     static func origin(frame: Int, columns: Int, rows: Int, cellPixels: Int) -> CGPoint {
+        origin(frame: frame, columns: columns, rows: rows, cell: CellSize(side: cellPixels))
+    }
+
+    /// `origin` for a cell of any shape — a preview baked at its clip's own
+    /// aspect (#539).
+    static func origin(frame: Int, columns: Int, rows: Int, cell: CellSize) -> CGPoint {
         CGPoint(
-            x: CGFloat((frame % columns) * cellPixels),
-            y: CGFloat((rows - 1 - frame / columns) * cellPixels)
+            x: CGFloat((frame % columns) * cell.width),
+            y: CGFloat((rows - 1 - frame / columns) * cell.height)
         )
+    }
+
+    /// A cell's size in sheet pixels. Square for icons; a video preview baked
+    /// with `--native-aspect` keeps its clip's shape (#539), so the hero that
+    /// opens a marker can REVEAL the picture rather than aspect-fill a square
+    /// crop of it into a portrait page.
+    struct CellSize: Equatable {
+        let width: Int
+        let height: Int
+
+        init(width: Int, height: Int) {
+            self.width = width
+            self.height = height
+        }
+
+        init(side: Int) {
+            self.init(width: side, height: side)
+        }
+
+        /// The SHORT side is `side`, the long one follows `aspect` — so the
+        /// marker, which aspect-fills a square, keeps `side` pixels across its
+        /// face exactly as a square cell gave it.
+        static func native(side: Int, aspect: CGSize) -> CellSize {
+            guard aspect.width > 0, aspect.height > 0 else { return CellSize(side: side) }
+            if aspect.height >= aspect.width {
+                return CellSize(width: side, height: Int((CGFloat(side) * aspect.height / aspect.width).rounded()))
+            }
+            return CellSize(width: Int((CGFloat(side) * aspect.width / aspect.height).rounded()), height: side)
+        }
+
+        var isSquare: Bool { width == height }
     }
 
     /// Draws one frame into a cell: inset by the gutter, clipped to the disc,
@@ -60,9 +97,16 @@ enum AtlasWriter {
         _ image: CGImage?, into context: CGContext, at origin: CGPoint,
         cellPixels: Int, plate: CGColor?, shape: Shape = .disc
     ) {
+        drawCell(image, into: context, at: origin, cell: CellSize(side: cellPixels), plate: plate, shape: shape)
+    }
+
+    static func drawCell(
+        _ image: CGImage?, into context: CGContext, at origin: CGPoint,
+        cell: CellSize, plate: CGColor?, shape: Shape = .disc
+    ) {
         let art = CGRect(
             x: origin.x + CGFloat(gutter), y: origin.y + CGFloat(gutter),
-            width: CGFloat(cellPixels - gutter * 2), height: CGFloat(cellPixels - gutter * 2)
+            width: CGFloat(cell.width - gutter * 2), height: CGFloat(cell.height - gutter * 2)
         )
         context.saveGState()
         if shape == .disc {
@@ -124,6 +168,12 @@ enum AtlasWriter {
     static func emptyCells(
         in sheet: CGImage, frameCount: Int, columns: Int, cellPixels: Int
     ) -> [Int] {
+        emptyCells(in: sheet, frameCount: frameCount, columns: columns, cell: CellSize(side: cellPixels))
+    }
+
+    static func emptyCells(
+        in sheet: CGImage, frameCount: Int, columns: Int, cell: CellSize
+    ) -> [Int] {
         let width = sheet.width, height = sheet.height
         var pixels = [UInt8](repeating: 0, count: width * height * 4)
         pixels.withUnsafeMutableBytes { raw in
@@ -138,10 +188,10 @@ enum AtlasWriter {
         // Read from the TOP, exactly as `contentsRect` does — checking in the
         // baker's own coordinate space would agree with the bug.
         return (0..<frameCount).filter { frame in
-            let cx = (frame % columns) * cellPixels
-            let cy = (frame / columns) * cellPixels
-            for y in (cy + cellPixels / 3)..<(cy + cellPixels * 2 / 3) {
-                for x in (cx + cellPixels / 3)..<(cx + cellPixels * 2 / 3) {
+            let cx = (frame % columns) * cell.width
+            let cy = (frame / columns) * cell.height
+            for y in (cy + cell.height / 3)..<(cy + cell.height * 2 / 3) {
+                for x in (cx + cell.width / 3)..<(cx + cell.width * 2 / 3) {
                     let p = (y * width + x) * 4
                     if p + 3 < pixels.count, pixels[p + 3] > 8 { return false }
                 }

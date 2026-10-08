@@ -332,7 +332,6 @@ final class SnapMediaCardView: UIView {
                 renderView.removeFromSuperview()
                 renderView = view
             }
-            view.transform = .identity
             // ⚠️ The adopted view IS this page's surface from here on.
             //
             // Without this the page kept pointing at the surface the landing
@@ -340,8 +339,12 @@ final class SnapMediaCardView: UIView {
             // re-minted one for the page the viewer was already watching — two
             // surfaces for one clip, and the live layer among the discarded.
             pageSurfaces[currentPage] = view
-            hostRenderViewOnCurrentPage()
-            hostRetainedSurfaces()
+            // Without animation — see `VideoRenderView.settleGeometry`.
+            view.settleGeometry {
+                view.transform = .identity
+                hostRenderViewOnCurrentPage()
+                hostRetainedSurfaces()
+            }
             return
         }
         guard view.superview !== self else { return }
@@ -354,6 +357,12 @@ final class SnapMediaCardView: UIView {
             renderView.removeFromSuperview()
             renderView = view
         }
+        // ⚠️ IN ONE UNANIMATED LAYOUT. The surface arrives at its flight size
+        // (the clip's native aspect, posed by transform); put back at this
+        // card's bounds, its content sublayer slid there over 0.25 s from the
+        // top-left — the landing jump filmed on a framed post. See
+        // `VideoRenderView.settleGeometry`.
+        view.settleGeometry {
         view.transform = .identity
         // Installed by FRAME, not by constraints, and that is the whole fix for
         // the landing flash. `pin(to:)` sets
@@ -371,7 +380,37 @@ final class SnapMediaCardView: UIView {
         // flown in between, where gravity is nobody's business but may have
         // been set by the grid it passed through.
         applyFraming()
+        }
+        #if DEBUG
+        probeLandingSurface(view)
+        #endif
     }
+
+    #if DEBUG
+    /// `-landing-surface-probe`: the adopted surface's geometry and running
+    /// animations over the 300 ms after a landing hands it over (#539).
+    private func probeLandingSurface(_ view: VideoRenderView) {
+        guard ProcessInfo.processInfo.arguments.contains("-landing-surface-probe") else { return }
+        func describe(_ label: String) {
+            let layer = view.layer
+            let keys = layer.animationKeys()?.joined(separator: ",") ?? "-"
+            let subs = (layer.sublayers ?? []).map { sub in
+                "\(type(of: sub)) f=\(NSCoder.string(for: sub.frame))"
+                    + " pres=\(sub.presentation().map { NSCoder.string(for: $0.frame) } ?? "-")"
+                    + " anim=[\(sub.animationKeys()?.joined(separator: ",") ?? "-")]"
+            }.joined(separator: " | ")
+            print("[landing-surface] \(label) frame=\(NSCoder.string(for: view.frame))"
+                + " pres=\(layer.presentation().map { NSCoder.string(for: $0.frame) } ?? "-")"
+                + " xf=\(NSCoder.string(for: view.transform)) anchor=\(NSCoder.string(for: layer.anchorPoint))"
+                + " gravity=\(view.debugVideoGravity) anim=[\(keys)] hidden=\(view.isHidden) alpha=\(view.alpha)"
+                + " super=\(view.superview.map { String(describing: type(of: $0)) } ?? "nil") subs: \(subs)")
+        }
+        describe("t0")
+        for delay in [0.016, 0.05, 0.1, 0.2, 0.3] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { describe("t+\(delay)") }
+        }
+    }
+    #endif
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }

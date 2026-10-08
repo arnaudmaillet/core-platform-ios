@@ -37,11 +37,12 @@ struct ZoomExistentialDispatchTests {
         #expect(source.zoomLandingMediaIsReady == false)
         source.zoomFinalizeLanding()
         #expect(source.zoomLandingAcceptsHero == false)
+        #expect(source.zoomFlightMediaTime == 1.5)
 
         #expect(spy.calls == [
             "surfaceIfReady", "carriesLivePlayer", "depthView", "willStageDismissal", "abandonDismissal", "adopt",
             "landingReady", "finalizeLanding",
-            "landingAcceptsHero",
+            "landingAcceptsHero", "flightMediaTime",
         ])
     }
 
@@ -64,6 +65,7 @@ struct ZoomExistentialDispatchTests {
         destination.zoomReclaimLiveMediaView(probe)
         destination.zoomAdoptLiveMediaView(probe)
         destination.zoomTransitionWillBegin(flyingLivePlayer: true)
+        destination.zoomTransitionWillStartMedia(at: 1)
         destination.zoomTransitionWillDepart()
         destination.zoomPrepareForPresentation(in: .zero)
         destination.setZoomDismissState(ZoomDismissState(
@@ -75,7 +77,7 @@ struct ZoomExistentialDispatchTests {
         #expect(spy.calls == [
             "kind", "contentReady", "ownsDismissal", "concealsTabBar", "mediaRendering",
             "verticalPermitted", "horizontalPermitted", "mirror", "donate",
-            "reclaim", "adopt", "willBegin", "willDepart", "prepareForPresentation", "dismissState", "park",
+            "reclaim", "adopt", "willBegin", "startMedia", "willDepart", "prepareForPresentation", "dismissState", "park",
             "framing",
         ])
     }
@@ -135,6 +137,7 @@ private final class SpySource: NSObject, ZoomTransitionSource {
     var zoomLandingMediaIsReady: Bool { calls.append("landingReady"); return false }
     func zoomFinalizeLanding() { calls.append("finalizeLanding") }
     var zoomLandingAcceptsHero: Bool { calls.append("landingAcceptsHero"); return false }
+    var zoomFlightMediaTime: TimeInterval? { calls.append("flightMediaTime"); return 1.5 }
 }
 
 private final class SpyDestination: NSObject, ZoomTransitionDestination {
@@ -166,6 +169,7 @@ private final class SpyDestination: NSObject, ZoomTransitionDestination {
     func zoomReclaimLiveMediaView(_ view: UIView) { calls.append("reclaim") }
     func zoomAdoptLiveMediaView(_ view: UIView) { calls.append("adopt") }
     func zoomTransitionWillBegin(flyingLivePlayer: Bool) { calls.append("willBegin") }
+    func zoomTransitionWillStartMedia(at seconds: TimeInterval) { calls.append("startMedia") }
     func zoomTransitionWillDepart() { calls.append("willDepart") }
     func zoomPrepareForPresentation(in bounds: CGRect) { calls.append("prepareForPresentation") }
     func setZoomDismissState(_ state: ZoomDismissState) { calls.append("dismissState") }

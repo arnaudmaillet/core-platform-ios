@@ -401,10 +401,19 @@ struct ZoomFlight {
         // Sized to cover the PICTURE's page-end rect: the page itself, or the
         // fitted rect when the page fits — which has the clip's own aspect, so
         // the page end is the surface at scale ~1 and a fit drawn by fill math.
-        let liveMediaSize = Self.liveMediaLayoutSize(native: card.zoomLiveMediaNativeSize,
-                                                     page: fittedMedia.size)
+        //
+        // A card with no live surface (or one that has not said its size yet)
+        // states the still's (#539): the marker's cover and its baked preview
+        // are the same clip at its own aspect, and they fly that way too.
+        let liveMediaSize = Self.liveMediaLayoutSize(
+            native: card.zoomLiveMediaNativeSize ?? card.zoomStillMediaNativeSize,
+            page: fittedMedia.size
+        )
         if card.zoomLiveMediaSurface != nil {
             card.prepareZoomLiveMediaForFlight(destinationSize: liveMediaSize)
+        }
+        if card.zoomStillMediaSurface != nil {
+            card.prepareZoomStillMediaForFlight(destinationSize: liveMediaSize)
         }
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
@@ -525,7 +534,7 @@ struct ZoomFlight {
         shadow.frame = CGRect(origin: landing.origin, size: shadow.frame.size)
         shadow.alpha = 1
         let center = CGPoint(x: landing.width / 2, y: landing.height / 2)
-        if let surface = mediaCard.zoomLiveMediaSurface, !mediaCard.zoomLiveMediaTracksCardBounds {
+        for surface in posedMediaSurfaces {
             let scale = Self.liveMediaScale(covering: landing.size, surface: liveMediaSize)
             surface.transform = CGAffineTransform(scaleX: scale, y: scale)
             surface.center = center
@@ -557,7 +566,7 @@ struct ZoomFlight {
         mediaCard.zoomRestingChrome?.alpha = 0
         shadow.alpha = 0
         let center = CGPoint(x: pageFrame.width / 2, y: pageFrame.height / 2)
-        if let surface = mediaCard.zoomLiveMediaSurface, !mediaCard.zoomLiveMediaTracksCardBounds {
+        for surface in posedMediaSurfaces {
             if isFramed {
                 // Covering the fitted rect, which has the clip's own shape —
                 // scale ~1, the surface's layout size — and centred in it.
@@ -625,7 +634,7 @@ struct ZoomFlight {
         // a surface anchored at its top-left it puts the picture's CORNER at
         // the card's centre — filmed on the dismiss as a second, differently
         // cropped rectangle inset into the bottom-right quadrant.
-        if let surface = mediaCard.zoomLiveMediaSurface, !mediaCard.zoomLiveMediaTracksCardBounds {
+        for surface in posedMediaSurfaces {
             if isFramed {
                 let fitScale = Self.liveMediaScale(covering: media.size, surface: liveMediaSize)
                 surface.transform = CGAffineTransform(scaleX: fitScale, y: fitScale)
@@ -737,7 +746,7 @@ struct ZoomFlight {
         // carrying live media returned here and never posed its CHROME for the
         // whole interpolation — the card's furniture frozen at its last value
         // while the card morphed under it.
-        if let surface = mediaCard.zoomLiveMediaSurface, !mediaCard.zoomLiveMediaTracksCardBounds {
+        for surface in posedMediaSurfaces {
             // Interpolate the SCALE between the two endpoint scales, rather
             // than recomputing a cover scale from the interpolated size.
             //
@@ -773,6 +782,19 @@ struct ZoomFlight {
             )
             chrome.center = CGPoint(x: size.width / 2, y: size.height / 2)
         }
+    }
+
+    /// Every picture the poses move by transform: the live surface (unless
+    /// the card sizes it from its own bounds) and the still one (#539). The
+    /// two are the same clip at the same native aspect, so they take the same
+    /// pose and stay registered whichever is showing.
+    private var posedMediaSurfaces: [UIView] {
+        var surfaces: [UIView] = []
+        if let live = mediaCard.zoomLiveMediaSurface, !mediaCard.zoomLiveMediaTracksCardBounds {
+            surfaces.append(live)
+        }
+        if let still = mediaCard.zoomStillMediaSurface { surfaces.append(still) }
+        return surfaces
     }
 
     // MARK: - Stage dressing

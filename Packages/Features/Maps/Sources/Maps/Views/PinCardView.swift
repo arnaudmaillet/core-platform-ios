@@ -90,6 +90,15 @@ final class PinCardView: UIView {
     /// frozen frame for the whole flight, which is the regression the live
     /// media work exists to prevent.
     private let departureCoverView = UIImageView()
+    /// The still picture — `imageView` and, over it, `previewSheetView` — as
+    /// ONE view the hero flight poses by transform (#539).
+    ///
+    /// Full-bleed at rest, so a marker looks exactly as it did. In flight it
+    /// is laid out once at the picture's NATIVE aspect (the baked previews
+    /// keep their clip's shape) and scaled uniformly, so the card's morphing
+    /// bounds are a window onto the picture rather than a frame it is
+    /// re-cropped to on every frame — see `ZoomFlightCard.zoomStillMediaSurface`.
+    private let stillMediaHost = UIView()
     /// The text-only face, above the (empty) cover and below the ring. Hidden
     /// for every media pin, so a recycled view must be told which face to wear
     /// on every configure — see `setFace(_:)`.
@@ -213,6 +222,9 @@ final class PinCardView: UIView {
     /// that did not exist. An index is not a name.
     var debugPreviewSheetFace: UIView { previewSheetView }
     var debugDepartureCover: UIView { departureCoverView }
+    /// The still picture's host — the cover and the preview, flown together
+    /// at their native aspect (#539).
+    var debugStillMediaHost: UIView { stillMediaHost }
     var debugLiveSurface: UIView { videoRenderView }
     var debugTextFace: UIView { textFaceView }
     /// The two things the disc can DRAW — the author's picture and the fallback
@@ -247,9 +259,13 @@ final class PinCardView: UIView {
         // grey that also hid the card's own black (:145, :397) completely, and
         // a marker whose picture had not resolved was a light box.
         imageView.backgroundColor = .black
+        stillMediaHost.frame = bounds
+        stillMediaHost.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        stillMediaHost.isUserInteractionEnabled = false
+        contentView.addSubview(stillMediaHost)
         imageView.frame = bounds
         imageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        contentView.addSubview(imageView)
+        stillMediaHost.addSubview(imageView)
 
         departureCoverView.contentMode = .scaleAspectFill
         departureCoverView.clipsToBounds = true
@@ -280,7 +296,7 @@ final class PinCardView: UIView {
         previewSheetView.frame = bounds
         previewSheetView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         previewSheetView.isHidden = true
-        contentView.addSubview(previewSheetView)
+        stillMediaHost.addSubview(previewSheetView)
 
         departureCoverView.frame = bounds
         departureCoverView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -365,8 +381,8 @@ final class PinCardView: UIView {
         // and a donated surface are both centred by `ZoomFlight`, and under a
         // zero anchor `center` would move their top-left corner instead. Nor
         // for `iconFaceView`, which `layoutIconFace` centres by hand.
-        for child in [contentView, imageView, previewSheetView, departureCoverView, donatedMediaHost,
-                      textFaceView, videoRenderView, lockVeil] {
+        for child in [contentView, stillMediaHost, imageView, previewSheetView, departureCoverView,
+                      donatedMediaHost, textFaceView, videoRenderView, lockVeil] {
             child.layer.anchorPoint = .zero
             child.frame = bounds
         }
@@ -780,7 +796,126 @@ final class PinCardView: UIView {
         }
     }
 
-    private(set) var wornPreview: (art: AnimatedIconArt, phase: Int)?
+    private(set) var wornPreview: (art: AnimatedIconArt, phase: Int)? {
+        didSet { previewHoldGeneration += 1 }
+    }
+    /// Bumped whenever the preview changes, so a scheduled hold on the end of
+    /// the sheet (`syncPreviewToLiveMedia`) never lands on another picture.
+    private var previewHoldGeneration = 0
+
+    /// The frame the preview sheet is showing right now; nil without one.
+    var previewDisplayedFrame: Int? {
+        wornPreview == nil ? nil : previewSheetView.displayedFrame
+    }
+
+    /// Puts the flight's preview sheet on the frame the live video is showing,
+    /// still playing, so the two pictures the reveal blends are the same moment
+    /// of the clip (#625). The page started its video where the sheet was
+    /// (`MapPinZoomSource.zoomFlightMediaTime`); this absorbs what the player's
+    /// first frame took. A no-op without a sheet.
+    ///
+    /// ⚠️ AND IT STOPS AT THE SHEET'S END INSTEAD OF LOOPING. The sheet is a
+    /// 2 s window of the clip on a loop; the video plays straight on. A video
+    /// that crossed the window's end during the fade had the sheet jump back to
+    /// the window's START under it — two unrelated moments blended, filmed on
+    /// device as a ghost of the other shot sliding over the picture (the Duomo
+    /// clip, whose window ends right after a cut). Lined up, the sheet plays to
+    /// its last frame and holds it; a video already past the window gets that
+    /// last frame at once — the nearest moment the sheet has.
+    func syncPreviewToLiveMedia() {
+        guard face == .media, let preview = wornPreview, case .sheet(let sheet) = preview.art,
+              let time = videoRenderView.displayedClipTime,
+              let plan = Self.previewHold(videoTime: time, sheet: sheet) else { return }
+        if let target = sheet.frame(atClipTime: time), let shown = previewSheetView.displayedFrame {
+            let phase = Self.phase(showing: target, now: shown, currentPhase: preview.phase, frameCount: sheet.frameCount)
+            if phase != preview.phase {
+                wornPreview = (preview.art, phase)
+                previewSheetView.setArt(preview.art, phase: phase)
+            }
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+                print(String(format: "[zoom-live] sheet synced video=%.3fs frame %d -> %d, holds %d in %.2fs",
+                             time, shown, target, plan.frame, plan.after))
+            }
+            #endif
+        }
+        holdPreview(on: plan.frame, after: plan.after)
+    }
+
+    /// Puts the preview sheet still on `frame` after `delay` — unless the
+    /// preview has changed by then.
+    private func holdPreview(on frame: Int, after delay: TimeInterval) {
+        let generation = previewHoldGeneration
+        let hold = { [weak self] in
+            guard let self, self.previewHoldGeneration == generation,
+                  let art = self.wornPreview?.art else { return }
+            self.previewSheetView.setArt(art, phase: frame, paused: true)
+        }
+        guard delay > 0 else { return hold() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: hold)
+    }
+
+    /// When the lined-up sheet must stop, and on which frame: its last, once
+    /// it has played up to it — `after` is the time until frame `last` is on
+    /// screen, which is inside that frame whatever part of the current one has
+    /// gone by. A video past the window holds the last frame now. Nil for a
+    /// video before the window, or a sheet with no clip start. Pure, for tests.
+    static func previewHold(videoTime: TimeInterval, sheet: AnimatedIconSheet) -> (frame: Int, after: TimeInterval)? {
+        guard let start = sheet.clipTime(ofFrame: 0), sheet.frameCount > 0, videoTime >= start else { return nil }
+        let last = sheet.frameCount - 1
+        guard let target = sheet.frame(atClipTime: videoTime) else { return (last, 0) }
+        return (last, TimeInterval(last - target) * sheet.frameDuration)
+    }
+
+    // MARK: - Focus pull (#625)
+
+    /// How long the live video takes to come into focus over the sheet.
+    static let focusPullDuration: TimeInterval = 0.3
+
+    /// Starts the live video at the sheet's resolution and raises it
+    /// (`VideoRenderView.pullFocus`): the reveal hands over between two
+    /// pictures that match, then sharpens, instead of ghosting a sharp picture
+    /// over a soft one.
+    func beginFocusPull() {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-no-focus-pull") { return }
+        #endif
+        guard let start = sheetPixelsPerPoint() else { return }
+        var duration = Self.focusPullDuration
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-focus-pull-slow") { duration = 2 }
+        #endif
+        let pulled = videoRenderView.pullFocus(fromPixelsPerPoint: start, over: duration)
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print(String(format: "[zoom-live] focus pull from %.2f px/pt: %@", start, pulled ? "yes" : "no"))
+        }
+        #endif
+    }
+
+    /// The sheet's resolution on the video's surface, in pixels per point: its
+    /// cell covering the surface the video is laid out on. Nil without a sheet.
+    private func sheetPixelsPerPoint() -> CGFloat? {
+        guard let preview = wornPreview, case .sheet(let sheet) = preview.art,
+              let pixels = sheet.sheet.cgImage, let rect = sheet.frameRects.first else { return nil }
+        let cell = CGSize(width: CGFloat(pixels.width) * rect.width, height: CGFloat(pixels.height) * rect.height)
+        return Self.sheetPixelsPerPoint(cell: cell, covering: videoRenderView.bounds.size)
+    }
+
+    /// A `cell`-pixel picture covering `surface`, in pixels per point. Pure,
+    /// for tests.
+    static func sheetPixelsPerPoint(cell: CGSize, covering surface: CGSize) -> CGFloat? {
+        guard cell.width > 0, cell.height > 0, surface.width > 0, surface.height > 0 else { return nil }
+        return min(cell.width / surface.width, cell.height / surface.height)
+    }
+
+    /// The phase that puts frame `target` on screen now, given that phase
+    /// `currentPhase` shows `now`. Every sheet runs on one shared clock, and a
+    /// phase only rotates which frame that clock lands on. Pure, for tests.
+    static func phase(showing target: Int, now shown: Int, currentPhase: Int, frameCount: Int) -> Int {
+        guard frameCount > 0 else { return currentPhase }
+        return ((currentPhase + target - shown) % frameCount + frameCount) % frameCount
+    }
 
     func reinstallPreviewPlayback() {
         previewSheetView.reinstall()
@@ -1566,11 +1701,27 @@ extension PinCardView: ZoomFlightCard {
     /// Nothing is shown until there is a decoded frame to show; if none ever
     /// arrives the surface simply stays at zero and the card lands on its
     /// cover, which is the picture the viewer was already looking at.
-    func fadeInAdoptedLiveMedia(over duration: TimeInterval) {
+    func fadeInAdoptedLiveMedia(over requested: TimeInterval) {
+        let wearsSheet: Bool = { if case .sheet? = wornPreview?.art { true } else { false } }()
+        let duration = Self.liveRevealFade(requested: requested, wearsSheet: wearsSheet)
         // `fadeInOnFirstFrame` un-hides on its own terms (isHidden false, alpha
         // 0, revealed when there is a frame), so it lifts the hold's hide as
         // part of the arrival rather than beside it.
         videoRenderView.setPoster(nil)
+        // Lined up on the video before it shows (#625): now when it already
+        // has a frame, else on its first one.
+        VideoRenderView.prewarmFocusPull()
+        if videoRenderView.isReadyForDisplay {
+            syncPreviewToLiveMedia()
+            beginFocusPull()
+        } else {
+            videoRenderView.onPictureAvailabilityChange = { [weak self] available in
+                guard available, let self else { return }
+                self.videoRenderView.onPictureAvailabilityChange = nil
+                self.syncPreviewToLiveMedia()
+                self.beginFocusPull()
+            }
+        }
         videoRenderView.fadeInOnFirstFrame(over: duration)
         // A DONATED surface arrives on its host, and the host's alpha is the
         // blend's. Releasing the hold inside an animation is what turns the
@@ -1579,6 +1730,20 @@ extension PinCardView: ZoomFlightCard {
         guard holdsAdoptedLiveMedia else { return }
         holdsAdoptedLiveMedia = false
         UIView.animate(withDuration: duration) { self.applyBlend() }
+    }
+
+    /// How long the live video takes to come up over the card (#646).
+    ///
+    /// ⚠️ SHORT OVER A SHEET. The flight asks for a fade over the rest of the
+    /// flight — over half a second when the frame comes early — and for all of
+    /// it the viewer sees the soft sheet blended into the video. Lined up on
+    /// the video (`syncPreviewToLiveMedia`) and handed over by a focus pull at
+    /// the sheet's own resolution, the two pictures already agree: a long blend
+    /// only keeps the picture soft longer. A card without a sheet keeps the
+    /// fade it was asked for. Pure, for tests.
+    static let sheetRevealFadeCap: TimeInterval = 0.15
+    static func liveRevealFade(requested: TimeInterval, wearsSheet: Bool) -> TimeInterval {
+        wearsSheet ? min(requested, sheetRevealFadeCap) : requested
     }
 
     func holdAdoptedLiveMediaUntilLanding() {
@@ -1653,6 +1818,32 @@ extension PinCardView: ZoomFlightCard {
 
     func prepareZoomLiveMediaForFlight(destinationSize: CGSize) {
         prepareVideoForFlight(destinationSize: destinationSize)
+    }
+
+    /// The still picture flies by transform (#539) — a media marker's cover
+    /// and its baked preview, whose native aspect is the cover's: under a
+    /// preview the cover IS the sheet's frame zero (`setPreviewSheet`).
+    var zoomStillMediaSurface: UIView? {
+        face == .media && imageView.image != nil ? stillMediaHost : nil
+    }
+
+    var zoomStillMediaNativeSize: CGSize? {
+        guard face == .media, let size = imageView.image?.size, size.width > 0, size.height > 0 else {
+            return nil
+        }
+        return size
+    }
+
+    /// Lays the still picture out ONCE at `destinationSize` — the native
+    /// aspect covering the page — centred, autoresizing off, so the flight's
+    /// transform and centre are the only things that move it. Its two views
+    /// fill it: at native aspect, aspect-fill crops nothing.
+    func prepareZoomStillMediaForFlight(destinationSize: CGSize) {
+        stillMediaHost.transform = .identity
+        stillMediaHost.autoresizingMask = []
+        stillMediaHost.layer.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+        stillMediaHost.bounds = CGRect(origin: .zero, size: destinationSize)
+        stillMediaHost.center = CGPoint(x: contentView.bounds.midX, y: contentView.bounds.midY)
     }
 
     /// A pin lifts off the map, so its flight carries the same drop shadow.

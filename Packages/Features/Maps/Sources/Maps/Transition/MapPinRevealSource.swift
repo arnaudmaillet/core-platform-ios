@@ -258,6 +258,15 @@ extension MKMapView {
     /// that was moving. A marker visibly playing its clip froze the instant it
     /// was tapped, and the phase goes with the art so it freezes on the frame
     /// it was on rather than restarting.
+    /// The frame the marker's preview sheet is showing right now (#625).
+    func wornPreviewFrame(for annotation: any MKAnnotation) -> Int? {
+        switch view(for: annotation) {
+        case let pin as MapAnnotationView: pin.card.previewDisplayedFrame
+        case let cluster as MapClusterAnnotationView: cluster.card.previewDisplayedFrame
+        default: nil
+        }
+    }
+
     func wornPreview(for annotation: any MKAnnotation) -> (art: AnimatedIconArt, phase: Int)? {
         switch view(for: annotation) {
         case let pin as MapAnnotationView: pin.card.wornPreview
