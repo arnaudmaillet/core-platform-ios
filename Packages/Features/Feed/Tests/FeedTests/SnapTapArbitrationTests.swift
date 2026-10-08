@@ -43,15 +43,17 @@ struct SnapTapArbitrationTests {
         // states) use the wheel, and taps on any comments surface
         // (empty-state pill, subtitle zone, ticker band) open the
         // engagement, and the repost bubble under the like anchor is a
-        // control of its own — none of them toggles playback. Each surface is
+        // control of its own, as is the sound bubble that takes its place
+        // under `-snap-pill-footer` (#671) — none of them toggles playback. Each surface is
         // hidden unless its content gate admits it, and hidden views
         // receive no touches, so play/pause keeps the whole page wherever
         // no surface is showing.
         let chrome = SnapChromeView()
-        #expect(chrome.interactionRoots.count == 6)
+        #expect(chrome.interactionRoots.count == 7)
         #expect(chrome.interactionRoots.contains(where: { $0 is SnapShortcutRailView }))
         #expect(chrome.interactionRoots.contains(where: { $0 is SnapRailBoostButton }))
         #expect(chrome.interactionRoots.contains(where: { $0 is SnapRailRepostButton }))
+        #expect(chrome.interactionRoots.contains(where: { $0 is SnapSoundBubbleButton }))
         #expect(chrome.interactionRoots.contains(where: { $0 is SnapCommentEmptyStateView }))
         #expect(chrome.interactionRoots.contains(where: { $0 is SnapSubtitleView }))
         #expect(chrome.interactionRoots.contains(where: { $0 is SnapCommentTickerView }))

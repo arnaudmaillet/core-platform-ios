@@ -48,6 +48,14 @@ struct SnapBarPillWidths: Equatable {
     /// The attribution's width on a post with (`true`) or without the mute
     /// button: without it, the attribution takes the button's slot, so the
     /// capsule they share keeps its width.
+    /// The author pill's width in the TOOLBAR's leading slot, under
+    /// `-snap-pill-footer` (#671): the room the attribution and the mute
+    /// button shared — the trailing run is the same two bubbles — capped at
+    /// the attribution's own cap, so the pill never folds into `•••`.
+    var toolbarAuthor: CGFloat {
+        min(attribution(soundShown: false), Self.attributionCap)
+    }
+
     func attribution(soundShown: Bool) -> CGFloat {
         soundShown ? attributionWithSound : attributionWithSound + Self.soundSlot
     }

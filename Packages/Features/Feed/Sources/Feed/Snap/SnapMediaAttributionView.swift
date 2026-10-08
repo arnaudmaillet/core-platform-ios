@@ -255,7 +255,7 @@ final class SnapMediaAttributionView: UIView {
     }
 
     /// The picture the round cover draws, nil for the note.
-    private static func coverURL(for model: FeedItemDisplayModel, cover: Cover) -> URL? {
+    static func coverURL(for model: FeedItemDisplayModel, cover: Cover) -> URL? {
         switch cover {
         case .note: nil
         case .artwork(let artwork): artwork
@@ -379,7 +379,7 @@ final class SnapMediaAttributionView: UIView {
     }
 
     /// A white note on the cover's own dark ground.
-    private static let noteImage: UIImage = {
+    static let noteImage: UIImage = {
         let side: CGFloat = 64
         return UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).image { context in
             UIColor.darkGray.setFill()

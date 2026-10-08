@@ -372,13 +372,20 @@ final class ConversationThreadViewController: UIViewController {
     /// save and repost have nothing to act on in a conversation, so the strip
     /// takes their room too.
     private func configureToolbar() {
-        guard let accessory else { return }
-        accessory.onInsertText = { [weak self] text in self?.composeBar.insertIntoComposer(text) }
         let more = SnapFooterToolbar.makeMoreButton(menu: UIMenu(children: [
             UIAction(title: "View Profile", image: UIImage(systemName: "person.crop.circle")) { [weak self] _ in
                 self?.driver.didTapIdentity()
             },
         ]))
+        // `-snap-pill-footer` (#671): [peer pill] … [⋯] — the pill leaves the
+        // nav bar for the strip's slot, and the strip goes (the composer's own
+        // emote button stays the way to emotes).
+        if SnapPillFooter.isOn {
+            toolbarItems = SnapFooterToolbar.items(leading: peerPill, actions: [], more: more)
+            return
+        }
+        guard let accessory else { return }
+        accessory.onInsertText = { [weak self] text in self?.composeBar.insertIntoComposer(text) }
         toolbarItems = SnapFooterToolbar.items(
             leading: accessory.view,
             leadingFills: true,
@@ -402,7 +409,9 @@ final class ConversationThreadViewController: UIViewController {
         peerPill.setFollowBadge(.none)
         peerPill.setOverMedia(false)
         peerPill.onAuthorTapped = { [weak self] _ in self?.driver.didTapIdentity() }
-        var items = [UIBarButtonItem(customView: peerPill)]
+        // Under `-snap-pill-footer` the pill is the toolbar's (#671).
+        // A preview (no toolbar) keeps it in the bar.
+        var items = pillRidesToolbar ? [] : [UIBarButtonItem(customView: peerPill)]
         if mode == .full, wallet != nil {
             walletBadge.isUserInteractionEnabled = makeWalletSheet != nil
             if makeWalletSheet != nil {
@@ -423,7 +432,7 @@ final class ConversationThreadViewController: UIViewController {
                     MainActor.assumeIsolated { self?.refreshWalletBadge() }
                 },
             ]
-            items += [.fixedSpace(Spacing.sm), item]
+            items += items.isEmpty ? [item] : [.fixedSpace(Spacing.sm), item]
         }
         navigationItem.rightBarButtonItems = items
     }
@@ -797,10 +806,20 @@ final class ConversationThreadViewController: UIViewController {
     /// The peer pill's share of the nav bar: the bar less its margins, the
     /// back button, and the wallet badge when there is one. Measured, and
     /// applied before the bar first lays the run out (see `viewWillAppear`).
+    /// Whether the peer pill is the toolbar's leading item (#671): under
+    /// `-snap-pill-footer`, on the full thread, which has a toolbar.
+    private var pillRidesToolbar: Bool { SnapPillFooter.isOn && mode == .full }
+
     private func fitTrailingRun() {
         let bar = navigationController?.navigationBar.bounds.width ?? view.bounds.width
         guard bar > 0 else { return }
         let itemPadding: CGFloat = 18
+        if pillRidesToolbar {
+            // The toolbar's leading slot (#671): the bar less its margins and
+            // the ⋯ bubble beside it.
+            peerPill.setWidthBudget(bar - 16 * 2 - (48 + itemPadding))
+            return
+        }
         var budget = bar - 16 * 2 - (36 + itemPadding) - itemPadding
         if walletBadgeItem != nil {
             let badge = walletBadge.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
