@@ -163,6 +163,9 @@ final class MainTabCoordinator: NSObject, Coordinator {
     /// One per tab stack: keeps the native edge-swipe pop working under the
     /// feed's custom transition delegates (see `NativePopGestureEnabler`).
     private var popGestureEnablers: [NativePopGestureEnabler] = []
+    /// The bar's items wait for a redraw at launch and after every
+    /// re-composition (#694, `refreshTabLabelsIfNeeded`).
+    private var tabLabelsNeedRefresh = true
 
     init(container: AppContainer, isMember: Bool, onLogout: @escaping () -> Void, onSignIn: @escaping () -> Void) {
         self.container = container
@@ -302,7 +305,14 @@ final class MainTabCoordinator: NSObject, Coordinator {
             // zero frame. One hop to the next runloop turn catches the settled
             // geometry, and alignment ignores a zero frame rather than caching
             // it, so the early pass costs nothing.
-            DispatchQueue.main.async { self?.alignMenuOverlays() }
+            DispatchQueue.main.async {
+                self?.alignMenuOverlays()
+                self?.refreshTabLabelsIfNeeded()
+            }
+        }
+        // On screen, the bar's buttons exist: redraw them once (#694).
+        tabBarController.onAppear = { [weak self] in
+            DispatchQueue.main.async { self?.refreshTabLabelsIfNeeded() }
         }
 
         loadAvatar()
@@ -684,8 +694,34 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
         let current = tabBarController.tabs
         guard current.count != wanted.count || zip(current, wanted).contains(where: { $0 !== $1 }) else { return }
         tabBarController.setTabs(wanted, animated: animated)
+        // The re-composed bar draws its items afresh — without their labels
+        // (#694): redraw each once it has placed them.
+        tabLabelsNeedRefresh = true
+        DispatchQueue.main.async { [weak self] in self?.refreshTabLabelsIfNeeded() }
         // The bar changed under VoiceOver's cursor: ask it to re-read.
         UIAccessibility.post(notification: .layoutChanged, argument: nil)
+    }
+
+    /// ⚠️ iOS 27 DRAWS A TAB'S FIRST RENDERING WITHOUT ITS LABEL (#694). An
+    /// item shows its title only once it has been UPDATED — a badge, an
+    /// avatar, a selection — so at launch the selected Explore tab, and a
+    /// guest's whole bar, were icons only until touched. The #547 cure, the
+    /// update every item takes: its image (and title) sent round once, after
+    /// the bar is in a window (keyed on that state, never on a delay) — at
+    /// the bar's first appearance and after each `setTabs`. Same values, so
+    /// nothing flickers. Measured: the label views existed, laid out, before
+    /// the redraw; the selected tab's simply did not draw.
+    private func refreshTabLabelsIfNeeded() {
+        guard tabLabelsNeedRefresh, tabBarController.view.window != nil else { return }
+        tabLabelsNeedRefresh = false
+        for tab in tabBarController.tabs {
+            let image = tab.image
+            tab.image = nil
+            tab.image = image
+            let title = tab.title
+            tab.title = ""
+            tab.title = title
+        }
     }
 
     /// The profile a tapped `@handle` names, by the same road as a

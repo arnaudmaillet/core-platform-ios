@@ -31,6 +31,15 @@ final class ShellTabBarController: UITabBarController, StakeShopOpening, MemberG
         onLayout?()
     }
 
+    /// Called when the bar is on screen (#694: the shell redraws its items
+    /// once it is — see `MainTabCoordinator.refreshTabLabelsIfNeeded`).
+    var onAppear: (() -> Void)?
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        onAppear?()
+    }
+
     func makeStakeShop() -> UIViewController? {
         makeStakeShopSheet?()
     }
