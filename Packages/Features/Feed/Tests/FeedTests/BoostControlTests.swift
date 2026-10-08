@@ -339,19 +339,19 @@ struct BoostControlTests {
         #expect(chrome.debugLikeBadgeText == "0")
     }
 
-    /// The count is always there, so a like changes its text in place: no
-    /// entry animation, on screen or not.
-    @Test func aLikeChangesTheCountInPlace() throws {
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+    /// ⚠️ THE COUNT IS THE PILL'S OWN (#692): its title, under the heart —
+    /// not a label laid over the glass, which read as pasted on.
+    @Test func theCountIsThePillsOwnTitle() throws {
         let chrome = Self.chrome(likes: 0)
-        window.addSubview(chrome)
-        defer { chrome.removeFromSuperview() }
-        let badge = try #require(chrome.subviews.compactMap { $0 as? SnapLikeCountBadge }.first)
+        let pill = chrome.debugBoostButton
+        #expect(pill.configuration?.title == "0")
+        #expect(pill.configuration?.image != nil, "the count took the heart's place")
+        #expect(pill.configuration?.imagePlacement == .top)
+        #expect(chrome.debugLikeBadgeFrame.minY > chrome.debugLikeHeartFrame.maxY, "the count is not under the heart")
+        #expect(chrome.debugBoostButton.titleLabel?.isDescendant(of: chrome.debugBoostButton) == true)
 
         chrome.setBoostTotal(1, animated: true)
-        #expect(badge.layer.animationKeys()?.isEmpty ?? true)
-        #expect(badge.alpha == 1)
-        #expect(badge.debugText == "1")
+        #expect(pill.configuration?.title == "1")
     }
 
     /// A post whose likes are hidden (#397) has no like button at all, stake
@@ -385,7 +385,7 @@ struct BoostControlTests {
         bar.setBoostTotal(2, animated: true)
         #expect(bar.debugLikeBadgeText == "42")
         #expect(boost.configuration?.image != nil)
-        #expect(boost.configuration?.attributedTitle == nil, "the composer's like face showed a number")
+        #expect(boost.configuration?.title == "42", "the composer's pill does not carry its count")
         #expect(boost.accessibilityValue == "42 likes, you staked 2 points")
         let first = try #require(bar.currentBoostMenuActions().first as? UIAction)
         #expect(first.title == "You staked 2 points")

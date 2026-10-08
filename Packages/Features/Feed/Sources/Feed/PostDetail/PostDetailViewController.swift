@@ -1376,6 +1376,11 @@ final class PostDetailViewController: UIViewController {
         composeBar.redrawRailFace()
     }
 
+    /// The slot's cover turns while the post plays aloud (#692).
+    func setRailSoundSpinning(_ spinning: Bool) {
+        composeBar.setRailSpinning(spinning)
+    }
+
     func setRailSoundActions(tap: (() -> Void)?, hold: (() -> Void)?) {
         composeBar.onRailAction = tap
         composeBar.onRailLongPress = hold

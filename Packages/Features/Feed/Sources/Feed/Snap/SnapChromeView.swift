@@ -103,7 +103,6 @@ final class SnapChromeView: UIView {
     private let boostButton = SnapRailBoostButton()
     /// The post's like count on the like button's corner (#668) — or, in the
     /// like pill (#669), under its heart.
-    private let likeBadge = SnapLikeCountBadge(ink: .white)
     /// The post's own like count from `configure` — nil when the author hides
     /// it (#397). The badge adds the viewer's stake to it.
     private var postLikeCount: Int64?
@@ -411,11 +410,6 @@ final class SnapChromeView: UIView {
                 constant: -(SnapActionColumn.inputRestingGap + SnapActionColumn.bubbleSize + SnapActionColumn.gap)
             )
         }
-        // The count, under the heart inside the pill — a sibling above the
-        // button, see `SnapLikeCountBadge`.
-        addSubview(likeBadge)
-        likeBadge.pin(underHeartOf: boostButton)
-
         // The subtitle zone extends the same one-directional chain one link
         // up (caption ← band ← subtitles): nothing constrains back onto it,
         // so cue presence/absence can never move the stack below. The slot
@@ -1102,7 +1096,7 @@ final class SnapChromeView: UIView {
     /// the available one — the way out of a post should not blink away because
     /// a thumb landed on a clip's bar.
     private var scrubFadedViews: [UIView] {
-        [captionLabel, commentTicker, subtitleView, commentEmptyState, shortcutRail, boostButton, likeBadge, soundBubble]
+        [captionLabel, commentTicker, subtitleView, commentEmptyState, shortcutRail, boostButton, soundBubble]
     }
 
     /// What each faded view was worth before the scrub took it, so the fade
@@ -1347,17 +1341,25 @@ final class SnapChromeView: UIView {
     }
 
     private func applyLikeBadge(animated: Bool) {
-        let count = Self.displayedLikeCount(postLikes: postLikeCount, viewerStake: boostTotal)
-        boostButton.setLikeCount(count)
-        // Only where the like button is: a text page has none.
-        likeBadge.setCount(boostButton.isHidden ? nil : count, animated: animated)
+        // Drawn by the pill itself, under its heart (#692).
+        boostButton.setLikeCount(Self.displayedLikeCount(postLikes: postLikeCount, viewerStake: boostTotal))
     }
 
     #if DEBUG
-    /// The badge's text as drawn — nil while it is not showing.
-    var debugLikeBadgeText: String? { likeBadge.debugText }
-    /// Where the badge sits, in the chrome's space.
-    var debugLikeBadgeFrame: CGRect { likeBadge.frame }
+    /// The count under the pill's heart — nil while the pill is not showing.
+    var debugLikeBadgeText: String? { boostButton.isHidden ? nil : boostButton.configuration?.title }
+    /// Where the heart is drawn, in the chrome's space.
+    var debugLikeHeartFrame: CGRect {
+        boostButton.layoutIfNeeded()
+        guard let image = boostButton.imageView else { return .zero }
+        return image.convert(image.bounds, to: self)
+    }
+    /// Where the count is drawn, in the chrome's space.
+    var debugLikeBadgeFrame: CGRect {
+        boostButton.layoutIfNeeded()
+        guard let label = boostButton.titleLabel else { return .zero }
+        return label.convert(label.bounds, to: self)
+    }
     #endif
 
     /// The anchor's wallet context: what the balance can still afford and

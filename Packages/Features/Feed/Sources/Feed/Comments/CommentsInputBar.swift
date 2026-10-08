@@ -260,11 +260,10 @@ final class CommentsInputBar: UIView {
         /// UIKit's 44pt, reached by `hitTest` around their drawn frames,
         /// which the 38pt line cannot hold.
         static let minimumHitSide: CGFloat = 44
-        /// The face FILLS its 38pt bubble, edge to edge — the bubble's own
-        /// capsule clip is the disc's circle. It used to sit inset at 30pt so
-        /// the glass read as a rim around it; that ring of glass read as a
-        /// margin instead, and the face is the thing worth the room.
-        @MainActor static var avatarDiameter: CGFloat { controlSize }
+        /// The face sits INSET in its glass bubble, a ring of glass around it
+        /// — the sound bubble's cover, at the cover's size, so the row's two
+        /// ends read as one family of controls (the owner, 2026-10-08, #692).
+        @MainActor static var avatarDiameter: CGFloat { controlSize - 10 }
     }
 
     /// The viewer's face, leading the bar — the composer's answer to the
@@ -306,6 +305,11 @@ final class CommentsInputBar: UIView {
     /// repost, pin, or hidden on a draft. It is the column's lower bubble and
     /// the station the stake stands on, so it is laid out even while hidden.
     private let railButton = UIButton(configuration: .glass())
+    /// The SOUND face's cover, over the slot's glass rather than as its
+    /// image: a record that turns while the song plays (#692) — and the mute
+    /// badge beside it, which does not.
+    private let railCoverView = UIImageView()
+    private let railMutedBadge = UIImageView()
     /// The field's trailing button, after the emote button: the voice note's
     /// WAVEFORM over an empty field, the SEND arrow over a draft (or while one
     /// is in flight) — one button, its glyph swapped with a symbol replace,
@@ -523,6 +527,7 @@ final class CommentsInputBar: UIView {
         let railHold = UILongPressGestureRecognizer(target: self, action: #selector(railHeld(_:)))
         railHold.minimumPressDuration = 0.4
         railButton.addGestureRecognizer(railHold)
+        installRailCover()
 
         // The keyboard axis: the page-swipe gate and the idle-dismiss seam.
         keyboardObservers.tokens = [
@@ -542,8 +547,9 @@ final class CommentsInputBar: UIView {
         // the picture layered over it) → a transparent button spanning the
         // whole bubble, which owns the touches and carries the menu.
         //
-        // The button is LAST and full-bleed over the disc, so the whole 38pt
-        // bubble is the tap target and owns the menu.
+        // The button is LAST and full-bleed over the bubble, so the whole
+        // bubble — the glass ring included — is the tap target and owns the
+        // menu.
         avatarImageView.pin(to: avatarView)
         avatarBubble.cornerConfiguration = .capsule(maximumRadius: Metrics.controlSize / 2)
         avatarBubble.clipsToBounds = true
@@ -571,8 +577,6 @@ final class CommentsInputBar: UIView {
         addSubview(boostButton)
         addSubview(visibilityButton)
         // The like face's count, under its heart in the stake pill (#669).
-        addSubview(likeBadge)
-        likeBadge.pin(underHeartOf: boostButton)
         addLayoutGuide(restingInputRow)
         avatarBubble.translatesAutoresizingMaskIntoConstraints = false
         boostButton.translatesAutoresizingMaskIntoConstraints = false
@@ -1345,8 +1349,6 @@ final class CommentsInputBar: UIView {
         applyLikeBadge(animated: false)
     }
 
-    /// The like face's count, in the page's ink like its resting heart (#680).
-    private let likeBadge = SnapLikeCountBadge(ink: .label)
 
     /// The stake's height: the like PILL with the like face (#669), the
     /// square bubble with the receipt face.
@@ -1357,15 +1359,16 @@ final class CommentsInputBar: UIView {
     }
     private var boostPostLikeCount: Int64?
 
+    /// The like face's count is the pill's own title (#692): redrawn with it.
     private func applyLikeBadge(animated: Bool) {
-        let count = SnapChromeView.displayedLikeCount(postLikes: boostPostLikeCount, viewerStake: boostSpentTotal)
-        let shows = usesLikeFace && showsStake && visibilityMenu == nil
-        likeBadge.setCount(shows ? count : nil, animated: animated)
+        applyBoostFace()
     }
 
     #if DEBUG
-    /// The like badge's text as drawn — nil while it is not showing.
-    var debugLikeBadgeText: String? { likeBadge.debugText }
+    /// The count under the like face's heart — nil while it is not showing.
+    var debugLikeBadgeText: String? {
+        usesLikeFace && !boostButton.isHidden ? boostButton.configuration?.title : nil
+    }
     #endif
 
     /// The viewer's cumulative spend on the represented post. With the like
@@ -1387,16 +1390,17 @@ final class CommentsInputBar: UIView {
     private func applyBoostFace() {
         let total = boostSpentTotal
         if usesLikeFace {
-            boostButton.configuration?.attributedTitle = nil
             // An outline in the page's ink at rest — the text's colour, black
             // on the light panel, white over dimmed media — and the points'
-            // red fill once staked (#680).
-            boostButton.configuration?.image = PointsSymbol.likeImage(
-                staked: total > 0, SnapActionColumn.heartConfiguration
-            )
-            boostButton.configuration?.baseForegroundColor = .label
-            // Even gaps in the pill: top, heart, count, bottom (#680).
-            boostButton.configuration?.contentInsets = SnapActionColumn.heartInsets
+            // red fill once staked (#680), over the count, one even gap apart
+            // (#692: the count is the pill's own title).
+            let count = SnapChromeView.displayedLikeCount(postLikes: boostPostLikeCount, viewerStake: total)
+            let shows = showsStake && visibilityMenu == nil
+            if let base = boostButton.configuration {
+                boostButton.configuration = SnapActionColumn.likeConfiguration(
+                    base, staked: total > 0, count: shows ? count : nil, ink: .label
+                )
+            }
             boostButton.accessibilityLabel = "Like"
             boostButton.accessibilityValue = SnapRailBoostButton.accessibilityValue(
                 likeCount: SnapChromeView.displayedLikeCount(postLikes: boostPostLikeCount, viewerStake: total),
@@ -1635,8 +1639,13 @@ final class CommentsInputBar: UIView {
             // The cover as a disc, the bubble's size less the sound bubble's
             // inset, so the two read as one (#671). Not a symbol: no replace.
             railButton.isHidden = false
-            railButton.configuration?.image = face.disc(side: SnapActionColumn.bubbleSize - 10, badged: face.isMuted && face.isAvailable)
+            railButton.configuration?.image = nil
             railButton.configuration?.contentInsets = .zero
+            if railCoverView.isHidden || railFaceSymbol != Self.soundRailSymbol || railCoverView.image == nil {
+                railCoverView.image = face.cachedCover
+            }
+            railCoverView.isHidden = false
+            railMutedBadge.isHidden = !(face.isMuted && face.isAvailable)
             railButton.accessibilityLabel = "Sound"
             railButton.alpha = face.isAvailable ? 1 : 0.45
             railFaceSymbol = Self.soundRailSymbol
@@ -1645,6 +1654,9 @@ final class CommentsInputBar: UIView {
         }
         railButton.alpha = 1
         railButton.isHidden = symbol == nil
+        railCoverView.isHidden = true
+        railMutedBadge.isHidden = true
+        railCoverView.layer.setRecordSpinning(false)
         if let symbol, railFaceSymbol != symbol {
             railButton.configuration?.image = UIImage(systemName: symbol, withConfiguration: Self.glyphConfiguration)
         }
@@ -1656,7 +1668,51 @@ final class CommentsInputBar: UIView {
     /// that was still being fetched has landed (#680).
     func redrawRailFace() {
         railFaceSymbol = nil
+        railCoverView.image = nil
         applyRailFace()
+    }
+
+    /// Turns the sound face's cover like a record while the post plays aloud
+    /// (#692) — the page's sound bubble's rule: play, pause and mute, and
+    /// Reduce Motion, never the idle calm. Other faces never turn.
+    func setRailSpinning(_ spinning: Bool) {
+        guard case .sound(let face) = railFace, face.isAvailable else {
+            railCoverView.layer.setRecordSpinning(false)
+            return
+        }
+        railCoverView.layer.setRecordSpinning(spinning, reducesMotion: MotionPreference.reducesMotion)
+    }
+
+    private func installRailCover() {
+        railCoverView.contentMode = .scaleAspectFill
+        railCoverView.clipsToBounds = true
+        railCoverView.isUserInteractionEnabled = false
+        railCoverView.isHidden = true
+        railCoverView.layer.cornerRadius = (SnapActionColumn.bubbleSize - 10) / 2
+        railMutedBadge.image = UIImage(
+            systemName: "speaker.slash.fill",
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 8, weight: .bold)
+        )
+        railMutedBadge.tintColor = .white
+        railMutedBadge.contentMode = .center
+        railMutedBadge.backgroundColor = UIColor.black.withAlphaComponent(0.7)
+        railMutedBadge.layer.cornerRadius = 8
+        railMutedBadge.isUserInteractionEnabled = false
+        railMutedBadge.isHidden = true
+        for view in [railCoverView, railMutedBadge] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            railButton.addSubview(view)
+        }
+        NSLayoutConstraint.activate([
+            railCoverView.centerXAnchor.constraint(equalTo: railButton.centerXAnchor),
+            railCoverView.centerYAnchor.constraint(equalTo: railButton.centerYAnchor),
+            railCoverView.widthAnchor.constraint(equalToConstant: SnapActionColumn.bubbleSize - 10),
+            railCoverView.heightAnchor.constraint(equalToConstant: SnapActionColumn.bubbleSize - 10),
+            railMutedBadge.trailingAnchor.constraint(equalTo: railButton.trailingAnchor),
+            railMutedBadge.bottomAnchor.constraint(equalTo: railButton.bottomAnchor),
+            railMutedBadge.widthAnchor.constraint(equalToConstant: 16),
+            railMutedBadge.heightAnchor.constraint(equalToConstant: 16),
+        ])
     }
 
     /// What `debugRailSymbol` reads while the slot wears the sound's cover.
@@ -1669,6 +1725,12 @@ final class CommentsInputBar: UIView {
     #if DEBUG
     /// The rail button, for the specs that read its face and tap it.
     var debugRailButton: UIButton { railButton }
+    /// The sound face's cover and whether it is turning now (#692).
+    var debugRailCover: UIImageView { railCoverView }
+    var debugRailIsSpinning: Bool {
+        railCoverView.layer.animation(forKey: CALayer.recordSpinKey) != nil && railCoverView.layer.speed != 0
+    }
+    var debugRailMutedBadgeShown: Bool { !railMutedBadge.isHidden }
     /// The waveform / send button inside the field.
     var debugFieldActionButton: UIButton { fieldActionButton }
     /// The symbol the rail button wears.

@@ -1534,7 +1534,11 @@ struct SnapCommentsPresentationTests {
         let face = try #require(Self.firstView(MonogramAvatarView.self, in: bubble))
         // The column's bubble: avatar, field and rail slot are one row (#680).
         #expect(abs(bubble.bounds.width - SnapActionColumn.bubbleSize) < 0.5)
-        #expect(face.bounds.size == bubble.bounds.size, "the face fills its bubble, no margin of glass")
+        // ⚠️ INSET, like the sound bubble's cover (#692): a ring of glass
+        // around the face, which is the cover's size and centred.
+        #expect(abs(face.bounds.width - (SnapActionColumn.bubbleSize - 10)) < 0.5, "the face fills its bubble")
+        let centre = face.convert(CGPoint(x: face.bounds.midX, y: face.bounds.midY), to: bubble)
+        #expect(abs(centre.x - bubble.bounds.midX) < 0.5 && abs(centre.y - bubble.bounds.midY) < 0.5)
 
         // The button spans the bubble and lives in the CONTENT view (adding
         // it to the effect view itself raises).
@@ -2202,13 +2206,21 @@ struct SnapCommentsPresentationTests {
 
     /// The composer's placeholder label — found by ELIMINATION rather than by
     /// matching its text, so it is still found when the copy changes.
+    private static func isInButton(_ view: UIView) -> Bool {
+        var current = view.superview
+        while let ancestor = current {
+            if ancestor is UIButton { return true }
+            current = ancestor.superview
+        }
+        return false
+    }
+
     private static func placeholderText(in bar: UIView) -> String? {
         var stack: [UIView] = [bar]
         while let view = stack.popLast() {
-            // The text view carries its own (empty) label, and the like badge
-            // its count (#668); the placeholder is the standalone one.
-            if let label = view as? UILabel, !(label.superview is UITextView),
-               !(label.superview is SnapLikeCountBadge) {
+            // The text view carries its own (empty) label, and the like pill
+            // its count (#692); the placeholder is the standalone one.
+            if let label = view as? UILabel, !(label.superview is UITextView), !Self.isInButton(label) {
                 return label.text
             }
             stack.append(contentsOf: view.subviews)
