@@ -57,6 +57,9 @@ public actor SessionManager {
     /// The last login resumed a self-deactivated account (#650), and nobody
     /// has said "welcome back" yet.
     var pendingReactivationNotice = false
+    /// The last session came from a sign-up (#666), and nobody has asked
+    /// the new member about notifications yet.
+    var pendingSignUpNotice = false
 
     public init(
         authClient: any Auth_V1_AuthServiceClientInterface,
@@ -116,6 +119,7 @@ public actor SessionManager {
         self.session = session
         try? store.save(session)
         pendingReactivationNotice = body.reactivated
+        pendingSignUpNotice = false
         broadcast(.authenticated(session.accountID))
     }
 
@@ -142,6 +146,13 @@ public actor SessionManager {
     public func consumeReactivationNotice() -> Bool {
         defer { pendingReactivationNotice = false }
         return pendingReactivationNotice
+    }
+
+    /// True once after a sign-up, so the shell can ask the new member about
+    /// notifications exactly once (#666). A sign-in never sets it.
+    public func consumeSignUpNotice() -> Bool {
+        defer { pendingSignUpNotice = false }
+        return pendingSignUpNotice
     }
 
     /// Step-up (`auth.v1.VerifyCredentials`, #648): the server re-proved the

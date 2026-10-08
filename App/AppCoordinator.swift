@@ -399,6 +399,16 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         }
     }
 
+    /// A sign-up asks the new member about notifications, once (#666): after
+    /// the sign-up flow has gone, over the shell. A sign-in never asks.
+    private func askForNotificationsAfterSignUp() {
+        Task { @MainActor [weak self] in
+            guard let self, await container.sessionManager.consumeSignUpNotice() else { return }
+            try? await Task.sleep(for: .milliseconds(600))
+            container.pushNotifications.askAfterSignUp()
+        }
+    }
+
     private func finishSignUp(signedIn: Bool) {
         let completions = signUpCompletions
         signUpCompletions = []
@@ -426,6 +436,7 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         }
         finishSignUp(signedIn: true)
         welcomeBackIfReactivated()
+        askForNotificationsAfterSignUp()
         #if DEBUG
         // `-mock-likes-still`: no ticking like counts — so a refresh can
         // come back with exactly what it had (`-profile-stretch-sweep`'s

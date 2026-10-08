@@ -236,6 +236,7 @@ extension SessionManager {
 
     /// An account that has its profile becomes the app's session.
     public func completeSignIn(_ account: PendingAccount) {
+        pendingSignUpNotice = false
         install(account.session)
         pendingReactivationNotice = account.reactivated
     }
@@ -250,6 +251,8 @@ extension SessionManager {
         let response = await authClient.refresh(request: request, headers: [:])
         switch response.result {
         case .success(let body):
+            // Before the broadcast: the shell reads it on `.authenticated`.
+            pendingSignUpNotice = true
             install(Self.makeSession(accountID: pending.accountID, tokens: body.tokens, now: now()))
         case .failure(let error):
             throw AuthError.transport(message: error.message ?? "code \(error.code)")

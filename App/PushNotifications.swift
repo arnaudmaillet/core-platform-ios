@@ -8,8 +8,9 @@ import UserNotifications
 /// install's token goes, what a tap opens, and the app icon's badge.
 ///
 /// - **Registration.** `notification.v1 RegisterDevice` on every launch and
-///   sign-in, once the viewer has allowed notifications — never a prompt of
-///   its own: permission is asked from Settings → Notifications. The device id
+///   sign-in, once the viewer has allowed notifications. The app asks on its
+///   own once, right after a sign-up (#666); after that, permission is asked
+///   from Settings → Notifications. The device id
 ///   is the session's own (`AppContainer.persistentDeviceID`, the one the login
 ///   sent), and the environment follows the build: development builds talk to
 ///   the APNs sandbox, TestFlight and App Store builds to production.
@@ -72,6 +73,22 @@ final class PushNotifications: NSObject {
             default:
                 break
             }
+        }
+    }
+
+    /// Right after a sign-up (#666): the one time the app asks on its own.
+    /// Only while the choice is still open — an answer already given stays,
+    /// and an allowed one has just registered through `registerIfAllowed()`.
+    func askAfterSignUp() {
+        Task {
+            let center = UNUserNotificationCenter.current()
+            guard await center.notificationSettings().authorizationStatus == .notDetermined else {
+                Self.trace("sign-up: permission already decided, no prompt")
+                return
+            }
+            let granted = (try? await center.requestAuthorization(options: [.alert, .badge, .sound])) ?? false
+            Self.trace("sign-up prompt answered, granted=\(granted)")
+            if granted { UIApplication.shared.registerForRemoteNotifications() }
         }
     }
 
