@@ -116,6 +116,14 @@ final class MapsViewController: UIViewController {
     private let openConversation: (ProfileID) -> Void
     /// The current viewport's prefetch, cancelled when the map settles elsewhere.
     private var prewarmTask: Task<Void, Never>?
+    /// Starts a post's page player at touch-down on its marker (#646).
+    private let warmPlayback: (PostID, TimeInterval?) -> (any FeedPlaybackWarm)?
+    /// The player a finger on a marker started, until the post opens or the
+    /// touch gives up.
+    private var playbackWarm: (postID: PostID, warm: any FeedPlaybackWarm)?
+    /// How long a touch that ended without opening keeps its warm player: the
+    /// tap is recognised on touch-up, in the same turn or the next.
+    static let warmOpenWindow: TimeInterval = 0.6
     /// Runaway guard: clustering already bounds the visible set to a handful, but
     /// cap the sweep in case it runs during a pre-cluster frame.
     private static let prewarmCap = 16
@@ -381,6 +389,7 @@ final class MapsViewController: UIViewController {
             ((UIViewController) -> RevealGeometry?)?
         ) -> UIViewController,
         prewarm: @escaping ([PostID]) async -> Void,
+        warmPlayback: @escaping (PostID, TimeInterval?) -> (any FeedPlaybackWarm)? = { _, _ in nil },
         openProfile: @escaping (ProfileID, ProfileIdentityStub?) -> Void,
         openConversation: @escaping (ProfileID) -> Void,
         countryAccess: (any CountryAccess)? = nil,
@@ -408,6 +417,7 @@ final class MapsViewController: UIViewController {
         self.makeRevealGeometry = makeRevealGeometry
         self.makeClusterGallery = makeClusterGallery
         self.prewarm = prewarm
+        self.warmPlayback = warmPlayback
         self.openProfile = openProfile
         self.openConversation = openConversation
         super.init(nibName: nil, bundle: nil)
@@ -3127,6 +3137,16 @@ extension MapsViewController: MKMapViewDelegate {
             }) { [weak self] in
                 guard let self, let target = resolve(shown(mapView)) else { return }
                 willSelect?(target)
+                // `-maps-touch-lead <ms>`: a finger rests on the marker that
+                // long before the tap — the touch-down warm, measurable (#646).
+                if let lead = Self.debugArgumentValue("-maps-touch-lead").flatMap(Double.init),
+                   let pin = target as? MapAnnotation {
+                    beginPlaybackWarm(for: pin)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + lead / 1000) { [weak self] in
+                        self?.mapView.selectAnnotation(target, animated: true)
+                    }
+                    return
+                }
                 mapView.selectAnnotation(target, animated: true)
             }
         }
@@ -3250,6 +3270,8 @@ extension MapsViewController: MKMapViewDelegate {
         view?.onSelect = { [weak self, weak view] in
             self?.openAnnotation(pinAnnotation, thumbnail: view?.heroImage)
         }
+        view?.onTouchDown = { [weak self] in self?.beginPlaybackWarm(for: pinAnnotation) }
+        view?.onTouchEnd = { [weak self] cancelled in self?.touchEnded(on: pinAnnotation, cancelled: cancelled) }
         view?.onDressed = { [weak self, weak view] in
             guard let self, let view else { return }
             popChoreographer.release(view)
@@ -3265,6 +3287,62 @@ extension MapsViewController: MKMapViewDelegate {
     /// safe to call from both the instant tap recognizer and MapKit's own
     /// `didSelect` (the fallback): whichever lands first wins, the other is a
     /// no-op while the flight is alive.
+    // MARK: - Touch-down warm (#646)
+
+    /// A finger landed on a lone marker: start its post's page player
+    /// now, at the clip time its sheet shows plus the decode, so the page that
+    /// opens on touch-up joins a running player instead of starting one.
+    ///
+    /// ⚠️ INTENT, NOT PROXIMITY. No player is started for a marker nobody
+    /// touches, and this one belongs to the post's page, not to the marker
+    /// (`GeoDiscoveryRepository.previewVideoURL`'s rule stands).
+    private func beginPlaybackWarm(for annotation: MapAnnotation) {
+        // ⚠️ NOT `pin.kind == .video`: production classifies every media pin
+        // `.photo` (`GeoDiscoveryRepository.kind(for:)`), sheet-wearing ones
+        // included. Whether there is a clip to warm is the POST's answer, and
+        // the feed gives it (`FlightPlaybackWarm.warmableClip`).
+        guard openGate.canOpen, playbackWarm?.postID != annotation.pin.postID else { return }
+        endPlaybackWarm(opened: false)
+        let time: TimeInterval? = {
+            guard case .sheet(let sheet)? = mapView.wornPreview(for: annotation)?.art,
+                  let frame = mapView.wornPreviewFrame(for: annotation) else { return nil }
+            return MapPinZoomSource.flightMediaTime(sheet: sheet, displayedFrame: frame,
+                                                    lead: MapPinZoomSource.warmMediaLead)
+        }()
+        guard let warm = warmPlayback(annotation.pin.postID, time) else {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+                print("[zoom-live] touch-down warm: nothing to warm for \(annotation.pin.postID.rawValue)")
+            }
+            #endif
+            return
+        }
+        playbackWarm = (annotation.pin.postID, warm)
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print(String(format: "[zoom-live] %.3f touch-down warm %@ at %@", CACurrentMediaTime(),
+                         annotation.pin.postID.rawValue, time.map { String(format: "%.2fs", $0) } ?? "start"))
+        }
+        #endif
+    }
+
+    /// The touch is over. A cancelled one (the map took it) lets go now; one
+    /// that ended gives the tap its turn to open the post first.
+    private func touchEnded(on annotation: MapAnnotation, cancelled: Bool) {
+        guard let warm = playbackWarm, warm.postID == annotation.pin.postID else { return }
+        guard !cancelled else { return endPlaybackWarm(opened: false) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.warmOpenWindow) { [weak self] in
+            guard let self, let current = playbackWarm, current.warm === warm.warm else { return }
+            endPlaybackWarm(opened: false)
+        }
+    }
+
+    private func endPlaybackWarm(opened: Bool) {
+        guard let warm = playbackWarm else { return }
+        playbackWarm = nil
+        warm.warm.end(opened: opened)
+    }
+
     private func openAnnotation(_ annotation: any MKAnnotation, thumbnail: UIImage?) {
         guard openGate.canOpen else { return }
         let postIDs = Self.postIDs(of: annotation)
@@ -3489,6 +3567,17 @@ extension MapsViewController: MKMapViewDelegate {
     }
 
     private func presentSnapFeed(postIDs: [PostID], from annotation: any MKAnnotation, thumbnail: UIImage?) {
+        // The page about to open joins the player its touch-down started
+        // (#646); any other post's warm has nothing to hand over. One with a
+        // picture already FLIES: the card carries it from its first frame.
+        let warm = playbackWarm.flatMap { postIDs.first == $0.postID ? $0.warm : nil }
+        let warmFlies = warm?.hasPicture ?? false
+        endPlaybackWarm(opened: warm != nil)
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print("[zoom-live] open: warm=\(warm == nil ? "none" : (warmFlies ? "flies" : "no picture yet"))")
+        }
+        #endif
         let feedVC = makeSnapFeed(postIDs)
         guard let nav = navigationController,
               let destination = feedVC as? any ZoomTransitionDestination else {
@@ -3520,13 +3609,17 @@ extension MapsViewController: MKMapViewDelegate {
             // anything that isn't the active band's own marker.
             dress: dress(for: annotation),
 
-            mirrorLive: tappedID.map { id in
+            // A touch-down warm with a picture is the page's own player, live
+            // (#646): the card flies it from take-off — no sheet, no fade —
+            // and the page, told so, joins it rather than starting its own.
+            mirrorLive: warmFlies ? warm.map { warm in { renderView in warm.mirror(onto: renderView) } }
+                : tappedID.map { id in
                 { renderView in coordinator.mirrorLivePreview(of: id, to: renderView) }
             },
             // Asked while this transition is being constructed — before the
             // freeze three dozen lines below, which is what makes the answer
             // hold for the whole flight.
-            isLivePreviewing: tappedID.map { id in
+            isLivePreviewing: warmFlies ? { true } : tappedID.map { id in
                 { coordinator.isLivePreviewing(id) }
             },
             // Asked at DISMISSAL staging, so it reports where the viewer

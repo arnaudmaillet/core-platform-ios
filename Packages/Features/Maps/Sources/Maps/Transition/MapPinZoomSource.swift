@@ -268,12 +268,19 @@ final class MapPinZoomSource: ZoomTransitionSource {
     /// It was 0.25 s, and a late start crossed the window's end mid-fade.
     static let flightMediaTailMargin: TimeInterval = 0.8
 
+    /// The lead when the player starts at TOUCH-DOWN instead (#646): the
+    /// flight has not begun, so only the player's start-up is ahead of it,
+    /// and the clip then plays on through the tap at the sheet's pace — so the
+    /// picture the card takes off with is the moment the marker was showing.
+    static let warmMediaLead: TimeInterval = 0.1
+
     /// The rule above, as arithmetic — pinnable without a map.
-    static func flightMediaTime(sheet: AnimatedIconSheet, displayedFrame: Int) -> TimeInterval? {
+    static func flightMediaTime(sheet: AnimatedIconSheet, displayedFrame: Int,
+                                lead: TimeInterval = flightMediaLead) -> TimeInterval? {
         guard let start = sheet.clipTime(ofFrame: 0),
               let shown = sheet.clipTime(ofFrame: displayedFrame) else { return nil }
         let latest = max(start, start + sheet.loopDuration - flightMediaTailMargin)
-        return min(shown + flightMediaLead, latest)
+        return min(shown + lead, latest)
     }
 
     /// The rule above, as arithmetic — pinnable without an `MKMapView`, which

@@ -1701,7 +1701,9 @@ extension PinCardView: ZoomFlightCard {
     /// Nothing is shown until there is a decoded frame to show; if none ever
     /// arrives the surface simply stays at zero and the card lands on its
     /// cover, which is the picture the viewer was already looking at.
-    func fadeInAdoptedLiveMedia(over duration: TimeInterval) {
+    func fadeInAdoptedLiveMedia(over requested: TimeInterval) {
+        let wearsSheet: Bool = { if case .sheet? = wornPreview?.art { true } else { false } }()
+        let duration = Self.liveRevealFade(requested: requested, wearsSheet: wearsSheet)
         // `fadeInOnFirstFrame` un-hides on its own terms (isHidden false, alpha
         // 0, revealed when there is a frame), so it lifts the hold's hide as
         // part of the arrival rather than beside it.
@@ -1728,6 +1730,20 @@ extension PinCardView: ZoomFlightCard {
         guard holdsAdoptedLiveMedia else { return }
         holdsAdoptedLiveMedia = false
         UIView.animate(withDuration: duration) { self.applyBlend() }
+    }
+
+    /// How long the live video takes to come up over the card (#646).
+    ///
+    /// ⚠️ SHORT OVER A SHEET. The flight asks for a fade over the rest of the
+    /// flight — over half a second when the frame comes early — and for all of
+    /// it the viewer sees the soft sheet blended into the video. Lined up on
+    /// the video (`syncPreviewToLiveMedia`) and handed over by a focus pull at
+    /// the sheet's own resolution, the two pictures already agree: a long blend
+    /// only keeps the picture soft longer. A card without a sheet keeps the
+    /// fade it was asked for. Pure, for tests.
+    static let sheetRevealFadeCap: TimeInterval = 0.15
+    static func liveRevealFade(requested: TimeInterval, wearsSheet: Bool) -> TimeInterval {
+        wearsSheet ? min(requested, sheetRevealFadeCap) : requested
     }
 
     func holdAdoptedLiveMediaUntilLanding() {
