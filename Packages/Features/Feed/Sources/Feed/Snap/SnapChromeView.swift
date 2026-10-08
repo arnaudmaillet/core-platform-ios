@@ -101,8 +101,11 @@ final class SnapChromeView: UIView {
     /// never from the stream (see there for why the band's hidden state is
     /// the wrong authority for it).
     private let boostButton = SnapRailBoostButton()
-    /// The post's like count on the like button's corner (#668).
-    private let likeBadge = SnapLikeCountBadge()
+    /// The post's like count on the like button's corner (#668) — or, in the
+    /// like pill (#669), under its heart.
+    private lazy var likeBadge = SnapLikeCountBadge(
+        style: SnapActionColumn.isLikePill ? .inline(ink: .white) : .corner
+    )
     /// The post's own like count from `configure` — nil when the author hides
     /// it (#397). The badge adds the viewer's stake to it.
     private var postLikeCount: Int64?
@@ -383,11 +386,24 @@ final class SnapChromeView: UIView {
             boostButton.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -Spacing.md)
             boostButton.widthAnchor.constraint(equalTo: commentTicker.heightAnchor)
             boostButton.topAnchor.constraint(equalTo: commentTicker.topAnchor)
-            boostButton.bottomAnchor.constraint(equalTo: commentTicker.bottomAnchor)
+            // The like pill (#669) runs down to `gap` above the DROPPED lower
+            // bubble, measured from the margin line rather than off the repost
+            // bubble — a text page shows none, and the pill keeps its frame
+            // there. The square ends with the band.
+            boostButton.bottomAnchor.constraint(
+                equalTo: SnapActionColumn.isLikePill ? parent.layoutMarginsGuide.bottomAnchor : commentTicker.bottomAnchor,
+                constant: SnapActionColumn.isLikePill
+                    ? -(SnapActionColumn.inputRestingGap + SnapActionColumn.bubbleSize + SnapActionColumn.gap)
+                    : 0
+            )
         }
-        // A sibling on the button's corner, above it — see `SnapLikeCountBadge`.
+        // A sibling above the button — see `SnapLikeCountBadge`.
         addSubview(likeBadge)
-        likeBadge.pin(toCornerOf: boostButton, in: self)
+        if SnapActionColumn.isLikePill {
+            likeBadge.pin(underHeartOf: boostButton, squareSide: SnapActionColumn.bubbleSize)
+        } else {
+            likeBadge.pin(toCornerOf: boostButton, in: self)
+        }
 
         // The subtitle zone extends the same one-directional chain one link
         // up (caption ← band ← subtitles): nothing constrains back onto it,
@@ -475,7 +491,14 @@ final class SnapChromeView: UIView {
             )
             repostButton.widthAnchor.constraint(equalTo: commentTicker.heightAnchor)
             repostButton.heightAnchor.constraint(equalTo: commentTicker.heightAnchor)
-            repostButton.topAnchor.constraint(equalTo: captionFloorGuide.topAnchor)
+            // Under the like pill (#669) the bubble drops to the composer's
+            // field line, `glassGap` above the toolbar's glass; otherwise its
+            // top is the caption floor's.
+            SnapActionColumn.isLikePill
+                ? repostButton.bottomAnchor.constraint(
+                    equalTo: parent.layoutMarginsGuide.bottomAnchor, constant: -SnapActionColumn.inputRestingGap
+                )
+                : repostButton.topAnchor.constraint(equalTo: captionFloorGuide.topAnchor)
         }
         captionLabel.trailingAnchor.constraint(
             equalTo: repostButton.leadingAnchor, constant: -Spacing.md
@@ -1288,6 +1311,8 @@ final class SnapChromeView: UIView {
     #if DEBUG
     /// The badge's text as drawn — nil while it is not showing.
     var debugLikeBadgeText: String? { likeBadge.debugText }
+    /// Where the badge sits, in the chrome's space.
+    var debugLikeBadgeFrame: CGRect { likeBadge.frame }
     #endif
 
     /// The anchor's wallet context: what the balance can still afford and

@@ -143,7 +143,8 @@ final class CommentsInputBar: UIView {
     /// the field grows beside the stake rather than under it.
     static func restingHeight(for category: UIContentSizeCategory, showsStake: Bool = true) -> CGFloat {
         let bubble = SnapActionColumn.bubbleSize
-        let column = SnapActionColumn.columnLift + bubble + (showsStake ? bubble + SnapActionColumn.gap : 0)
+        let stake = SnapActionColumn.upperBubbleHeight
+        let column = SnapActionColumn.columnLift + bubble + (showsStake ? stake + SnapActionColumn.gap : 0)
         return max(column, restingInputRowHeight(for: category))
     }
 
@@ -508,9 +509,14 @@ final class CommentsInputBar: UIView {
         addSubview(railButton)
         addSubview(boostButton)
         addSubview(visibilityButton)
-        // The like face's count, on the stake bubble's corner (#668).
+        // The like face's count: on the stake bubble's corner (#668), or under
+        // its heart in the like pill (#669).
         addSubview(likeBadge)
-        likeBadge.pin(toCornerOf: boostButton, in: self)
+        if SnapActionColumn.isLikePill {
+            likeBadge.pin(underHeartOf: boostButton, squareSide: SnapActionColumn.bubbleSize)
+        } else {
+            likeBadge.pin(toCornerOf: boostButton, in: self)
+        }
         addLayoutGuide(restingInputRow)
         avatarBubble.translatesAutoresizingMaskIntoConstraints = false
         boostButton.translatesAutoresizingMaskIntoConstraints = false
@@ -562,7 +568,9 @@ final class CommentsInputBar: UIView {
             boostButton.trailingAnchor.constraint(equalTo: trailingAnchor),
             boostButton.bottomAnchor.constraint(equalTo: railButton.topAnchor, constant: -SnapActionColumn.gap),
             boostButton.widthAnchor.constraint(equalToConstant: bubble),
-            boostButton.heightAnchor.constraint(equalToConstant: bubble),
+            // The pill's height under `-snap-like-pill` (#669), the square's
+            // otherwise.
+            boostButton.heightAnchor.constraint(equalToConstant: SnapActionColumn.upperBubbleHeight),
             // The boost's own station: the two never show at once.
             visibilityButton.centerXAnchor.constraint(equalTo: boostButton.centerXAnchor),
             visibilityButton.centerYAnchor.constraint(equalTo: boostButton.centerYAnchor),
@@ -1281,7 +1289,9 @@ final class CommentsInputBar: UIView {
         applyLikeBadge(animated: false)
     }
 
-    private let likeBadge = SnapLikeCountBadge()
+    private lazy var likeBadge = SnapLikeCountBadge(
+        style: SnapActionColumn.isLikePill ? .inline(ink: .white) : .corner
+    )
     private var boostPostLikeCount: Int64?
 
     private func applyLikeBadge(animated: Bool) {
@@ -1319,6 +1329,8 @@ final class CommentsInputBar: UIView {
             // the comments layout's light page too (owner's call 2026-10-08:
             // the two bubbles wear one face).
             boostButton.configuration?.image = PointsSymbol.likeImage(staked: total > 0, Self.glyphConfiguration)
+            // In the like pill (#669), the heart's square is the pill's top.
+            boostButton.configuration?.contentInsets = SnapActionColumn.heartInsets
             boostButton.accessibilityLabel = "Like"
             boostButton.accessibilityValue = SnapRailBoostButton.accessibilityValue(
                 likeCount: SnapChromeView.displayedLikeCount(postLikes: boostPostLikeCount, viewerStake: total),
