@@ -6,6 +6,24 @@ public struct MediaPlaybackPreferences: Codable, Equatable, Sendable {
         case always, wifiOnly, never
     }
 
+    /// How many video players the app keeps ready (#702): Settings shows the
+    /// three notches, never the number.
+    public enum PlayerPool: String, Codable, CaseIterable, Sendable {
+        case less, normal, more
+
+        /// Players bound at once and kept idle for reuse. Normal is the
+        /// pools' long-standing six — the ceiling that bites is the device's
+        /// hardware decoders, so More stays below a figure that would starve
+        /// the clips already playing.
+        public var size: Int {
+            switch self {
+            case .less: 3
+            case .normal: 6
+            case .more: 8
+            }
+        }
+    }
+
     public var autoplay: Autoplay
     /// Whether a full-screen video starts with its sound. The in-feed mute
     /// button still toggles it for the session.
@@ -18,20 +36,23 @@ public struct MediaPlaybackPreferences: Codable, Equatable, Sendable {
     /// Picture in Picture (#483): a playing video moves into a floating
     /// window when the app leaves the screen. Off by default.
     public var pictureInPicture: Bool
+    /// How many players stay ready (#702).
+    public var playerPool: PlayerPool
 
     public init(
         autoplay: Autoplay = .always, startsWithSound: Bool = true, dataSaver: Bool = false,
-        backgroundPlay: Bool = false, pictureInPicture: Bool = false
+        backgroundPlay: Bool = false, pictureInPicture: Bool = false, playerPool: PlayerPool = .normal
     ) {
         self.autoplay = autoplay
         self.startsWithSound = startsWithSound
         self.dataSaver = dataSaver
         self.backgroundPlay = backgroundPlay
         self.pictureInPicture = pictureInPicture
+        self.playerPool = playerPool
     }
 
     private enum CodingKeys: String, CodingKey {
-        case autoplay, startsWithSound, dataSaver, backgroundPlay, pictureInPicture
+        case autoplay, startsWithSound, dataSaver, backgroundPlay, pictureInPicture, playerPool
     }
 
     /// Field by field, each with its default: preferences saved before a
@@ -44,6 +65,7 @@ public struct MediaPlaybackPreferences: Codable, Equatable, Sendable {
         dataSaver = try container.decodeIfPresent(Bool.self, forKey: .dataSaver) ?? defaults.dataSaver
         backgroundPlay = try container.decodeIfPresent(Bool.self, forKey: .backgroundPlay) ?? defaults.backgroundPlay
         pictureInPicture = try container.decodeIfPresent(Bool.self, forKey: .pictureInPicture) ?? defaults.pictureInPicture
+        playerPool = try container.decodeIfPresent(PlayerPool.self, forKey: .playerPool) ?? defaults.playerPool
     }
 
     /// Whether a video may start on its own, given the network it is on.

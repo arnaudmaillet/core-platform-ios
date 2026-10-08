@@ -365,8 +365,23 @@ final class AppContainer {
         case .mock: PlaceholderVideoFetcher(bundledClip: { MockClipCatalog.shared.fileURL(forVideo: $0) })
         case .localFleet: PassthroughVideoSource()
         }
-        return VideoPlaybackController(source: source)
+        return Self.sizedToPreference(VideoPlaybackController(source: source))
     }()
+
+    /// A playback pool sized by Settings' player pool (#702), and resized
+    /// live when it changes.
+    private static func sizedToPreference(_ pool: VideoPlaybackController) -> VideoPlaybackController {
+        let store = MediaPlaybackPreferencesStore.standard
+        pool.resize(to: store.preferences.playerPool.size)
+        NotificationCenter.default.addObserver(
+            forName: .mediaPlaybackPreferencesDidChange, object: nil, queue: .main
+        ) { [weak pool] _ in
+            MainActor.assumeIsolated {
+                pool?.resize(to: MediaPlaybackPreferencesStore.standard.preferences.playerPool.size)
+            }
+        }
+        return pool
+    }
 
     // MARK: - Realtime
 
@@ -644,7 +659,7 @@ final class AppContainer {
         case .mock: PlaceholderVideoFetcher(bundledClip: { MockClipCatalog.shared.fileURL(forVideo: $0) })
         case .localFleet: PassthroughVideoSource()
         }
-        return VideoPlaybackController(source: source)
+        return Self.sizedToPreference(VideoPlaybackController(source: source))
     }()
 
     /// The account's unlocked countries — the map shows only their posts.

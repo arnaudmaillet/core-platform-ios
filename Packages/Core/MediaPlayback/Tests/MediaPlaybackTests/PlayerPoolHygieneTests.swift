@@ -286,6 +286,30 @@ struct PlayerPoolHygieneTests {
         #expect(controller.idlePlayerCount == 2)
     }
 
+    // MARK: - The pool's size (#702)
+
+    /// Settings' player pool resizes a live pool: the budget and the idle
+    /// cache follow, and idle players past the new cache are dropped now.
+    @Test func aLivePoolResizesItsBudgetAndItsIdleCache() async {
+        let controller = pool(size: 4)
+        let views = (0..<4).map { _ in VideoRenderView() }
+        for (index, view) in views.enumerated() {
+            await controller.play(URL(string: "mock://video/resize-\(index)")!, in: view)
+        }
+        for view in views { controller.stop(view) }
+        #expect(controller.idlePlayerCount == 4)
+
+        controller.resize(to: 2)
+        #expect(controller.capacity == 2)
+        #expect(controller.idlePlayerCount == 2, "the idle cache kept players past its new size")
+
+        controller.resize(to: 8)
+        #expect(controller.capacity == 8)
+        #expect(controller.idlePlayerCount == 2, "growing must not mint players")
+        controller.resize(to: 0)
+        #expect(controller.capacity == 1, "a pool always keeps one")
+    }
+
     // MARK: - Support
 
     /// Condition-based settle — never a fixed sleep (the CI flake history in

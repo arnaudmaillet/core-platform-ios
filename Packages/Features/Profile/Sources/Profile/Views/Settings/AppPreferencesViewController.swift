@@ -10,12 +10,13 @@ import UIKit
 /// the profile.
 final class AppPreferencesViewController: UIViewController {
     enum Section: Int, CaseIterable {
-        case playback, sounds, appearance, care, motion, emojis, band, subtitles, commentsScreen, muted, language, storage
+        case playback, players, sounds, appearance, care, motion, emojis, band, subtitles, commentsScreen, muted, language, storage
     }
 
     private enum Item: Hashable {
         case autoplay, startsWithSound, dataSaver
         case backgroundPlay, pictureInPicture
+        case playerPool
         case interfaceSounds, haptics
         case appearance, careMode, reduceMotion
         case animatedEmojis
@@ -30,7 +31,7 @@ final class AppPreferencesViewController: UIViewController {
     /// The sections each App and Device page shows.
     static func sections(for page: SettingsSection) -> [Section] {
         switch page {
-        case .playback: [.playback, .sounds]
+        case .playback: [.playback, .players, .sounds]
         case .display: [.appearance, .care, .motion]
         case .emojis: [.emojis]
         case .mediaComments: [.band, .subtitles, .commentsScreen, .muted]
@@ -160,6 +161,7 @@ final class AppPreferencesViewController: UIViewController {
         case .sounds: "Sounds and Haptics"
         case .language: "Language"
         case .playback: "Playback"
+        case .players: "Video Players"
         case .band: "Reaction Band"
         case .muted: "Muted on Media"
         case .subtitles: "Subtitles"
@@ -185,9 +187,10 @@ final class AppPreferencesViewController: UIViewController {
                 ? Self.powerSavingNote
                 : "Emojis and stickers in comments, messages and posts play their animation. Off, they stay still."
         case .language: "The app is in English for now. When more languages arrive, you'll choose yours here and in iOS Settings."
+        case .players: Self.playerPoolFooter
         case .playback:
             (PowerSavingPreference.isOn ? Self.powerSavingNote + " " : "")
-                + "A video that doesn't start on its own shows its first frame with a play mark; tap it to play. Data Saver lowers stream quality and stops loading upcoming videos ahead while on cellular. "
+                + "Autoplay applies to videos in grids, rails and previews; a post you open full screen always plays. A video that doesn't start on its own shows its first frame with a play mark; tap it to play. Data Saver lowers stream quality and stops loading upcoming videos ahead while on cellular. "
                 + Self.backgroundPlayNote
         case .band: "The short reactions that scroll over videos and photos. Background darkens the strip behind them; it darkens more while you scrub through them. Don't Cover People lets reactions pass behind the people in a playing video; it pauses in Low Power Mode, with Power Saving on, or when your iPhone is hot."
         case .muted: "Comments with these words, or from these accounts, never appear in the reaction band or the subtitles. They still show in the comments."
@@ -200,6 +203,17 @@ final class AppPreferencesViewController: UIViewController {
     static let backgroundPlayNote = "With Background Play on, a video you're listening to keeps playing when you leave the app or lock your iPhone, with controls on the Lock Screen. With Picture in Picture on, a playing video moves into a small window over your other apps, and videos play their sound even when your iPhone is on silent."
 
     /// What an overridden section says while Power Saving is on.
+    /// Under the player pool slider (#702): what it trades, never a number.
+    static let playerPoolFooter = "How many videos the app keeps ready to play. More makes scrolling smoother but uses more performance and battery; Less saves battery."
+
+    static func playerPoolTitle(_ pool: MediaPlaybackPreferences.PlayerPool) -> String {
+        switch pool {
+        case .less: "Less"
+        case .normal: "Normal"
+        case .more: "More"
+        }
+    }
+
     static let powerSavingNote = "Power Saving is on, so this is set for you. Turn it off in Settings → App and Device to use your own choice."
 
     static func appearanceTitle(_ appearance: AppearancePreference) -> String {
@@ -264,6 +278,7 @@ final class AppPreferencesViewController: UIViewController {
     private static func items(in section: Section) -> [Item] {
         switch section {
         case .playback: [.autoplay, .startsWithSound, .dataSaver, .backgroundPlay, .pictureInPicture]
+        case .players: [.playerPool]
         case .sounds: [.interfaceSounds, .haptics]
         case .appearance: [.appearance]
         case .care: [.careMode]
@@ -368,6 +383,20 @@ final class AppPreferencesViewController: UIViewController {
             cell.accessories = [switchAccessory(isOn: playback.preferences.pictureInPicture) { [weak self] isOn in
                 self?.playback.update { $0.pictureInPicture = isOn }
             }]
+        case .playerPool:
+            cell.contentConfiguration = nil
+            let slider = NotchedSlider(
+                notches: MediaPlaybackPreferences.PlayerPool.allCases.map(Self.playerPoolTitle),
+                selected: MediaPlaybackPreferences.PlayerPool.allCases.firstIndex(of: playback.preferences.playerPool) ?? 1
+            )
+            slider.accessibilityLabel = "Video Players"
+            slider.addAction(UIAction { [weak self] action in
+                guard let slider = action.sender as? NotchedSlider else { return }
+                let pool = MediaPlaybackPreferences.PlayerPool.allCases[slider.selectedIndex]
+                guard self?.playback.preferences.playerPool != pool else { return }
+                self?.playback.update { $0.playerPool = pool }
+            }, for: .valueChanged)
+            install(slider, in: cell, title: nil)
         case .cacheSize:
             var content = Self.label("Media Cache", symbol: "internaldrive")
             content.secondaryText = cacheBytes.map(MediaCacheInventory.formatted) ?? "Measuring…"

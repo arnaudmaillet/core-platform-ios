@@ -241,7 +241,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             }
             auditPagePlayback()
             #endif
-            holdIfAutoplayIsOff(surface)
             // The resumed path warms too: arriving back at a kept clip is the
             // moment the NEXT one becomes reachable in a swipe.
             prewarmNeighbouringClips()
@@ -266,7 +265,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         let peakBitRate = MediaPlaybackPolicy.peakBitRate
         Task { [weak self] in
             await videoPlayback.play(url, in: surface, peakBitRate: peakBitRate, scope: scope)
-            self?.holdIfAutoplayIsOff(surface)
             self?.auditPagePlayback()
             // ⚠️ AFTER, and that ordering is the whole safety of this.
             //
@@ -2195,7 +2193,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // page with no player behind it. A hosted player is resumed in place —
         // which is what makes the settle after a half-screen start free.
         if videoPlayback.hasPlayer(in: view), videoPlayback.setPaused(false, in: view) {
-            holdIfAutoplayIsOff(view)
             prewarmNeighbouringClips()
             return
         }
@@ -2207,7 +2204,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         }
         Task { [weak self] in
             await videoPlayback.play(url, in: view, peakBitRate: peakBitRate, scope: scope)
-            self?.holdIfAutoplayIsOff(view)
             // ⚠️ ACTIVATION IS ITS OWN DOOR, and it bypasses the page reconcile
             // entirely — which is why warming hung off that reconcile alone did
             // nothing at all for the case that matters most: opening a post.
@@ -2294,26 +2290,16 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // only when there is genuinely nothing to join.
         if VideoRenderFlags.usesSampleBufferLayer, videoPlayback.attachSurface(view, to: url, scope: playbackScope) {
             view.revealOnFirstFrame()
-            holdIfAutoplayIsOff(view)
             return
         }
         let scope = playbackScope
         let peakBitRate = MediaPlaybackPolicy.peakBitRate
-        Task { [weak self] in
+        // ⚠️ NOT HELD WHEN AUTOPLAY IS OFF (#702). The full-screen post is the
+        // one the viewer opened: it plays whatever Autoplay and Power Saving
+        // say, which govern grids, rails and previews (#409 held it here
+        // under the pause mark).
+        Task {
             await videoPlayback.play(url, in: view, peakBitRate: peakBitRate, scope: scope)
-            self?.holdIfAutoplayIsOff(view)
-        }
-    }
-
-    /// #409: when the viewer's autoplay preference doesn't allow it on this
-    /// network, the clip is still STARTED — so the first frame, the hero
-    /// handoff and the player loan behave exactly as they always have — and
-    /// then held at once under the pause mark. A tap resumes it through the
-    /// ordinary play/pause toggle.
-    private func holdIfAutoplayIsOff(_ view: VideoRenderView) {
-        guard !MediaPlaybackPolicy.autoplays, isActive, let videoPlayback else { return }
-        if videoPlayback.setPaused(true, in: view) {
-            setPauseGlyphVisible(true)
         }
     }
 

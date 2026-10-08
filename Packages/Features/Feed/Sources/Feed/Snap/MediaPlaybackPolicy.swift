@@ -13,8 +13,10 @@ enum MediaPlaybackPolicy {
     /// Swappable for tests; the live answer comes from `NWPathMonitor`.
     static var isOnCellular: () -> Bool = { CellularPathMonitor.shared.isExpensive }
 
-    /// Power Saving (Settings → App and Device) stops every video from
-    /// starting on its own, whatever Autoplay says.
+    /// Whether a video in a GRID, a rail or a preview may start on its own:
+    /// Power Saving (Settings → App and Device) stops them whatever Autoplay
+    /// says. A post opened full screen always plays (#702) — the viewer asked
+    /// for that one post — so the snap feed does not read this.
     static var autoplays: Bool {
         !PowerSavingPreference.isOn && store.preferences.autoplays(onCellular: isOnCellular())
     }
