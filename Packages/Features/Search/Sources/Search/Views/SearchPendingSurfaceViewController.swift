@@ -25,19 +25,16 @@ final class SearchPendingSurfaceViewController: UIViewController, SearchPostSurf
 
     enum Kind {
         case posts
-        case media
 
         var title: String {
             switch self {
             case .posts: "Posts aren't available here"
-            case .media: "Media isn't available here"
             }
         }
 
         var symbol: String {
             switch self {
             case .posts: "rectangle.stack"
-            case .media: "square.grid.2x2"
             }
         }
     }

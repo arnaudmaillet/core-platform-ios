@@ -75,9 +75,9 @@ public final class SearchViewModel {
     /// The page each answer is fetching — one at a time per answer.
     private var postsPageLoad: Task<Void, Never>?
     private var peoplePageLoad: Task<Void, Never>?
-    /// A page that adds nothing new (every row already shown, or no picture
-    /// for the Media tab) leaves no new row to ask again, so the next one is
-    /// asked at once — at most this many in a row.
+    /// A page that adds nothing new (every row already shown) leaves no new
+    /// row to ask again, so the next one is asked at once — at most this many
+    /// in a row.
     static let maxEmptyPagesInARow = 5
     /// Whether the Recent section is showing everything or just the first
     /// window of it. Sticky for the life of the screen: a viewer who expanded
@@ -212,10 +212,6 @@ public final class SearchViewModel {
         didSet { onPostResultsChange?(postResults) }
     }
 
-    /// The subset of `postResults` that has a picture — what the Media tab
-    /// shows. See `PostSearchHit.hasMedia`: a gallery of text posts is a grid
-    /// of blank tiles.
-    public private(set) var mediaResults: [PostID] = []
 
     /// ⚠️ ITS OWN CHANNEL, and it earned one the hard way. The post answer
     /// used to ride the phase: the screen read `postResults` whenever a phase
@@ -227,7 +223,7 @@ public final class SearchViewModel {
     public var onPostResultsChange: (([PostID]) -> Void)?
 
     /// A next page of POSTS starting (true) and landing (false) — the Posts
-    /// and Media tabs' footer spinner (#612).
+    /// tab's footer spinner (#612).
     public var onPostsPagingChange: ((Bool) -> Void)?
     /// The same for PEOPLE — the Users tab's footer spinner (#612).
     public var onPeoplePagingChange: ((Bool) -> Void)?
@@ -773,70 +769,78 @@ public final class SearchViewModel {
     // moved to `SearchResultsViewController`. State and the words describing
     // it belong together, and this way the tray is testable without a view.
 
-    /// What the sheet shows: three dimensions, in the order they were asked
-    /// for, with every segment the product named.
+    /// The results screen's two tabs (#630), for what their filter sheet offers.
+    public enum ResultsTab: Sendable {
+        case posts
+        case users
+    }
+
+    /// What the filter sheet shows on `tab` (#630): only the dimensions that
+    /// change THAT tab, in the order they were asked for.
     ///
-    /// ⚠️ FOUR OF TWELVE SEGMENTS CAN ACT. `search.v1.SearchRequest` carries
-    /// six fields — query, entity_types, sort, page_size, page_token,
-    /// exclude_author_ids — and `SearchSort` has three values. There is no
-    /// like or comment sort, no date bound, and no viewer scope. The rest are
-    /// drawn and disabled, with the reason in each footer, because a
-    /// segmented control showing two of four options makes the dimension
-    /// itself unreadable. Asked for in `dev/BACKEND_GAPS.md` §19.
-    /// `isMember` false (a guest) disables Following: someone who follows
-    /// no one has nothing to narrow the results to.
-    func filterGroups(isMember: Bool = true) -> [SearchFilterSheetViewController.Group] {
-        [
-            .init(
-                id: Self.rankingGroupID,
-                title: "Rank by",
-                // ⚠️ "Trending" is `SearchSort.POPULARITY`, and the contract's
-                // own comment is why the footer says what it says: it "reads
-                // the periodically-refreshed popularity signal, never a
-                // real-time count".
-                footer: "Trending reads a periodically-refreshed popularity signal, "
-                    + "not a live count. Likes and comments need a sort search.v1 "
-                    + "does not have yet.",
-                segments: [
-                    .init(SearchSortOrder.popularity.rawValue, "Trending"),
-                    .init(SearchSortOrder.recency.rawValue, "Newest"),
-                    .init("mostLiked", "Liked", isEnabled: false),
-                    .init("mostCommented", "Commented", isEnabled: false)
-                ],
-                selectedID: sortOrder.rawValue
-            ),
-            .init(
-                id: Self.publishedGroupID,
-                title: "Published",
-                footer: "A date window needs a bound on the request, and a date on "
-                    + "each result. search.v1 has neither for people.",
-                segments: [
-                    .init("day", "24h", isEnabled: false),
-                    .init("week", "Week", isEnabled: false),
-                    .init("halfYear", "6 months", isEnabled: false),
-                    .init("all", "All time")
-                ],
-                selectedID: "all"
-            ),
-            .init(
-                id: Self.scopeGroupID,
-                title: "Scope",
-                footer: "Following narrows the results on screen. Nothing records "
-                    + "which of them you have already seen, so those two cannot be "
-                    + "offered yet.",
-                segments: [
-                    .init(SearchScope.everyone.rawValue, "Everyone"),
-                    .init("seen", "Seen", isEnabled: false),
-                    .init("unseen", "Unseen", isEnabled: false),
-                    .init(SearchScope.following.rawValue, "Following", isEnabled: isMember)
-                ],
-                selectedID: scope.rawValue
-            )
-        ]
+    /// ⚠️ FEW SEGMENTS CAN ACT. `search.v1.SearchRequest` carries six fields —
+    /// query, entity_types, sort, page_size, page_token, exclude_author_ids —
+    /// and `SearchSort` has three values. There is no like or comment sort, no
+    /// date bound, and no viewer scope. Asked for in `dev/BACKEND_GAPS.md` §19.
+    ///
+    /// "Scope" narrows the people list alone — it was offered
+    /// on Posts too, under a footer saying it narrowed the results, and did
+    /// nothing there. "Published" is gone until the request carries a date
+    /// bound (`dev/issues/BACKEND_SEARCH_FILTERS.md`): only "All time" could
+    /// be picked, so the whole group changed nothing.
+    ///
+    /// Within a group that acts, segments nothing can honour yet stay drawn
+    /// and disabled, with the reason in the footer: a segmented control
+    /// showing two of four options makes the dimension itself unreadable.
+    func filterGroups(for tab: ResultsTab, isMember: Bool = true) -> [SearchFilterSheetViewController.Group] {
+        switch tab {
+        case .posts: [rankingGroup]
+        case .users: [rankingGroup, scopeGroup(isMember: isMember)]
+        }
+    }
+
+    private var rankingGroup: SearchFilterSheetViewController.Group {
+        .init(
+            id: Self.rankingGroupID,
+            title: "Rank by",
+            // ⚠️ "TOP", NOT "TRENDING": `SearchSort.POPULARITY` "reads the
+            // periodically-refreshed popularity signal, never a real-time
+            // count", and on the fleet that signal is not wired yet
+            // (core-platform-backend#830). The owner's call for the hashtag
+            // page (#629), and the same sort here.
+            footer: "Top reads a periodically-refreshed popularity signal, "
+                + "not a live count. Likes and comments need a sort search.v1 "
+                + "does not have yet.",
+            segments: [
+                .init(SearchSortOrder.popularity.rawValue, "Top"),
+                .init(SearchSortOrder.recency.rawValue, "Newest"),
+                .init("mostLiked", "Liked", isEnabled: false),
+                .init("mostCommented", "Commented", isEnabled: false)
+            ],
+            selectedID: sortOrder.rawValue
+        )
+    }
+
+    /// `isMember` false (a guest) disables Following: someone who follows no
+    /// one has nothing to narrow the people to.
+    private func scopeGroup(isMember: Bool) -> SearchFilterSheetViewController.Group {
+        .init(
+            id: Self.scopeGroupID,
+            title: "Scope",
+            footer: "Following narrows the people to those you follow. Nothing "
+                + "records which of them you have already seen, so those two "
+                + "cannot be offered yet.",
+            segments: [
+                .init(SearchScope.everyone.rawValue, "Everyone"),
+                .init("seen", "Seen", isEnabled: false),
+                .init("unseen", "Unseen", isEnabled: false),
+                .init(SearchScope.following.rawValue, "Following", isEnabled: isMember)
+            ],
+            selectedID: scope.rawValue
+        )
     }
 
     static let rankingGroupID = "ranking"
-    static let publishedGroupID = "published"
     static let scopeGroupID = "scope"
 
     func applyFilter(group: String, option: String) {
@@ -848,8 +852,8 @@ public final class SearchViewModel {
             guard let scope = SearchScope(rawValue: option) else { return }
             setScope(scope)
         default:
-            // `published` reaches here only if a disabled segment is picked
-            // programmatically, which the sheet already refuses.
+            // A disabled segment picked programmatically, which the sheet
+            // already refuses.
             break
         }
     }
@@ -864,7 +868,6 @@ public final class SearchViewModel {
         postsNextToken = nil
         peopleNextToken = nil
         postResults = []
-        mediaResults = []
         // ⚠️ ITS OWN TASK, deliberately unawaited by the people search. The two
         // are separate round trips (see `searchPosts` for why they cannot be
         // one federated page), and making the list of people wait for the list
@@ -879,9 +882,6 @@ public final class SearchViewModel {
             let hits = page?.hits ?? []
             guard !Task.isCancelled, self.submittedQuery == trimmed else { return }
             self.postsNextToken = page?.nextPageToken
-            // ⚠️ MEDIA FIRST, because `postResults` announces and the screen
-            // reads both in that announcement.
-            self.mediaResults = hits.filter(\.hasMedia).map(\.id)
             self.postResults = hits.map(\.id)
         }
         do {
@@ -915,15 +915,15 @@ public final class SearchViewModel {
 
     // MARK: - Paging (#612)
 
-    /// The viewer neared the end of the Posts tab (or, with `untilMedia`, the
-    /// Media tab): the next page of posts, if there is one and none is on its
-    /// way. Appended, never reordering what is shown; a failure is retried on
-    /// the next approach.
+    /// The viewer neared the end of the Posts tab: the next page of posts, if
+    /// there is one and none is on its way. Appended, never reordering what is
+    /// shown; a failure is retried on the next approach. A page that brings
+    /// only posts already shown (one can sit on both sides of a boundary)
+    /// reads on, a few pages at most.
     ///
-    /// `untilMedia`: the Media tab shows only the posts with a picture, so a
-    /// page of text posts adds nothing to it and no new tile would ask again.
-    /// Pages are read on until one brings a picture.
-    public func loadMorePosts(untilMedia: Bool = false) {
+    /// The Media tab and its "read on until a picture" are gone (#630): the
+    /// one Posts tab draws text posts as cards and tiles media itself.
+    public func loadMorePosts() {
         guard postsPageLoad == nil, let token = postsNextToken, !submittedQuery.isEmpty else { return }
         let query = submittedQuery
         let sort = sortOrder
@@ -945,8 +945,7 @@ public final class SearchViewModel {
                 // A post can sit on both sides of a page boundary.
                 var known = Set(self.postResults + fresh.map(\.id))
                 for hit in page.hits where known.insert(hit.id).inserted { fresh.append(hit) }
-                let enough = untilMedia ? fresh.contains(where: \.hasMedia) : !fresh.isEmpty
-                guard !enough, let next = page.nextPageToken else { break }
+                guard fresh.isEmpty, let next = page.nextPageToken else { break }
                 token = next
             }
             // ⚠️ The slot frees BEFORE the rows announce: showing them can
@@ -954,8 +953,6 @@ public final class SearchViewModel {
             self.postsPageLoad = nil
             self.onPostsPagingChange?(false)
             guard !fresh.isEmpty else { return }
-            // Media first, because `postResults` announces (see `runSearch`).
-            self.mediaResults += fresh.filter(\.hasMedia).map(\.id)
             self.postResults += fresh.map(\.id)
         }
         // Announced after the slot is taken: the spinner's layout pass can ask

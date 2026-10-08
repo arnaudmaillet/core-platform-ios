@@ -50,8 +50,8 @@ private actor TagSearch: SearchProviding {
     }
 }
 
-private func hits(_ count: Int, prefix: String = "p", media: Bool = true) -> [PostSearchHit] {
-    (0..<count).map { PostSearchHit(id: PostID("\(prefix)\($0)"), hasMedia: media) }
+private func hits(_ count: Int, prefix: String = "p") -> [PostSearchHit] {
+    (0..<count).map { PostSearchHit(id: PostID("\(prefix)\($0)")) }
 }
 
 @MainActor
@@ -60,8 +60,8 @@ private final class Routes: Router {
     func route(to route: AppRoute) { all.append(route) }
 }
 
-private func hit(_ id: String, media: Bool = true) -> PostSearchHit {
-    PostSearchHit(id: PostID(id), hasMedia: media)
+private func hit(_ id: String) -> PostSearchHit {
+    PostSearchHit(id: PostID(id))
 }
 
 @MainActor
@@ -69,7 +69,7 @@ struct HashtagViewModelTests {
     /// Both lists hold every post, text ones included: the page draws a text
     /// post as a card and tiles media into its mosaic slices itself (#629).
     @Test func bothListsHoldEveryPost() async {
-        let search = TagSearch(top: [hit("a"), hit("t", media: false), hit("b")], recent: [hit("t", media: false), hit("a")])
+        let search = TagSearch(top: [hit("a"), hit("t"), hit("b")], recent: [hit("t"), hit("a")])
         let viewModel = HashtagViewModel(tag: "#Travel", repository: search)
         await viewModel.load()
 
@@ -151,7 +151,7 @@ struct HashtagViewModelTests {
     /// A page of text posts is a page like any other: one request, and the
     /// next waits for the viewer (it used to read on, hunting for pictures).
     @Test func topTakesAPageOfTextPostsAsItIs() async {
-        let text = hits(page, prefix: "t", media: false)
+        let text = hits(page, prefix: "t")
         let pictures = hits(4, prefix: "m")
         let search = TagSearch(top: text + pictures)
         let viewModel = HashtagViewModel(tag: "travel", repository: search)

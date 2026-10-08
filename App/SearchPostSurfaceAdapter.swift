@@ -36,7 +36,6 @@ struct SearchPostSurfaceAdapter: SearchPostSurfaceProviding {
     static func feedStyle(for style: SearchPostSurfaceStyle) -> PostSetSurfaceStyle {
         switch style {
         case .cards: .cards
-        case .gallery: .gallery
         case .discover: .discover
         }
     }

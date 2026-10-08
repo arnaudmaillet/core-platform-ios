@@ -75,7 +75,7 @@ private func people(_ numbers: ClosedRange<Int>, next: String?) -> ProfileSearch
 
 /// Even numbers have a picture, odd ones are text.
 private func posts(_ numbers: [Int], next: String?) -> PostSearchPage {
-    PostSearchPage(hits: numbers.map { PostSearchHit(id: PostID("post-\($0)"), hasMedia: $0.isMultiple(of: 2)) }, nextPageToken: next)
+    PostSearchPage(hits: numbers.map { PostSearchHit(id: PostID("post-\($0)")) }, nextPageToken: next)
 }
 
 @MainActor
@@ -155,9 +155,9 @@ struct SearchResultsPagingTests {
         #expect(await provider.asks("people") == [nil, "u2", "u3"])
     }
 
-    /// Posts page into the Posts tab; the Media tab gets the new hits with a
-    /// picture. Media's near-end reads on past a page of text posts.
-    @Test func postsPageIntoBothTabsAndMediaReadsOnToAPicture() async throws {
+    /// Posts page into the one Posts tab (#630), every hit, text posts
+    /// included — a page of them is a page like any other.
+    @Test func postsPageInEveryHit() async throws {
         let provider = PagedSearch(
             people: ["ann": [nil: people(1...1, next: nil)]],
             posts: ["ann": [
@@ -169,14 +169,15 @@ struct SearchResultsPagingTests {
         let viewModel = makeViewModel(provider)
         viewModel.submitQuery("ann")
         try #require(await settle { viewModel.postResults.count == 2 })
-        #expect(ids(viewModel.mediaResults) == ["post-0"])
         #expect(viewModel.hasMorePosts)
 
-        viewModel.loadMorePosts(untilMedia: true)
+        viewModel.loadMorePosts()
+        try #require(await settle { viewModel.postResults.count == 4 })
+        #expect(ids(viewModel.postResults) == ["post-0", "post-1", "post-3", "post-5"], "one page per ask")
+        viewModel.loadMorePosts()
         try #require(await settle { !viewModel.hasMorePosts })
 
         #expect(ids(viewModel.postResults) == ["post-0", "post-1", "post-3", "post-5", "post-6", "post-7"])
-        #expect(ids(viewModel.mediaResults) == ["post-0", "post-6"])
         #expect(await provider.asks("posts") == [nil, "p2", "p3"])
     }
 

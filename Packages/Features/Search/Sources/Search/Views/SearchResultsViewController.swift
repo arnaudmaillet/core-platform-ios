@@ -132,7 +132,7 @@ final class SearchResultsViewController: UIViewController {
     /// documented as "compact, marginless, and BARE: the navigation bar
     /// supplies the backdrop" — a `.floating` bar carries its own glass, which
     /// inside the bar's platter would draw a second lens over the first.
-    private let tabBar = PagedTabBar(titles: ["Posts", "Media", "Users"], style: .navigationTitle)
+    private let tabBar = PagedTabBar(titles: ["Posts", "Users"], style: .navigationTitle)
 
     private var pager: HorizontalPagerView!
 
@@ -140,8 +140,11 @@ final class SearchResultsViewController: UIViewController {
     /// The Users tab, for tests that need to see what this screen actually
     /// rendered rather than what it was told.
     var peoplePageForTesting: SearchPeoplePage { peoplePage }
+    /// Every post the search matched, laid out like For You (#630): cards,
+    /// with slices of the media mosaic between them and "View all" into the
+    /// gallery. It replaced a Posts (cards) and a Media (gallery) tab that
+    /// were the same answer in two layouts.
     private let postsPage: any SearchPostSurface
-    private let mediaPage: any SearchPostSurface
 
     /// Called when the viewer taps the query. The pusher owns the navigation:
     /// it pops itself back into view and focuses its own field.
@@ -160,10 +163,8 @@ final class SearchResultsViewController: UIViewController {
         self.wallet = wallet
         self.makeWalletSheet = makeWalletSheet
         peoplePage = SearchPeoplePage(imagePipeline: imagePipeline)
-        postsPage = postSurfaces?.makePostSurface(style: .cards)
+        postsPage = postSurfaces?.makePostSurface(style: .discover)
             ?? SearchPendingSurfaceViewController(kind: .posts)
-        mediaPage = postSurfaces?.makePostSurface(style: .gallery)
-            ?? SearchPendingSurfaceViewController(kind: .media)
         super.init(nibName: nil, bundle: nil)
         // ⚠️ IN THE INITIALISER. A navigation controller reads this when the
         // push BEGINS, and `viewDidLoad` can run inside that same push — set
@@ -185,13 +186,13 @@ final class SearchResultsViewController: UIViewController {
         render(viewModel.currentPhase)
         showPosts(postState(for: viewModel.currentPhase))
         #if DEBUG
-        // `-search-results-tab <0|1|2>` opens on a tab. The pager is driven by
+        // `-search-results-tab <0|1>` opens on a tab. The pager is driven by
         // a swipe and the simulator injects none, so without this only the
         // first tab can ever be seen offline.
         let arguments = ProcessInfo.processInfo.arguments
         if let index = arguments.firstIndex(of: "-search-results-tab"),
            index + 1 < arguments.count,
-           let tab = Int(arguments[index + 1]), (0...2).contains(tab) {
+           let tab = Int(arguments[index + 1]), (0...1).contains(tab) {
             DispatchQueue.main.async { [weak self] in
                 self?.tabBar.select(tab)
                 self?.pager.setActivePage(tab, animated: false)
@@ -526,14 +527,11 @@ final class SearchResultsViewController: UIViewController {
         // routes with the identity stub the row already holds, so the profile
         // opens on a name and a face rather than on a spinner.
         peoplePage.onSelect = { [weak self] id in self?.viewModel.didSelectResult(id) }
-        // Each tab's near-end asks for ITS answer's next page (#612). Media
-        // reads on until a page brings a picture — a page of text posts adds
-        // no tile to it.
+        // Each tab's near-end asks for ITS answer's next page (#612).
         postsPage.onNearEnd = { [weak self] in self?.viewModel.loadMorePosts() }
-        mediaPage.onNearEnd = { [weak self] in self?.viewModel.loadMorePosts(untilMedia: true) }
         peoplePage.onNearEnd = { [weak self] in self?.viewModel.loadMorePeople() }
 
-        for page in [postsPage.viewController, mediaPage.viewController, peoplePage] {
+        for page in [postsPage.viewController, peoplePage] {
             addChild(page)
             page.didMove(toParent: self)
         }
@@ -546,13 +544,13 @@ final class SearchResultsViewController: UIViewController {
             }
         }
         pager = HorizontalPagerView(
-            pages: [postsPage.viewController.view, mediaPage.viewController.view, peoplePage.view],
+            pages: [postsPage.viewController.view, peoplePage.view],
             initialIndex: 0
         )
         pager.translatesAutoresizingMaskIntoConstraints = false
         // ⚠️ The bar follows the SWIPE as well as the tap. A selector that only
         // moved on its own taps would sit on "Posts" while the viewer read the
-        // gallery, which is the bug this channel exists to prevent.
+        // people, which is the bug this channel exists to prevent.
         pager.onProgress = { [weak self] progress in self?.tabBar.setProgress(progress) }
         // And the pages follow the PILL: a drag that starts on the selection
         // runs them under the finger, and the release lets the pager land.
@@ -875,7 +873,6 @@ final class SearchResultsViewController: UIViewController {
         // the pool. A grid under another screen holding players is the leak
         // this call exists to prevent.
         postsPage.setPlaybackActive(false)
-        mediaPage.setPlaybackActive(false)
     }
 
     /// Internal, not private, so the tests can assert what is IN the band.
@@ -930,7 +927,9 @@ final class SearchResultsViewController: UIViewController {
 
     private func presentFilters() {
         let isMember = MemberGates.gate(from: self)?.isMember ?? true
-        present(SearchFilterSheetViewController.inSheet(groups: viewModel.filterGroups(isMember: isMember)) {
+        // The tab in front decides what the sheet offers (#630).
+        let tab: SearchViewModel.ResultsTab = tabBar.selectedIndex == 0 ? .posts : .users
+        present(SearchFilterSheetViewController.inSheet(groups: viewModel.filterGroups(for: tab, isMember: isMember)) {
             [weak self] group, option in
             self?.viewModel.applyFilter(group: group, option: option)
         }, animated: true)
@@ -977,10 +976,6 @@ final class SearchResultsViewController: UIViewController {
         }
     }
 
-    /// ⚠️ THE TWO TABS GET DIFFERENT SETS. Posts is every match; Media is the
-    /// subset with a picture. Handing the gallery the full set drew a blank
-    /// tile per text post — filmed, a grid of empty rectangles among the
-    /// photographs.
     /// Claims the view model's callbacks for this screen.
     private func subscribe() {
         viewModel.onPhaseChange = { [weak self] phase in self?.render(phase) }
@@ -991,7 +986,6 @@ final class SearchResultsViewController: UIViewController {
         viewModel.onPostsPagingChange = { [weak self] paging in
             guard let self else { return }
             self.postsPage.setPaging(paging)
-            self.mediaPage.setPaging(paging)
             // A page has landed (or failed): whether there is another.
             if !paging { self.publishHasMorePosts() }
         }
@@ -1010,27 +1004,17 @@ final class SearchResultsViewController: UIViewController {
         let active = isViewLoaded && view.window != nil
         let index = tabBar.selectedIndex
         postsPage.setPlaybackActive(active && index == 0)
-        mediaPage.setPlaybackActive(active && index == 1)
     }
 
     private func showPosts(_ state: SearchPostSurfaceState) {
         postsPage.show(state)
-        mediaPage.show(mediaState(from: state))
         publishHasMorePosts()
     }
 
-    /// Both post tabs read one result list, so they share its next page
-    /// (#638). Media's next page IS the posts' — it pages them until media
-    /// turns up.
+    /// Whether the posts have a next page — what lets a feed opened from a
+    /// tile go on into it (#638), and the list settle its last mosaic slice.
     private func publishHasMorePosts() {
         postsPage.setHasMore(viewModel.hasMorePosts)
-        mediaPage.setHasMore(viewModel.hasMorePosts)
-    }
-
-    private func mediaState(from state: SearchPostSurfaceState) -> SearchPostSurfaceState {
-        guard case .posts = state else { return state }
-        let media = viewModel.mediaResults
-        return media.isEmpty ? .empty(query: viewModel.submittedQueryText) : .posts(media)
     }
 }
 

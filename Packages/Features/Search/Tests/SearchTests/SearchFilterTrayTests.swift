@@ -170,10 +170,14 @@ struct SearchFilterTrayTests {
             }
         }
 
-        /// The groups the sheet would be built from. They live on the view
-        /// model — two screens read them — so this needs no presentation.
+        /// The groups the sheet would be built from on each tab. They live on
+        /// the view model — two screens read them — so this needs no
+        /// presentation.
         var filterGroups: [SearchFilterSheetViewController.Group] {
-            viewModel.filterGroups()
+            viewModel.filterGroups(for: .users)
+        }
+        var postFilterGroups: [SearchFilterSheetViewController.Group] {
+            viewModel.filterGroups(for: .posts)
         }
 
         func submit(_ text: String) {
@@ -225,10 +229,14 @@ struct SearchFilterTrayTests {
         #expect(host.results?.navigationItem.hidesBackButton == false)
     }
 
-    @Test func theSheetCarriesTheThreeDimensionsAsked() async {
+    /// Each tab's sheet offers only what changes that tab (#630): Scope
+    /// narrows people alone, and no date window can be picked yet, so
+    /// "Published" is not offered at all.
+    @Test func eachTabOffersWhatChangesIt() async {
         let host = Host()
         await host.showResults("haddad")
-        #expect(host.filterGroups.map(\.title) == ["Rank by", "Published", "Scope"])
+        #expect(host.postFilterGroups.map(\.title) == ["Rank by"])
+        #expect(host.filterGroups.map(\.title) == ["Rank by", "Scope"])
     }
 
     /// ⚠️ EVERY SEGMENT THE PRODUCT NAMED IS DRAWN, and the ones nothing can
@@ -237,17 +245,19 @@ struct SearchFilterTrayTests {
     @Test func everySegmentIsDrawnAndOnlyTheImpossibleOnesAreDisabled() async {
         let host = Host()
         await host.showResults("haddad")
-        let groups = host.filterGroups
+        let posts = host.postFilterGroups
+        let users = host.filterGroups
 
-        #expect(groups.first { $0.title == "Rank by" }?.segments.map(\.title)
-                == ["Trending", "Newest", "Liked", "Commented"])
-        #expect(groups.first { $0.title == "Published" }?.segments.map(\.title)
-                == ["24h", "Week", "6 months", "All time"])
-        #expect(groups.first { $0.title == "Scope" }?.segments.map(\.title)
+        // "Top", not "Trending", until the backend ranks by trend
+        // (core-platform-backend#830) — the owner's call, #629.
+        #expect(posts.first { $0.title == "Rank by" }?.segments.map(\.title)
+                == ["Top", "Newest", "Liked", "Commented"])
+        #expect(users.first { $0.title == "Scope" }?.segments.map(\.title)
                 == ["Everyone", "Seen", "Unseen", "Following"])
 
-        let enabled = groups.flatMap(\.segments).filter(\.isEnabled).map(\.title)
-        #expect(enabled == ["Trending", "Newest", "All time", "Everyone", "Following"])
+        #expect(posts.flatMap(\.segments).filter(\.isEnabled).map(\.title) == ["Top", "Newest"])
+        #expect(users.flatMap(\.segments).filter(\.isEnabled).map(\.title)
+                == ["Top", "Newest", "Everyone", "Following"])
     }
 
     /// Each dimension says why its dead segments are dead, which is the thing a
@@ -255,7 +265,7 @@ struct SearchFilterTrayTests {
     @Test func everyDimensionWithADeadSegmentExplainsItself() async {
         let host = Host()
         await host.showResults("haddad")
-        let groups = host.filterGroups
+        let groups = host.filterGroups + host.postFilterGroups
         for group in groups where group.segments.contains(where: { !$0.isEnabled }) {
             #expect(group.footer?.isEmpty == false)
         }
@@ -264,9 +274,8 @@ struct SearchFilterTrayTests {
     @Test func theSheetOpensOnWhatIsInEffect() async {
         let host = Host()
         await host.showResults("haddad")
-        let groups = host.filterGroups
-        #expect(groups.first { $0.title == "Scope" }?.selectedID == SearchScope.everyone.rawValue)
-        #expect(groups.first { $0.title == "Published" }?.selectedID == "all")
+        #expect(host.filterGroups.first { $0.title == "Scope" }?.selectedID == SearchScope.everyone.rawValue)
+        #expect(host.postFilterGroups.first?.selectedID == SearchSortOrder.popularity.rawValue)
     }
 
     /// ⚠️ Built at PRESENTATION, not once. A sheet assembled when the screen
