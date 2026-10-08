@@ -102,6 +102,14 @@ public final class FeedViewModel {
     private var authorStubs: [ProfileID: ProfileIdentityStub] = [:]
     private var isColdRefreshing = false
     private var nextPageToken: String?
+    /// Whether the source has nothing after the last post loaded (#628) — the
+    /// one moment a swipe up past the end may close the feed.
+    ///
+    /// True only when a page said so (`FeedPage.isEndOfSource`) AND left no
+    /// cursor: a window cut from a longer grid, a page still to come, or a
+    /// page that FAILED (its cursor is kept) all read false — an error is not
+    /// "the end" (the owner's call, 2026-10-07).
+    public private(set) var isSourceExhausted = false
     private var builder: FeedDisplayModelBuilder?
     private var initialLoad: Task<Void, Never>?
     private var pagingLoad: Task<Void, Never>?
@@ -388,6 +396,7 @@ public final class FeedViewModel {
         engagement = [:]
         likesInFlight = []
         nextPageToken = nil
+        isSourceExhausted = false
         isColdRefreshing = false
         phase = .loading
         // A fresh builder, matching `viewDidLoad` — it carries per-corpus
@@ -421,6 +430,7 @@ public final class FeedViewModel {
             seedEngagement(from: page.entries)
             subscribeToCounters(for: models.map(\.id))
             nextPageToken = page.nextPageToken
+            isSourceExhausted = page.nextPageToken == nil && page.isEndOfSource
             isColdRefreshing = page.isCold
             phase = models.isEmpty ? .empty : .content
         } catch {
@@ -445,6 +455,7 @@ public final class FeedViewModel {
                 seedEngagement(from: page.entries)
                 subscribeToCounters(for: fresh.map(\.id))
                 nextPageToken = page.nextPageToken
+                isSourceExhausted = page.nextPageToken == nil && page.isEndOfSource
                 isColdRefreshing = page.isCold
             }
         } catch {

@@ -546,6 +546,16 @@ public protocol ZoomTransitionDestination: AnyObject {
     /// every driver has to ask it the same way.
     func zoomHorizontalDismissalPermitted(at location: CGPoint, in view: UIView) -> Bool
 
+    /// Whether an UPWARD grab may claim a touch at `location` (#628): a swipe
+    /// up past the very last post of a source that has nothing after it.
+    ///
+    /// ⚠️ DEFAULT IS "NO", the opposite of the other two. Upward is the
+    /// pager's direction everywhere else — the next post — so only a
+    /// destination that knows it is at the true end may open it, and when it
+    /// does its own pager must decline the same touch (the mirror rule the
+    /// downward split already keeps).
+    func zoomUpwardDismissalPermitted(at location: CGPoint, in view: UIView) -> Bool
+
     /// Freeze/unfreeze the feed's own scrolling while a grab-to-dismiss drives,
     /// so its rubber-band doesn't fight the shrinking card.
     func setContentScrollEnabled(_ enabled: Bool)
@@ -560,6 +570,7 @@ public extension ZoomTransitionDestination {
     func zoomPageFraming(sourcePicture: UIImage?) -> ZoomPageFraming? { nil }
     func zoomVerticalDismissalPermitted(at location: CGPoint, in view: UIView) -> Bool { true }
     func zoomHorizontalDismissalPermitted(at location: CGPoint, in view: UIView) -> Bool { true }
+    func zoomUpwardDismissalPermitted(at location: CGPoint, in view: UIView) -> Bool { false }
     func zoomMirrorLiveMedia(onto surface: UIView) -> Bool { false }
     func zoomDonateLiveMediaView() -> UIView? { nil }
     func zoomReclaimLiveMediaView(_ view: UIView) {}
@@ -612,6 +623,8 @@ extension ZoomTransitionDestination {
             return zoomVerticalDismissalPermitted(at: pan.location(in: view), in: view)
         case .horizontal:
             return zoomHorizontalDismissalPermitted(at: pan.dragOrigin(in: view), in: view)
+        case .upward:
+            return zoomUpwardDismissalPermitted(at: pan.location(in: view), in: view)
         }
     }
 }

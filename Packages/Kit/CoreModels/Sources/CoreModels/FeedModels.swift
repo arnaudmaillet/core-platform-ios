@@ -112,10 +112,20 @@ public struct FeedPage: Sendable, Equatable {
     /// True when the backend served cold storage and is warming its cache;
     /// the UI may surface a transient refreshing indicator.
     public let isCold: Bool
+    /// True when this page is KNOWN to be the source's last: nothing at all
+    /// follows it, not merely no cursor this provider can follow (#628).
+    ///
+    /// ⚠️ A nil `nextPageToken` alone does not say that. A feed opened from a
+    /// grid's tile was a fixed window with no cursor, and its "last" post was
+    /// routinely the middle of a result set. Only a provider that knows — a
+    /// complete set (a map marker's posts), or a source's continuation that
+    /// answered "nothing after this" — sets it. False by default.
+    public let isEndOfSource: Bool
 
-    public init(entries: [FeedEntry], nextPageToken: String?, isCold: Bool) {
+    public init(entries: [FeedEntry], nextPageToken: String?, isCold: Bool, isEndOfSource: Bool = false) {
         self.entries = entries
         self.nextPageToken = nextPageToken
         self.isCold = isCold
+        self.isEndOfSource = isEndOfSource
     }
 }

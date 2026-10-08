@@ -1059,8 +1059,11 @@ extension ZoomDismissInteractionController: UIGestureRecognizerDelegate {
         // would start a second pop mid-transition. Refuse; the next grab retries.
         guard (destination as? UIViewController)?.transitionCoordinator == nil
         else { return grabLog("transition settling", false) }
-        guard let axis = ZoomDismissAxis.match(velocity: pan.velocity(in: view), axes: axes)
-        else { return grabLog("no axis v=\(pan.velocity(in: view))", false) }
+        // `withUpward`: the swipe up past a finished source (#628) rides with
+        // the vertical axis; the destination's gate below keeps it closed.
+        guard let axis = ZoomDismissAxis.match(
+            velocity: pan.velocity(in: view), axes: ZoomDismissAxis.withUpward(axes)
+        ) else { return grabLog("no axis v=\(pan.velocity(in: view))", false) }
         // And the destination's TENANTS: subsurfaces that own drags along this
         // axis — a scrolling rail or an open comments panel vertically, a
         // carousel with a photograph to its left horizontally (a rightward drag

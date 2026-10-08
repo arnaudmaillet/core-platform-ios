@@ -217,7 +217,7 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
         // vertical grab that simply went somewhere else. The gallery leg had no
         // scripted route at all, which is why it was only ever verified by hand.
         let driver = ([interaction] + extraInteractions)
-            .first { $0.debugArmedAxes.contains(axis) } ?? interaction
+            .first { ZoomDismissAxis.withUpward($0.debugArmedAxes).contains(axis) } ?? interaction
         Task { @MainActor in
             await driver.debugPerformGrab(
                 peakProgress: 0.22, verticalDrift: 180, axis: axis

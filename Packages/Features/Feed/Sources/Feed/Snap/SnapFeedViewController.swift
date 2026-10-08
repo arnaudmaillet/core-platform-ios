@@ -1345,7 +1345,15 @@ final class SnapFeedViewController: UIViewController {
     }
 
     private func configureCollectionView() {
-        collectionView = SnapFeedCollectionView(frame: .zero, collectionViewLayout: Self.makeLayout())
+        let pager = SnapFeedCollectionView(frame: .zero, collectionViewLayout: Self.makeLayout())
+        // The mirror of the upward grab's gate (#628): the pager gives up an
+        // upward touch exactly where the grab may take it — the true end, at
+        // rest — so one side claims it, never both and never neither.
+        pager.yieldsUpwardTouch = { [weak self, weak pager] location in
+            guard let self, let pager, self.isReadyForInteractiveDismissal else { return false }
+            return self.zoomUpwardDismissalPermitted(at: location, in: pager)
+        }
+        collectionView = pager
         collectionView.backgroundColor = emptyGround
         collectionView.isPagingEnabled = true
         collectionView.allowsSelection = false // taps toggle playback, not selection
@@ -6701,6 +6709,59 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         return true
     }
 
+    /// Whether the viewer is on the source's very last post (#628): the settled
+    /// page is the last one, and the source has said nothing follows it — not
+    /// a window cut short, not a page still to come, not a page that failed
+    /// (`FeedViewModel.isSourceExhausted`).
+    var isAtEndOfSource: Bool {
+        viewModel.isSourceExhausted && !orderedIDs.isEmpty && settledPageIndex == orderedIDs.count - 1
+    }
+
+    #if DEBUG
+    /// How many pages the feed holds, for a test waiting on its first load.
+    var debugPageCount: Int { orderedIDs.count }
+    #endif
+
+    /// The UPWARD grab's gate (#628): a swipe up past the very end closes the
+    /// feed — the window follows the finger up — and nowhere else.
+    ///
+    /// The vertical gate's rules, mirrored: refused while the keyboard is up
+    /// or a comments panel is OPEN, refused over the rail and the composer,
+    /// and on a RESTING text page the stream yields only at its BOTTOM (where
+    /// the downward grab needs its top). And first of all: only at the end of
+    /// a finished source, and never mid-fling (`isReadyForInteractiveDismissal`
+    /// is asked separately, as for every axis).
+    ///
+    /// The pager declines the same touch (`SnapFeedCollectionView`), so
+    /// exactly one side claims an upward drag — the split the downward
+    /// direction already keeps.
+    public func zoomUpwardDismissalPermitted(at location: CGPoint, in view: UIView) -> Bool {
+        #if DEBUG
+        // `-grab-log`: why an upward swipe at the end did or did not close.
+        if ProcessInfo.processInfo.arguments.contains("-grab-log") {
+            print("[grab-up] exhausted=\(viewModel.isSourceExhausted) page=\(settledPageIndex)/\(orderedIDs.count)"
+                + " keyboard=\(isKeyboardOnScreen) engaged=\(commentsEngagedID?.rawValue ?? "nil")"
+                + " resting=\(commentsEngagementIsResting)"
+                + " streamAtBottom=\((commentsContentVC as? PostDetailViewController)?.streamIsAtBottom.description ?? "-")")
+        }
+        #endif
+        guard isAtEndOfSource, !isKeyboardOnScreen else { return false }
+        guard commentsEngagedID == nil || commentsEngagementIsResting else { return false }
+        let point = collectionView.convert(location, from: view)
+        guard let hit = collectionView.hitTest(point, with: nil) else { return true }
+        for current in sequence(first: hit, next: { $0.superview }) {
+            if current is SnapShortcutRailView || current is SnapRailBoostButton
+                || current is CommentsInputBar {
+                return false
+            }
+            if current is SnapCommentsContainerView {
+                let stream = commentsContentVC as? PostDetailViewController
+                return commentsEngagementIsResting && stream?.streamIsAtBottom == true
+            }
+        }
+        return true
+    }
+
     /// The horizontal grab's gate, which exists because a post's media can now
     /// be a carousel.
     ///
@@ -6852,6 +6913,11 @@ extension SnapFeedViewController: UICollectionViewDataSourcePrefetching {
 /// ticker's axis test, with zero edges added to the gesture graph. Left of
 /// the rail's column nothing hit-tests into the rail, so the feed is stock.
 final class SnapFeedCollectionView: UICollectionView {
+    /// Whether an upward touch at a location (in this view's space) belongs to
+    /// the swipe-up close past a finished source (#628). Asked only for a
+    /// predominantly-upward pan; nil (a feed with no such end) never yields.
+    var yieldsUpwardTouch: ((CGPoint) -> Bool)?
+
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         let location = gestureRecognizer.location(in: self)
         if let hit = hitTest(location, with: nil), Self.claimsTouches(hit) {
@@ -6868,7 +6934,20 @@ final class SnapFeedCollectionView: UICollectionView {
            Self.declinesDownwardPagingTouch(velocity: pan.velocity(in: self)) {
             return false
         }
+        // And at the true end, the UPWARD touch too — handed to the close the
+        // same way (#628). Anywhere else upward is the next post, as ever.
+        if let pan = gestureRecognizer as? UIPanGestureRecognizer,
+           Self.isUpwardTouch(velocity: pan.velocity(in: self)),
+           yieldsUpwardTouch?(pan.location(in: self)) == true {
+            return false
+        }
         return super.gestureRecognizerShouldBegin(gestureRecognizer)
+    }
+
+    /// A predominantly-upward movement — the upward grab's begin rule
+    /// (`ZoomDismissAxis.match`), mirrored. Pure, for tests.
+    static func isUpwardTouch(velocity: CGPoint) -> Bool {
+        velocity.y < 0 && abs(velocity.y) > abs(velocity.x)
     }
 
     /// The forward-only axis test, mirrored from the dismissal pan's begin

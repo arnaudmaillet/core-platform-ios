@@ -36,11 +36,20 @@ actor FixedPostsFeedProvider: FeedProviding, RepointableFeedProviding {
     /// Continuation steps whose posts ALL fail to hydrate, walked through in a
     /// row: such a page brings no row to come on screen and ask again.
     static let maxEmptySteps = 5
+    /// Whether `ids` is everything the source has — a map marker's or a
+    /// cluster's posts — so the first page is also the last (#628). Only
+    /// meaningful without a continuation; with one, the continuation's own
+    /// `nil` says when the end is reached.
+    private var isCompleteSet: Bool
 
-    init(base: any FeedProviding, ids: [PostID], continuation: SnapFeedContinuation? = nil) {
+    init(
+        base: any FeedProviding, ids: [PostID], continuation: SnapFeedContinuation? = nil,
+        isCompleteSet: Bool = false
+    ) {
         self.base = base
         self.ids = ids
         self.continuation = continuation
+        self.isCompleteSet = isCompleteSet
     }
 
     /// Aims this provider at a different set. The next `loadFirstPage` serves
@@ -51,6 +60,8 @@ actor FixedPostsFeedProvider: FeedProviding, RepointableFeedProviding {
         self.ids = ids
         continuation = nil
         lastServed = nil
+        // A re-aimed window is somebody's window, not a whole set.
+        isCompleteSet = false
     }
 
     func cachedFirstPage() async -> [FeedEntry]? { nil }
@@ -65,7 +76,10 @@ actor FixedPostsFeedProvider: FeedProviding, RepointableFeedProviding {
         return FeedPage(
             entries: entries,
             nextPageToken: continuation == nil ? nil : Self.continuationToken,
-            isCold: false
+            isCold: false,
+            // A window with no continuation is the end only when it is the
+            // whole set; otherwise its last post may be the middle of one.
+            isEndOfSource: continuation == nil && isCompleteSet
         )
     }
 
@@ -80,7 +94,8 @@ actor FixedPostsFeedProvider: FeedProviding, RepointableFeedProviding {
         }
         for _ in 0..<Self.maxEmptySteps {
             guard let next = await continuation(after) else {
-                return FeedPage(entries: [], nextPageToken: nil, isCold: false)
+                // The source said so: nothing follows (#628).
+                return FeedPage(entries: [], nextPageToken: nil, isCold: false, isEndOfSource: true)
             }
             guard let last = next.last else { throw FeedContinuationError.nothingYet }
             after = last

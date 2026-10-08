@@ -69,4 +69,37 @@ struct ZoomDismissAxisTests {
             #expect(rebuilt == point)
         }
     }
+
+    // MARK: - Upward, past a finished source (#628)
+
+    /// Upward matches only when armed, and only outbound-upward and
+    /// predominantly vertical — the same rule as the other two.
+    @Test func upwardMatchesOnlyWhenArmed() {
+        let up = CGPoint(x: 40, y: -300)
+        #expect(ZoomDismissAxis.match(velocity: up, axes: [.horizontal, .vertical]) == nil,
+                "unarmed, upward is the pager's next post")
+        #expect(ZoomDismissAxis.match(velocity: up, axes: [.upward]) == .upward)
+        #expect(ZoomDismissAxis.match(velocity: CGPoint(x: 40, y: 300), axes: [.upward]) == nil, "downward")
+        #expect(ZoomDismissAxis.match(velocity: CGPoint(x: 300, y: -250), axes: [.upward]) == nil,
+                "mostly sideways")
+    }
+
+    /// The drivers arm upward wherever vertical is, and nowhere else: a
+    /// horizontal-only driver (a profile's tab pager) never gains it.
+    @Test func upwardRidesWithVertical() {
+        #expect(ZoomDismissAxis.withUpward([.horizontal, .vertical]) == [.horizontal, .vertical, .upward])
+        #expect(ZoomDismissAxis.withUpward([.vertical]) == [.vertical, .upward])
+        #expect(ZoomDismissAxis.withUpward([.horizontal]) == [.horizontal])
+    }
+
+    /// Travel is positive outbound on every axis, so progress and the release
+    /// velocity read the same whichever way the hand went.
+    @Test func upwardTravelIsPositiveGoingUp() {
+        let size = CGSize(width: 402, height: 874)
+        #expect(ZoomDismissAxis.upward.along(CGPoint(x: 10, y: -200)) == 200)
+        #expect(ZoomDismissAxis.upward.across(CGPoint(x: 10, y: -200)) == 10)
+        #expect(ZoomDismissAxis.upward.span(of: size) == 874)
+        #expect(ZoomDismissAxis.upward.offset(along: 200, across: 10) == CGPoint(x: 10, y: -200),
+                "the window follows the finger up")
+    }
 }
