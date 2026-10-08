@@ -124,9 +124,9 @@ final class SnapChromeView: UIView {
     /// post has no sound bubble (the feed pushes it, `setSoundFace`).
     private var soundFace: SnapSoundFace?
     private var imagePipeline: ImagePipeline?
-    /// The sound bubble was tapped: toggle the feed's sound (#671).
-    var onSoundTapped: (() -> Void)?
-    /// The sound bubble was held: open the sound sheet (#671).
+    /// The sound bubble was held: toggle the feed's sound (#683).
+    var onSoundToggleRequested: (() -> Void)?
+    /// The sound bubble was tapped: open the sound sheet (#683).
     var onSoundSheetRequested: (() -> Void)?
     /// The rail's top edge as a cell-relative constant (see `buildLayout`).
     /// Optional: margins change during `init` before the layout exists.
@@ -505,14 +505,14 @@ final class SnapChromeView: UIView {
         captionLabel.trailingAnchor.constraint(
             equalTo: soundBubble.leadingAnchor, constant: -Spacing.md
         ).isActive = true
-        soundBubble.onTap = { [weak self] in self?.onSoundTapped?() }
-        soundBubble.onLongPress = { [weak self] in self?.onSoundSheetRequested?() }
+        soundBubble.onTap = { [weak self] in self?.onSoundSheetRequested?() }
+        soundBubble.onLongPress = { [weak self] in self?.onSoundToggleRequested?() }
     }
 
     /// The sound bubble is MEDIA chrome, like the like pill above it: a text
     /// page's engagement is its permanent layout, and its composer stands in
     /// the column instead (its rail slot wears the sound). Shown for a post
-    /// with a face.
+    /// with a face — every media post has one, greyed when it has no sound.
     private func applySoundVisibility() {
         soundBubble.isHidden = !(hasMedia && soundFace != nil)
     }
@@ -604,6 +604,12 @@ final class SnapChromeView: UIView {
         // chrome (seeded on every post type below); the "+" that rides it
         // is not — see its assignment.
         hasMedia = model.mediaURL != nil
+        // ⚠️ THE CHROME CARRIES ITS OWN THEME (#683). The live cell's content
+        // view is themed when it joins a window, and the hero flight's
+        // replica never was: the like pill and the sound bubble flew as LIGHT
+        // glass with dark ink, and turned dark at the landing — while the
+        // toolbar, themed already, was white from the first frame.
+        overrideUserInterfaceStyle = SnapChromeTheme.style(hasMedia: hasMedia)
         scrimView.isHidden = !hasMedia
         // Set the timestamp before the caption so the caption's didSet
         // composes with both already in hand.

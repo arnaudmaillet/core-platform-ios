@@ -23,12 +23,30 @@ struct SnapSoundFace: Equatable {
     /// composer's slot wore nothing, since a file was never cached. The
     /// attribution has always read files directly (`SnapMediaAttributionView`).
     @MainActor var cachedCover: UIImage? {
+        guard isAvailable else { return Self.noSoundImage }
         guard let coverURL else { return SnapMediaAttributionView.noteImage }
         if let hit = SnapAttributionCoverCache.cover(for: coverURL) { return hit }
         guard coverURL.isFileURL, let image = UIImage(contentsOfFile: coverURL.path) else { return nil }
         SnapAttributionCoverCache.store(image, for: coverURL)
         return image
     }
+
+    /// A post with no sound (#683): the note struck through, greyed — the
+    /// bubble keeps its place and says there is nothing to hear.
+    static let noSoundImage: UIImage = {
+        let side: CGFloat = 64
+        return UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).image { context in
+            UIColor.darkGray.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: side, height: side))
+            let glyph = UIImage(systemName: noSoundSymbol)?
+                .withConfiguration(UIImage.SymbolConfiguration(pointSize: 26, weight: .semibold))
+                .withTintColor(.lightGray, renderingMode: .alwaysOriginal)
+            if let glyph {
+                glyph.draw(at: CGPoint(x: (side - glyph.size.width) / 2, y: (side - glyph.size.height) / 2))
+            }
+        }
+    }()
+    static let noSoundSymbol = "music.note.slash"
 
     /// Fetches a remote cover into the cache, for a host that has to redraw
     /// once it lands (the composer's slot). Nil for a file, the note, or a
@@ -73,18 +91,21 @@ struct SnapSoundFace: Equatable {
 /// The column's lower bubble (#671): the sound's cover on the like pill's
 /// glass.
 ///
-/// - A TAP toggles the feed's sound; a LONG PRESS opens the sound sheet.
+/// - A TAP opens the sound sheet; a LONG PRESS toggles the feed's sound
+///   (#683).
 /// - A `speaker.slash` badge on its corner while the sound is off.
-/// - Greyed and refusing the mute on a media post with no audio.
-/// - The cover turns like a record while the post plays (`setSpinning`), under
-///   the same decorative-motion rules as the toolbar's (#580, #650).
+/// - A greyed `music.note.slash`, refusing both, on a post with no sound.
+/// - The cover turns like a record while the post plays AUDIBLY
+///   (`setSpinning`): it says the sound is playing, so it follows play,
+///   pause and mute, and Reduce Motion — not the idle calm (#650), which
+///   stopped it on a clip watched to its end and looping (#683).
 ///
 /// Configured PLAIN at init; the glass materializes on first window attach —
 /// the like anchor's doctrine (`SnapRailBoostButton`).
 final class SnapSoundBubbleButton: UIButton {
-    /// A tap: toggle the sound.
+    /// A tap: open the sound sheet.
     var onTap: (() -> Void)?
-    /// A long press: open the sound sheet.
+    /// A long press: toggle the sound.
     var onLongPress: (() -> Void)?
 
     private let coverView = UIImageView()
@@ -121,7 +142,7 @@ final class SnapSoundBubbleButton: UIButton {
 
         isAccessibilityElement = true
         accessibilityLabel = "Sound"
-        accessibilityHint = "Double-tap to mute or unmute. Touch and hold for the sound."
+        accessibilityHint = "Double-tap for the sound. Touch and hold to mute or unmute."
         isHidden = true
     }
 
@@ -165,6 +186,7 @@ final class SnapSoundBubbleButton: UIButton {
     func setFace(_ face: SnapSoundFace?, pipeline: ImagePipeline?) {
         guard face != self.face else { return }
         let coverChanged = face?.coverURL != self.face?.coverURL || self.face == nil
+            || face?.isAvailable != self.face?.isAvailable
         self.face = face
         mutedBadge.isHidden = !(face?.isMuted ?? false) || !(face?.isAvailable ?? false)
         isEnabled = face?.isAvailable ?? false
@@ -182,10 +204,17 @@ final class SnapSoundBubbleButton: UIButton {
         }
     }
 
-    /// Turns the cover like a record while the post plays.
+    /// Turns the cover like a record while the post plays audibly.
     func setSpinning(_ spinning: Bool) {
-        coverView.layer.setRecordSpinning(spinning)
+        coverView.layer.setRecordSpinning(spinning, reducesMotion: MotionPreference.reducesMotion)
     }
+
+    #if DEBUG
+    /// Whether the record is turning now.
+    var debugIsSpinning: Bool {
+        coverView.layer.animation(forKey: CALayer.recordSpinKey) != nil && coverView.layer.speed != 0
+    }
+    #endif
 
     #if DEBUG
     var debugIsMutedBadgeShown: Bool { !mutedBadge.isHidden }

@@ -123,8 +123,8 @@ final class CommentsInputBar: UIView {
     /// The rail face was tapped (repost, pin, the sound's mute), whatever the
     /// field holds.
     var onRailAction: (() -> Void)?
-    /// The SOUND face was held: the host opens the sound sheet (#680). Other
-    /// faces ignore a hold.
+    /// The SOUND face was held: the host toggles the sound (#683). Other
+    /// faces, and a post with no sound, ignore a hold.
     var onRailLongPress: (() -> Void)?
 
     @objc private func railHeld(_ recogniser: UILongPressGestureRecognizer) {
@@ -182,7 +182,7 @@ final class CommentsInputBar: UIView {
             forTextStyle: .body,
             compatibleWith: UITraitCollection(preferredContentSizeCategory: category)
         )
-        probe.textContainerInset = UIEdgeInsets(top: Spacing.sm, left: Spacing.sm, bottom: Spacing.sm, right: Spacing.sm)
+        probe.textContainerInset = fieldInsets(for: probe.font)
         let fitting = probe.sizeThatFits(CGSize(width: 320, height: CGFloat.greatestFiniteMagnitude)).height
         let field = max(ceil(fitting), Metrics.controlSize)
         restingFieldHeights[category] = field
@@ -210,6 +210,34 @@ final class CommentsInputBar: UIView {
     }
 
     private static var restingFieldHeights: [UIContentSizeCategory: CGFloat] = [:]
+
+    /// The text's insets in the field: `sm` at the sides, and above and below
+    /// whatever centres ONE line in the field's resting height (#683) — with
+    /// `sm` the line sat high in the bubble-tall field, under a placeholder
+    /// centred on it. Never less than `sm`, so a large text size still grows
+    /// the field as before.
+    ///
+    /// The line is MEASURED, not read off the font: a text view lays one line
+    /// out a little taller than `lineHeight`, and a field centred on the
+    /// font's figure came out two points taller than the bubbles.
+    @MainActor static func fieldInsets(for font: UIFont?) -> UIEdgeInsets {
+        let font = font ?? .appFont(forTextStyle: .body)
+        let line: CGFloat
+        if let cached = measuredLines[font.pointSize] {
+            line = cached
+        } else {
+            let probe = UITextView()
+            probe.font = font
+            probe.isScrollEnabled = false
+            probe.textContainerInset = .zero
+            line = probe.sizeThatFits(CGSize(width: 320, height: CGFloat.greatestFiniteMagnitude)).height
+            measuredLines[font.pointSize] = line
+        }
+        let vertical = max(Spacing.sm, floor((Metrics.controlSize - line) / 2 * 2) / 2)
+        return UIEdgeInsets(top: vertical, left: Spacing.sm, bottom: vertical, right: Spacing.sm)
+    }
+
+    private static var measuredLines: [CGFloat: CGFloat] = [:]
 
     enum Metrics {
         static let maxLines: CGFloat = 4
@@ -373,7 +401,7 @@ final class CommentsInputBar: UIView {
         textView.adjustsFontForContentSizeCategory = true
         textView.backgroundColor = .clear
         textView.isScrollEnabled = false
-        textView.textContainerInset = UIEdgeInsets(top: Spacing.sm, left: Spacing.sm, bottom: Spacing.sm, right: Spacing.sm)
+        textView.textContainerInset = Self.fieldInsets(for: textView.font)
         textView.delegate = self
         // The field's trailing end holds the emote toggle; the text stops
         // short of it, and the toggle holds the last line's station as the
@@ -1607,7 +1635,7 @@ final class CommentsInputBar: UIView {
             // The cover as a disc, the bubble's size less the sound bubble's
             // inset, so the two read as one (#671). Not a symbol: no replace.
             railButton.isHidden = false
-            railButton.configuration?.image = face.disc(side: SnapActionColumn.bubbleSize - 10, badged: face.isMuted)
+            railButton.configuration?.image = face.disc(side: SnapActionColumn.bubbleSize - 10, badged: face.isMuted && face.isAvailable)
             railButton.configuration?.contentInsets = .zero
             railButton.accessibilityLabel = "Sound"
             railButton.alpha = face.isAvailable ? 1 : 0.45
@@ -1679,6 +1707,9 @@ final class CommentsInputBar: UIView {
     private func updateFieldHeight(animated: Bool = false) -> Bool {
         let textWidth = field.bounds.width - Metrics.emoteToggleWidth - Metrics.fieldActionSide
         guard textWidth > 0 else { return false }
+        // The text size may have moved the line's height.
+        let centred = Self.fieldInsets(for: textView.font)
+        if textView.textContainerInset != centred { textView.textContainerInset = centred }
         let insets = textView.textContainerInset
         let lineHeight = textView.font?.lineHeight ?? UIFont.appFont(forTextStyle: .body).lineHeight
         let maxHeight = ceil(lineHeight * Metrics.maxLines) + insets.top + insets.bottom
