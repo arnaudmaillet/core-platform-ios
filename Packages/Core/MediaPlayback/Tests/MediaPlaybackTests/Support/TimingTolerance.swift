@@ -73,4 +73,23 @@ enum TimingTolerance {
         let over = samples.filter { $0 > bound }
         return over.count <= 1 && over.allSatisfy { $0 <= hardLimit }
     }
+
+    /// Whether playhead `samples` stay inside a looping `range` — one frame of
+    /// slack past its end — but for at most one late reading, which may be as
+    /// late as one whole period of the loop.
+    ///
+    /// ⚠️ **THE LATE READING'S LIMIT IS THE LOOP'S OWN PERIOD, NOT A FEW
+    /// MILLISECONDS** (#599). A starved runner can hold the wrap, or the
+    /// sampler, for hundreds of ms: CI read 1.875 s in a 0.5…1.5 s loop, past a
+    /// fixed 1.6 s hard limit, with every other sample inside. What a broken
+    /// loop does is different and still fails:
+    /// - it overshoots on EVERY wrap — several readings past the end;
+    /// - it never wraps — every reading after the end is past it;
+    /// - it runs on into the item — a reading more than a period past the end.
+    static func withinLoopButOne(_ samples: [Double], loop range: ClosedRange<Double>, frame: Double) -> Bool {
+        withinBoundButOne(
+            samples, range.upperBound + frame + 0.01,
+            hardLimit: range.upperBound + (range.upperBound - range.lowerBound)
+        )
+    }
 }
