@@ -253,7 +253,8 @@ struct BoostControlTests {
         let button = SnapRailBoostButton()
         #expect(Self.drawn(button.configuration?.image) == white)
         #expect(button.configuration?.image?.renderingMode == .alwaysTemplate, "the resting heart takes the ink")
-        #expect(button.configuration?.baseForegroundColor == .white)
+        // The content's ink, which the column's style resolves (#695).
+        #expect(button.configuration?.baseForegroundColor == .label)
         #expect(button.configuration?.attributedTitle == nil)
 
         button.setSpentTotal(60)
@@ -355,15 +356,16 @@ struct BoostControlTests {
     }
 
     /// A post whose likes are hidden (#397) has no like button at all, stake
-    /// or not (#680); a text page has no like pill to wear one.
-    @Test func noLikeButtonForAHiddenCountOrOnATextPage() {
+    /// or not (#680). A text page wears the page's pill like any other
+    /// (#695).
+    @Test func noLikeButtonForAHiddenCountButOnATextPage() {
         let hidden = Self.chrome(likes: 900, hidden: true)
         hidden.setBoostTotal(3)
         #expect(hidden.debugBoostButton.isHidden, "the like button stayed on a hidden-likes post")
         #expect(hidden.debugLikeBadgeText == nil)
 
         let text = Self.chrome(likes: 900, media: false)
-        #expect(text.debugLikeBadgeText == nil)
+        #expect(text.debugLikeBadgeText == "900")
     }
 
     /// The comments panel's stake bubble wears the same face, badge and menu

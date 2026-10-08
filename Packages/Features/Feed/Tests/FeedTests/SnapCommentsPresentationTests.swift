@@ -278,7 +278,7 @@ struct SnapCommentsPresentationTests {
         // owns the full width now, so the rail and its "+" anchor fade out
         // together (alpha < 0.01 also retires them from hit-testing, which
         // is what removed the composer-vs-rail overlap entirely).
-        let plus = try #require(chrome.subviews.compactMap { $0 as? SnapRailBoostButton }.first)
+        let plus = try #require((chrome.debugBoostButton as? SnapRailBoostButton))
         #expect(rail.alpha == 1)
         #expect(plus.alpha == 1)
         #expect(chrome.interactionRoots.contains(plus))

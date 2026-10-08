@@ -855,6 +855,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         pageStage.addSubview(headerFrost)
 
         chrome.pin(to: contentView)
+        // The action column rides ABOVE the chrome (#695): the comments'
+        // fade takes the chrome, never the like pill and the sound bubble.
+        chrome.installActionColumn(in: contentView)
 
         // NOTE: no pause glyph is installed here. The mark that says a clip is
         // stopped belongs to the PICTURE — `SnapMediaCardView` holds it for a
@@ -2968,6 +2971,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         isChromeHeldForFlight = held
         defer { refreshPersonOcclusion() }
         chrome.setTickerHeldForFlight(held)
+        // The column leaves and returns with the hold, engaged or not: the
+        // replica flies its own (#695).
+        chrome.setColumnHeld(held)
         if held {
             chrome.alpha = 0
             return
@@ -3344,6 +3350,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // leaves the hold un-released — and the next post to use this cell would
         // arrive with no chrome at all and nothing on the way to bring it back.
         chrome.alpha = 1
+        chrome.setColumnHeld(false)
         cancelPrewarming()
         videoPlayback?.stop(mediaCard.renderView)
         // Reuse is the other door out, and a retained clip must not walk

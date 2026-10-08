@@ -235,12 +235,13 @@ struct SnapActionColumnLayoutTests {
         #expect(chrome.interactionRoots.contains { $0 === chrome.debugSoundBubble })
     }
 
-    /// Media chrome, like the pill: a text page's composer stands in the
-    /// column instead (its rail slot wears the sound).
-    @Test func aTextPageHasNoSoundBubble() {
+    /// Every page's column, a text page's included (#695).
+    @Test func aTextPageWearsTheSoundBubble() {
         let chrome = Self.chrome(mediaURL: nil)
         chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false))
-        #expect(chrome.debugSoundBubble.isHidden)
+        // One column for every page (#695): the text page's composer only
+        // reserves its room, on the same frames.
+        #expect(!chrome.debugSoundBubble.isHidden)
     }
 
     // MARK: - The comments layout

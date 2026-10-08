@@ -681,11 +681,13 @@ final class SnapRailBoostButton: UIButton {
     }
 
     private static func makeConfiguration(glass: Bool, spentTotal: Int, likeCount: Int64?) -> UIButton.Configuration {
-        // A heart either way (#668): an outline in the media's ink (white) at
-        // rest, the points' red fill once the viewer has staked (#680) —
-        // never replaced by a number — over the post's count (#692).
+        // A heart either way (#668): an outline in the content's ink at rest,
+        // the points' red fill once the viewer has staked (#680) — never
+        // replaced by a number — over the post's count (#692). `.label`,
+        // resolved by the column's style: white over media, the panel's ink
+        // while the comments are up (#695).
         SnapActionColumn.likeConfiguration(
-            glass ? .glass() : .plain(), staked: spentTotal > 0, count: likeCount, ink: .white
+            glass ? .glass() : .plain(), staked: spentTotal > 0, count: likeCount, ink: .label
         )
     }
 }

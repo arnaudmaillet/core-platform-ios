@@ -1376,6 +1376,12 @@ final class PostDetailViewController: UIViewController {
         composeBar.redrawRailFace()
     }
 
+    /// The snap feed's page draws the action column above this panel (#695):
+    /// the composer only reserves its room.
+    func setActionColumnHostedByPage(_ hosted: Bool) {
+        composeBar.hostsActionColumn = !hosted
+    }
+
     /// The slot's cover turns while the post plays aloud (#692).
     func setRailSoundSpinning(_ spinning: Bool) {
         composeBar.setRailSpinning(spinning)

@@ -371,7 +371,7 @@ struct SnapShortcutRailViewTests {
         // frosted chip is gone): a Liquid Glass circle whose box fills
         // 100% of the square — width == height == the band's height —
         // sitting ABOVE the rail (a chrome sibling; it never scrolls).
-        let compose = try #require(chrome.subviews.compactMap { $0 as? SnapRailBoostButton }.first)
+        let compose = try #require((chrome.debugBoostButton as? SnapRailBoostButton))
         // No bare effect view in the overlap zone — the frosted chip that used
         // to sit there is gone and must not come back.
         //
@@ -391,7 +391,11 @@ struct SnapShortcutRailViewTests {
         #expect(compose.configuration?.cornerStyle == .capsule)
         let order = chrome.subviews
         #expect(order.firstIndex(of: ticker)! < order.firstIndex(of: rail)!)
-        #expect(order.firstIndex(of: rail)! < order.firstIndex(of: compose)!)
+        // The anchor is the action column's, in its own layer ABOVE every
+        // part of the chrome (#695).
+        let column = try #require(compose.superview)
+        #expect(column is SnapActionColumnLayer)
+        #expect(order.firstIndex(of: rail)! < order.firstIndex(of: column)!)
         #expect(rail.bottomReservedInset == ticker.frame.height)
 
         // The band's trailing edge sits at the anchor's outer threshold
@@ -437,7 +441,7 @@ struct SnapShortcutRailViewTests {
             ))
             chrome.layoutIfNeeded()
             let rail = try #require(chrome.subviews.compactMap { $0 as? SnapShortcutRailView }.first)
-            let compose = try #require(chrome.subviews.compactMap { $0 as? SnapRailBoostButton }.first)
+            let compose = try #require((chrome.debugBoostButton as? SnapRailBoostButton))
             return (rail.frame, compose.frame, chrome.debugSoundBubble.frame)
         }
         let media = try corner(mediaURL: URL(string: "mock://media/1"))
@@ -538,7 +542,7 @@ struct SnapShortcutRailViewTests {
         ))
         chrome.layoutIfNeeded()
         let ticker = try #require(chrome.subviews.compactMap { $0 as? SnapCommentTickerView }.first)
-        let compose = try #require(chrome.subviews.compactMap { $0 as? SnapRailBoostButton }.first)
+        let compose = try #require((chrome.debugBoostButton as? SnapRailBoostButton))
 
         // One-directional height authority: the band resolves to exactly
         // its intrinsic (type-metric) height — the anchor pinned to its
@@ -579,7 +583,7 @@ struct SnapShortcutRailViewTests {
             return chrome
         }
         func anchor(in chrome: SnapChromeView) throws -> SnapRailBoostButton {
-            try #require(chrome.subviews.compactMap { $0 as? SnapRailBoostButton }.first)
+            try #require((chrome.debugBoostButton as? SnapRailBoostButton))
         }
 
         // Configured, nothing loaded: the anchor is already there.
@@ -603,12 +607,10 @@ struct SnapShortcutRailViewTests {
             #expect(compose.isHidden == false)
         }
 
-        // Text-only pages are the one exception: their engagement is a
-        // permanent resting state carrying its own composer, so the rail's
-        // anchor never belongs to them — and it is hidden from the FIRST
-        // frame, not merely faded once that engagement mounts.
+        // Text-only pages wear it too (#695): their composer only reserves
+        // the column's room, so the page's anchor is the one drawn.
         let text = chrome(mediaURL: nil)
-        #expect(try anchor(in: text).isHidden == true)
+        #expect(try anchor(in: text).isHidden == false)
 
         // Reuse hands the next post a clean slate; configure re-establishes.
         media.reset()
@@ -694,10 +696,13 @@ struct SnapShortcutRailViewTests {
         ))
         chrome.layoutIfNeeded()
         let rail = try #require(chrome.subviews.compactMap { $0 as? SnapShortcutRailView }.first)
-        let anchor = try #require(chrome.subviews.compactMap { $0 as? SnapRailBoostButton }.first)
+        let anchor = try #require((chrome.debugBoostButton as? SnapRailBoostButton))
 
         // ONE FADED LAYER: the chrome's own alpha carries every surface it
-        // owns, so the rail and its anchor keep alpha 1 and inherit.
+        // owns, so the rail keeps alpha 1 and inherits. The anchor is the
+        // action column's (#695): its own alpha never moves — a chrome that
+        // is not mounted in a cell carries the column with it, one that is
+        // leaves it on screen (`SnapSharedColumnTests`).
         chrome.setCommentsEngaged(true)
         #expect(chrome.alpha == 0)
         #expect(rail.alpha == 1)
