@@ -76,6 +76,15 @@ public final class MockNotificationService: @unchecked Sendable {
     /// email off, no pause, no quiet hours until set.
     private let preferencesLock = NSLock()
     private var preferences: [String: Notification_V1_NotificationPreferences] = [:]
+    /// Push registrations (#651), by profile then device id — what a test reads
+    /// back, and what lets the app's launch-time registration succeed in mock
+    /// mode rather than fail against an unrouted path.
+    private var devices: [String: [String: Notification_V1_RegisterDeviceRequest]] = [:]
+
+    /// The registration a profile holds for a device, if any.
+    public func registeredDevice(profileID: String, deviceID: String) -> Notification_V1_RegisterDeviceRequest? {
+        preferencesLock.withLock { devices[profileID]?[deviceID] }
+    }
 
     private static func defaultPreferences() -> Notification_V1_NotificationPreferences {
         var preferences = Notification_V1_NotificationPreferences()
@@ -126,6 +135,21 @@ public final class MockNotificationService: @unchecked Sendable {
                 return current
             }
             return .success(updated)
+        }
+        bff.register(path: "/notification.v1.NotificationService/RegisterDevice") { [self] (request: Notification_V1_RegisterDeviceRequest) -> Result<Notification_V1_CommandResponse, ConnectError> in
+            guard !request.deviceID.isEmpty, !request.token.isEmpty else {
+                return .failure(ConnectError(code: .invalidArgument, message: "device_id and token are required"))
+            }
+            preferencesLock.withLock { devices[request.profileID, default: [:]][request.deviceID] = request }
+            var response = Notification_V1_CommandResponse()
+            response.success = true
+            return .success(response)
+        }
+        bff.register(path: "/notification.v1.NotificationService/UnregisterDevice") { [self] (request: Notification_V1_UnregisterDeviceRequest) in
+            _ = preferencesLock.withLock { devices[request.profileID]?.removeValue(forKey: request.deviceID) }
+            var response = Notification_V1_CommandResponse()
+            response.success = true
+            return .success(response)
         }
         bff.register(path: "/notification.v1.NotificationService/GetUnreadCount") { [self] (_: Notification_V1_GetUnreadCountRequest) in
             var response = Notification_V1_GetUnreadCountResponse()

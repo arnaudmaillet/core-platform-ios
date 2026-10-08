@@ -625,12 +625,16 @@ final class MainTabCoordinator: NSObject, Coordinator {
     private func refreshUnreadBadge() {
         guard isMember else {
             notificationsBell.setUnread(false)
+            container.pushNotifications.setBadge(0)
             return
         }
         Task { [weak self] in
             guard let self else { return }
             let count = await container.notificationsFeature.unreadCount()
             notificationsBell.setUnread(count > 0)
+            // The app icon too: a push sets it, but a read sends no push, so
+            // the count the bell reads is the one the icon wears (#651).
+            container.pushNotifications.setBadge(count)
         }
     }
 }

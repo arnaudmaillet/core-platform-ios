@@ -1098,6 +1098,42 @@ final class AppContainer {
         viewer: viewerSession
     )
 
+    /// Push notifications (#651): this install's registration, what a tap
+    /// opens, the app icon's badge. See `PushNotifications`.
+    private(set) lazy var pushNotifications = makePushNotifications()
+
+    private func makePushNotifications() -> PushNotifications {
+        PushNotifications(
+            registering: notificationsRepository,
+            // The login's own device id — the edge registers a session's own
+            // device only.
+            deviceID: Self.persistentDeviceID(),
+            // Routes only once the shell exists; a tap before it waits.
+            router: { [weak self] in
+                guard let self, routeResolver.navigator != nil else { return nil }
+                return router
+            },
+            postOfComment: Self.postOfComment(
+                using: Comment_V1_CommentServiceClient(client: authenticatedRPCClient)
+            )
+        )
+    }
+
+    /// A comment's post, for a tap on a comment's notification: the payload
+    /// names the comment, and a post is what opens.
+    private nonisolated static func postOfComment(
+        using comments: Comment_V1_CommentServiceClient
+    ) -> @Sendable (String) async -> PostID? {
+        { commentID in
+            var request = Comment_V1_GetCommentRequest()
+            request.commentID = commentID
+            guard case .success(let comment) = await comments.getComment(request: request, headers: [:]).result,
+                  !comment.postID.isEmpty
+            else { return nil }
+            return PostID(comment.postID)
+        }
+    }
+
     private(set) lazy var notificationsFeature: any NotificationsFeatureBuilding = NotificationsFeatureBuilder(
         repository: notificationsRepository,
         router: routeResolver,

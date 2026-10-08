@@ -1,5 +1,6 @@
 import DesignSystem
 import UIKit
+import UserNotifications
 
 /// Settings → Notifications (#392, backend #725): pause everything, push per
 /// category and quiet hours, for the active profile. Saved on the server,
@@ -12,10 +13,16 @@ final class NotificationSettingsViewController: UIViewController {
     }
 
     enum Section: Hashable {
+        /// iOS's own permission (#651): asked here, never in a pop-up of its own.
+        case system
         case pause, push, quiet, comingSoon
     }
 
     private enum Item: Hashable {
+        /// Permission not asked yet: asks it.
+        case allow
+        /// Permission refused: iOS Settings is the only way back.
+        case turnOnInSettings
         case pause
         case category(NotificationCategory)
         case quietSwitch
@@ -37,6 +44,11 @@ final class NotificationSettingsViewController: UIViewController {
         didSet { applySnapshot() }
     }
     private var isSaving = false
+    /// iOS's notification permission for this app, read on every appearance —
+    /// it changes in iOS Settings, behind this screen's back.
+    private var systemPermission: UNAuthorizationStatus? {
+        didSet { applySnapshot() }
+    }
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
 
@@ -70,6 +82,35 @@ final class NotificationSettingsViewController: UIViewController {
         load()
     }
 
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        readSystemPermission()
+    }
+
+    private func readSystemPermission() {
+        Task { [weak self] in
+            let settings = await UNUserNotificationCenter.current().notificationSettings()
+            self?.systemPermission = settings.authorizationStatus
+        }
+    }
+
+    /// The system prompt, from the viewer's own tap. Granted, this install asks
+    /// APNs for its token, and the app registers it with the notification
+    /// service (`AppDelegate` → `PushNotifications`).
+    private func requestPermission() {
+        Task { [weak self] in
+            let granted = (try? await UNUserNotificationCenter.current()
+                .requestAuthorization(options: [.alert, .badge, .sound])) ?? false
+            if granted { UIApplication.shared.registerForRemoteNotifications() }
+            self?.readSystemPermission()
+        }
+    }
+
+    private func openSystemSettings() {
+        guard let url = URL(string: UIApplication.openNotificationSettingsURLString) else { return }
+        UIApplication.shared.open(url)
+    }
+
     private func load() {
         phase = .loading
         Task { [weak self] in
@@ -93,7 +134,7 @@ final class NotificationSettingsViewController: UIViewController {
 
     static func header(_ section: Section) -> String? {
         switch section {
-        case .pause: nil
+        case .system, .pause: nil
         case .push: "Push Notifications"
         case .quiet: "Quiet Hours"
         case .comingSoon: "Coming Soon"
@@ -102,13 +143,17 @@ final class NotificationSettingsViewController: UIViewController {
 
     func footer(_ section: Section) -> String? {
         switch section {
+        case .system:
+            return systemPermission == .denied
+                ? "Notifications are turned off for this app in iOS Settings."
+                : "Get a notification when someone likes, comments, mentions or follows you."
         case .pause:
             if case .loaded(let preferences) = phase, let until = preferences.pausedUntil {
                 return "Paused until \(Self.timeFormatter.string(from: until))."
             }
             return "Stops every push for a while, up to 8 hours."
         case .push:
-            return "Applies to this profile. This app doesn't receive push notifications yet; your choices are saved and will apply when it does."
+            return "Applies to this profile."
         case .quiet:
             return "No pushes between these times, in this iPhone's time zone."
         case .comingSoon:
@@ -134,6 +179,14 @@ final class NotificationSettingsViewController: UIViewController {
             var content = UIListContentConfiguration.cell()
             let preferences: NotificationPreferences? = if case .loaded(let current) = phase { current } else { nil }
             switch item {
+            case .allow:
+                content.text = "Allow Notifications"
+                content.image = UIImage(systemName: "bell.badge")
+                content.textProperties.color = .tintColor
+            case .turnOnInSettings:
+                content.text = "Turn On in Settings"
+                content.image = UIImage(systemName: "gear")
+                content.textProperties.color = .tintColor
             case .pause:
                 content = .valueCell()
                 content.text = "Pause All"
@@ -236,6 +289,17 @@ final class NotificationSettingsViewController: UIViewController {
     private func applySnapshot() {
         guard dataSource != nil else { return }
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
+        // The permission row first, while there is something to do about it.
+        switch systemPermission {
+        case .notDetermined:
+            snapshot.appendSections([.system])
+            snapshot.appendItems([.allow], toSection: .system)
+        case .denied:
+            snapshot.appendSections([.system])
+            snapshot.appendItems([.turnOnInSettings], toSection: .system)
+        default:
+            break
+        }
         snapshot.appendSections([.pause])
         switch phase {
         case .loading:
@@ -286,11 +350,19 @@ final class NotificationSettingsViewController: UIViewController {
 
 extension NotificationSettingsViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
-        dataSource.itemIdentifier(for: indexPath) == .failed
+        switch dataSource.itemIdentifier(for: indexPath) {
+        case .failed, .allow, .turnOnInSettings: true
+        default: false
+        }
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         collectionView.deselectItem(at: indexPath, animated: true)
-        if dataSource.itemIdentifier(for: indexPath) == .failed { load() }
+        switch dataSource.itemIdentifier(for: indexPath) {
+        case .failed: load()
+        case .allow: requestPermission()
+        case .turnOnInSettings: openSystemSettings()
+        default: break
+        }
     }
 }

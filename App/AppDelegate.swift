@@ -27,7 +27,24 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         }
         #endif
         AppContainer.configureEmotes()
+        // Before returning: a tap on a notification that launched the app is
+        // delivered to the delegate this installs (#651).
+        AppContainer.shared.pushNotifications.start()
         return true
+    }
+
+    // MARK: Push registration (#651)
+
+    func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        AppContainer.shared.pushNotifications.didRegister(deviceToken: deviceToken)
+    }
+
+    /// No token: no `aps-environment` entitlement (a free-team device build),
+    /// or no network. Nothing to register; the next launch asks again.
+    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        #if DEBUG
+        print("[push] registration failed: \(error.localizedDescription)")
+        #endif
     }
 
     // MARK: UISceneSession Lifecycle
