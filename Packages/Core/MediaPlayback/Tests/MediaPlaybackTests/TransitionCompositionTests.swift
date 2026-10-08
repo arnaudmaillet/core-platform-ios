@@ -649,7 +649,12 @@ struct TransitionPreviewTests {
                 if CVPixelBufferGetIOSurface(frame.buffer) != nil { backed += 1 }
             }
             player.pause()
-            #expect(frames > 3, "guard: no frames came out (composed: \(composed))")
+            // ⚠️ AT LEAST ONE, NOT A RATE (#599): on a starved legacy lane most
+            // looks find no new frame at the host time, and the 2026-10-09
+            // develop backstop saw 3 over the whole budget. The guard is "a
+            // source that never hands a frame"; what this test proves is that
+            // every frame handed is IOSurface-backed.
+            #expect(frames >= 1, "guard: no frames came out (composed: \(composed))")
             #expect(backed == frames, "\(frames - backed) of \(frames) frames had no IOSurface (composed: \(composed))")
         }
     }
