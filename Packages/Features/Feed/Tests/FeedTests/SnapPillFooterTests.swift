@@ -127,12 +127,13 @@ struct SnapPillFooterTests {
         }
     }
 
-    /// A text page's column is its composer's: no bubble on the page.
-    @Test func aTextPageHasNoBubbleOnThePage() {
+    /// A text page wears the page's bubble too (#695): its composer only
+    /// reserves the room.
+    @Test func aTextPageWearsTheBubbleOnThePage() {
         do {
             let chrome = Layout.chrome(mediaURL: nil)
             chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false))
-            #expect(chrome.debugSoundBubble.isHidden)
+            #expect(!chrome.debugSoundBubble.isHidden)
         }
     }
 

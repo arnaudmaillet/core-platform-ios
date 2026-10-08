@@ -2641,9 +2641,12 @@ final class SnapFeedViewController: UIViewController {
     /// The composer's rail slot wears the sound's cover (#671) — on the sound
     /// bubble's frame — and answers as the bubble does: a tap opens the sound
     /// sheet, a hold mutes (#683). Internal for tests.
-    func applySoundRail(to panel: UIViewController?) {
+    func applySoundRail(to panel: UIViewController?, hostedByPage: Bool = true) {
         guard let detail = panel as? PostDetailViewController,
               let id = detail.postID, let model = modelsByID[id] else { return }
+        // A panel inside a page sits under that page's action column (#695);
+        // the loading page has no page above it and keeps its own.
+        detail.setActionColumnHostedByPage(hostedByPage)
         let face = soundFace(for: model)
         detail.setRailSoundFace(face)
         detail.setLikesHidden(model.likeCountHidden)
@@ -5861,7 +5864,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         else { return }
 
         let panel = (makeRestingCommentsPanelContent ?? makeCommentsPanelContent)(id)
-        applySoundRail(to: panel)
+        applySoundRail(to: panel, hostedByPage: false)
         // Transparent, so the lent ground is still what is on screen — and so a
         // flight that clears both floors is not lidded by this.
         panel.view.backgroundColor = .clear

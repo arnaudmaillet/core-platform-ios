@@ -119,6 +119,28 @@ final class SnapChromeView: UIView {
     /// the caption and the page strip — see `SnapActionColumn`. Media chrome,
     /// like the pill (`applySoundVisibility`).
     private let soundBubble = SnapSoundBubbleButton()
+
+    // MARK: The action column (#695)
+    //
+    // ⚠️ ONE COLUMN FOR BOTH LAYOUTS. The like pill and the sound bubble are
+    // the page's — and they stay on screen when the comments take the page,
+    // where the composer used to draw a SECOND pill and slot on the same
+    // frames and the two crossfaded (the owner, on a device: "it looks
+    // replaced"). The composer now only reserves their room.
+    //
+    // So the two buttons live in `columnLayer`, which the owning cell mounts
+    // ABOVE this chrome (`installActionColumn(in:)`): this view's engagement
+    // fade, a single container alpha, never reaches them. They are framed by
+    // two invisible STATIONS that keep every constraint the buttons had —
+    // the caption, the band and the composer's reserved room all stop short
+    // of the same places. A chrome nobody installs (the hero flight's
+    // replica) keeps the layer inside itself, as before.
+    private let boostStation = UIView()
+    private let soundStation = UIView()
+    private let columnLayer = SnapActionColumnLayer()
+    /// Where `columnLayer` is mounted: this chrome, or the cell's content.
+    private weak var columnHost: UIView?
+
     /// What the sound bubble draws for the represented post — nil when the
     /// post has no sound bubble (the feed pushes it, `setSoundFace`).
     private var soundFace: SnapSoundFace?
@@ -398,14 +420,15 @@ final class SnapChromeView: UIView {
         boostButton.setContentHuggingPriority(UILayoutPriority(1), for: .horizontal)
         boostButton.setContentCompressionResistancePriority(UILayoutPriority(1), for: .vertical)
         boostButton.setContentCompressionResistancePriority(UILayoutPriority(1), for: .horizontal)
-        boostButton.constrain(in: self) { parent in
-            boostButton.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -Spacing.md)
-            boostButton.widthAnchor.constraint(equalTo: commentTicker.heightAnchor)
-            boostButton.topAnchor.constraint(equalTo: commentTicker.topAnchor)
+        boostStation.isUserInteractionEnabled = false
+        boostStation.constrain(in: self) { parent in
+            boostStation.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -Spacing.md)
+            boostStation.widthAnchor.constraint(equalTo: commentTicker.heightAnchor)
+            boostStation.topAnchor.constraint(equalTo: commentTicker.topAnchor)
             // The like pill (#669) runs down to `gap` above the lower bubble,
             // measured from the margin line rather than off the sound bubble —
-            // a text page shows none, and the pill keeps its frame there.
-            boostButton.bottomAnchor.constraint(
+            // a text page's station keeps the same frame.
+            boostStation.bottomAnchor.constraint(
                 equalTo: parent.layoutMarginsGuide.bottomAnchor,
                 constant: -(SnapActionColumn.inputRestingGap + SnapActionColumn.bubbleSize + SnapActionColumn.gap)
             )
@@ -486,19 +509,24 @@ final class SnapChromeView: UIView {
         soundBubble.setContentHuggingPriority(UILayoutPriority(1), for: .horizontal)
         soundBubble.setContentCompressionResistancePriority(UILayoutPriority(1), for: .vertical)
         soundBubble.setContentCompressionResistancePriority(UILayoutPriority(1), for: .horizontal)
-        soundBubble.constrain(in: self) { parent in
-            soundBubble.trailingAnchor.constraint(
+        soundStation.isUserInteractionEnabled = false
+        soundStation.constrain(in: self) { parent in
+            soundStation.trailingAnchor.constraint(
                 equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -SnapActionColumn.trailingInset
             )
-            soundBubble.widthAnchor.constraint(equalTo: commentTicker.heightAnchor)
-            soundBubble.heightAnchor.constraint(equalTo: commentTicker.heightAnchor)
-            soundBubble.bottomAnchor.constraint(
+            soundStation.widthAnchor.constraint(equalTo: commentTicker.heightAnchor)
+            soundStation.heightAnchor.constraint(equalTo: commentTicker.heightAnchor)
+            soundStation.bottomAnchor.constraint(
                 equalTo: parent.layoutMarginsGuide.bottomAnchor, constant: -SnapActionColumn.inputRestingGap
             )
         }
         captionLabel.trailingAnchor.constraint(
-            equalTo: soundBubble.leadingAnchor, constant: -Spacing.md
+            equalTo: soundStation.leadingAnchor, constant: -Spacing.md
         ).isActive = true
+        // The two buttons, in the column's own layer, on their stations.
+        columnLayer.addSubview(boostButton)
+        columnLayer.addSubview(soundBubble)
+        mountColumn(in: self)
         soundBubble.onTap = { [weak self] in self?.onSoundSheetRequested?() }
         soundBubble.onLongPress = { [weak self] in self?.onSoundToggleRequested?() }
     }
@@ -508,7 +536,7 @@ final class SnapChromeView: UIView {
     /// the column instead (its rail slot wears the sound). Shown for a post
     /// with a face — every media post has one, greyed when it has no sound.
     private func applySoundVisibility() {
-        soundBubble.isHidden = !(hasMedia && soundFace != nil)
+        soundBubble.isHidden = soundFace == nil
     }
 
     /// The sound bubble's face for the represented post (#671): its cover, the
@@ -604,6 +632,7 @@ final class SnapChromeView: UIView {
         // glass with dark ink, and turned dark at the landing — while the
         // toolbar, themed already, was white from the first frame.
         overrideUserInterfaceStyle = SnapChromeTheme.style(hasMedia: hasMedia)
+        applyColumnStyle()
         scrimView.isHidden = !hasMedia
         // Set the timestamp before the caption so the caption's didSet
         // composes with both already in hand.
@@ -631,7 +660,8 @@ final class SnapChromeView: UIView {
         // ⚠️ A POST THAT HIDES ITS LIKES HAS NO LIKE PILL (#680): no heart,
         // no count — and the band runs to the screen's edge in its place.
         likesHidden = model.likeCountHidden
-        boostButton.isHidden = !hasMedia || likesHidden
+        // On every page (#695): a text page's composer reserves its room.
+        boostButton.isHidden = likesHidden
         applyTickerReach()
         // The badge's count, from what the card knew; the stake pushed after
         // `configure` is added in `setBoostTotal`.
@@ -1251,6 +1281,51 @@ final class SnapChromeView: UIView {
         lastEngagedProgress = resolved
         alpha = resolved
         if returnedToRest { commentEmptyState.restartLabelDwell() }
+    }
+
+    // MARK: - The action column (#695)
+
+    /// Mounts the column ABOVE this chrome in `host` (the cell's content
+    /// view), so the engagement fade leaves it on screen. The buttons stay on
+    /// their stations: same frames, by construction.
+    func installActionColumn(in host: UIView) {
+        mountColumn(in: host)
+    }
+
+    private func mountColumn(in host: UIView) {
+        columnHost = host
+        columnLayer.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(columnLayer)
+        var constraints = [
+            columnLayer.leadingAnchor.constraint(equalTo: leadingAnchor),
+            columnLayer.trailingAnchor.constraint(equalTo: trailingAnchor),
+            columnLayer.topAnchor.constraint(equalTo: topAnchor),
+            columnLayer.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ]
+        for (button, station) in [(boostButton as UIView, boostStation), (soundBubble, soundStation)] {
+            button.translatesAutoresizingMaskIntoConstraints = false
+            constraints += [
+                button.leadingAnchor.constraint(equalTo: station.leadingAnchor),
+                button.trailingAnchor.constraint(equalTo: station.trailingAnchor),
+                button.topAnchor.constraint(equalTo: station.topAnchor),
+                button.bottomAnchor.constraint(equalTo: station.bottomAnchor),
+            ]
+        }
+        NSLayoutConstraint.activate(constraints)
+    }
+
+    /// Hides the column with the page while a flight covers it — the
+    /// replica carries its own. Unlike the chrome's own hold, released into
+    /// the engaged state too: the column belongs to both.
+    func setColumnHeld(_ held: Bool) {
+        columnLayer.alpha = held ? 0 : 1
+    }
+
+    /// The column's ink: dark glass and white ink on a media page — in
+    /// BOTH layouts, the comments' included (the owner, on a device: the
+    /// column stays dark) — and a text page's own theme.
+    private func applyColumnStyle() {
+        columnLayer.overrideUserInterfaceStyle = hasMedia ? .dark : .unspecified
     }
 
     /// Cycles while the owning cell is on screen — the band's visibility

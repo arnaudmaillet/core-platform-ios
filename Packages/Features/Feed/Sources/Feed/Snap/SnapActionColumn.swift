@@ -186,3 +186,12 @@ enum SnapActionColumn {
     }
 
 }
+
+/// The layer the action column's two buttons live in (#695): mounted by the
+/// cell above the page's chrome, transparent to every touch but the buttons'.
+final class SnapActionColumnLayer: UIView {
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        let hit = super.hitTest(point, with: event)
+        return hit === self ? nil : hit
+    }
+}

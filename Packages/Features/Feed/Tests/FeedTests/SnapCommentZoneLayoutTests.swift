@@ -32,8 +32,16 @@ struct SnapCommentZoneLayoutTests {
         return chrome
     }
 
+    /// A part of the chrome, its own or its action column's (#695).
     private static func part<T: UIView>(_ chrome: SnapChromeView, _ type: T.Type) throws -> T {
-        try #require(chrome.subviews.compactMap { $0 as? T }.first)
+        func find(_ view: UIView) -> T? {
+            for sub in view.subviews {
+                if let match = sub as? T { return match }
+                if sub is SnapActionColumnLayer, let match = find(sub) { return match }
+            }
+            return nil
+        }
+        return try #require(find(chrome))
     }
 
     private static func cues(_ count: Int) -> [SubtitleCue] {

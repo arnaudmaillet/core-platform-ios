@@ -140,6 +140,34 @@ final class CommentsInputBar: UIView {
     /// A recognised hold on the slot, for tests (`railHeld`'s `.began`).
     func debugHoldRail() { holdRail() }
 
+    /// Whether the bar DRAWS its trailing column (the stake and the rail
+    /// slot), or only RESERVES its room for a column drawn above it — the
+    /// snap feed's page, whose like pill and sound bubble stay on screen
+    /// when the comments take the page (#695). Reserved, the two buttons
+    /// keep their stations — the resting height, the field's trailing inset
+    /// and the keyboard's rise read the same frames — but draw nothing and
+    /// take no touch.
+    var hostsActionColumn = true {
+        didSet {
+            guard hostsActionColumn != oldValue else { return }
+            railButton.isUserInteractionEnabled = hostsActionColumn
+            boostButton.isUserInteractionEnabled = hostsActionColumn
+            if hostsActionColumn {
+                boostButton.alpha = 1
+                redrawRailFace()
+            } else {
+                applyReservedColumn()
+            }
+        }
+    }
+
+    private func applyReservedColumn() {
+        guard !hostsActionColumn else { return }
+        railButton.alpha = 0
+        boostButton.alpha = 0
+        railCoverView.layer.setRecordSpinning(false)
+    }
+
     /// Whether the column carries the stake bubble. A conversation's does not:
     /// there is nothing there to like. The slot stays where it was.
     var showsStake = true {
@@ -696,6 +724,8 @@ final class CommentsInputBar: UIView {
             return true
         }
         guard super.point(inside: point, with: event) else { return false }
+        // A reserved column is the page's, drawn above: not the bar's touch.
+        guard hostsActionColumn else { return false }
         if !railButton.isHidden, railButton.frame.contains(point) { return true }
         guard showsStake else { return false }
         let station = visibilityMenu == nil ? boostButton : visibilityButton
@@ -743,6 +773,7 @@ final class CommentsInputBar: UIView {
         boostButton.isHidden = !showsStake || visibilityMenu != nil
         visibilityButton.isHidden = !showsStake || visibilityMenu == nil
         applyLikeBadge(animated: false)
+        applyReservedColumn()
         setNeedsLayout()
     }
 
@@ -1650,6 +1681,7 @@ final class CommentsInputBar: UIView {
             railButton.alpha = face.isAvailable ? 1 : 0.45
             railFaceSymbol = Self.soundRailSymbol
             railButton.isEnabled = isRailFaceEnabled && face.isAvailable
+            applyReservedColumn()
             return
         }
         railButton.alpha = 1
@@ -1662,6 +1694,7 @@ final class CommentsInputBar: UIView {
         }
         railFaceSymbol = symbol
         railButton.isEnabled = isRailFaceEnabled
+        applyReservedColumn()
     }
 
     /// Redraws the rail face as it stands — the sound's cover, once a cover
@@ -1676,7 +1709,7 @@ final class CommentsInputBar: UIView {
     /// (#692) — the page's sound bubble's rule: play, pause and mute, and
     /// Reduce Motion, never the idle calm. Other faces never turn.
     func setRailSpinning(_ spinning: Bool) {
-        guard case .sound(let face) = railFace, face.isAvailable else {
+        guard hostsActionColumn, case .sound(let face) = railFace, face.isAvailable else {
             railCoverView.layer.setRecordSpinning(false)
             return
         }
