@@ -311,6 +311,12 @@ final class SnapFeedViewController: UIViewController {
     /// Background Play (#483): this screen's clip went on playing when the
     /// app left the screen, and the screen was left exactly as it was.
     private var isPlayingInBackground = false
+    /// Picture in Picture (#483): the surface this screen readied for the
+    /// floating window, so leaving only lets go of its own.
+    private weak var ownPictureInPictureSurface: VideoRenderView?
+    /// The app left with a clip readied: the screen waits, untouched, for the
+    /// system to open the window — or gives up and pauses as usual.
+    private var isAwaitingPictureInPicture = false
     /// The inert page-chrome replica riding in the hero transition's flying
     /// card. Held weakly for the duration of a flight so a post that hydrates
     /// mid-flight (cold tap) can still fill in the replica's labels; the card
@@ -2434,18 +2440,80 @@ final class SnapFeedViewController: UIViewController {
     }
 
     private func setForeground(_ foreground: Bool) {
-        if !foreground, continueInBackground() {
-            // Nothing is paused or silenced: the page keeps its player, and
-            // the controller keeps it heard with the Lock Screen's controls.
-            isPlayingInBackground = true
-            return
+        if !foreground {
+            let keepsPlaying = continueInBackground()
+            isPlayingInBackground = keepsPlaying
+            let floats = awaitPictureInPicture()
+            // Nothing is paused or silenced: the page keeps its player, for the
+            // Lock Screen's controls, the floating window, or both.
+            if keepsPlaying || floats { return }
         }
-        if foreground, isPlayingInBackground {
-            isPlayingInBackground = false
-            videoPlayback?.endBackgroundPlayback()
+        if foreground {
+            isAwaitingPictureInPicture = false
+            videoPlayback?.stopPictureInPicture()
+            if isPlayingInBackground {
+                isPlayingInBackground = false
+                videoPlayback?.endBackgroundPlayback()
+            }
         }
         isForeground = foreground
         refreshVisibility()
+    }
+
+    /// Picture in Picture (#483): when this screen readied its clip, leaves it
+    /// playing for the window the system opens as the app resigns. A window
+    /// that does not come — or that the viewer closes while the app is away —
+    /// hands the page back to the usual pause.
+    private func awaitPictureInPicture() -> Bool {
+        guard let videoPlayback, ownPictureInPictureSurface != nil,
+              videoPlayback.isPictureInPictureArmed, MediaPlaybackPolicy.floatsInPictureInPicture
+        else { return false }
+        isAwaitingPictureInPicture = true
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(1.5))
+            guard let self, isAwaitingPictureInPicture, !(self.videoPlayback?.isPictureInPictureActive ?? false) else { return }
+            pictureInPictureEnded()
+        }
+        return true
+    }
+
+    /// The window closed (or never opened) while the app is away: unless
+    /// Background Play keeps the clip going, the page pauses as it would have.
+    private func pictureInPictureEnded() {
+        guard isAwaitingPictureInPicture else { return }
+        isAwaitingPictureInPicture = false
+        guard !isPlayingInBackground, UIApplication.shared.applicationState == .background else { return }
+        isForeground = false
+        refreshVisibility()
+    }
+
+    /// Readies the page that owns the screen for the floating window — or lets
+    /// go of this screen's, when the setting is off or the screen is covered.
+    private func refreshPictureInPicture(ownerCell: SnapFeedCell? = nil) {
+        guard let videoPlayback, !isAwaitingPictureInPicture else { return }
+        var surface: VideoRenderView?
+        if MediaPlaybackPolicy.floatsInPictureInPicture, isOnScreen, isForeground, let owner = playbackOwner,
+           let cell = ownerCell ?? lifecycleCell(at: owner) as? SnapFeedCell {
+            surface = cell.audibleSurface
+        }
+        if surface == nil {
+            // Only lets go of what this screen readied: a feed pushed on top
+            // owns the window now.
+            guard ownPictureInPictureSurface != nil else { return }
+            ownPictureInPictureSurface = nil
+            videoPlayback.armPictureInPicture(for: nil)
+            return
+        }
+        guard videoPlayback.armPictureInPicture(for: surface) else { return }
+        ownPictureInPictureSurface = surface
+        videoPlayback.onPictureInPictureChange = { [weak self] active in
+            guard let self else { return }
+            if active {
+                isAwaitingPictureInPicture = true
+            } else {
+                pictureInPictureEnded()
+            }
+        }
     }
 
     /// Background Play (#483): keeps the clip this screen is being heard
@@ -4626,6 +4694,7 @@ final class SnapFeedViewController: UIViewController {
     ///   cell being displayed is not yet one the collection view hands back.
     private func refreshAudibleSurface(ownerCell: SnapFeedCell? = nil) {
         refreshSong()
+        refreshPictureInPicture(ownerCell: ownerCell)
         guard let videoPlayback else { return }
         var surface: VideoRenderView?
         if FeedSound.isOn, isOnScreen, isForeground, !isAudioYielded, let owner = playbackOwner,

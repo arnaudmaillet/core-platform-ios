@@ -15,19 +15,23 @@ public struct MediaPlaybackPreferences: Codable, Equatable, Sendable {
     /// Background Play (#483): a video being heard keeps playing when the app
     /// leaves the screen, with controls on the Lock Screen. Off by default.
     public var backgroundPlay: Bool
+    /// Picture in Picture (#483): a playing video moves into a floating
+    /// window when the app leaves the screen. Off by default.
+    public var pictureInPicture: Bool
 
     public init(
         autoplay: Autoplay = .always, startsWithSound: Bool = true, dataSaver: Bool = false,
-        backgroundPlay: Bool = false
+        backgroundPlay: Bool = false, pictureInPicture: Bool = false
     ) {
         self.autoplay = autoplay
         self.startsWithSound = startsWithSound
         self.dataSaver = dataSaver
         self.backgroundPlay = backgroundPlay
+        self.pictureInPicture = pictureInPicture
     }
 
     private enum CodingKeys: String, CodingKey {
-        case autoplay, startsWithSound, dataSaver, backgroundPlay
+        case autoplay, startsWithSound, dataSaver, backgroundPlay, pictureInPicture
     }
 
     /// Field by field, each with its default: preferences saved before a
@@ -39,6 +43,7 @@ public struct MediaPlaybackPreferences: Codable, Equatable, Sendable {
         startsWithSound = try container.decodeIfPresent(Bool.self, forKey: .startsWithSound) ?? defaults.startsWithSound
         dataSaver = try container.decodeIfPresent(Bool.self, forKey: .dataSaver) ?? defaults.dataSaver
         backgroundPlay = try container.decodeIfPresent(Bool.self, forKey: .backgroundPlay) ?? defaults.backgroundPlay
+        pictureInPicture = try container.decodeIfPresent(Bool.self, forKey: .pictureInPicture) ?? defaults.pictureInPicture
     }
 
     /// Whether a video may start on its own, given the network it is on.

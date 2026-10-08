@@ -53,6 +53,13 @@ struct MediaPlaybackPolicyTests {
         defer { MediaPlaybackPolicy.store = previousStore }
         MediaPlaybackPolicy.store = store
         #expect(MediaPlaybackPolicy.playsInBackground)
+
+        // Picture in Picture: off by default too, and its own switch.
+        #expect(!MediaPlaybackPreferences().pictureInPicture)
+        #expect(!MediaPlaybackPolicy.floatsInPictureInPicture)
+        store.update { $0.pictureInPicture = true }
+        #expect(MediaPlaybackPolicy.floatsInPictureInPicture)
+        #expect(MediaPlaybackPolicy.playsInBackground, "one switch leaves the other alone")
     }
 
     /// The Lock Screen's lines: the caption's first line and the author.

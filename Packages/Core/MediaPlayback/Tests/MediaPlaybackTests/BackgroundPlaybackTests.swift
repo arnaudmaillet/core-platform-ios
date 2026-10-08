@@ -121,6 +121,40 @@ struct BackgroundPlaybackTests {
         #expect(MPNowPlayingInfoCenter.default().nowPlayingInfo?[MPMediaItemPropertyArtwork] != nil)
     }
 
+    /// Picture in Picture (#483): readying a clip needs a device that can
+    /// show the window. Where it can't (this simulator says so), nothing is
+    /// readied and the feed's session stays `.ambient`; where it can, the
+    /// session becomes `.playback` until the clip is let go.
+    @Test func readyingPictureInPictureFollowsWhatTheDeviceCan() async throws {
+        let controller = controller()
+        let file = try await ColourClipWriter.clip()
+        let view = surface()
+        await controller.play(file, in: view)
+        defer { controller.armPictureInPicture(for: nil); controller.stop(view) }
+
+        let armed = controller.armPictureInPicture(for: view)
+        #expect(armed == VideoPlaybackController.supportsPictureInPicture)
+        #expect(controller.isPictureInPictureArmed == armed)
+        #expect(AVAudioSession.sharedInstance().category == (armed ? .playback : .ambient))
+        #expect(!controller.isPictureInPictureActive)
+
+        controller.armPictureInPicture(for: nil)
+        #expect(!controller.isPictureInPictureArmed)
+        #expect(AVAudioSession.sharedInstance().category == .ambient)
+    }
+
+    /// While the window is up the app is off screen, where the display link
+    /// does not fire: a timer paces the renderers instead, and only then.
+    @Test func theWindowGetsFramesWithoutTheDisplay() {
+        let clock = VideoFrameClock.shared
+        defer { clock.pacesWithoutDisplay = false }
+        #expect(!clock.isPacingWithoutDisplay)
+        clock.pacesWithoutDisplay = true
+        #expect(clock.isPacingWithoutDisplay)
+        clock.pacesWithoutDisplay = false
+        #expect(!clock.isPacingWithoutDisplay)
+    }
+
     /// A clip given back to the pool leaves the Lock Screen with it.
     @Test func stoppingTheClipEndsBackgroundPlayback() async throws {
         let controller = controller()

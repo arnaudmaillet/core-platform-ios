@@ -155,11 +155,13 @@ extension VideoPlaybackController {
         return bound.layout
     }
 
-    /// `.playback` while a player is heard by name (`setMuted`) or kept
-    /// playing in the background (#483); `.ambient` otherwise.
+    /// `.playback` while a player is heard by name (`setMuted`), kept playing
+    /// in the background, or readied for Picture in Picture (#483);
+    /// `.ambient` otherwise.
     func settleAudioSession() {
         let session = AVAudioSession.sharedInstance()
-        let wanted: AVAudioSession.Category = audiblePlayers.isEmpty && backgroundPlayer == nil ? .ambient : .playback
+        let quiet = audiblePlayers.isEmpty && backgroundPlayer == nil && pictureInPicture == nil
+        let wanted: AVAudioSession.Category = quiet ? .ambient : .playback
         guard session.category != wanted else { return }
         try? session.setCategory(wanted, mode: .moviePlayback)
     }
