@@ -62,8 +62,10 @@ struct ProfileSelectorHandoverTests {
 
     /// A loaded screen with its view up — the selectors are only placed once
     /// the profile has a gallery to filter.
-    private func loadedScreen() async -> ProfileViewController? {
-        let viewModel = ProfileViewModel(repository: GalleryProvider(), gallery: EmptyGallery())
+    private func loadedScreen(
+        source: ProfileViewModel.Source = .currentUser
+    ) async -> ProfileViewController? {
+        let viewModel = ProfileViewModel(repository: GalleryProvider(), gallery: EmptyGallery(), source: source)
         viewModel.viewDidLoad()
         for _ in 0..<60 {
             await Task.yield()
@@ -178,5 +180,38 @@ struct ProfileSelectorHandoverTests {
                 "the filter left the bar on tab \(index)")
             #expect(filter?.customView == nil, "something wrapped the filter")
         }
+    }
+
+    // MARK: - Someone else's profile (#631)
+
+    /// ⚠️ NO SELECTOR ON ANYONE ELSE'S PROFILE. It has one page — Posts, the
+    /// For You-style list — and a strip with one segment would be a label
+    /// pretending to be a control. The source filter stays: it narrows that
+    /// list.
+    @Test func someoneElsesProfileHasNoSelector() async {
+        guard let screen = await loadedScreen(source: .profile(ProfileID("prof-2"))) else { return }
+        #expect(screen.selectorAccessory == nil, "a one-page profile placed a selector")
+        #expect(screen.debugPageCount == 1)
+        #expect(screen.navigationItem.leftBarButtonItems?
+            .contains { $0.accessibilityLabel == "Content source" && !$0.isHidden } == true,
+            "the source filter must still narrow the list")
+    }
+
+    /// The viewer's own keeps Posts | Saved | Liked.
+    @Test func yourOwnProfileKeepsPostsSavedLiked() async {
+        guard let screen = await loadedScreen() else { return }
+        let band = try? #require(screen.selectorAccessory?.hostView)
+        #expect(band?.subviews.contains { $0 is PagedTabBar } == true, "the strip is not in the band")
+        #expect(screen.debugTabTitles == ["Posts", "Saved", "Liked"])
+        #expect(screen.debugPageCount == 3)
+    }
+
+    /// With no page to the left — there is only one — a drag anywhere on a
+    /// pushed profile may dismiss it: the plain pushed-screen rule.
+    @Test func aSelectorlessPushedProfileDismissesFromAnywhere() async {
+        guard let screen = await loadedScreen(source: .profile(ProfileID("prof-2"))) else { return }
+        #expect(ProfileDismissalPolicy.allowsFullWidthDismissal(
+            activeIndex: screen.debugActivePageIndex, isPushed: true
+        ))
     }
 }

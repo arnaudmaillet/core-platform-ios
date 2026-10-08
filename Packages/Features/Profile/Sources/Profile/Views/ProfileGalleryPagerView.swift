@@ -6,9 +6,9 @@ import MediaPlayback
 import PostGrid
 import UIKit
 
-/// The gallery's horizontal pager: three format pages (Activity / Media /
-/// Short) in one paging scroll view, each exactly one viewport tall and
-/// scrolling itself.
+/// The profile's horizontal pager: its pages (Posts, and on the viewer's own
+/// Saved and Liked) in one paging scroll view, each exactly one viewport tall
+/// and scrolling itself. Anyone else's profile has the one page, Posts (#631).
 ///
 /// ⚠️ **The pager's height is fixed and its pages own all vertical motion.**
 /// It used to be the other way around — the profile had one outer scroll view,
@@ -71,6 +71,8 @@ final class ProfileGalleryPagerView: UIView {
     /// The page on screen neared its end — only the format pages, whose
     /// corpora page (#634). Saved and Liked are lists the client already holds.
     var onNearEnd: (() -> Void)?
+    /// "View all" under one of Posts' mosaic chunks (#631).
+    var onViewAllTapped: (() -> Void)?
     /// A drag on the active page ended, with its overscroll distance.
     var onPullReleased: ((CGFloat) -> Void)?
     /// A row's author was tapped, on whichever page is showing.
@@ -112,9 +114,9 @@ final class ProfileGalleryPagerView: UIView {
         pages = tabs.map { tab in
             ProfileGalleryGridView(
                 imagePipeline: imagePipeline,
-                // The mosaic is for pages that are mostly pictures. Saved and
-                // Liked are whatever the viewer kept, which is mostly not.
-                style: tab == .format(.media) ? .grid : .list,
+                // Posts is For You's list (#631). Saved and Liked are whatever
+                // the viewer kept: a plain timeline.
+                style: Self.style(for: tab),
                 tab: tab,
                 videoPlayback: videoPlayback,
                 bookmarks: bookmarks
@@ -168,6 +170,7 @@ final class ProfileGalleryPagerView: UIView {
                     onNearEnd?()
                 }
             }
+            page.onViewAllTapped = { [weak self] in self?.onViewAllTapped?() }
             page.onAuthorTapped = { [weak self] post in self?.onAuthorTapped?(post) }
             page.authorMenuActions = { [weak self] context in
                 self?.authorMenuActions?(context) ?? []
@@ -186,8 +189,20 @@ final class ProfileGalleryPagerView: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    /// The shape a tab's page takes.
+    static func style(for tab: ProfileTab) -> ProfileGalleryGridView.Style {
+        switch tab {
+        case .format(.activity): .discover
+        case .format(.media): .grid
+        case .format(.short), .saved, .reactions: .list
+        }
+    }
+
     func render(_ snapshot: ProfileViewModel.GallerySnapshot) {
         for (index, tab) in pageOrder.enumerated() {
+            // Whether more pages are coming decides the Discover list's tail
+            // chunk, so it is told before the posts.
+            pages[index].setCorpusComplete(snapshot.isComplete)
             pages[index].render(snapshot.state(for: tab))
         }
     }

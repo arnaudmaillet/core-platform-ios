@@ -86,14 +86,18 @@ public final class ProfileViewModel {
         case failed(message: String)
     }
 
-    /// All three format pages at once — the pager renders every page
-    /// (neighbors are visible mid-swipe), so the view model always answers
-    /// for all of them. The source filter is a global modifier: it is
-    /// already applied to each page's content here.
+    /// Every page at once — the pager renders every page (neighbors are
+    /// visible mid-swipe), so the view model always answers for all of them.
+    /// The source filter is a global modifier: it is already applied to each
+    /// page's content here.
     public nonisolated struct GallerySnapshot: Equatable, Sendable {
+        /// Posts: every post, the list laid out like For You (#631).
         public var activity: GalleryPageState
+        /// The media among them — the gallery Posts' "View all" pushes.
         public var media: GalleryPageState
-        public var short: GalleryPageState
+        /// Whether no further page is coming, under the active source. What
+        /// lets the Posts list settle its tail chunk (`MosaicChunkPlanner`).
+        public var isComplete: Bool = true
         /// The viewer's saved pile. Absent on anyone else's profile — a saved
         /// list is private by construction.
         public var saved: GalleryPageState = .empty(message: "")
@@ -109,7 +113,8 @@ public final class ProfileViewModel {
             switch tab {
             case .format(.activity): activity
             case .format(.media): media
-            case .format(.short): short
+            // No page since #631: its text posts are cards on Posts.
+            case .format(.short): .empty(message: "")
             case .saved: saved
             case .reactions: reactions
             }
@@ -336,11 +341,16 @@ public final class ProfileViewModel {
         self.source = source
         self.router = router
         self.cache = cache
-        // The gallery opens on the user's last GLOBAL choice, not a per-
-        // profile default — the tray, pager, and menu all read this filter
-        // as their initial truth.
+        // The gallery opens on the user's last GLOBAL source, not a per-
+        // profile default — the tray and its menu read this filter as their
+        // initial truth.
+        //
+        // ⚠️ THE FORMAT IS NOT RESTORED (#631). It named one of three pages
+        // (Activity / Gallery / Short) and there is one now, Posts — every
+        // post. A stored Gallery or Short would narrow the list to media or
+        // text with no page to say so.
         if let stored = galleryPreferences?.filter {
-            galleryFilter = stored
+            galleryFilter = GalleryFilter(format: .activity, source: stored.source)
         }
         followSubscription = followEvents?.subscribeOnMain { [weak self] change in
             self?.followGraphDidChange(change)
@@ -1042,9 +1052,14 @@ public final class ProfileViewModel {
     /// `nil`: nothing follows and the corpora have no more. EMPTY: none yet
     /// (a page failed, or the first load is still out); the feed asks again
     /// on its next approach.
-    public func galleryPostIDs(after id: PostID) async -> [PostID]? {
+    ///
+    /// `format` is the list the feed was opened from: Posts, or the media
+    /// gallery its "View all" pushes (#631).
+    public func galleryPostIDs(
+        after id: PostID, in format: GalleryFilter.Format = .activity
+    ) async -> [PostID]? {
         for _ in 0..<Self.maxUnchangedGalleryPages {
-            let tiles = galleryTiles(galleryFilter.format)
+            let tiles = galleryTiles(format)
             guard let index = tiles.firstIndex(where: { $0.id == id }) else { return nil }
             let following = tiles[(index + 1)...]
             if !following.isEmpty { return following.prefix(Self.continuationWindow).map(\.id) }
@@ -1223,7 +1238,7 @@ public final class ProfileViewModel {
         let snapshot = GallerySnapshot(
             activity: page(.activity),
             media: page(.media),
-            short: page(.short),
+            isComplete: galleryTokensToFollow() == (nil, nil),
             saved: savedPage
         )
         fillEmptyGalleryTab()
@@ -1286,8 +1301,17 @@ public final class ProfileViewModel {
     /// and that is worth overriding the tab's own line for.
     nonisolated static func emptyMessage(for filter: GalleryFilter) -> String {
         guard filter.source != .all else { return "" }
+        // Posts (#631) is every kind, so the source alone names what is
+        // missing: "No reposts yet", not "No activity in reposts yet".
+        if filter.format == .activity {
+            return switch filter.source {
+            case .all, .posts: "No posts yet."
+            case .reposts: "No reposts yet."
+            case .tagged: "No tagged posts yet."
+            }
+        }
         let format = switch filter.format {
-        case .activity: "activity"
+        case .activity: "posts"
         case .media: "media"
         case .short: "short posts"
         }

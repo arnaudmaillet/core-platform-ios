@@ -256,7 +256,8 @@ struct ProfileGalleryViewModelTests {
         #expect(box.items.isEmpty)
     }
 
-    @Test func landsWithAllThreeFormatPagesResolved() async {
+    /// Posts (every post) and the media its "View all" pushes (#631).
+    @Test func landsWithPostsAndTheirMediaResolved() async {
         let gallery = StubGalleryProvider(authored: authored, tagged: tagged)
         let (viewModel, snapshots) = makeViewModel(gallery: gallery)
 
@@ -269,14 +270,14 @@ struct ProfileGalleryViewModelTests {
         }
         // Default source = All: every page carries the merged timeline slice.
         guard case .content(let activity) = snapshot.activity,
-              case .content(let media) = snapshot.media,
-              case .content(let short) = snapshot.short else {
-            Issue.record("expected content on all pages")
+              case .content(let media) = snapshot.media else {
+            Issue.record("expected content on both lists")
             return
         }
         #expect(activity.count == 7)
+        #expect(activity.contains { $0.id == PostID("p-text") }, "text posts are cards in Posts")
         #expect(media.count == 5)
-        #expect(short.map(\.id) == [PostID("p-text"), PostID("t-text")])
+        #expect(snapshot.isComplete, "one page each: nothing more is coming")
         // Both corpora fetch eagerly (the pager shows neighbors mid-swipe),
         // with the mention query built from the loaded handle.
         #expect(await gallery.authoredCalls == 1)
@@ -300,7 +301,10 @@ struct ProfileGalleryViewModelTests {
             tile("r-photo", kind: .photo, isRepost: true, publishedAtMS: 30),
             tile("r-video", kind: .video, isRepost: true, publishedAtMS: 20)
         ]))
-        #expect(snapshot.short == .empty(message: "No short posts in reposts yet."))
+        #expect(snapshot.activity == .content([
+            tile("r-photo", kind: .photo, isRepost: true, publishedAtMS: 30),
+            tile("r-video", kind: .video, isRepost: true, publishedAtMS: 20)
+        ]))
         // No refetch: the source axis filters the cached datasets.
         #expect(await gallery.authoredCalls == 1)
         #expect(await gallery.taggedCalls == 1)
@@ -355,7 +359,10 @@ struct ProfileGalleryViewModelTests {
             gallery: StubGalleryProvider(authored: authored, tagged: tagged),
             galleryPreferences: preferences
         )
-        #expect(second.galleryFilter == GalleryFilter(format: .media, source: .reposts))
+        // ⚠️ THE SOURCE CARRIES OVER, THE FORMAT DOES NOT (#631): the format
+        // named one of three pages, and a profile opens on its one list,
+        // every post — a stored Gallery would narrow it to media unseen.
+        #expect(second.galleryFilter == GalleryFilter(format: .activity, source: .reposts))
     }
 
     @Test func withoutAStoreTheFilterStaysSessionLocal() async {

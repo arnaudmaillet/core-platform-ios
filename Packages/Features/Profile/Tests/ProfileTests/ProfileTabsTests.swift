@@ -20,10 +20,10 @@ struct ProfileTabsTests {
 
     // MARK: - Who sees what
 
+    /// Posts | Saved | Liked — the owner's call for #631 (2026-10-07).
     @Test func yourOwnProfileCarriesSavedAndLiked() {
-        #expect(ProfileTab.ownTabs.contains(.saved))
-        #expect(ProfileTab.ownTabs.contains(.reactions))
-        #expect(ProfileTab.ownTabs.count == 5)
+        #expect(ProfileTab.ownTabs == [.format(.activity), .saved, .reactions])
+        #expect(ProfileTab.ownTabs.map(\.title) == ["Posts", "Saved", "Liked"])
     }
 
     /// ⚠️ And nobody else's does. A saved pile has no owner but the device it
@@ -32,13 +32,29 @@ struct ProfileTabsTests {
     @Test func someoneElsesProfileCarriesNeither() {
         #expect(ProfileTab.publicTabs.contains(.saved) == false)
         #expect(ProfileTab.publicTabs.contains(.reactions) == false)
-        #expect(ProfileTab.publicTabs.count == 3)
     }
 
-    /// The public three come first and in their existing order, so the tabs a
-    /// viewer already knows do not move when two more appear beside them.
+    /// ⚠️ ONE PAGE (#631): Activity, Gallery and Short were one corpus
+    /// filtered three ways, and the For You list draws its cards and its
+    /// mosaic together — so anyone else's profile is the one list, Posts.
+    @Test func someoneElsesProfileIsOneList() {
+        #expect(ProfileTab.publicTabs == [.format(.activity)])
+        #expect(ProfileTab.format(.activity).title == "Posts")
+    }
+
+    /// Posts comes first on your own too, so the list a viewer knows from
+    /// every other profile is where theirs opens.
     @Test func theExistingTabsKeepTheirPlaces() {
-        #expect(Array(ProfileTab.ownTabs.prefix(3)) == ProfileTab.publicTabs)
+        #expect(Array(ProfileTab.ownTabs.prefix(1)) == ProfileTab.publicTabs)
+    }
+
+    /// Posts is For You's Discover list; Saved and Liked stay timelines; the
+    /// media mosaic is the gallery "View all" pushes.
+    @Test func eachPageTakesItsShape() {
+        #expect(ProfileGalleryPagerView.style(for: .format(.activity)) == .discover)
+        #expect(ProfileGalleryPagerView.style(for: .saved) == .list)
+        #expect(ProfileGalleryPagerView.style(for: .reactions) == .list)
+        #expect(ProfileGalleryPagerView.style(for: .format(.media)) == .grid)
     }
 
     // MARK: - Which axis they are on
@@ -77,12 +93,12 @@ struct ProfileTabsTests {
         return pager
     }
 
-    /// ⚠️ Five tabs means five PAGES, each with its own scroll position — the
-    /// page count used to be a constant, and a selector with more segments than
+    /// ⚠️ One PAGE per tab, each with its own scroll position — the page
+    /// count used to be a constant, and a selector with more segments than
     /// the pager has pages indexes past the end on the last tab.
     @Test func thePagerBuildsOnePageForEachTab() {
-        #expect(pager(ProfileTab.ownTabs).debugVerticalOffsets.count == 5)
-        #expect(pager(ProfileTab.publicTabs).debugVerticalOffsets.count == 3)
+        #expect(pager(ProfileTab.ownTabs).debugVerticalOffsets.count == 3)
+        #expect(pager(ProfileTab.publicTabs).debugVerticalOffsets.count == 1)
     }
 
     /// And the new pages join the same coordinator as the old: each keeps its
@@ -91,9 +107,9 @@ struct ProfileTabsTests {
         let pager = pager(ProfileTab.ownTabs)
         pager.setMinimumScrollTravel(2_000)
         pager.setSharedTravel(dockLine: 300, contentFloor: 360)
-        pager.debugSetOffset(900, forPage: 4)
+        pager.debugSetOffset(900, forPage: 2)
         pager.debugSetOffset(400, forPage: 0)
-        #expect(pager.debugAlignedOffset(forPage: 4) == 900)
+        #expect(pager.debugAlignedOffset(forPage: 2) == 900)
     }
 
     /// A swipe onto the last tab reports THAT tab — an off-by-one here lands
@@ -105,7 +121,7 @@ struct ProfileTabsTests {
         let pager = pager(ProfileTab.ownTabs)
         var settled: [ProfileTab] = []
         pager.onPageSettled = { settled.append($0) }
-        pager.debugScrollView.contentOffset = CGPoint(x: 4 * pager.bounds.width, y: 0)
+        pager.debugScrollView.contentOffset = CGPoint(x: 2 * pager.bounds.width, y: 0)
         pager.scrollViewDidEndDecelerating(pager.debugScrollView)
         #expect(settled == [.reactions])
     }
@@ -213,9 +229,11 @@ struct ProfileEmptyStateTests {
     /// The copy itself, pinned — it was specified, so a change to it should be
     /// a decision rather than a drift.
     @Test func theCopyIsWhatWasAskedFor() {
-        #expect(ProfileTab.format(.activity).emptyState.title == "No Activity Yet")
-        #expect(ProfileTab.format(.media).emptyState.title == "No Posts Yet")
-        #expect(ProfileTab.format(.short).emptyState.title == "No Shorts Yet")
+        // Posts is every post since #631, and says so; the media gallery is
+        // photos and videos.
+        #expect(ProfileTab.format(.activity).emptyState.title == "No Posts Yet")
+        #expect(ProfileTab.format(.activity).emptyState.subtitle == "Posts and reposts will appear here.")
+        #expect(ProfileTab.format(.media).emptyState.title == "No Photos or Videos")
         #expect(ProfileTab.saved.emptyState.title == "No Saved Posts")
         #expect(ProfileTab.reactions.emptyState.title == "No Reactions Yet")
 

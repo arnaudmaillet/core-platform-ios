@@ -2,7 +2,9 @@ import DesignSystem
 import UIKit
 
 /// "View all ›" under each of Discover's mosaic chunks: pushes the whole
-/// mosaic (`DiscoverGalleryViewController`).
+/// mosaic — For You's `DiscoverGalleryViewController`, a profile's media
+/// gallery (#631). In PostGrid since the profile lays out the same list
+/// (`DiscoverListLayout`).
 ///
 /// A plain secondary-label button in semibold subheadline, the chevron
 /// trailing and pointing RIGHT because it pushes a screen.
@@ -20,17 +22,26 @@ import UIKit
 /// control keeps the footer's full 44pt height as its hit target while
 /// drawing its title at the TOP of it: the rest of the height is the air
 /// before the next card, so tightening the gap above cost the target nothing.
-final class DiscoverViewAllFooterView: UICollectionReusableView {
-    static let reuseID = "DiscoverViewAllFooterView"
-    static let title = "View all"
+public final class DiscoverViewAllFooterView: UICollectionReusableView {
+    public static let reuseID = "DiscoverViewAllFooterView"
+    public static let title = "View all"
     /// Between the chunk's foot and the top of the title's line.
-    static let titleTopInset: CGFloat = 6
+    public static let titleTopInset: CGFloat = 6
+    /// What VoiceOver says the control does. For You's by default; a host
+    /// whose mosaic is something else says so (the profile's is its media).
+    public static let defaultAccessibilityHint = "Shows every post in Discover's mosaic"
 
-    var onTap: (() -> Void)?
+    public var onTap: (() -> Void)?
+
+    /// VoiceOver's hint — see `defaultAccessibilityHint`.
+    public var controlAccessibilityHint: String? {
+        get { button.accessibilityHint }
+        set { button.accessibilityHint = newValue }
+    }
 
     private let button = UIButton(configuration: .plain())
 
-    override init(frame: CGRect) {
+    override public init(frame: CGRect) {
         super.init(frame: frame)
         var configuration = UIButton.Configuration.plain()
         configuration.image = UIImage(systemName: "chevron.right")
@@ -49,7 +60,7 @@ final class DiscoverViewAllFooterView: UICollectionReusableView {
         button.configuration = configuration
         button.contentHorizontalAlignment = .trailing
         button.contentVerticalAlignment = .top
-        button.accessibilityHint = "Shows every post in Discover's mosaic"
+        button.accessibilityHint = Self.defaultAccessibilityHint
         button.addAction(UIAction { [weak self] _ in self?.onTap?() }, for: .primaryActionTriggered)
         button.translatesAutoresizingMaskIntoConstraints = false
         addSubview(button)
@@ -64,19 +75,20 @@ final class DiscoverViewAllFooterView: UICollectionReusableView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    override func prepareForReuse() {
+    override public func prepareForReuse() {
         super.prepareForReuse()
         onTap = nil
+        button.accessibilityHint = Self.defaultAccessibilityHint
     }
 
     /// Presses the control, as a tap would.
-    func sendTap() { onTap?() }
+    public func sendTap() { onTap?() }
 
     #if DEBUG
     /// The control's frame — its hit target — in this view's space.
-    var debugControlFrame: CGRect { button.frame }
+    public var debugControlFrame: CGRect { button.frame }
     /// Its title's frame, in this view's space.
-    var debugTitleFrame: CGRect? {
+    public var debugTitleFrame: CGRect? {
         button.titleLabel.map { $0.convert($0.bounds, to: self) }
     }
     #endif
