@@ -1342,11 +1342,11 @@ final class PostDetailViewController: UIViewController {
     /// The post this panel is about — nil on a draft.
     var postID: PostID? { viewModel.postID }
 
-    /// What a published post's rail slot wears: the repost, or — under
-    /// `-snap-pill-footer` (#671) — the sound's cover the snap feed hands
-    /// over (`setRailSoundFace`), and nothing for a post with no sound bubble.
+    /// What a published post's rail slot wears: in the snap feed's panel, the
+    /// sound's cover the feed hands over (`setRailSoundFace`, #671) — nothing
+    /// for a post with no sound bubble; elsewhere the repost.
     private var publishedRailFace: CommentsInputBar.RailFace {
-        guard SnapPillFooter.isOn else { return .repost }
+        guard mode == .commentsOnly else { return .repost }
         return railSoundFace.map { .sound($0) } ?? .empty
     }
 
@@ -1358,6 +1358,27 @@ final class PostDetailViewController: UIViewController {
         railSoundFace = face
         guard !viewModel.isDraft else { return }
         composeBar.railFace = publishedRailFace
+    }
+
+    /// The rail slot's sound gestures (#680) — the snap feed's: a tap toggles
+    /// the sound, a hold opens the sound sheet, as the media page's sound
+    /// bubble does. A text post's page has no bubble of its own: this slot is
+    /// its sound control.
+    /// A post that hides its likes from this reader has no stake pill — the
+    /// media layout's like pill is gone too (#680).
+    func setLikesHidden(_ hidden: Bool) {
+        guard !viewModel.isDraft else { return }
+        composeBar.showsStake = !hidden
+    }
+
+    /// Redraws the rail slot's cover once a fetched one has landed (#680).
+    func redrawRailSoundFace() {
+        composeBar.redrawRailFace()
+    }
+
+    func setRailSoundActions(tap: (() -> Void)?, hold: (() -> Void)?) {
+        composeBar.onRailAction = tap
+        composeBar.onRailLongPress = hold
     }
 
     /// The stake bubble's like badge reads the caption row's count — one

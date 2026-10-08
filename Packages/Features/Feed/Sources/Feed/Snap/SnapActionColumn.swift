@@ -7,24 +7,28 @@ import UIKit
 ///
 /// ```
 ///   media layout                         comments layout
-///   ~~~~ band ~~~~~~~~~~~~~~ [♥]          ———————————————————— [♥]
-///   caption…                 [⇄]          ———————————————————— [⇄]
-///   ━━━ progress ━━━                      [◉][field…      ☺ 〰/↑]
-///   [♫ attribution]  …  [⇪ 🔖] [⋯]        [♫ attribution]  …  [⇪ 🔖] [⋯]
+///   ~~~~ band ~~~~~~~~~~~~~~ ╭♥╮          ———————————————————— ╭♥╮
+///   caption…                 │1.2K│       ———————————————————— │1.2K│
+///   ━━━ progress ━━━         ╰─╯                               ╰─╯
+///                            [◉]          [◉][field…    ☺ 〰/↑][◉]
+///   [author pill] … [⇄ 🔖] [⋯]            [author pill] … [⇄ 🔖] [⋯]
 /// ```
 ///
-/// - Media layout: the points/like anchor (`SnapRailBoostButton`) where it has
-///   always been, and a REPOST bubble directly below it, beside the caption
-///   and the page strip (which give up that width). The toolbar's capsule is
-///   [share][bookmark]: share took repost's place there, and left the ⋯.
-/// - Comments layout: the composer's stake bubble stands on the like anchor's
-///   frame, and its trailing rail slot on the repost bubble's — a REPOST face,
-///   whatever the field holds. Same size, same place: switching layouts is an
-///   alpha crossfade between two bubbles that never move. The voice note is a
-///   waveform INSIDE the field, beside the emote button, and it becomes the
-///   SEND arrow while there is text (a symbol replace).
+/// - Media layout: the like PILL (`SnapRailBoostButton`, #669), from the
+///   band's top down to `gap` above the lower bubble — the heart on top and
+///   the post's like count under it — and the SOUND bubble
+///   (`SnapSoundBubbleButton`, #671) on the composer's field line.
+/// - Comments layout: the composer's stake pill stands on the like pill's
+///   frame, and its trailing rail slot — the sound's cover — on the sound
+///   bubble's. Same size, same place: switching layouts is an alpha crossfade
+///   between two bubbles that never move. The voice note is a waveform INSIDE
+///   the field, beside the emote button, and it becomes the SEND arrow while
+///   there is text (a symbol replace).
 /// - The Messages thread: no stake (a conversation has nothing to like), and
-///   the rail slot is a PIN for the conversation.
+///   the rail slot is a PIN for the conversation, on the field line.
+///
+/// The like pill and the dropped lower bubble began behind `-snap-like-pill`
+/// (#669) and became the layout on 2026-10-08 (#680).
 /// - KEYBOARD UP the column still does not move (asked 2026-10-02): only the
 ///   composer's input row rides the keyboard, widening into the column's
 ///   width as it rises clear of it (`CommentsInputBar.riseWithKeyboard(of:)`);
@@ -41,11 +45,9 @@ import UIKit
 /// test is what says the column moved.
 ///
 /// **THE INPUT ROW RESTS ON THE TOOLBAR** (asked 2026-10-01). The composer's
-/// field sits `glassGap` above the toolbar's glass, and the trailing column
-/// keeps its place on the media layout's bubbles: the composer lifts the
-/// column off its own bottom by `columnLift`, so the rail bubble stands a
-/// little higher than the field — accepted, the field is what reads as "right
-/// above the toolbar".
+/// field sits `glassGap` above the toolbar's glass, and the lower bubble sits
+/// on the same line (#669): the field, its avatar and the rail slot are one
+/// row of `bubbleSize` (#680).
 enum SnapActionColumn {
     /// The bubbles' side: the comment band's height — the like anchor's
     /// square, which the band has always sized. Font-derived, so it follows
@@ -116,96 +118,40 @@ enum SnapActionColumn {
     /// line, so this is the glass drop short of the gap (and may be negative).
     static var inputRestingGap: CGFloat { glassGap - toolbarGlassDrop }
 
-    /// What the composer puts between its own bottom (the input row's) and
-    /// its trailing column's bottom, so a bar resting at `inputRestingGap`
-    /// stands its column at `restingLift` — on the media layout's bubbles.
-    ///
-    /// Zero under `isLikePill`: the lower bubble drops to the input row's
-    /// line (the media layout's repost bubble with it).
-    @MainActor static var columnLift: CGFloat { isLikePill ? 0 : restingLift - inputRestingGap }
+    // MARK: - The like pill (#669)
 
-    // MARK: - The like pill (#669, behind a flag)
-
-    /// `-snap-like-pill` (DEBUG, #669): an experimental column.
-    /// - The lower bubble (the media layout's repost, the composer's rail
-    ///   slot, the Messages thread's pin) drops to `glassGap` above the
-    ///   toolbar's glass — the composer's field line.
-    /// - The like button above it stretches into a VERTICAL PILL from the
-    ///   band's top down to `gap` above that bubble, the heart on top and the
-    ///   post's like count under it (no corner badge).
-    ///
-    /// ⚠️ READ WHERE CONSTRAINTS ARE BUILT, ONCE: `-snap-layout-v2` (#340) was
-    /// read in the chrome's init through a property whose `didSet` never ran.
-    /// A static the views read when they lay themselves out, settable by the
-    /// layout tests (which cannot pass launch arguments) BEFORE they build a
-    /// view — never flipped under a live one.
-    @MainActor static var isLikePill: Bool = {
-        #if DEBUG
-        ProcessInfo.processInfo.arguments.contains("-snap-like-pill")
-        #else
-        false
-        #endif
-    }()
-
-    /// The like pill's height: from the band's top (where the square like
-    /// bubble's top is) down to `gap` above the dropped lower bubble — the
-    /// square plus the distance the lower bubble dropped. The same on a text
-    /// page as on a media one: derived from the margin line, never from the
-    /// repost bubble, which a text page does not show.
+    /// The like pill's height: from the band's top down to `gap` above the
+    /// lower bubble, which rests on the field line. The same on a text page as
+    /// on a media one: derived from the margin line, never from the lower
+    /// bubble, which a text page's chrome does not show.
     @MainActor static var likePillHeight: CGFloat { bubbleSize + restingLift - inputRestingGap }
 
-    /// The upper (like / stake) bubble's height: the pill's under the flag,
-    /// the square otherwise.
-    @MainActor static var upperBubbleHeight: CGFloat { isLikePill ? likePillHeight : bubbleSize }
+    /// The heart's symbol: an OUTLINE at rest, the points' red FILL once the
+    /// viewer has staked (#680).
+    static let heartConfiguration = UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
 
-    /// Where the heart sits in the upper bubble: centred in the square, and in
-    /// the pill's TOP square — the count is under it (`SnapLikeCountBadge`).
+    /// The heart's drawn height at `heartConfiguration`.
+    @MainActor static var heartHeight: CGFloat {
+        UIImage(systemName: PointsSymbol.glyph, withConfiguration: heartConfiguration)?.size.height ?? 15
+    }
+
+    /// ⚠️ EVEN GAPS INSIDE THE PILL (#680): top → heart, heart → count, count →
+    /// bottom are one gap, the pill's height less the heart and the count,
+    /// shared three ways.
+    @MainActor static var pillGap: CGFloat {
+        max(0, (likePillHeight - heartHeight - SnapLikeCountBadge.height) / 3)
+    }
+
+    /// The button insets that put the heart one `pillGap` below the pill's
+    /// top: the image centres in what the insets leave, which is exactly the
+    /// heart's height.
     @MainActor static var heartInsets: NSDirectionalEdgeInsets {
-        NSDirectionalEdgeInsets(top: 0, leading: 0, bottom: upperBubbleHeight - bubbleSize, trailing: 0)
-    }
-}
-
-/// The media layout's repost bubble: a Liquid Glass circle the like anchor's
-/// size, directly under it.
-///
-/// ⚠️ DRAWN WITHOUT AN ACTION: the client has no path that publishes a repost
-/// yet (see the feed's `configureToolbarItems`).
-///
-/// Configured PLAIN at init; the glass materializes on first window attach —
-/// the like anchor's doctrine (`SnapRailBoostButton`): creating a system
-/// material contacts the render server, a multi-second main-thread stall on
-/// headless CI simulators, where unit-tested views never join a window.
-final class SnapRailRepostButton: UIButton {
-    private var hasGlass = false
-
-    init() {
-        super.init(frame: .zero)
-        applyFace()
-        accessibilityLabel = "Repost"
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    override func didMoveToWindow() {
-        super.didMoveToWindow()
-        if window != nil, !hasGlass {
-            hasGlass = true
-            applyFace()
-        }
-    }
-
-    /// The like anchor's face recipe — same glyph size, same white ink over
-    /// the media, same zero insets — so the two read as one column.
-    private func applyFace() {
-        var config: UIButton.Configuration = hasGlass ? .glass() : .plain()
-        config.image = UIImage(
-            systemName: PostActionSymbol.repost,
-            withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
+        NSDirectionalEdgeInsets(
+            top: pillGap, leading: 0, bottom: max(0, likePillHeight - pillGap - heartHeight), trailing: 0
         )
-        config.baseForegroundColor = .white
-        config.contentInsets = .zero
-        config.cornerStyle = .capsule
-        configuration = config
     }
+
+    /// Where the count's top sits below the pill's top: one gap, the heart,
+    /// another gap.
+    @MainActor static var countTopInset: CGFloat { 2 * pillGap + heartHeight }
 }

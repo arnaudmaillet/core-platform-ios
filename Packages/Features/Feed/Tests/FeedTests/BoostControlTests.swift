@@ -238,23 +238,27 @@ struct BoostControlTests {
 
     // MARK: - The like face (#668)
 
-    private static let railGlyph = UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
+    private static let railGlyph = SnapActionColumn.heartConfiguration
 
     private static func drawn(_ image: UIImage?) -> Data? { image?.pngData() }
 
-    /// A heart either way: white while the viewer has staked nothing, the
-    /// points' red once they have — never a number in its place.
-    @Test func railHeartIsWhiteAtRestRedOnceStakedNeverANumber() {
+    /// A heart either way: an OUTLINE in the page's ink while the viewer has
+    /// staked nothing, the points' red, filled, once they have — never a
+    /// number in its place (#680).
+    @Test func railHeartIsAnInkOutlineAtRestRedOnceStakedNeverANumber() {
         let white = Self.drawn(PointsSymbol.likeImage(staked: false, Self.railGlyph))
         let red = Self.drawn(PointsSymbol.likeImage(staked: true, Self.railGlyph))
         #expect(white != red, "the two hearts must differ")
 
         let button = SnapRailBoostButton()
         #expect(Self.drawn(button.configuration?.image) == white)
+        #expect(button.configuration?.image?.renderingMode == .alwaysTemplate, "the resting heart takes the ink")
+        #expect(button.configuration?.baseForegroundColor == .white)
         #expect(button.configuration?.attributedTitle == nil)
 
         button.setSpentTotal(60)
         #expect(Self.drawn(button.configuration?.image) == red)
+        #expect(button.configuration?.image?.renderingMode == .alwaysOriginal, "the staked heart lost its red")
         #expect(button.configuration?.attributedTitle == nil, "the spend came back as a number")
 
         button.setSpentTotal(0)
@@ -324,20 +328,20 @@ struct BoostControlTests {
         #expect(Self.chrome(likes: 1_203).debugLikeBadgeText == "1.2K")
     }
 
-    /// No badge at zero; the viewer's like brings it.
-    @Test func noBadgeAtZeroUntilALikeTakesItToOne() {
+    /// A post nobody liked yet reads "0" (#680); the viewer's like takes it
+    /// to one, an Undo back to zero.
+    @Test func zeroLikesReadZero() {
         let chrome = Self.chrome(likes: 0)
-        #expect(chrome.debugLikeBadgeText == nil)
+        #expect(chrome.debugLikeBadgeText == "0")
         chrome.setBoostTotal(1, animated: true)
         #expect(chrome.debugLikeBadgeText == "1")
         chrome.setBoostTotal(0, animated: true)
-        #expect(chrome.debugLikeBadgeText == nil)
+        #expect(chrome.debugLikeBadgeText == "0")
     }
 
-    /// On screen, the like that takes the count off zero brings the badge in
-    /// with an animation (the fade and bounce); a page opening on a count
-    /// does not perform.
-    @Test func theFirstLikeAnimatesTheBadgeIn() throws {
+    /// The count is always there, so a like changes its text in place: no
+    /// entry animation, on screen or not.
+    @Test func aLikeChangesTheCountInPlace() throws {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         let chrome = Self.chrome(likes: 0)
         window.addSubview(chrome)
@@ -345,22 +349,17 @@ struct BoostControlTests {
         let badge = try #require(chrome.subviews.compactMap { $0 as? SnapLikeCountBadge }.first)
 
         chrome.setBoostTotal(1, animated: true)
-        #expect(badge.layer.animationKeys()?.isEmpty == false, "the badge popped in without its bounce")
-
-        let opened = Self.chrome(likes: 12)
-        window.addSubview(opened)
-        defer { opened.removeFromSuperview() }
-        let still = try #require(opened.subviews.compactMap { $0 as? SnapLikeCountBadge }.first)
-        opened.setBoostTotal(3)
-        #expect(still.layer.animationKeys()?.isEmpty ?? true)
-        #expect(still.alpha == 1)
+        #expect(badge.layer.animationKeys()?.isEmpty ?? true)
+        #expect(badge.alpha == 1)
+        #expect(badge.debugText == "1")
     }
 
-    /// A hidden count (#397) shows no badge, stake or not; a text page has no
-    /// like button to wear one.
-    @Test func noBadgeForAHiddenCountOrOnATextPage() {
+    /// A post whose likes are hidden (#397) has no like button at all, stake
+    /// or not (#680); a text page has no like pill to wear one.
+    @Test func noLikeButtonForAHiddenCountOrOnATextPage() {
         let hidden = Self.chrome(likes: 900, hidden: true)
         hidden.setBoostTotal(3)
+        #expect(hidden.debugBoostButton.isHidden, "the like button stayed on a hidden-likes post")
         #expect(hidden.debugLikeBadgeText == nil)
 
         let text = Self.chrome(likes: 900, media: false)
@@ -378,6 +377,10 @@ struct BoostControlTests {
         bar.setLikeCount(40)
         #expect(bar.debugLikeBadgeText == "40")
         #expect(boost.configuration?.image != nil)
+        // At rest an outline in the PAGE's ink — the panel and a text page
+        // are not drawn over media (#680).
+        #expect(boost.configuration?.image?.renderingMode == .alwaysTemplate)
+        #expect(boost.configuration?.baseForegroundColor == .label)
 
         bar.setBoostTotal(2, animated: true)
         #expect(bar.debugLikeBadgeText == "42")
@@ -416,47 +419,40 @@ struct BoostControlTests {
 
     // MARK: - The feed header's balance badge
 
-    /// With a wallet injected the trailing run closes with the badge —
-    /// [‹ back] … [🪙 solde] [author pill] — in BOTH engagement states
-    /// (`rightBarButtonItems` is indexed right-to-left, so the badge is the
-    /// LAST item), spacer-separated so iOS 26 keeps the pills apart.
+    /// With a wallet injected the trailing run is the badge alone at rest —
+    /// the author pill is the toolbar's (#671) — and the ✕ joins it, at the
+    /// edge, while a media post's thread is open, spacer-separated so iOS 26
+    /// keeps the pills apart (`rightBarButtonItems` is indexed right to left).
     @Test func feedTrailingRunEndsWithTheWalletBadgeWhenAWalletIsWired() throws {
         let (feed, _) = Self.walletFeed()
 
         let resting = feed.navigationItem.rightBarButtonItems ?? []
-        #expect(resting.count == 3)
-        #expect(resting[0].customView is SnapAuthorIdentityView)
-        #expect(resting[1].customView == nil) // the fixed space
-        #expect(resting[2].customView is WalletBadgeButton)
+        #expect(resting.count == 1)
+        #expect(resting.first?.customView is WalletBadgeButton)
 
-        // ⚠️ THE BADGE HOLDS ITS PLACE THROUGH THE ENGAGEMENT; the OUTERMOST
-        // item is what changes. The sort used to join this run — first inboard
-        // of the author, then outboard of the badge — and neither read: it is a
-        // control over the thread, not a fact about the post, and it sits
-        // beside the back arrow now. What does belong here is the ✕, which
-        // takes the author's slot while a media post's thread is open: the
-        // balance is still one in from the edge, whatever is at the edge.
+        // ⚠️ THE BADGE HOLDS ITS PLACE THROUGH THE ENGAGEMENT; the ✕ is added
+        // outboard of it, and the sort sits beside the back arrow.
         feed.setEngagedChrome(true, hasMedia: true, animated: false)
         let engaged = feed.navigationItem.rightBarButtonItems ?? []
         #expect(engaged.count == 3)
-        #expect((engaged[0].customView as? UIButton)?.accessibilityLabel == "Close comments")
-        #expect(engaged[1] == resting[1])   // the same fixed space
-        #expect(engaged[2] == resting[2])   // …and the same badge
+        #expect((engaged.first?.customView as? UIButton)?.accessibilityLabel == "Close comments")
+        #expect(engaged.dropFirst().first?.customView == nil)   // the fixed space
+        #expect(engaged.last == resting.first)                   // …and the same badge
         #expect(engaged.contains { $0.customView is SnapCommentSortButton } == false)
 
         feed.setEngagedChrome(false, hasMedia: true, animated: false)
-        #expect((feed.navigationItem.rightBarButtonItems ?? []).count == 3)
+        #expect((feed.navigationItem.rightBarButtonItems ?? []).count == 1)
     }
 
-    /// No wallet → the historical author-only run, untouched. This is the
-    /// contract that keeps every older bar test green.
-    @Test func feedTrailingRunIsUnchangedWithoutAWallet() {
+    /// No wallet → an empty trailing run at rest: the author pill is the
+    /// toolbar's.
+    @Test func feedTrailingRunIsEmptyWithoutAWallet() {
         let feed = SnapFeedViewController(
             viewModel: FeedViewModel(repository: InertFeedProvider()),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
         )
         feed.loadViewIfNeeded()
-        #expect((feed.navigationItem.rightBarButtonItems ?? []).count == 1)
+        #expect((feed.navigationItem.rightBarButtonItems ?? []).isEmpty)
     }
 
     /// The header badge renders the live balance and re-renders on a spend —

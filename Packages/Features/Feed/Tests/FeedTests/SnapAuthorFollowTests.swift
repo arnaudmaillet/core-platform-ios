@@ -41,8 +41,9 @@ struct SnapAuthorFollowTests {
         )
     }
 
+    /// The author pill's item — the toolbar's leading one since #671/#680.
     private static func authorItem(_ feed: SnapFeedViewController) throws -> UIBarButtonItem {
-        try #require(feed.navigationItem.rightBarButtonItems?.first { $0.customView is SnapAuthorIdentityView })
+        try #require(feed.toolbarItems?.first { $0.customView is SnapAuthorIdentityView })
     }
 
     private static func pill(_ feed: SnapFeedViewController) throws -> SnapAuthorIdentityView {
@@ -325,60 +326,12 @@ struct SnapAttributionItemTests {
         )
     }
 
-    private static func attributionItems(_ feed: SnapFeedViewController) -> [UIBarButtonItem] {
-        (feed.toolbarItems ?? []).filter { $0.customView is SnapMediaAttributionView }
-    }
-
     private static func labels(in view: UIView) -> [String] {
         view.subviews.flatMap { subview -> [String] in
             var found = labels(in: subview)
             if let label = subview as? UILabel, let text = label.text, !text.isEmpty { found.append(text) }
             return found
         }
-    }
-
-    @Test func aDifferentAttributionIsDrawnInTheSameItem() throws {
-        let feed = Self.feed()
-        let song = SnapMediaAttributionView.SoundCredit.sound("Haru Haru · BIGBANG")
-        feed.showAttribution(Self.model(id: "p1", author: "Ada"), sound: song, cover: .note)
-        let first = try #require(Self.attributionItems(feed).first)
-
-        let other = SnapMediaAttributionView.SoundCredit.sound("Original sound · @grace")
-        feed.showAttribution(Self.model(id: "p2", author: "Grace"), sound: other, cover: .note)
-        let second = try #require(Self.attributionItems(feed).first)
-
-        #expect(second === first, "a new item per content: iOS 26 morphs the glass between them")
-        #expect(second.customView === first.customView)
-        #expect(second.identifier == SnapFeedViewController.attributionItemIdentifier)
-        let drawn = Self.labels(in: try #require(second.customView))
-        #expect(drawn.contains("Original sound · @grace"))
-        #expect(drawn.contains("Haru Haru · BIGBANG") == false)
-        // Exactly one attribution in the bar, however many pages went by, and
-        // still in the leading slot.
-        #expect(Self.attributionItems(feed).count == 1)
-        #expect(feed.toolbarItems?.first === second)
-    }
-
-    /// Two pages that DRAW the same pill are one item: nothing on the bar moves.
-    @Test func theSameAttributionKeepsTheItem() throws {
-        let feed = Self.feed()
-        let song = SnapMediaAttributionView.SoundCredit.sound("Haru Haru · BIGBANG")
-        feed.showAttribution(Self.model(id: "p1", author: "Ada"), sound: song, cover: .note)
-        let first = try #require(Self.attributionItems(feed).first)
-
-        feed.showAttribution(Self.model(id: "p2", author: "Ada"), sound: song, cover: .note)
-
-        #expect(Self.attributionItems(feed).first === first)
-    }
-
-    /// Across pages the pill keeps the host's wiring: its tap opens the sound.
-    @Test func theAttributionKeepsTheHostsWiring() throws {
-        let feed = Self.feed()
-        feed.showAttribution(Self.model(id: "p1", author: "Ada"), sound: .sound("A"), cover: .note)
-        feed.showAttribution(Self.model(id: "p2", author: "Grace"), sound: .sound("B"), cover: .note)
-
-        let pill = try #require(Self.attributionItems(feed).first?.customView as? SnapMediaAttributionView)
-        #expect(pill.onTap != nil)
     }
 
     /// The key is what is DRAWN: the name, the line, whether it opens, the cover.

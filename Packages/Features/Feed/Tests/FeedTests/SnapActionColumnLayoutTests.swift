@@ -9,12 +9,12 @@ import UIKit
 ///
 /// ```
 ///   media layout                         comments layout
-///   ~~~~ band ~~~~~~~~~~~~~~ [♥]          ———————————————————— [♥]
-///   caption…                 [⇄]          ———————————————————— [⇄]
-///                                         [◉][field…    ☺ 〰/↑]
+///   ~~~~ band ~~~~~~~~~~~~~~ ╭♥╮          ———————————————————— ╭♥╮
+///   caption…                 ╰─╯          ———————————————————— ╰─╯
+///                            [◉]          [◉][field…    ☺ 〰/↑][◉]
 /// ```
 ///
-/// The like anchor and the repost bubble are constraints inside the page's
+/// The like pill and the sound bubble are constraints inside the page's
 /// chrome; the composer's stake and rail slot are constraints inside the
 /// comments panel, resting on a line computed from the column's numbers. The
 /// two never see each other — so the only proof they agree is to lay both out
@@ -55,10 +55,19 @@ struct SnapActionColumnLayoutTests {
         return chrome
     }
 
-    /// The media layout's two bubbles, in screen coordinates.
-    static func mediaColumn(insets: UIEdgeInsets = insets) -> (like: CGRect, repost: CGRect) {
+    /// The media layout's two bubbles, in screen coordinates: the like pill
+    /// and the sound bubble (laid out on its station, shown or not).
+    static func mediaColumn(insets: UIEdgeInsets = insets) -> (like: CGRect, sound: CGRect) {
         let chrome = chrome(insets: insets)
-        return (chrome.debugBoostButton.frame, chrome.debugRepostButton.frame)
+        return (chrome.debugBoostButton.frame, chrome.debugSoundBubble.frame)
+    }
+
+    /// Equal to the float: the pill's height is a sum of font-derived terms
+    /// the two layouts add in a different order.
+    static func same(_ a: CGRect?, _ b: CGRect) -> Bool {
+        guard let a else { return false }
+        return abs(a.minX - b.minX) < 0.01 && abs(a.minY - b.minY) < 0.01
+            && abs(a.width - b.width) < 0.01 && abs(a.height - b.height) < 0.01
     }
 
     /// The composer's column in `space`: the stake (nil when the bar shows
@@ -206,48 +215,51 @@ struct SnapActionColumnLayoutTests {
 
     // MARK: - The media layout
 
-    /// The repost bubble is the like anchor's twin, one md under it, and the
-    /// caption and the page strip stop md short of it.
-    @Test func theRepostBubbleStandsUnderTheLikeBubbleBesideTheCaption() {
+    /// The sound bubble stands one md under the like pill, the pill's width,
+    /// and the caption and the page strip stop md short of it.
+    @Test func theSoundBubbleStandsUnderTheLikePillBesideTheCaption() {
         let chrome = Self.chrome()
+        chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false))
+        chrome.layoutIfNeeded()
         let like = chrome.debugBoostButton.frame
-        let repost = chrome.debugRepostButton.frame
+        let sound = chrome.debugSoundBubble.frame
 
-        #expect(chrome.debugRepostButton.isHidden == false)
-        #expect(chrome.debugRepostButton.accessibilityLabel == "Repost")
-        #expect(repost.size == like.size)
-        #expect(abs(repost.width - SnapActionColumn.bubbleSize) < 0.5)
-        #expect(repost.maxX == like.maxX)
-        #expect(abs(repost.minY - (like.maxY + SnapActionColumn.gap)) < 0.5)
-        #expect(chrome.debugCaptionFrame.maxX <= repost.minX - Spacing.md + 0.5)
-        // Its top is the caption floor's: beside the caption's first line.
-        #expect(abs(chrome.debugCaptionFrame.maxY - (repost.minY + SnapChromeView.captionFloorHeight)) < 0.5)
+        #expect(chrome.debugSoundBubble.isHidden == false)
+        #expect(chrome.debugSoundBubble.accessibilityLabel == "Sound")
+        #expect(abs(sound.width - SnapActionColumn.bubbleSize) < 0.5)
+        #expect(sound.width == like.width)
+        #expect(sound.maxX == like.maxX)
+        #expect(abs(sound.minY - (like.maxY + SnapActionColumn.gap)) < 0.5)
+        #expect(chrome.debugCaptionFrame.maxX <= sound.minX - Spacing.md + 0.5)
         #expect(chrome.debugPageBarFrame.maxX == chrome.debugCaptionFrame.maxX)
-        #expect(chrome.interactionRoots.contains { $0 === chrome.debugRepostButton })
+        #expect(chrome.interactionRoots.contains { $0 === chrome.debugSoundBubble })
     }
 
-    /// Media chrome, like the anchor: a text page's composer stands in the
-    /// column instead.
-    @Test func aTextPageHasNoRepostBubble() {
+    /// Media chrome, like the pill: a text page's composer stands in the
+    /// column instead (its rail slot wears the sound).
+    @Test func aTextPageHasNoSoundBubble() {
         let chrome = Self.chrome(mediaURL: nil)
-        #expect(chrome.debugRepostButton.isHidden)
+        chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false))
+        #expect(chrome.debugSoundBubble.isHidden)
     }
 
     // MARK: - The comments layout
 
-    /// ⚠️ THE CONTRACT. The engaged composer's stake sits on the like
-    /// bubble's frame and its rail slot — a REPOST face — on the repost
-    /// bubble's, in screen coordinates: equal, not close. The field rests on
-    /// the toolbar below them, and the waveform is in the field.
+    /// ⚠️ THE CONTRACT. The engaged composer's stake pill sits on the like
+    /// pill's frame and its rail slot — the sound's cover — on the sound
+    /// bubble's, in screen coordinates. The field rests on the toolbar below
+    /// them, level with the slot, and the waveform is in the field.
     @Test func theComposerBubblesStandExactlyOnTheMediaLayoutsBubbles() throws {
         let media = Self.mediaColumn()
         let (controller, window) = Self.engagedPanel()
+        controller.setRailSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false))
+        controller.view.layoutIfNeeded()
         let composer = try Self.composerColumn(in: controller.view, space: window)
 
         let stake = try #require(composer.stake)
-        #expect(stake == media.like, "stake \(stake) vs like \(media.like)")
-        #expect(composer.rail == media.repost, "rail \(composer.rail) vs repost \(media.repost)")
-        #expect(composer.bar.debugRailSymbol == PostActionSymbol.repost)
+        #expect(Self.same(stake, media.like), "stake \(stake) vs like \(media.like)")
+        #expect(Self.same(composer.rail, media.sound), "rail \(composer.rail) vs sound \(media.sound)")
+        #expect(composer.bar.debugRailSymbol == CommentsInputBar.soundRailSymbol)
         #expect(!composer.bar.debugFieldActionButton.isHidden, "the waveform is in the field")
         #expect(composer.bar.debugFieldActionSymbol == CommentsInputBar.waveformSymbol)
         #expect(abs(composer.field.maxY - (Self.toolbarGlassTop - SnapActionColumn.glassGap)) < 0.5,
@@ -281,8 +293,9 @@ struct SnapActionColumnLayoutTests {
         return (bar, host)
     }
 
-    /// The bar's own geometry: both bubbles the band's height, md apart, the
-    /// slot lifted `columnLift` off the field's bottom, and a field that grows
+    /// The bar's own geometry: both bubbles the band's height (a bar without
+    /// the like face keeps a square stake), md apart, the slot resting on the
+    /// field's line, and a field that grows
     /// BESIDE the stake, never moving it. Without a rail face (a draft post)
     /// the slot holds no bubble but keeps its station, and the field holds the
     /// waveform as on every bar.
@@ -297,11 +310,11 @@ struct SnapActionColumnLayoutTests {
         #expect(slot.frame.size == CGSize(width: side, height: side))
         #expect(abs(slot.frame.minY - stake.frame.maxY - SnapActionColumn.gap) < 0.5)
         #expect(abs(field.frame.maxY - bar.bounds.maxY) < 0.5, "the field is the bar's bottom")
-        #expect(abs(bar.bounds.maxY - slot.frame.maxY - SnapActionColumn.columnLift) < 0.5)
+        #expect(abs(bar.bounds.maxY - slot.frame.maxY) < 0.5, "the slot rests on the field's line")
         #expect(slot.isHidden, "no rail face, no rail bubble")
         #expect(!bar.debugFieldActionButton.isHidden, "the waveform is in the field")
         #expect(bar.debugFieldActionSymbol == CommentsInputBar.waveformSymbol)
-        #expect(abs(bar.bounds.height - CommentsInputBar.restingHeight(for: .large)) < 0.5)
+        #expect(abs(bar.bounds.height - CommentsInputBar.restingHeight(for: .large, likeFace: false)) < 0.5)
         #expect(!bar.hasAmbiguousLayout)
 
         let stakeInHost = stake.convert(stake.bounds, to: host)
@@ -501,12 +514,14 @@ struct SnapActionColumnLayoutTests {
     }
 
     /// ⚠️ THE CONTRACT, KEYBOARD UP. On the engaged panel the column's
-    /// bubbles stand on the media layout's like and repost bubbles with a
+    /// bubbles stand on the media layout's like pill and sound bubble with a
     /// keyboard up exactly as at rest — equal frames, in window coordinates —
     /// while the field rides `sm` above the keyboard at full width.
     @Test func theColumnHoldsTheMediaLayoutsBubblesWithTheKeyboardUp() throws {
         let media = Self.mediaColumn()
         let (controller, window) = Self.engagedPanel()
+        controller.setRailSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false))
+        controller.view.layoutIfNeeded()
         let rest = try Self.composerColumn(in: controller.view, space: window)
         let keyboard = Self.fakeKeyboard(in: controller.view, for: rest.bar, top: Self.screen.height)
         controller.view.layoutIfNeeded()
@@ -516,12 +531,12 @@ struct SnapActionColumnLayoutTests {
         keyboard.constant = Self.screen.height - 336
         controller.view.layoutIfNeeded()
         let up = try Self.composerColumn(in: controller.view, space: window)
-        #expect(up.stake == media.like, "stake \(String(describing: up.stake)) vs like \(media.like)")
-        #expect(up.rail == media.repost, "rail \(up.rail) vs repost \(media.repost)")
+        #expect(Self.same(up.stake, media.like), "stake \(String(describing: up.stake)) vs like \(media.like)")
+        #expect(Self.same(up.rail, media.sound), "rail \(up.rail) vs sound \(media.sound)")
         #expect(up.stake == rest.stake && up.rail == rest.rail)
         #expect(abs(up.field.maxY - (Self.screen.height - 336 - Spacing.sm)) < 0.5)
         #expect(abs(up.field.maxX - up.rail.maxX) < 0.5, "the risen field does not take the column's width")
-        #expect(up.bar.debugRailSymbol == PostActionSymbol.repost)
+        #expect(up.bar.debugRailSymbol == CommentsInputBar.soundRailSymbol)
         _ = window
     }
 
@@ -562,14 +577,15 @@ struct SnapActionColumnLayoutTests {
 
     // MARK: - The toolbar and the menu
 
-    /// Share has a button in the toolbar's capsule, so ⋯ does not offer it.
-    @Test func theMenuLeavesShareToTheToolbar() {
+    /// Share left the toolbar's capsule for the repost (#671), so ⋯ leads
+    /// with it.
+    @Test func theMenuLeadsWithShare() {
         let controller = SnapFeedViewController(
             viewModel: FeedViewModel(repository: ColumnSilentProvider()),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             reporting: nil
         )
-        #expect(controller.debugMoreMenuTitles(for: PostID("p1")) == ["Not interested"])
+        #expect(controller.debugMoreMenuTitles(for: PostID("p1")) == ["Share", "Not interested"])
     }
 }
 

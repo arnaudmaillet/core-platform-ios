@@ -28,13 +28,23 @@ public enum PointsSymbol {
         return image?.withTintColor(tint, renderingMode: .alwaysOriginal)
     }
 
-    /// The like heart of a stake control over media (#668): WHITE while the
-    /// viewer has staked nothing on the post, the points' red once they have
-    /// — a heart either way, never a number. The cards' `.media` readout rule
-    /// (`PostLikeReadoutView`), on the snap feed's controls.
+    /// The like heart of the snap feed's stake controls.
+    ///
+    /// - At rest (#680): the OUTLINE heart as a TEMPLATE — the control's own
+    ///   foreground draws it, in the content's text ink (white over media, the
+    ///   page's ink on a light panel).
+    /// - Staked: the points' red FILL, carrying its own colour.
+    ///
+    /// A heart either way, never a number (#668).
     public static func likeImage(staked: Bool, _ configuration: UIImage.SymbolConfiguration? = nil) -> UIImage? {
-        let image = configuration.map { UIImage(systemName: glyph, withConfiguration: $0) }
-            ?? UIImage(systemName: glyph)
-        return image?.withTintColor(staked ? tint : .white, renderingMode: .alwaysOriginal)
+        let name = staked ? glyph : outlineGlyph
+        let image = configuration.map { UIImage(systemName: name, withConfiguration: $0) }
+            ?? UIImage(systemName: name)
+        return staked
+            ? image?.withTintColor(tint, renderingMode: .alwaysOriginal)
+            : image?.withRenderingMode(.alwaysTemplate)
     }
+
+    /// The like heart at rest: an outline.
+    public static let outlineGlyph = "heart"
 }

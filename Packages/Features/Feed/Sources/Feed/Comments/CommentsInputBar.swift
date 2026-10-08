@@ -14,9 +14,9 @@ import CoreNavigation
 ///
 /// AN INPUT ROW AND A TRAILING COLUMN, one view:
 ///
-///     ——————————————————————[stake]
-///     ——————————————————————[repost/pin]
-///     [avatar][field   ☺ 〰/↑]  ↑ columnLift
+///     ——————————————————————╭stake╮
+///     ——————————————————————╰─────╯
+///     [avatar][field   ☺ 〰/↑][sound/pin]
 ///
 /// The INPUT ROW — avatar and field — is the bar's bottom edge at rest: a host
 /// rests the bar `SnapActionColumn.inputRestingGap` above its footer line,
@@ -24,9 +24,10 @@ import CoreNavigation
 /// 2026-10-01: the field sat too far above the toolbar). The trailing COLUMN —
 /// the rail slot and the stake (boost) bubble over it — is the ACTION COLUMN's
 /// two bubbles (`SnapActionColumn`): both the comment band's height, one md
-/// apart, standing exactly on the media layout's like and repost bubbles. It
-/// stands `columnLift` off the bar's bottom, so it is a little higher than the
-/// field (accepted). The stake holds its station over the slot, and a growing
+/// apart, standing exactly on the media layout's like pill and sound bubble.
+/// The slot rests on the field's line (#669), and the avatar, the field and
+/// the slot are one row of `SnapActionColumn.bubbleSize` (#680). The stake (a
+/// pill, #669) holds its station over the slot, and a growing
 /// field rises BESIDE it. Everything is INSIDE the bar's bounds at rest, so
 /// the bar's height (and `restingHeight(for:)`) include it and every host's
 /// clearance follows; the empty run left of the column is NOT part of the bar
@@ -97,8 +98,8 @@ final class CommentsInputBar: UIView {
         case repost
         /// This conversation pinned to the top of the inbox, or not.
         case pin(isPinned: Bool)
-        /// The post's sound, under `-snap-pill-footer` (#671): the snap feed's
-        /// sound bubble's cover, on that bubble's frame.
+        /// The post's sound (#671): the snap feed's sound bubble's cover, on
+        /// that bubble's frame.
         case sound(SnapSoundFace)
     }
 
@@ -119,8 +120,25 @@ final class CommentsInputBar: UIView {
         didSet { applyRailFace() }
     }
 
-    /// The rail face was tapped (repost, pin), whatever the field holds.
+    /// The rail face was tapped (repost, pin, the sound's mute), whatever the
+    /// field holds.
     var onRailAction: (() -> Void)?
+    /// The SOUND face was held: the host opens the sound sheet (#680). Other
+    /// faces ignore a hold.
+    var onRailLongPress: (() -> Void)?
+
+    @objc private func railHeld(_ recogniser: UILongPressGestureRecognizer) {
+        guard recogniser.state == .began else { return }
+        holdRail()
+    }
+
+    private func holdRail() {
+        guard case .sound(let face) = railFace, face.isAvailable else { return }
+        onRailLongPress?()
+    }
+
+    /// A recognised hold on the slot, for tests (`railHeld`'s `.began`).
+    func debugHoldRail() { holdRail() }
 
     /// Whether the column carries the stake bubble. A conversation's does not:
     /// there is nothing there to like. The slot stays where it was.
@@ -131,8 +149,8 @@ final class CommentsInputBar: UIView {
         }
     }
 
-    /// The bar's height at rest in `category`: the trailing column (the slot,
-    /// the stake over it, both lifted `columnLift` off the bottom), or one
+    /// The bar's height at rest in `category`: the trailing column (the slot
+    /// on the bottom line, the stake over it), or one
     /// empty line never less than the field's floor when a large text size
     /// makes the field the taller. For a host that places something against
     /// the resting bar before it is laid out.
@@ -142,12 +160,15 @@ final class CommentsInputBar: UIView {
     /// asks a text view set up like the bar's own (`updateFieldHeight`), and
     /// gets the answer the bar will reach. Cached per size.
     ///
-    /// The column is two bubbles and their gap (one without the stake), and
-    /// the field grows beside the stake rather than under it.
-    static func restingHeight(for category: UIContentSizeCategory, showsStake: Bool = true) -> CGFloat {
+    /// The column is the slot, the stake and their gap (the slot alone
+    /// without the stake) — the stake the like pill with the like face, a
+    /// bubble without — and the field grows beside the stake rather than
+    /// under it.
+    static func restingHeight(
+        for category: UIContentSizeCategory, showsStake: Bool = true, likeFace: Bool = true
+    ) -> CGFloat {
         let bubble = SnapActionColumn.bubbleSize
-        let stake = SnapActionColumn.upperBubbleHeight
-        let column = SnapActionColumn.columnLift + bubble + (showsStake ? stake + SnapActionColumn.gap : 0)
+        let column = bubble + (showsStake ? stakeSide(likeFace: likeFace) + SnapActionColumn.gap : 0)
         return max(column, restingInputRowHeight(for: category))
     }
 
@@ -192,7 +213,11 @@ final class CommentsInputBar: UIView {
 
     enum Metrics {
         static let maxLines: CGFloat = 4
-        static let controlSize: CGFloat = 38
+        /// The field's resting line, the avatar's side and the field's
+        /// trailing cap: the column's bubble (#680) — the avatar, the field
+        /// and the rail slot are ONE row, the comment band's height, so the
+        /// row reads as the media layout's sound bubble's line.
+        @MainActor static var controlSize: CGFloat { SnapActionColumn.bubbleSize }
         /// The emote toggle inside the field: 32pt wide on the 38pt line —
         /// room for its widest face, the keyboard glyph (26pt), with a margin
         /// either side.
@@ -202,7 +227,7 @@ final class CommentsInputBar: UIView {
         /// with the capsule's round end. The send disc (29pt) used to stand
         /// in a 30pt column 4pt in from the edge — no margin at all, and its
         /// sides came out shaved (asked 2026-10-02).
-        static let fieldActionSide: CGFloat = controlSize
+        @MainActor static var fieldActionSide: CGFloat { controlSize }
         /// The smallest touch target the field's two buttons answer to —
         /// UIKit's 44pt, reached by `hitTest` around their drawn frames,
         /// which the 38pt line cannot hold.
@@ -211,7 +236,7 @@ final class CommentsInputBar: UIView {
         /// capsule clip is the disc's circle. It used to sit inset at 30pt so
         /// the glass read as a rim around it; that ring of glass read as a
         /// margin instead, and the face is the thing worth the room.
-        static let avatarDiameter: CGFloat = controlSize
+        @MainActor static var avatarDiameter: CGFloat { controlSize }
     }
 
     /// The viewer's face, leading the bar — the composer's answer to the
@@ -465,6 +490,11 @@ final class CommentsInputBar: UIView {
         railButton.configuration?.symbolContentTransition = UISymbolContentTransition(.replace)
         railButton.addAction(UIAction { [weak self] _ in self?.onRailAction?() }, for: .primaryActionTriggered)
         railButton.isHidden = true
+        // A hold on the SOUND face opens the sound sheet (#680); a recognised
+        // hold cancels the button's touch, so it never also counts as the tap.
+        let railHold = UILongPressGestureRecognizer(target: self, action: #selector(railHeld(_:)))
+        railHold.minimumPressDuration = 0.4
+        railButton.addGestureRecognizer(railHold)
 
         // The keyboard axis: the page-swipe gate and the idle-dismiss seam.
         keyboardObservers.tokens = [
@@ -512,14 +542,9 @@ final class CommentsInputBar: UIView {
         addSubview(railButton)
         addSubview(boostButton)
         addSubview(visibilityButton)
-        // The like face's count: on the stake bubble's corner (#668), or under
-        // its heart in the like pill (#669).
+        // The like face's count, under its heart in the stake pill (#669).
         addSubview(likeBadge)
-        if SnapActionColumn.isLikePill {
-            likeBadge.pin(underHeartOf: boostButton, squareSide: SnapActionColumn.bubbleSize)
-        } else {
-            likeBadge.pin(toCornerOf: boostButton, in: self)
-        }
+        likeBadge.pin(underHeartOf: boostButton)
         addLayoutGuide(restingInputRow)
         avatarBubble.translatesAutoresizingMaskIntoConstraints = false
         boostButton.translatesAutoresizingMaskIntoConstraints = false
@@ -527,6 +552,7 @@ final class CommentsInputBar: UIView {
         field.translatesAutoresizingMaskIntoConstraints = false
         railButton.translatesAutoresizingMaskIntoConstraints = false
         fieldHeight = field.heightAnchor.constraint(equalToConstant: Metrics.controlSize)
+        stakeHeight = boostButton.heightAnchor.constraint(equalToConstant: Self.stakeSide(likeFace: usesLikeFace))
         // The INPUT row, leading to trailing: the viewer's AVATAR, then the
         // field, which owns all the flexible width and, at rest, ends `sm`
         // short of the trailing COLUMN (`fieldTrailing`, which the rise
@@ -535,9 +561,9 @@ final class CommentsInputBar: UIView {
         // keyboard's ceiling (`riseWithKeyboard(of:)`) outranks the rest and
         // lifts the row clear of the bar.
         //
-        // The column: the slot (the rail button) stands `columnLift` off the
-        // bar's bottom, on the media layout's repost bubble; the stake bubble
-        // stands one `gap` over it, on the like anchor. Both are the comment
+        // The column: the slot (the rail button) rests on the bar's bottom —
+        // the field's line — on the media layout's sound bubble; the stake
+        // pill stands one `gap` over it, on the like pill. Both are the comment
         // band's height (`SnapActionColumn.bubbleSize`) — read once, here,
         // like the band reads its own at init. The stake holds its station
         // over the slot: a growing field rises beside it, not under it. The
@@ -564,16 +590,14 @@ final class CommentsInputBar: UIView {
             fieldAtRest,
             fieldTrailing,
             railButton.trailingAnchor.constraint(equalTo: trailingAnchor),
-            railButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -SnapActionColumn.columnLift),
+            railButton.bottomAnchor.constraint(equalTo: bottomAnchor),
             railButton.widthAnchor.constraint(equalToConstant: bubble),
             railButton.heightAnchor.constraint(equalToConstant: bubble),
             railButton.topAnchor.constraint(greaterThanOrEqualTo: topAnchor),
             boostButton.trailingAnchor.constraint(equalTo: trailingAnchor),
             boostButton.bottomAnchor.constraint(equalTo: railButton.topAnchor, constant: -SnapActionColumn.gap),
             boostButton.widthAnchor.constraint(equalToConstant: bubble),
-            // The pill's height under `-snap-like-pill` (#669), the square's
-            // otherwise.
-            boostButton.heightAnchor.constraint(equalToConstant: SnapActionColumn.upperBubbleHeight),
+            stakeHeight,
             // The boost's own station: the two never show at once.
             visibilityButton.centerXAnchor.constraint(equalTo: boostButton.centerXAnchor),
             visibilityButton.centerYAnchor.constraint(equalTo: boostButton.centerYAnchor),
@@ -1277,6 +1301,7 @@ final class CommentsInputBar: UIView {
     var usesLikeFace = false {
         didSet {
             guard usesLikeFace != oldValue else { return }
+            stakeHeight?.constant = Self.stakeSide(likeFace: usesLikeFace)
             applyBoostFace()
             applyLikeBadge(animated: false)
         }
@@ -1292,9 +1317,16 @@ final class CommentsInputBar: UIView {
         applyLikeBadge(animated: false)
     }
 
-    private lazy var likeBadge = SnapLikeCountBadge(
-        style: SnapActionColumn.isLikePill ? .inline(ink: .white) : .corner
-    )
+    /// The like face's count, in the page's ink like its resting heart (#680).
+    private let likeBadge = SnapLikeCountBadge(ink: .label)
+
+    /// The stake's height: the like PILL with the like face (#669), the
+    /// square bubble with the receipt face.
+    private var stakeHeight: NSLayoutConstraint!
+
+    private static func stakeSide(likeFace: Bool) -> CGFloat {
+        likeFace ? SnapActionColumn.likePillHeight : SnapActionColumn.bubbleSize
+    }
     private var boostPostLikeCount: Int64?
 
     private func applyLikeBadge(animated: Bool) {
@@ -1328,11 +1360,14 @@ final class CommentsInputBar: UIView {
         let total = boostSpentTotal
         if usesLikeFace {
             boostButton.configuration?.attributedTitle = nil
-            // White at rest, red once staked — the rail's heart exactly, on
-            // the comments layout's light page too (owner's call 2026-10-08:
-            // the two bubbles wear one face).
-            boostButton.configuration?.image = PointsSymbol.likeImage(staked: total > 0, Self.glyphConfiguration)
-            // In the like pill (#669), the heart's square is the pill's top.
+            // An outline in the page's ink at rest — the text's colour, black
+            // on the light panel, white over dimmed media — and the points'
+            // red fill once staked (#680).
+            boostButton.configuration?.image = PointsSymbol.likeImage(
+                staked: total > 0, SnapActionColumn.heartConfiguration
+            )
+            boostButton.configuration?.baseForegroundColor = .label
+            // Even gaps in the pill: top, heart, count, bottom (#680).
             boostButton.configuration?.contentInsets = SnapActionColumn.heartInsets
             boostButton.accessibilityLabel = "Like"
             boostButton.accessibilityValue = SnapRailBoostButton.accessibilityValue(
@@ -1572,7 +1607,7 @@ final class CommentsInputBar: UIView {
             // The cover as a disc, the bubble's size less the sound bubble's
             // inset, so the two read as one (#671). Not a symbol: no replace.
             railButton.isHidden = false
-            railButton.configuration?.image = face.disc(side: SnapActionColumn.bubbleSize - 10)
+            railButton.configuration?.image = face.disc(side: SnapActionColumn.bubbleSize - 10, badged: face.isMuted)
             railButton.configuration?.contentInsets = .zero
             railButton.accessibilityLabel = "Sound"
             railButton.alpha = face.isAvailable ? 1 : 0.45
@@ -1587,6 +1622,13 @@ final class CommentsInputBar: UIView {
         }
         railFaceSymbol = symbol
         railButton.isEnabled = isRailFaceEnabled
+    }
+
+    /// Redraws the rail face as it stands — the sound's cover, once a cover
+    /// that was still being fetched has landed (#680).
+    func redrawRailFace() {
+        railFaceSymbol = nil
+        applyRailFace()
     }
 
     /// What `debugRailSymbol` reads while the slot wears the sound's cover.
@@ -1607,6 +1649,8 @@ final class CommentsInputBar: UIView {
     var debugFieldActionSymbol: String? { fieldActionSymbol }
     /// The field, for the specs that measure it.
     var debugField: UIView { field }
+    /// The avatar's bubble, in the bar's space.
+    var debugAvatarFrame: CGRect { avatarBubble.frame }
     #endif
 
     /// Grows the field with its content up to `maxLines`, then hands the

@@ -50,10 +50,9 @@ struct ConversationThreadViewControllerTests {
         }
     }
 
-    private final class FakeAccessory: ConversationThreadAccessory {
-        let view: UIView = UIView()
-        var onInsertText: ((String) -> Void)?
-    }
+    /// Kept as the fixture's fourth member so every destructuring stays put;
+    /// the thread has no footer accessory since #680.
+    private final class FakeAccessory {}
 
     /// `minutes` past the START of today — anchored to the calendar day, not
     /// to now, so the fixture's days are the same at 00:10 and at 23:50 (an
@@ -84,7 +83,6 @@ struct ConversationThreadViewControllerTests {
         let accessory = FakeAccessory()
         let screen = ConversationThreadViewController(
             driver: driver, mode: mode, prefill: prefill,
-            accessory: mode == .full ? accessory : nil,
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             wallet: nil, makeWalletSheet: nil
         )
@@ -325,7 +323,7 @@ struct ConversationThreadViewControllerTests {
         let composer = try SnapActionColumnLayoutTests.composerColumn(in: screen.view, space: window)
 
         #expect(composer.stake == nil)
-        #expect(composer.rail == media.repost, "pin \(composer.rail) vs repost \(media.repost)")
+        #expect(SnapActionColumnLayoutTests.same(composer.rail, media.sound), "pin \(composer.rail) vs sound \(media.sound)")
         #expect(composer.bar.debugRailSymbol == "pin")
         #expect(!composer.bar.debugFieldActionButton.isHidden, "the waveform is in the field")
     }
@@ -444,44 +442,13 @@ struct ConversationThreadViewControllerTests {
         #expect(driver.sent == ["Sent with the keyboard down"])
     }
 
-    @Test func anEmoteGoesIntoTheDraftAndIsNotSent() throws {
-        let (screen, driver, accessory, _) = makeScreen()
-        let bar = try #require(Self.firstView(CommentsInputBar.self, in: screen.view))
-        accessory.onInsertText?("🔥")
-        #expect(bar.draftText == "🔥")
-        #expect(driver.sent.isEmpty)
-    }
-
-    /// The post's footer, with the emote strip where the music would be — its
-    /// own capsule, not one inside the bar's bubble, which pads it and cuts its
-    /// content short of the visible ends — and nothing else but ⋯: a post's
-    /// save and repost have nothing to act on here, and the strip takes their
-    /// room. [emotes ………………][⋯].
-    @Test func theFooterIsTheStripFillingUpToTheMenu() throws {
-        let (screen, _, accessory, _) = makeScreen()
-        let items = try #require(screen.toolbarItems)
-        #expect(items.first?.customView === accessory.view)
-        #expect(items.first?.hidesSharedBackground == true, "a capsule in a bubble")
-        let labels = items.compactMap(\.customView).flatMap { view -> [String] in
-            if let button = view as? UIButton { return [button.accessibilityLabel].compactMap { $0 } }
-            return view.subviews.compactMap { ($0 as? UIButton)?.accessibilityLabel }
-        }
-        #expect(labels == ["More actions"])
-        // [strip][fixed][⋯]: no flexible space to claim the strip's room.
-        #expect(items.count == 3)
-        #expect(items[1].customView == nil)
-        #expect(items.last?.customView is UIButton)
-    }
-
-    /// `-snap-pill-footer` (#671): [peer pill] … [⋯] — no emote strip, and no
+    /// The footer: [peer pill] … [⋯] (#671, the layout since #680) — no
+    /// emote strip (the composer's emote button is the way to emotes), and no
     /// peer pill left in the nav bar. The composer's pin is unchanged.
-    @Test func underThePillFooterThePeerPillLeadsTheFooter() throws {
-        SnapPillFooter.isOn = true
-        defer { SnapPillFooter.isOn = false }
-        let (screen, _, accessory, _) = makeScreen()
+    @Test func thePeerPillLeadsTheFooter() throws {
+        let (screen, _, _, _) = makeScreen()
         let items = try #require(screen.toolbarItems)
         #expect(items.first?.customView is SnapAuthorIdentityView)
-        #expect(!items.contains { $0.customView === accessory.view }, "the emote strip stayed")
         #expect((items.last?.customView as? UIButton)?.accessibilityLabel == "More actions")
         let nav = screen.navigationItem.rightBarButtonItems ?? []
         #expect(!nav.contains { $0.customView is SnapAuthorIdentityView }, "the peer pill is still in the nav bar")

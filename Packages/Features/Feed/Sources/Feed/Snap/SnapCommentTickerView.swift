@@ -213,6 +213,17 @@ final class SnapCommentTickerView: UIView {
     /// Where the band reads its appearance when a stream starts — the app's
     /// store; a test hands its own.
     var appearanceStore: MediaCommentPreferencesStore = .standard
+
+    /// The band runs to the screen's trailing edge, square-ended (#680): the
+    /// post hides its likes, so there is no like pill for the band to slide
+    /// out from under, and no capsule end to nest in its curve. The host
+    /// moves the band's trailing edge; this drops the rounded clip.
+    var runsToTrailingEdge = false {
+        didSet {
+            guard runsToTrailingEdge != oldValue else { return }
+            setNeedsLayout()
+        }
+    }
     /// The interaction's own intensity (0 when no scrub or coast is running);
     /// the wash shows the larger of this and the resting level.
     private var kineticFraction: CGFloat = 0
@@ -389,7 +400,9 @@ final class SnapCommentTickerView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        layer.cornerRadius = bounds.height / 2 // capsule end (see init)
+        // A capsule end (see init) — or none when the band runs to the
+        // screen's edge with no like pill to nest under (#680).
+        layer.cornerRadius = runsToTrailingEdge ? 0 : bounds.height / 2
         backdropView.frame = bounds
         blurBackdrop?.frame = bounds
         // ⚠️ **A TRAIN LAID AT ONE WIDTH IS RE-LAID AT ANOTHER.** The pre-fill
