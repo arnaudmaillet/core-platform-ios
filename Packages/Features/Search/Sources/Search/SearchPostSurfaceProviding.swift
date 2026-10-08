@@ -102,8 +102,6 @@ public enum SearchPostSurfaceState: Equatable, Sendable {
 public enum SearchPostSurfaceStyle: Sendable {
     /// Full-width cards, the shape For You's "Following" list reads in.
     case cards
-    /// A media gallery, the shape For You's "View all" mosaic reads in.
-    case gallery
     /// For You's own page (#629): cards with slices of the media mosaic
     /// between them, "View all" into the media gallery, and an optional row
     /// of cards above (`showLeadRow`).

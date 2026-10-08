@@ -14,7 +14,7 @@ public struct SearchFeatureBuilder: SearchFeatureBuilding {
     private let metadata: (any ProfileMetadataProviding)?
     private let imagePipeline: ImagePipeline
     private let router: (any Router)?
-    /// Where the results screen's Posts and Media tabs come from. `nil` in a
+    /// Where the results screen's Posts tab and the hashtag page come from. `nil` in a
     /// composition without Feed — see `SearchPostSurfaceProviding`.
     private let postSurfaces: (any SearchPostSurfaceProviding)?
     /// The viewer's point balance, for the results screen's header. `nil` in a

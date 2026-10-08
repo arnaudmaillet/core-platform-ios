@@ -58,24 +58,18 @@ public enum SearchScope: String, Equatable, Sendable, CaseIterable {
     case following
 }
 
-/// A post match, as much as `search.v1` knows about one.
+/// A post match, as much as `search.v1` knows about one: its id.
 ///
-/// ⚠️ `hasMedia` IS THE ONLY THING A HIT SAYS ABOUT THE POST'S SHAPE, and it is
-/// said by omission: an empty `thumbnail_key` means there is no picture. That
-/// is the same signal the map reads for a text pin — an empty `thumbnail_url`
-/// is how `geo_discovery.v1` says "this post is text" — so the two surfaces
-/// agree about what a text post looks like on the wire.
-///
-/// It matters because the results screen has a MEDIA tab. Without this the
-/// gallery drew a tile per text post: a grid of blank rectangles among the
-/// pictures, each one a post that has nothing to show in a gallery.
+/// ⚠️ NOT ITS SHAPE. A hit's `thumbnail_key` used to say "has a picture" by
+/// omission, for a Media tab that is gone (#630), and the search service
+/// never fills it ("thumbnail derivation from attachments is deferred"), so
+/// on the fleet every post read as text. The For You-style page tiles from
+/// the HYDRATED post's kind instead.
 public struct PostSearchHit: Equatable, Sendable, Identifiable {
     public let id: PostID
-    public let hasMedia: Bool
 
-    public init(id: PostID, hasMedia: Bool) {
+    public init(id: PostID) {
         self.id = id
-        self.hasMedia = hasMedia
     }
 }
 
@@ -294,7 +288,7 @@ public actor SearchRepository: SearchProviding {
             // offline today. Recorded rather than guessed at.
             let hits = body.hits
                 .filter { $0.entityType == .post }
-                .map { PostSearchHit(id: PostID($0.id), hasMedia: !$0.post.thumbnailKey.isEmpty) }
+                .map { PostSearchHit(id: PostID($0.id)) }
             return PostSearchPage(hits: hits, nextPageToken: body.nextPageToken.isEmpty ? nil : body.nextPageToken)
         case .failure(let error):
             throw SearchError.transport(message: error.message ?? "code \(error.code)")

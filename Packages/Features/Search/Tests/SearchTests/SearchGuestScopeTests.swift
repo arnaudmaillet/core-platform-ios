@@ -15,7 +15,7 @@ struct SearchGuestScopeTests {
     private func followingSegment(isMember: Bool) throws -> SearchFilterSheetViewController.Segment {
         let store = RecentSearchStore(defaults: UserDefaults(suiteName: UUID().uuidString)!, now: { 1 })
         let viewModel = SearchViewModel(repository: QuietSearchProvider(), recentSearches: store)
-        let scope = try #require(viewModel.filterGroups(isMember: isMember).first { $0.id == SearchViewModel.scopeGroupID })
+        let scope = try #require(viewModel.filterGroups(for: .users, isMember: isMember).first { $0.id == SearchViewModel.scopeGroupID })
         return try #require(scope.segments.first { $0.id == SearchScope.following.rawValue })
     }
 
