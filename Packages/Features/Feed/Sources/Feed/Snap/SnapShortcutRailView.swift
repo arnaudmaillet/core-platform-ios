@@ -688,7 +688,7 @@ final class SnapRailBoostButton: UIButton {
             UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
         )
         config.baseForegroundColor = .white
-        config.contentInsets = .zero
+        config.contentInsets = SnapActionColumn.heartInsets
         config.cornerStyle = .capsule
         return config
     }

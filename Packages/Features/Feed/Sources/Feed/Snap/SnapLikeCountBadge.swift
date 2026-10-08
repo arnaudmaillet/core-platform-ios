@@ -22,22 +22,38 @@ import UIKit
 /// Neutral ink, not red: the liked heart beside it is the red one.
 @MainActor
 final class SnapLikeCountBadge: UIView {
+    /// Where the count sits.
+    enum Style {
+        /// A capsule on the button's corner (#668).
+        case corner
+        /// Bare text under the heart, inside the like pill (#669), in `ink`.
+        case inline(ink: UIColor)
+    }
+
     private let label = UILabel()
+    private let style: Style
     /// The count drawn — nil while there is none to show.
     private(set) var count: Int64?
 
-    override init(frame: CGRect) {
-        super.init(frame: frame)
+    init(style: Style = .corner) {
+        self.style = style
+        super.init(frame: .zero)
         isUserInteractionEnabled = false
         isAccessibilityElement = false
-        backgroundColor = UIColor.black.withAlphaComponent(0.6)
-        layer.borderColor = UIColor.white.withAlphaComponent(0.25).cgColor
-        layer.borderWidth = 0.5
-        layer.cornerCurve = .continuous
         // Fixed size (#482): it lives on a bubble whose size does not follow
         // the text size either.
-        label.font = .monospacedDigitSystemFont(ofSize: 11, weight: .bold)
-        label.textColor = .white
+        switch style {
+        case .corner:
+            backgroundColor = UIColor.black.withAlphaComponent(0.6)
+            layer.borderColor = UIColor.white.withAlphaComponent(0.25).cgColor
+            layer.borderWidth = 0.5
+            layer.cornerCurve = .continuous
+            label.font = .monospacedDigitSystemFont(ofSize: 11, weight: .bold)
+            label.textColor = .white
+        case .inline(let ink):
+            label.font = .monospacedDigitSystemFont(ofSize: 12, weight: .bold)
+            label.textColor = ink
+        }
         label.textAlignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false
         addSubview(label)
@@ -59,7 +75,7 @@ final class SnapLikeCountBadge: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        layer.cornerRadius = bounds.height / 2
+        if case .corner = style { layer.cornerRadius = bounds.height / 2 }
     }
 
     /// Draws `count`: hidden at nil or zero. `animated` brings a badge that
@@ -115,4 +131,18 @@ final class SnapLikeCountBadge: UIView {
 
     /// How far inside the button's corner the badge's centre sits.
     private static let cornerInset: CGFloat = 4
+
+    /// Pins the badge under the heart of a like PILL (#669): the heart sits
+    /// centred in the pill's top square (`squareSide`), the count right below.
+    func pin(underHeartOf button: UIView, squareSide: CGFloat) {
+        translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            centerXAnchor.constraint(equalTo: button.centerXAnchor),
+            topAnchor.constraint(equalTo: button.topAnchor, constant: squareSide / 2 + Self.heartHalfHeight),
+        ])
+    }
+
+    /// Half the heart glyph's height at the bubbles' 15 pt symbol size, and
+    /// the breath under it.
+    private static let heartHalfHeight: CGFloat = 9
 }

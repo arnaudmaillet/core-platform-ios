@@ -119,7 +119,50 @@ enum SnapActionColumn {
     /// What the composer puts between its own bottom (the input row's) and
     /// its trailing column's bottom, so a bar resting at `inputRestingGap`
     /// stands its column at `restingLift` — on the media layout's bubbles.
-    @MainActor static var columnLift: CGFloat { restingLift - inputRestingGap }
+    ///
+    /// Zero under `isLikePill`: the lower bubble drops to the input row's
+    /// line (the media layout's repost bubble with it).
+    @MainActor static var columnLift: CGFloat { isLikePill ? 0 : restingLift - inputRestingGap }
+
+    // MARK: - The like pill (#669, behind a flag)
+
+    /// `-snap-like-pill` (DEBUG, #669): an experimental column.
+    /// - The lower bubble (the media layout's repost, the composer's rail
+    ///   slot, the Messages thread's pin) drops to `glassGap` above the
+    ///   toolbar's glass — the composer's field line.
+    /// - The like button above it stretches into a VERTICAL PILL from the
+    ///   band's top down to `gap` above that bubble, the heart on top and the
+    ///   post's like count under it (no corner badge).
+    ///
+    /// ⚠️ READ WHERE CONSTRAINTS ARE BUILT, ONCE: `-snap-layout-v2` (#340) was
+    /// read in the chrome's init through a property whose `didSet` never ran.
+    /// A static the views read when they lay themselves out, settable by the
+    /// layout tests (which cannot pass launch arguments) BEFORE they build a
+    /// view — never flipped under a live one.
+    @MainActor static var isLikePill: Bool = {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-snap-like-pill")
+        #else
+        false
+        #endif
+    }()
+
+    /// The like pill's height: from the band's top (where the square like
+    /// bubble's top is) down to `gap` above the dropped lower bubble — the
+    /// square plus the distance the lower bubble dropped. The same on a text
+    /// page as on a media one: derived from the margin line, never from the
+    /// repost bubble, which a text page does not show.
+    @MainActor static var likePillHeight: CGFloat { bubbleSize + restingLift - inputRestingGap }
+
+    /// The upper (like / stake) bubble's height: the pill's under the flag,
+    /// the square otherwise.
+    @MainActor static var upperBubbleHeight: CGFloat { isLikePill ? likePillHeight : bubbleSize }
+
+    /// Where the heart sits in the upper bubble: centred in the square, and in
+    /// the pill's TOP square — the count is under it (`SnapLikeCountBadge`).
+    @MainActor static var heartInsets: NSDirectionalEdgeInsets {
+        NSDirectionalEdgeInsets(top: 0, leading: 0, bottom: upperBubbleHeight - bubbleSize, trailing: 0)
+    }
 }
 
 /// The media layout's repost bubble: a Liquid Glass circle the like anchor's
