@@ -4079,6 +4079,15 @@ final class SnapFeedViewController: UIViewController {
         (1 - 1 / (x * 0.55 / d + 1)) * d
     }
 
+    /// Whether the engaged page resigning retires its engagement: only a
+    /// non-resting one, and only when the SETTLED page moved — a covered
+    /// screen (a pushed hashtag or profile) resigns the page in place, and
+    /// the comments must be there when the viewer comes back (#698). Pure,
+    /// for tests.
+    static func resignRetiresEngagement(resting: Bool, settledPage: Int, resigned: Int) -> Bool {
+        !resting && settledPage != resigned
+    }
+
     private func engagedCell() -> SnapFeedCell? {
         guard let id = commentsEngagedID,
               let indexPath = dataSource.indexPath(for: id) else { return nil }
@@ -4239,7 +4248,18 @@ final class SnapFeedViewController: UIViewController {
                 // down the case where a page is scrolled past without ever
                 // settling. A page that never leaves the viewport keeps its
                 // interface, which is what a resting engagement is for.
-                if !commentsEngagementIsResting { finishCommentsDisengagement() }
+                //
+                // ⚠️ AND ONLY A PAGE CHANGE RETIRES IT (#698). The screen being
+                // COVERED resigns the page too — a pushed hashtag or profile
+                // hides the feed, and `activeIndex` goes nil while the settled
+                // page has not moved. Tearing down there sent the viewer back
+                // to the media layout; keep-and-stack (`viewWillDisappear`) and
+                // `syncEngagementAfterAppearance` exist to bring it back as left.
+                if Self.resignRetiresEngagement(
+                    resting: commentsEngagementIsResting, settledPage: settledPageIndex, resigned: resign
+                ) {
+                    finishCommentsDisengagement()
+                }
             }
             // A warm panel belongs to the page that was active. Once that
             // page is not, the warm is stale — and holding it would block
