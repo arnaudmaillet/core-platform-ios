@@ -223,6 +223,14 @@ public protocol FeedFeatureBuilding: ConversationThreadScreenBuilding, TextPostS
     /// ⚠️ A REQUIREMENT, read through `any FeedFeatureBuilding`; the default
     /// warms nothing.
     func warmPlayback(of postID: PostID, at seconds: TimeInterval?) -> (any FeedPlaybackWarm)?
+    /// Like `warmPlayback`, but the player plays to its first frame and
+    /// PAUSES there (#654): the map prerolls the one marker nearest its centre
+    /// while it is idle, and `FeedPlaybackWarm.resume(at:)` plays it on when
+    /// that marker is touched. Nil when the device should not spend it — Low
+    /// Power, thermal pressure, preloading off — or there is nothing to warm.
+    ///
+    /// ⚠️ A REQUIREMENT, like `warmPlayback`; the default prerolls nothing.
+    func prerollPlayback(of postID: PostID, at seconds: TimeInterval?) -> (any FeedPlaybackWarm)?
     /// Builds the place gallery that sits BENEATH a semantic-cluster feed
     /// (city/country/region — the cluster-gallery milestone's Case B): a grid
     /// of the cluster's members ranked by engagement, titled `title`
@@ -356,10 +364,15 @@ public protocol FeedPlaybackWarm: AnyObject {
     /// surface — the way a grid tile's live player rides its flight. False
     /// when the surface is not one the player can draw on.
     func mirror(onto surface: UIView) -> Bool
+    /// Plays a prerolled (paused) player on, from `seconds` into its clip when
+    /// given — the moment the marker shows now (#654). On a playing one it only
+    /// moves the playhead.
+    func resume(at seconds: TimeInterval?)
 }
 
 extension FeedFeatureBuilding {
     public func warmPlayback(of postID: PostID, at seconds: TimeInterval?) -> (any FeedPlaybackWarm)? { nil }
+    public func prerollPlayback(of postID: PostID, at seconds: TimeInterval?) -> (any FeedPlaybackWarm)? { nil }
 
     /// A place with no rank and no flag to show.
     public func makeClusterGallery(

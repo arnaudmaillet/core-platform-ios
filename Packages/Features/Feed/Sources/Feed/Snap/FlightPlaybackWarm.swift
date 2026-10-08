@@ -45,12 +45,61 @@ public final class FlightPlaybackWarm: FeedPlaybackWarm {
         #endif
     }
 
+    /// Set by a preroll (#654) until the first frame pauses it — or until a
+    /// `resume` claims it first.
+    private var pausesOnFirstFrame = false
+
     /// Starts the clip at `seconds` (or where the pool would start it).
-    func start(at seconds: TimeInterval?) {
+    /// `pausedOnFirstFrame`: a PREROLL — it plays to its first decoded frame
+    /// and stops there, so nothing decodes while the map is at rest.
+    func start(at seconds: TimeInterval?, pausedOnFirstFrame: Bool = false) {
         if let seconds { pool.prepareStart(of: url, scope: scope, at: seconds) }
+        pausesOnFirstFrame = pausedOnFirstFrame
         let pool = pool, url = url, scope = scope, surface = surface
         let peakBitRate = MediaPlaybackPolicy.peakBitRate
-        Task { await pool.play(url, in: surface, peakBitRate: peakBitRate, scope: scope) }
+        Task { [weak self] in
+            await pool.play(url, in: surface, peakBitRate: peakBitRate, scope: scope)
+            await self?.pauseOnFirstFrameIfPrerolling()
+        }
+    }
+
+    /// Polls for the first frame — an offscreen surface hears no picture
+    /// callback, since nothing is enqueued on it — and pauses on it. Gives up
+    /// after `firstFrameLooks` looks, leaving a player that never decoded to
+    /// whoever ends this warm.
+    private func pauseOnFirstFrameIfPrerolling() async {
+        for _ in 0..<Self.firstFrameLooks {
+            guard pausesOnFirstFrame, !hasEnded else { return }
+            if hasPicture {
+                pausesOnFirstFrame = false
+                pool.setPaused(true, in: surface)
+                #if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+                    print("[zoom-live] preroll \(scope): first frame decoded, paused")
+                }
+                #endif
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(30))
+        }
+    }
+
+    static let firstFrameLooks = 100
+
+    public func resume(at seconds: TimeInterval?) {
+        pausesOnFirstFrame = false
+        // Resumed BEFORE the seek: `setPaused(false)` pins a drifted player
+        // back to where it paused, which would undo a seek made first.
+        pool.setPaused(false, in: surface)
+        if let seconds { pool.seek(toSeconds: seconds, in: surface, toleranceSeconds: 0.05) }
+    }
+
+    /// Whether a preroll may spend a player now (#654): the viewer's
+    /// preloading preference (which covers cellular) and autoplay, and the
+    /// device not in Low Power nor under serious thermal pressure. Pure.
+    nonisolated static func prerollAllowed(preloads: Bool, autoplays: Bool, lowPower: Bool,
+                                           thermal: ProcessInfo.ThermalState) -> Bool {
+        preloads && autoplays && !lowPower && thermal != .serious && thermal != .critical
     }
 
     public var hasPicture: Bool { surface.currentFrameBuffer != nil }

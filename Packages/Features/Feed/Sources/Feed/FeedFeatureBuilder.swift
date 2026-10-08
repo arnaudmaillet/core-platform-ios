@@ -197,6 +197,38 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         return warm
     }
 
+    /// See `FeedFeatureBuilding.prerollPlayback` (#654).
+    @MainActor
+    public func prerollPlayback(of postID: PostID, at seconds: TimeInterval?) -> (any FeedPlaybackWarm)? {
+        let process = ProcessInfo.processInfo
+        let allowed = FlightPlaybackWarm.prerollAllowed(preloads: MediaPlaybackPolicy.preloads,
+                                                        autoplays: MediaPlaybackPolicy.autoplays,
+                                                        lowPower: process.isLowPowerModeEnabled,
+                                                        thermal: process.thermalState)
+        let entry = repository.peekPost(postID)
+        // Not hydrated yet: the map warms its visible posts' data on the same
+        // settle, and which ones a sweep reaches is not guaranteed. Asked for
+        // here, so the map's next try finds it.
+        if allowed, entry == nil {
+            let repository = repository
+            Task { await repository.prewarm([postID]) }
+        }
+        guard allowed, let videoPlayback, let entry,
+              let clip = FlightPlaybackWarm.warmableClip(of: entry) else {
+            #if DEBUG
+            if process.arguments.contains("-zoom-live-log") {
+                print("[zoom-live] preroll refused \(postID.rawValue): preloads=\(MediaPlaybackPolicy.preloads) "
+                      + "autoplay=\(MediaPlaybackPolicy.autoplays) lowPower=\(process.isLowPowerModeEnabled) "
+                      + "thermal=\(process.thermalState.rawValue) hydrated=\(entry != nil)")
+            }
+            #endif
+            return nil
+        }
+        let warm = FlightPlaybackWarm(pool: videoPlayback, url: clip.url, scope: clip.scope)
+        warm.start(at: seconds, pausedOnFirstFrame: true)
+        return warm
+    }
+
     public func prewarmPosts(_ ids: [PostID]) async {
         #if DEBUG
         // See `isColdOpenForced`: a warmed corpus seeds synchronously and the
