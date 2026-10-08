@@ -385,7 +385,7 @@ struct TextPostComposePageTests {
         let bar = try #require(Self.all(CommentsInputBar.self, in: page.panel.view).first)
         let buttons = Self.all(UIButton.self, in: bar)
         #expect(buttons.contains { $0.accessibilityLabel == "Post visibility" && !$0.isHidden })
-        #expect(buttons.contains { $0.accessibilityLabel == "Boost post" && $0.isHidden })
+        #expect(buttons.contains { $0.accessibilityLabel == "Like" && $0.isHidden })
         #expect(Self.texts(in: bar).contains("Post as Demo Viewer"))
     }
 
@@ -419,7 +419,7 @@ struct TextPostComposePageTests {
         #expect((page.composer.navigationItem.rightBarButtonItems ?? []).contains { $0.customView is SnapAuthorIdentityView })
         #expect(page.composer.toolbarItems?.first?.customView is SnapMediaAttributionView)
         let bar = try #require(Self.all(CommentsInputBar.self, in: page.panel.view).first)
-        #expect(Self.all(UIButton.self, in: bar).contains { $0.accessibilityLabel == "Boost post" && !$0.isHidden })
+        #expect(Self.all(UIButton.self, in: bar).contains { $0.accessibilityLabel == "Like" && !$0.isHidden })
     }
 
     @Test func commentsAfterPublishTargetTheNewPost() async throws {

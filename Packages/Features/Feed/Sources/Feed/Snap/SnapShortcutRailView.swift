@@ -536,13 +536,16 @@ final class SnapRailBoostButton: UIButton {
     var onUndo: (() -> Void)?
 
     private var hasGlass = false
-    /// The viewer's cumulative spend on the represented post — the button's
-    /// SECOND face. Zero wears the star glyph (an invitation); anything
-    /// above it wears the gold number itself (a receipt), because "what have
-    /// I already put on this post" is the question the control's own state
-    /// answers best. Owned by the host via `setSpentTotal` — the button
-    /// never reads a wallet.
+    /// The viewer's cumulative spend on the represented post. It turns the
+    /// heart red — a like button's liked state — and nothing more (#668): the
+    /// heart is never replaced by a number. The receipt it used to be ("what
+    /// have I already put on this post") moved to the long-press menu
+    /// (`StakeMenu`'s `showsStake`). Owned by the host via `setSpentTotal` —
+    /// the button never reads a wallet.
     private var spentTotal = 0
+    /// The post's like count as the badge beside it shows it (the viewer's
+    /// stake included), for VoiceOver — nil when the author hides it (#397).
+    private var likeCount: Int64?
     /// The wallet context the host pushes (`setWalletContext`): what the
     /// balance can still afford, and how much of this post's spend is
     /// session-undoable. `Int.max` at rest so an unwired host keeps the
@@ -616,12 +619,22 @@ final class SnapRailBoostButton: UIButton {
             undo: { [weak self] in self?.onUndo?() },
             // The empty pack's row opens the Shop, found up this button's
             // responder chain (`StakeShopOpening`).
-            openShop: StakeShop.openAction(from: self)
+            openShop: StakeShop.openAction(from: self),
+            // What the viewer has put on the post — the number this button
+            // no longer wears (#668).
+            showsStake: true
         )
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// The like count VoiceOver reads (the badge draws it). Nil: hidden.
+    func setLikeCount(_ count: Int64?) {
+        guard count != likeCount else { return }
+        likeCount = count
+        applyAccessibility()
+    }
 
     /// Renders the viewer's spend on this post. Idempotent; a recycled cell
     /// resets it to 0 through `SnapChromeView.reset`.
@@ -647,25 +660,33 @@ final class SnapRailBoostButton: UIButton {
     /// wrong face (the configuration is rebuilt whole each time).
     private func applyFace() {
         configuration = Self.makeConfiguration(glass: hasGlass, spentTotal: spentTotal)
-        accessibilityLabel = "Boost post"
-        accessibilityValue = spentTotal > 0 ? "\(spentTotal) points spent" : nil
+        applyAccessibility()
+    }
+
+    private func applyAccessibility() {
+        accessibilityLabel = "Like"
+        accessibilityValue = Self.accessibilityValue(likeCount: likeCount, staked: spentTotal)
+    }
+
+    /// "1.2K likes, you staked 3 points" — the post's count when it is shown,
+    /// the viewer's stake when there is any. Nil when there is neither.
+    static func accessibilityValue(likeCount: Int64?, staked: Int) -> String? {
+        var parts: [String] = []
+        if let likeCount {
+            parts.append(likeCount == 1 ? "1 like" : "\(likeCount.formattedCompact()) likes")
+        }
+        if staked > 0 { parts.append("you staked \(StakeMenu.points(staked))") }
+        return parts.isEmpty ? nil : parts.joined(separator: ", ")
     }
 
     private static func makeConfiguration(glass: Bool, spentTotal: Int) -> UIButton.Configuration {
         var config: UIButton.Configuration = glass ? .glass() : .plain()
-        if spentTotal > 0 {
-            // The receipt face: the compact count in points red, replacing
-            // the glyph outright — the 36pt circle holds one or the other.
-            var title = AttributedString(spentTotal.formattedCompact())
-            // Fixed size (#482): it lives inside the 36 pt circle.
-            title.font = .monospacedDigitSystemFont(ofSize: 13, weight: .bold)
-            title.foregroundColor = PointsSymbol.tint
-            config.attributedTitle = title
-        } else {
-            config.image = PointsSymbol.glyphImage(
-                UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
-            )
-        }
+        // A heart either way (#668): white at rest, the points' red once the
+        // viewer has staked — never replaced by a number.
+        config.image = PointsSymbol.likeImage(
+            staked: spentTotal > 0,
+            UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
+        )
         config.baseForegroundColor = .white
         config.contentInsets = .zero
         config.cornerStyle = .capsule

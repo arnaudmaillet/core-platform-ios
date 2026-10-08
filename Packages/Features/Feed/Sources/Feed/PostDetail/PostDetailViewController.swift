@@ -369,6 +369,10 @@ final class PostDetailViewController: UIViewController {
         title = mode == .commentsOnly ? "Comments" : "Post"
         view.backgroundColor = .systemBackground
         configureViews()
+        // The snap feed's comments panel stands its stake bubble on the media
+        // layout's like button: the same heart, badge and menu (#668).
+        composeBar.usesLikeFace = mode == .commentsOnly
+        pushComposerLikeCount()
         if viewModel.isDraft { configureDraft() }
 
         viewModel.onPhaseChange = { [weak self] phase in self?.render(phase) }
@@ -839,7 +843,7 @@ final class PostDetailViewController: UIViewController {
                     HapticImpact(style: .medium).impactOccurred()
                     // Receipt before theatre — the button flips to (or grows)
                     // its number face, then the "+N" float rises off it.
-                    self.composeBar.setBoostTotal(targetTotal)
+                    self.composeBar.setBoostTotal(targetTotal, animated: true)
                     self.composeBar.playBoostConfirmation(amount: spent)
                 case .insufficientBalance, .targetCapReached, .noShotsLeft, .shotDoesNotFit:
                     HapticNotification().notificationOccurred(.error)
@@ -861,7 +865,7 @@ final class PostDetailViewController: UIViewController {
             let refunded = self.sessionBoostAmount
             self.sessionBoostAmount = 0
             HapticImpact(style: .light).impactOccurred()
-            self.composeBar.setBoostTotal(result.targetTotal)
+            self.composeBar.setBoostTotal(result.targetTotal, animated: true)
             self.composeBar.playBoostRefund(amount: refunded)
             self.refreshComposeBarBoostState()
         }
@@ -1298,6 +1302,7 @@ final class PostDetailViewController: UIViewController {
     private func setCaptionLikeCount(_ count: Int64?) {
         let before = captionLikeCount
         liveLikeCount = count
+        pushComposerLikeCount()
         guard captionLikeCount != before, streamDataSource != nil else { return }
         var snapshot = streamDataSource.snapshot()
         guard snapshot.itemIdentifiers.contains(.caption) else { return }
@@ -1330,7 +1335,14 @@ final class PostDetailViewController: UIViewController {
         seededAuthor = (authorName, monogram, avatarURL)
         seededCardMetrics = metrics
         loadViewIfNeeded()
+        pushComposerLikeCount()
         applyStream(animated: false)
+    }
+
+    /// The stake bubble's like badge reads the caption row's count — one
+    /// number on one panel — and none when the author hides it (#397).
+    private func pushComposerLikeCount() {
+        composeBar.setLikeCount(viewModel.engagementState.countHidden ? nil : captionLikeCount)
     }
 
     /// Where the caption bubble is drawn, in `space` — the reveal transition's

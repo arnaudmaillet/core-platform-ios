@@ -534,7 +534,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// The viewer's cumulative spend on this post — the anchor's number
     /// face. Set at configure (from the wallet's ledger) and again after
     /// each confirmed spend; chrome reset returns it to 0 on reuse.
-    func setBoostTotal(_ total: Int) { chrome.setBoostTotal(total) }
+    func setBoostTotal(_ total: Int, animated: Bool = false) { chrome.setBoostTotal(total, animated: animated) }
     /// The anchor's wallet context (affordability + undoable tally) —
     /// pushed at configure and on every wallet change.
     func setBoostContext(balance: Int, undoable: Int, stakeShots: Int = 0) {

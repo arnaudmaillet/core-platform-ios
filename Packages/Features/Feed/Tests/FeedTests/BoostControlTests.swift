@@ -80,7 +80,10 @@ struct BoostControlTests {
 
         button.setSpentTotal(200)
         button.setWalletContext(balance: 250, undoableAmount: 0, stakeShots: 2)
-        let full = try #require(button.currentMenuActions().first as? UIAction)
+        // Under the "You staked" line the snap feed's menu now opens with.
+        let full = try #require(
+            button.currentMenuActions().compactMap { $0 as? UIAction }.first { $0.title.hasPrefix("×100") }
+        )
         #expect(full.attributes.contains(.disabled))
         #expect(full.subtitle == "Only 50 points more fit on this post")
     }
@@ -233,34 +236,167 @@ struct BoostControlTests {
         #expect(boost.showsMenuAsPrimaryAction == false)
     }
 
-    // MARK: - The spent-total (receipt) face
+    // MARK: - The like face (#668)
 
-    /// A spend flips the anchor from the star glyph to the gold number,
-    /// and clearing it flips back — one face at a time, never both.
-    @Test func railAnchorSwapsGlyphForSpentTotalAndBack() {
+    private static let railGlyph = UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
+
+    private static func drawn(_ image: UIImage?) -> Data? { image?.pngData() }
+
+    /// A heart either way: white while the viewer has staked nothing, the
+    /// points' red once they have — never a number in its place.
+    @Test func railHeartIsWhiteAtRestRedOnceStakedNeverANumber() {
+        let white = Self.drawn(PointsSymbol.likeImage(staked: false, Self.railGlyph))
+        let red = Self.drawn(PointsSymbol.likeImage(staked: true, Self.railGlyph))
+        #expect(white != red, "the two hearts must differ")
+
         let button = SnapRailBoostButton()
-        #expect(button.configuration?.image != nil)
+        #expect(Self.drawn(button.configuration?.image) == white)
         #expect(button.configuration?.attributedTitle == nil)
 
         button.setSpentTotal(60)
-        #expect(button.configuration?.image == nil)
-        let title = button.configuration?.attributedTitle
-        #expect(title.map { String($0.characters) } == "60")
-        #expect(button.accessibilityValue == "60 points spent")
+        #expect(Self.drawn(button.configuration?.image) == red)
+        #expect(button.configuration?.attributedTitle == nil, "the spend came back as a number")
 
         button.setSpentTotal(0)
-        #expect(button.configuration?.image != nil)
-        #expect(button.configuration?.attributedTitle == nil)
-        #expect(button.accessibilityValue == nil)
+        #expect(Self.drawn(button.configuration?.image) == white)
     }
 
-    /// Large receipts wear the app's one compact spelling, same as every
-    /// other count on screen.
-    @Test func railAnchorSpellsTheReceiptCompactly() {
+    /// VoiceOver reads the like state and both counts.
+    @Test func railReadsTheLikeAndBothCounts() {
         let button = SnapRailBoostButton()
-        button.setSpentTotal(1_240)
-        let title = button.configuration?.attributedTitle
-        #expect(title.map { String($0.characters) } == "1.2K")
+        #expect(button.accessibilityLabel == "Like")
+        button.setLikeCount(1_203)
+        #expect(button.accessibilityValue == "1.2K likes")
+        button.setSpentTotal(3)
+        #expect(button.accessibilityValue == "1.2K likes, you staked 3 points")
+        button.setLikeCount(nil)
+        #expect(button.accessibilityValue == "you staked 3 points", "a hidden count is not read")
+    }
+
+    /// The snap feed's menu says what the viewer has staked, above zero only.
+    @Test func railMenuSaysTheStakeAboveZeroOnly() throws {
+        let button = SnapRailBoostButton()
+        button.setWalletContext(balance: 200, undoableAmount: 0)
+        #expect(button.currentMenuActions().compactMap { $0 as? UIAction }
+            .allSatisfy { !$0.title.hasPrefix("You staked") })
+
+        button.setSpentTotal(37)
+        let first = try #require(button.currentMenuActions().first as? UIAction)
+        #expect(first.title == "You staked 37 points")
+        #expect(first.attributes.contains(.disabled), "a line that reads, not one that acts")
+    }
+
+    /// ...and the cards' like-chip menu, `StakeMenu`'s default, does not.
+    @Test func theCardsMenuNeverSaysTheStake() {
+        let state = StakeMenu.State(
+            balance: 200, stakedOnTarget: 37, undoable: 0, perTargetCap: 250,
+            tapAmount: 1, shotsLeft: 0, shotAmount: 100
+        )
+        let titles = StakeMenu.elements(for: state, stake: { _ in }, shoot: {}, undo: nil)
+            .compactMap { ($0 as? UIAction)?.title }
+        #expect(!titles.contains { $0.hasPrefix("You staked") })
+    }
+
+    // MARK: - The like badge (#668)
+
+    private static func chrome(likes: Int64, hidden: Bool = false, media: Bool = true) -> SnapChromeView {
+        let chrome = SnapChromeView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        chrome.configure(with: FeedItemDisplayModel(
+            id: PostID("post-1"), authorID: ProfileID("profile-1"), authorName: "Ana",
+            metaText: "@ana", avatarURL: nil, caption: "A caption",
+            mediaURL: media ? URL(string: "mock://media/1") : nil, mediaKind: .image,
+            thumbnailURL: nil, audioText: nil, likeCount: likes, likeCountHidden: hidden
+        ))
+        chrome.layoutIfNeeded()
+        return chrome
+    }
+
+    /// The post's count with the viewer's stake in it: a stake adds, an Undo
+    /// takes it back off.
+    @Test func theBadgeCountsThePostsLikesWithTheViewersStake() {
+        let chrome = Self.chrome(likes: 40)
+        #expect(chrome.debugLikeBadgeText == "40")
+        chrome.setBoostTotal(2, animated: true)
+        #expect(chrome.debugLikeBadgeText == "42")
+        chrome.setBoostTotal(0, animated: true)
+        #expect(chrome.debugLikeBadgeText == "40")
+        // The app's one compact spelling.
+        #expect(Self.chrome(likes: 1_203).debugLikeBadgeText == "1.2K")
+    }
+
+    /// No badge at zero; the viewer's like brings it.
+    @Test func noBadgeAtZeroUntilALikeTakesItToOne() {
+        let chrome = Self.chrome(likes: 0)
+        #expect(chrome.debugLikeBadgeText == nil)
+        chrome.setBoostTotal(1, animated: true)
+        #expect(chrome.debugLikeBadgeText == "1")
+        chrome.setBoostTotal(0, animated: true)
+        #expect(chrome.debugLikeBadgeText == nil)
+    }
+
+    /// On screen, the like that takes the count off zero brings the badge in
+    /// with an animation (the fade and bounce); a page opening on a count
+    /// does not perform.
+    @Test func theFirstLikeAnimatesTheBadgeIn() throws {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let chrome = Self.chrome(likes: 0)
+        window.addSubview(chrome)
+        defer { chrome.removeFromSuperview() }
+        let badge = try #require(chrome.subviews.compactMap { $0 as? SnapLikeCountBadge }.first)
+
+        chrome.setBoostTotal(1, animated: true)
+        #expect(badge.layer.animationKeys()?.isEmpty == false, "the badge popped in without its bounce")
+
+        let opened = Self.chrome(likes: 12)
+        window.addSubview(opened)
+        defer { opened.removeFromSuperview() }
+        let still = try #require(opened.subviews.compactMap { $0 as? SnapLikeCountBadge }.first)
+        opened.setBoostTotal(3)
+        #expect(still.layer.animationKeys()?.isEmpty ?? true)
+        #expect(still.alpha == 1)
+    }
+
+    /// A hidden count (#397) shows no badge, stake or not; a text page has no
+    /// like button to wear one.
+    @Test func noBadgeForAHiddenCountOrOnATextPage() {
+        let hidden = Self.chrome(likes: 900, hidden: true)
+        hidden.setBoostTotal(3)
+        #expect(hidden.debugLikeBadgeText == nil)
+
+        let text = Self.chrome(likes: 900, media: false)
+        #expect(text.debugLikeBadgeText == nil)
+    }
+
+    /// The comments panel's stake bubble wears the same face, badge and menu
+    /// line — so the layouts' crossfade stays between two identical bubbles.
+    @Test func theComposersLikeFaceMatchesTheRails() throws {
+        let bar = CommentsInputBar()
+        bar.usesLikeFace = true
+        let boost = try #require(
+            bar.subviews.compactMap { $0 as? UIButton }.first { $0.accessibilityLabel == "Like" }
+        )
+        bar.setLikeCount(40)
+        #expect(bar.debugLikeBadgeText == "40")
+        #expect(boost.configuration?.image != nil)
+
+        bar.setBoostTotal(2, animated: true)
+        #expect(bar.debugLikeBadgeText == "42")
+        #expect(boost.configuration?.image != nil)
+        #expect(boost.configuration?.attributedTitle == nil, "the composer's like face showed a number")
+        #expect(boost.accessibilityValue == "42 likes, you staked 2 points")
+        let first = try #require(bar.currentBoostMenuActions().first as? UIAction)
+        #expect(first.title == "You staked 2 points")
+    }
+
+    /// Off (post detail, everywhere but the snap panel): the receipt face as
+    /// before, and no badge.
+    @Test func withoutTheLikeFaceTheComposerKeepsItsReceipt() {
+        let bar = CommentsInputBar()
+        bar.setLikeCount(40)
+        bar.setBoostTotal(60)
+        #expect(bar.debugLikeBadgeText == nil)
+        let titles = bar.currentBoostMenuActions().compactMap { ($0 as? UIAction)?.title }
+        #expect(!titles.contains { $0.hasPrefix("You staked") })
     }
 
     @Test func composerBoostSwapsGlyphForSpentTotalAndBack() throws {

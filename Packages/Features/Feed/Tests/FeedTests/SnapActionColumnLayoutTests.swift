@@ -68,7 +68,8 @@ struct SnapActionColumnLayoutTests {
         in root: UIView, space: UICoordinateSpace
     ) throws -> (stake: CGRect?, rail: CGRect, field: CGRect, bar: CommentsInputBar) {
         let bar = try #require(firstView(CommentsInputBar.self, in: root))
-        let stake = button(bar, "Boost post").flatMap { $0.isHidden ? nil : $0 }
+        // The snap panel's stake bubble wears the like face (#668).
+        let stake = button(bar, "Like").flatMap { $0.isHidden ? nil : $0 }
         let rail = bar.debugRailButton
         let field = try #require(fieldView(in: bar))
         return (

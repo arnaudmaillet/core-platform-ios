@@ -76,14 +76,30 @@ public enum StakeMenu {
     /// empty pack's row: it is the way TO the pack, so with an `openShop` it
     /// is enabled and opens the Shop (2026-10-02) — without one (no shop
     /// sells packs: the fleet, a test host) it stays a disabled signpost.
+    ///
+    /// `showsStake` heads the menu with what the viewer has already staked
+    /// on the post ("You staked 37 points", #668), while there is any. OFF by
+    /// default: only the snap feed's controls ask for it — its like button
+    /// stopped showing the viewer's spend as a number, and the menu is where
+    /// that answer went. The cards' like chips never showed it and don't.
     public static func elements(
         for state: State,
         stake: @escaping @MainActor (Int) -> Void,
         shoot: @escaping @MainActor () -> Void,
         undo: (@MainActor () -> Void)?,
-        openShop: (@MainActor () -> Void)? = nil
+        openShop: (@MainActor () -> Void)? = nil,
+        showsStake: Bool = false
     ) -> [UIMenuElement] {
-        var actions: [UIMenuElement] = [shotAction(for: state, shoot: shoot, openShop: openShop)]
+        var actions: [UIMenuElement] = []
+        if showsStake, state.stakedOnTarget > 0 {
+            // A row that reads, not one that acts: disabled.
+            actions.append(UIAction(
+                title: stakedLine(state.stakedOnTarget),
+                image: UIImage(systemName: PointsSymbol.glyph),
+                attributes: .disabled
+            ) { _ in })
+        }
+        actions.append(shotAction(for: state, shoot: shoot, openShop: openShop))
 
         let tap = UIAction(
             title: points(state.tapAmount),
@@ -141,6 +157,11 @@ public enum StakeMenu {
     /// "Get ×100 cartridges in the Shop" — the empty pack's row.
     public nonisolated static func shopSubtitle(_ shotAmount: Int) -> String {
         "Get \(shotName(shotAmount)) cartridges in the Shop"
+    }
+
+    /// "You staked 37 points" — the viewer's total on the post (#668).
+    public nonisolated static func stakedLine(_ amount: Int) -> String {
+        "You staked \(points(amount))"
     }
 
     /// "1 point", "100 points".
