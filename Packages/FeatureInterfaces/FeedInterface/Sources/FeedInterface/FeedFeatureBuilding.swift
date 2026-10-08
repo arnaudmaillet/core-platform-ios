@@ -125,6 +125,16 @@ public protocol FeedFeatureBuilding: ConversationThreadScreenBuilding, TextPostS
         postIDs: [PostID],
         ownsInteractiveDismissal: Bool
     ) -> UIViewController
+
+    /// The same feed over a COMPLETE set (#628): `postIDs` is everything its
+    /// source has — a map marker's or cluster's posts — so a swipe up past the
+    /// last one may close the feed. Without this a feed never knows it is at
+    /// the end, which is the safe answer for a window cut from a longer grid.
+    func makeSnapFeedViewController(
+        postIDs: [PostID],
+        ownsInteractiveDismissal: Bool,
+        sourceIsComplete: Bool
+    ) -> UIViewController
     // (see `SnapFeedSettleReporting` below for asking a built feed where the
     // viewer stopped — the one question a presenter outside this package has
     // to be able to put to it.)
@@ -458,6 +468,14 @@ extension FeedFeatureBuilding {
     /// unqualified spelling and only the plain-push caller has to say otherwise.
     public func makeSnapFeedViewController(postIDs: [PostID]) -> UIViewController {
         makeSnapFeedViewController(postIDs: postIDs, ownsInteractiveDismissal: true)
+    }
+
+    /// A conformer that cannot tell a complete set from a window opens the
+    /// plain feed — "not known to be the end", the safe answer.
+    public func makeSnapFeedViewController(
+        postIDs: [PostID], ownsInteractiveDismissal: Bool, sourceIsComplete: Bool
+    ) -> UIViewController {
+        makeSnapFeedViewController(postIDs: postIDs, ownsInteractiveDismissal: ownsInteractiveDismissal)
     }
 }
 

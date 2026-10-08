@@ -108,7 +108,9 @@ public final class InteractiveSlideDismissal: NSObject {
     /// excluded axis at — a window can only shrink onto a rect some screen is
     /// really showing, and an axis with no such rect must ride the plain
     /// slide instead.
-    public var revealReturnAxes: Set<ZoomDismissAxis> = [.horizontal, .vertical]
+    /// `upward` (#628) is in it by default: the swipe past a finished source
+    /// closes as the window the other two do.
+    public var revealReturnAxes: Set<ZoomDismissAxis> = [.horizontal, .vertical, .upward]
 
     /// The axis the FALLBACK slide travels on, when it is not the axis the
     /// finger travelled on.
@@ -296,7 +298,7 @@ public final class InteractiveSlideDismissal: NSObject {
         prepareForDismissal = nil
         revealGeometry = nil
         revealPresents = false
-        revealReturnAxes = [.horizontal, .vertical]
+        revealReturnAxes = [.horizontal, .vertical, .upward]
         fallbackSlideAxis = nil
         // ⚠️ AND THIS ONE, which outlived its presentation and answered about a
         // post that was two screens ago.
@@ -483,7 +485,7 @@ public final class InteractiveSlideDismissal: NSObject {
         // A real touch picks the axis in `gestureRecognizerShouldBegin`; this
         // harness has no velocity to be matched, so it says so directly — and
         // only for an axis the attach allowed, exactly like the begin gate.
-        guard axes.contains(axis) else { return false }
+        guard ZoomDismissAxis.withUpward(axes).contains(axis) else { return false }
         activeAxis = axis
         beginSwipe()
         let isDriven = feedViewController?.transitionCoordinator?.isInteractive == true
@@ -655,7 +657,12 @@ extension InteractiveSlideDismissal: UINavigationControllerDelegate {
         // `fallbackSlideAxis`). A back-button pop (no interaction) exits
         // horizontally, the platform's own direction.
         guard interaction != nil else { return TimelineSlidePopAnimator(axis: .horizontal) }
-        return TimelineSlidePopAnimator(axis: fallbackSlideAxis ?? activeAxis)
+        // ⚠️ THE TRANSPOSITION IS THE DOWNWARD GRAB'S ONLY (#628): an upward
+        // close leaves upward with the finger — the owner's call — so a
+        // `fallbackSlideAxis` written for "a page dropped downward" leaves it be.
+        return TimelineSlidePopAnimator(
+            axis: activeAxis == .upward ? .upward : (fallbackSlideAxis ?? activeAxis)
+        )
     }
 
     public func navigationController(
@@ -781,7 +788,7 @@ extension InteractiveSlideDismissal: UIGestureRecognizerDelegate {
         // ⚠️ ASKED ONCE THE AXIS IS KNOWN, because the answer can depend on it
         // (`heroClaimsAxis`): the same photograph flies home rightward and
         // closes as this driver's window downward.
-        guard let axis = ZoomDismissAxis.match(velocity: pan.velocity(in: view), axes: axes)
+        guard let axis = ZoomDismissAxis.match(velocity: pan.velocity(in: view), axes: ZoomDismissAxis.withUpward(axes))
         else { return false }
         if arbitratesWithHeroGrab,
            DismissalArbiter.heroCarries(

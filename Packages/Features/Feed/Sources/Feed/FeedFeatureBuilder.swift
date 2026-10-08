@@ -1151,16 +1151,31 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         makeSnapFeedViewController(postIDs: postIDs, ownsInteractiveDismissal: ownsInteractiveDismissal, continuation: nil)
     }
 
+    public func makeSnapFeedViewController(
+        postIDs: [PostID],
+        ownsInteractiveDismissal: Bool,
+        sourceIsComplete: Bool
+    ) -> UIViewController {
+        makeSnapFeedViewController(
+            postIDs: postIDs, ownsInteractiveDismissal: ownsInteractiveDismissal,
+            continuation: nil, isCompleteSet: sourceIsComplete
+        )
+    }
+
     /// The feed over a window of posts — and, with `continuation`, on past it
-    /// into the source's next posts (#638).
+    /// into the source's next posts (#638). `isCompleteSet`: the window is the
+    /// whole source, so its last post is the end (#628).
     func makeSnapFeedViewController(
         postIDs: [PostID],
         ownsInteractiveDismissal: Bool,
-        continuation: SnapFeedContinuation?
+        continuation: SnapFeedContinuation?,
+        isCompleteSet: Bool = false
     ) -> UIViewController {
         let feed = makeSnapFeed(
             viewModel: FeedViewModel(
-                repository: FixedPostsFeedProvider(base: repository, ids: postIDs, continuation: continuation),
+                repository: FixedPostsFeedProvider(
+                    base: repository, ids: postIDs, continuation: continuation, isCompleteSet: isCompleteSet
+                ),
                 engagementProvider: engagementProvider,
                 commentsProvider: commentsProvider,
                 router: router

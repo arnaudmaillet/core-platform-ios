@@ -1085,6 +1085,15 @@ final class PostDetailViewController: UIViewController {
         collectionView.contentOffset.y <= -collectionView.contentInset.top + 0.5
     }
 
+    /// The mirror, for the swipe UP past a finished source (#628): nothing
+    /// left to scroll below, so an upward drag has no stream to move. A stream
+    /// shorter than its viewport is at both ends at once.
+    var streamIsAtBottom: Bool {
+        let insets = collectionView.adjustedContentInset
+        let lowest = max(-insets.top, collectionView.contentSize.height + insets.bottom - collectionView.bounds.height)
+        return collectionView.contentOffset.y >= lowest - 0.5
+    }
+
     func setStreamScrollEnabled(_ enabled: Bool) {
         if enabled { streamLock.thaw(collectionView) } else { streamLock.freeze(collectionView) }
     }

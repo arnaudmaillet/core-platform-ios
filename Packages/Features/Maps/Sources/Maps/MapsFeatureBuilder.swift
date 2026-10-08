@@ -200,7 +200,14 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
             iconCatalog: iconCatalog,
             previewCatalog: previewCatalog,
             videoPlayback: videoPlayback,
-            makeSnapFeed: { postIDs in feedFeature().makeSnapFeedViewController(postIDs: postIDs) },
+            // A marker's or a cluster's posts are everything it has: the feed
+            // knows its last post is the end, and a swipe up there closes it
+            // (#628).
+            makeSnapFeed: { postIDs in
+                feedFeature().makeSnapFeedViewController(
+                    postIDs: postIDs, ownsInteractiveDismissal: true, sourceIsComplete: true
+                )
+            },
             // The same feed, arrived at by the platform's own slide — what a
             // marker with no cover to fly opens with.
             pushPlainSnapFeed: { postIDs, presenter in
