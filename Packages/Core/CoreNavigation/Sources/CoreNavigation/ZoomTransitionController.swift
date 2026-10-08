@@ -332,6 +332,18 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
         // card's presentation size against them.
         interruptor.flightCard = { [weak zoom] in zoom?.stagedFlightCard }
         interruptor.flightEndpoints = { [weak zoom] in zoom?.stagedFlightEndpoints }
+        // ⚠️ THE FLIGHT'S END TAKES THE CATCHERS OFF, not only this
+        // controller's `didShow` (#670). When this controller was released
+        // before the pop's `didShow` reached it — For You's close does exactly
+        // that — the interruptor went with it and its zero-duration press and
+        // pan stayed on the container. That container is the stack's
+        // `UIViewControllerWrapperView`, the parent of every screen pushed
+        // after, and a zero-duration press with no delegate there claims the
+        // touches meant for them. The animator lives until UIKit has called
+        // its end, so the end reaches the catchers whoever else has gone;
+        // only the catchers are held, so the interruptor still lives exactly
+        // one flight.
+        zoom.onAnimationEnded = { [catchers = interruptor.catchers] in catchers.detach() }
         flightInterruptor = interruptor
         return interruptor
     }

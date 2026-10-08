@@ -49,6 +49,9 @@ final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
     private weak var container: UIView?
     private weak var pan: UIPanGestureRecognizer?
     private weak var touchCatcher: UILongPressGestureRecognizer?
+    /// The same two recognisers, held where the flight's END can reach them
+    /// without keeping this object alive — see `ZoomFlightCatchers`.
+    let catchers = ZoomFlightCatchers()
     /// Vends the card of the flight currently staged, for the free-position
     /// channel. Wired by the transition controller from the animator that
     /// builds the flight; the default answers nil, which degrades to the
@@ -109,7 +112,13 @@ final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
         #if DEBUG
         scheduleScriptedInterruptIfNeeded()
         #endif
+        attachCatchers(to: container)
+    }
 
+    /// Puts the touch catcher and the pan on the flight's container — and
+    /// `detach()` takes them off, at the flight's end whoever reports it.
+    func attachCatchers(to container: UIView) {
+        self.container = container
         // Freeze on contact: recognises at touch-down, before the pan's
         // ~10pt movement threshold, so the flight stops the instant it is
         // touched. Coexists with the pan (delegate below); the pan takes over
@@ -119,6 +128,8 @@ final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
         touch.delegate = self
         container.addGestureRecognizer(touch)
         touchCatcher = touch
+        catchers.container = container
+        catchers.touch = touch
 
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan))
         // Never blocks anything: the flight's container has no other recogniser
@@ -126,6 +137,7 @@ final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
         pan.delegate = self
         container.addGestureRecognizer(pan)
         self.pan = pan
+        catchers.pan = pan
     }
 
     // MARK: - Touch catcher
@@ -423,10 +435,35 @@ final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
     /// press left on it with no delegate would claim touches meant for the
     /// screens below.
     func detach() {
-        if let pan { container?.removeGestureRecognizer(pan) }
-        if let touchCatcher { container?.removeGestureRecognizer(touchCatcher) }
+        catchers.detach()
         pan = nil
         touchCatcher = nil
+    }
+}
+
+/// The two recognisers one flight put on its container, apart from the
+/// interruptor that owns them (#670).
+///
+/// The container is the stack's `UIViewControllerWrapperView`, the parent of
+/// every screen pushed later, and it keeps whatever is added to it. Taking the
+/// catchers off used to depend on the interruptor being told the flight was
+/// over; an interruptor released with its transition controller before that
+/// left a zero-duration press and a pan with no delegate on every later
+/// screen. The animator hands this object to the flight's end, so the
+/// catchers come off whoever is still listening, while the interruptor itself
+/// still lives exactly one flight.
+@MainActor
+final class ZoomFlightCatchers {
+    weak var container: UIView?
+    weak var touch: UIGestureRecognizer?
+    weak var pan: UIGestureRecognizer?
+
+    /// Takes both off the container. Idempotent.
+    func detach() {
+        if let pan { container?.removeGestureRecognizer(pan) }
+        if let touch { container?.removeGestureRecognizer(touch) }
+        pan = nil
+        touch = nil
     }
 }
 

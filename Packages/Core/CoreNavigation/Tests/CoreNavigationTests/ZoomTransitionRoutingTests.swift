@@ -147,6 +147,37 @@ struct ZoomTransitionRoutingTests {
                 "the interruptor outlived the flight it served")
     }
 
+    /// ⚠️ THE FLIGHT'S END TAKES THE CATCHERS OFF THE CONTAINER, even when the
+    /// controller that vended them is gone before any `didShow` reaches it
+    /// (#670).
+    ///
+    /// The container is the stack's `UIViewControllerWrapperView`, the parent
+    /// of every screen pushed later. For You's close released its controller
+    /// first, the interruptor went with it, and its zero-duration press stayed
+    /// behind: Discover's mosaic and the Following and Friends lists, pushed
+    /// next, never began a back swipe.
+    @Test func theFlightsEndTakesItsCatchersOffWhoeverIsListening() throws {
+        let container = UIView()
+        let feed = RoutedFeed()
+        var controller: ZoomTransitionController? = ZoomTransitionController(source: RoutedSource(), destination: feed)
+        let nav = UINavigationController(rootViewController: UIViewController())
+        let animator = try #require(controller?.navigationController(
+            nav, animationControllerFor: .pop, from: feed, to: UIViewController()
+        ))
+        var interruptor = controller?.navigationController(nav, interactionControllerFor: animator)
+            as? ZoomFlightInterruptor
+        try #require(interruptor).attachCatchers(to: container)
+        #expect(container.gestureRecognizers?.count == 2, "the flight should be catchable while it flies")
+
+        // The controller goes first, and no `didShow` ever reaches it.
+        interruptor = nil
+        controller = nil
+
+        animator.animationEnded?(true)
+        #expect(container.gestureRecognizers?.isEmpty ?? true,
+                "a catcher outlived its flight on the container every later screen sits in")
+    }
+
     /// `didShow` routes by WHAT showed: the feed reports the destination
     /// shown; a registered intermediate reports its own hook and neither of
     /// the others; anything else with the feed gone is the source's return.

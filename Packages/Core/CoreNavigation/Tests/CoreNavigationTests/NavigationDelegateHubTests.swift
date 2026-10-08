@@ -57,6 +57,56 @@ struct NavigationDelegateHubTests {
         withExtendedLifetime((before, lease, after)) {}
     }
 
+    /// ⚠️ AN IDLE HUB LEAVES THE SLOT (#670): any delegate there cost the
+    /// stack its full-surface back swipe on a screen whose pop brings the tab
+    /// bar back, even with every answer nil. The next lease takes it back.
+    @Test func theLastReleaseEmptiesTheSlotAndTheNextLeaseRetakesIt() {
+        let nav = UINavigationController(rootViewController: UIViewController())
+        let hub = NavigationDelegateHub.of(nav)
+        let flight = AnsweringDelegate()
+        hub.lease(flight)
+        #expect(nav.delegate === hub)
+
+        hub.release(flight)
+        #expect(nav.delegate == nil, "an idle hub kept the slot, and with it the back swipe")
+
+        let next = AnsweringDelegate()
+        NavigationDelegateHub.of(nav).lease(next)
+        #expect(nav.delegate === hub, "a lease found the hub out of its slot")
+        #expect(nav.leasedDelegate === next)
+        withExtendedLifetime((flight, next)) {}
+    }
+
+    /// Leases are weak and can die without a release — For You's flight does,
+    /// with its owner. The next `didShow` notices the hub is idle.
+    @Test func aDidShowThatFindsNoLiveLeaseEmptiesTheSlot() {
+        let nav = UINavigationController(rootViewController: UIViewController())
+        let hub = NavigationDelegateHub.of(nav)
+        var flight: AnsweringDelegate? = AnsweringDelegate()
+        hub.lease(flight!)
+        flight = nil
+
+        hub.navigationController(nav, didShow: nav.topViewController!, animated: true)
+
+        #expect(nav.delegate == nil, "a hub whose every lease was gone kept the slot")
+    }
+
+    /// Stepping out is from the hub's OWN slot only: a delegate written there
+    /// directly in the meantime is someone else's.
+    @Test func anIdleHubNeverClearsSomeoneElsesDelegate() {
+        let nav = UINavigationController(rootViewController: UIViewController())
+        let hub = NavigationDelegateHub.of(nav)
+        let flight = AnsweringDelegate()
+        hub.lease(flight)
+        let direct = AnsweringDelegate()
+        nav.delegate = direct
+
+        hub.release(flight)
+
+        #expect(nav.delegate === direct)
+        withExtendedLifetime((flight, direct)) {}
+    }
+
     @Test func aReleasedLeaseIsNotToldAnything() {
         let nav = UINavigationController(rootViewController: UIViewController())
         let hub = NavigationDelegateHub.of(nav)

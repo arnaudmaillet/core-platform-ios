@@ -135,6 +135,21 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     /// would have landed.
     var onPresentationReversed: (() -> Void)?
 
+    /// Runs once, when UIKit reports this flight over (`animationEnded`) —
+    /// completed, cancelled or caught.
+    ///
+    /// The one end-of-flight signal that does not depend on who is listening:
+    /// UIKit keeps the animation controller alive until it has called this, so
+    /// cleanup hung here happens even when the transition controller that
+    /// vended the flight is gone before `didShow` (#670).
+    var onAnimationEnded: (() -> Void)?
+
+    func animationEnded(_ transitionCompleted: Bool) {
+        let ended = onAnimationEnded
+        onAnimationEnded = nil
+        ended?()
+    }
+
     /// Set when a grab that started from REST owns this transition.
     ///
     /// `ZoomDismissInteractionController` stages its OWN complete flight — card,

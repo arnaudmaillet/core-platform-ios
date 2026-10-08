@@ -34,6 +34,18 @@ import UIKit
 /// A delegate written to the slot directly (code or tests that predate the hub)
 /// is adopted the next time the hub is reached — at the bottom if it was there
 /// first, on top if it was written after — so nothing is silently dropped.
+///
+/// ⚠️ **AN IDLE HUB LEAVES THE SLOT** (#670). A navigation controller with ANY
+/// delegate implementing the transition callbacks loses its full-surface back
+/// swipe on a screen whose pop brings the tab bar back
+/// (`hidesBottomBarWhenPushed`): UIKit's own delegate for that recogniser
+/// refuses the touch before anything public is asked, even when every answer
+/// would have been nil. Measured on For You's stack after one opened and
+/// closed post: Discover's mosaic and the Following and Friends lists would not
+/// swipe back while the hub sat in the slot with no lease, and swiped back the
+/// moment the slot was empty. So once its last lease is released or gone (a
+/// `release`, or a `didShow` that finds none alive) the hub steps out; the next
+/// `lease` puts it back.
 @MainActor
 public final class NavigationDelegateHub: NSObject, UINavigationControllerDelegate {
     private struct Lease {
@@ -102,6 +114,16 @@ public final class NavigationDelegateHub: NSObject, UINavigationControllerDelega
     /// Takes `delegate` out, uncovering whatever is below it. Idempotent.
     public func release(_ delegate: any UINavigationControllerDelegate) {
         leases.removeAll { $0.delegate === delegate || $0.delegate == nil }
+        vacateIfIdle()
+    }
+
+    /// Steps out of the slot when no lease is alive — see the type's note.
+    /// Only out of its OWN slot: a delegate written there directly since is
+    /// someone else's, and is adopted when the hub is next reached.
+    private func vacateIfIdle() {
+        prune()
+        guard leases.isEmpty, let nav = navigationController, nav.delegate === self else { return }
+        nav.delegate = nil
     }
 
     /// The lease UIKit's questions go to.
@@ -194,6 +216,9 @@ public final class NavigationDelegateHub: NSObject, UINavigationControllerDelega
                 viewController: viewController, animated: animated
             )
         }
+        // A lease can die without a release (they are weak): the outermost
+        // `didShow` is the moment to notice the hub is idle.
+        if outer == nil { vacateIfIdle() }
     }
 }
 
