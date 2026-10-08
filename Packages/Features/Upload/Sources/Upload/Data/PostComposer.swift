@@ -146,11 +146,9 @@ public extension PostComposing {
 /// IssueUploadTicket → background byte upload → CommitUpload → ResolveDelivery
 /// → CreatePost(draft) → PublishPost, then the optimistic local insert.
 public actor PostComposer: PostComposing {
-    private let mediaClient: any Media_V1_MediaServiceClientInterface
     private let postClient: any Post_V1_PostServiceClientInterface
     private let profileClient: any Profile_V1_ProfileServiceClientInterface
     private let authSession: any AuthSessionProviding
-    private let uploadTransport: any MediaUploadTransport
     private let imagePipeline: ImagePipeline
     private let composedChannel: ComposedPostChannel
     private let encoder: MediaEncoder
@@ -164,8 +162,7 @@ public actor PostComposer: PostComposing {
     /// unreachable through the normal seam — and an unreachable fallback is one
     /// nobody has ever seen run.
     private let posterFrame: @Sendable (ExportedVideo) async -> UIImage?
-    private let resolveMaxAttempts: Int
-    private let resolvePollSeconds: Double
+    private let uploader: MediaAssetUploader
     private let now: @Sendable () -> Date
     private let logger = Logger(subsystem: "cn.wynn.core-platform-ios", category: "compose")
 
@@ -195,7 +192,6 @@ public actor PostComposer: PostComposing {
         resolvePollSeconds: Double = 1,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
-        self.mediaClient = mediaClient
         self.postClient = postClient
         self.profileClient = profileClient
         self.authSession = authSession
@@ -205,14 +201,15 @@ public actor PostComposer: PostComposing {
             try await AccountProfilesReader.profileIDs(ofAccount: account.rawValue, using: profileClient)
                 .map { ProfileID($0) }
         }
-        self.uploadTransport = uploadTransport
         self.imagePipeline = imagePipeline
         self.composedChannel = composedChannel
         self.encoder = encoder
         self.videoExporter = videoExporter
         self.posterFrame = posterFrame
-        self.resolveMaxAttempts = resolveMaxAttempts
-        self.resolvePollSeconds = resolvePollSeconds
+        self.uploader = MediaAssetUploader(
+            mediaClient: mediaClient, transport: uploadTransport,
+            resolveMaxAttempts: resolveMaxAttempts, resolvePollSeconds: resolvePollSeconds
+        )
         self.now = now
     }
 
@@ -294,10 +291,9 @@ public actor PostComposer: PostComposing {
             ownerID: ownerID,
             mimeType: encoded.mimeType,
             sizeBytes: encoded.byteSize,
-            sha256: encoded.sha256Hex
-        ) { ticket in
-            try await self.uploadTransport.upload(encoded.data, using: ticket)
-        }
+            sha256: encoded.sha256Hex,
+            payload: .data(encoded.data)
+        )
         return MediaAttachment(
             url: cdnURL,
             thumbnailURL: cdnURL,
@@ -323,10 +319,9 @@ public actor PostComposer: PostComposing {
             ownerID: ownerID,
             mimeType: exported.mimeType,
             sizeBytes: exported.byteSize,
-            sha256: exported.sha256Hex
-        ) { ticket in
-            try await self.uploadTransport.upload(fileURL: exported.fileURL, using: ticket)
-        }
+            sha256: exported.sha256Hex,
+            payload: .file(exported.fileURL)
+        )
 
         let poster = await uploadPoster(for: exported, ownerID: ownerID)
 
@@ -388,10 +383,9 @@ public actor PostComposer: PostComposing {
                 ownerID: ownerID,
                 mimeType: encoded.mimeType,
                 sizeBytes: encoded.byteSize,
-                sha256: encoded.sha256Hex
-            ) { ticket in
-                try await self.uploadTransport.upload(encoded.data, using: ticket)
-            }
+                sha256: encoded.sha256Hex,
+                payload: .data(encoded.data)
+            )
             return (frame, url)
         } catch {
             logger.warning("poster upload failed (\(String(describing: error))); publishing without one")
@@ -399,80 +393,22 @@ public actor PostComposer: PostComposing {
         }
     }
 
-    /// The shared media.v1 upload dance: IssueUploadTicket → byte upload
-    /// (delegated) → CommitUpload → ResolveDelivery. Returns the delivery URL.
+    /// The shared media.v1 upload dance (`MediaAssetUploader`, shared with the
+    /// Messages thread since #681). Returns the delivery URL.
     private func uploadAsset(
         ownerID: AccountID,
         mimeType: String,
         sizeBytes: UInt64,
         sha256: String,
-        uploadBytes: (MediaUploadTicket) async throws -> String
+        payload: MediaAssetUploader.Payload
     ) async throws -> URL {
-        // 1. Ticket. NOTE: MediaKind has no video value yet — pass `.postImage`
-        //    until the Phase 3 contract adds `MEDIA_KIND_POST_VIDEO`. The mock
-        //    ignores `kind` and routes on `declaredMimeType`.
-        var ticketRequest = Media_V1_IssueUploadTicketRequest()
-        ticketRequest.ownerID = ownerID.rawValue
-        ticketRequest.kind = .postImage
-        ticketRequest.declaredMimeType = mimeType
-        ticketRequest.declaredSizeBytes = sizeBytes
-        ticketRequest.contentSha256 = sha256
-        ticketRequest.idempotencyKey = UUID().uuidString
-
-        let ticketResponse = await mediaClient.issueUploadTicket(request: ticketRequest, headers: [:])
-        let ticketBody = try unwrap(ticketResponse.message, errorMessage: ticketResponse.error?.message, as: ComposeError.media)
-        let assetID = ticketBody.assetID
-
-        // 2. Upload bytes + 3. Commit (skipped when the server deduplicated).
-        if !ticketBody.deduplicated {
-            guard let uploadURL = URL(string: ticketBody.ticket.uploadURL) else {
-                throw ComposeError.media("invalid upload URL")
-            }
-            let ticket = MediaUploadTicket(
-                uploadURL: uploadURL,
-                httpMethod: ticketBody.ticket.method,
-                requiredHeaders: ticketBody.ticket.requiredHeaders,
-                maxSizeBytes: ticketBody.ticket.maxSizeBytes
-            )
-            let etag: String
-            do {
-                etag = try await uploadBytes(ticket)
-            } catch {
-                throw ComposeError.media("upload failed: \(error)")
-            }
-
-            var commitRequest = Media_V1_CommitUploadRequest()
-            commitRequest.assetID = assetID
-            commitRequest.etag = etag
-            commitRequest.contentSha256 = sha256
-            let commitResponse = await mediaClient.commitUpload(request: commitRequest, headers: [:])
-            _ = try unwrap(commitResponse.message, errorMessage: commitResponse.error?.message, as: ComposeError.media)
+        do {
+            return try await uploader.upload(
+                payload, ownerID: ownerID.rawValue, mimeType: mimeType, sizeBytes: sizeBytes, sha256: sha256
+            ).url
+        } catch let error as MediaAssetUploader.UploadError {
+            throw ComposeError.media(error.message)
         }
-
-        // 4. Resolve delivery. Processing is async server-side (PENDING →
-        //    worker), so poll until a rendition URL is available.
-        return try await resolveDeliveryURL(assetID: assetID)
-    }
-
-    /// Polls ResolveDelivery until the asset has a rendition URL, tolerating
-    /// the async media pipeline. Throws a clear error if it never becomes
-    /// deliverable within the budget.
-    private func resolveDeliveryURL(assetID: String) async throws -> URL {
-        for attempt in 0..<resolveMaxAttempts {
-            if attempt > 0 {
-                try? await Task.sleep(for: .seconds(resolvePollSeconds))
-            }
-            var request = Media_V1_ResolveDeliveryRequest()
-            request.assetID = assetID
-            request.preferred = .mediaRenditionKindLarge
-            let response = await mediaClient.resolveDelivery(request: request, headers: [:])
-            if let body = response.message,
-               let urlString = body.media.renditions.first(where: { !$0.url.isEmpty })?.url,
-               let url = URL(string: urlString) {
-                return url
-            }
-        }
-        throw ComposeError.media("media still processing (asset \(assetID) not ready)")
     }
 
     private func createDraft(profileID: ProfileID, caption: String, attachments: [Post_V1_MediaAttachmentInput], hasMedia: Bool) async throws -> PostID {

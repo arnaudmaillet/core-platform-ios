@@ -1147,8 +1147,36 @@ final class AppContainer {
         profileClient: Profile_V1_ProfileServiceClient(client: authenticatedRPCClient),
         authSession: sessionManager,
         viewer: viewerSession,
+        // A message's photo or video goes up the way a post's does (#681).
+        mediaUploader: MediaAssetUploader(
+            mediaClient: Media_V1_MediaServiceClient(client: authenticatedRPCClient),
+            transport: mediaUploadTransport
+        ),
         inboxPageSize: Self.inboxPageSize
     )
+
+    /// The thread's camera and library (#681): the upload flow's own sheet,
+    /// in its send mode, its picks spelled as Chat sends them.
+    private var chatMediaPicker: ChatMediaPickerFactory {
+        { [unowned self] source, completion in
+            self.uploadFeature.makeSendMediaPicker(source == .camera ? .camera : .library) { picked in
+                completion(picked.map(Self.chatUpload))
+            }
+        }
+    }
+
+    private static func chatUpload(_ picked: PickedSendMedia) -> ChatMediaUpload {
+        switch picked {
+        case .photo(let image):
+            .image(image)
+        case .video(let exported, let poster):
+            .video(ChatVideoUpload(
+                fileURL: exported.fileURL, mimeType: exported.mimeType, poster: poster,
+                pixelWidth: exported.pixelWidth, pixelHeight: exported.pixelHeight,
+                duration: exported.durationSeconds
+            ))
+        }
+    }
 
     /// Conversations per inbox page (#593).
     ///
@@ -1194,6 +1222,7 @@ final class AppContainer {
         // One history for the whole app: a query typed in the inbox is recent on
         // the search screen, and the other way round.
         recentSearches: recentSearchStore,
+        mediaPicker: chatMediaPicker,
         // A conversation is drawn by the feed's text-post screen. Lazy, like
         // every feature here: the feed builder reaches the router, and the
         // router reaches this.
@@ -1250,6 +1279,23 @@ final class AppContainer {
         UploadFeatureBuilder(composer: postComposer, textPostScreens: { [unowned self] in self.feedFeature })
     }
 
+    /// Where media bytes go: the mock's blob store, or the fleet's object
+    /// store. Shared by posts and messages (#681).
+    private var mediaUploadTransport: any MediaUploadTransport {
+        switch environment {
+        case .mock:
+            MockMediaUploadTransport(store: mockBackend.blobStore)
+        case .localFleet:
+            // The media service presigns object-store URLs against the
+            // Docker-internal host (minio:9000), unreachable from the
+            // client; rewrite to the published host, preserving the signed
+            // Host header. Remove once the fleet presigns a reachable host.
+            URLSessionMediaUploadTransport(
+                hostRewrite: HostRewrite(from: "minio:9000", to: "localhost:9000")
+            )
+        }
+    }
+
     // Computed (not lazy): the PostComposer init is actor-isolated, which a
     // stored-property initializer can't call under default-MainActor isolation.
     private var cachedPostComposer: PostComposer?
@@ -1258,18 +1304,7 @@ final class AppContainer {
             if let cachedPostComposer {
                 return cachedPostComposer
             }
-            let uploadTransport: any MediaUploadTransport = switch environment {
-            case .mock:
-                MockMediaUploadTransport(store: mockBackend.blobStore)
-            case .localFleet:
-                // The media service presigns object-store URLs against the
-                // Docker-internal host (minio:9000), unreachable from the
-                // client; rewrite to the published host, preserving the signed
-                // Host header. Remove once the fleet presigns a reachable host.
-                URLSessionMediaUploadTransport(
-                    hostRewrite: HostRewrite(from: "minio:9000", to: "localhost:9000")
-                )
-            }
+            let uploadTransport = mediaUploadTransport
             let composer = PostComposer(
                 mediaClient: Media_V1_MediaServiceClient(client: authenticatedRPCClient),
                 postClient: Post_V1_PostServiceClient(client: authenticatedRPCClient),

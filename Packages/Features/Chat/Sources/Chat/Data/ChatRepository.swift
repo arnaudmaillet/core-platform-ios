@@ -3,6 +3,8 @@ import CoreContracts
 import CoreModels
 import CoreNetworking
 import Foundation
+import MediaCore
+import UIKit
 
 public enum ChatError: Error, Equatable, Sendable {
     case notAuthenticated
@@ -10,6 +12,10 @@ public enum ChatError: Error, Equatable, Sendable {
     /// CHT-1011: the recipient takes no messages ("Who Can Message": No
     /// One, #397). A narrower audience makes the message a request instead.
     case messagesRefused
+    /// The photo or video could not be uploaded (#681); nothing was sent.
+    case mediaUpload(message: String)
+    /// This provider sends no media.
+    case mediaUnsupported
     case transport(message: String)
 }
 
@@ -117,6 +123,9 @@ public struct ChatMessage: Equatable, Sendable, Identifiable {
     /// The id of the message this one replies to, if any — chat.v1's
     /// `reply_to`. `nil` for a normal (non-threaded) message.
     public let replyToID: String?
+    /// The photo or video a MEDIA message carries (#681); `body` is then its
+    /// caption, often empty.
+    public let media: ChatMedia?
 
     public init(
         id: String,
@@ -124,7 +133,8 @@ public struct ChatMessage: Equatable, Sendable, Identifiable {
         body: String,
         createdAt: Date,
         isMine: Bool,
-        replyToID: String? = nil
+        replyToID: String? = nil,
+        media: ChatMedia? = nil
     ) {
         self.id = id
         self.senderID = senderID
@@ -132,6 +142,7 @@ public struct ChatMessage: Equatable, Sendable, Identifiable {
         self.createdAt = createdAt
         self.isMine = isMine
         self.replyToID = replyToID
+        self.media = media
     }
 }
 
@@ -198,6 +209,12 @@ public protocol ChatProviding: ViewerIdentityProviding {
     /// Sends `body`, optionally as a threaded reply to `replyToID` (chat.v1
     /// `reply_to`). Returns the created, viewer-owned message.
     func send(_ body: String, to conversationID: ConversationID, replyingTo replyToID: String?) async throws -> ChatMessage
+    /// Uploads `media` (media.v1), then sends it as a MEDIA message with
+    /// `caption` as its body (#681). Returns the created, viewer-owned
+    /// message. `ChatError.mediaUpload` when the upload failed.
+    func send(
+        media: ChatMediaUpload, caption: String, to conversationID: ConversationID, replyingTo replyToID: String?
+    ) async throws -> ChatMessage
     func markRead(_ conversationID: ConversationID, upTo messageID: String) async throws
     /// The direct-message conversation with `profileID`, reusing an existing
     /// 1:1 conversation or creating one.
@@ -228,6 +245,13 @@ extension ChatProviding {
     public func send(_ body: String, to conversationID: ConversationID) async throws -> ChatMessage {
         try await send(body, to: conversationID, replyingTo: nil)
     }
+
+    /// Providers that send no media (previews, fakes).
+    public func send(
+        media: ChatMediaUpload, caption: String, to conversationID: ConversationID, replyingTo replyToID: String?
+    ) async throws -> ChatMessage {
+        throw ChatError.mediaUnsupported
+    }
 }
 
 /// Reads/writes conversations via chat.v1, hydrating member names via
@@ -247,15 +271,22 @@ public actor ChatRepository: ChatProviding {
     private let viewer: any ViewerProviding
     private var nameCache: [ProfileID: String] = [:]
     private var handleCache: [ProfileID: String] = [:]
+    /// Uploads a message's photo or video (#681); nil sends no media.
+    private let mediaUploader: MediaAssetUploader?
+    private let encoder: MediaEncoder
 
     public init(
         chatClient: any Chat_V1_ChatServiceClientInterface,
         profileClient: any Profile_V1_ProfileServiceClientInterface,
         authSession: any AuthSessionProviding,
         viewer: (any ViewerProviding)? = nil,
+        mediaUploader: MediaAssetUploader? = nil,
+        encoder: MediaEncoder = MediaEncoder(),
         pageSize: Int32 = 50,
         inboxPageSize: Int32 = 20
     ) {
+        self.mediaUploader = mediaUploader
+        self.encoder = encoder
         self.chatClient = chatClient
         self.profileClient = profileClient
         self.authSession = authSession
@@ -383,7 +414,7 @@ public actor ChatRepository: ChatProviding {
         return Conversation(
             id: ConversationID(entry.conversationID),
             title: title.isEmpty ? "Conversation" : title,
-            lastMessage: last?.preview ?? "",
+            lastMessage: last.map(Self.previewText) ?? "",
             // Only a delivered message is activity on the row: an entry with
             // none dates from when the viewer joined, which is no news.
             lastActivityAt: last.map { _ in Date(timeIntervalSince1970: TimeInterval(entry.lastActivityMs) / 1000) },
@@ -431,11 +462,79 @@ public actor ChatRepository: ChatProviding {
 
     public func send(_ body: String, to conversationID: ConversationID, replyingTo replyToID: String?) async throws -> ChatMessage {
         let viewer = try await resolveViewerProfileID(forWrite: "send")
+        return try await sendMessage(
+            body: body, media: nil, as: viewer, to: conversationID, replyingTo: replyToID
+        )
+    }
+
+    public func send(
+        media upload: ChatMediaUpload, caption: String, to conversationID: ConversationID, replyingTo replyToID: String?
+    ) async throws -> ChatMessage {
+        guard let mediaUploader else { throw ChatError.mediaUnsupported }
+        let viewer = try await resolveViewerProfileID(forWrite: "send")
+        guard case .authenticated(let account) = await authSession.currentState() else {
+            throw ChatError.notAuthenticated
+        }
+        let media: ChatMedia
+        do {
+            media = try await Self.upload(upload, ownerID: account.rawValue, uploader: mediaUploader, encoder: encoder)
+        } catch let error as MediaAssetUploader.UploadError {
+            throw ChatError.mediaUpload(message: error.message)
+        } catch {
+            throw ChatError.mediaUpload(message: String(describing: error))
+        }
+        return try await sendMessage(
+            body: caption, media: media, as: viewer, to: conversationID, replyingTo: replyToID
+        )
+    }
+
+    /// The photo, or the clip and its still (best effort: a clip sends
+    /// without one), through media.v1.
+    private static func upload(
+        _ upload: ChatMediaUpload, ownerID: String, uploader: MediaAssetUploader, encoder: MediaEncoder
+    ) async throws -> ChatMedia {
+        switch upload {
+        case .image(let image):
+            let encoded = try encoder.encode(image)
+            let asset = try await uploader.upload(
+                .data(encoded.data), ownerID: ownerID, mimeType: encoded.mimeType,
+                sizeBytes: encoded.byteSize, sha256: encoded.sha256Hex
+            )
+            return ChatMedia(
+                kind: .image, url: asset.url, pixelWidth: encoded.pixelWidth, pixelHeight: encoded.pixelHeight
+            )
+        case .video(let video):
+            let fingerprint = try video.fingerprint()
+            let asset = try await uploader.upload(
+                .file(video.fileURL), ownerID: ownerID, mimeType: video.mimeType,
+                sizeBytes: fingerprint.size, sha256: fingerprint.sha256
+            )
+            var posterURL: URL?
+            if let poster = video.poster, let encoded = try? encoder.encode(poster) {
+                posterURL = try? await uploader.upload(
+                    .data(encoded.data), ownerID: ownerID, mimeType: encoded.mimeType,
+                    sizeBytes: encoded.byteSize, sha256: encoded.sha256Hex
+                ).url
+            }
+            return ChatMedia(
+                kind: .video, url: asset.url, posterURL: posterURL,
+                pixelWidth: video.pixelWidth, pixelHeight: video.pixelHeight, duration: video.duration
+            )
+        }
+    }
+
+    /// chat.v1 `SendMessage`: TEXT with `body`, or MEDIA with the reference
+    /// (`ChatMediaRef`) and `body` as its caption.
+    private func sendMessage(
+        body: String, media: ChatMedia?, as viewer: ProfileID,
+        to conversationID: ConversationID, replyingTo replyToID: String?
+    ) async throws -> ChatMessage {
         var request = Chat_V1_SendMessageRequest()
         request.conversationID = conversationID.rawValue
         request.senderID = viewer.rawValue
-        request.contentType = .text
+        request.contentType = media == nil ? .text : .media
         request.body = body
+        if let media { request.mediaRef = ChatMediaRef.encode(media) }
         if let replyToID { request.replyTo = replyToID }
         let response = await chatClient.sendMessage(request: request, headers: [:])
         switch response.result {
@@ -446,7 +545,8 @@ public actor ChatRepository: ChatProviding {
                 body: body,
                 createdAt: Date(),
                 isMine: true,
-                replyToID: replyToID
+                replyToID: replyToID,
+                media: media
             )
         case .failure(let error):
             if (error.message ?? "").contains("CHT-1011") { throw ChatError.messagesRefused }
@@ -582,6 +682,14 @@ public actor ChatRepository: ChatProviding {
         return tail.count { ProfileID($0.senderID) != viewer }
     }
 
+    /// The inbox row's line: the preview, or — a MEDIA message with no
+    /// caption, whose preview is empty — what it carries (#681). The preview
+    /// holds no reference, so the line cannot say which of the two.
+    static func previewText(_ preview: Chat_V1_MessagePreview) -> String {
+        guard preview.preview.isEmpty, preview.contentType == .media else { return preview.preview }
+        return "Photo or video"
+    }
+
     private static func makeMessage(from view: Chat_V1_MessageView, viewer: ProfileID) -> ChatMessage {
         let sender = ProfileID(view.senderID)
         return ChatMessage(
@@ -590,7 +698,8 @@ public actor ChatRepository: ChatProviding {
             body: view.body,
             createdAt: Date(timeIntervalSince1970: TimeInterval(view.createdAtMs) / 1000),
             isMine: sender == viewer,
-            replyToID: view.replyTo.isEmpty ? nil : view.replyTo
+            replyToID: view.replyTo.isEmpty ? nil : view.replyTo,
+            media: view.contentType == .media ? ChatMediaRef.decode(view.mediaRef) : nil
         )
     }
 

@@ -40,7 +40,9 @@ import UIKit
 /// surface, and the colour that disappears next to a picture is black.
 @MainActor
 final class CaptureViewController: UIViewController {
-    typealias MakeEditor = ([MediaLibraryItem], [String: MediaEdits]) -> UIViewController
+    /// The screen a capture goes on to — nil when it goes back to the
+    /// presenter instead (a message's camera, #681).
+    typealias MakeEditor = ([MediaLibraryItem], [String: MediaEdits]) -> UIViewController?
 
     private let source: any CaptureSource
     private let folder: CaptureFolder
@@ -1193,8 +1195,8 @@ final class CaptureViewController: UIViewController {
     /// for the editor to filter.
     private func openEditor(_ items: [MediaLibraryItem], edits: [String: MediaEdits]) {
         let edits = edits.filter { !$0.value.isUntouched }
-        let editor = makeEditor(items, edits)
         debugLastHandOff = (items, edits)
+        guard let editor = makeEditor(items, edits) else { return }
         navigationController?.pushViewController(editor, animated: true)
     }
 

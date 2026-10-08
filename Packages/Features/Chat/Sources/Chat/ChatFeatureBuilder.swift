@@ -33,6 +33,8 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
     /// router, and the router reaches this — the same lazy edge Maps takes to
     /// the feed.
     private let threadScreens: () -> any ConversationThreadScreenBuilding
+    /// The thread's camera and library (#681); nil sends text only.
+    private let mediaPicker: ChatMediaPickerFactory?
 
     public init(
         repository: any ChatProviding,
@@ -41,9 +43,11 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         imagePipeline: ImagePipeline? = nil,
         router: (any Router)? = nil,
         recentSearches: RecentSearchStore? = nil,
+        mediaPicker: ChatMediaPickerFactory? = nil,
         threadScreens: @escaping () -> any ConversationThreadScreenBuilding
     ) {
         self.threadScreens = threadScreens
+        self.mediaPicker = mediaPicker
         let directory = ConversationDirectory()
         self.directory = directory
         catalog = InboxCatalog(repository: repository, directory: directory)
@@ -186,6 +190,7 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         viewModel.onDidSendMessage = { [catalog] id, message in
             catalog.recordSentMessage(message, in: id)
         }
+        viewModel.onDidUploadMedia = { [imagePipeline] image, url in imagePipeline?.store(image, for: url) }
         // A draft that just became real: the inbox has never heard of it, so
         // the viewer would otherwise swipe back from a thread they started to
         // a list without it.
@@ -208,7 +213,8 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
             viewer: repository,
             avatars: connections as? any PeerAvatarProviding,
             // The thread's pin is the inbox's: a peek offers no pinning.
-            pins: mode == .full ? catalog : nil
+            pins: mode == .full ? catalog : nil,
+            mediaPicker: mode == .full ? mediaPicker : nil
         )
         return threadScreens().makeConversationThreadViewController(
             driver: driver,

@@ -9,7 +9,7 @@ extension Conversation {
         Conversation(
             id: id,
             title: title,
-            lastMessage: message.body,
+            lastMessage: message.summary,
             lastActivityAt: message.createdAt,
             otherMemberIDs: otherMemberIDs,
             lastMessageIsMine: true,
