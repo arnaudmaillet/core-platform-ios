@@ -603,6 +603,17 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         surface.openPost = { [self] presenter, origin, ids in
             presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)
         }
+        // "View all" on a discover page: For You's own media gallery, with the
+        // header For You's pushed screens wear (#629).
+        surface.makeGallery = { [self] in
+            DiscoverGalleryViewController(
+                imagePipeline: imagePipeline, videoPlayback: videoPlayback,
+                header: PushedScreenHeader(wallet: wallet, makeWalletSheet: makeWalletSheet, router: router),
+                openPost: { [self] presenter, origin, ids in
+                    presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)
+                }
+            )
+        }
         return surface
     }
 

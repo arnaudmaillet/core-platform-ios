@@ -66,13 +66,15 @@ private func hit(_ id: String, media: Bool = true) -> PostSearchHit {
 
 @MainActor
 struct HashtagViewModelTests {
-    @Test func topIsThePicturesRecentIsEverything() async {
+    /// Both lists hold every post, text ones included: the page draws a text
+    /// post as a card and tiles media into its mosaic slices itself (#629).
+    @Test func bothListsHoldEveryPost() async {
         let search = TagSearch(top: [hit("a"), hit("t", media: false), hit("b")], recent: [hit("t", media: false), hit("a")])
         let viewModel = HashtagViewModel(tag: "#Travel", repository: search)
         await viewModel.load()
 
         #expect(viewModel.title == "#travel")
-        #expect(viewModel.top == .posts([PostID("a"), PostID("b")]))
+        #expect(viewModel.top == .posts([PostID("a"), PostID("t"), PostID("b")]))
         #expect(viewModel.recent == .posts([PostID("t"), PostID("a")]))
         #expect(await search.queries.count == 2)
         #expect(await search.queries.allSatisfy { $0 == "#travel" }, "the tag is asked for with its #")
@@ -146,15 +148,39 @@ struct HashtagViewModelTests {
         #expect(viewModel.recent == .posts(all.map(\.id)))
     }
 
-    /// Top shows pictures only: a page of text posts adds nothing, so it
-    /// reads on rather than leave the viewer at an end that does not move.
-    @Test func topReadsPastAPageOfTextPosts() async {
+    /// A page of text posts is a page like any other: one request, and the
+    /// next waits for the viewer (it used to read on, hunting for pictures).
+    @Test func topTakesAPageOfTextPostsAsItIs() async {
         let text = hits(page, prefix: "t", media: false)
         let pictures = hits(4, prefix: "m")
         let search = TagSearch(top: text + pictures)
         let viewModel = HashtagViewModel(tag: "travel", repository: search)
         await viewModel.load()
-        #expect(viewModel.top == .posts(pictures.map(\.id)))
+        #expect(viewModel.top == .posts(text.map(\.id)))
+        #expect(viewModel.hasMore(.top))
+    }
+
+    /// The row above the list: the newest posts, at most For You's row's
+    /// number — and no row while Recent has nothing to show (#629).
+    @Test func theRecentRowIsTheNewestFew() async {
+        let all = hits(page * 2)
+        let viewModel = HashtagViewModel(tag: "travel", repository: TagSearch(recent: all))
+        #expect(viewModel.recentRow == .empty(query: "#travel"), "no row while loading")
+        await viewModel.load()
+        await viewModel.loadMore(.recent)
+        #expect(page * 2 > HashtagViewModel.rowLimit, "the premise: more posts than the row holds")
+        #expect(viewModel.recentRow == .posts(Array(all.prefix(HashtagViewModel.rowLimit)).map(\.id)))
+
+        let empty = HashtagViewModel(tag: "nothing", repository: TagSearch())
+        await empty.load()
+        #expect(empty.recentRow == .empty(query: "#nothing"))
+    }
+
+    /// "Top" until the backend ranks by trend (core-platform-backend#830);
+    /// "Recent", never "New", which means unseen in this app.
+    @Test func theSectionsAreNamedForWhatTheyAre() {
+        #expect(HashtagViewModel.listTitle == "Top")
+        #expect(HashtagViewModel.rowTitle == "Recent")
     }
 
     @Test func nothingTaggedIsEmptyAndAFailureSaysSo() async {

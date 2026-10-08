@@ -419,6 +419,17 @@ public protocol PostSetSurface: AnyObject {
     /// full-screen feed opened from a tile go on into it, and know when to
     /// stop (#638). Set it with every answer; false until said otherwise.
     func setHasMore(_ hasMore: Bool)
+
+    /// `.discover` only (#629): a row of cards above the list — For You's
+    /// "Following" slot — showing these posts in this order. Anything but
+    /// `.posts` (or an empty one) shows no row.
+    func showLeadRow(_ state: PostSetSurfaceState)
+    /// `.discover` only: what the lead row and the list are titled — For You's
+    /// "Following" and "For you".
+    func setSectionTitles(row: String, list: String)
+    /// `.discover` only: the lead row's title was tapped — the host's cue to
+    /// push the row's whole list.
+    var onLeadRowTitleTapped: (() -> Void)? { get set }
 }
 
 public extension PostSetSurface {
@@ -429,14 +440,24 @@ public extension PostSetSurface {
 
     func setPaging(_ paging: Bool) {}
     func setHasMore(_ hasMore: Bool) {}
+    func showLeadRow(_ state: PostSetSurfaceState) {}
+    func setSectionTitles(row: String, list: String) {}
+    var onLeadRowTitleTapped: (() -> Void)? {
+        get { nil }
+        set {}
+    }
 }
 
-/// Which of the two For You shapes the caller wants.
+/// Which For You shape the caller wants.
 public enum PostSetSurfaceStyle: Sendable {
     /// Full-width cards — For You's "Following".
     case cards
-    /// A media grid — For You's "Discover".
+    /// A media grid — For You's "View all" mosaic.
     case gallery
+    /// For You's own page (#629): cards with slices of the media mosaic
+    /// between them, "View all" on each slice pushing the media gallery, and
+    /// an optional row of cards above it (`showLeadRow`).
+    case discover
 }
 
 /// What a post surface is being asked to show.

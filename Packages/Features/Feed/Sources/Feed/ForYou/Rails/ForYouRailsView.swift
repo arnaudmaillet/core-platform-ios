@@ -240,6 +240,16 @@ final class ForYouRailsView: UIView {
     /// The list's own title, under the rows — and, like the rows', a way in:
     /// Discover's whole mosaic.
     private let listHeader = SectionTitleView(content: .init(title: "For you", isLink: true))
+
+    /// What the card row and the list are called. For You's, by default; a
+    /// hashtag's page names them "Recent" and "Top" (#629).
+    var followingTitle = "Following" {
+        didSet { followingHeader.content = .init(title: followingTitle, newCount: followingBadge, isLink: true) }
+    }
+    var listTitle = "For you" {
+        didSet { listHeader.content = .init(title: listTitle, isLink: true) }
+    }
+    private var followingBadge = 0
     private let storiesView: UICollectionView
     /// Following's media row — the cards that play.
     private let mediaView: UICollectionView
@@ -388,7 +398,8 @@ final class ForYouRailsView: UIView {
         stories = ordered
         cards = rails.following
         friendsHeader.content = .init(title: "Friends", newCount: rails.friendsBadge, isLink: true)
-        followingHeader.content = .init(title: "Following", newCount: rails.followingBadge, isLink: true)
+        followingBadge = rails.followingBadge
+        followingHeader.content = .init(title: followingTitle, newCount: rails.followingBadge, isLink: true)
         if storiesChanged { applyStories(animated: window != nil) }
         if cardsChanged {
             applyCards()

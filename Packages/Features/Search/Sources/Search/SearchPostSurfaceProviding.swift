@@ -58,6 +58,14 @@ public protocol SearchPostSurface: AnyObject {
     /// Whether there is another page past what was shown, so a post opened
     /// from this surface can page on into it (#638).
     func setHasMore(_ hasMore: Bool)
+
+    /// `.discover` only (#629): a row of cards above the list — For You's
+    /// "Following" slot — showing these posts in this order.
+    func showLeadRow(_ state: SearchPostSurfaceState)
+    /// `.discover` only: what the lead row and the list are titled.
+    func setSectionTitles(row: String, list: String)
+    /// `.discover` only: the lead row's title was tapped.
+    var onLeadRowTitleTapped: (() -> Void)? { get set }
 }
 
 public extension SearchPostSurface {
@@ -68,6 +76,12 @@ public extension SearchPostSurface {
 
     func setPaging(_ paging: Bool) {}
     func setHasMore(_ hasMore: Bool) {}
+    func showLeadRow(_ state: SearchPostSurfaceState) {}
+    func setSectionTitles(row: String, list: String) {}
+    var onLeadRowTitleTapped: (() -> Void)? {
+        get { nil }
+        set {}
+    }
 }
 
 /// What a post surface is being asked to show.
@@ -84,10 +98,14 @@ public enum SearchPostSurfaceState: Equatable, Sendable {
     case failed(message: String)
 }
 
-/// Which of the two the caller wants.
+/// Which shape the caller wants.
 public enum SearchPostSurfaceStyle: Sendable {
-    /// Full-width cards, the shape For You's "Following" tab reads in.
+    /// Full-width cards, the shape For You's "Following" list reads in.
     case cards
-    /// A media gallery, the shape For You's "Discover" tab reads in.
+    /// A media gallery, the shape For You's "View all" mosaic reads in.
     case gallery
+    /// For You's own page (#629): cards with slices of the media mosaic
+    /// between them, "View all" into the media gallery, and an optional row
+    /// of cards above (`showLeadRow`).
+    case discover
 }
