@@ -169,6 +169,7 @@ struct AuthEndToEndTests {
         #expect(await stack.manager.currentState() == .unauthenticated, "not the session until completed")
         await stack.manager.completeSignIn(account)
         #expect(await stack.manager.currentState() == .authenticated(AccountID(MockAuthService.accountID)))
+        #expect(await !stack.manager.consumeSignUpNotice(), "a sign-in never asks about notifications (#666)")
         #expect(try await stack.manager.validAccessToken()?.hasPrefix("at-") == true)
         #expect(try stack.guestStore.load() == nil, "the guest became the member")
         // The server ended the guest session it was handed.
@@ -213,9 +214,13 @@ struct AuthEndToEndTests {
         )
         #expect(created.error == nil)
 
+        #expect(await !stack.manager.consumeSignUpNotice(), "not before the sign-up completes")
         try await stack.manager.completeSignUp(pending)
         #expect(await stack.manager.currentState() == .authenticated(pending.accountID))
         #expect(try stack.guestStore.load() == nil)
+        // The shell asks the new member about notifications, once (#666).
+        #expect(await stack.manager.consumeSignUpNotice())
+        #expect(await !stack.manager.consumeSignUpNotice())
     }
 
     @Test func underThirteenCreatesNothing() async throws {
