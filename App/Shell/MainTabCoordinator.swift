@@ -185,7 +185,8 @@ final class MainTabCoordinator: NSObject, Coordinator {
         }
         profileTab?.show(member: isMember)
         messagesTab?.show(member: isMember)
-        applyMessagesAvailability()
+        // The bar itself changes shape with the viewer (#626), in place.
+        applyBar(animated: true)
         forYouTab?.start()
         for (_, tab) in orderedTabs {
             (tab as? ExploreTabCoordinator)?.viewerDidChange()
@@ -254,9 +255,8 @@ final class MainTabCoordinator: NSObject, Coordinator {
         }
         profileMenuOverlay.isContextMenuInteractionEnabled = isMember
         popGestureEnablers = orderedTabs.map { NativePopGestureEnabler(taking: $0.1.navigationController) }
-        tabBarController.tabs = orderedTabs.map { $0.1.tab } + [createItem.tab]
+        applyBar(animated: false)
         tabBarController.delegate = self
-        applyMessagesAvailability()
         // The stake menu's way to the cartridge pack, from any screen.
         tabBarController.makeStakeShopSheet = { [unowned container] in container.makeStakeShopSheet() }
         // A `@handle` tapped in a comment, a caption or a bio (#524).
@@ -646,27 +646,42 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
         alignMenuOverlays()
     }
 
-    /// A guest has no conversations: the Messages tab stands greyed out and
-    /// takes no tap — the bar's own disabled state (`UITab.isEnabled`), not a
-    /// faded view (the bar is UIKit's to draw). A route to Messages asks a
-    /// guest to sign up instead (`AppRoute.gatedAction`). A session that ends
-    /// with Messages selected leaves it for Explore: a greyed tab is no place
-    /// to stand.
-    private func applyMessagesAvailability() {
-        guard let tab = messagesTab?.tab else { return }
-        if tab.isEnabled != isMember {
-            tab.isEnabled = isMember
-            // ⚠️ iOS 27 does not redraw a bar item when only `isEnabled`
-            // changes: a guest who signed in kept a grey Messages tab until
-            // they tapped it. Any other change redraws it, so the image goes
-            // round once.
-            let image = tab.image
-            tab.image = nil
-            tab.image = image
+    /// The bar for this viewer (#626) — a member's: Explore, For You,
+    /// Messages, Profile and the "+"; a guest's: Explore, For You, Settings and
+    /// a "Sign in" bubble. Nothing in it is a dead end.
+    ///
+    /// ⚠️ MESSAGES LEAVES THE BAR, it is not greyed out. A disabled tab stood
+    /// in a guest's bar doing nothing on tap (and iOS 27 would not even redraw
+    /// it on sign-in, #547). A route to Messages still asks a guest to sign up
+    /// (`AppRoute.gatedAction`) and lands in the inbox after.
+    ///
+    /// ⚠️ THE SAME TAB OBJECTS, re-composed with `setTabs` — never rebuilt. The
+    /// Profile tab is re-dressed as Settings by its coordinator, and the "+"
+    /// is the SAME `UISearchTab` re-dressed as "Sign in": the prominent
+    /// identifier, the hold shortcut and the menu anchor are keyed on it.
+    ///
+    /// A viewer standing on a tab that leaves (a member on Messages who logs
+    /// out) lands on Explore — set before the bar changes, so the bar never
+    /// holds a selection it no longer has.
+    private func applyBar(animated: Bool) {
+        createItem.showSignIn(!isMember)
+        createHold.isEnabled = isMember
+        // A guest's tab is Settings, with no switcher behind a long press: the
+        // overlay that carries Profile's menu goes, so the tab is the bar's own
+        // button — one element for VoiceOver, not a duplicate laid over it.
+        profileMenuOverlay.isHidden = !isMember
+        let wanted = orderedTabs
+            .filter { isMember || $0.0 != .messages }
+            .map(\.1.tab) + [createItem.tab]
+        if let selected = tabBarController.selectedTab, !wanted.contains(where: { $0 === selected }),
+           let explore = orderedTabs.first(where: { $0.0 == .explore })?.1.tab {
+            tabBarController.selectedTab = explore
         }
-        if !isMember, tabBarController.selectedTab === tab {
-            selectTab(.explore)
-        }
+        let current = tabBarController.tabs
+        guard current.count != wanted.count || zip(current, wanted).contains(where: { $0 !== $1 }) else { return }
+        tabBarController.setTabs(wanted, animated: animated)
+        // The bar changed under VoiceOver's cursor: ask it to re-read.
+        UIAccessibility.post(notification: .layoutChanged, argument: nil)
     }
 
     /// The profile a tapped `@handle` names, by the same road as a
@@ -682,6 +697,12 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
     /// VoiceOver and a hardware keyboard arrive by the same road.
     func tabBarController(_ tabBarController: UITabBarController, shouldSelectTab tab: UITab) -> Bool {
         guard tab === createItem.tab else { return true }
+        // A guest's bubble is "Sign in" (#626): one tap, the login sheet — no
+        // menu of things they cannot do yet.
+        if createItem.isSignIn {
+            onSignIn()
+            return false
+        }
         // A hold on the "+" that went on to show the camera disc is not a tap,
         // whatever the bar makes of the lift — see `CreateHoldShortcut`.
         if createHold.consumeSelection() { return false }
@@ -848,7 +869,10 @@ extension MainTabCoordinator: AppNavigating {
     }
 
     func selectTab(_ tab: AppTab) {
-        guard let match = orderedTabs.first(where: { $0.0 == tab }) else { return }
+        guard let match = orderedTabs.first(where: { $0.0 == tab }),
+              // Only a tab the bar holds: a guest's has no Messages (#626).
+              tabBarController.tabs.contains(where: { $0 === match.1.tab })
+        else { return }
         #if DEBUG
         // The zero the `[dock]` stamps are read against: how long after the tab
         // changed did the band actually arrive. Stamped HERE and not in

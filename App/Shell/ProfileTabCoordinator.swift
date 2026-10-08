@@ -19,7 +19,8 @@ import UIKit
 ///   without throwing away scroll position and gallery state on every tab
 ///   switch, so freshness has to come from the repositories and the image
 ///   cache. It IS rebuilt when the viewer changes (`show(member:)`): a guest
-///   has no profile, and a sign-in or sign-out swaps the whole stack.
+///   has no profile — their tab is Settings (#626) — and a sign-in or
+///   sign-out swaps the whole stack.
 /// - **The shell outlives the session.** Logging out returns to guest mode in
 ///   the same shell rather than to a login screen (guest mode, #438).
 @MainActor
@@ -41,6 +42,12 @@ final class ProfileTabCoordinator: TabCoordinator {
     ) { [navigationController] _ in navigationController }
 
     private static let placeholder = UIImage(systemName: "person.crop.circle")
+    /// A guest's tab: Settings, wearing the gear the guest Profile page used to
+    /// carry in its header (#626).
+    private static let guestSettingsImage = UIImage(systemName: "gearshape")
+    /// Whether the tab is a guest's Settings — so an avatar reset cannot put
+    /// the person glyph back over the gear.
+    private var showsGuestSettings = false
 
     init(
         container: AppContainer,
@@ -60,26 +67,31 @@ final class ProfileTabCoordinator: TabCoordinator {
     }
 
     /// Installs the root for this viewer, replacing the whole stack: the own
-    /// profile for a member, the sign-in invitation for a guest.
+    /// profile for a member, the guest Settings for a guest (#626).
     func show(member: Bool) {
         guard member else {
             walletBadge = nil
-            let guest = GuestSignInViewController(
-                symbolName: "person.crop.circle",
-                title: "Your profile",
-                message: "Sign up to create your profile, post and keep what you like.",
-                onSignIn: onSignIn
-            )
-            // Settings a guest can use (preferences, help, legal) — where the
-            // own profile wears its gear.
-            guest.navigationItem.rightBarButtonItem = UIBarButtonItem(
-                image: UIImage(systemName: "gearshape"),
-                primaryAction: UIAction { [weak self] _ in self?.openGuestSettings() }
-            )
-            guest.navigationItem.rightBarButtonItem?.accessibilityLabel = "Settings"
-            navigationController.viewControllers = [guest]
+            // ⚠️ A GUEST'S TAB IS SETTINGS ITSELF (#626), not a sign-up page with
+            // Settings behind a gear: a guest has no profile, and the bar's own
+            // "Sign in" bubble is the way in. The settings a guest can use —
+            // preferences, help, legal — are the tab's root.
+            showsGuestSettings = true
+            tab.title = "Settings"
+            // Said outright — see `CreateTabItem.showSignIn`.
+            tab.accessibilityLabel = "Settings"
+            tab.image = Self.guestSettingsImage
+            let settings = container.profileFeature.makeGuestSettingsViewController(onSignIn: onSignIn)
+            // ⚠️ THE BAR STAYS. The screen asks to hide it when PUSHED ("not a
+            // fifth tab"), and here it is a tab's root: the bar is how a guest
+            // leaves it. Its sub-pages push on this stack as before.
+            settings.hidesBottomBarWhenPushed = false
+            navigationController.viewControllers = [settings]
             return
         }
+        showsGuestSettings = false
+        tab.title = "Profile"
+        tab.accessibilityLabel = "Profile"
+        tab.image = Self.placeholder
         // `.aboveBottomSafeArea` is the whole difference between a tab root and
         // a pushed profile, and it settles both halves at once: the tray is
         // hosted in the screen's own view above the bottom safe area (the top of
@@ -119,11 +131,6 @@ final class ProfileTabCoordinator: TabCoordinator {
         }
     }
 
-    private func openGuestSettings() {
-        let settings = container.profileFeature.makeGuestSettingsViewController(onSignIn: onSignIn)
-        navigationController.pushViewController(settings, animated: true)
-    }
-
     /// The header's balance badge. Held for the coordinator's life, which is
     /// the process's.
     private var walletBadge: WalletBadgeInstaller?
@@ -136,6 +143,8 @@ final class ProfileTabCoordinator: TabCoordinator {
     /// colour — the photo is there and invisible, which reads as a broken image
     /// rather than a wrong render mode.
     func setAvatar(_ image: UIImage?) {
+        // A guest's tab is Settings: its gear is not an avatar placeholder.
+        guard !showsGuestSettings else { return }
         tab.image = image ?? Self.placeholder
     }
 }
