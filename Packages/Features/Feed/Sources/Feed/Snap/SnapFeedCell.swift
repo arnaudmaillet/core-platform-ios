@@ -535,6 +535,14 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// face. Set at configure (from the wallet's ledger) and again after
     /// each confirmed spend; chrome reset returns it to 0 on reuse.
     func setBoostTotal(_ total: Int, animated: Bool = false) { chrome.setBoostTotal(total, animated: animated) }
+    /// The sound bubble's face (#671) — see `SnapChromeView.setSoundFace`.
+    func setSoundFace(_ face: SnapSoundFace?) { chrome.setSoundFace(face) }
+    /// Turns the sound bubble's cover while the post plays (#671).
+    func setSoundSpinning(_ spinning: Bool) { chrome.setSoundSpinning(spinning) }
+    /// The sound bubble was tapped: the screen toggles the sound (#671).
+    var onRequestSoundToggle: (() -> Void)?
+    /// The sound bubble was held: the screen opens the sound sheet (#671).
+    var onRequestSoundSheet: (() -> Void)?
     /// The anchor's wallet context (affordability + undoable tally) —
     /// pushed at configure and on every wallet change.
     func setBoostContext(balance: Int, undoable: Int, stakeShots: Int = 0) {
@@ -1607,6 +1615,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             guard let self, let id = self.representedID else { return }
             self.onRequestBoostUndo?(id)
         }
+        chrome.onSoundTapped = { [weak self] in self?.onRequestSoundToggle?() }
+        chrome.onSoundSheetRequested = { [weak self] in self?.onRequestSoundSheet?() }
         #if DEBUG
         // Which projection fields are present the moment the page is
         // configured. Everything listed here is supposed to render at 0ms from

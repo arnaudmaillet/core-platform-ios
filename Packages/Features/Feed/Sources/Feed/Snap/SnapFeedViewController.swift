@@ -1475,6 +1475,10 @@ final class SnapFeedViewController: UIViewController {
                 cell.onRequestCommentsPageDrive = { [weak self] phase, translation, velocity in
                     self?.drivePageSwipe(phase, translation: translation, velocity: velocity)
                 }
+                // The sound bubble (#671): its face, and its two gestures.
+                cell.setSoundFace(self.soundFace(for: model))
+                cell.onRequestSoundToggle = { [weak self] in self?.toggleSound() }
+                cell.onRequestSoundSheet = { [weak self] in self?.presentSoundSheet() }
             }
             return cell
         }
@@ -1569,12 +1573,19 @@ final class SnapFeedViewController: UIViewController {
         // the re-hand that drifts UIKit's wrapper off the pill's width (memory
         // `bar-item-wrapper-drift`); a fresh item is a fresh wrapper.
         let wearsAuthor = !(engaged && hasMedia)
-        if wearsAuthor, !(navigationItem.rightBarButtonItems ?? []).contains(authorItem) {
-            authorItem = makeAuthorItem()
+        var navItems: [UIBarButtonItem]
+        if SnapPillFooter.isOn {
+            // The pill is the toolbar's (#671): the slot holds the ✕ alone,
+            // while a media post's thread is open.
+            navItems = wearsAuthor ? [] : [closeCommentsItem]
+        } else {
+            if wearsAuthor, !(navigationItem.rightBarButtonItems ?? []).contains(authorItem) {
+                authorItem = makeAuthorItem()
+            }
+            navItems = [wearsAuthor ? authorItem : closeCommentsItem]
         }
-        var navItems: [UIBarButtonItem] = [wearsAuthor ? authorItem : closeCommentsItem]
         if let walletBadgeItem {
-            navItems += [.fixedSpace(Spacing.sm), walletBadgeItem]
+            navItems += navItems.isEmpty ? [walletBadgeItem] : [.fixedSpace(Spacing.sm), walletBadgeItem]
         }
         applyTrailingNavItems(navItems, animated: animated)
 
@@ -1632,7 +1643,8 @@ final class SnapFeedViewController: UIViewController {
         )
         barPillWidths = widths
         commentSortButton.setTitleHidden(sortOnBar && !widths.sortShowsTitle)
-        authorIdentityView.setFixedWidth(widths.author)
+        // In the toolbar under `-snap-pill-footer` (#671), the attribution's room.
+        authorIdentityView.setFixedWidth(SnapPillFooter.isOn ? widths.toolbarAuthor : widths.author)
         mediaAttributionView.setFixedWidth(widths.attribution(soundShown: !soundItem.isHidden))
     }
 
@@ -1655,6 +1667,8 @@ final class SnapFeedViewController: UIViewController {
     /// pill with the badge to its left, spacer-separated so iOS 26 never
     /// fuses them into one platter.
     private func restingTrailingItems() -> [UIBarButtonItem] {
+        // Under `-snap-pill-footer` (#671) the pill is the toolbar's.
+        if SnapPillFooter.isOn { return walletBadgeItem.map { [$0] } ?? [] }
         guard let walletBadgeItem else { return [authorItem] }
         return [authorItem, .fixedSpace(Spacing.sm), walletBadgeItem]
     }
@@ -1794,6 +1808,14 @@ final class SnapFeedViewController: UIViewController {
     private func reinstallAuthorItem() {
         let previousItem = authorItem
         authorItem = makeAuthorItem()
+        if SnapPillFooter.isOn {
+            // The toolbar's leading item (#671).
+            guard var items = toolbarItems, let index = items.firstIndex(of: previousItem) else { return }
+            items[index] = authorItem
+            defaultToolbarItems = defaultToolbarItems.map { $0 === previousItem ? authorItem : $0 }
+            setToolbarItems(items, animated: false)
+            return
+        }
         guard var items = navigationItem.rightBarButtonItems,
               let index = items.firstIndex(of: previousItem) else { return }
         items[index] = authorItem
@@ -2160,6 +2182,10 @@ final class SnapFeedViewController: UIViewController {
         }
         #endif
         refreshSoundButton()
+        if SnapPillFooter.isOn {
+            configurePillFooterToolbar(bookmark: bookmarkButton, more: more)
+            return
+        }
         let attributionItem = makeAttributionItem()
         // Every item carries a stable identifier, so a re-handed set is matched
         // item for item and nothing transitions.
@@ -2218,6 +2244,27 @@ final class SnapFeedViewController: UIViewController {
             defaultToolbarItems = []
         }
         #endif
+        toolbarItems = defaultToolbarItems
+    }
+
+    /// The toolbar under `-snap-pill-footer` (#671):
+    ///
+    ///   [author pill] … [⇄ 🔖] [⋯]
+    ///
+    /// The pill leaves the nav bar for the attribution's slot; repost takes the
+    /// share's place in the capsule (still without an action — no client path
+    /// publishes a repost), share moves into ⋯, and the mute button leaves for
+    /// the sound bubble on the page.
+    private func configurePillFooterToolbar(bookmark: UIButton, more: UIButton) {
+        let repost = SnapNavControls.makeToolbarActionButton(systemName: PostActionSymbol.repost)
+        repost.accessibilityLabel = "Repost"
+        let cluster = UIStackView(arrangedSubviews: [repost, bookmark])
+        cluster.axis = .horizontal
+        let actionsItem = UIBarButtonItem(customView: cluster)
+        actionsItem.identifier = "feed.snap.actions"
+        let moreItem = UIBarButtonItem(customView: more)
+        moreItem.identifier = "feed.snap.more"
+        defaultToolbarItems = [authorItem, .flexibleSpace(), actionsItem, .fixedSpace(Spacing.sm), moreItem]
         toolbarItems = defaultToolbarItems
     }
 
@@ -2784,6 +2831,43 @@ final class SnapFeedViewController: UIViewController {
     /// session-undoable tally — into every visible cell's boost anchor, so
     /// a spend (or a claim on another screen) enables/disables the control
     /// and updates the menu it will build on its next long-press.
+    /// What the sound bubble and the composer's rail slot draw for `model`
+    /// under `-snap-pill-footer` (#671): the attribution's cover, the mute
+    /// state, greyed for a media post with no audio. Nil — no bubble — with
+    /// the flag off, and for a text post with no sound.
+    func soundFace(for model: FeedItemDisplayModel) -> SnapSoundFace? {
+        guard SnapPillFooter.isOn else { return nil }
+        let postSound = sound(for: model)
+        guard postSound != nil || model.mediaURL != nil else { return nil }
+        return SnapSoundFace(
+            coverURL: SnapMediaAttributionView.coverURL(for: model, cover: attributionContent(for: model).cover),
+            isAvailable: postSound != nil,
+            isMuted: !FeedSound.isOn
+        )
+    }
+
+    /// Every visible sound bubble, and the open panel's rail slot, after the
+    /// sound changed (#671).
+    private func refreshVisibleSoundFaces() {
+        guard SnapPillFooter.isOn else { return }
+        for indexPath in collectionView.indexPathsForVisibleItems {
+            guard orderedIDs.indices.contains(indexPath.item),
+                  let model = modelsByID[orderedIDs[indexPath.item]],
+                  let cell = collectionView.cellForItem(at: indexPath) as? SnapFeedCell else { continue }
+            cell.setSoundFace(soundFace(for: model))
+        }
+        applySoundRail(to: commentsContentVC)
+        applySoundRail(to: previewRestingVC)
+    }
+
+    /// The composer's rail slot wears the sound's cover under
+    /// `-snap-pill-footer` (#671) — on the sound bubble's frame.
+    private func applySoundRail(to panel: UIViewController?) {
+        guard SnapPillFooter.isOn, let detail = panel as? PostDetailViewController,
+              let id = detail.postID, let model = modelsByID[id] else { return }
+        detail.setRailSoundFace(soundFace(for: model))
+    }
+
     private func refreshVisibleBoostControls() {
         guard let wallet else { return }
         let balance = wallet.stakeableBalance
@@ -2961,6 +3045,7 @@ final class SnapFeedViewController: UIViewController {
               let makeCommentsPanelContent else { return }
         discardPrewarmedResting()
         let content = (makeRestingCommentsPanelContent ?? makeCommentsPanelContent)(id)
+        applySoundRail(to: content)
         content.view.backgroundColor = .clear
         // ⚠️ IN THE DEVICE'S THEME, not `.unspecified`.
         //
@@ -3396,7 +3481,9 @@ final class SnapFeedViewController: UIViewController {
             discardPrewarmedResting()
             return warmed
         }
-        return (makeRestingCommentsPanelContent ?? makeCommentsPanelContent)?(id)
+        let panel = (makeRestingCommentsPanelContent ?? makeCommentsPanelContent)?(id)
+        applySoundRail(to: panel)
+        return panel
     }
 
     /// Everything a resting panel needs once it has a cell — identical whether
@@ -3535,6 +3622,7 @@ final class SnapFeedViewController: UIViewController {
     ) -> PostDetailViewController? {
         guard commentsContentVC == nil, let makeCommentsPanelContent else { return nil }
         let content = makeCommentsPanelContent(id)
+        applySoundRail(to: content)
         content.view.backgroundColor = .clear
         // No style of its own: the panel is hosted INSIDE the cell and
         // inherits the page's theme from it (see `SnapChromeTheme`).
@@ -4489,6 +4577,11 @@ final class SnapFeedViewController: UIViewController {
         // collection with one. A photograph or a text page has nothing to mute.
         // Usually already decided by the scroll's swap (`updateBarPillScrub`).
         setSoundShown(postSound != nil)
+        // The page's sound bubble and the panel's rail slot (#671).
+        if SnapPillFooter.isOn {
+            activeSnapCell?.setSoundFace(soundFace(for: model))
+            applySoundRail(to: commentsContentVC)
+        }
     }
 
     /// What the attribution draws for `model`: the sound's line, and a cover
@@ -4775,6 +4868,8 @@ final class SnapFeedViewController: UIViewController {
     private func refreshCoverSpin() {
         let playing = isOnScreen && ((activeSnapCell?.isClipAdvancing ?? false) || songPlayer.isPlaying)
         mediaAttributionView.setSpinning(playing)
+        // The sound bubble's record turns with the toolbar's (#671).
+        if SnapPillFooter.isOn { activeSnapCell?.setSoundSpinning(playing) }
     }
 
     private func setCoverSpinWatch(_ on: Bool) {
@@ -4792,6 +4887,7 @@ final class SnapFeedViewController: UIViewController {
         FeedSound.toggle()
         refreshSoundButton()
         refreshAudibleSurface()
+        refreshVisibleSoundFaces()
     }
 
     private func refreshSoundButton() {
@@ -5141,6 +5237,13 @@ final class SnapFeedViewController: UIViewController {
     /// the kind of duplicate this menu exists to avoid.
     private func moreMenuActions(for id: PostID) -> [UIMenuElement] {
         var actions: [UIMenuElement] = []
+        // Under `-snap-pill-footer` share left the toolbar's capsule for here
+        // (#671), with the same sheet.
+        if SnapPillFooter.isOn {
+            actions.append(UIAction(title: "Share", image: UIImage(systemName: "square.and.arrow.up")) { [weak self] _ in
+                self?.presentShareSheet(for: id)
+            })
+        }
         actions.append(UIAction(title: "Not interested", image: UIImage(systemName: "hand.thumbsdown")) { [weak self] _ in
             self?.markNotInterested(id)
         })
@@ -6024,6 +6127,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         else { return }
 
         let panel = (makeRestingCommentsPanelContent ?? makeCommentsPanelContent)(id)
+        applySoundRail(to: panel)
         // Transparent, so the lent ground is still what is on screen — and so a
         // flight that clears both floors is not lidded by this.
         panel.view.backgroundColor = .clear

@@ -115,6 +115,17 @@ final class SnapChromeView: UIView {
     /// beside the caption and the page strip — see `SnapActionColumn`. Media
     /// chrome, like the anchor (`applyRepostVisibility`).
     private let repostButton = SnapRailRepostButton()
+    /// The repost bubble's replacement under `-snap-pill-footer` (#671): the
+    /// sound's cover on the same frame.
+    private let soundBubble = SnapSoundBubbleButton()
+    /// What the sound bubble draws for the represented post — nil when the
+    /// post has no sound bubble (the feed pushes it, `setSoundFace`).
+    private var soundFace: SnapSoundFace?
+    private var imagePipeline: ImagePipeline?
+    /// The sound bubble was tapped: toggle the feed's sound (#671).
+    var onSoundTapped: (() -> Void)?
+    /// The sound bubble was held: open the sound sheet (#671).
+    var onSoundSheetRequested: (() -> Void)?
     /// The rail's top edge as a cell-relative constant (see `buildLayout`).
     /// Optional: margins change during `init` before the layout exists.
     private var railTopConstraint: NSLayoutConstraint?
@@ -149,7 +160,7 @@ final class SnapChromeView: UIView {
     /// engagement's entry points; hidden views receive no touches, so each
     /// claims taps only while shown).
     var interactionRoots: [UIView] {
-        [shortcutRail, boostButton, commentEmptyState, subtitleView, commentTicker, repostButton]
+        [shortcutRail, boostButton, commentEmptyState, subtitleView, commentTicker, repostButton, soundBubble]
     }
 
     /// A comments surface was tapped (empty-state pill, subtitle zone, or
@@ -503,13 +514,43 @@ final class SnapChromeView: UIView {
         captionLabel.trailingAnchor.constraint(
             equalTo: repostButton.leadingAnchor, constant: -Spacing.md
         ).isActive = true
+        // The sound bubble (#671) stands on the repost bubble's frame exactly —
+        // whichever of the two flags is on, the column keeps one set of
+        // coordinates (`SnapActionColumn`).
+        addSubview(soundBubble)
+        soundBubble.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            soundBubble.centerXAnchor.constraint(equalTo: repostButton.centerXAnchor),
+            soundBubble.centerYAnchor.constraint(equalTo: repostButton.centerYAnchor),
+            soundBubble.widthAnchor.constraint(equalTo: repostButton.widthAnchor),
+            soundBubble.heightAnchor.constraint(equalTo: repostButton.heightAnchor),
+        ])
+        soundBubble.onTap = { [weak self] in self?.onSoundTapped?() }
+        soundBubble.onLongPress = { [weak self] in self?.onSoundSheetRequested?() }
     }
 
     /// The repost bubble is MEDIA chrome, like the boost anchor above it: a
     /// text page's engagement is its permanent layout, and its composer stands
     /// in the column instead.
     private func applyRepostVisibility() {
-        repostButton.isHidden = !hasMedia
+        // Under `-snap-pill-footer` the repost lives in the toolbar and the
+        // sound bubble takes its place — on a media page, for a post with a
+        // face (a text page's column is its composer's).
+        repostButton.isHidden = !hasMedia || SnapPillFooter.isOn
+        soundBubble.isHidden = !(SnapPillFooter.isOn && hasMedia && soundFace != nil)
+    }
+
+    /// The sound bubble's face for the represented post (#671): its cover, the
+    /// mute state, greyed for a post with no audio; nil for none.
+    func setSoundFace(_ face: SnapSoundFace?) {
+        soundFace = face
+        soundBubble.setFace(face, pipeline: imagePipeline)
+        applyRepostVisibility()
+    }
+
+    /// Turns the sound bubble's cover while the post plays.
+    func setSoundSpinning(_ spinning: Bool) {
+        soundBubble.setSpinning(spinning)
     }
 
     /// The rail's reserved bottom strip is the glass square's height — a
@@ -979,6 +1020,7 @@ final class SnapChromeView: UIView {
     /// holds them still across the media and comments layouts.
     var debugBoostButton: UIButton { boostButton }
     var debugRepostButton: UIButton { repostButton }
+    var debugSoundBubble: SnapSoundBubbleButton { soundBubble }
     var debugCaptionFrame: CGRect { captionLabel.frame }
     var debugPageBar: SnapMediaPageBarView { mediaPageBar }
     var debugScrubPreview: SnapScrubPreviewView { scrubPreview }
@@ -1070,7 +1112,7 @@ final class SnapChromeView: UIView {
     /// the available one — the way out of a post should not blink away because
     /// a thumb landed on a clip's bar.
     private var scrubFadedViews: [UIView] {
-        [captionLabel, commentTicker, subtitleView, commentEmptyState, shortcutRail, boostButton, likeBadge, repostButton]
+        [captionLabel, commentTicker, subtitleView, commentEmptyState, shortcutRail, boostButton, likeBadge, repostButton, soundBubble]
     }
 
     /// What each faded view was worth before the scrub took it, so the fade
@@ -1170,6 +1212,7 @@ final class SnapChromeView: UIView {
     /// leading their comment content). Set at configure, before any stream
     /// arrives via `updateCommentStreams`.
     func setImagePipeline(_ pipeline: ImagePipeline) {
+        imagePipeline = pipeline
         commentTicker.setImagePipeline(pipeline)
         subtitleView.setImagePipeline(pipeline)
     }
@@ -1267,6 +1310,9 @@ final class SnapChromeView: UIView {
         boostTotal = 0
         postLikeCount = nil
         applyLikeBadge(animated: false)
+        soundFace = nil
+        soundBubble.setFace(nil, pipeline: nil)
+        soundBubble.isHidden = true
         // Back to the unwired default (enabled, nothing undoable) — the
         // next configure pushes the real context.
         boostButton.setWalletContext(balance: .max, undoableAmount: 0)

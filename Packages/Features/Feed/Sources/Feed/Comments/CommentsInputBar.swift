@@ -97,6 +97,9 @@ final class CommentsInputBar: UIView {
         case repost
         /// This conversation pinned to the top of the inbox, or not.
         case pin(isPinned: Bool)
+        /// The post's sound, under `-snap-pill-footer` (#671): the snap feed's
+        /// sound bubble's cover, on that bubble's frame.
+        case sound(SnapSoundFace)
     }
 
     /// The slot's face: ONE glass button wearing the host's action. It is the
@@ -1565,7 +1568,19 @@ final class CommentsInputBar: UIView {
         case .pin(let isPinned):
             symbol = isPinned ? "pin.fill" : "pin"
             railButton.accessibilityLabel = isPinned ? "Unpin conversation" : "Pin conversation"
+        case .sound(let face):
+            // The cover as a disc, the bubble's size less the sound bubble's
+            // inset, so the two read as one (#671). Not a symbol: no replace.
+            railButton.isHidden = false
+            railButton.configuration?.image = face.disc(side: SnapActionColumn.bubbleSize - 10)
+            railButton.configuration?.contentInsets = .zero
+            railButton.accessibilityLabel = "Sound"
+            railButton.alpha = face.isAvailable ? 1 : 0.45
+            railFaceSymbol = Self.soundRailSymbol
+            railButton.isEnabled = isRailFaceEnabled && face.isAvailable
+            return
         }
+        railButton.alpha = 1
         railButton.isHidden = symbol == nil
         if let symbol, railFaceSymbol != symbol {
             railButton.configuration?.image = UIImage(systemName: symbol, withConfiguration: Self.glyphConfiguration)
@@ -1573,6 +1588,9 @@ final class CommentsInputBar: UIView {
         railFaceSymbol = symbol
         railButton.isEnabled = isRailFaceEnabled
     }
+
+    /// What `debugRailSymbol` reads while the slot wears the sound's cover.
+    static let soundRailSymbol = "sound.cover"
 
     /// The symbol the rail button wears, so an unchanged face is not
     /// re-applied (a re-applied image would replay the replace).

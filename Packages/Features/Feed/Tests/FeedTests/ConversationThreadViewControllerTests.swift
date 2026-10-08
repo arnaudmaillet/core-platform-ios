@@ -473,6 +473,22 @@ struct ConversationThreadViewControllerTests {
         #expect(items.last?.customView is UIButton)
     }
 
+    /// `-snap-pill-footer` (#671): [peer pill] … [⋯] — no emote strip, and no
+    /// peer pill left in the nav bar. The composer's pin is unchanged.
+    @Test func underThePillFooterThePeerPillLeadsTheFooter() throws {
+        SnapPillFooter.isOn = true
+        defer { SnapPillFooter.isOn = false }
+        let (screen, _, accessory, _) = makeScreen()
+        let items = try #require(screen.toolbarItems)
+        #expect(items.first?.customView is SnapAuthorIdentityView)
+        #expect(!items.contains { $0.customView === accessory.view }, "the emote strip stayed")
+        #expect((items.last?.customView as? UIButton)?.accessibilityLabel == "More actions")
+        let nav = screen.navigationItem.rightBarButtonItems ?? []
+        #expect(!nav.contains { $0.customView is SnapAuthorIdentityView }, "the peer pill is still in the nav bar")
+        let bar = try #require(Self.firstView(CommentsInputBar.self, in: screen.view))
+        #expect(bar.debugRailSymbol == "pin" || bar.debugRailSymbol == "pin.fill")
+    }
+
     @Test func aPeekHasNoComposerNoFooterAndNoMenu() throws {
         let (screen, _, _, _) = makeScreen(mode: .preview)
         let stream = try #require(Self.firstView(UICollectionView.self, in: screen.view))

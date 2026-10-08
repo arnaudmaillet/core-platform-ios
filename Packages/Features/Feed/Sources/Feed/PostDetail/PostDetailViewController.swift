@@ -753,7 +753,7 @@ final class PostDetailViewController: UIViewController {
         composeBar.defaultPlaceholder = nil
         composeBar.sendAccessibilityLabel = nil
         composeBar.visibilityMenu = nil
-        composeBar.railFace = .repost
+        composeBar.railFace = publishedRailFace
         refreshBoostTotal()
         onPostPublished?(entry)
     }
@@ -805,7 +805,7 @@ final class PostDetailViewController: UIViewController {
         // A post's rail slot is its REPOST — drawn without an action, like the
         // media layout's bubble (no client path publishes one yet). A draft
         // is not a post: its slot stays empty until it is.
-        composeBar.railFace = viewModel.isDraft ? .empty : .repost
+        composeBar.railFace = viewModel.isDraft ? .empty : publishedRailFace
         // The Liquid Glass composer (Private Messages' recipe): a floating
         // capsule field, no opaque bar, no separator — the glass carries
         // its own boundary against whatever is behind it.
@@ -1337,6 +1337,27 @@ final class PostDetailViewController: UIViewController {
         loadViewIfNeeded()
         pushComposerLikeCount()
         applyStream(animated: false)
+    }
+
+    /// The post this panel is about — nil on a draft.
+    var postID: PostID? { viewModel.postID }
+
+    /// What a published post's rail slot wears: the repost, or — under
+    /// `-snap-pill-footer` (#671) — the sound's cover the snap feed hands
+    /// over (`setRailSoundFace`), and nothing for a post with no sound bubble.
+    private var publishedRailFace: CommentsInputBar.RailFace {
+        guard SnapPillFooter.isOn else { return .repost }
+        return railSoundFace.map { .sound($0) } ?? .empty
+    }
+
+    private var railSoundFace: SnapSoundFace?
+
+    /// The snap feed's sound bubble face, for the rail slot that stands on it
+    /// (#671).
+    func setRailSoundFace(_ face: SnapSoundFace?) {
+        railSoundFace = face
+        guard !viewModel.isDraft else { return }
+        composeBar.railFace = publishedRailFace
     }
 
     /// The stake bubble's like badge reads the caption row's count — one
