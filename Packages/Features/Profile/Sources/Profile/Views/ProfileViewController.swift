@@ -54,6 +54,10 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     /// Retained for the share sheet, which builds its own QR card (and a
     /// throwaway one to rasterize) and needs the same avatar cache.
     private let imagePipeline: ImagePipeline
+    /// The player pool, kept for the media gallery "View all" pushes (#631).
+    private let videoPlayback: VideoPlaybackController?
+    /// That gallery while it is up, so the pages landing reach it.
+    private weak var mediaGallery: ProfileMediaGalleryViewController?
     /// Supplies the share sheet's quick-send row; nil hides it.
     private let shareTargeting: (any ProfileShareTargeting)?
     private let headerView: ProfileHeaderView
@@ -307,6 +311,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         self.switcherFactory = switcherFactory
         self.makeRelationshipsViewController = makeRelationshipsViewController
         self.imagePipeline = imagePipeline
+        self.videoPlayback = videoPlayback
         self.shareTargeting = shareTargeting
         headerView = ProfileHeaderView(imagePipeline: imagePipeline)
         let tabs = viewModel.isOwnProfile ? ProfileTab.ownTabs : ProfileTab.publicTabs
@@ -450,6 +455,9 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         viewModel.onGalleryChange = { [weak self] snapshot in
             self?.lastGallerySnapshot = snapshot
             HeroScreenCost.measure("landing.gallery") { self?.galleryPager.render(snapshot) }
+            // The media gallery "View all" pushed, if it is up, grows with
+            // the pages as they land (#631).
+            self?.mediaGallery?.render(snapshot.media)
             self?.settlePresentationIfReady()
             #if DEBUG
             self?.auditPostMenu(snapshot)
@@ -465,6 +473,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         galleryPager.onAuthorTapped = { [weak self] post in
             self?.viewModel.galleryAuthorTapped(post)
         }
+        galleryPager.onViewAllTapped = { [weak self] in self?.pushMediaGallery() }
         galleryPager.authorMenuActions = { [weak self] context in
             self?.galleryMenuActions(for: context) ?? []
         }
@@ -854,10 +863,8 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
             }
             attempt(30)
         }
-        // `-profile-tab <activity|gallery|short|saved|liked>` selects a tab.
-        // The choice PERSISTS across launches, so without this a scripted run
-        // inherits whatever the last one left — which is how a video-autoplay
-        // check ended up on the text-only page.
+        // `-profile-tab <posts|saved|liked>` selects a tab on the viewer's own
+        // profile — the only one with more than Posts since #631.
         if let position = arguments.firstIndex(of: "-profile-tab"),
            position + 1 < arguments.count {
             let wanted = arguments[position + 1]
@@ -866,6 +873,14 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
                       let index = tabs.firstIndex(where: { $0.title.lowercased() == wanted })
                 else { return }
                 selectTab(at: index)
+            }
+        }
+        // `-profile-view-all [seconds]`: pushes the media gallery a chunk's
+        // "View all" opens (#631), once the posts have had time to land.
+        if let position = arguments.firstIndex(of: "-profile-view-all") {
+            let delay = position + 1 < arguments.count ? Double(arguments[position + 1]) ?? 2 : 2
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                self?.pushMediaGallery()
             }
         }
         // `-header-dock-demo`: docks and undocks the selector on a timer, ANIMATED,
@@ -1867,6 +1882,10 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     /// rebuild an injected item has to survive without having to move the
     /// follow state to get there.
     func debugRebuildNavigationState() { applyNavigationState() }
+    /// The pages this profile has, and what its selector would call them.
+    var debugPageCount: Int { galleryPager.pageOrder.count }
+    var debugTabTitles: [String] { tabs.map(\.title) }
+    var debugActivePageIndex: Int { galleryPager.activePageIndex }
     #endif
 
     /// Pre-fetches the switcher snapshot and installs a synchronous menu on the
@@ -2472,8 +2491,11 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     /// `isOwnProfile` would hang a shell-lifetime accessory on a screen with
     /// `hidesBottomBarWhenPushed = true`, which is the measured leak the
     /// accessory's install/remove bracket exists to prevent.
+    ///
+    /// ⚠️ ONE PAGE, NO SELECTOR (#631). Anyone else's profile has only Posts,
+    /// and a strip with one segment is a label pretending to be a control.
     private func placeSelectors() {
-        guard viewModel.hasGallery else { return }
+        guard viewModel.hasGallery, tabs.count > 1 else { return }
         selectorTouchProbe.attach(to: selectorBar)
         // `hosting` and `fillsWidth` are the host's to set — see
         // `SelectorAccessoryHost`, which is where the reasons for both live.
@@ -2778,7 +2800,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
             if viewModel.hasGallery {
                 skeletonViewportFill?.isActive = true
                 galleryPager.render(ProfileViewModel.GallerySnapshot(
-                    activity: .loading, media: .loading, short: .loading
+                    activity: .loading, media: .loading, isComplete: false
                 ))
             }
 
@@ -2958,10 +2980,53 @@ extension ProfileViewController: DebugInteractivelyDismissible {
 #endif
 
 extension ProfileViewController {
+    /// "View all" under one of Posts' chunks: the profile's photos and videos
+    /// as the media mosaic (#631) — what the Gallery tab was.
+    ///
+    /// Fed from here as pages land (`onGalleryChange`), under the same
+    /// source, and its posts open through `openGalleryPost` measured against
+    /// ITS mosaic, so a close lands on the tile it left from.
+    func pushMediaGallery() {
+        guard navigationController?.transitionCoordinator == nil else { return }
+        let gallery = ProfileMediaGalleryViewController(
+            imagePipeline: imagePipeline, videoPlayback: videoPlayback, handle: currentHandle
+        )
+        gallery.loadViewIfNeeded()
+        gallery.render(lastGallerySnapshot?.media ?? .loading)
+        gallery.onOpen = { [weak self, weak gallery] post, stream, showingComments in
+            guard let self, let gallery else { return }
+            openGalleryPost(
+                post, stream: stream, showingComments: showingComments,
+                from: gallery.grid, presenter: gallery, format: .media
+            )
+        }
+        gallery.onNearEnd = { [weak self] in self?.viewModel.loadMoreGallery() }
+        // ⚠️ THE LIST ON SCREEN IS THE MEDIA NOW, and the model pages for it:
+        // a page of text posts adds no tile here, so no tile would come on
+        // screen to ask for the next one — the model reads on instead, as it
+        // does for whichever list is showing (`appendGalleryPages`).
+        viewModel.setGalleryFormat(.media)
+        gallery.onClose = { [weak self] in self?.viewModel.setGalleryFormat(.activity) }
+        mediaGallery = gallery
+        navigationController?.pushViewController(gallery, animated: true)
+    }
+
     /// Opens a gallery post — from its card, or from its comment chip with the
     /// thread already up (`showingComments`, never set for a text post: its
     /// page IS its thread).
-    func openGalleryPost(_ post: GalleryPost, stream: [GalleryPost], showingComments: Bool) {
+    ///
+    /// `surface` is the list it was tapped in — the profile's pager unless
+    /// said otherwise, or the media gallery its "View all" pushed (#631),
+    /// which then also `presents` the feed and names its `format` for the
+    /// feed's continuation.
+    func openGalleryPost(
+        _ post: GalleryPost, stream: [GalleryPost], showingComments: Bool,
+        from surface: (any ProfileHeroSurface)? = nil,
+        presenter: UIViewController? = nil,
+        format: GalleryFilter.Format = .activity
+    ) {
+        let galleryPager: any ProfileHeroSurface = surface ?? self.galleryPager
+        let presenter = presenter ?? self
         // One opening at a time: a second tap while the first push is in the
         // air pushed a second feed over it.
         guard navigationController?.transitionCoordinator == nil else { return }
@@ -3009,7 +3074,7 @@ extension ProfileViewController {
             hasHero: geometry != nil,
             cover: geometry?.cover,
             style: geometry?.isTile == true ? .tile : .listMedia,
-            frame: { [weak self] container in
+            frame: { [weak galleryPager] container in
                 // Re-measured, not captured: the grid scrolls itself clear
                 // of the chrome while the post is open, so the rect the
                 // dismissal flies home to is not the one it left from.
@@ -3018,20 +3083,20 @@ extension ProfileViewController {
                 // ACTIVE page's collection view, and the geometry above is
                 // already read from whichever page is active — capturing one
                 // and re-asking the other could describe two different pages.
-                guard let self,
-                      let space = self.galleryPager.heroCoordinateSpace,
-                      let current = self.galleryPager.heroGeometry(for: post.id)
+                guard let galleryPager,
+                      let space = galleryPager.heroSpace,
+                      let current = galleryPager.heroGeometry(for: post.id)
                 else { return nil }
                 return space.convert(current.rect, to: container)
             },
-            isOnScreen: { [weak self] in
-                self?.galleryPager.heroGeometry(for: post.id) != nil
+            isOnScreen: { [weak galleryPager] in
+                galleryPager?.heroGeometry(for: post.id) != nil
             },
-            setConcealed: { [weak self] concealed in
-                self?.galleryPager.setHeroConcealed(concealed, for: post.id)
+            setConcealed: { [weak galleryPager] concealed in
+                galleryPager?.setHeroConcealed(concealed, for: post.id, carrying: .media)
             },
             opensComments: showingComments,
-            depthView: { [weak self] in self?.galleryPager },
+            depthView: { [weak galleryPager] in galleryPager },
             // A text-only post has no media to fly, and until now that
             // meant a plain push here while For You opened the same post
             // as a window. One post, one screen, two transitions depending
@@ -3048,13 +3113,13 @@ extension ProfileViewController {
             // same close For You's Following list runs. Before it did, that
             // page had no drag and a chevron that cut.
             textReveal: TextRevealOrigin(
-                rowFrame: { [weak self] space in
+                rowFrame: { [weak galleryPager] space in
                     // The text row's rect, or ANY row's — see
                     // `ProfileGalleryGridView.rowFrame`. A close whose
                     // anchor turned out to carry media used to land on a
                     // 96pt square in the middle of the screen.
-                    self?.galleryPager.textRowFrame(for: anchorID, in: space)
-                        ?? self?.galleryPager.rowFrame(for: anchorID, in: space)
+                    galleryPager?.textRowFrame(for: anchorID, in: space)
+                        ?? galleryPager?.rowFrame(for: anchorID, in: space)
                 },
                 // Read ONCE, at tap, for the reason the geometry above is:
                 // the viewer just touched this cell, so it is realized by
@@ -3062,7 +3127,7 @@ extension ProfileViewController {
                 // the header while the post is up, and a row that scrolled
                 // out cannot answer.
                 captionEnd: galleryPager.textRowCaptionEnd(for: post.id),
-                depthView: { [weak self] in self?.galleryPager },
+                depthView: { [weak galleryPager] in galleryPager },
                 captionTop: galleryPager.textRowCaptionTop(for: post.id),
                 // Borrowed by the destination for the flight, so the window
                 // shows the header the card does instead of a blank strip
@@ -3076,8 +3141,8 @@ extension ProfileViewController {
                 // why the two screens' reveals did not feel the same: this
                 // one flew the live page home and gained its header in a
                 // single frame.
-                makeDismissStandIn: { [weak self] _ in
-                    self?.galleryPager.makeDismissStandIn(for: anchorID)
+                makeDismissStandIn: { [weak galleryPager] _ in
+                    galleryPager?.makeDismissStandIn(for: anchorID)
                 },
                 // ⚠️ THE PAGE TRAVELS — this list never got the transition
                 // every other surface now runs. Under `.clipped` it handed
@@ -3099,8 +3164,8 @@ extension ProfileViewController {
                 // window lands on a photograph and leaves its caption
                 // showing underneath, which is what For You was filmed
                 // doing.
-                setConcealed: { [weak self] concealed in
-                    self?.galleryPager.setHeroConcealed(
+                setConcealed: { [weak galleryPager] concealed in
+                    galleryPager?.setHeroConcealed(
                         concealed, for: anchorID, carrying: .card
                     )
                 },
@@ -3125,7 +3190,7 @@ extension ProfileViewController {
                         // settled, against the rect the close was aimed at.
                         if ProcessInfo.processInfo.arguments.contains("-text-reveal-log"),
                            let self,
-                           let rect = self.galleryPager.textRowFrame(
+                           let rect = galleryPager.textRowFrame(
                                for: post.id, in: self.view
                            ) {
                             print("[text-reveal] rowAfterPop \(NSCoder.string(for: rect))")
@@ -3136,8 +3201,10 @@ extension ProfileViewController {
             ),
             // On past the tiles loaded at the tap into the gallery's next
             // pages, under the tab and source the viewer opened it from (#638).
-            continuation: { [weak self] after in await self?.viewModel.galleryPostIDs(after: after) }
+            continuation: { [weak self] after in
+                await self?.viewModel.galleryPostIDs(after: after, in: format)
+            }
         )
-        feedHero(window.map(\.id), self, origin)
+        feedHero(window.map(\.id), presenter, origin)
     }
 }

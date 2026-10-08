@@ -21,12 +21,15 @@ public enum ProfileTab: Equatable, Sendable {
 
     /// What the selector calls it.
     ///
-    /// Short on purpose. These five have to share a navigation bar's title slot,
-    /// and every character is measured against a hard 258pt — "Reactions" alone
-    /// costs more than "Saved" and "Short" together.
+    /// Short on purpose: the strip shares a slot with the bar's glass, and
+    /// "Reactions" alone costs more than "Saved" and "Posts" together.
+    ///
+    /// Only Posts is a page since #631 — the profile's every post, laid out
+    /// like For You. Media is the gallery its "View all" pushes; Short is no
+    /// page at all any more (it was text posts, which are cards now).
     public var title: String {
         switch self {
-        case .format(.activity): "Activity"
+        case .format(.activity): "Posts"
         case .format(.media): "Gallery"
         case .format(.short): "Short"
         case .saved: "Saved"
@@ -42,10 +45,18 @@ public enum ProfileTab: Equatable, Sendable {
         return nil
     }
 
-    /// The three every profile shows.
-    public static let publicTabs: [ProfileTab] = [.format(.activity), .format(.media), .format(.short)]
+    /// What anyone else's profile shows: one list, every post, laid out like
+    /// For You (#631). One page means no selector at all.
+    ///
+    /// It was three — Activity, Gallery, Short — and they were one corpus
+    /// filtered three ways on the client (every post, media, text), from when
+    /// each format had a layout of its own. The For You list draws cards and
+    /// mosaic together, so the three became the one list and its "View all".
+    public static let publicTabs: [ProfileTab] = [.format(.activity)]
 
-    /// The five the viewer sees on their own.
+    /// What the viewer sees on their own: Posts | Saved | Liked. Saved and
+    /// Liked are other corpora, so a selector stays (the owner's call,
+    /// 2026-10-07).
     public static let ownTabs: [ProfileTab] = publicTabs + [.saved, .reactions]
 }
 
@@ -67,11 +78,13 @@ extension ProfileTab {
     var emptyState: (symbol: String, title: String, subtitle: String) {
         switch self {
         case .format(.activity):
-            ("rectangle.stack", "No Activity Yet", "Activity and updates will appear here.")
+            ("rectangle.stack", "No Posts Yet", "Posts and reposts will appear here.")
         case .format(.media):
-            ("photo.on.rectangle", "No Posts Yet", "Photos and posts will be listed here.")
+            ("photo.on.rectangle", "No Photos or Videos", "Photos and videos will appear here.")
         case .format(.short):
-            ("play.rectangle", "No Shorts Yet", "Short video clips will be displayed here.")
+            // No page shows it since #631. Worded for what it filtered —
+            // text posts — not for the video clips it once claimed.
+            ("text.alignleft", "No Text Posts", "Text posts will appear here.")
         case .saved:
             ("bookmark", "No Saved Posts", "Posts you bookmark will appear here.")
         case .reactions:

@@ -7,11 +7,10 @@ import PostGrid
 import UIKit
 import CoreNavigation
 
-/// One format page of the gallery pager, in the fixed shape its format owns:
-/// an asymmetric media mosaic (Media) or a 1-column timeline of full-width
-/// rows (Activity, Short). Layouts are format-bound, so the page's shape is
-/// set at init and never morphs — moving between shapes IS the pager's
-/// horizontal swipe.
+/// One page of the profile's posts, in a shape fixed at init: For You's
+/// Discover list for the profile's Posts (#631), a 1-column timeline of
+/// full-width rows for Saved and Liked, or the asymmetric media mosaic for the
+/// media gallery "View all" pushes.
 ///
 /// The pattern, the cells and the skeletons come from `PostGrid`, shared with
 /// every other post-grid surface. What is NOT shared is this host: it is
@@ -29,6 +28,11 @@ final class ProfileGalleryGridView: UIView {
         case grid
         /// 1-column full-width self-sizing rows with reading margins.
         case list
+        /// For You's Discover list (#631): full-width cards with chunks of
+        /// the media mosaic between them, vertical media in half-width pairs,
+        /// and "View all" under each chunk — `MosaicChunkPlanner` decides the
+        /// stretches, `DiscoverListLayout` draws them, one SECTION each.
+        case discover
     }
 
     /// The tapped post, plus the ordered run of posts FROM it — what the
@@ -56,6 +60,9 @@ final class ProfileGalleryGridView: UIView {
     /// One of the grid's last tiles came on screen: time for the next page
     /// (#634).
     var onNearEnd: (() -> Void)?
+    /// "View all" under one of the Discover list's chunks: the profile's
+    /// media gallery (#631).
+    var onViewAllTapped: (() -> Void)?
     /// How close to the end a tile has to be for its coming on screen to ask
     /// for the next page — three rows of tiles.
     static let nearEndTileCount = 9
@@ -106,7 +113,31 @@ final class ProfileGalleryGridView: UIView {
     /// that show them are recycled (see `CaptionExpansion`).
     private let captionExpansion = CaptionExpansion()
     private let style: Style
+    /// The posts in the order they are DRAWN. On Discover that is the
+    /// stretches' order, not the corpus's: a chunk pulls media forward.
     private var posts: [GalleryPost] = []
+
+    // MARK: Discover's stretches
+
+    /// Discover only: the list's stretches, one collection-view SECTION each.
+    /// Empty on the other styles, and while a skeleton shows.
+    private var segments: [DiscoverSegment] = []
+    /// Where each stretch begins in `posts`.
+    private var segmentStarts: [Int] = []
+    /// The posts a chunk draws as mosaic tiles.
+    private var tilePostIDs: Set<PostID> = []
+    /// The posts drawn as half-width cards in pairs — a tile wearing the
+    /// Following card's foot and corner (For You draws them with its
+    /// Following card, whose face this is).
+    private var pairedPostIDs: Set<PostID> = []
+    /// Keeps the chunk tilings it has generated, for the page's life.
+    private var chunkPlanner = MosaicChunkPlanner()
+    /// Whether the corpus behind the page is all of it — what lets the tail
+    /// chunk be decided rather than held back (`MosaicChunkPlanner`). Told by
+    /// the owner before each render.
+    private var isCorpusComplete = false
+    /// The completeness the stretches on screen were planned under.
+    private var plannedCorpusComplete = false
     /// Autoplay for this page's video media. Absent only where the host
     /// supplied no player pool.
     private let playback: GridVideoPlaybackCoordinator?
@@ -138,7 +169,7 @@ final class ProfileGalleryGridView: UIView {
               let index = posts.firstIndex(where: { $0.id == id }),
               let window,
               let attributes = collectionView.layoutAttributesForItem(
-                  at: IndexPath(item: index, section: 0)
+                  at: indexPath(for: index)
               )
         else { return nil }
         return collectionView.convert(attributes.frame, to: window)
@@ -160,6 +191,12 @@ final class ProfileGalleryGridView: UIView {
     private(set) var debugRecountedItems = 0
     /// The empty state's fitting passes — which a scroll must not add to.
     private(set) var debugEmptyStateMeasureCount = 0
+    /// Discover's stretches as planned.
+    var debugSegments: [DiscoverSegment] { segments }
+    /// Where a post is drawn, for a test that scrolls to it.
+    func debugIndexPath(for postID: PostID) -> IndexPath? {
+        posts.firstIndex { $0.id == postID }.map { indexPath(for: $0) }
+    }
     #endif
 
     /// What `emptyStateHeight` was last measured for.
@@ -224,8 +261,9 @@ final class ProfileGalleryGridView: UIView {
         // candidates ranked by distance from the viewport centre, the nearest
         // N kept. Six for a mosaic, five for a timeline — a column fits fewer
         // previews on screen, so the sixth slot would go to a row outside it.
+        // Discover holds tiles and cards both, so it takes the mosaic's six.
         playback = videoPlayback.map {
-            GridVideoPlaybackCoordinator(pool: $0, maxConcurrent: style == .grid ? 6 : 5)
+            GridVideoPlaybackCoordinator(pool: $0, maxConcurrent: style == .list ? 5 : 6)
         }
         collectionView = UICollectionView(
             frame: .zero,
@@ -266,6 +304,22 @@ final class ProfileGalleryGridView: UIView {
         collectionView.register(
             PostGridSkeletonListCell.self, forCellWithReuseIdentifier: PostGridSkeletonListCell.reuseID
         )
+        collectionView.register(
+            DiscoverViewAllFooterView.self,
+            forSupplementaryViewOfKind: DiscoverListLayout.viewAllElementKind,
+            withReuseIdentifier: DiscoverViewAllFooterView.reuseID
+        )
+        if style == .discover {
+            // Set here rather than in the initialiser: its sections are asked
+            // of this page, which does not exist until `super.init`.
+            collectionView.setCollectionViewLayout(
+                DiscoverListLayout.layout(
+                    chunk: { [weak self] section in self?.chunk(inSection: section) },
+                    isPairs: { [weak self] section in self?.isPairs(inSection: section) ?? false }
+                ),
+                animated: false
+            )
+        }
         collectionView.dataSource = self
         collectionView.delegate = self
         collectionView.pin(to: self)
@@ -377,7 +431,17 @@ final class ProfileGalleryGridView: UIView {
         return recounted == old
     }
 
+    /// No further page is coming, or one is. Read by the next `render` —
+    /// Discover only; the other styles show what they have.
+    func setCorpusComplete(_ complete: Bool) {
+        isCorpusComplete = complete
+    }
+
     private func apply(_ posts: [GalleryPost], skeleton: Bool) {
+        if style == .discover {
+            applyDiscover(posts, skeleton: skeleton)
+            return
+        }
         guard self.posts != posts || showsSkeleton != skeleton else { return }
         // ⚠️ The same posts in the same places — a refresh bringing new
         // counts — re-dress only the cells whose post changed. A reload
@@ -441,6 +505,157 @@ final class ProfileGalleryGridView: UIView {
         let dissolving = showsSkeleton && !skeleton && !posts.isEmpty && window != nil
         self.posts = posts
         showsSkeleton = skeleton
+        reloadAll(dissolving: dissolving)
+    }
+
+    /// Discover's delivery, For You's rule (`ForYouGridPage.applyDiscover`):
+    /// the stretches are re-planned over the whole corpus, and the difference
+    /// is an INSERT whenever it is one — a page landing grows the last run of
+    /// cards and appends stretches after it, leaving every realized cell and
+    /// its playback alone. The same structure with new counters re-dresses
+    /// only what changed.
+    private func applyDiscover(_ corpus: [GalleryPost], skeleton: Bool) {
+        let before = segments
+        let postsBefore = posts
+        let wasSkeleton = showsSkeleton
+        let completenessChanged = plannedCorpusComplete != isCorpusComplete
+        plannedCorpusComplete = isCorpusComplete
+        let planned = skeleton ? [] : chunkPlanner.segments(for: corpus, isComplete: isCorpusComplete)
+        let change = MosaicChunkPlanner.change(from: before, to: planned)
+        let dissolving = wasSkeleton && !skeleton && !planned.isEmpty && window != nil
+        adoptSegments(planned)
+        showsSkeleton = skeleton
+        if !wasSkeleton, !skeleton, !before.isEmpty, case .extended(let grown, let appended) = change {
+            let last = before.count - 1
+            let changed = postsBefore.indices.filter { postsBefore[$0] != posts[$0] }
+            UIView.performWithoutAnimation {
+                collectionView.performBatchUpdates {
+                    if !grown.isEmpty {
+                        collectionView.insertItems(at: grown.map { IndexPath(item: $0, section: last) })
+                    }
+                    if !appended.isEmpty {
+                        collectionView.insertSections(IndexSet(integersIn: appended))
+                    }
+                    if !changed.isEmpty {
+                        collectionView.reconfigureItems(at: changed.map { indexPath(for: $0) })
+                    }
+                }
+            }
+            DispatchQueue.main.async { [weak self] in self?.reconcileAutoplay() }
+            return
+        }
+        if change == .identical, wasSkeleton == skeleton {
+            // Same stretches, same posts in them: only what a post SAYS moved.
+            // A count alone is written onto the cell on screen, as on the
+            // other styles; anything else is reconfigured.
+            let changed = postsBefore.indices.filter { postsBefore[$0] != posts[$0] }
+            guard !changed.isEmpty || completenessChanged else { return }
+            let visible = Set(collectionView.indexPathsForVisibleItems)
+            let countsOnly = changed.filter {
+                visible.contains(indexPath(for: $0)) && Self.differOnlyInCounts(postsBefore[$0], posts[$0])
+            }
+            let reconfigured = changed.filter { !countsOnly.contains($0) }
+            for index in countsOnly {
+                switch collectionView.cellForItem(at: indexPath(for: index)) {
+                case let row as PostGridListRowCell: row.updateCounts(from: posts[index])
+                case let tile as PostGridTileCell: tile.updateCounts(from: posts[index])
+                default: break
+                }
+            }
+            if !reconfigured.isEmpty {
+                collectionView.reconfigureItems(at: reconfigured.map { indexPath(for: $0) })
+            }
+            #if DEBUG
+            debugRecountedItems += countsOnly.count
+            debugReconfiguredItems += reconfigured.count
+            #endif
+            return
+        }
+        reloadAll(dissolving: dissolving)
+    }
+
+    /// Adopts a planned list: stretches, starts, the drawn order and which
+    /// posts are tiles — derived from one value so they cannot disagree.
+    private func adoptSegments(_ planned: [DiscoverSegment]) {
+        segments = planned
+        var starts: [Int] = []
+        var flat: [GalleryPost] = []
+        var tiles: Set<PostID> = []
+        var paired: Set<PostID> = []
+        for segment in planned {
+            starts.append(flat.count)
+            flat += segment.posts
+            if segment.chunk != nil { tiles.formUnion(segment.posts.map(\.id)) }
+            if segment.isPairs { paired.formUnion(segment.posts.map(\.id)) }
+        }
+        segmentStarts = starts
+        posts = flat
+        tilePostIDs = tiles
+        pairedPostIDs = paired
+        #if DEBUG
+        // `-profile-segments-log`: the stretches as planned — `rows(3)@0
+        // chunk(5)@3 pairs(2)@8 …`, with each one's first index.
+        if ProcessInfo.processInfo.arguments.contains("-profile-segments-log") {
+            let parts = zip(planned, starts).map { segment, start -> String in
+                let kind = switch segment {
+                case .rows: "rows"
+                case .chunk: "chunk"
+                case .pairs: "pairs"
+                }
+                return "\(kind)(\(segment.posts.count))@\(start)"
+            }
+            print("[profile-segments] complete=\(isCorpusComplete) \(parts.joined(separator: " "))")
+        }
+        #endif
+    }
+
+    /// The chunk `section` holds, or nil for cards. Asked by the layout.
+    private func chunk(inSection section: Int) -> MosaicChunk? {
+        guard style == .discover, !showsSkeleton, segments.indices.contains(section) else { return nil }
+        return segments[section].chunk
+    }
+
+    /// Whether `section` is a block of paired half-width cards. Asked by the
+    /// layout.
+    private func isPairs(inSection section: Int) -> Bool {
+        guard style == .discover, !showsSkeleton, segments.indices.contains(section) else { return false }
+        return segments[section].isPairs
+    }
+
+    /// Where a post at `index` in `posts` lives — one section on the grid and
+    /// the list, the stretch holding it on Discover.
+    private func indexPath(for index: Int) -> IndexPath {
+        guard style == .discover, !segmentStarts.isEmpty else { return IndexPath(item: index, section: 0) }
+        // The last stretch starting at or before `index`.
+        var low = 0
+        var high = segmentStarts.count - 1
+        while low < high {
+            let mid = (low + high + 1) / 2
+            if segmentStarts[mid] <= index { low = mid } else { high = mid - 1 }
+        }
+        return IndexPath(item: index - segmentStarts[low], section: low)
+    }
+
+    /// The index into `posts` an index path names.
+    private func flatIndex(for indexPath: IndexPath) -> Int {
+        guard style == .discover, segmentStarts.indices.contains(indexPath.section) else { return indexPath.item }
+        return segmentStarts[indexPath.section] + indexPath.item
+    }
+
+    /// Whether `postID` is drawn as a whole-rectangle tile — every post on the
+    /// grid, a chunk's or a pair's on Discover, none on the list. What plays
+    /// like a brick and hides whole for a flight.
+    private func drawsAsTile(_ postID: PostID) -> Bool {
+        switch style {
+        case .grid: true
+        case .list: false
+        case .discover: tilePostIDs.contains(postID) || pairedPostIDs.contains(postID)
+        }
+    }
+
+    /// The whole-table path every delivery ends on when it is not an append
+    /// or an in-place update.
+    private func reloadAll(dissolving: Bool) {
         let reload = {
             #if DEBUG
             self.debugReloadCount += 1
@@ -487,8 +702,31 @@ final class ProfileGalleryGridView: UIView {
 // MARK: - Data source / delegate
 
 extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDelegate {
+    func numberOfSections(in collectionView: UICollectionView) -> Int {
+        // One section per stretch on Discover — and one empty one for an empty
+        // list, the shape the other styles have when there is nothing to show.
+        guard style == .discover, !showsSkeleton else { return 1 }
+        return max(1, segments.count)
+    }
+
     func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
-        showsSkeleton ? skeletonCount : posts.count
+        guard !showsSkeleton else { return skeletonCount }
+        guard style == .discover else { return posts.count }
+        return segments.indices.contains(section) ? segments[section].posts.count : 0
+    }
+
+    func collectionView(
+        _ collectionView: UICollectionView,
+        viewForSupplementaryElementOfKind kind: String,
+        at indexPath: IndexPath
+    ) -> UICollectionReusableView {
+        // The one supplementary this page has: "View all" under a chunk.
+        let footer = collectionView.dequeueReusableSupplementaryView(
+            ofKind: kind, withReuseIdentifier: DiscoverViewAllFooterView.reuseID, for: indexPath
+        ) as! DiscoverViewAllFooterView
+        footer.controlAccessibilityHint = "Shows every photo and video on this profile"
+        footer.onTap = { [weak self] in self?.onViewAllTapped?() }
+        return footer
     }
 
     func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
@@ -498,7 +736,7 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
     private func cell(at indexPath: IndexPath) -> UICollectionViewCell {
         if showsSkeleton {
             switch style {
-            case .list:
+            case .list, .discover:
                 let cell = collectionView.dequeueReusableCell(
                     withReuseIdentifier: PostGridSkeletonListCell.reuseID, for: indexPath
                 ) as! PostGridSkeletonListCell
@@ -514,9 +752,23 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
                 return cell
             }
         }
-        let post = posts[indexPath.item]
+        let post = posts[flatIndex(for: indexPath)]
         switch style {
-        case .list:
+        case .grid:
+            return tileCell(at: indexPath, post: post,
+                            cornerRadius: ChaoticSliceLayout.harmonisedCornerRadius, showsInfo: false)
+        case .discover where pairedPostIDs.contains(post.id):
+            // A pair's half-width card is For You's Following card: all
+            // picture, its author and first lines over its foot, at the list
+            // card's media corner — a tile wearing exactly that.
+            return tileCell(at: indexPath, post: post,
+                            cornerRadius: PostGridListRowCell.mediaCornerRadius, showsInfo: true)
+        case .discover where tilePostIDs.contains(post.id):
+            // A chunk's tile wears its words when it is large enough for them,
+            // as For You's chunks do (`PostTileInfo`).
+            return tileCell(at: indexPath, post: post,
+                            cornerRadius: ChaoticSliceLayout.harmonisedCornerRadius, showsInfo: true)
+        case .list, .discover:
             let cell = collectionView.dequeueReusableCell(
                 withReuseIdentifier: PostGridListRowCell.reuseID, for: indexPath
             ) as! PostGridListRowCell
@@ -591,17 +843,24 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
             // card landing on it. Also resets a recycled cell that was hidden.
             cell.setHeroConcealed(post.id == heroFlyingPostID, carrying: heroFlyingCarry)
             return cell
-        case .grid:
-            let cell = collectionView.dequeueReusableCell(
-                withReuseIdentifier: PostGridTileCell.reuseID, for: indexPath
-            ) as! PostGridTileCell
-            cell.cornerRadius = ChaoticSliceLayout.harmonisedCornerRadius
-            cell.configure(with: post, imagePipeline: imagePipeline)
-            cell.onCoverLoaded = { [weak self] in self?.reconcileAutoplay() }
-            // Re-applied per configure — see the row above.
-            cell.isHidden = post.id == heroFlyingPostID
-            return cell
         }
+    }
+
+    /// A mosaic tile — the grid's every cell, Discover's chunks and pairs.
+    private func tileCell(
+        at indexPath: IndexPath, post: GalleryPost, cornerRadius: CGFloat, showsInfo: Bool
+    ) -> PostGridTileCell {
+        let cell = collectionView.dequeueReusableCell(
+            withReuseIdentifier: PostGridTileCell.reuseID, for: indexPath
+        ) as! PostGridTileCell
+        cell.cornerRadius = cornerRadius
+        cell.configure(with: post, imagePipeline: imagePipeline, showsInfo: showsInfo)
+        // The count's heart reads the viewer's stake, as For You's tiles do.
+        if showsInfo { staking?.bindReadout(cell, to: post.id) }
+        cell.onCoverLoaded = { [weak self] in self?.reconcileAutoplay() }
+        // Re-applied per configure — see the row's concealment.
+        cell.isHidden = post.id == heroFlyingPostID
+        return cell
     }
 
     // MARK: - Autoplay
@@ -677,12 +936,14 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
         let centreY = viewport.midY
         let candidates = collectionView.indexPathsForVisibleItems.compactMap {
             indexPath -> GridVideoPlaybackCoordinator.Candidate? in
-            guard !showsSkeleton, posts.indices.contains(indexPath.item) else { return nil }
-            let post = posts[indexPath.item]
+            let index = flatIndex(for: indexPath)
+            guard !showsSkeleton, posts.indices.contains(index) else { return nil }
+            let post = posts[index]
             // Square video stays still in a MOSAIC and plays in a timeline row,
             // for the reason `hasPlayableVideo` records — the same split the
             // For You pages make.
-            let playsHere = style == .grid ? post.autoplaysInGrid : post.hasPlayableVideo
+            // On Discover, per post: a tile plays as a brick, a card as a row.
+            let playsHere = drawsAsTile(post.id) ? post.autoplaysInGrid : post.hasPlayableVideo
             guard playsHere, let url = post.videoURL,
                   post.id != heroFlyingPostID,
                   let cell = collectionView.cellForItem(at: indexPath) as? any GridPlaybackCell,
@@ -718,12 +979,12 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
             print("[profile-autoplay] none: posts=\(posts.count) videos=\(videos) "
                   + "candidates=\(candidates.count) surfaceVisible=\(playback.debugIsSurfaceVisible) "
                   + "skeleton=\(showsSkeleton) visible=\(visible.count) realized=\(realized) "
-                  + "style=\(style == .grid ? "grid" : "list") "
+                  + "style=\(style) "
                   + "viewport=\(Int(viewport.minY))…\(Int(viewport.maxY)) "
                   + "inset=\(Int(collectionView.adjustedContentInset.top))/"
                   + "\(Int(collectionView.adjustedContentInset.bottom))")
-            for indexPath in visible where posts.indices.contains(indexPath.item) {
-                let post = posts[indexPath.item]
+            for indexPath in visible where posts.indices.contains(flatIndex(for: indexPath)) {
+                let post = posts[flatIndex(for: indexPath)]
                 guard post.hasPlayableVideo else { continue }
                 let cell = collectionView.cellForItem(at: indexPath) as? any GridPlaybackCell
                 let frame = cell.map { $0.convert($0.videoMediaRect, to: collectionView) } ?? .zero
@@ -731,7 +992,7 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
                 let fraction = frame.height > 0 && !overlap.isNull
                     ? (overlap.height * overlap.width) / (frame.height * frame.width) : 0
                 print("[profile-autoplay]   \(post.id.rawValue) shape=\(post.shape) "
-                      + "playsHere=\(style == .grid ? post.autoplaysInGrid : post.hasPlayableVideo) "
+                      + "playsHere=\(drawsAsTile(post.id) ? post.autoplaysInGrid : post.hasPlayableVideo) "
                       + "cover=\(cell?.renderedCover == nil ? "NIL" : "set") "
                       + "media=\(Int(frame.minY))…\(Int(frame.maxY)) frac=\(String(format: "%.2f", fraction))")
             }
@@ -768,7 +1029,7 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
     /// media to fly, which is the same rule the For You grid applies.
     func heroGeometry(for postID: PostID) -> (rect: CGRect, cover: UIImage?, isTile: Bool)? {
         guard let index = posts.firstIndex(where: { $0.id == postID }),
-              let cell = collectionView.cellForItem(at: IndexPath(item: index, section: 0))
+              let cell = collectionView.cellForItem(at: indexPath(for: index))
         else { return nil }
         // The MEDIA's rect, which a text row does not have — and that absence
         // is the whole of its transition policy, exactly as on For You. A row
@@ -788,7 +1049,10 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
         return (
             rect: cell.convert(rect, to: collectionView),
             cover: (cell as? any GridPlaybackCell)?.renderedCover,
-            isTile: cell is PostGridTileCell
+            // ⚠️ A PAIRED CARD FLIES AS THE LIST'S MEDIA, not as a tile: it
+            // is For You's Following card, which takes off and lands on the
+            // list card's curve (`.listMedia`) — its own corner.
+            isTile: cell is PostGridTileCell && !pairedPostIDs.contains(postID)
         )
     }
 
@@ -796,7 +1060,7 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
     /// starts from.
     private func cell(for postID: PostID) -> UICollectionViewCell? {
         guard let index = posts.firstIndex(where: { $0.id == postID }) else { return nil }
-        return collectionView.cellForItem(at: IndexPath(item: index, section: 0))
+        return collectionView.cellForItem(at: indexPath(for: index))
     }
 
     /// The whole CARD of a text-only row, which is what a reveal's window opens
@@ -932,7 +1196,7 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
         heroFlyingCarry = carry
         if !concealed { reconcileAutoplay() }
         guard let index = posts.firstIndex(where: { $0.id == postID }),
-              let cell = collectionView.cellForItem(at: IndexPath(item: index, section: 0))
+              let cell = collectionView.cellForItem(at: indexPath(for: index))
         else { return }
         if let row = cell as? PostGridListRowCell {
             // The CALLER says what it carried; the row hides that much. Reading
@@ -955,7 +1219,7 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
     /// exercises. Same reason `ForYouGridPage` grew one.
     func debugSelectItem(at index: Int) -> Bool {
         guard posts.indices.contains(index) else { return false }
-        let path = IndexPath(item: index, section: 0)
+        let path = indexPath(for: index)
         // REALIZED FIRST, and it is not a convenience. A finger can only tap a
         // row that is on screen, and this page shows very few at rest — the
         // header takes most of the screen, so an Activity list of nine posts
@@ -987,7 +1251,7 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
         debugLastRevealedPostID = id
         #endif
         guard let index = posts.firstIndex(where: { $0.id == id }) else { return }
-        let rect = collectionView.layoutAttributesForItem(at: IndexPath(item: index, section: 0))?.frame
+        let rect = collectionView.layoutAttributesForItem(at: indexPath(for: index))?.frame
         #if DEBUG
         let offsetBefore = collectionView.contentOffset.y
         #endif
@@ -1024,7 +1288,7 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
         willDisplay cell: UICollectionViewCell,
         forItemAt indexPath: IndexPath
     ) {
-        guard !showsSkeleton, indexPath.item >= posts.count - Self.nearEndTileCount else { return }
+        guard !showsSkeleton, flatIndex(for: indexPath) >= posts.count - Self.nearEndTileCount else { return }
         onNearEnd?()
     }
 
@@ -1045,14 +1309,15 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
 
     /// Both ways into a post — the card, and its comment chip.
     private func open(at indexPath: IndexPath, showingComments: Bool) {
-        guard !showsSkeleton, posts.indices.contains(indexPath.item) else { return }
+        let index = flatIndex(for: indexPath)
+        guard !showsSkeleton, posts.indices.contains(index) else { return }
         // Same contract as the For You grids: the flight leaves from where
         // the tile IS, and the reveal waits until the post has covered this
         // page (`applyPendingReveal`). Moving the grid under the thumb at tap
         // time is a jump the viewer is looking straight at.
-        let post = posts[indexPath.item]
+        let post = posts[index]
         pendingRevealPostID = post.id
-        let stream = Array(posts[indexPath.item...].prefix(Self.streamWindow))
+        let stream = Array(posts[index...].prefix(Self.streamWindow))
         // ⚠️ A TEXT POST'S COMMENTS ARE ITS PAGE — see `ForYouGridPage.open`.
         if showingComments, post.kind != .text, let openComments = onItemCommentsTapped {
             openComments(post, stream)

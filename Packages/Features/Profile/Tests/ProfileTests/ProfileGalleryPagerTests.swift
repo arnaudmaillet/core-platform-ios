@@ -24,7 +24,11 @@ struct ProfileGalleryScrubTests {
 
     /// A pager with real bounds, so offsets and page widths are meaningful.
     private func makePager(width: CGFloat = 400) -> ProfileGalleryPagerView {
-        let pager = ProfileGalleryPagerView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()))
+        let pager = ProfileGalleryPagerView(
+            // The viewer's own three — the only profile with more than one page
+            // since #631, and so the only one these mechanics run on.
+            imagePipeline: ImagePipeline(fetcher: SilentFetcher()), tabs: ProfileTab.ownTabs
+        )
         pager.frame = CGRect(x: 0, y: 0, width: width, height: 600)
         pager.layoutIfNeeded()
         return pager
@@ -172,7 +176,11 @@ struct ProfileGalleryOffsetSyncTests {
     }
 
     private func makePager() -> ProfileGalleryPagerView {
-        let pager = ProfileGalleryPagerView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()))
+        let pager = ProfileGalleryPagerView(
+            // The viewer's own three — the only profile with more than one page
+            // since #631, and so the only one these mechanics run on.
+            imagePipeline: ImagePipeline(fetcher: SilentFetcher()), tabs: ProfileTab.ownTabs
+        )
         pager.frame = CGRect(x: 0, y: 0, width: 400, height: 600)
         pager.layoutIfNeeded()
         return pager

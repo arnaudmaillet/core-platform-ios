@@ -152,20 +152,21 @@ struct GalleryPagingTests {
         #expect(ids(shown.snapshot?.activity) == ["a", "t1", "b", "c", "t2"])
     }
 
-    /// Short shows only text: a page of photos adds nothing to it, and with
-    /// no tile coming on screen to ask, the next page is asked at once.
-    @Test func aTabThatAPageLeavesUnchangedKeepsLoading() async throws {
+    /// The media gallery "View all" pushes (#631) shows only media: a page
+    /// of text posts adds nothing to it, and with no tile coming on screen to
+    /// ask, the next page is asked at once.
+    @Test func aListThatAPageLeavesUnchangedKeepsLoading() async throws {
         let gallery = PagedGallery(authored: [
-            nil: GalleryPage(posts: [post("p1", at: 60)], nextPageToken: "a2"),
-            "a2": GalleryPage(posts: [post("p2", at: 50)], nextPageToken: "a3"),
-            "a3": GalleryPage(posts: [post("x", .text, at: 40)], nextPageToken: nil),
+            nil: GalleryPage(posts: [post("t1", .text, at: 60)], nextPageToken: "a2"),
+            "a2": GalleryPage(posts: [post("t2", .text, at: 50)], nextPageToken: "a3"),
+            "a3": GalleryPage(posts: [post("x", at: 40)], nextPageToken: nil),
         ])
         let (viewModel, shown) = try await open(gallery)
 
-        viewModel.setGalleryFormat(.short)
-        try #require(await settle { ids(shown.snapshot?.short) == ["x"] })
+        viewModel.setGalleryFormat(.media)
+        try #require(await settle { ids(shown.snapshot?.media) == ["x"] })
 
-        #expect(ids(shown.snapshot?.short) == ["x"])
+        #expect(ids(shown.snapshot?.media) == ["x"])
         #expect(await gallery.authoredAsks == [nil, "a2", "a3"])
     }
 
@@ -173,15 +174,15 @@ struct GalleryPagingTests {
     /// loop; the viewer's next approach retries.
     @Test func aFailingPageUnderAnEmptyTabWaitsForTheViewer() async throws {
         let gallery = PagedGallery(authored: [
-            nil: GalleryPage(posts: [post("p1", at: 60)], nextPageToken: "a2"),
-            "a2": GalleryPage(posts: [post("x", .text, at: 40)], nextPageToken: nil),
+            nil: GalleryPage(posts: [post("t1", .text, at: 60)], nextPageToken: "a2"),
+            "a2": GalleryPage(posts: [post("x", at: 40)], nextPageToken: nil),
         ])
         await gallery.fail("a2")
         let (viewModel, shown) = try await open(gallery)
 
-        viewModel.setGalleryFormat(.short)
+        viewModel.setGalleryFormat(.media)
         try #require(await settle {
-            if case .failed = shown.snapshot?.short { return true }
+            if case .failed = shown.snapshot?.media { return true }
             return false
         })
         await settle()
@@ -189,8 +190,8 @@ struct GalleryPagingTests {
 
         await gallery.heal("a2")
         viewModel.loadMoreGallery()
-        try #require(await settle { ids(shown.snapshot?.short) == ["x"] })
-        #expect(ids(shown.snapshot?.short) == ["x"])
+        try #require(await settle { ids(shown.snapshot?.media) == ["x"] })
+        #expect(ids(shown.snapshot?.media) == ["x"])
     }
 
     /// A revisit or a pull revalidates: the fresh first page goes over the
