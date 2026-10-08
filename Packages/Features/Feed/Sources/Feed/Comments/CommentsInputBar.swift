@@ -1315,18 +1315,10 @@ final class CommentsInputBar: UIView {
         let total = boostSpentTotal
         if usesLikeFace {
             boostButton.configuration?.attributedTitle = nil
-            // ⚠️ THE RESTING HEART IS THE PAGE'S INK HERE, NOT WHITE: the
-            // comments layout is a light page (media posts included), where
-            // the rail's white heart — drawn over media — would vanish. Red
-            // once staked, as on the rail.
-            if total > 0 {
-                boostButton.configuration?.image = PointsSymbol.likeImage(staked: true, Self.glyphConfiguration)
-            } else {
-                boostButton.configuration?.image = UIImage(
-                    systemName: PointsSymbol.glyph, withConfiguration: Self.glyphConfiguration
-                )
-                boostButton.configuration?.baseForegroundColor = .label
-            }
+            // White at rest, red once staked — the rail's heart exactly, on
+            // the comments layout's light page too (owner's call 2026-10-08:
+            // the two bubbles wear one face).
+            boostButton.configuration?.image = PointsSymbol.likeImage(staked: total > 0, Self.glyphConfiguration)
             boostButton.accessibilityLabel = "Like"
             boostButton.accessibilityValue = SnapRailBoostButton.accessibilityValue(
                 likeCount: SnapChromeView.displayedLikeCount(postLikes: boostPostLikeCount, viewerStake: total),
