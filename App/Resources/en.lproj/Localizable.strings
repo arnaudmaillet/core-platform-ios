@@ -1,0 +1,44 @@
+/* Push notification alerts (#651). The notification service sends a loc-key
+   with its arguments (aps.alert.loc-key / loc-args, backend#839), and iOS
+   shows the string below; a missing key would show the raw key.
+
+   Three forms per kind:
+   - NTF_PUSH_<KIND>         one argument: the sender's name.
+   - NTF_PUSH_<KIND>_OTHERS  two arguments: the name, and how many others
+                             (a grouped notification).
+   - NTF_PUSH_<KIND>_ANON    no argument: the sender's name is unknown. */
+
+/* Likes */
+"NTF_PUSH_REACTION" = "%@ liked your post";
+"NTF_PUSH_REACTION_OTHERS" = "%1$@ and %2$@ others liked your post";
+"NTF_PUSH_REACTION_ANON" = "Someone liked your post";
+
+/* Comments on your post */
+"NTF_PUSH_COMMENT" = "%@ commented on your post";
+"NTF_PUSH_COMMENT_OTHERS" = "%1$@ and %2$@ others commented on your post";
+"NTF_PUSH_COMMENT_ANON" = "Someone commented on your post";
+
+/* Replies to your comment */
+"NTF_PUSH_REPLY" = "%@ replied to your comment";
+"NTF_PUSH_REPLY_OTHERS" = "%1$@ and %2$@ others replied to your comment";
+"NTF_PUSH_REPLY_ANON" = "Someone replied to your comment";
+
+/* Mentions */
+"NTF_PUSH_MENTION" = "%@ mentioned you";
+"NTF_PUSH_MENTION_OTHERS" = "%1$@ and %2$@ others mentioned you";
+"NTF_PUSH_MENTION_ANON" = "Someone mentioned you";
+
+/* New followers */
+"NTF_PUSH_FOLLOW" = "%@ started following you";
+"NTF_PUSH_FOLLOW_OTHERS" = "%1$@ and %2$@ others started following you";
+"NTF_PUSH_FOLLOW_ANON" = "You have a new follower";
+
+/* Follow requests (private accounts) */
+"NTF_PUSH_FOLLOW_REQUEST" = "%@ asked to follow you";
+"NTF_PUSH_FOLLOW_REQUEST_OTHERS" = "%1$@ and %2$@ others asked to follow you";
+"NTF_PUSH_FOLLOW_REQUEST_ANON" = "You have a new follow request";
+
+/* Your follow request was accepted */
+"NTF_PUSH_FOLLOW_ACCEPTED" = "%@ accepted your follow request";
+"NTF_PUSH_FOLLOW_ACCEPTED_OTHERS" = "%1$@ and %2$@ others accepted your follow requests";
+"NTF_PUSH_FOLLOW_ACCEPTED_ANON" = "Your follow request was accepted";

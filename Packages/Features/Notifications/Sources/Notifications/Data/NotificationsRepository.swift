@@ -147,7 +147,7 @@ extension NotificationsProviding {
 /// profile.v1, and — when a post client is supplied — the subject post's
 /// thumbnail or text via post.v1.
 public actor NotificationsRepository: NotificationsProviding {
-    private let notificationClient: any Notification_V1_NotificationServiceClientInterface
+    let notificationClient: any Notification_V1_NotificationServiceClientInterface
     private let profileClient: any Profile_V1_ProfileServiceClientInterface
     private let postClient: (any Post_V1_PostServiceClientInterface)?
     private let authSession: any AuthSessionProviding
@@ -354,6 +354,11 @@ public actor NotificationsRepository: NotificationsProviding {
 
     /// `write` names the caller when it is a write, so a guest reaching it is
     /// reported (`GateAudit`): the member gate should have stopped them first.
+    /// The active profile, for a write — what `PushDeviceRegistering` asks.
+    func activeProfileIDForWrite(_ write: String) async throws -> ProfileID {
+        try await resolveViewerProfileID(forWrite: write)
+    }
+
     private func resolveViewerProfileID(forWrite write: String? = nil) async throws -> ProfileID {
         do {
             return try await viewer.activeProfileID()

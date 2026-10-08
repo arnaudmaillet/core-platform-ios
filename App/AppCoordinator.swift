@@ -285,7 +285,14 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         let tabCoordinator = MainTabCoordinator(
             container: container,
             isMember: isMember,
-            onLogout: { Task { await sessionManager.logout() } },
+            onLogout: { [container] in
+                Task {
+                    // While the session can still say who it is: this install
+                    // stops receiving the departing profile's pushes (#651).
+                    await container.pushNotifications.signOut()
+                    await sessionManager.logout()
+                }
+            },
             onSignIn: { [weak self] in self?.presentSignUp(for: nil) { _ in } }
         )
         tabCoordinator.start()
@@ -297,6 +304,8 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
             self.pendingDeepLink = nil
             container.router.route(to: pendingDeepLink)
         }
+        // A tap on a notification that launched the app, now that it can land.
+        container.pushNotifications.routePending()
         #if DEBUG
         // `-gate-demo`: asks the member gate for a like ~2 s in, as a gated tap
         // would, and logs the answer — so the sheet's prompt and its close /
@@ -401,6 +410,8 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
     /// A session landed: put away the sign-in flow if a guest opened one, and
     /// start what only a member has.
     private func didSignIn() {
+        // This install's push token, for the profile just signed in (#651).
+        container.pushNotifications.registerIfAllowed()
         if let sheet = presentedSignIn {
             // Signed in from the sheet: say so once it is gone, over the
             // screen the guest was on — where the action they started has
