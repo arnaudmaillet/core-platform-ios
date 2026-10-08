@@ -64,8 +64,12 @@ struct RecentlyDeletedTests {
         #expect(try await !fixture.gallery.authoredPosts(for: viewer).map(\.id).contains(post.id))
         let trash = try await fixture.gallery.recentlyDeleted(for: viewer)
         #expect(trash.map(\.post.id) == [post.id])
-        #expect(trash.first?.deletedAt != nil)
-        #expect(trash.first?.daysLeft() == 30)
+        let deletedAt = try #require(trash.first?.deletedAt)
+        // ⚠️ READ AT THE DELETION'S OWN TIME, not at a second clock read
+        // (#664): a run that crossed midnight between the delete and the
+        // check counted 29 — rightly, on the next day. The day of deletion is
+        // what this asserts.
+        #expect(trash.first?.daysLeft(now: deletedAt) == 30)
 
         try await fixture.gallery.restorePost(post.id, author: viewer)
         #expect(try await fixture.gallery.authoredPosts(for: viewer).map(\.id) == before.map(\.id))
@@ -104,7 +108,9 @@ struct RecentlyDeletedTests {
             Issue.record("the list didn't load")
             return
         }
-        #expect(RecentlyDeletedViewModel.remaining(deleted) == "30 days left")
+        // On the deletion's own day (#664) — see `aDeletedPostComesBack`.
+        let deletedAt = try #require(deleted.deletedAt)
+        #expect(RecentlyDeletedViewModel.remaining(deleted, now: deletedAt) == "30 days left")
         try await viewModel.restore(deleted)
         #expect(viewModel.phase == .loaded([]))
     }
