@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import FeedInterface
 import MediaCore
 import Testing
@@ -89,6 +90,36 @@ struct SnapComposerSoundSlotTests {
         #expect(FeedSound.isOn != before, "the slot's hold did not toggle the sound")
         bar.debugHoldRail()
         #expect(FeedSound.isOn == before)
+    }
+
+    /// ⚠️ A TEXT PAGE'S RECORD TURNS (#692): the slot's cover turns while
+    /// asked to and stops when asked to; its mute badge never turns; another
+    /// face, or a post with no sound, never turns.
+    @Test func theSlotsRecordTurnsWithTheSound() {
+        guard !MotionPreference.reducesMotion else { return }
+        let bar = CommentsInputBar()
+        bar.frame = CGRect(x: 0, y: 0, width: 360, height: 120)
+        bar.railFace = .sound(Self.face)
+        bar.layoutIfNeeded()
+        #expect(!bar.debugRailCover.isHidden, "the cover is not drawn on the slot")
+        #expect(bar.debugRailButton.configuration?.image == nil, "the cover is still the button's image")
+
+        bar.setRailSpinning(true)
+        #expect(bar.debugRailIsSpinning)
+        bar.setRailSpinning(false)
+        #expect(!bar.debugRailIsSpinning)
+
+        bar.railFace = .sound(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: true))
+        #expect(bar.debugRailMutedBadgeShown)
+        bar.setRailSpinning(true)
+        #expect(bar.debugRailIsSpinning)
+
+        bar.railFace = .sound(SnapSoundFace(coverURL: nil, isAvailable: false, isMuted: false))
+        bar.setRailSpinning(true)
+        #expect(!bar.debugRailIsSpinning, "a post with no sound turned")
+        bar.railFace = .pin(isPinned: false)
+        #expect(bar.debugRailCover.isHidden)
+        #expect(!bar.debugRailIsSpinning)
     }
 
     /// ⚠️ A FILE COVER IS READ, NEVER FETCHED (#680): the slot and the bubble

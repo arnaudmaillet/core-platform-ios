@@ -139,7 +139,41 @@ enum SnapActionColumn {
     /// bottom are one gap, the pill's height less the heart and the count,
     /// shared three ways.
     @MainActor static var pillGap: CGFloat {
-        max(0, (likePillHeight - heartHeight - SnapLikeCountBadge.height) / 3)
+        max(0, (likePillHeight - heartHeight - countHeight) / 3)
+    }
+
+    /// The count's face under the heart: fixed size (#482), like the pill.
+    static let countFont = UIFont.monospacedDigitSystemFont(ofSize: 12, weight: .bold)
+    /// The count's line, as the button lays it out.
+    static var countHeight: CGFloat { countFont.lineHeight }
+
+    /// The like pill's face, the rail's and the composer's alike: the heart
+    /// over the count, one `pillGap` apart and from each end.
+    ///
+    /// ⚠️ THE COUNT IS THE BUTTON'S OWN TITLE (#692), not a label laid over
+    /// it: a sibling sat on the glass without being part of it — it did not
+    /// move with the press and was not drawn as the glass's content, and it
+    /// read as pasted on (the owner, on a device).
+    @MainActor static func likeConfiguration(
+        _ base: UIButton.Configuration, staked: Bool, count: Int64?, ink: UIColor
+    ) -> UIButton.Configuration {
+        var config = base
+        config.image = PointsSymbol.likeImage(staked: staked, heartConfiguration)
+        config.baseForegroundColor = ink
+        config.cornerStyle = .capsule
+        guard let count else {
+            config.attributedTitle = nil
+            config.contentInsets = heartInsets
+            return config
+        }
+        var title = AttributedString(count.formattedCompact())
+        title.font = countFont
+        config.attributedTitle = title
+        config.titleLineBreakMode = .byClipping
+        config.imagePlacement = .top
+        config.imagePadding = pillGap
+        config.contentInsets = NSDirectionalEdgeInsets(top: pillGap, leading: 0, bottom: pillGap, trailing: 0)
+        return config
     }
 
     /// The button insets that put the heart one `pillGap` below the pill's
@@ -151,7 +185,4 @@ enum SnapActionColumn {
         )
     }
 
-    /// Where the count's top sits below the pill's top: one gap, the heart,
-    /// another gap.
-    @MainActor static var countTopInset: CGFloat { 2 * pillGap + heartHeight }
 }

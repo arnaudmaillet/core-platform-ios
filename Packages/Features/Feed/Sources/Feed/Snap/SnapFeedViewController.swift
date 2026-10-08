@@ -4607,8 +4607,12 @@ final class SnapFeedViewController: UIViewController {
     private func refreshCoverSpin() {
         let playing = isOnScreen && ((activeSnapCell?.isClipAdvancing ?? false) || songPlayer.isPlaying)
         // The sound bubble's record turns while the post plays AUDIBLY: the
-        // player's play and pause, and the mute (#683).
-        activeSnapCell?.setSoundSpinning(playing && FeedSound.isOn)
+        // player's play and pause, and the mute (#683) — and so does the
+        // panel's slot, where a TEXT page's sound lives (#692).
+        let audible = playing && FeedSound.isOn
+        activeSnapCell?.setSoundSpinning(audible)
+        (commentsContentVC as? PostDetailViewController)?.setRailSoundSpinning(audible)
+        (previewRestingVC as? PostDetailViewController)?.setRailSoundSpinning(audible)
     }
 
     private func setCoverSpinWatch(_ on: Bool) {

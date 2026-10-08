@@ -69,18 +69,19 @@ struct SnapLikePillLayoutTests {
         #expect(text.debugBoostButton.frame == media.debugBoostButton.frame)
     }
 
-    /// ⚠️ EVEN GAPS (#680): top → heart, heart → count, count → bottom.
+    /// ⚠️ EVEN GAPS (#680): top → heart, heart → count, count → bottom —
+    /// measured on what the pill DRAWS, its image and its title (#692).
     @Test func theGapsInsideThePillAreEven() {
         let chrome = Self.chrome(Self.model())
         let pill = chrome.debugBoostButton.frame
         let count = chrome.debugLikeBadgeFrame
-        let heart = SnapActionColumn.heartHeight
-        let gap = SnapActionColumn.pillGap
-        #expect(gap > 4, "the pill has no room for its gaps: \(gap)")
-        let heartTop = pill.minY + SnapActionColumn.heartInsets.top
-        #expect(abs((heartTop - pill.minY) - gap) < 1, "top gap")
-        #expect(abs(count.minY - (heartTop + heart) - gap) < 1, "heart → count gap")
-        #expect(abs(pill.maxY - count.maxY - gap) < 1, "count → bottom gap: \(pill.maxY - count.maxY) vs \(gap)")
+        let heart = chrome.debugLikeHeartFrame
+        #expect(SnapActionColumn.pillGap > 4, "the pill has no room for its gaps")
+        let top = heart.minY - pill.minY
+        let middle = count.minY - heart.maxY
+        let bottom = pill.maxY - count.maxY
+        let gaps = [top, middle, bottom]
+        #expect((gaps.max() ?? 0) - (gaps.min() ?? 0) < 1, "uneven gaps top \(top), middle \(middle), bottom \(bottom)")
         #expect(pill.contains(count), "the count \(count) left the pill \(pill)")
     }
 

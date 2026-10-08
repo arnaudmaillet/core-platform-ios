@@ -629,11 +629,12 @@ final class SnapRailBoostButton: UIButton {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    /// The like count VoiceOver reads (the badge draws it). Nil: hidden.
+    /// The like count, drawn under the heart and read by VoiceOver. Nil:
+    /// hidden (#397).
     func setLikeCount(_ count: Int64?) {
         guard count != likeCount else { return }
         likeCount = count
-        applyAccessibility()
+        applyFace()
     }
 
     /// Renders the viewer's spend on this post. Idempotent; a recycled cell
@@ -659,7 +660,7 @@ final class SnapRailBoostButton: UIButton {
     /// funnel here, so a glass materialization can never resurrect the
     /// wrong face (the configuration is rebuilt whole each time).
     private func applyFace() {
-        configuration = Self.makeConfiguration(glass: hasGlass, spentTotal: spentTotal)
+        configuration = Self.makeConfiguration(glass: hasGlass, spentTotal: spentTotal, likeCount: likeCount)
         applyAccessibility()
     }
 
@@ -679,16 +680,13 @@ final class SnapRailBoostButton: UIButton {
         return parts.isEmpty ? nil : parts.joined(separator: ", ")
     }
 
-    private static func makeConfiguration(glass: Bool, spentTotal: Int) -> UIButton.Configuration {
-        var config: UIButton.Configuration = glass ? .glass() : .plain()
+    private static func makeConfiguration(glass: Bool, spentTotal: Int, likeCount: Int64?) -> UIButton.Configuration {
         // A heart either way (#668): an outline in the media's ink (white) at
         // rest, the points' red fill once the viewer has staked (#680) —
-        // never replaced by a number.
-        config.image = PointsSymbol.likeImage(staked: spentTotal > 0, SnapActionColumn.heartConfiguration)
-        config.baseForegroundColor = .white
-        config.contentInsets = SnapActionColumn.heartInsets
-        config.cornerStyle = .capsule
-        return config
+        // never replaced by a number — over the post's count (#692).
+        SnapActionColumn.likeConfiguration(
+            glass ? .glass() : .plain(), staked: spentTotal > 0, count: likeCount, ink: .white
+        )
     }
 }
 
