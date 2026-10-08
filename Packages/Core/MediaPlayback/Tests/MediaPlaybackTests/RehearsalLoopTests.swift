@@ -69,7 +69,7 @@ struct RehearsalLoopTests {
         // ⚠️ ONE LATE READING IS THE SAMPLER, NOT THE LOOP (#599): a starved
         // runner reads the playhead a few ms after the wrap was due. A loop
         // that overshoots does so on every wrap (`TimingToleranceTests`).
-        #expect(TimingTolerance.withinBoundButOne(taken, 2.0 + 1.0 / 30 + 0.01, hardLimit: 2.1),
+        #expect(TimingTolerance.withinLoopButOne(taken, loop: 1.0...2.0, frame: 1.0 / 30),
                 "the rehearsal played past its range: \(high), \(taken.filter { $0 > 2.0 + 1.0 / 30 + 0.01 })")
     }
 
@@ -101,8 +101,9 @@ struct RehearsalLoopTests {
         let taken = try await samples(controller, view, for: 3.5)
 
         #expect(wraps(taken).count >= 2, "guard: it did not loop twice")
-        // One late reading is the sampler (#599); see `aRehearsalStaysInsideItsRange`.
-        #expect(TimingTolerance.withinBoundButOne(taken, 1.5 + 1.0 / 30 + 0.01, hardLimit: 1.6),
+        // One late reading is the runner (#599) — up to a period late: CI read
+        // 1.875 s here once, every other sample inside. See `withinLoopButOne`.
+        #expect(TimingTolerance.withinLoopButOne(taken, loop: 0.5...1.5, frame: 1.0 / 30),
                 "it played past its range: \(taken.filter { $0 > 1.5 + 1.0 / 30 + 0.01 })")
         #expect((taken.dropFirst(5).min() ?? -1) >= 0.49, "it played before its range")
     }

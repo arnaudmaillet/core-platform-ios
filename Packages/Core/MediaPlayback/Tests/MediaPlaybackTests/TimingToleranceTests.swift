@@ -38,6 +38,24 @@ struct TimingToleranceTests {
         #expect(!TimingTolerance.withinBoundButOne([0.6, 1.0, 1.9], bound, hardLimit: hard), "a wild overshoot")
     }
 
+    /// A loop's late reading may be up to a period late — the CI reading on
+    /// #649 was 1.875 s in a 0.5…1.5 s loop — while a loop that overshoots on
+    /// every wrap, never wraps, or runs on past a period still fails.
+    @Test func aLoopToleratesOneReadingUpToAPeriodLate() {
+        let loop = 0.5...1.5
+        let frame = 1.0 / 30
+        let wraps = (0..<3).flatMap { _ in stride(from: 0.5, through: 1.5, by: 0.01).map { $0 } }
+        #expect(TimingTolerance.withinLoopButOne(wraps, loop: loop, frame: frame))
+        #expect(TimingTolerance.withinLoopButOne(wraps + [1.875] + wraps, loop: loop, frame: frame),
+                "one starved reading, the loop wrapping after it")
+        #expect(!TimingTolerance.withinLoopButOne(wraps + [1.56] + wraps + [1.57] + wraps + [1.56], loop: loop, frame: frame),
+                "past the end on every wrap: broken")
+        #expect(!TimingTolerance.withinLoopButOne(wraps + [1.6, 1.7, 1.8, 1.9], loop: loop, frame: frame),
+                "it never wrapped: broken")
+        #expect(!TimingTolerance.withinLoopButOne(wraps + [2.6], loop: loop, frame: frame),
+                "more than a period past the end: it ran on into the item")
+    }
+
     /// A look budget is spent by polls, not by time: a condition that never
     /// holds fails after its looks; one that holds stops at once.
     @Test func aLookBudgetCountsPolls() async throws {

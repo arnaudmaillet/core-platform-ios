@@ -95,6 +95,14 @@ struct ComposedFrameReaderTests {
         return CACurrentMediaTime() - started
     }
 
+    /// Waits, in looks, until the reader holds at least two frames — one to
+    /// hand out and a newer one behind it. What the tests that hand frames out
+    /// need first; a precondition, so the budget is generous (30 s of looks)
+    /// and only a reader that never reads ahead runs it out.
+    private static func holdsReadAhead(_ reader: ComposedFrameReader) async throws -> Bool {
+        try await TimingTolerance.settle(looks: 6000) { reader.debugState.frames >= 2 }
+    }
+
     /// One pixel of a BGRA buffer, at fractions of its size (0,0 top left).
     private func colour(of buffer: CVPixelBuffer, x: Double, y: Double) -> RGB {
         CVPixelBufferLockBaseAddress(buffer, .readOnly)
@@ -138,12 +146,17 @@ struct ComposedFrameReaderTests {
             defer { reader.close() }
             _ = reader.frame(at: time(seconds))
             let waited = try await settle(reader)
-            let held = reader.debugState.frames
             // ⚠️ TWO IS ENOUGH TO MAKE THE POINT — a newer frame than the one
             // asked for is there to be handed out wrongly. A slow CI runner read
             // only three of the six in the settle budget.
-            #expect(held >= 2,
-                    "guard: at \(seconds)s the reader read \(held) frames ahead in \(waited)s")
+            // ⚠️ AND IT IS WAITED FOR, not read once (#599): a starved runner
+            // ends the settle holding one frame and reads the second later. A
+            // precondition, in looks — a reader that never reads ahead still
+            // fails it.
+            let readAhead = try await Self.holdsReadAhead(reader)
+            let held = reader.debugState.frames
+            #expect(readAhead,
+                    "guard: at \(seconds)s the reader read \(held) frames ahead in \(waited)s and after")
             let got = try #require(try await poll(reader, at: seconds), "nothing answered \(seconds)s")
             let at = got.time.seconds
             #expect(at <= seconds + 0.000_001 && seconds - at < Self.frame + 0.001,
@@ -386,7 +399,9 @@ struct ComposedFrameReaderTests {
         _ = reader.frame(at: time(0.5))
         try await settle(reader)
         _ = try #require(try await poll(reader, at: 0.5), "guard: nothing answered 0.5s")
-        #expect(reader.debugState.frames > 1, "guard: nothing was read ahead to be handed out")
+        // Waited for, in looks (#599): the poll took frames out, and a starved
+        // runner refills them late. CI once held one frame here after 15 s.
+        try #require(try await Self.holdsReadAhead(reader), "guard: nothing was read ahead to be handed out")
 
         reader.close()
         let generation = reader.debugState.generation
