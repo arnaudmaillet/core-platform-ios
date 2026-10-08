@@ -97,8 +97,8 @@ struct SnapSharedColumnTests {
         #expect(Self.isDrawn(chrome.debugBoostButton), "the engaged column did not come back after the flight")
     }
 
-    /// The ink changes IN PLACE: dark glass over a media page at rest, the
-    /// device's while the comments are up, a text page's always.
+    /// The ink: dark glass on a media page in both layouts, a text page's
+    /// own theme.
     @Test func theInkFollowsTheLayout() {
         let (chrome, host, window) = Self.mounted()
         defer { window.isHidden = true }
@@ -111,8 +111,10 @@ struct SnapSharedColumnTests {
             return pill.traitCollection.userInterfaceStyle
         }
         #expect(style() == .dark)
+        // ⚠️ STILL DARK with the comments up (the owner, on a device): the
+        // column is the media's, in both layouts.
         chrome.setCommentsEngaged(true)
-        #expect(style() == .light, "engaged, the column kept the media's ink")
+        #expect(style() == .dark, "engaged, the column turned light")
         chrome.setCommentsEngaged(false)
         #expect(style() == .dark)
 

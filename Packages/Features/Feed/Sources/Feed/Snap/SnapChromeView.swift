@@ -140,8 +140,7 @@ final class SnapChromeView: UIView {
     private let columnLayer = SnapActionColumnLayer()
     /// Where `columnLayer` is mounted: this chrome, or the cell's content.
     private weak var columnHost: UIView?
-    /// The comments own the page: the column's ink is the panel's.
-    private var columnEngaged = false
+
     /// What the sound bubble draws for the represented post — nil when the
     /// post has no sound bubble (the feed pushes it, `setSoundFace`).
     private var soundFace: SnapSoundFace?
@@ -633,7 +632,7 @@ final class SnapChromeView: UIView {
         // glass with dark ink, and turned dark at the landing — while the
         // toolbar, themed already, was white from the first frame.
         overrideUserInterfaceStyle = SnapChromeTheme.style(hasMedia: hasMedia)
-        applyColumnStyle(animated: false)
+        applyColumnStyle()
         scrimView.isHidden = !hasMedia
         // Set the timestamp before the caption so the caption's didSet
         // composes with both already in hand.
@@ -1282,8 +1281,6 @@ final class SnapChromeView: UIView {
         lastEngagedProgress = resolved
         alpha = resolved
         if returnedToRest { commentEmptyState.restartLabelDwell() }
-        // The column stays (#695); only its ink changes, past the middle.
-        setColumnEngaged(resolved < 0.5)
     }
 
     // MARK: - The action column (#695)
@@ -1324,30 +1321,11 @@ final class SnapChromeView: UIView {
         columnLayer.alpha = held ? 0 : 1
     }
 
-    /// The column's ink: the media's (dark glass, white ink) at rest on a
-    /// media page, the panel's (the device's) while the comments own it, a
-    /// text page's always. Changed IN PLACE, through a short dissolve of the
-    /// layer's own rendering — never by swapping two copies.
-    private func setColumnEngaged(_ engaged: Bool) {
-        guard engaged != columnEngaged else { return }
-        columnEngaged = engaged
-        applyColumnStyle(animated: true)
-    }
-
-    private func applyColumnStyle(animated: Bool) {
-        // A text page inherits its page's theme (the device's); a media page
-        // is dark at rest and the DEVICE's while its comments are up — what
-        // the panel itself wears.
-        let device = window?.traitCollection.userInterfaceStyle ?? .unspecified
-        let style: UIUserInterfaceStyle = !hasMedia ? .unspecified : (columnEngaged ? device : .dark)
-        guard columnLayer.overrideUserInterfaceStyle != style else { return }
-        if animated, columnLayer.window != nil, !UIAccessibility.isReduceMotionEnabled {
-            let dissolve = CATransition()
-            dissolve.type = .fade
-            dissolve.duration = 0.25
-            columnLayer.layer.add(dissolve, forKey: "column-ink")
-        }
-        columnLayer.overrideUserInterfaceStyle = style
+    /// The column's ink: dark glass and white ink on a media page — in
+    /// BOTH layouts, the comments' included (the owner, on a device: the
+    /// column stays dark) — and a text page's own theme.
+    private func applyColumnStyle() {
+        columnLayer.overrideUserInterfaceStyle = hasMedia ? .dark : .unspecified
     }
 
     /// Cycles while the owning cell is on screen — the band's visibility
