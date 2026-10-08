@@ -58,6 +58,29 @@ struct TimingToleranceTests {
 
     /// A look budget is spent by polls, not by time: a condition that never
     /// holds fails after its looks; one that holds stops at once.
+    /// A restart's small step back adds no film; the end wrapping to the
+    /// start adds the rest of the loop.
+    @Test func aSmallStepBackIsNotAWrap() {
+        #expect(abs(TimingTolerance.filmAdvanced(from: 1.0, to: 1.2, period: 4) - 0.2) < 1e-9)
+        #expect(TimingTolerance.filmAdvanced(from: 1.2, to: 1.17, period: 4) == 0, "a restart counted as a loop")
+        let wrapped = TimingTolerance.filmAdvanced(from: 3.9, to: 0.1, period: 4)
+        #expect(abs(wrapped - 0.2) < 1e-9, "the end wrapping to the start: \(wrapped)")
+    }
+
+    /// The scrub case: resumed at 2.25 s on a 3 s loop. Played on, it is
+    /// where the elapsed time says, wrapped or not; dragged back to where the
+    /// scrub started (0.1 s), it is not — unless a whole period went by.
+    @Test func aLoopReadingIsJudgedAgainstTheElapsedTime() {
+        // 0.3 s later: 2.55 s.
+        #expect(TimingTolerance.isOnLoop(2.55, start: 2.25, elapsed: 0.3...0.35, period: 3, slack: 0.2))
+        // A starved 2.4 s: wrapped to 1.65 s, and still right.
+        #expect(TimingTolerance.isOnLoop(1.65, start: 2.25, elapsed: 2.38...2.42, period: 3, slack: 0.2))
+        // Dragged back to the scrub's start and played 0.3 s: 0.4 s. Wrong.
+        #expect(!TimingTolerance.isOnLoop(0.4, start: 2.25, elapsed: 0.3...0.35, period: 3, slack: 0.2))
+        // ...and still wrong after a starved 2.4 s (0.1 + 2.4 = 2.5 s).
+        #expect(!TimingTolerance.isOnLoop(2.5, start: 2.25, elapsed: 2.38...2.42, period: 3, slack: 0.2))
+    }
+
     @Test func aLookBudgetCountsPolls() async throws {
         var polls = 0
         let never = try await TimingTolerance.settle(looks: 5, step: .milliseconds(1)) {
