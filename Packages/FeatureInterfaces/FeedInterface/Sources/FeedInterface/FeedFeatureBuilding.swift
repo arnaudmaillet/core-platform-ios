@@ -170,6 +170,10 @@ public protocol FeedFeatureBuilding: ConversationThreadScreenBuilding, TextPostS
     /// hand-rolled push leaves behind: perfect pixels, no way back but the
     /// chevron.
     func pushSnapFeed(postIDs: [PostID], from presenter: UIViewController)
+    /// The same push over a COMPLETE set (#674): the posts are everything the
+    /// source has — a map marker's — so the feed's last post is the end and a
+    /// swipe up there grabs the window (#628).
+    func pushSnapFeed(postIDs: [PostID], from presenter: UIViewController, sourceIsComplete: Bool)
     /// The same push, opened as a WINDOW growing out of `origin` rather than as
     /// a slide from the edge.
     ///
@@ -194,6 +198,15 @@ public protocol FeedFeatureBuilding: ConversationThreadScreenBuilding, TextPostS
         from presenter: UIViewController,
         origin: TextRevealOrigin,
         beneath: ((UIViewController) -> UIViewController)?
+    )
+    /// The same window over a COMPLETE set (#674) — see
+    /// `pushSnapFeed(postIDs:from:sourceIsComplete:)`.
+    func revealSnapFeed(
+        postIDs: [PostID],
+        from presenter: UIViewController,
+        origin: TextRevealOrigin,
+        beneath: ((UIViewController) -> UIViewController)?,
+        sourceIsComplete: Bool
     )
     /// The same window, built for the CLOSE and pushing nothing.
     ///
@@ -510,6 +523,22 @@ extension FeedFeatureBuilding {
         postIDs: [PostID], ownsInteractiveDismissal: Bool, sourceIsComplete: Bool
     ) -> UIViewController {
         makeSnapFeedViewController(postIDs: postIDs, ownsInteractiveDismissal: ownsInteractiveDismissal)
+    }
+
+    /// The same safe answer for the plain push.
+    public func pushSnapFeed(postIDs: [PostID], from presenter: UIViewController, sourceIsComplete: Bool) {
+        pushSnapFeed(postIDs: postIDs, from: presenter)
+    }
+
+    /// And for the window.
+    public func revealSnapFeed(
+        postIDs: [PostID],
+        from presenter: UIViewController,
+        origin: TextRevealOrigin,
+        beneath: ((UIViewController) -> UIViewController)?,
+        sourceIsComplete: Bool
+    ) {
+        revealSnapFeed(postIDs: postIDs, from: presenter, origin: origin, beneath: beneath)
     }
 }
 

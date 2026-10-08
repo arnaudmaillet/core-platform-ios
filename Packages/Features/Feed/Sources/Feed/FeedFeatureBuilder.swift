@@ -717,8 +717,15 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     /// `pushViewController` is exactly the regression `PlainPushDismissalTests`
     /// guards.
     public func pushSnapFeed(postIDs: [PostID], from presenter: UIViewController) {
+        pushSnapFeed(postIDs: postIDs, from: presenter, sourceIsComplete: false)
+    }
+
+    public func pushSnapFeed(postIDs: [PostID], from presenter: UIViewController, sourceIsComplete: Bool) {
         guard !postIDs.isEmpty, let nav = presenter.navigationController else { return }
-        pushWithoutFlight(makeSnapFeedViewController(postIDs: postIDs), on: nav, reveal: nil)
+        pushWithoutFlight(
+            makeSnapFeedViewController(postIDs: postIDs, ownsInteractiveDismissal: true, sourceIsComplete: sourceIsComplete),
+            on: nav, reveal: nil
+        )
     }
 
     public func revealSnapFeed(
@@ -727,9 +734,19 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         origin: TextRevealOrigin,
         beneath: ((UIViewController) -> UIViewController)?
     ) {
+        revealSnapFeed(postIDs: postIDs, from: presenter, origin: origin, beneath: beneath, sourceIsComplete: false)
+    }
+
+    public func revealSnapFeed(
+        postIDs: [PostID],
+        from presenter: UIViewController,
+        origin: TextRevealOrigin,
+        beneath: ((UIViewController) -> UIViewController)?,
+        sourceIsComplete: Bool
+    ) {
         guard !postIDs.isEmpty, let nav = presenter.navigationController else { return }
         pushWithoutFlight(
-            makeSnapFeedViewController(postIDs: postIDs),
+            makeSnapFeedViewController(postIDs: postIDs, ownsInteractiveDismissal: true, sourceIsComplete: sourceIsComplete),
             on: nav, reveal: origin, beneath: beneath
         )
     }
