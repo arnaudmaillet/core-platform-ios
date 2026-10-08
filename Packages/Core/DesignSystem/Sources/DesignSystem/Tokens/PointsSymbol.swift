@@ -27,4 +27,14 @@ public enum PointsSymbol {
             ?? UIImage(systemName: glyph)
         return image?.withTintColor(tint, renderingMode: .alwaysOriginal)
     }
+
+    /// The like heart of a stake control over media (#668): WHITE while the
+    /// viewer has staked nothing on the post, the points' red once they have
+    /// — a heart either way, never a number. The cards' `.media` readout rule
+    /// (`PostLikeReadoutView`), on the snap feed's controls.
+    public static func likeImage(staked: Bool, _ configuration: UIImage.SymbolConfiguration? = nil) -> UIImage? {
+        let image = configuration.map { UIImage(systemName: glyph, withConfiguration: $0) }
+            ?? UIImage(systemName: glyph)
+        return image?.withTintColor(staked ? tint : .white, renderingMode: .alwaysOriginal)
+    }
 }

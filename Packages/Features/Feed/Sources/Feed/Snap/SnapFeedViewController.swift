@@ -2695,7 +2695,7 @@ final class SnapFeedViewController: UIViewController {
             HapticImpact(style: .medium).impactOccurred()
             // Receipt before theatre: the anchor flips to (or grows) its
             // number face, then the "+N" float rises off it.
-            feedbackCell?.setBoostTotal(targetTotal)
+            feedbackCell?.setBoostTotal(targetTotal, animated: true)
             feedbackCell?.playBoostConfirmation(amount: spent)
             refreshVisibleBoostControls()
             #if DEBUG
@@ -2745,7 +2745,7 @@ final class SnapFeedViewController: UIViewController {
         sessionBoostID = nil
         sessionBoostAmount = 0
         HapticImpact(style: .light).impactOccurred()
-        feedbackCell?.setBoostTotal(result.targetTotal)
+        feedbackCell?.setBoostTotal(result.targetTotal, animated: true)
         feedbackCell?.playBoostRefund(amount: refunded)
         refreshVisibleBoostControls()
         #if DEBUG

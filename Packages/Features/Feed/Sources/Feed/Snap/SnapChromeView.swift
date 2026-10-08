@@ -101,6 +101,13 @@ final class SnapChromeView: UIView {
     /// never from the stream (see there for why the band's hidden state is
     /// the wrong authority for it).
     private let boostButton = SnapRailBoostButton()
+    /// The post's like count on the like button's corner (#668).
+    private let likeBadge = SnapLikeCountBadge()
+    /// The post's own like count from `configure` — nil when the author hides
+    /// it (#397). The badge adds the viewer's stake to it.
+    private var postLikeCount: Int64?
+    /// The viewer's stake on the post, as last pushed (`setBoostTotal`).
+    private var boostTotal = 0
     /// The REPOST bubble, directly under the boost anchor and its size,
     /// beside the caption and the page strip — see `SnapActionColumn`. Media
     /// chrome, like the anchor (`applyRepostVisibility`).
@@ -378,6 +385,9 @@ final class SnapChromeView: UIView {
             boostButton.topAnchor.constraint(equalTo: commentTicker.topAnchor)
             boostButton.bottomAnchor.constraint(equalTo: commentTicker.bottomAnchor)
         }
+        // A sibling on the button's corner, above it — see `SnapLikeCountBadge`.
+        addSubview(likeBadge)
+        likeBadge.pin(toCornerOf: boostButton, in: self)
 
         // The subtitle zone extends the same one-directional chain one link
         // up (caption ← band ← subtitles): nothing constrains back onto it,
@@ -578,6 +588,10 @@ final class SnapChromeView: UIView {
         // it needs no stream to appear and the flight replica — which never
         // receives one — draws the identical corner.
         boostButton.isHidden = !hasMedia
+        // The badge's count, from what the card knew; the stake pushed after
+        // `configure` is added in `setBoostTotal`.
+        postLikeCount = model.visibleLikeCount
+        applyLikeBadge(animated: false)
         applyRepostVisibility()
         if !hasMedia {
             commentTicker.setComments([])
@@ -1033,7 +1047,7 @@ final class SnapChromeView: UIView {
     /// the available one — the way out of a post should not blink away because
     /// a thumb landed on a clip's bar.
     private var scrubFadedViews: [UIView] {
-        [captionLabel, commentTicker, subtitleView, commentEmptyState, shortcutRail, boostButton, repostButton]
+        [captionLabel, commentTicker, subtitleView, commentEmptyState, shortcutRail, boostButton, likeBadge, repostButton]
     }
 
     /// What each faded view was worth before the scrub took it, so the fade
@@ -1227,6 +1241,9 @@ final class SnapChromeView: UIView {
         boostButton.isHidden = true
         repostButton.isHidden = true
         boostButton.setSpentTotal(0)
+        boostTotal = 0
+        postLikeCount = nil
+        applyLikeBadge(animated: false)
         // Back to the unwired default (enabled, nothing undoable) — the
         // next configure pushes the real context.
         boostButton.setWalletContext(balance: .max, undoableAmount: 0)
@@ -1243,13 +1260,35 @@ final class SnapChromeView: UIView {
 
     // MARK: - Boost feedback
 
-    /// The viewer's cumulative spend on the represented post — flips the
-    /// rail anchor between its glyph face (0) and its gold-number face.
-    /// Owned by the cell's configurator (the chrome has no wallet); reset
-    /// to 0 with the rest of the post state on reuse.
-    func setBoostTotal(_ total: Int) {
+    /// The viewer's cumulative spend on the represented post — turns the like
+    /// heart red and moves the like badge with it (#668). Owned by the cell's
+    /// configurator (the chrome has no wallet); reset to 0 with the rest of
+    /// the post state on reuse. `animated` for the viewer's own stake or
+    /// undo, so a badge leaving zero arrives with its bounce; a page opening
+    /// on an earlier stake does not perform.
+    func setBoostTotal(_ total: Int, animated: Bool = false) {
         boostButton.setSpentTotal(total)
+        boostTotal = total
+        applyLikeBadge(animated: animated)
     }
+
+    /// The count the badge shows: the post's, the viewer's stake included
+    /// (product decision 2026-10-08). Nil when the author hides it.
+    static func displayedLikeCount(postLikes: Int64?, viewerStake: Int) -> Int64? {
+        postLikes.map { $0 + Int64(max(0, viewerStake)) }
+    }
+
+    private func applyLikeBadge(animated: Bool) {
+        let count = Self.displayedLikeCount(postLikes: postLikeCount, viewerStake: boostTotal)
+        boostButton.setLikeCount(count)
+        // Only where the like button is: a text page has none.
+        likeBadge.setCount(boostButton.isHidden ? nil : count, animated: animated)
+    }
+
+    #if DEBUG
+    /// The badge's text as drawn — nil while it is not showing.
+    var debugLikeBadgeText: String? { likeBadge.debugText }
+    #endif
 
     /// The anchor's wallet context: what the balance can still afford and
     /// how much of this post's spend is session-undoable — the enable state

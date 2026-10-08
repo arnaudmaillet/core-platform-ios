@@ -508,6 +508,9 @@ final class CommentsInputBar: UIView {
         addSubview(railButton)
         addSubview(boostButton)
         addSubview(visibilityButton)
+        // The like face's count, on the stake bubble's corner (#668).
+        addSubview(likeBadge)
+        likeBadge.pin(toCornerOf: boostButton, in: self)
         addLayoutGuide(restingInputRow)
         avatarBubble.translatesAutoresizingMaskIntoConstraints = false
         boostButton.translatesAutoresizingMaskIntoConstraints = false
@@ -672,6 +675,7 @@ final class CommentsInputBar: UIView {
         }
         boostButton.isHidden = !showsStake || visibilityMenu != nil
         visibilityButton.isHidden = !showsStake || visibilityMenu == nil
+        applyLikeBadge(animated: false)
         setNeedsLayout()
     }
 
@@ -1252,14 +1256,85 @@ final class CommentsInputBar: UIView {
 
     // MARK: - Boost feedback
 
-    /// The viewer's cumulative spend on the represented post — flips the
-    /// boost button between its star-glyph face (0, an invitation) and
-    /// the gold number itself (a receipt): the rail anchor's exact contract
-    /// (`SnapRailBoostButton.setSpentTotal`), on this surface. Owned by the
-    /// host, which owns the post identity and the wallet.
-    func setBoostTotal(_ total: Int) {
+    /// The snap feed's LIKE face on the stake bubble (#668), off by default:
+    /// a heart white at rest and red once the viewer has staked, the post's
+    /// like count on its corner, and the viewer's stake in the long-press
+    /// menu — the rail button's exact face, so switching between the media
+    /// and comments layouts stays a crossfade between two identical bubbles.
+    /// The snap feed's comments panel turns it on; elsewhere the bubble keeps
+    /// its receipt face (the spend as a number).
+    var usesLikeFace = false {
+        didSet {
+            guard usesLikeFace != oldValue else { return }
+            applyBoostFace()
+            applyLikeBadge(animated: false)
+        }
+    }
+
+    /// The post's like count, the viewer's stake NOT included — the bar adds
+    /// it, as the rail's chrome does. Nil when the author hides it (#397).
+    /// Read only by the like face.
+    func setLikeCount(_ count: Int64?) {
+        guard count != boostPostLikeCount else { return }
+        boostPostLikeCount = count
+        applyBoostFace()
+        applyLikeBadge(animated: false)
+    }
+
+    private let likeBadge = SnapLikeCountBadge()
+    private var boostPostLikeCount: Int64?
+
+    private func applyLikeBadge(animated: Bool) {
+        let count = SnapChromeView.displayedLikeCount(postLikes: boostPostLikeCount, viewerStake: boostSpentTotal)
+        let shows = usesLikeFace && showsStake && visibilityMenu == nil
+        likeBadge.setCount(shows ? count : nil, animated: animated)
+    }
+
+    #if DEBUG
+    /// The like badge's text as drawn — nil while it is not showing.
+    var debugLikeBadgeText: String? { likeBadge.debugText }
+    #endif
+
+    /// The viewer's cumulative spend on the represented post. With the like
+    /// face it only turns the heart red and moves the badge (`animated` for
+    /// the viewer's own stake or undo); otherwise it flips the bubble between
+    /// its glyph face (0, an invitation) and the number itself (a receipt),
+    /// the rail's former contract. Owned by the host, which owns the post
+    /// identity and the wallet.
+    func setBoostTotal(_ total: Int, animated: Bool = false) {
         guard total != boostSpentTotal else { return }
         boostSpentTotal = total
+        applyBoostFace()
+        applyLikeBadge(animated: animated)
+        // The receipt moves the cap's remainder, and the remainder moves
+        // the enable state (a full post refuses even the tap).
+        refreshBoostEnabled()
+    }
+
+    private func applyBoostFace() {
+        let total = boostSpentTotal
+        if usesLikeFace {
+            boostButton.configuration?.attributedTitle = nil
+            // ⚠️ THE RESTING HEART IS THE PAGE'S INK HERE, NOT WHITE: the
+            // comments layout is a light page (media posts included), where
+            // the rail's white heart — drawn over media — would vanish. Red
+            // once staked, as on the rail.
+            if total > 0 {
+                boostButton.configuration?.image = PointsSymbol.likeImage(staked: true, Self.glyphConfiguration)
+            } else {
+                boostButton.configuration?.image = UIImage(
+                    systemName: PointsSymbol.glyph, withConfiguration: Self.glyphConfiguration
+                )
+                boostButton.configuration?.baseForegroundColor = .label
+            }
+            boostButton.accessibilityLabel = "Like"
+            boostButton.accessibilityValue = SnapRailBoostButton.accessibilityValue(
+                likeCount: SnapChromeView.displayedLikeCount(postLikes: boostPostLikeCount, viewerStake: total),
+                staked: total
+            )
+            return
+        }
+        boostButton.accessibilityLabel = "Boost post"
         if total > 0 {
             var title = AttributedString(total.formattedCompact())
             // Fixed size (#482): the count replaces the glyph inside the
@@ -1278,9 +1353,6 @@ final class CommentsInputBar: UIView {
             boostButton.configuration?.image = PointsSymbol.glyphImage(Self.glyphConfiguration)
         }
         boostButton.accessibilityValue = total > 0 ? "\(total) points spent" : nil
-        // The receipt moves the cap's remainder, and the remainder moves
-        // the enable state (a full post refuses even the tap).
-        refreshBoostEnabled()
     }
 
     /// The number face's current value, so `setBoostTotal` is cheap to call
@@ -1336,7 +1408,9 @@ final class CommentsInputBar: UIView {
             undo: { [weak self] in self?.onBoostUndo?() },
             // The empty pack's row opens the Shop, found up the bar's
             // responder chain (`StakeShopOpening`).
-            openShop: StakeShop.openAction(from: self)
+            openShop: StakeShop.openAction(from: self),
+            // The like face shows no spend, so the menu says it (#668).
+            showsStake: usesLikeFace
         )
     }
 

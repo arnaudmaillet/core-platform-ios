@@ -2207,9 +2207,10 @@ struct SnapCommentsPresentationTests {
     private static func placeholderText(in bar: UIView) -> String? {
         var stack: [UIView] = [bar]
         while let view = stack.popLast() {
-            // The text view carries its own (empty) label; the placeholder is
-            // the standalone one.
-            if let label = view as? UILabel, !(label.superview is UITextView) {
+            // The text view carries its own (empty) label, and the like badge
+            // its count (#668); the placeholder is the standalone one.
+            if let label = view as? UILabel, !(label.superview is UITextView),
+               !(label.superview is SnapLikeCountBadge) {
                 return label.text
             }
             stack.append(contentsOf: view.subviews)
