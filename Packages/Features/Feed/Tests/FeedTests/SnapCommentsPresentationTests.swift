@@ -1110,15 +1110,15 @@ struct SnapCommentsPresentationTests {
     @Test func theToolbarsTrailingRunIsTwoPlatters() {
         let (_, feed) = Self.chromeHost()
         let items = feed.toolbarItems ?? []
-        // [attribution][mute][flexible space][🔖 ⇄][fixed space][⋯]
+        // [author pill][flexible space][⇄ 🔖][fixed space][⋯]
         //
         // It was one platter holding all three for a while, to save a glass
         // host on the hero flight's push. The arms were then measured and the
         // saving was ~2 ms — inside the noise — so the grouping went back to
         // being a design question. `SnapToolbarCompositionTests` owns the
         // reason; this pins the shape.
-        #expect(items.count == 6)
-        #expect((items.dropFirst(3).first?.customView as? UIStackView)?.arrangedSubviews.count == 2)
+        #expect(items.count == 5)
+        #expect((items.dropFirst(2).first?.customView as? UIStackView)?.arrangedSubviews.count == 2)
         #expect(items.last?.customView is UIButton)
     }
 
@@ -1130,8 +1130,7 @@ struct SnapCommentsPresentationTests {
     /// was the ⋯ itself for as long as the thread was open: Share, Report and
     /// Not interested, gone exactly when a reader is deepest in the post. The
     /// exit lives in the TRAILING NAV slot now (see
-    /// `theExitTakesTheAuthorsSlotWhileTheThreadIsOpen`), where what it
-    /// displaces has already been read.
+    /// `theExitTakesTheTrailingSlotWhileTheThreadIsOpen`).
     @Test func theFooterCornerKeepsItsMenuInEveryState() throws {
         let (_, feed) = Self.chromeHost()
         let resting = feed.toolbarItems ?? []
@@ -1152,28 +1151,27 @@ struct SnapCommentsPresentationTests {
         #expect(feed.toolbarItems ?? [] == resting)
     }
 
-    /// ⚠️ THE EXIT TAKES THE AUTHOR'S SLOT while a media post's thread is open.
-    ///
-    /// The two are the same kind of thing — the outermost item at the end that
-    /// says what the screen is ABOUT — and only one of them is worth the slot
-    /// at a time: with the thread open, whose post it is has already been read
-    /// and the way back to the picture has not. A TEXT post keeps its author,
-    /// because its comments ARE the page and there is nothing to close.
-    @Test func theExitTakesTheAuthorsSlotWhileTheThreadIsOpen() throws {
+    /// ⚠️ THE EXIT TAKES THE NAV BAR'S TRAILING SLOT while a media post's
+    /// thread is open — the way back to the picture. The author pill is the
+    /// toolbar's (#671), so the slot is otherwise empty; a TEXT post's
+    /// comments ARE the page, and there is nothing to close.
+    @Test func theExitTakesTheTrailingSlotWhileTheThreadIsOpen() throws {
         let (_, feed) = Self.chromeHost()
         func trailingFirst() -> UIView? {
             feed.navigationItem.rightBarButtonItems?.first?.customView
         }
-        #expect(trailingFirst() is SnapAuthorIdentityView)
+        func closes() -> Bool { (trailingFirst() as? UIButton)?.accessibilityLabel == "Close comments" }
+        #expect(!closes())
 
         feed.setEngagedChrome(true, hasMedia: true, animated: false)
-        #expect((trailingFirst() as? UIButton)?.accessibilityLabel == "Close comments")
+        #expect(closes())
 
         feed.setEngagedChrome(true, hasMedia: false, animated: false)
-        #expect(trailingFirst() is SnapAuthorIdentityView)
+        #expect(!closes())
 
         feed.setEngagedChrome(false, hasMedia: true, animated: false)
-        #expect(trailingFirst() is SnapAuthorIdentityView)
+        #expect(!closes())
+        #expect(!(feed.navigationItem.rightBarButtonItems ?? []).contains { $0.customView is SnapAuthorIdentityView })
     }
 
     /// A TEXT page's corner never changes: its comments are its resting state,
@@ -1459,13 +1457,13 @@ struct SnapCommentsPresentationTests {
     /// The bar's INPUT row and trailing COLUMN. The row: the viewer's AVATAR
     /// opens it, the field takes the flexible width — and both stand on the
     /// bar's bottom edge, which the host rests on the toolbar. The column at
-    /// the trailing edge (`SnapActionColumn`): the rail slot, lifted
-    /// `columnLift` off that edge, and the stake one `gap` over it — both the
-    /// comment band's height.
+    /// the trailing edge (`SnapActionColumn`): the rail slot, on that edge's
+    /// line, and the stake one `gap` over it — both the comment band's height
+    /// (the receipt face's square stake).
     @Test func composerRowsRunAvatarFieldToggleUnderTheStake() throws {
         let bar = CommentsInputBar()
         bar.onPageSwipe = { _, _, _ in }
-        let height = CommentsInputBar.restingHeight(for: .large)
+        let height = CommentsInputBar.restingHeight(for: .large, likeFace: false)
         bar.frame = CGRect(x: 0, y: 0, width: 340, height: height)
         bar.layoutIfNeeded()
 
@@ -1492,15 +1490,14 @@ struct SnapCommentsPresentationTests {
         #expect(send.frame.maxX == bar.bounds.width)
 
         // Every control keeps a full tap target. The input row shares the
-        // bar's bottom edge, the field growing away from it; the slot stands
-        // `columnLift` higher.
+        // bar's bottom edge, the field growing away from it; the slot rests on
+        // the same line, and the avatar is the bubble's height (#680).
         let bubble = SnapActionColumn.bubbleSize
-        #expect(avatar.frame.height == 38)
+        #expect(abs(avatar.frame.height - bubble) < 0.5)
         #expect(abs(send.frame.height - bubble) < 0.5)
         #expect(abs(avatar.frame.maxY - bar.bounds.height) < 0.5)
         #expect(abs(field.frame.maxY - bar.bounds.height) < 0.5)
-        let lift = SnapActionColumn.columnLift
-        #expect(abs(bar.bounds.height - send.frame.maxY - lift) < 0.5)
+        #expect(abs(bar.bounds.height - send.frame.maxY) < 0.5)
 
         // The stake: on top, trailing-aligned over the slot, one `gap` above
         // it, the slot's size.
@@ -1509,7 +1506,7 @@ struct SnapCommentsPresentationTests {
         #expect(abs(stake.frame.minY) < 0.5)
         #expect(stake.frame.maxX == send.frame.maxX)
         #expect(abs(send.frame.minY - stake.frame.maxY - SnapActionColumn.gap) < 0.5)
-        #expect(abs(bar.bounds.height - (lift + 2 * bubble + SnapActionColumn.gap)) < 0.5)
+        #expect(abs(bar.bounds.height - (2 * bubble + SnapActionColumn.gap)) < 0.5)
 
         // The row's empty leading run is not the bar's: the stream behind it
         // keeps those touches. The stake and the input row are.
@@ -1535,7 +1532,8 @@ struct SnapCommentsPresentationTests {
         // never `layer.cornerRadius` + `clipsToBounds`.
         #expect(bubble.cornerConfiguration != nil)
         let face = try #require(Self.firstView(MonogramAvatarView.self, in: bubble))
-        #expect(bubble.bounds.width == 38)
+        // The column's bubble: avatar, field and rail slot are one row (#680).
+        #expect(abs(bubble.bounds.width - SnapActionColumn.bubbleSize) < 0.5)
         #expect(face.bounds.size == bubble.bounds.size, "the face fills its bubble, no margin of glass")
 
         // The button spans the bubble and lives in the CONTENT view (adding

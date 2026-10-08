@@ -298,7 +298,7 @@ struct CommentsInputBarFieldTests {
     }
 
     /// The emote toggle and the field button answer to a 44pt target around
-    /// what they draw — the 38pt line cannot hold one.
+    /// what they draw, however narrow the glyph's own frame.
     @Test func theFieldButtonsAnswerToA44ptTarget() throws {
         let (bar, _, window) = hostedBar()
         defer { window.isHidden = true }
@@ -310,11 +310,10 @@ struct CommentsInputBarFieldTests {
         let reach = CommentsInputBar.Metrics.minimumHitSide / 2 - 0.5
         for (button, outward) in [(action, CGFloat(1)), (toggle, -1)] {
             let frame = button.convert(button.bounds, to: bar)
-            #expect(frame.height < CommentsInputBar.Metrics.minimumHitSide, "guard: the line is shorter than 44")
             let points = [
                 CGPoint(x: frame.midX, y: frame.midY - reach),
                 CGPoint(x: frame.midX, y: frame.midY + reach),
-                CGPoint(x: frame.midX + outward * max(frame.width / 2, reach), y: frame.midY),
+                CGPoint(x: frame.midX + outward * max(frame.width / 2 - 0.5, reach), y: frame.midY),
             ]
             for point in points {
                 #expect(bar.hitTest(point, with: nil) === button,

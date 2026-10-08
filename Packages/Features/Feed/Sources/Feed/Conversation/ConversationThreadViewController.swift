@@ -44,7 +44,6 @@ final class ConversationThreadViewController: UIViewController {
     private let driver: any ConversationThreadDriving
     private let mode: ConversationThreadMode
     private let prefill: String
-    private let accessory: (any ConversationThreadAccessory)?
     private let imagePipeline: ImagePipeline
     private let wallet: WalletStore?
     private let makeWalletSheet: (@MainActor () -> UIViewController)?
@@ -117,7 +116,6 @@ final class ConversationThreadViewController: UIViewController {
         driver: any ConversationThreadDriving,
         mode: ConversationThreadMode,
         prefill: String,
-        accessory: (any ConversationThreadAccessory)?,
         imagePipeline: ImagePipeline,
         wallet: WalletStore?,
         makeWalletSheet: (@MainActor () -> UIViewController)?
@@ -125,7 +123,6 @@ final class ConversationThreadViewController: UIViewController {
         self.driver = driver
         self.mode = mode
         self.prefill = prefill
-        self.accessory = accessory
         self.imagePipeline = imagePipeline
         self.wallet = wallet
         self.makeWalletSheet = makeWalletSheet
@@ -367,31 +364,16 @@ final class ConversationThreadViewController: UIViewController {
         composeBar.riseWithKeyboard(of: view.keyboardLayoutGuide)
     }
 
-    /// The post's footer, with the emote strip where the music would be —
-    /// stretched over every point ⋯ leaves: [emotes ………………][⋯]. A post's
-    /// save and repost have nothing to act on in a conversation, so the strip
-    /// takes their room too.
+    /// The post's footer, with the peer's pill where the post's author pill
+    /// is (#671): [peer pill] … [⋯]. The emote strip that held the slot is
+    /// gone — the composer's own emote button is the way to emotes.
     private func configureToolbar() {
         let more = SnapFooterToolbar.makeMoreButton(menu: UIMenu(children: [
             UIAction(title: "View Profile", image: UIImage(systemName: "person.crop.circle")) { [weak self] _ in
                 self?.driver.didTapIdentity()
             },
         ]))
-        // `-snap-pill-footer` (#671): [peer pill] … [⋯] — the pill leaves the
-        // nav bar for the strip's slot, and the strip goes (the composer's own
-        // emote button stays the way to emotes).
-        if SnapPillFooter.isOn {
-            toolbarItems = SnapFooterToolbar.items(leading: peerPill, actions: [], more: more)
-            return
-        }
-        guard let accessory else { return }
-        accessory.onInsertText = { [weak self] text in self?.composeBar.insertIntoComposer(text) }
-        toolbarItems = SnapFooterToolbar.items(
-            leading: accessory.view,
-            leadingFills: true,
-            actions: [],
-            more: more
-        )
+        toolbarItems = SnapFooterToolbar.items(leading: peerPill, actions: [], more: more)
     }
 
     private func configureNavigationItem() {
@@ -409,8 +391,8 @@ final class ConversationThreadViewController: UIViewController {
         peerPill.setFollowBadge(.none)
         peerPill.setOverMedia(false)
         peerPill.onAuthorTapped = { [weak self] _ in self?.driver.didTapIdentity() }
-        // Under `-snap-pill-footer` the pill is the toolbar's (#671).
-        // A preview (no toolbar) keeps it in the bar.
+        // The pill is the toolbar's (#671); a preview (no toolbar) keeps it
+        // in the bar.
         var items = pillRidesToolbar ? [] : [UIBarButtonItem(customView: peerPill)]
         if mode == .full, wallet != nil {
             walletBadge.isUserInteractionEnabled = makeWalletSheet != nil
@@ -806,9 +788,9 @@ final class ConversationThreadViewController: UIViewController {
     /// The peer pill's share of the nav bar: the bar less its margins, the
     /// back button, and the wallet badge when there is one. Measured, and
     /// applied before the bar first lays the run out (see `viewWillAppear`).
-    /// Whether the peer pill is the toolbar's leading item (#671): under
-    /// `-snap-pill-footer`, on the full thread, which has a toolbar.
-    private var pillRidesToolbar: Bool { SnapPillFooter.isOn && mode == .full }
+    /// Whether the peer pill is the toolbar's leading item (#671): on the full
+    /// thread, which has a toolbar; a preview keeps it in the bar.
+    private var pillRidesToolbar: Bool { mode == .full }
 
     private func fitTrailingRun() {
         let bar = navigationController?.navigationBar.bounds.width ?? view.bounds.width

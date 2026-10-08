@@ -382,10 +382,12 @@ struct SnapShortcutRailViewTests {
         // NO effect view in the chrome at all — which is stronger than the
         // filtered version it replaces.
         #expect(chrome.subviews.compactMap { $0 as? UIVisualEffectView }.isEmpty)
+        // The like PILL (#669): the band's width, its top on the band's, as
+        // tall as the column above the sound bubble lets it be.
         #expect(compose.frame.minY == ticker.frame.minY)
-        #expect(abs(compose.frame.maxY - ticker.frame.maxY) < 0.01)
+        #expect(abs(compose.frame.height - SnapActionColumn.likePillHeight) < 0.34, "a pixel of snapping at most")
         #expect(abs(compose.frame.maxX - rail.frame.maxX) < 0.01)
-        #expect(abs(compose.frame.width - compose.frame.height) < 0.01)
+        #expect(abs(compose.frame.width - ticker.frame.height) < 0.01)
         #expect(compose.configuration?.cornerStyle == .capsule)
         let order = chrome.subviews
         #expect(order.firstIndex(of: ticker)! < order.firstIndex(of: rail)!)
@@ -424,7 +426,7 @@ struct SnapShortcutRailViewTests {
     /// height — and the "+" is lifted clear of the caption box, never sinking
     /// into the input bar below it.
     @Test func railAndComposeAreFormatAgnostic() throws {
-        func corner(mediaURL: URL?) throws -> (rail: CGRect, compose: CGRect) {
+        func corner(mediaURL: URL?) throws -> (rail: CGRect, compose: CGRect, sound: CGRect) {
             let chrome = SnapChromeView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
             chrome.setFixedInsets(UIEdgeInsets(top: 103, left: 0, bottom: 34, right: 0))
             chrome.configure(with: FeedItemDisplayModel(
@@ -436,7 +438,7 @@ struct SnapShortcutRailViewTests {
             chrome.layoutIfNeeded()
             let rail = try #require(chrome.subviews.compactMap { $0 as? SnapShortcutRailView }.first)
             let compose = try #require(chrome.subviews.compactMap { $0 as? SnapRailBoostButton }.first)
-            return (rail.frame, compose.frame)
+            return (rail.frame, compose.frame, chrome.debugSoundBubble.frame)
         }
         let media = try corner(mediaURL: URL(string: "mock://media/1"))
         let text = try corner(mediaURL: nil)
@@ -445,12 +447,12 @@ struct SnapShortcutRailViewTests {
         #expect(media.rail == text.rail)
         #expect(media.compose == text.compose)
 
-        // Collision guard: the "+" bottom clears the caption's reserved floor
-        // entirely (its box sits ABOVE the two-line caption region), so on a
-        // text-only post it can't overlap the input bar docked below.
-        let captionBoxTop = 844 - 34 - Spacing.xl - SnapChromeView.captionFloorHeight
-        #expect(media.compose.maxY <= captionBoxTop + 0.5)
-        #expect(text.compose.maxY <= captionBoxTop + 0.5)
+        // Collision guard: the pill's bottom stands one gap over the sound
+        // bubble's station (#680), on every format, so it never reaches the
+        // input bar docked below a text page.
+        for corner in [media, text] {
+            #expect(abs(corner.sound.minY - corner.compose.maxY - SnapActionColumn.gap) < 0.5)
+        }
     }
 
     @Test func topExitInterpolationIsPureOnTheDetentGrid() {

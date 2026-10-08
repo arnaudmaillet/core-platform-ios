@@ -681,12 +681,10 @@ final class SnapRailBoostButton: UIButton {
 
     private static func makeConfiguration(glass: Bool, spentTotal: Int) -> UIButton.Configuration {
         var config: UIButton.Configuration = glass ? .glass() : .plain()
-        // A heart either way (#668): white at rest, the points' red once the
-        // viewer has staked — never replaced by a number.
-        config.image = PointsSymbol.likeImage(
-            staked: spentTotal > 0,
-            UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
-        )
+        // A heart either way (#668): an outline in the media's ink (white) at
+        // rest, the points' red fill once the viewer has staked (#680) —
+        // never replaced by a number.
+        config.image = PointsSymbol.likeImage(staked: spentTotal > 0, SnapActionColumn.heartConfiguration)
         config.baseForegroundColor = .white
         config.contentInsets = SnapActionColumn.heartInsets
         config.cornerStyle = .capsule

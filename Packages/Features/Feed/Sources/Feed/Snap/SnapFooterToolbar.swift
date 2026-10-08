@@ -25,7 +25,7 @@ enum SnapFooterToolbar {
     ///
     /// `leadingFills`: `leading` draws its own capsule and stretches by Auto
     /// Layout over every point the trailing bubbles leave (lowest hugging, a
-    /// huge lowest-priority width — see `ConversationThreadAccessory`). Its
+    /// huge lowest-priority width — the text post composer's tool strip). Its
     /// item hides the bar's shared bubble — a capsule in a bubble would be
     /// padded inside it, its content cut short of the visible ends — and a
     /// fixed space takes the flexible one's place, which would otherwise

@@ -183,7 +183,7 @@ struct SnapFeedEndOfSourceTests {
             builder.pushSnapFeed(postIDs: ids("a", "b", "c"), from: presenter, sourceIsComplete: true)
         }
         page(push, to: 2)
-        #expect(push.isAtEndOfSource, "the map's plain push lost the upward grab")
+        #expect(await settle { push.isAtEndOfSource }, "the map's plain push lost the upward grab")
 
         let (reveal, revealStack) = try await routed { builder, presenter in
             builder.revealSnapFeed(
@@ -192,7 +192,7 @@ struct SnapFeedEndOfSourceTests {
             )
         }
         page(reveal, to: 2)
-        #expect(reveal.isAtEndOfSource, "the map's reveal lost the upward grab")
+        #expect(await settle { reveal.isAtEndOfSource }, "the map's reveal lost the upward grab")
         withExtendedLifetime((pushStack, revealStack)) {}
     }
 
@@ -234,7 +234,9 @@ struct SnapFeedEndOfSourceTests {
         feed.loadViewIfNeeded()
         feed.view.frame = window.bounds
         feed.view.layoutIfNeeded()
-        try #require(await settle { feed.debugPageCount > 0 }, "the feed never loaded")
+        // ⚠️ EVERY PAGE, not the first: the tests page to the last one, and on
+        // a starved runner the first page can be all there is when they do.
+        try #require(await settle { feed.debugPageCount >= 3 }, "the feed never loaded its three posts")
         feed.view.layoutIfNeeded()
         return (feed, [builder, window])
     }

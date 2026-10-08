@@ -4,12 +4,9 @@ import Testing
 import UIKit
 @testable import Feed
 
-/// `-snap-like-pill` (#669): the lower bubble drops to the composer's field
-/// line and the like button stretches into a vertical pill above it — in both
-/// layouts, on the same window frames.
-///
-/// Each test turns the flag on BEFORE it builds a view and off before it
-/// returns; none awaits in between, so no other main-actor test sees it.
+/// The like pill (#669, the layout since #680): the lower bubble sits on the
+/// composer's field line and the like button is a vertical pill above it —
+/// in both layouts, on the same window frames.
 @MainActor
 struct SnapLikePillLayoutTests {
     private typealias Layout = SnapActionColumnLayoutTests
@@ -19,111 +16,136 @@ struct SnapLikePillLayoutTests {
             && abs(a.width - b.width) < 0.01 && abs(a.height - b.height) < 0.01
     }
 
-    private func withPill<T>(_ body: () throws -> T) rethrows -> T {
-        SnapActionColumn.isLikePill = true
-        defer { SnapActionColumn.isLikePill = false }
-        return try body()
+    private static func model(likes: Int64 = 1_203, hidden: Bool = false, media: Bool = true) -> FeedItemDisplayModel {
+        FeedItemDisplayModel(
+            id: PostID("post-1"), authorID: ProfileID("profile-1"), authorName: "Ana",
+            metaText: "@ana", avatarURL: nil, caption: "A caption",
+            mediaURL: media ? URL(string: "mock://media/1") : nil, mediaKind: .image,
+            thumbnailURL: nil, audioText: nil, likeCount: likes, likeCountHidden: hidden
+        )
     }
 
-    /// The repost bubble's bottom is `glassGap` above the toolbar's glass; the
-    /// like button runs from the band's top (where the square's top was) down
-    /// to `gap` above it, a capsule taller than wide.
-    @Test func theRepostDropsAndTheLikeBecomesAPill() {
-        let square = Layout.mediaColumn()
-        let pill = withPill { Layout.mediaColumn() }
+    private static func chrome(_ model: FeedItemDisplayModel) -> SnapChromeView {
+        let chrome = SnapChromeView(frame: Layout.screen)
+        chrome.setFixedInsets(Layout.insets)
+        chrome.configure(with: model)
+        chrome.layoutIfNeeded()
+        return chrome
+    }
 
-        #expect(abs(pill.repost.maxY - (Layout.toolbarGlassTop - SnapActionColumn.glassGap)) < 0.5,
-                "repost ends at \(pill.repost.maxY), not glassGap above the glass at \(Layout.toolbarGlassTop)")
-        #expect(pill.repost.size == square.repost.size)
-        #expect(pill.like.minY == square.like.minY, "the pill's top left the band's")
-        #expect(abs(pill.like.maxY - (pill.repost.minY - SnapActionColumn.gap)) < 0.5)
-        #expect(pill.like.width == square.like.width)
-        #expect(pill.like.height > pill.like.width)
-        #expect(abs(pill.like.height - SnapActionColumn.likePillHeight) < 0.5)
+    /// The sound bubble's bottom is `glassGap` above the toolbar's glass; the
+    /// like pill runs from the band's top down to `gap` above it, taller than
+    /// wide.
+    @Test func theSoundSitsOnTheFieldLineAndTheLikeIsAPill() {
+        let column = Layout.mediaColumn()
+        #expect(abs(column.sound.maxY - (Layout.toolbarGlassTop - SnapActionColumn.glassGap)) < 0.5,
+                "the sound ends at \(column.sound.maxY), not glassGap above the glass at \(Layout.toolbarGlassTop)")
+        #expect(abs(column.like.maxY - (column.sound.minY - SnapActionColumn.gap)) < 0.5)
+        #expect(column.like.width == column.sound.width)
+        #expect(column.like.height > column.like.width)
+        #expect(abs(column.like.height - SnapActionColumn.likePillHeight) < 0.5)
     }
 
     /// The comments layout's stake pill and rail slot stand on the media
-    /// layout's frames — the crossfade contract, with the flag on.
+    /// layout's frames — the crossfade contract.
     @Test func theComposerStandsOnThePillExactly() throws {
-        try withPill {
-            let media = Layout.mediaColumn()
-            let (controller, window) = Layout.engagedPanel()
-            let composer = try Layout.composerColumn(in: controller.view, space: window)
-            let stake = try #require(composer.stake)
-            // Equal to the float: the pill's height is a sum of font-derived
-            // terms the two sides add in a different order.
-            #expect(Self.same(stake, media.like), "stake \(stake) vs pill \(media.like)")
-            #expect(Self.same(composer.rail, media.repost), "rail \(composer.rail) vs repost \(media.repost)")
-            // The rail slot is level with the input row.
-            #expect(abs(composer.rail.maxY - composer.field.maxY) < 0.5)
-        }
+        let media = Layout.mediaColumn()
+        let (controller, window) = Layout.engagedPanel()
+        let composer = try Layout.composerColumn(in: controller.view, space: window)
+        let stake = try #require(composer.stake)
+        // Equal to the float: the pill's height is a sum of font-derived terms
+        // the two sides add in a different order.
+        #expect(Self.same(stake, media.like), "stake \(stake) vs pill \(media.like)")
+        #expect(Self.same(composer.rail, media.sound), "rail \(composer.rail) vs sound \(media.sound)")
+        // The rail slot is level with the input row.
+        #expect(abs(composer.rail.maxY - composer.field.maxY) < 0.5)
     }
 
-    /// A text page has no repost bubble; the pill keeps its media-page frame.
+    /// A text page has no sound bubble on the page; the pill keeps its
+    /// media-page frame.
     @Test func thePillIsTheSameSizeOnATextPage() {
-        withPill {
-            let media = Layout.chrome()
-            let text = Layout.chrome(mediaURL: nil)
-            #expect(text.debugBoostButton.frame == media.debugBoostButton.frame)
-        }
+        let media = Self.chrome(Self.model())
+        let text = Self.chrome(Self.model(media: false))
+        #expect(text.debugBoostButton.frame == media.debugBoostButton.frame)
     }
 
-    /// The count is under the heart, inside the pill — no corner badge — and
-    /// none at all when the author hides it (#397).
-    @Test func theCountSitsUnderTheHeartInsideThePill() {
-        withPill {
-            let shown = SnapChromeView(frame: Layout.screen)
-            shown.setFixedInsets(Layout.insets)
-            shown.configure(with: FeedItemDisplayModel(
-                id: PostID("post-1"), authorID: ProfileID("profile-1"), authorName: "Ana",
-                metaText: "@ana", avatarURL: nil, caption: "A caption",
-                mediaURL: URL(string: "mock://media/1"), mediaKind: .image,
-                thumbnailURL: nil, audioText: nil, likeCount: 1_203
-            ))
-            shown.layoutIfNeeded()
-            #expect(shown.debugLikeBadgeText == "1.2K")
-            let pill = shown.debugBoostButton.frame
-            let count = shown.debugLikeBadgeFrame
-            #expect(pill.contains(count), "the count \(count) left the pill \(pill)")
-            #expect(count.minY >= pill.minY + SnapActionColumn.bubbleSize / 2, "the count is not under the heart")
-
-            let hidden = SnapChromeView(frame: Layout.screen)
-            hidden.configure(with: FeedItemDisplayModel(
-                id: PostID("post-2"), authorID: ProfileID("profile-1"), authorName: "Ana",
-                metaText: "@ana", avatarURL: nil, caption: nil,
-                mediaURL: URL(string: "mock://media/1"), mediaKind: .image,
-                thumbnailURL: nil, audioText: nil, likeCount: 1_203, likeCountHidden: true
-            ))
-            #expect(hidden.debugLikeBadgeText == nil)
-        }
+    /// ⚠️ EVEN GAPS (#680): top → heart, heart → count, count → bottom.
+    @Test func theGapsInsideThePillAreEven() {
+        let chrome = Self.chrome(Self.model())
+        let pill = chrome.debugBoostButton.frame
+        let count = chrome.debugLikeBadgeFrame
+        let heart = SnapActionColumn.heartHeight
+        let gap = SnapActionColumn.pillGap
+        #expect(gap > 4, "the pill has no room for its gaps: \(gap)")
+        let heartTop = pill.minY + SnapActionColumn.heartInsets.top
+        #expect(abs((heartTop - pill.minY) - gap) < 1, "top gap")
+        #expect(abs(count.minY - (heartTop + heart) - gap) < 1, "heart → count gap")
+        #expect(abs(pill.maxY - count.maxY - gap) < 1, "count → bottom gap: \(pill.maxY - count.maxY) vs \(gap)")
+        #expect(pill.contains(count), "the count \(count) left the pill \(pill)")
     }
 
-    /// The composer with no stake — the Messages thread — drops its rail slot
-    /// (the pin) to the input row's line too.
-    @Test func theThreadsPinDropsToTheInputRow() throws {
-        try withPill {
-            let bar = CommentsInputBar()
-            bar.showsStake = false
-            bar.railFace = .repost
-            bar.onPageSwipe = { _, _, _ in }
-            let host = UIView(frame: CGRect(x: 0, y: 0, width: 360, height: 600))
-            host.addSubview(bar)
-            bar.translatesAutoresizingMaskIntoConstraints = false
-            NSLayoutConstraint.activate([
-                bar.leadingAnchor.constraint(equalTo: host.leadingAnchor),
-                bar.trailingAnchor.constraint(equalTo: host.trailingAnchor),
-                bar.bottomAnchor.constraint(equalTo: host.bottomAnchor),
-            ])
-            host.layoutIfNeeded()
-            #expect(abs(bar.bounds.maxY - bar.debugRailButton.frame.maxY) < 0.5)
-        }
+    /// No likes is "0", not an empty pill (#680).
+    @Test func noLikesReadsZero() {
+        #expect(Self.chrome(Self.model(likes: 0)).debugLikeBadgeText == "0")
+        #expect(Self.chrome(Self.model(likes: 1_203)).debugLikeBadgeText == "1.2K")
     }
 
-    /// Flag off, nothing moves: the square and the caption-floor repost.
-    @Test func withoutTheFlagTheColumnIsUnchanged() {
-        #expect(!SnapActionColumn.isLikePill)
-        let square = Layout.mediaColumn()
-        #expect(square.like.height == square.like.width)
-        #expect(SnapActionColumn.upperBubbleHeight == SnapActionColumn.bubbleSize)
+    /// ⚠️ A POST THAT HIDES ITS LIKES HAS NO LIKE PILL (#680): no heart, no
+    /// count, and the band runs to the screen's edge, square-ended, in its
+    /// place.
+    @Test func hiddenLikesTakeThePillAwayAndWidenTheBand() {
+        let shown = Self.chrome(Self.model())
+        let hidden = Self.chrome(Self.model(hidden: true))
+
+        #expect(!shown.debugBoostButton.isHidden)
+        #expect(hidden.debugBoostButton.isHidden, "a post that hides its likes kept its like button")
+        #expect(hidden.debugLikeBadgeText == nil)
+
+        #expect(abs(hidden.debugTickerFrame.maxX - Layout.screen.maxX) < 0.5,
+                "the band stops at \(hidden.debugTickerFrame.maxX), not the screen's edge")
+        #expect(shown.debugTickerFrame.maxX < Layout.screen.maxX - SnapActionColumn.trailingInset)
+        #expect(hidden.debugTickerRunsToEdge)
+        #expect(!shown.debugTickerRunsToEdge)
+    }
+
+    /// The composer with no stake — the Messages thread — rests its rail
+    /// slot (the pin) on the input row's line.
+    @Test func theThreadsPinRestsOnTheInputRow() {
+        let bar = CommentsInputBar()
+        bar.showsStake = false
+        bar.railFace = .pin(isPinned: false)
+        bar.onPageSwipe = { _, _, _ in }
+        let host = UIView(frame: CGRect(x: 0, y: 0, width: 360, height: 600))
+        host.addSubview(bar)
+        bar.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            bar.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            bar.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            bar.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+        ])
+        host.layoutIfNeeded()
+        #expect(abs(bar.bounds.maxY - bar.debugRailButton.frame.maxY) < 0.5)
+    }
+
+    /// ⚠️ ONE ROW (#680): at rest the field, its avatar and the rail slot are
+    /// all `bubbleSize` tall — the post's comments and the Messages thread
+    /// alike (one composer).
+    @Test func theFieldAndItsAvatarAreTheBubblesHeight() throws {
+        let bar = CommentsInputBar()
+        bar.railFace = .pin(isPinned: false)
+        bar.onPageSwipe = { _, _, _ in }
+        let host = UIView(frame: CGRect(x: 0, y: 0, width: 360, height: 600))
+        host.addSubview(bar)
+        bar.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            bar.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            bar.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            bar.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+        ])
+        host.layoutIfNeeded()
+        let side = SnapActionColumn.bubbleSize
+        #expect(abs(bar.debugField.frame.height - side) < 0.5, "field \(bar.debugField.frame.height) vs \(side)")
+        #expect(abs(bar.debugAvatarFrame.height - side) < 0.5, "avatar \(bar.debugAvatarFrame.height) vs \(side)")
+        #expect(abs(bar.debugRailButton.frame.height - side) < 0.5)
     }
 }

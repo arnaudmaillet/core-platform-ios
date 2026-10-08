@@ -2,33 +2,6 @@ import DesignSystem
 import MediaCore
 import UIKit
 
-/// `-snap-pill-footer` (DEBUG, #671): the author pill leaves the top bar for
-/// the toolbar's leading slot, where the audio capsule was.
-///
-/// - The feed's toolbar reads `[author pill] … [⇄ 🔖] [⋯]`: repost takes the
-///   share's place in the capsule, share moves into ⋯, the mute button goes.
-/// - The column's lower bubble becomes a SOUND bubble wearing the sound's
-///   cover (`SnapSoundBubbleButton`): a tap mutes, a long press opens the
-///   sound sheet, a `speaker.slash` badge while muted. The comments composer's
-///   rail slot wears the same cover.
-/// - The Messages thread's toolbar reads `[peer pill] … [⋯]`: the emote strip
-///   goes, the peer pill leaves the nav bar.
-///
-/// ⚠️ READ WHERE THE BARS AND CONSTRAINTS ARE BUILT, ONCE — the
-/// `SnapActionColumn.isLikePill` doctrine (`-snap-layout-v2`, #340, was read
-/// through a property whose `didSet` never ran). Settable by tests before they
-/// build a view; never flipped under a live one.
-@MainActor
-enum SnapPillFooter {
-    static var isOn: Bool = {
-        #if DEBUG
-        ProcessInfo.processInfo.arguments.contains("-snap-pill-footer")
-        #else
-        false
-        #endif
-    }()
-}
-
 /// What the sound bubble (and the composer's rail slot) draws for a post.
 struct SnapSoundFace: Equatable {
     /// The cover's picture — the sound's artwork, else the post's own; nil
@@ -40,31 +13,65 @@ struct SnapSoundFace: Equatable {
     /// The feed's sound is off (`FeedSound`).
     var isMuted: Bool
 
-    /// The cover as it can be drawn on THIS turn: the note, or a picture the
-    /// attribution has already fetched (`SnapAttributionCoverCache`).
+    /// The cover as it can be drawn on THIS turn: the note, a picture already
+    /// fetched (`SnapAttributionCoverCache`), or a FILE read here.
+    ///
+    /// ⚠️ A FILE IS READ, NEVER FETCHED (#680). Mock posters and local covers
+    /// are file URLs, and the image pipeline paints a flat colour for any URL
+    /// its fetchers do not recognise, a file among them: on a device the
+    /// bubble wore a coloured disc instead of the post's picture, and the
+    /// composer's slot wore nothing, since a file was never cached. The
+    /// attribution has always read files directly (`SnapMediaAttributionView`).
     @MainActor var cachedCover: UIImage? {
         guard let coverURL else { return SnapMediaAttributionView.noteImage }
-        return SnapAttributionCoverCache.cover(for: coverURL)
+        if let hit = SnapAttributionCoverCache.cover(for: coverURL) { return hit }
+        guard coverURL.isFileURL, let image = UIImage(contentsOfFile: coverURL.path) else { return nil }
+        SnapAttributionCoverCache.store(image, for: coverURL)
+        return image
+    }
+
+    /// Fetches a remote cover into the cache, for a host that has to redraw
+    /// once it lands (the composer's slot). Nil for a file, the note, or a
+    /// fetch that fails — `cachedCover` already answers the first two.
+    @MainActor static func fetchCover(_ url: URL, pipeline: ImagePipeline) async -> UIImage? {
+        guard !url.isFileURL else { return nil }
+        guard let image = try? await pipeline.image(for: url) else { return nil }
+        SnapAttributionCoverCache.store(image, for: url)
+        return image
     }
 
     /// The cover as a disc of `side` points, drawn once — what a glass
-    /// button's configuration can wear.
-    @MainActor func disc(side: CGFloat) -> UIImage? {
+    /// button's configuration can wear — with the muted badge on its corner
+    /// when `badged`.
+    @MainActor func disc(side: CGFloat, badged: Bool = false) -> UIImage? {
         guard let cover = cachedCover else { return nil }
-        let image = UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).image { _ in
+        let image = UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).image { context in
+            context.cgContext.saveGState()
             UIBezierPath(ovalIn: CGRect(x: 0, y: 0, width: side, height: side)).addClip()
             let scale = max(side / max(cover.size.width, 1), side / max(cover.size.height, 1))
             let size = CGSize(width: cover.size.width * scale, height: cover.size.height * scale)
             cover.draw(in: CGRect(
                 x: (side - size.width) / 2, y: (side - size.height) / 2, width: size.width, height: size.height
             ))
+            context.cgContext.restoreGState()
+            guard badged else { return }
+            let badge: CGFloat = 14
+            let frame = CGRect(x: side - badge, y: side - badge, width: badge, height: badge)
+            UIColor.black.withAlphaComponent(0.7).setFill()
+            UIBezierPath(ovalIn: frame).fill()
+            if let glyph = UIImage(
+                systemName: "speaker.slash.fill",
+                withConfiguration: UIImage.SymbolConfiguration(pointSize: 7, weight: .bold)
+            )?.withTintColor(.white, renderingMode: .alwaysOriginal) {
+                glyph.draw(at: CGPoint(x: frame.midX - glyph.size.width / 2, y: frame.midY - glyph.size.height / 2))
+            }
         }
         return image.withRenderingMode(.alwaysOriginal)
     }
 }
 
-/// The column's lower bubble under `-snap-pill-footer` (#671): the sound's
-/// cover on the like bubble's glass, in the repost bubble's place.
+/// The column's lower bubble (#671): the sound's cover on the like pill's
+/// glass.
 ///
 /// - A TAP toggles the feed's sound; a LONG PRESS opens the sound sheet.
 /// - A `speaker.slash` badge on its corner while the sound is off.
@@ -169,8 +176,7 @@ final class SnapSoundBubbleButton: UIButton {
         coverView.image = face?.cachedCover
         guard let face, coverView.image == nil, let url = face.coverURL, let pipeline else { return }
         coverTask = Task { [weak self] in
-            guard let image = try? await pipeline.image(for: url) else { return }
-            SnapAttributionCoverCache.store(image, for: url)
+            guard let image = await SnapSoundFace.fetchCover(url, pipeline: pipeline) else { return }
             guard let self, self.face?.coverURL == url else { return }
             self.coverView.image = image
         }

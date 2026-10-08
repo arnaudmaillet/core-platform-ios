@@ -132,29 +132,12 @@ public extension ConversationThreadDriving {
     func loadOlder() {}
 }
 
-/// What sits in the footer where a post shows its music: for a conversation,
-/// the emote strip.
-///
-/// The view is a bar item's custom view that draws its OWN glass capsule and
-/// FILLS the bar by Auto Layout (lowest hugging, a huge lowest-priority
-/// width): the host hides the bar's shared bubble around it and puts no
-/// flexible space beside it, and the bar stretches it over whatever the other
-/// items leave.
-@MainActor
-public protocol ConversationThreadAccessory: AnyObject {
-    var view: UIView { get }
-    /// Text the accessory wants in the composer (an emoji, or a house emote's
-    /// `:code:`).
-    var onInsertText: ((String) -> Void)? { get set }
-}
-
 @MainActor
 public protocol ConversationThreadScreenBuilding {
     /// `driver` is retained by the returned screen for its lifetime.
     func makeConversationThreadViewController(
         driver: any ConversationThreadDriving,
         mode: ConversationThreadMode,
-        prefill: String,
-        accessory: (any ConversationThreadAccessory)?
+        prefill: String
     ) -> UIViewController
 }

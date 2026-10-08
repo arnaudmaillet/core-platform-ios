@@ -7,17 +7,20 @@ import UIKit
 
 /// **What the footer offers, and what the ⋯ folds up.**
 ///
-/// The bar and its menu are one decision, so they are stated together: three
-/// glyphs of equal weight say those three things are equally common, and
-/// anything demoted into the menu says it is not. The composition IS the
-/// product decision, which is why it is pinned rather than left to whoever
-/// edits the builder next.
+/// The bar and its menu are one decision, so they are stated together: what
+/// the capsule holds says what is common, and anything demoted into the menu
+/// says it is not. The composition IS the product decision, which is why it
+/// is pinned rather than left to whoever edits the builder next.
 ///
 /// ```
-///  [♫ attribution 🔊] ————————————— [⇪ 🔖] [⋯]
-///                                            ├ Not interested
-///                                            └ Report            (destructive)
+///  [author pill] ——————————————— [⇄ 🔖] [⋯]
+///                                         ├ Share
+///                                         ├ Not interested
+///                                         └ Report            (destructive)
 /// ```
+///
+/// (#671, the layout since #680: the author pill leads, where the audio
+/// capsule was; the sound is a bubble on the page.)
 ///
 /// ⚠️ Asserted through the ITEMS, not through a screenshot: a bar item's
 /// custom view is where this composition actually lives, and a picture of it
@@ -44,10 +47,11 @@ struct SnapToolbarCompositionTests {
         return controller
     }
 
-    /// Every button the toolbar draws, in bar order — hidden items draw nothing.
+    /// Every action button the toolbar draws, in bar order — hidden items
+    /// draw nothing, and the author pill is not an action.
     private func toolbarButtons(_ feed: SnapFeedViewController) -> [UIButton] {
         (feed.toolbarItems ?? [])
-            .filter { !$0.isHidden }
+            .filter { !$0.isHidden && !($0.customView is SnapAuthorIdentityView) }
             .compactMap(\.customView)
             .flatMap { view -> [UIButton] in
                 if let button = view as? UIButton { return [button] }
@@ -55,105 +59,75 @@ struct SnapToolbarCompositionTests {
             }
     }
 
-    /// ⚠️ BY LABEL, not by glyph. There is no public way to ask a `UIImage`
-    /// which SF Symbol it is, and the label is the better question anyway: it
-    /// is what a reader using VoiceOver is offered, so a bar whose composition
-    /// is right but whose labels are missing should not pass.
+    /// ⚠️ BY LABEL, not by glyph: the label is what a reader using VoiceOver
+    /// is offered, so a bar whose composition is right but whose labels are
+    /// missing should not pass.
     private func labels(_ buttons: [UIButton]) -> [String] {
         buttons.compactMap(\.accessibilityLabel)
     }
 
     // MARK: - The bar
 
-    /// ⚠️ SHARE AND SAVE, in that order, and nothing else beside the ⋯.
-    ///
-    /// Repost is a bubble on the page, under the like anchor
-    /// (`SnapActionColumn`), so share took its place in the capsule — first:
-    /// [⇪ 🔖] [⋯].
-    @Test func theTrailingRunIsShareSaveAndTheMenu() {
+    /// ⚠️ REPOST AND SAVE, in that order, and nothing else beside the ⋯.
+    /// Share moved into the menu.
+    @Test func theTrailingRunIsRepostSaveAndTheMenu() {
         let buttons = toolbarButtons(feed())
-        #expect(labels(buttons) == ["Share", "Save", "More actions"],
-                "the trailing run is not [share, save, ⋯]: \(labels(buttons))")
+        #expect(labels(buttons) == ["Repost", "Save", "More actions"],
+                "the trailing run is not [repost, save, ⋯]: \(labels(buttons))")
     }
 
-    /// Repost is GONE from the bar — it stands on the page.
-    @Test func theBarNoLongerCarriesRepost() {
-        #expect(labels(toolbarButtons(feed())).contains("Repost") == false)
-    }
-
-    /// The attribution keeps the leading end, with the dynamic space between:
-    /// the audio credit is about the post, the actions are about what you do
-    /// with it, and the gap is what says so.
-    @Test func theAudioCreditKeepsTheLeadingEnd() throws {
+    /// The author pill keeps the leading end, with the dynamic space between,
+    /// and no audio capsule or mute button is left in the bar.
+    @Test func theAuthorPillKeepsTheLeadingEnd() throws {
         let items = try #require(feed().toolbarItems)
-
-        #expect(items.first?.customView is SnapMediaAttributionView)
-        // The mute shares the credit's platter: adjacent, no space between.
-        let mute = try #require(items.dropFirst().first?.customView as? UIButton)
-        #expect(mute.accessibilityLabel == "Mute" || mute.accessibilityLabel == "Unmute")
-        // The spaces are system items with no custom view of their own — which
-        // is exactly how a space reads from out here.
-        let space = try #require(items.dropFirst(2).first)
-        #expect(space.customView == nil, "no dynamic space after the credit")
-        // ⚠️ SIX, because ⋯ HAS ITS OWN BUBBLE: [credit][mute][flex][actions]
-        // [fixed][⋯]. iOS 26 fuses adjacent bar items into one platter, so the
-        // fixed space between the last two IS the separation — see
-        // `theMenuStandsInItsOwnPlatter`.
-        #expect(items.count == 6, "the bar is [credit][mute][flex][actions][fixed][⋯]: \(items.count)")
+        #expect(items.first?.customView is SnapAuthorIdentityView)
+        #expect(items.dropFirst().first?.customView == nil, "no dynamic space after the pill")
+        #expect(!items.contains { $0.customView is SnapMediaAttributionView }, "the audio capsule is back")
+        #expect(!labels(toolbarButtons(feed())).contains("Mute"))
+        // ⚠️ FIVE, because ⋯ HAS ITS OWN BUBBLE: [pill][flex][actions][fixed]
+        // [⋯]. iOS 26 fuses adjacent bar items into one platter, so the fixed
+        // space between the last two IS the separation.
+        #expect(items.count == 5, "the bar is [pill][flex][actions][fixed][⋯]: \(items.count)")
     }
 
-    /// ⚠️ A PHOTOGRAPH HAS NOTHING TO MUTE: the sound's button is for clips.
-    @Test func theMuteIsHiddenOnAPhotograph() throws {
-        let items = try #require(feed().toolbarItems)
-        #expect(items.dropFirst().first?.isHidden == true)
+    /// And the nav bar no longer wears the pill.
+    @Test func theNavBarHasNoAuthorPill() {
+        let nav = feed().navigationItem.rightBarButtonItems ?? []
+        #expect(!nav.contains { $0.customView is SnapAuthorIdentityView })
     }
 
-    /// ⚠️ THE ⋯ STANDS APART, in a platter of its own.
-    ///
-    /// The capsule holds what you DO to this post — save it, pass it on — and
-    /// ⋯ holds what is folded away; a shared platter said the three were three
-    /// of a kind. The separation is a fixed space, because iOS 26 groups
-    /// ADJACENT items into one platter and a spacer is the only way to make
-    /// two.
+    /// ⚠️ THE ⋯ STANDS APART, in a platter of its own: the capsule holds what
+    /// you DO to this post, ⋯ what is folded away.
     @Test func theMenuStandsInItsOwnPlatter() throws {
         let items = try #require(feed().toolbarItems)
-
-        let actions = try #require(items.dropFirst(3).first?.customView as? UIStackView)
-        #expect(actions.arrangedSubviews.count == 2, "the capsule is not [share, save]")
-        #expect(items.dropFirst(4).first?.customView == nil, "no separator before the ⋯")
+        let actions = try #require(items.dropFirst(2).first?.customView as? UIStackView)
+        #expect(actions.arrangedSubviews.count == 2, "the capsule is not [repost, save]")
+        #expect(items.dropFirst(3).first?.customView == nil, "no separator before the ⋯")
         let more = try #require(items.last?.customView as? UIButton)
         #expect(more.accessibilityLabel == "More actions")
     }
 
     // MARK: - The menu
 
-    /// ⚠️ NOT NAVIGATION. "View comments" and "View profile" are gone: both
-    /// were second doors to places one tap already opens (the comment count,
-    /// the author pill), and a menu of things you can reach anyway crowds out
-    /// the things that have nowhere else to live. Share has its own button in
-    /// the capsule, so it is not here either.
-    @Test func theMenuOffersNotInterestedAndReport() {
+    /// Share first (it left the capsule, #671), then Not interested and Report.
+    @Test func theMenuOffersShareNotInterestedAndReport() {
         let titles = feed().debugMoreMenuTitles(for: PostID("p1"))
-
-        #expect(titles == ["Not interested", "Report"], "the menu reads: \(titles)")
+        #expect(titles == ["Share", "Not interested", "Report"], "the menu reads: \(titles)")
     }
 
     /// Report is destructive and LAST — the gallery card's own menu ordering.
     @Test func reportIsTheDestructiveRowAtTheEnd() throws {
         let actions = feed().debugMoreMenuActions(for: PostID("p1"))
-
         let report = try #require(actions.last as? UIAction)
         #expect(report.title == "Report")
         #expect(report.attributes.contains(.destructive))
     }
 
     /// ⚠️ WITHHELD, NOT DISABLED. With nobody to file a report with, the row
-    /// is absent — an action that cannot act is not offered. The other one
-    /// stands: it needs no backend.
+    /// is absent — an action that cannot act is not offered.
     @Test func theReportRowIsAbsentWithoutSomewhereToFileIt() {
         let titles = feed(reporting: nil).debugMoreMenuTitles(for: PostID("p1"))
-
-        #expect(titles == ["Not interested"])
+        #expect(titles == ["Share", "Not interested"])
     }
 }
 

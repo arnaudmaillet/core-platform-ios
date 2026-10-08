@@ -4,8 +4,8 @@ import Testing
 import UIKit
 @testable import Feed
 
-/// `-snap-pill-footer` (#671): the author pill leaves the nav bar for the
-/// toolbar's leading slot; the column's lower bubble becomes the sound's.
+/// The pill footer (#671, the layout since #680): the author pill leads the
+/// toolbar; the column's lower bubble is the sound's.
 ///
 /// ```
 ///  NAV      [‹] ……………………………… [points]
@@ -13,18 +13,9 @@ import UIKit
 ///             [◉ sound]      tap: mute · hold: the sound sheet · 🔇 badge
 ///  TOOLBAR  [author pill] ……… [⇄ 🔖] [⋯]   ⋯: Share · Not interested · Report
 /// ```
-///
-/// Each test turns the flag on BEFORE it builds a view and off before it
-/// returns, with nothing awaited in between.
 @MainActor
 struct SnapPillFooterTests {
     private typealias Layout = SnapActionColumnLayoutTests
-
-    private func withFooter<T>(_ body: () throws -> T) rethrows -> T {
-        SnapPillFooter.isOn = true
-        defer { SnapPillFooter.isOn = false }
-        return try body()
-    }
 
     private static func photo(_ id: String = "p1") -> FeedItemDisplayModel {
         FeedItemDisplayModel(
@@ -60,7 +51,7 @@ struct SnapPillFooterTests {
 
     /// `[author pill] … [⇄ 🔖] [⋯]`, and no pill in the nav bar.
     @Test func thePillLeadsTheToolbarAndLeavesTheNavBar() throws {
-        try withFooter {
+        do {
             let feed = feed()
             let items = try #require(feed.toolbarItems)
             #expect(items.count == 5, "the bar is [pill][flex][actions][fixed][⋯]: \(items.count)")
@@ -78,19 +69,9 @@ struct SnapPillFooterTests {
 
     /// Share moved into ⋯, first.
     @Test func shareIsInTheMenu() {
-        withFooter {
+        do {
             #expect(feed().debugMoreMenuTitles(for: PostID("p1")) == ["Share", "Not interested", "Report"])
         }
-    }
-
-    /// Flag off: the bar and the menu are what they were.
-    @Test func withoutTheFlagTheBarsAreUnchanged() throws {
-        #expect(!SnapPillFooter.isOn)
-        let feed = feed()
-        let items = try #require(feed.toolbarItems)
-        #expect(items.first?.customView is SnapMediaAttributionView)
-        #expect(feed.navigationItem.rightBarButtonItems?.contains { $0.customView is SnapAuthorIdentityView } == true)
-        #expect(feed.debugMoreMenuTitles(for: PostID("p1")) == ["Not interested", "Report"])
     }
 
     // MARK: - The sound bubble's face
@@ -98,19 +79,18 @@ struct SnapPillFooterTests {
     /// A media post with no audio wears a greyed bubble; a text post with no
     /// sound has none; the flag off, nobody has one.
     @Test func whoGetsASoundBubble() {
-        withFooter {
+        do {
             let feed = feed()
             let photo = feed.soundFace(for: Self.photo())
             #expect(photo?.isAvailable == false, "a photograph with no audio is not greyed")
             #expect(feed.soundFace(for: Self.text()) == nil, "a text post with no sound grew a bubble")
         }
-        #expect(feed().soundFace(for: Self.photo()) == nil)
     }
 
     /// The bubble stands on the repost bubble's frame, which it replaces; a
     /// tap mutes, a hold opens the sheet, and the badge says when it is muted.
     @Test func theBubbleTakesTheRepostsPlace() {
-        withFooter {
+        do {
             let chrome = Layout.chrome()
             let bubble = chrome.debugSoundBubble
             #expect(bubble.isHidden, "a bubble with no face")
@@ -122,8 +102,6 @@ struct SnapPillFooterTests {
             chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false))
             chrome.layoutIfNeeded()
             #expect(!bubble.isHidden)
-            #expect(chrome.debugRepostButton.isHidden, "the repost stayed on the page")
-            #expect(bubble.frame == chrome.debugRepostButton.frame)
             #expect(bubble.debugCoverImage != nil, "the note did not draw")
             #expect(!bubble.debugIsMutedBadgeShown)
 
@@ -143,7 +121,7 @@ struct SnapPillFooterTests {
 
     /// A text page's column is its composer's: no bubble on the page.
     @Test func aTextPageHasNoBubbleOnThePage() {
-        withFooter {
+        do {
             let chrome = Layout.chrome(mediaURL: nil)
             chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false))
             #expect(chrome.debugSoundBubble.isHidden)
@@ -155,14 +133,14 @@ struct SnapPillFooterTests {
     /// The composer's rail slot wears the sound's cover, on the sound
     /// bubble's frame.
     @Test func theRailSlotWearsTheCoverOnTheBubblesFrame() throws {
-        try withFooter {
+        do {
             let media = Layout.mediaColumn()
             let (controller, window) = Layout.engagedPanel()
             controller.setRailSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false))
             controller.view.layoutIfNeeded()
             let composer = try Layout.composerColumn(in: controller.view, space: window)
             #expect(composer.bar.debugRailSymbol == CommentsInputBar.soundRailSymbol)
-            #expect(composer.rail == media.repost, "rail \(composer.rail) vs bubble \(media.repost)")
+            #expect(Layout.same(composer.rail, media.sound), "rail \(composer.rail) vs bubble \(media.sound)")
 
             controller.setRailSoundFace(nil)
             #expect(composer.bar.debugRailSymbol == nil, "a post with no sound kept a rail face")

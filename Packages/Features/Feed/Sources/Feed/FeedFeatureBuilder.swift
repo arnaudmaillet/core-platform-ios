@@ -127,14 +127,12 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     public func makeConversationThreadViewController(
         driver: any ConversationThreadDriving,
         mode: ConversationThreadMode,
-        prefill: String,
-        accessory: (any ConversationThreadAccessory)?
+        prefill: String
     ) -> UIViewController {
         ConversationThreadViewController(
             driver: driver,
             mode: mode,
             prefill: prefill,
-            accessory: accessory,
             imagePipeline: imagePipeline,
             wallet: wallet,
             makeWalletSheet: makeWalletSheet

@@ -25,7 +25,6 @@ struct ChatFeatureBuilderThreadTests {
         struct Call {
             let mode: ConversationThreadMode
             let prefill: String
-            let hasAccessory: Bool
         }
         private(set) var calls: [Call] = []
         let screen = UIViewController()
@@ -33,22 +32,22 @@ struct ChatFeatureBuilderThreadTests {
         func makeConversationThreadViewController(
             driver: any ConversationThreadDriving,
             mode: ConversationThreadMode,
-            prefill: String,
-            accessory: (any ConversationThreadAccessory)?
+            prefill: String
         ) -> UIViewController {
-            calls.append(Call(mode: mode, prefill: prefill, hasAccessory: accessory != nil))
+            calls.append(Call(mode: mode, prefill: prefill))
             return screen
         }
     }
 
-    @Test func anExistingThreadIsTheFeedsScreenWithTheEmoteStrip() {
+    /// The thread's footer has no emote strip any more (#680): the peer pill
+    /// leads it, and the composer's emote button is the way to emotes.
+    @Test func anExistingThreadIsTheFeedsScreen() {
         let screens = RecordingScreens()
         let builder = ChatFeatureBuilder(repository: Stub(), threadScreens: { screens })
         let built = builder.makeConversationViewController(for: ConversationID("c1"))
         #expect(built === screens.screen)
         #expect(screens.calls.count == 1)
         #expect(screens.calls.first?.mode == .full)
-        #expect(screens.calls.first?.hasAccessory == true)
     }
 
     @Test func aSharedLinkReachesTheFeedsScreenAsItsDraft() {

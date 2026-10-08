@@ -143,7 +143,6 @@ struct SnapBarPillWidthsTests {
             audioText: "Original sound · @maximilian.featherstonehaugh"
         )
         feed.showAuthor(model)
-        feed.showAttribution(model, sound: .sound("A Very Long Song Title Indeed · Somebody"), cover: .note)
         feed.setCommentSortAvailable(true)
         feed.setEngagedChrome(true, hasMedia: false, animated: false)
         for _ in 0..<30 {
@@ -154,17 +153,17 @@ struct SnapBarPillWidthsTests {
 
         let right = feed.navigationItem.rightBarButtonItems ?? []
         let left = feed.navigationItem.leftBarButtonItems ?? []
-        let pill = try #require(right.compactMap { $0.customView as? SnapAuthorIdentityView }.first)
         let badge = try #require(right.compactMap { $0.customView as? WalletBadgeButton }.first)
         let sort = try #require(left.compactMap { $0.customView as? SnapCommentSortButton }.first)
+        // The author pill leads the TOOLBAR (#671, the layout since #680).
         let toolbar = feed.toolbarItems ?? []
-        let attribution = try #require(toolbar.compactMap { $0.customView as? SnapMediaAttributionView }.first)
+        let pill = try #require(toolbar.compactMap { $0.customView as? SnapAuthorIdentityView }.first)
         let more = try #require(
             toolbar.compactMap { $0.customView as? UIButton }.first { $0.accessibilityLabel == "More actions" }
         )
 
         for (name, view) in [("author", pill), ("wallet", badge), ("sort", sort),
-                             ("attribution", attribution), ("more", more)] as [(String, UIView)] {
+                             ("more", more)] as [(String, UIView)] {
             #expect(view.window != nil, "\(width)pt: the \(name) item was folded away")
         }
         let fixed = try #require(pill.fixedWidth)

@@ -213,8 +213,7 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         return threadScreens().makeConversationThreadViewController(
             driver: driver,
             mode: mode,
-            prefill: prefill,
-            accessory: mode == .full ? EmoteStripAccessory() : nil
+            prefill: prefill
         )
     }
 

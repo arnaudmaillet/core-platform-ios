@@ -37,7 +37,7 @@ struct SnapAuthorPillItemTests {
     }
 
     private static func authorItem(_ feed: SnapFeedViewController) -> UIBarButtonItem? {
-        feed.navigationItem.rightBarButtonItems?.first { $0.customView is SnapAuthorIdentityView }
+        feed.toolbarItems?.first { $0.customView is SnapAuthorIdentityView }
     }
 
     private static func labels(in view: UIView) -> [String] {
@@ -64,7 +64,7 @@ struct SnapAuthorPillItemTests {
         #expect(Self.labels(in: secondPill).contains("Grace Hopper"))
         #expect(Self.labels(in: secondPill).contains("Ada Lovelace") == false)
         // Exactly one author item in the run, however many authors went by.
-        let pills = (feed.navigationItem.rightBarButtonItems ?? []).filter { $0.customView is SnapAuthorIdentityView }
+        let pills = (feed.toolbarItems ?? []).filter { $0.customView is SnapAuthorIdentityView }
         #expect(pills.count == 1)
     }
 
@@ -157,20 +157,20 @@ struct SnapAuthorPillItemTests {
         return nil
     }
 
-    /// With a media post's thread open the ✕ holds the slot; an author change
-    /// then must not push the pill back over it, and the new pill is what
-    /// returns when the thread closes.
-    @Test func anAuthorChangeUnderTheCloseButtonWaitsForTheSlot() throws {
+    /// The pill is the toolbar's (#671): with a media post's thread open the
+    /// ✕ takes the nav bar's slot, and the pill stays where it is, drawing
+    /// an author change in place.
+    @Test func anAuthorChangeWithTheThreadOpenIsDrawnInTheToolbar() throws {
         let (_, feed) = Self.feed()
         feed.showAuthor(Self.model(id: "p1", author: "Ada Lovelace", authorID: "prof-1", meta: "@ada · 2h"))
+        let before = try #require(Self.authorItem(feed))
         feed.setEngagedChrome(true, hasMedia: true, animated: false)
+        #expect(!(feed.navigationItem.rightBarButtonItems ?? []).contains { $0.customView is SnapAuthorIdentityView })
 
         feed.showAuthor(Self.model(id: "p2", author: "Grace Hopper", authorID: "prof-2", meta: "@grace · 1d"))
-        #expect(Self.authorItem(feed) == nil, "the pill replaced the close button")
-
-        feed.setEngagedChrome(false, hasMedia: true, animated: false)
-        let back = try #require(Self.authorItem(feed)?.customView)
-        #expect(Self.labels(in: back).contains("Grace Hopper"))
+        let open = try #require(Self.authorItem(feed))
+        #expect(open === before)
+        #expect(Self.labels(in: try #require(open.customView)).contains("Grace Hopper"))
     }
 
     /// The landing install: once the screen has appeared, the item that rode

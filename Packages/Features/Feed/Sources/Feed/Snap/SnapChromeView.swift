@@ -103,20 +103,22 @@ final class SnapChromeView: UIView {
     private let boostButton = SnapRailBoostButton()
     /// The post's like count on the like button's corner (#668) — or, in the
     /// like pill (#669), under its heart.
-    private lazy var likeBadge = SnapLikeCountBadge(
-        style: SnapActionColumn.isLikePill ? .inline(ink: .white) : .corner
-    )
+    private let likeBadge = SnapLikeCountBadge(ink: .white)
     /// The post's own like count from `configure` — nil when the author hides
     /// it (#397). The badge adds the viewer's stake to it.
     private var postLikeCount: Int64?
     /// The viewer's stake on the post, as last pushed (`setBoostTotal`).
     private var boostTotal = 0
-    /// The REPOST bubble, directly under the boost anchor and its size,
-    /// beside the caption and the page strip — see `SnapActionColumn`. Media
-    /// chrome, like the anchor (`applyRepostVisibility`).
-    private let repostButton = SnapRailRepostButton()
-    /// The repost bubble's replacement under `-snap-pill-footer` (#671): the
-    /// sound's cover on the same frame.
+    /// The band's trailing edge: under the like pill's glass, or — a post
+    /// whose likes are hidden, which has no like pill (#680) — the screen's.
+    private var tickerUnderPill: NSLayoutConstraint!
+    private var tickerToEdge: NSLayoutConstraint!
+    /// The post hides its like count from this reader (#397): no like pill
+    /// at all, and the band takes the whole width (#680).
+    private var likesHidden = false
+    /// The SOUND bubble (#671), under the like pill on the field line, beside
+    /// the caption and the page strip — see `SnapActionColumn`. Media chrome,
+    /// like the pill (`applySoundVisibility`).
     private let soundBubble = SnapSoundBubbleButton()
     /// What the sound bubble draws for the represented post — nil when the
     /// post has no sound bubble (the feed pushes it, `setSoundFace`).
@@ -160,7 +162,7 @@ final class SnapChromeView: UIView {
     /// engagement's entry points; hidden views receive no touches, so each
     /// claims taps only while shown).
     var interactionRoots: [UIView] {
-        [shortcutRail, boostButton, commentEmptyState, subtitleView, commentTicker, repostButton, soundBubble]
+        [shortcutRail, boostButton, commentEmptyState, subtitleView, commentTicker, soundBubble]
     }
 
     /// A comments surface was tapped (empty-state pill, subtitle zone, or
@@ -214,8 +216,8 @@ final class SnapChromeView: UIView {
         }
 
         buildLayout()
-        installRepostBubble()
-        applyRepostVisibility()
+        installSoundBubble()
+        applySoundVisibility()
     }
 
     @available(*, unavailable)
@@ -244,7 +246,7 @@ final class SnapChromeView: UIView {
         }
 
         // Caption, over the scrim; its trailing edge stops one md short of the
-        // repost bubble (`installRepostBubble`). The margins guide tracks the
+        // sound bubble (`installSoundBubble`). The margins guide tracks the
         // safe area, so when the navigation controller's toolbar is visible
         // the caption sits above it automatically — live cell and flight
         // replica alike (`setFixedInsets` captures the toolbar-inflated
@@ -300,9 +302,12 @@ final class SnapChromeView: UIView {
         // hugging/resistance makes the band unsqueezable and unstretchable.
         commentTicker.setContentHuggingPriority(.required, for: .vertical)
         commentTicker.setContentCompressionResistancePriority(.required, for: .vertical)
+        tickerUnderPill = commentTicker.trailingAnchor.constraint(
+            equalTo: layoutMarginsGuide.trailingAnchor, constant: -Spacing.md - 0.5
+        )
+        tickerToEdge = commentTicker.trailingAnchor.constraint(equalTo: trailingAnchor)
         commentTicker.constrain(in: self) { parent in
             commentTicker.leadingAnchor.constraint(equalTo: leadingAnchor)
-            commentTicker.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -Spacing.md - 0.5)
             // md, not sm: the band and the caption are separate CONTAINERS
             // in the bottom stack — inter-container seams breathe at md in
             // the harmonized rhythm (sm stays the WITHIN-container gap).
@@ -312,6 +317,7 @@ final class SnapChromeView: UIView {
             // media caption fills, so the band never sinks toward the bar.
             commentTicker.bottomAnchor.constraint(equalTo: captionFloorGuide.topAnchor, constant: -Spacing.md)
         }
+        tickerUnderPill.isActive = true
 
         // NOTE: nothing rides above the ticker any more. The page indicator
         // used to — a chip of dots hung off the band's top edge — and it is the
@@ -397,24 +403,18 @@ final class SnapChromeView: UIView {
             boostButton.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -Spacing.md)
             boostButton.widthAnchor.constraint(equalTo: commentTicker.heightAnchor)
             boostButton.topAnchor.constraint(equalTo: commentTicker.topAnchor)
-            // The like pill (#669) runs down to `gap` above the DROPPED lower
-            // bubble, measured from the margin line rather than off the repost
-            // bubble — a text page shows none, and the pill keeps its frame
-            // there. The square ends with the band.
+            // The like pill (#669) runs down to `gap` above the lower bubble,
+            // measured from the margin line rather than off the sound bubble —
+            // a text page shows none, and the pill keeps its frame there.
             boostButton.bottomAnchor.constraint(
-                equalTo: SnapActionColumn.isLikePill ? parent.layoutMarginsGuide.bottomAnchor : commentTicker.bottomAnchor,
-                constant: SnapActionColumn.isLikePill
-                    ? -(SnapActionColumn.inputRestingGap + SnapActionColumn.bubbleSize + SnapActionColumn.gap)
-                    : 0
+                equalTo: parent.layoutMarginsGuide.bottomAnchor,
+                constant: -(SnapActionColumn.inputRestingGap + SnapActionColumn.bubbleSize + SnapActionColumn.gap)
             )
         }
-        // A sibling above the button — see `SnapLikeCountBadge`.
+        // The count, under the heart inside the pill — a sibling above the
+        // button, see `SnapLikeCountBadge`.
         addSubview(likeBadge)
-        if SnapActionColumn.isLikePill {
-            likeBadge.pin(underHeartOf: boostButton, squareSide: SnapActionColumn.bubbleSize)
-        } else {
-            likeBadge.pin(toCornerOf: boostButton, in: self)
-        }
+        likeBadge.pin(underHeartOf: boostButton)
 
         // The subtitle zone extends the same one-directional chain one link
         // up (caption ← band ← subtitles): nothing constrains back onto it,
@@ -480,64 +480,41 @@ final class SnapChromeView: UIView {
         commentTicker.onTap = { [weak self] in self?.onCommentsTapped?() }
     }
 
-    /// The action column's media half (`SnapActionColumn`): the repost bubble
-    /// under the boost anchor, and the caption — with the page strip, which
-    /// shares its trailing edge — ending one md short of it.
-    ///
-    /// The bubble is the anchor's twin: same trailing margin, same square
-    /// (the band's height), its top on the caption FLOOR's top — one md under
-    /// the anchor, the band → caption seam — so it sits beside the caption's
-    /// first line and the strip runs on under the caption alone.
-    private func installRepostBubble() {
-        repostButton.isHidden = true
-        // Framed from outside, like the anchor: zero back-pressure from
-        // its intrinsic size (see the anchor's height-authority note).
-        repostButton.setContentHuggingPriority(UILayoutPriority(1), for: .vertical)
-        repostButton.setContentHuggingPriority(UILayoutPriority(1), for: .horizontal)
-        repostButton.setContentCompressionResistancePriority(UILayoutPriority(1), for: .vertical)
-        repostButton.setContentCompressionResistancePriority(UILayoutPriority(1), for: .horizontal)
-        repostButton.constrain(in: self) { parent in
-            repostButton.trailingAnchor.constraint(
+    /// The action column's media half (`SnapActionColumn`): the SOUND bubble
+    /// (#671) on the composer's field line, `glassGap` above the toolbar's
+    /// glass (#669), and the caption — with the page strip, which shares its
+    /// trailing edge — ending one md short of it.
+    private func installSoundBubble() {
+        soundBubble.isHidden = true
+        // Framed from outside, like the like pill: zero back-pressure from
+        // its intrinsic size (see the pill's height-authority note).
+        soundBubble.setContentHuggingPriority(UILayoutPriority(1), for: .vertical)
+        soundBubble.setContentHuggingPriority(UILayoutPriority(1), for: .horizontal)
+        soundBubble.setContentCompressionResistancePriority(UILayoutPriority(1), for: .vertical)
+        soundBubble.setContentCompressionResistancePriority(UILayoutPriority(1), for: .horizontal)
+        soundBubble.constrain(in: self) { parent in
+            soundBubble.trailingAnchor.constraint(
                 equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -SnapActionColumn.trailingInset
             )
-            repostButton.widthAnchor.constraint(equalTo: commentTicker.heightAnchor)
-            repostButton.heightAnchor.constraint(equalTo: commentTicker.heightAnchor)
-            // Under the like pill (#669) the bubble drops to the composer's
-            // field line, `glassGap` above the toolbar's glass; otherwise its
-            // top is the caption floor's.
-            SnapActionColumn.isLikePill
-                ? repostButton.bottomAnchor.constraint(
-                    equalTo: parent.layoutMarginsGuide.bottomAnchor, constant: -SnapActionColumn.inputRestingGap
-                )
-                : repostButton.topAnchor.constraint(equalTo: captionFloorGuide.topAnchor)
+            soundBubble.widthAnchor.constraint(equalTo: commentTicker.heightAnchor)
+            soundBubble.heightAnchor.constraint(equalTo: commentTicker.heightAnchor)
+            soundBubble.bottomAnchor.constraint(
+                equalTo: parent.layoutMarginsGuide.bottomAnchor, constant: -SnapActionColumn.inputRestingGap
+            )
         }
         captionLabel.trailingAnchor.constraint(
-            equalTo: repostButton.leadingAnchor, constant: -Spacing.md
+            equalTo: soundBubble.leadingAnchor, constant: -Spacing.md
         ).isActive = true
-        // The sound bubble (#671) stands on the repost bubble's frame exactly —
-        // whichever of the two flags is on, the column keeps one set of
-        // coordinates (`SnapActionColumn`).
-        addSubview(soundBubble)
-        soundBubble.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            soundBubble.centerXAnchor.constraint(equalTo: repostButton.centerXAnchor),
-            soundBubble.centerYAnchor.constraint(equalTo: repostButton.centerYAnchor),
-            soundBubble.widthAnchor.constraint(equalTo: repostButton.widthAnchor),
-            soundBubble.heightAnchor.constraint(equalTo: repostButton.heightAnchor),
-        ])
         soundBubble.onTap = { [weak self] in self?.onSoundTapped?() }
         soundBubble.onLongPress = { [weak self] in self?.onSoundSheetRequested?() }
     }
 
-    /// The repost bubble is MEDIA chrome, like the boost anchor above it: a
-    /// text page's engagement is its permanent layout, and its composer stands
-    /// in the column instead.
-    private func applyRepostVisibility() {
-        // Under `-snap-pill-footer` the repost lives in the toolbar and the
-        // sound bubble takes its place — on a media page, for a post with a
-        // face (a text page's column is its composer's).
-        repostButton.isHidden = !hasMedia || SnapPillFooter.isOn
-        soundBubble.isHidden = !(SnapPillFooter.isOn && hasMedia && soundFace != nil)
+    /// The sound bubble is MEDIA chrome, like the like pill above it: a text
+    /// page's engagement is its permanent layout, and its composer stands in
+    /// the column instead (its rail slot wears the sound). Shown for a post
+    /// with a face.
+    private func applySoundVisibility() {
+        soundBubble.isHidden = !(hasMedia && soundFace != nil)
     }
 
     /// The sound bubble's face for the represented post (#671): its cover, the
@@ -545,7 +522,7 @@ final class SnapChromeView: UIView {
     func setSoundFace(_ face: SnapSoundFace?) {
         soundFace = face
         soundBubble.setFace(face, pipeline: imagePipeline)
-        applyRepostVisibility()
+        applySoundVisibility()
     }
 
     /// Turns the sound bubble's cover while the post plays.
@@ -651,12 +628,16 @@ final class SnapChromeView: UIView {
         // Owned by `configure` (static chrome, like the rail's emotes), so
         // it needs no stream to appear and the flight replica — which never
         // receives one — draws the identical corner.
-        boostButton.isHidden = !hasMedia
+        // ⚠️ A POST THAT HIDES ITS LIKES HAS NO LIKE PILL (#680): no heart,
+        // no count — and the band runs to the screen's edge in its place.
+        likesHidden = model.likeCountHidden
+        boostButton.isHidden = !hasMedia || likesHidden
+        applyTickerReach()
         // The badge's count, from what the card knew; the stake pushed after
         // `configure` is added in `setBoostTotal`.
         postLikeCount = model.visibleLikeCount
         applyLikeBadge(animated: false)
-        applyRepostVisibility()
+        applySoundVisibility()
         if !hasMedia {
             commentTicker.setComments([])
             subtitleView.setCues([])
@@ -1019,8 +1000,11 @@ final class SnapChromeView: UIView {
     /// The action column's two bubbles, for the spec that
     /// holds them still across the media and comments layouts.
     var debugBoostButton: UIButton { boostButton }
-    var debugRepostButton: UIButton { repostButton }
     var debugSoundBubble: SnapSoundBubbleButton { soundBubble }
+    /// The comment band, in the chrome's space.
+    var debugTickerFrame: CGRect { commentTicker.frame }
+    /// Whether the band runs to the screen's edge, square-ended (#680).
+    var debugTickerRunsToEdge: Bool { commentTicker.runsToTrailingEdge && commentTicker.layer.cornerRadius == 0 }
     var debugCaptionFrame: CGRect { captionLabel.frame }
     var debugPageBar: SnapMediaPageBarView { mediaPageBar }
     var debugScrubPreview: SnapScrubPreviewView { scrubPreview }
@@ -1112,7 +1096,7 @@ final class SnapChromeView: UIView {
     /// the available one — the way out of a post should not blink away because
     /// a thumb landed on a clip's bar.
     private var scrubFadedViews: [UIView] {
-        [captionLabel, commentTicker, subtitleView, commentEmptyState, shortcutRail, boostButton, likeBadge, repostButton, soundBubble]
+        [captionLabel, commentTicker, subtitleView, commentEmptyState, shortcutRail, boostButton, likeBadge, soundBubble]
     }
 
     /// What each faded view was worth before the scrub took it, so the fade
@@ -1305,7 +1289,8 @@ final class SnapChromeView: UIView {
         commentTicker.reset()
         applyBandPresence()
         boostButton.isHidden = true
-        repostButton.isHidden = true
+        likesHidden = false
+        applyTickerReach()
         boostButton.setSpentTotal(0)
         boostTotal = 0
         postLikeCount = nil
@@ -1345,6 +1330,14 @@ final class SnapChromeView: UIView {
     /// (product decision 2026-10-08). Nil when the author hides it.
     static func displayedLikeCount(postLikes: Int64?, viewerStake: Int) -> Int64? {
         postLikes.map { $0 + Int64(max(0, viewerStake)) }
+    }
+
+    /// The band under the pill, or to the edge when there is no pill (#680).
+    private func applyTickerReach() {
+        let toEdge = likesHidden
+        tickerUnderPill.isActive = !toEdge
+        tickerToEdge.isActive = toEdge
+        commentTicker.runsToTrailingEdge = toEdge
     }
 
     private func applyLikeBadge(animated: Bool) {

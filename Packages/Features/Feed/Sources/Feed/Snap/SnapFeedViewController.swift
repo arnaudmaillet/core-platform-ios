@@ -35,25 +35,6 @@ final class SnapFeedViewController: UIViewController {
     /// visibly morphed on every page, which read as UIKit's machinery rather
     /// than the screen's own transition.
     private let authorIdentityView = SnapAuthorIdentityView()
-    /// The media attribution (cover + author + audio line), hosted as the
-    /// native bottom toolbar's leading item — one view in one item for the
-    /// screen's life, the author pill's contract (`showAttribution`).
-    private let mediaAttributionView = SnapMediaAttributionView()
-    /// Mutes and unmutes the feed for the session (`FeedSound`), shown on
-    /// clips only. It sits in the ATTRIBUTION'S capsule, on purpose: adjacent
-    /// items share one platter on iOS 26, so the sound reads as one thing —
-    /// what is playing, and whether you hear it.
-    ///
-    /// ⚠️ NOT ITS OWN BUBBLE. With a fixed space before it (a fourth platter)
-    /// the toolbar silently stopped rendering the [🔖 ⇄] capsule: no overflow,
-    /// no warning, the bookmark just gone. Measured on iOS 27.
-    private let soundButton = SnapNavControls.makeToolbarActionButton(systemName: "speaker.wave.2.fill")
-    private lazy var soundItem: UIBarButtonItem = {
-        let item = UIBarButtonItem(customView: soundButton)
-        // Hidden until a page with a clip settles (`updateBarChrome`).
-        item.isHidden = true
-        return item
-    }()
     /// The navigation controller whose toolbar this feed is showing — held
     /// weakly across its own pop, when `navigationController` is already nil
     /// but the toolbar bookkeeping must still be settled (`viewDidDisappear`).
@@ -68,8 +49,8 @@ final class SnapFeedViewController: UIViewController {
     /// card; the audio attribution stays anchored on the left).
     private let commentSortButton = SnapCommentSortButton()
     /// The one living toolbar's items (keep-and-stack): built once. The
-    /// attribution's content changes inside its item (`showAttribution`), at a
-    /// fixed width (`applyBarPillWidths`). The engagement no longer touches the
+    /// author pill's content changes inside its item (`showAuthor`), at a fixed
+    /// width (`applyBarPillWidths`). The engagement no longer touches the
     /// footer — see `configureToolbarItems` for why the trailing ✕ left it.
     private var defaultToolbarItems: [UIBarButtonItem] = []
     /// The nav bar's two trailing items, held so comment mode can add the
@@ -91,9 +72,6 @@ final class SnapFeedViewController: UIViewController {
     /// what the pill draws is the pill's own blur.
     static let authorItemIdentifier = "feed.snap.author-pill"
 
-    /// The attribution item's identifier — the author pill's rule applied to
-    /// the toolbar: one for the slot, and the content blurs across inside it.
-    static let attributionItemIdentifier = "feed.snap.attribution"
     /// The viewer's balance, closing the trailing run on its left —
     /// [‹ back] … [🪙 solde] [author pill] — so a spend made on this very
     /// screen is visibly paid for. DISPLAY-ONLY here: the map's badge is
@@ -1506,84 +1484,23 @@ final class SnapFeedViewController: UIViewController {
     func setEngagedChrome(_ engaged: Bool, hasMedia: Bool, animated: Bool) {
         engagedChromeOnBar = engaged
         engagedChromeHasMedia = hasMedia
-        // `rightBarButtonItems` reads RIGHT TO LEFT: index 0 is the
-        // rightmost, so the sort lands just LEFT of the author pill.
-        //
-        // The FIXED SPACE between them is not cosmetic — it is what makes
-        // them two pills. iOS 26 groups ADJACENT bar items into one shared
-        // glass platter, so `[author, sort]` rendered as a single capsule
-        // with the sort swallowed into the author's pill; a spacer item
-        // breaks the run and each custom view gets its own floating
-        // background, its own padding, and its own tap target.
-        //
-        // SET, don't ASSIGN. `navigationItem.rightBarButtonItems = …` is a
-        // plain property write: the bar has no transition to run, so the
-        // pill popped in on a hard crossfade. The `setRightBarButtonItems(
-        // _:animated:)` form is the one that hands the change to the
-        // navigation bar's own item animator — the same slide-and-fade the
-        // system uses for a push — so the sort pill morphs in beside the
-        // author instead of appearing on top of it.
-        // ONE author pill, identical in both states: same component, same
-        // platter, same handle-and-age line, same follow button.
-        //
-        // It used to shrink to a name-only COMPACT form for the engagement,
-        // because at full size the two-pill run once overflowed and the
-        // system's answer to an overflow is to hide the whole item behind a
-        // `•••` menu. That was measured against the bar as it stood then —
-        // the toolbar has since become state-invariant and the leading slot
-        // is a single 36pt bubble — and re-measured now the run fits with
-        // room to spare on the narrowest device the app targets. So the
-        // pill stops changing identity halfway through a state it is
-        // supposed to persist across.
-        //
-        // The run's width budget is REAL, though, and it is paid in width
-        // rather than in layout: the pill keeps every part of itself and is
-        // narrower while the sort shares the bar (`applyBarPillWidths`) — in
-        // this same turn, under the bar's own item animation. Measured on the
-        // narrowest device: a full-width pill DID overflow the whole item
-        // into a `•••` menu, and losing the author entirely is worse than
-        // any truncation.
+        // The bar pills' widths for the bars as they stand
+        // (`applyBarPillWidths`), in this same turn, under the bar's own item
+        // animation.
         applyBarPillWidths()
 
-        // ⚠️ READ RIGHT TO LEFT: `rightBarButtonItems[0]` is the one nearest the
-        // screen edge, so this array is the bar reversed — left to right the
-        // run is [◎ balance] [author], in both states.
+        // ⚠️ READ RIGHT TO LEFT: `rightBarButtonItems[0]` is the one nearest
+        // the screen edge. The author pill is the toolbar's (#671), so this
+        // run holds the ✕ while a media post's thread is open — the way back
+        // to the picture — and the balance. A TEXT post's comments ARE the
+        // page: there is nothing to close.
         //
-        // The SORT is not here any more. It rode this run, first inboard of the
-        // author and then outboard of the balance, and neither reads: it is a
-        // control over the thread below it, not a fact about the post, and the
-        // trailing end of this bar is where the post's own identity lives. It
-        // sits beside the back arrow now (`applyLeadingNavItem`), which is the
-        // end that says what this screen is DOING rather than what it is about.
-        //
-        // The fixed space is what keeps the two separate pills: iOS 26 groups
-        // ADJACENT bar items into one shared glass platter.
-        //
-        // ⚠️ AND THE EXIT TAKES THE AUTHOR'S SLOT while a media post's thread is
-        // open. The two are the same kind of thing — the outermost item at the
-        // end that says what this screen is about — and only one of them is
-        // worth the slot at a time: with the thread open, whose post it is has
-        // already been read, and the way back to the picture has not.
-        //
-        // A TEXT post keeps its author here, because its comments ARE the page:
-        // there is nothing to close, so nothing to put in the slot.
-        //
-        // ⚠️ A RETURNING author is a FRESH item (the same pill, the same
-        // identifier). Re-handing the kept item after the ✕ held its slot is
-        // the re-hand that drifts UIKit's wrapper off the pill's width (memory
-        // `bar-item-wrapper-drift`); a fresh item is a fresh wrapper.
-        let wearsAuthor = !(engaged && hasMedia)
-        var navItems: [UIBarButtonItem]
-        if SnapPillFooter.isOn {
-            // The pill is the toolbar's (#671): the slot holds the ✕ alone,
-            // while a media post's thread is open.
-            navItems = wearsAuthor ? [] : [closeCommentsItem]
-        } else {
-            if wearsAuthor, !(navigationItem.rightBarButtonItems ?? []).contains(authorItem) {
-                authorItem = makeAuthorItem()
-            }
-            navItems = [wearsAuthor ? authorItem : closeCommentsItem]
-        }
+        // SET, don't ASSIGN (`applyTrailingNavItems`): the animated setter is
+        // the one that hands the change to the bar's own item animator. The
+        // fixed space keeps two pills apart — iOS 26 groups ADJACENT bar
+        // items into one shared glass platter.
+        let closes = engaged && hasMedia
+        var navItems: [UIBarButtonItem] = closes ? [closeCommentsItem] : []
         if let walletBadgeItem {
             navItems += navItems.isEmpty ? [walletBadgeItem] : [.fixedSpace(Spacing.sm), walletBadgeItem]
         }
@@ -1643,34 +1560,19 @@ final class SnapFeedViewController: UIViewController {
         )
         barPillWidths = widths
         commentSortButton.setTitleHidden(sortOnBar && !widths.sortShowsTitle)
-        // In the toolbar under `-snap-pill-footer` (#671), the attribution's room.
-        authorIdentityView.setFixedWidth(SnapPillFooter.isOn ? widths.toolbarAuthor : widths.author)
-        mediaAttributionView.setFixedWidth(widths.attribution(soundShown: !soundItem.isHidden))
+        // The toolbar's leading slot (#671): the room the audio capsule had.
+        authorIdentityView.setFixedWidth(widths.toolbarAuthor)
     }
 
     /// The widths `applyBarPillWidths` last gave the pills.
     private var barPillWidths: SnapBarPillWidths?
 
-    /// Shows or hides the mute button — and gives its slot to the attribution
-    /// that shares its capsule, so the capsule keeps its width
-    /// (`SnapBarPillWidths.attribution(soundShown:)`). In the same turn, so
-    /// the toolbar lays the two out together.
-    private func setSoundShown(_ shown: Bool) {
-        guard soundItem.isHidden == shown else { return }
-        soundItem.isHidden = !shown
-        if let barPillWidths {
-            mediaAttributionView.setFixedWidth(barPillWidths.attribution(soundShown: shown))
-        }
-    }
-
     /// The resting run's items: the author pill alone (no wallet), or the
     /// pill with the badge to its left, spacer-separated so iOS 26 never
     /// fuses them into one platter.
     private func restingTrailingItems() -> [UIBarButtonItem] {
-        // Under `-snap-pill-footer` (#671) the pill is the toolbar's.
-        if SnapPillFooter.isOn { return walletBadgeItem.map { [$0] } ?? [] }
-        guard let walletBadgeItem else { return [authorItem] }
-        return [authorItem, .fixedSpace(Spacing.sm), walletBadgeItem]
+        // The pill is the toolbar's (#671): the nav bar holds the points alone.
+        walletBadgeItem.map { [$0] } ?? []
     }
     /// The leading slot's two faces:
     ///
@@ -1798,9 +1700,7 @@ final class SnapFeedViewController: UIViewController {
 
     /// Re-mints the author item — the SAME pill in a fresh item under the same
     /// identifier, so the bar swaps it in one unseen frame — and swaps it into
-    /// the trailing run when the run is WEARING it: with a media post's thread
-    /// open the ✕ holds the slot, and the new item simply waits in `authorItem`
-    /// for the run to be rebuilt.
+    /// the toolbar.
     ///
     /// A fresh item is a fresh custom-view wrapper, measured at hand-over — the
     /// landing install's second guard, and the cure for a wrapper whose width
@@ -1808,18 +1708,11 @@ final class SnapFeedViewController: UIViewController {
     private func reinstallAuthorItem() {
         let previousItem = authorItem
         authorItem = makeAuthorItem()
-        if SnapPillFooter.isOn {
-            // The toolbar's leading item (#671).
-            guard var items = toolbarItems, let index = items.firstIndex(of: previousItem) else { return }
-            items[index] = authorItem
-            defaultToolbarItems = defaultToolbarItems.map { $0 === previousItem ? authorItem : $0 }
-            setToolbarItems(items, animated: false)
-            return
-        }
-        guard var items = navigationItem.rightBarButtonItems,
-              let index = items.firstIndex(of: previousItem) else { return }
+        // The toolbar's leading item (#671).
+        defaultToolbarItems = defaultToolbarItems.map { $0 === previousItem ? authorItem : $0 }
+        guard var items = toolbarItems, let index = items.firstIndex(of: previousItem) else { return }
         items[index] = authorItem
-        navigationItem.setRightBarButtonItems(items, animated: false)
+        setToolbarItems(items, animated: false)
     }
 
     /// Set by an appearance, spent once the screen has LANDED: the pill that
@@ -2093,8 +1986,8 @@ final class SnapFeedViewController: UIViewController {
     /// bar-bubble invariant the top bar's controls already follow.
     ///
     /// Items are installed once; the bookmark glyph follows the active page in
-    /// place, and so does the attribution, blurring across inside its item
-    /// (`showAttribution` — the identity pill's contract). Every action
+    /// place, and so does the author pill, blurring across inside its item
+    /// (`showAuthor`). Every action
     /// resolves the active post at action time, so none can act on a page the
     /// user has scrolled past.
     private func configureToolbarItems() {
@@ -2104,50 +1997,21 @@ final class SnapFeedViewController: UIViewController {
             self.toggleBookmark(for: model.id)
         }, for: .primaryActionTriggered)
 
-        // REPOST IS NOT HERE: it is a bubble on the page, under the like
-        // anchor (`SnapActionColumn`, `SnapRailRepostButton`), so it holds the
-        // same screen coordinates as the comments composer's rail slot. ⚠️ It
-        // has no action yet, and is drawn anyway — the same posture the
-        // gallery card's band takes for the same glyph, and for the same
-        // reason: `CreatePost` carries `parent_id` on the wire and
-        // `GalleryPost.isRepost` already reads it (the profile's
-        // Posts/Reposts split), but `PostComposer` takes no parent, so there is
-        // no client path that publishes one. What it needs is a mutation, not a
-        // handler. Pressing it does nothing today.
-        //
-        // SHARE took its place in the capsule, first — [⇪ 🔖] — and left ⋯
-        // for it (`moreMenuActions`).
-
-        // TWO bubbles: [⇪ 🔖] and [⋯], held apart by a fixed space — iOS 26
-        // groups ADJACENT bar items into one shared platter, so a spacer is
-        // the only way to make two.
-        //
-        // ⚠️ THE COST ARGUMENT DOES NOT DECIDE THIS, and the measurements are
-        // the reason. They were merged into one capsule to save a platter,
-        // each being its own glass host that UIKit materialises through
-        // SwiftUI inside `pushViewController` — the hero flight's stall. Then
-        // the arms were measured (the table under `-no-toolbar` below): one
-        // platter fewer bought ~2 ms, inside the noise, while the floating bar
-        // itself costs ~45 ms cold whatever is in it.
-        //
-        // So the grouping is a design question again, and the two are not the
-        // same kind of thing: the capsule holds what you DO to this post —
-        // save it, pass it on — and ⋯ holds what is folded away. A separator
-        // between them says which is which; sharing a platter said they were
-        // three of a kind.
-        let share = SnapNavControls.makeToolbarActionButton(systemName: "square.and.arrow.up")
-        share.accessibilityLabel = "Share"
-        share.addAction(UIAction { [weak self] _ in
-            guard let self, let model = self.activeModel else { return }
-            self.presentShareSheet(for: model.id)
-        }, for: .primaryActionTriggered)
-        let shareCluster = UIStackView(arrangedSubviews: [share, bookmarkButton])
-        shareCluster.axis = .horizontal
+        // REPOST takes the share's place in the capsule — [⇄ 🔖] — and SHARE
+        // moved into ⋯ (#671, `moreMenuActions`). ⚠️ Repost has no action yet,
+        // and is drawn anyway — the same posture the gallery card's band takes
+        // for the same glyph, and for the same reason: `CreatePost` carries
+        // `parent_id` on the wire and `GalleryPost.isRepost` already reads it,
+        // but `PostComposer` takes no parent, so there is no client path that
+        // publishes one. Pressing it does nothing today.
+        let repost = SnapNavControls.makeToolbarActionButton(systemName: PostActionSymbol.repost)
+        repost.accessibilityLabel = "Repost"
+        let actions = UIStackView(arrangedSubviews: [repost, bookmarkButton])
+        actions.axis = .horizontal
 
         let more = SnapNavControls.makeToolbarActionButton(systemName: "ellipsis")
-        // ⚠️ NAMED, all three. Two of these glyphs carried no label at all, so
-        // VoiceOver read them as "button" — the composition test needs a handle
-        // on them and a reader needs one more.
+        // ⚠️ NAMED, every one: a glyph with no label reads as "button" to
+        // VoiceOver, and the composition test needs a handle on it.
         more.accessibilityLabel = "More actions"
         more.showsMenuAsPrimaryAction = true
         more.menu = UIMenu(children: [
@@ -2157,114 +2021,31 @@ final class SnapFeedViewController: UIViewController {
             }
         ])
 
-        // ONE item set, for every state:
+        // ONE item set, for every state (#671):
         //
-        //   [♫ attribution] … [⇪ 🔖] [⋯]
+        //   [author pill] … [⇄ 🔖] [⋯]
         //
-        // The toolbar is now STATE-INVARIANT. It used to carry three sets
-        // whose only difference was the trailing slot — a red ✕ while a
-        // media post's comments were open, ⋯ otherwise — which meant a text
-        // engagement and a media engagement disagreed about what that corner
-        // meant. The comments exit moved to the navigation bar's LEADING
-        // slot, where it replaces the back arrow and reads as "leave this
-        // layout" the way a back arrow reads as "leave this screen"; ⋯ keeps
-        // the trailing corner in all states, so the footer no longer changes
-        // under the engagement at all.
-        //
-        // The sort selector is not here either — it moved to the nav bar
-        // beside the author pill (`setEngagedChrome`).
-        soundButton.addAction(UIAction { [weak self] _ in self?.toggleSound() }, for: .primaryActionTriggered)
-        mediaAttributionView.onTap = { [weak self] in self?.presentSoundSheet() }
-        #if DEBUG
-        mediaAttributionView.onContentSettled = { [weak self] in
-            guard let self else { return }
-            self.debugProbeBarItemWidth(self.mediaAttributionView, slot: "attribution")
-        }
-        #endif
-        refreshSoundButton()
-        if SnapPillFooter.isOn {
-            configurePillFooterToolbar(bookmark: bookmarkButton, more: more)
-            return
-        }
-        let attributionItem = makeAttributionItem()
-        // Every item carries a stable identifier, so a re-handed set is matched
-        // item for item and nothing transitions.
-        soundItem.identifier = "feed.snap.sound"
-        let leading: [UIBarButtonItem] = [
-            attributionItem,
-            soundItem,
-            .flexibleSpace(),
-        ]
-        #if DEBUG
-        // `-merge-toolbar-platters`: the A/B's other arm, folding ⋯ back into
-        // the actions' capsule so both come from one binary. It was the
-        // shipped side once — see the note above for why the numbers no longer
-        // argue for it.
-        if ProcessInfo.processInfo.arguments.contains("-merge-toolbar-platters") {
-            shareCluster.addArrangedSubview(more)
-            defaultToolbarItems = leading + [UIBarButtonItem(customView: shareCluster)]
-            toolbarItems = defaultToolbarItems
-            return
-        }
-        #endif
-        let actionsItem = UIBarButtonItem(customView: shareCluster)
-        actionsItem.identifier = "feed.snap.actions"
-        let moreItem = UIBarButtonItem(customView: more)
-        moreItem.identifier = "feed.snap.more"
-        defaultToolbarItems = leading + [
-            actionsItem,
-            .fixedSpace(Spacing.sm),
-            moreItem,
-        ]
-        #if DEBUG
-        // `-no-toolbar`: the UPPER BOUND on what trimming the footer can buy,
-        // and the probe that settled where the flight's cost actually lives.
-        // Not shippable — it is the whole footer — but the numbers redirect
-        // the whole question. Push work, 3 runs each:
-        //
-        //   5 platters (two-bubble run, shipped)  cold 95.4  warm 43.2 / 47.0
-        //   4 platters (merged)                    cold 98.5  warm 40.4 / 45.4
-        //   4 platters, STANDARD items not custom  cold 103.9 warm 45.9 / 44.8
-        //   NO TOOLBAR AT ALL (2 platters)         cold 53.1  warm 32.6 / 31.0
-        //
-        // So it is not the platter COUNT (one fewer bought ~2 ms, inside the
-        // noise) and not the SwiftUI custom-view bridge either (standard items
-        // measured the same). It is having a floating bar at all: the
-        // `FloatingBarHostingView<FloatingBarContainer>` machinery costs ~45 ms
-        // cold and ~14 ms warm on every push, near enough regardless of what
-        // is in it.
-        //
-        // Which means the only real lever left is architectural — a footer the
-        // FEED owns, inside its own view, would be laid out by
-        // `prepareForHeroPresentation` and hidden with the rest of the content
-        // during the flight, and the navigation controller's floating bar
-        // would never run during the push. That trades the system's own glass
-        // for a hand-rolled one, so it is a product decision, not a cleanup.
-        if ProcessInfo.processInfo.arguments.contains("-no-toolbar") {
-            defaultToolbarItems = []
-        }
-        #endif
-        toolbarItems = defaultToolbarItems
-    }
-
-    /// The toolbar under `-snap-pill-footer` (#671):
-    ///
-    ///   [author pill] … [⇄ 🔖] [⋯]
-    ///
-    /// The pill leaves the nav bar for the attribution's slot; repost takes the
-    /// share's place in the capsule (still without an action — no client path
-    /// publishes a repost), share moves into ⋯, and the mute button leaves for
-    /// the sound bubble on the page.
-    private func configurePillFooterToolbar(bookmark: UIButton, more: UIButton) {
-        let repost = SnapNavControls.makeToolbarActionButton(systemName: PostActionSymbol.repost)
-        repost.accessibilityLabel = "Repost"
-        let cluster = UIStackView(arrangedSubviews: [repost, bookmark])
-        cluster.axis = .horizontal
-        let actionsItem = UIBarButtonItem(customView: cluster)
+        // The author pill leads, in the slot the audio capsule had; the sound
+        // lives on the page (`SnapSoundBubbleButton`). TWO bubbles on the
+        // right, held apart by a fixed space — iOS 26 groups ADJACENT items
+        // into one platter, and the capsule (what you DO to this post) is not
+        // the same kind of thing as ⋯ (what is folded away). The toolbar is
+        // STATE-INVARIANT: the comments exit is the nav bar's ✕, and the sort
+        // selector is the nav bar's too (`setEngagedChrome`).
+        let actionsItem = UIBarButtonItem(customView: actions)
         actionsItem.identifier = "feed.snap.actions"
         let moreItem = UIBarButtonItem(customView: more)
         moreItem.identifier = "feed.snap.more"
         defaultToolbarItems = [authorItem, .flexibleSpace(), actionsItem, .fixedSpace(Spacing.sm), moreItem]
+        #if DEBUG
+        // `-no-toolbar`: the upper bound on what trimming the footer can buy.
+        // Measured (push work, 3 runs): the floating bar's machinery costs ~45
+        // ms cold and ~14 ms warm whatever is in it, against ~2 ms for one
+        // platter fewer — the lever is architectural, not the item count.
+        if ProcessInfo.processInfo.arguments.contains("-no-toolbar") {
+            defaultToolbarItems = []
+        }
+        #endif
         toolbarItems = defaultToolbarItems
     }
 
@@ -2832,11 +2613,9 @@ final class SnapFeedViewController: UIViewController {
     /// a spend (or a claim on another screen) enables/disables the control
     /// and updates the menu it will build on its next long-press.
     /// What the sound bubble and the composer's rail slot draw for `model`
-    /// under `-snap-pill-footer` (#671): the attribution's cover, the mute
-    /// state, greyed for a media post with no audio. Nil — no bubble — with
-    /// the flag off, and for a text post with no sound.
+    /// (#671): the sound's cover, the mute state, greyed for a media post
+    /// with no audio. Nil — no bubble — for a text post with no sound.
     func soundFace(for model: FeedItemDisplayModel) -> SnapSoundFace? {
-        guard SnapPillFooter.isOn else { return nil }
         let postSound = sound(for: model)
         guard postSound != nil || model.mediaURL != nil else { return nil }
         return SnapSoundFace(
@@ -2849,7 +2628,6 @@ final class SnapFeedViewController: UIViewController {
     /// Every visible sound bubble, and the open panel's rail slot, after the
     /// sound changed (#671).
     private func refreshVisibleSoundFaces() {
-        guard SnapPillFooter.isOn else { return }
         for indexPath in collectionView.indexPathsForVisibleItems {
             guard orderedIDs.indices.contains(indexPath.item),
                   let model = modelsByID[orderedIDs[indexPath.item]],
@@ -2860,12 +2638,27 @@ final class SnapFeedViewController: UIViewController {
         applySoundRail(to: previewRestingVC)
     }
 
-    /// The composer's rail slot wears the sound's cover under
-    /// `-snap-pill-footer` (#671) — on the sound bubble's frame.
-    private func applySoundRail(to panel: UIViewController?) {
-        guard SnapPillFooter.isOn, let detail = panel as? PostDetailViewController,
+    /// The composer's rail slot wears the sound's cover (#671) — on the sound
+    /// bubble's frame — and answers as the bubble does: a tap mutes, a hold
+    /// opens the sound sheet (#680). Internal for tests.
+    func applySoundRail(to panel: UIViewController?) {
+        guard let detail = panel as? PostDetailViewController,
               let id = detail.postID, let model = modelsByID[id] else { return }
-        detail.setRailSoundFace(soundFace(for: model))
+        let face = soundFace(for: model)
+        detail.setRailSoundFace(face)
+        detail.setLikesHidden(model.likeCountHidden)
+        // A remote cover the attribution has not fetched yet: fetch it, and
+        // redraw the slot once it lands (#680).
+        if let face, face.cachedCover == nil, let url = face.coverURL {
+            Task { [weak detail, imagePipeline] in
+                guard await SnapSoundFace.fetchCover(url, pipeline: imagePipeline) != nil else { return }
+                detail?.redrawRailSoundFace()
+            }
+        }
+        detail.setRailSoundActions(
+            tap: { [weak self] in self?.toggleSound() },
+            hold: { [weak self] in self?.presentSoundSheet() }
+        )
     }
 
     private func refreshVisibleBoostControls() {
@@ -4541,10 +4334,7 @@ final class SnapFeedViewController: UIViewController {
             authorIdentityView.debugProbe("setAuthor \(model.authorName)")
         }
         #endif
-        let postSound = sound(for: model)
-        let attribution = attributionContent(for: model)
-        showAttribution(model, sound: attribution.sound, cover: attribution.cover)
-        // The neighbours' covers too, so the attribution paged to next arrives
+        // The neighbours' covers, so the sound bubble paged to next arrives
         // wearing its own.
         for neighbour in [index - 1, index + 1] where orderedIDs.indices.contains(neighbour) {
             if let next = modelsByID[orderedIDs[neighbour]] {
@@ -4571,17 +4361,10 @@ final class SnapFeedViewController: UIViewController {
         // a text page's own ground makes them unnecessary. The colours now
         // come from the theme above.
         authorIdentityView.setOverMedia(overMedia)
-        mediaAttributionView.setOverMedia(overMedia)
         refreshBookmarkGlyph(for: model.id)
-        // The sound bubble is for posts that HAVE a sound: a clip, or a
-        // collection with one. A photograph or a text page has nothing to mute.
-        // Usually already decided by the scroll's swap (`updateBarPillScrub`).
-        setSoundShown(postSound != nil)
         // The page's sound bubble and the panel's rail slot (#671).
-        if SnapPillFooter.isOn {
-            activeSnapCell?.setSoundFace(soundFace(for: model))
-            applySoundRail(to: commentsContentVC)
-        }
+        activeSnapCell?.setSoundFace(soundFace(for: model))
+        applySoundRail(to: commentsContentVC)
     }
 
     /// What the attribution draws for `model`: the sound's line, and a cover
@@ -4599,33 +4382,6 @@ final class SnapFeedViewController: UIViewController {
         return (soundLine(for: model).map { .sound($0) } ?? .none, cover)
     }
 
-    /// A fresh item wearing THE attribution, under the slot's one identifier.
-    private func makeAttributionItem() -> UIBarButtonItem {
-        let item = UIBarButtonItem(customView: mediaAttributionView)
-        item.identifier = Self.attributionItemIdentifier
-        return item
-    }
-
-    /// Puts `model`'s attribution in the toolbar — the author pill's mechanism
-    /// (`showAuthor`): same item, same view, and the content blurs across
-    /// inside it while the glass stays put. A page that draws the same pill
-    /// (`contentKey`) changes nothing.
-    ///
-    /// Internal, not private, so the item contract is testable without a
-    /// populated feed.
-    func showAttribution(
-        _ model: FeedItemDisplayModel,
-        sound: SnapMediaAttributionView.SoundCredit,
-        cover: SnapMediaAttributionView.Cover
-    ) {
-        let key = SnapMediaAttributionView.contentKey(for: model, sound: sound, cover: cover)
-        guard key != mediaAttributionView.shownContentKey else { return }
-        mediaAttributionView.setPost(
-            model, sound: sound, cover: cover, pipeline: imagePipeline, animated: canAnimateBarItems
-        )
-        refreshCoverSpin()
-    }
-
     // MARK: - Bar pills under the scroll
 
     /// Which page the pills draw, as the SCROLL has it — see `BarPillScrub`.
@@ -4633,7 +4389,7 @@ final class SnapFeedViewController: UIViewController {
     /// The pair of pages the pills' blur was last decided for, and whether
     /// each pill draws the two differently — asked once per pair, not per
     /// frame.
-    private var barPillScrubPair: (upper: Int, author: Bool, attribution: Bool)?
+    private var barPillScrubPair: (upper: Int, author: Bool)?
     #if DEBUG
     private var debugLastScrubBlur: CGFloat = 0
     #endif
@@ -4663,57 +4419,46 @@ final class SnapFeedViewController: UIViewController {
         let position = collectionView.contentOffset.y / page
         let count = orderedIDs.count
         let frame = BarPillScrub.frame(position: position, itemCount: count)
-        let differs = frame.map { barPillsDiffer(upper: $0.upper) } ?? (author: false, attribution: false)
-        let blur = frame?.blur ?? 0
-        let authorBlur = differs.author ? blur : 0
-        let attributionBlur = differs.attribution ? blur : 0
+        let differs = frame.map { barPillDiffers(upper: $0.upper) } ?? false
+        let authorBlur = differs ? (frame?.blur ?? 0) : 0
         // Blur first — a scrub that starts on this frame pictures the content
         // being left — then the swap, which lands under that blur on the
         // second call.
         authorIdentityView.setScrubBlur(authorBlur)
-        mediaAttributionView.setScrubBlur(attributionBlur)
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-pill-probe"),
            (authorBlur * 10).rounded() != (debugLastScrubBlur * 10).rounded() {
             debugLastScrubBlur = authorBlur
-            print(String(format: "[pill-probe] scrub pos=%.3f blur=%.2f/%.2f alpha=%.2f",
-                         position, authorBlur, attributionBlur, authorIdentityView.subviews.first?.alpha ?? -1))
+            print(String(format: "[pill-probe] scrub pos=%.3f blur=%.2f alpha=%.2f",
+                         position, authorBlur, authorIdentityView.subviews.first?.alpha ?? -1))
         }
         #endif
         guard let index = barPillScrub.update(position: position, itemCount: count),
               orderedIDs.indices.contains(index), let model = modelsByID[orderedIDs[index]] else { return }
         showAuthor(model)
-        let attribution = attributionContent(for: model)
-        // The mute button changes hands with the attribution, under its blur —
-        // and gives or takes the attribution's slot, so their capsule keeps
-        // its width (`setSoundShown`).
-        setSoundShown(sound(for: model) != nil)
-        showAttribution(model, sound: attribution.sound, cover: attribution.cover)
         // Lands the swap under the blur, at FULL blur, and starts its
         // envelope (`BarItemContentTransition.swapEnvelope`). A frame that
         // jumped the whole window swaps with the scroll's blur at 0: the
         // change then took the clock's timeline, which this call leaves to
         // run (#627).
         authorIdentityView.setScrubBlur(authorBlur)
-        mediaAttributionView.setScrubBlur(attributionBlur)
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-pill-probe") {
-            print(String(format: "[pill-probe] scrub swap -> %d at %.3f blur=%.2f/%.2f shown=%.2f/%.2f",
-                         index, position, authorBlur, attributionBlur,
-                         authorIdentityView.shownScrubBlur, mediaAttributionView.shownScrubBlur))
+            print(String(format: "[pill-probe] scrub swap -> %d at %.3f blur=%.2f shown=%.2f",
+                         index, position, authorBlur, authorIdentityView.shownScrubBlur))
         }
         #endif
     }
 
-    /// Whether the author pill and the audio capsule draw pages `upper` and
-    /// `upper + 1` differently. Unknown (a page without its model yet) is
-    /// "no": the pill stays sharp, and the settle blurs it across on the
-    /// clock once the page has arrived.
-    private func barPillsDiffer(upper: Int) -> (author: Bool, attribution: Bool) {
-        if let pair = barPillScrubPair, pair.upper == upper { return (pair.author, pair.attribution) }
+    /// Whether the author pill draws pages `upper` and `upper + 1`
+    /// differently. Unknown (a page without its model yet) is "no": the pill
+    /// stays sharp, and the settle blurs it across on the clock once the page
+    /// has arrived.
+    private func barPillDiffers(upper: Int) -> Bool {
+        if let pair = barPillScrubPair, pair.upper == upper { return pair.author }
         guard orderedIDs.indices.contains(upper), orderedIDs.indices.contains(upper + 1),
               let first = modelsByID[orderedIDs[upper]],
-              let second = modelsByID[orderedIDs[upper + 1]] else { return (false, false) }
+              let second = modelsByID[orderedIDs[upper + 1]] else { return false }
         // What the author pill DRAWS: the face, the name, the meta line
         // (the post's age) and the follow badge.
         let author = first.authorID != second.authorID
@@ -4721,13 +4466,8 @@ final class SnapFeedViewController: UIViewController {
             || first.avatarURL != second.avatarURL
             || first.metaText != second.metaText
             || followBadge(for: first.authorID) != followBadge(for: second.authorID)
-        let firstContent = attributionContent(for: first)
-        let secondContent = attributionContent(for: second)
-        let attribution = SnapMediaAttributionView.contentKey(
-            for: first, sound: firstContent.sound, cover: firstContent.cover
-        ) != SnapMediaAttributionView.contentKey(for: second, sound: secondContent.sound, cover: secondContent.cover)
-        barPillScrubPair = (upper, author, attribution)
-        return (author, attribution)
+        barPillScrubPair = (upper, author)
+        return author
     }
 
     /// Renders the stills a drag may need before the page moves.
@@ -4735,7 +4475,6 @@ final class SnapFeedViewController: UIViewController {
         barPillScrubPair = nil
         guard canAnimateBarItems else { return }
         authorIdentityView.prepareScrub()
-        mediaAttributionView.prepareScrub()
     }
 
     /// Both pills sharp and alone: the scroll has stopped, or stopped owning
@@ -4743,7 +4482,6 @@ final class SnapFeedViewController: UIViewController {
     private func endBarPillScrub() {
         barPillScrubPair = nil
         authorIdentityView.setScrubBlur(0)
-        mediaAttributionView.setScrubBlur(0)
     }
 
     #if DEBUG
@@ -4867,9 +4605,8 @@ final class SnapFeedViewController: UIViewController {
     /// look at the player is one rule where wiring every door would be six.
     private func refreshCoverSpin() {
         let playing = isOnScreen && ((activeSnapCell?.isClipAdvancing ?? false) || songPlayer.isPlaying)
-        mediaAttributionView.setSpinning(playing)
-        // The sound bubble's record turns with the toolbar's (#671).
-        if SnapPillFooter.isOn { activeSnapCell?.setSoundSpinning(playing) }
+        // The sound bubble's record turns while the post plays (#671).
+        activeSnapCell?.setSoundSpinning(playing)
     }
 
     private func setCoverSpinWatch(_ on: Bool) {
@@ -4885,16 +4622,9 @@ final class SnapFeedViewController: UIViewController {
 
     private func toggleSound() {
         FeedSound.toggle()
-        refreshSoundButton()
         refreshAudibleSurface()
+        // The page's sound bubble and the panel's slot wear the new state.
         refreshVisibleSoundFaces()
-    }
-
-    private func refreshSoundButton() {
-        let on = FeedSound.isOn
-        soundButton.configuration?.image = UIImage(systemName: on ? "speaker.wave.2.fill" : "speaker.slash.fill")?
-            .withConfiguration(UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold))
-        soundButton.accessibilityLabel = on ? "Mute" : "Unmute"
     }
 
     /// Silences this screen's sound while something else is heard over it —
@@ -5237,13 +4967,10 @@ final class SnapFeedViewController: UIViewController {
     /// the kind of duplicate this menu exists to avoid.
     private func moreMenuActions(for id: PostID) -> [UIMenuElement] {
         var actions: [UIMenuElement] = []
-        // Under `-snap-pill-footer` share left the toolbar's capsule for here
-        // (#671), with the same sheet.
-        if SnapPillFooter.isOn {
-            actions.append(UIAction(title: "Share", image: UIImage(systemName: "square.and.arrow.up")) { [weak self] _ in
-                self?.presentShareSheet(for: id)
-            })
-        }
+        // Share left the toolbar's capsule for here (#671), with the same sheet.
+        actions.append(UIAction(title: "Share", image: UIImage(systemName: "square.and.arrow.up")) { [weak self] _ in
+            self?.presentShareSheet(for: id)
+        })
         actions.append(UIAction(title: "Not interested", image: UIImage(systemName: "hand.thumbsdown")) { [weak self] _ in
             self?.markNotInterested(id)
         })
