@@ -112,6 +112,13 @@ final class CreateHoldShortcut: NSObject {
         recognizer.name = "CreateHoldShortcut"
     }
 
+    /// Whether a hold may arm the camera at all. Off for a guest (#626): their
+    /// bubble is "Sign in", and a hold on it does nothing special.
+    var isEnabled: Bool {
+        get { recognizer.isEnabled }
+        set { recognizer.isEnabled = newValue }
+    }
+
     /// Hangs the recogniser on the bar. Idempotent.
     func install() {
         guard let bar = tabBarController?.tabBar, recognizer.view !== bar else { return }

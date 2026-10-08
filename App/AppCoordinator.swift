@@ -113,6 +113,11 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
             let arguments = ProcessInfo.processInfo.arguments
             let signInAfter = arguments.firstIndex(of: "-guest-sign-in-after")
                 .flatMap { $0 + 1 < arguments.count ? Double(arguments[$0 + 1]) : nil }
+            // `-guest-sign-out-after <seconds>`: and then out again, that many
+            // seconds after the sign-in — the member → guest leg of the bar
+            // (#626), with no Settings walk to the log-out row.
+            let signOutAfter = arguments.firstIndex(of: "-guest-sign-out-after")
+                .flatMap { $0 + 1 < arguments.count ? Double(arguments[$0 + 1]) : nil }
             Task { [weak self] in
                 await sessionManager.logout()
                 self?.observeAuthState()
@@ -120,6 +125,9 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
                 try? await Task.sleep(for: .seconds(signInAfter))
                 let credentials = MockAuthService.defaultCredentials
                 _ = try? await sessionManager.login(username: credentials.username, password: credentials.password)
+                guard let signOutAfter else { return }
+                try? await Task.sleep(for: .seconds(signOutAfter))
+                await sessionManager.logout()
             }
             return
         }

@@ -39,6 +39,43 @@ final class GuestModeUITests: XCTestCase {
         XCTAssertTrue(app.tabBars.buttons["For You"].exists, "the guest left For You")
     }
 
+    /// The guest bar holds only what a guest can use (#626): Explore, For You,
+    /// Settings and a "Sign in" bubble — no Messages. Settings is the tab's
+    /// root, with the bar still under it. Signing in turns the bar back into
+    /// the member's, without a tap.
+    func testTheGuestBarHoldsOnlyWhatAGuestCanUseUntilTheySignIn() {
+        let app = launch(["-guest-sign-in-after", "12"])
+        let bar = app.tabBars.firstMatch
+        XCTAssertTrue(bar.waitForExistence(timeout: 25), "no tab bar")
+        let settings = bar.buttons["Settings"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 5), "the guest bar has no Settings")
+        XCTAssertTrue(bar.buttons["Sign in"].exists, "the guest bar has no Sign in bubble")
+        XCTAssertFalse(bar.buttons["Messages"].exists, "Messages is in the guest bar")
+
+        settings.tap()
+        XCTAssertTrue(app.staticTexts["Playback and Sound"].waitForExistence(timeout: 8),
+                      "Settings is not the tab's root")
+        XCTAssertTrue(bar.isHittable, "the bar left with the Settings root")
+
+        XCTAssertTrue(bar.buttons["Messages"].waitForExistence(timeout: 25), "signing in did not bring Messages back")
+        XCTAssertTrue(bar.buttons["Profile"].exists, "the member bar has no Profile")
+        XCTAssertTrue(bar.buttons["Create"].exists,
+                      "the member bar has no \"+\": \(bar.buttons.allElementsBoundByIndex.map { $0.label })")
+        XCTAssertFalse(bar.buttons["Settings"].exists, "the guest's Settings tab outlived the sign-in")
+    }
+
+    /// One tap on the guest's bubble opens the login sheet — no create menu.
+    func testTheSignInBubbleOpensTheSheetInOneTap() {
+        let app = launch([])
+        let signIn = app.tabBars.buttons["Sign in"]
+        XCTAssertTrue(signIn.waitForExistence(timeout: 25), "the guest bar has no Sign in bubble")
+        signIn.tap()
+        let email = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS[c] 'with email'")).firstMatch
+        XCTAssertTrue(email.waitForExistence(timeout: 8), "the bubble did not open the login sheet")
+        XCTAssertFalse(app.buttons["Text Post"].exists, "the create menu opened for a guest")
+    }
+
     /// A gated action asks, titled for that action; closing the sheet leaves
     /// the guest on the screen they were reading.
     func testClosingTheSignUpSheetLeavesTheGuestWhereTheyWere() {

@@ -63,6 +63,13 @@ final class CreateTabItem {
     /// Kept aligned over the bubble by `MainTabCoordinator`, which owns the bar.
     let overlay: UIButton
     private let opener: @MainActor (Destination) -> Void
+    /// Whether the bubble is a guest's "Sign in" rather than the "+" (#626).
+    private(set) var isSignIn = false
+
+    /// The symbol a guest's bubble wears: "join / your account" — it carries
+    /// on from the person glyph the guest Profile tab wore, and matches the
+    /// sheet's "Log in or sign up".
+    static let signInSymbol = "person.crop.circle.badge.plus"
 
     init(open: @escaping @MainActor (Destination) -> Void) {
         self.opener = open
@@ -82,6 +89,25 @@ final class CreateTabItem {
         button.isUserInteractionEnabled = false
         button.isAccessibilityElement = false
         overlay = button
+    }
+
+    /// Dresses the SAME tab as a guest's "Sign in" or a member's "+" (#626).
+    ///
+    /// ⚠️ THE SAME `UISearchTab`, re-dressed — not a second tab. Only this type
+    /// detaches into its own bubble on iPhone, and the prominent identifier
+    /// (iOS 27), the hold shortcut and the menu anchor are all keyed on this
+    /// one object; a fresh tab would lose every one of them.
+    func showSignIn(_ signIn: Bool) {
+        guard signIn != isSignIn else { return }
+        isSignIn = signIn
+        tab.title = signIn ? "Sign in" : "Create"
+        // ⚠️ AND ITS ACCESSIBILITY LABEL, said outright: a title changed on an
+        // item already in the bar redraws the bubble but left VoiceOver
+        // reading the old name ("Sign in" on a member's "+") — measured by
+        // `GuestModeUITests`. The #547 family: a bar item does not refresh
+        // everything one change touches.
+        tab.accessibilityLabel = tab.title
+        tab.image = UIImage(systemName: signIn ? Self.signInSymbol : "plus")
     }
 
     /// Opens the menu, anchored to the bubble. Returns `false`, and opens

@@ -128,7 +128,7 @@ What we take from it:
 | Sound | Save sound, Use this sound | 🔒 | "Use" opens the camera |
 | Profile (others) | Public profile, gallery, followers/following of public accounts | ✅ | Private accounts show the private header only |
 | Profile (others) | Follow, Message, add to map favourites | 🔒 | |
-| Profile tab | Own profile | 🔒 | Full-page sign-up state + Settings gear |
+| Profile tab | Own profile | — | A guest has no Profile tab: the slot is **Settings** (#626) |
 | Map | Map, pins, clusters, place pages, galleries | ✅ | `QueryTile` is viewer-independent |
 | Map | Posts in the country the device is in | ✅ | Only once location is allowed (§3.1) |
 | Map | Favourites dock (following/friends rails) | — | |
@@ -136,14 +136,28 @@ What we take from it:
 | Search | Results, trending, people, hashtags | ✅ | |
 | Search | Recent searches | ✅ | Device-local, as today |
 | Search | "Following" scope | — | |
-| Messages tab | Inbox, requests, suggestions | 🔒 | Full-page state: "Sign up to message friends" |
+| Messages tab | Inbox, requests, suggestions | — | Not in a guest's bar (#626). A route to Messages asks to sign up, then lands in the inbox |
 | Notifications | Bell + drawer | 🔒 | Drawer shows the sign-up state; no badge |
-| Create "+" | Camera, upload, text post, long-press camera | 🔒 | TikTok behaviour: the "+" stays, a tap opens the sheet |
+| Create "+" | Camera, upload, text post, long-press camera | 🔒 | A guest's bubble is **Sign in** (#626): one tap opens the login sheet; no menu, no hold |
 | Wallet | Balance badge, wallet sheet | ✅ | The badge shows the welcome gift (§3.2) and pulses; the sheet's Claim button is locked |
 | Wallet | Daily claim, spending likes, shop | 🔒 | The sheet names the amount waiting |
-| Settings | Language, app preferences (#409), captions, comment ticker, data saver, clear cache, personalisation off, help, legal, "delete my guest data" | ✅ | Reached from the Profile tab gear |
+| Settings | Language, app preferences (#409), captions, comment ticker, data saver, clear cache, personalisation off, help, legal, "delete my guest data" | ✅ | A guest's own tab, **Settings**, as its root (#626) |
 | Settings | Everything account-scoped | — | Shown after sign-up |
 | Realtime | Live counters, typing, presence | — | Counts refresh on load and pull-to-refresh |
+
+### 3.0 The guest's tab bar (#626)
+
+A guest's bar holds only what a guest can use, plus a direct way in:
+
+| Member | Guest |
+| --- | --- |
+| Explore | Explore |
+| For You | For You |
+| Messages | — (not in the bar) |
+| Profile (avatar, long-press switcher) | **Settings** (`gearshape`): the guest Settings catalog as the tab's root, bar visible |
+| "+" (create menu, hold → camera) | **Sign in** (`person.crop.circle.badge.plus`): one tap opens the login/sign-up sheet |
+
+The same tab objects are re-composed in place (`MainTabCoordinator.applyBar`) on sign-in and on log-out, so there is no shell rebuild; the "+" stays the same `UISearchTab`, re-dressed. A viewer standing on a tab that leaves lands on Explore. Checked by `GuestModeUITests` and with `-guest -guest-sign-in-after <s> [-guest-sign-out-after <s>]`.
 
 ### 3.1 Location unlocks the current country
 
