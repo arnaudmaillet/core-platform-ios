@@ -1,6 +1,15 @@
 import CoreModels
 import FeedInterface
 import Foundation
+import UIKit
+
+/// Makes the sheet a message's photo or video is picked (or captured) in:
+/// the upload flow's own (#681), built by the app. It calls back with what
+/// was picked, in order; the caller dismisses the sheet.
+public typealias ChatMediaPickerFactory = @MainActor (
+    _ source: ConversationThreadMediaSource,
+    _ completion: @escaping @MainActor ([ChatMediaUpload]) -> Void
+) -> UIViewController
 
 /// Drives Feed's conversation screen from the thread's view model.
 ///
@@ -30,6 +39,7 @@ final class ConversationThreadDriver: ConversationThreadDriving {
     static let viewerName = "You"
 
     private let viewModel: ConversationViewModel
+    private let mediaPicker: ChatMediaPickerFactory?
     private let viewer: any ViewerIdentityProviding
     private let avatars: (any PeerAvatarProviding)?
     /// The INBOX's pins — the screen's pin writes the very set the list reads,
@@ -50,9 +60,11 @@ final class ConversationThreadDriver: ConversationThreadDriving {
         viewModel: ConversationViewModel,
         viewer: any ViewerIdentityProviding,
         avatars: (any PeerAvatarProviding)?,
-        pins: InboxCatalog? = nil
+        pins: InboxCatalog? = nil,
+        mediaPicker: ChatMediaPickerFactory? = nil
     ) {
         self.viewModel = viewModel
+        self.mediaPicker = mediaPicker
         self.viewer = viewer
         self.avatars = avatars
         self.pins = pins
@@ -111,6 +123,21 @@ final class ConversationThreadDriver: ConversationThreadDriving {
     func delete(_ messageID: String) { viewModel.deleteMessage(messageID) }
     func didTapIdentity() { viewModel.didTapIdentity() }
 
+    // MARK: - Media (#681)
+
+    var sendsMedia: Bool { mediaPicker != nil }
+
+    func pickMedia(_ source: ConversationThreadMediaSource, from presenter: UIViewController) {
+        guard let mediaPicker, presenter.presentedViewController == nil else { return }
+        let picker = mediaPicker(source) { [weak self, weak presenter] uploads in
+            presenter?.dismiss(animated: true)
+            self?.viewModel.send(media: uploads)
+        }
+        presenter.present(picker, animated: true)
+    }
+
+    func retry(_ messageID: String) { viewModel.retry(messageID) }
+
     // MARK: - Outputs
 
     private func forward(_ phase: ConversationViewModel.Phase) {
@@ -134,13 +161,29 @@ final class ConversationThreadDriver: ConversationThreadDriving {
                 ConversationThreadMessage.Quote(
                     messageID: original.id,
                     author: ChatTranscript.quoteAuthor(isMine: original.isMine, peerName: peerName),
-                    snippet: ChatTranscript.snippet(original.body)
+                    snippet: ChatTranscript.snippet(original.summary)
                 )
             }
             return ConversationThreadMessage(
                 id: model.id, senderID: model.senderID, body: model.body,
-                sentAt: model.sentAt, isMine: model.isMine, quote: quote
+                sentAt: model.sentAt, isMine: model.isMine, quote: quote,
+                media: model.media.map { media in
+                    ConversationThreadMedia(
+                        kind: media.kind == .video ? .video : .image, url: media.url,
+                        posterURL: media.posterURL, preview: media.preview,
+                        aspectRatio: media.aspectRatio, duration: media.duration
+                    )
+                },
+                delivery: Self.delivery(model.delivery)
             )
+        }
+    }
+
+    private static func delivery(_ delivery: MessageDisplayModel.Delivery) -> ConversationThreadDelivery {
+        switch delivery {
+        case .sent: .sent
+        case .sending: .sending
+        case .failed: .failed
         }
     }
 

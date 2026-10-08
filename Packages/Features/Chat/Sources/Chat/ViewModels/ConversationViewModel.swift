@@ -1,6 +1,7 @@
 import CoreModels
 import CoreNavigation
 import Foundation
+import UIKit
 
 /// What thread a screen is showing.
 ///
@@ -52,6 +53,10 @@ public final class ConversationViewModel {
     /// The inbox listens so the row's preview, time and position are already
     /// right underneath this screen — sending changes all three.
     public var onDidSendMessage: ((ConversationID, ChatMessage) -> Void)?
+    /// A photo or video was uploaded and sent: the picture the viewer picked
+    /// and the URL it now lives at (a video's still's), for the image cache —
+    /// so a reopened thread draws it without a fetch (#681).
+    public var onDidUploadMedia: ((UIImage, URL) -> Void)?
     /// True while a message is being sent (disables the send control).
     public var onSendingChange: ((Bool) -> Void)?
     /// Fires once the peer's name resolves; best-effort (no title on failure).
@@ -113,6 +118,26 @@ public final class ConversationViewModel {
     private var peerName = ""
     /// The message currently being replied to; folded into the next send.
     private var replyingToID: String?
+    /// Photos and videos of the viewer's on their way (or failed), drawn
+    /// after the transcript in the order they were picked (#681).
+    private var pendingSends: [PendingSend] = []
+    private var pendingCount = 0
+    /// Pending sends being delivered now — never twice at once.
+    private var delivering: Set<String> = []
+    /// The picture each sent media message was picked as, so the viewer's
+    /// own bubble keeps drawing it instead of waiting on the network.
+    private var localPreviews: [String: UIImage] = [:]
+    /// The profile this conversation sends as — signs a pending bubble.
+    private var senderID = ProfileID("")
+
+    private struct PendingSend {
+        let id: String
+        let upload: ChatMediaUpload
+        let replyTo: String?
+        let createdAt: Date
+        var failed = false
+    }
+
     /// Messages deleted this session. chat.v1 has no DeleteMessage RPC
     /// (`dev/BACKEND_GAPS.md`), so removal is local — this set filters them
     /// back out of every reload, exactly as the conversation list does.
@@ -265,6 +290,82 @@ public final class ConversationViewModel {
         }
     }
 
+    /// Sends photos and videos, one message each, in the order picked
+    /// (#681). Each appears at once as a pending bubble, wearing the picture
+    /// picked, and turns into the delivered message — or into a failed one
+    /// with a retry (`retry`).
+    public func send(media uploads: [ChatMediaUpload]) {
+        guard !uploads.isEmpty else { return }
+        let replyTo = replyingToID
+        cancelReply()
+        var ids: [String] = []
+        for (index, upload) in uploads.enumerated() {
+            pendingCount += 1
+            let id = "pending-\(pendingCount)"
+            ids.append(id)
+            pendingSends.append(PendingSend(
+                id: id, upload: upload, replyTo: index == 0 ? replyTo : nil, createdAt: Date()
+            ))
+        }
+        emit()
+        Task { [weak self] in
+            guard let self else { return }
+            if self.senderID.rawValue.isEmpty, let me = try? await self.repository.viewerProfileID() {
+                self.senderID = me
+                self.emit()
+            }
+            // One at a time, so they land in the order they were picked.
+            for id in ids { await self.deliver(id) }
+        }
+    }
+
+    /// Sends a failed photo or video again.
+    public func retry(_ messageID: String) {
+        guard let index = pendingSends.firstIndex(where: { $0.id == messageID }), pendingSends[index].failed else { return }
+        pendingSends[index].failed = false
+        emit()
+        Task { [weak self] in await self?.deliver(messageID) }
+    }
+
+    private func deliver(_ pendingID: String) async {
+        guard let pending = pendingSends.first(where: { $0.id == pendingID }), !pending.failed,
+              !delivering.contains(pendingID) else { return }
+        delivering.insert(pendingID)
+        defer { delivering.remove(pendingID) }
+        guard let id = await resolveConversation().value else {
+            markFailed(pendingID)
+            return
+        }
+        do {
+            let message = try await repository.send(
+                media: pending.upload, caption: "", to: id, replyingTo: pending.replyTo
+            )
+            pendingSends.removeAll { $0.id == pendingID }
+            if let preview = pending.upload.preview {
+                localPreviews[message.id] = preview
+                if let media = message.media, let url = media.kind == .video ? media.posterURL : media.url {
+                    onDidUploadMedia?(preview, url)
+                }
+            }
+            messages.append(message)
+            emit()
+            onDidSendMessage?(id, message)
+            await markRead(id, upTo: message.id)
+        } catch {
+            markFailed(pendingID)
+            if (error as? ChatError) == .messagesRefused {
+                let notice = Self.sendFailureNotice(error)
+                onActionNotice?(notice.title, notice.message)
+            }
+        }
+    }
+
+    private func markFailed(_ pendingID: String) {
+        guard let index = pendingSends.firstIndex(where: { $0.id == pendingID }) else { return }
+        pendingSends[index].failed = true
+        emit()
+    }
+
     /// What a message that didn't go says: the recipient takes none (#397),
     /// or it simply failed.
     static func sendFailureNotice(_ error: Error) -> (title: String, message: String) {
@@ -296,7 +397,7 @@ public final class ConversationViewModel {
         onReplyStateChange?(ReplyDraft(
             messageID: messageID,
             author: ChatTranscript.quoteAuthor(isMine: message.isMine, peerName: peerName),
-            snippet: ChatTranscript.snippet(message.body)
+            snippet: ChatTranscript.snippet(message.summary)
         ))
     }
 
@@ -311,6 +412,12 @@ public final class ConversationViewModel {
     /// `deletedMessageIDs` keeps it out of subsequent reloads. Re-emits so the
     /// diffable data source animates the row out.
     public func deleteMessage(_ messageID: String) {
+        // A failed photo or video is discarded, not deleted: it never left.
+        if pendingSends.contains(where: { $0.id == messageID }) {
+            pendingSends.removeAll { $0.id == messageID }
+            emit()
+            return
+        }
         guard messages.contains(where: { $0.id == messageID }) else { return }
         deletedMessageIDs.insert(messageID)
         if replyingToID == messageID { cancelReply() }
@@ -466,11 +573,13 @@ public final class ConversationViewModel {
     }
 
     private func emit() {
-        // One pass; skip the filter entirely in the common no-deletions case.
-        let models = deletedMessageIDs.isEmpty
-            ? messages.map(MessageDisplayModel.init)
-            : messages.compactMap { deletedMessageIDs.contains($0.id) ? nil : MessageDisplayModel(message: $0) }
-        phase = .content(models)
+        let previews = localPreviews
+        let shown = deletedMessageIDs.isEmpty ? messages : messages.filter { !deletedMessageIDs.contains($0.id) }
+        let models = shown.map { MessageDisplayModel(message: $0, preview: previews[$0.id]) }
+        let pending = pendingSends.map {
+            MessageDisplayModel(pending: $0.id, upload: $0.upload, sender: senderID, sentAt: $0.createdAt, failed: $0.failed)
+        }
+        phase = .content(models + pending)
     }
 
     private func setSending(_ sending: Bool) {

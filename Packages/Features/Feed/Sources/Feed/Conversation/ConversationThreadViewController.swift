@@ -373,7 +373,42 @@ final class ConversationThreadViewController: UIViewController {
                 self?.driver.didTapIdentity()
             },
         ]))
-        toolbarItems = SnapFooterToolbar.items(leading: peerPill, actions: [], more: more)
+        toolbarItems = SnapFooterToolbar.items(leading: peerPill, actions: mediaButtons(), more: more)
+    }
+
+    /// `[📷 🖼]` left of the ⋯ (#681): the camera and the library, for a
+    /// thread whose driver sends media.
+    private func mediaButtons() -> [UIButton] {
+        guard mode == .full, driver.sendsMedia else { return [] }
+        let camera = SnapNavControls.makeToolbarActionButton(systemName: "camera")
+        camera.accessibilityLabel = "Camera"
+        camera.addAction(UIAction { [weak self] _ in self?.pickMedia(.camera) }, for: .primaryActionTriggered)
+        let library = SnapNavControls.makeToolbarActionButton(systemName: "photo.on.rectangle")
+        library.accessibilityLabel = "Photo Library"
+        library.addAction(UIAction { [weak self] _ in self?.pickMedia(.library) }, for: .primaryActionTriggered)
+        return [camera, library]
+    }
+
+    private func pickMedia(_ source: ConversationThreadMediaSource) {
+        view.endEditing(true)
+        driver.pickMedia(source, from: self)
+    }
+
+    /// A media bubble was tapped: a failed one is sent again, a sent one
+    /// opens full screen.
+    private func tapMedia(of messageID: String, in cell: ThreadRowCell) {
+        guard let message = messagesByID[messageID], let media = message.media else { return }
+        switch message.delivery {
+        case .failed:
+            driver.retry(messageID)
+        case .sending:
+            break
+        case .sent:
+            guard presentedViewController == nil,
+                  let viewer = ThreadMediaViewer.make(media, shownImage: cell.mediaView.image, pipeline: imagePipeline)
+            else { return }
+            present(viewer, animated: true)
+        }
     }
 
     private func configureNavigationItem() {
@@ -573,6 +608,11 @@ final class ConversationThreadViewController: UIViewController {
             cell.onQuoteTap = { [weak self] in self?.scrollToMessage(quote.messageID) }
         } else {
             cell.setQuote(nil)
+        }
+        cell.mediaView.configure(message.media, delivery: message.delivery, pipeline: imagePipeline)
+        cell.mediaView.onTap = message.media == nil ? nil : { [weak self, weak cell] in
+            guard let self, let cell else { return }
+            self.tapMedia(of: messageID, in: cell)
         }
     }
 
@@ -797,9 +837,11 @@ final class ConversationThreadViewController: UIViewController {
         guard bar > 0 else { return }
         let itemPadding: CGFloat = 18
         if pillRidesToolbar {
-            // The toolbar's leading slot (#671): the bar less its margins and
-            // the ⋯ bubble beside it.
-            peerPill.setWidthBudget(bar - 16 * 2 - (48 + itemPadding))
+            // The toolbar's leading slot (#671): the bar less its margins, the
+            // ⋯ bubble beside it and — sending media (#681) — the camera and
+            // library capsule, the snap feed's repost and save capsule's size.
+            let capsule: CGFloat = mediaButtons().isEmpty ? 0 : 2 * 44 + itemPadding + Spacing.sm
+            peerPill.setWidthBudget(bar - 16 * 2 - (48 + itemPadding) - capsule)
             return
         }
         var budget = bar - 16 * 2 - (36 + itemPadding) - itemPadding

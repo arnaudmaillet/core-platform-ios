@@ -50,6 +50,8 @@ let package = Package(
                 "CoreNavigation",
                 "CoreNetworking",
                 "FeedInterface",
+                // `ChatMediaTests` builds an uploader and a transport (#681).
+                "MediaCore",
                 .product(name: "CoreNetworkingMocks", package: "CoreNetworking")
             ]
         )

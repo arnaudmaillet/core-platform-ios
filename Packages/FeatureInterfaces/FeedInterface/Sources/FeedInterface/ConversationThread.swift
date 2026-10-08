@@ -20,6 +20,53 @@ public enum ConversationThreadMode: Sendable {
     case preview
 }
 
+/// A message's photo or video (#681), as the bubble draws it.
+public struct ConversationThreadMedia: Equatable, Sendable {
+    public enum Kind: Sendable {
+        case image
+        case video
+    }
+
+    public let kind: Kind
+    /// The picture, or the clip. Nil while a sent message is still uploading.
+    public let url: URL?
+    /// A video's still.
+    public let posterURL: URL?
+    /// The picture the viewer picked, drawn while it uploads and after, so
+    /// their own message never waits on the network.
+    public let preview: UIImage?
+    /// Width over height; nil when unknown.
+    public let aspectRatio: CGFloat?
+    /// A video's length in seconds.
+    public let duration: TimeInterval?
+
+    public init(
+        kind: Kind, url: URL?, posterURL: URL? = nil, preview: UIImage? = nil,
+        aspectRatio: CGFloat? = nil, duration: TimeInterval? = nil
+    ) {
+        self.kind = kind
+        self.url = url
+        self.posterURL = posterURL
+        self.preview = preview
+        self.aspectRatio = aspectRatio
+        self.duration = duration
+    }
+}
+
+/// Where the viewer's own message is: sent, on its way, or failed — a failed
+/// one offers a retry (#681).
+public enum ConversationThreadDelivery: Equatable, Sendable {
+    case sent
+    case sending
+    case failed
+}
+
+/// Where a photo or video to send comes from.
+public enum ConversationThreadMediaSource: Equatable, Sendable {
+    case camera
+    case library
+}
+
 /// One message, as the screen needs it.
 public struct ConversationThreadMessage: Equatable, Sendable, Identifiable {
     /// The message a reply answers, already resolved to what the row shows.
@@ -41,14 +88,22 @@ public struct ConversationThreadMessage: Equatable, Sendable, Identifiable {
     public let sentAt: Date
     public let isMine: Bool
     public let quote: Quote?
+    /// A MEDIA message's photo or video; `body` is then its caption.
+    public let media: ConversationThreadMedia?
+    public let delivery: ConversationThreadDelivery
 
-    public init(id: String, senderID: ProfileID, body: String, sentAt: Date, isMine: Bool, quote: Quote?) {
+    public init(
+        id: String, senderID: ProfileID, body: String, sentAt: Date, isMine: Bool, quote: Quote?,
+        media: ConversationThreadMedia? = nil, delivery: ConversationThreadDelivery = .sent
+    ) {
         self.id = id
         self.senderID = senderID
         self.body = body
         self.sentAt = sentAt
         self.isMine = isMine
         self.quote = quote
+        self.media = media
+        self.delivery = delivery
     }
 }
 
@@ -125,11 +180,22 @@ public protocol ConversationThreadDriving: AnyObject {
     /// Pins the conversation, or unpins it. A no-op while there is nothing to
     /// pin (`onPinnedChange` said nil).
     func togglePinned()
+    /// Whether the footer offers the camera and the library (#681).
+    var sendsMedia: Bool { get }
+    /// Lets the viewer pick (or capture) a photo or video, presented over
+    /// `presenter`, and sends it.
+    func pickMedia(_ source: ConversationThreadMediaSource, from presenter: UIViewController)
+    /// Sends a failed message again.
+    func retry(_ messageID: String)
 }
 
 public extension ConversationThreadDriving {
     /// Drivers with no older history to page through.
     func loadOlder() {}
+    /// Drivers that send text only.
+    var sendsMedia: Bool { false }
+    func pickMedia(_ source: ConversationThreadMediaSource, from presenter: UIViewController) {}
+    func retry(_ messageID: String) {}
 }
 
 @MainActor

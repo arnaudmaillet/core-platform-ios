@@ -53,6 +53,10 @@ final class MediaPickerViewController: UIViewController {
     private let library: any MediaLibraryReading
     /// What "Next" hands the selection to.
     private let onNext: ([MediaLibraryItem]) -> UIViewController
+    /// The SEND mode (#681): the selection goes back to the presenter instead
+    /// of on to the editor, and "Next" reads `nextTitle`. No drafts there.
+    private let onChoose: (([MediaLibraryItem]) -> Void)?
+    private let nextTitle: String
 
     private var albums: [MediaLibraryAlbum] = []
     /// Every item this screen has seen, across every album it has opened —
@@ -117,6 +121,24 @@ final class MediaPickerViewController: UIViewController {
     ) {
         self.library = library
         self.onNext = onNext
+        self.onChoose = nil
+        self.nextTitle = "Next"
+        super.init(nibName: nil, bundle: nil)
+        configureBars()
+        updateNextItem()
+    }
+
+    /// The send mode: "Send" hands the selection to `onChoose`, in the order
+    /// it was chosen (#681).
+    init(
+        library: any MediaLibraryReading,
+        nextTitle: String,
+        onChoose: @escaping ([MediaLibraryItem]) -> Void
+    ) {
+        self.library = library
+        self.onNext = { _ in UIViewController() }
+        self.onChoose = onChoose
+        self.nextTitle = nextTitle
         super.init(nibName: nil, bundle: nil)
         // ⚠️ THE BARS BELONG TO THE SCREEN, NOT TO ITS VIEW. Built in
         // `viewDidLoad` they exist only once something has asked for the view,
@@ -312,7 +334,7 @@ final class MediaPickerViewController: UIViewController {
         navigationItem.backButtonDisplayMode = .minimal
         // Right-to-left: the first item is the RIGHTMOST, so "Next" sits at the
         // edge and "Drafts" beside it, which is the order the layout asks for.
-        navigationItem.rightBarButtonItems = [
+        navigationItem.rightBarButtonItems = onChoose != nil ? [nextItem] : [
             nextItem,
             UIBarButtonItem(
                 title: "Drafts",
@@ -325,7 +347,7 @@ final class MediaPickerViewController: UIViewController {
     /// "Next" alone says nothing about what is going; "Next (3)" says what the
     /// step after this one will be handed.
     private func updateNextItem() {
-        nextItem.title = selection.isEmpty ? "Next" : "Next (\(selection.count))"
+        nextItem.title = selection.isEmpty ? nextTitle : "\(nextTitle) (\(selection.count))"
         nextItem.isEnabled = !selection.isEmpty
     }
 
@@ -336,6 +358,11 @@ final class MediaPickerViewController: UIViewController {
     private func goNext() {
         let chosen = selection.ids.compactMap { itemsByID[$0] }
         guard !chosen.isEmpty else { return }
+        if let onChoose {
+            nextItem.isEnabled = false
+            onChoose(chosen)
+            return
+        }
         navigationController?.pushViewController(onNext(chosen), animated: true)
     }
 

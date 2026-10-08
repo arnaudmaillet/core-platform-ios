@@ -27,6 +27,8 @@ let package = Package(
                 // module is visible to the whole graph long after the target
                 // that declared it stopped being the only one using it.
                 "CoreContracts",
+                // `MediaAssetUploader` hands bytes to a `MediaUploadTransport`.
+                .product(name: "MediaCore", package: "MediaCore"),
                 .product(name: "Connect", package: "connect-swift")
             ]
         ),
@@ -51,7 +53,10 @@ let package = Package(
         ),
         .testTarget(
             name: "CoreNetworkingTests",
-            dependencies: ["CoreNetworking", "CoreNetworkingMocks", "CoreContracts"]
+            dependencies: [
+                "CoreNetworking", "CoreNetworkingMocks", "CoreContracts",
+                .product(name: "MediaCore", package: "MediaCore")
+            ]
         )
     ]
 )

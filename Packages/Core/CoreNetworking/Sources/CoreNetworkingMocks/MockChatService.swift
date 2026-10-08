@@ -211,7 +211,7 @@ public final class MockChatService: @unchecked Sendable {
                 var preview = Chat_V1_MessagePreview()
                 preview.messageID = latest.messageID
                 preview.senderID = latest.senderID
-                preview.contentType = .text
+                preview.contentType = latest.contentType
                 preview.preview = String(latest.body.prefix(100))
                 entry.lastMessage = preview
                 entry.unread = latest.senderID != viewer && (isRequest || viewerLastRead(in: id) != latest.messageID)
@@ -413,6 +413,9 @@ public final class MockChatService: @unchecked Sendable {
         // the quoted-reply rendering is present in the dense demo thread
         // without having to compose one. conv-0 only.
         let replyLinks: [Int: Int] = conversationID == "conv-0" ? [6: 5, 8: 7] : [:]
+        // A received PHOTO (#681): "Room 4 this time" is its caption, so the
+        // thread draws a media message on a cold launch. conv-0 only.
+        let photoAt: Int? = conversationID == "conv-0" ? 1 : nil
         return specs.enumerated().map { index, spec in
             let (sender, body, minutesAgo) = spec
             var view = Chat_V1_MessageView()
@@ -421,8 +424,23 @@ public final class MockChatService: @unchecked Sendable {
             view.body = body
             view.createdAtMs = nowMs - minutesAgo * minute
             if let target = replyLinks[index] { view.replyTo = "\(conversationID)-m\(target)" }
+            if index == photoAt, let reference = Self.seededPhotoReference {
+                view.contentType = .media
+                view.mediaRef = reference
+            } else {
+                view.contentType = .text
+            }
             return view
         }
+    }
+
+    /// A catalog photo as the client's `ChatMediaRef` writes one
+    /// (`cpmedia://v1?kind=image&url=…&w=…&h=…`).
+    static var seededPhotoReference: String? {
+        guard let photo = MockPhotoCatalog.shared.photo(forSlot: 3) else { return nil }
+        let media = photo.media
+        let url = media.url.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? media.url
+        return "cpmedia://v1?kind=image&url=\(url)&w=\(media.width)&h=\(media.height)"
     }
 
     private final class Store: @unchecked Sendable {
@@ -481,6 +499,10 @@ public final class MockChatService: @unchecked Sendable {
                 view.messageID = id
                 view.senderID = request.senderID
                 view.body = request.body
+                // Kept as sent (#681): a MEDIA message comes back with its
+                // reference, the way chat.v1 stores it.
+                view.contentType = request.contentType
+                view.mediaRef = request.mediaRef
                 view.replyTo = request.replyTo
                 view.createdAtMs = max(Int64(Date().timeIntervalSince1970 * 1000), newest + 1)
                 sent[request.conversationID, default: []].append(view)

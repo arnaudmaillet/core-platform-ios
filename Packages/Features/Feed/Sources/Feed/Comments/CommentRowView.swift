@@ -175,6 +175,9 @@ final class CommentRowView: UIView {
             ? "\(model.authorName) · \(model.metaText) · \(Self.heldMarker)"
             : "\(model.authorName) · \(model.metaText)"
         bodyLabel.text = model.body
+        // A conversation's caption-less photo (#681): no empty line between
+        // the header and the picture.
+        bodyLabel.isHidden = model.body.isEmpty
         bodyLabel.textColor = model.isHeld ? .secondaryLabel : .label
         avatarView.setMonogram(model.monogram)
         isReplyRow = model.isReply
@@ -215,6 +218,7 @@ final class CommentRowView: UIView {
         bodyLabel.textColor = .label
         headerLabel.text = timestamp.isEmpty ? authorName : "\(authorName) · \(timestamp)"
         bodyLabel.text = caption
+        bodyLabel.isHidden = false
         avatarView.setMonogram(monogram)
         isReplyRow = false
         refreshTypeDrivenGeometry()

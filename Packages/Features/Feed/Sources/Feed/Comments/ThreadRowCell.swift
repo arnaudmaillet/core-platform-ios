@@ -11,13 +11,17 @@ import UIKit
 ///  - a clear LIFT PLATE stands behind the row, outset by the platter's
 ///    padding, so the preview has room around the text and its bounds ARE the
 ///    lifted shape (see `LiftedPreview` for why that must hold);
-///  - an optional quote strip above the row, for a reply in a conversation.
+///  - an optional quote strip above the row, for a reply in a conversation;
+///  - an optional photo or video under it, for a conversation's media
+///    message (#681).
 final class ThreadRowCell: UICollectionViewCell {
     /// The platter's margin around the row's content when lifted.
     static let liftPadding: CGFloat = Spacing.sm
     static let liftCornerRadius: CGFloat = 16
 
     let row = CommentRowView(installsContextMenu: false)
+    /// A media message's photo or video (#681); hidden otherwise.
+    let mediaView = ThreadMediaView()
     private let liftPlate = UIView()
     private let quoteView = ThreadQuoteView()
     private var selection: SelectableTextOverlay?
@@ -36,7 +40,7 @@ final class ThreadRowCell: UICollectionViewCell {
         contentView.addSubview(liftPlate)
 
         quoteView.isHidden = true
-        let stack = UIStackView(arrangedSubviews: [quoteView, row])
+        let stack = UIStackView(arrangedSubviews: [quoteView, row, mediaView])
         stack.axis = .vertical
         stack.spacing = Spacing.xs
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -68,6 +72,8 @@ final class ThreadRowCell: UICollectionViewCell {
         row.setLikeControlHidden(false)
         endTextSelection()
         setQuote(nil)
+        mediaView.configure(nil, delivery: .sent, pipeline: nil)
+        mediaView.onTap = nil
         liftPlate.layer.removeAllAnimations()
         liftPlate.backgroundColor = .clear
     }
