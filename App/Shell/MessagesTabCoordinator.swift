@@ -80,5 +80,11 @@ final class MessagesTabCoordinator: TabCoordinator {
         // something in Messages" is blank until Messages has been opened, which
         // is the one moment it has nothing left to tell anyone.
         container.chatFeature.primeInbox()
+        // ⚠️ AND THE SCREEN THAT COUNTS IT (#748). The badge is the inbox
+        // pages' sum, published from the inbox's `viewDidLoad` on: a tab never
+        // opened never loaded its view, so the primed data sat uncounted and
+        // the bar item stayed blank until Messages was selected. Loaded a beat
+        // later, off the launch's first frame.
+        DispatchQueue.main.async { [weak inbox] in inbox?.loadViewIfNeeded() }
     }
 }

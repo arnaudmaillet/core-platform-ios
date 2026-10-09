@@ -19,6 +19,41 @@ struct InboxHeaderAccessoryTests {
         func surfaceDidBecomeActive() {}
     }
 
+    /// A page with something new on it.
+    private final class CountingSurface: UIViewController, InboxSurface {
+        let category: MessagesCategory = .all
+        var chrome: InboxSurfaceChrome
+        var onChromeChange: ((InboxSurfaceChrome) -> Void)?
+        func surfaceDidBecomeActive() {}
+        init(badge: Int) {
+            var chrome = InboxSurfaceChrome()
+            chrome.badgeCount = badge
+            self.chrome = chrome
+            super.init(nibName: nil, bundle: nil)
+        }
+        @available(*, unavailable)
+        required init?(coder: NSCoder) { fatalError() }
+        func publish(_ badge: Int) {
+            chrome.badgeCount = badge
+            onChromeChange?(chrome)
+        }
+    }
+
+    /// ⚠️ LOADED, NEVER SHOWN, STILL COUNTED (#748): the shell loads the
+    /// inbox at launch so the Messages tab item wears its badge before the tab
+    /// is ever opened — which only works if a loaded inbox publishes its sum
+    /// with no window and no appearance.
+    @Test func aLoadedInboxPublishesItsTotalWithoutAppearing() {
+        let surface = CountingSurface(badge: 3)
+        let screen = MessagesInboxViewController(surfaces: [surface])
+        var totals: [Int] = []
+        screen.onTotalNewCountChange = { totals.append($0) }
+        screen.loadViewIfNeeded()
+        surface.publish(4)
+        #expect(screen.view.window == nil)
+        #expect(totals.last == 4, "a loaded, unshown inbox did not publish: \(totals)")
+    }
+
     private func inbox() -> MessagesInboxViewController {
         MessagesInboxViewController(surfaces: [BlankSurface()])
     }
