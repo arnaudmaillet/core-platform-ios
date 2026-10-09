@@ -152,8 +152,13 @@ final class ProfileBannerView: UIView {
     /// ⚠️ A BAND DOES NOT BLUR, AND ITS RAMP IS BLACK (user, 5 October 2026):
     /// the strip stays sharp to its foot, and the opacity ramp lands on
     /// black whatever the appearance rather than on the page's tone. The
-    /// ground the name's ink is read off follows (`pageTone`). A poster keeps
-    /// the progressive blur into the page's tone.
+    /// ground the name's ink is read off follows (`pageTone`).
+    ///
+    /// ⚠️ A POSTER WEARS THE BLUR ALONE (#688, the owner's call 2026-10-08):
+    /// no opaque fade between the picture and the profile. The type may read
+    /// less well over a busy cover, and the picture's edge may show at the
+    /// foot — both accepted. The ink is still read off the picture
+    /// (`rampsToPage = false`), so it stays the most legible one there is.
     func setFormat(_ format: ProfileBannerFormat) {
         self.format = format
         let band = format == .band
@@ -161,6 +166,9 @@ final class ProfileBannerView: UIView {
         let tone: UIColor = band ? Self.bandRampTone : Surface.page
         ramp.tone = tone
         picture.pageTone = tone
+        let poster = format == .poster
+        ramp.isHidden = poster
+        picture.rampsToPage = !poster
     }
 
     /// The tone a band's ramp lands on: black, fixed.
@@ -248,6 +256,8 @@ final class ProfileBannerView: UIView {
     var debugHasPicture: Bool { picture.image != nil }
     var debugShowsBlur: Bool { picture.showsBlur }
     var debugRampTone: UIColor { ramp.tone }
+    /// Whether the opaque fade is drawn (not on a poster, #688).
+    var debugShowsRamp: Bool { !ramp.isHidden }
     var debugFade: HeroBannerFade.Geometry? { picture.fade }
     var debugBlurLevels: [(start: CGFloat, full: CGFloat)] { picture.debugVisibleLevels }
     var debugRampLocations: [CGFloat] { ramp.debugLocations }

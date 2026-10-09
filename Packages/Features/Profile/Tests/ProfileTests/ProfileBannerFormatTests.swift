@@ -128,10 +128,8 @@ struct ProfileBannerFormatTests {
     }
 
     /// A poster runs to the tray's FOOT — not cut at the midline (user, 30
-    /// September 2026): the whole identity block stands on the picture, and
-    /// the page is whole behind the tray's foot. Under the name the page's
-    /// tone is already half there (the shoulder), and the counters are
-    /// still on the picture.
+    /// September 2026): the whole identity block stands on the picture. It
+    /// wears the blur alone (#688): no page tone fades in under its type.
     @Test func aPosterRunsPastTheTraysFoot() throws {
         let header = header(format: .poster)
         let banner = header.debugBannerFrame
@@ -140,13 +138,24 @@ struct ProfileBannerFormatTests {
         // block starts at 40%, over it: the tray stands on the picture too.
         #expect(banner.maxY > tray.maxY)
         let fade = try #require(header.debugBannerFade)
-        #expect(abs(fade.rampEnd - banner.maxY) < 0.5)
-        let underName = HeroBannerFade.rampAlpha(at: header.debugNameFrame.minY, geometry: fade)
-        #expect(underName >= HeroBannerFade.shoulderAlpha - 0.001)
-        #expect(HeroBannerFade.rampAlpha(at: header.debugStatsFrame.maxY, geometry: fade) < 0.7)
-        let alphas = header.debugBannerRampAlphas
-        #expect(alphas.first == 0)
-        #expect(alphas.last == 1)
+        #expect(abs(fade.blurFull - banner.maxY) < 0.5)
+        #expect(header.debugBannerShowsBlur)
+        #expect(!header.debugBannerShowsRamp, "a poster draws the opaque fade")
+    }
+
+    /// Only a poster lost its fade (#688): a band keeps its black one, and
+    /// a header with no picture is as it was.
+    @Test(arguments: [ProfileBannerFormat.band, .poster, .none])
+    func onlyAPosterDropsTheFade(format: ProfileBannerFormat) {
+        let header = header(format: format, picture: format != .none)
+        #expect(header.debugBannerShowsRamp == (format != .poster))
+        // `.none` hides the whole banner; its layers are as they always were.
+        if format != .none {
+            #expect(header.debugBannerShowsBlur == (format == .poster))
+        }
+        if format == .band {
+            #expect(header.debugBannerRampTone == ProfileBannerView.bandRampTone)
+        }
     }
 
     /// On a band the name and the handle stand on the picture — darkened by
