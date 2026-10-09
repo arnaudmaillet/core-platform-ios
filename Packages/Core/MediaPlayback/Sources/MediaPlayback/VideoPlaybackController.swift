@@ -28,7 +28,7 @@ public struct VideoLoadLanding: Sendable, Equatable {
 @MainActor
 public final class VideoPlaybackController {
     private let source: any VideoSource
-    private let poolSize: Int
+    private var poolSize: Int
     private var idlePlayers: [AVPlayer] = []
     /// Player currently bound to each render view.
     private var activePlayers: [ObjectIdentifier: AVPlayer] = [:]
@@ -236,7 +236,22 @@ public final class VideoPlaybackController {
     /// decoders, not memory — simultaneous hardware decode sessions are a small
     /// number on every phone this ships to, and a seventh clip does not stutter
     /// politely, it starves one of the six already playing.
-    public let capacity: Int
+    public private(set) var capacity: Int
+
+    /// Resizes the pool live (Settings' player pool, #702): the working-set
+    /// budget and the idle cache both follow `size`, and idle players past the
+    /// new cache are dropped now — with their renderers, as `recycle` drops an
+    /// over-pool player. Players bound to surfaces are never taken away: the
+    /// budget is what claimants size themselves against next.
+    public func resize(to size: Int) {
+        let size = max(1, size)
+        capacity = size
+        poolSize = size
+        while idlePlayers.count > poolSize {
+            let dropped = idlePlayers.removeLast()
+            renderers.removeValue(forKey: ObjectIdentifier(dropped))
+        }
+    }
 
     /// How many surfaces are holding a player right now. The measurement the
     /// capacity claim is worth nothing without — see `VideoPoolIdentityTests`,

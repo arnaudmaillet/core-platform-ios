@@ -62,6 +62,22 @@ struct MediaPlaybackPolicyTests {
         #expect(MediaPlaybackPolicy.playsInBackground, "one switch leaves the other alone")
     }
 
+    /// The player pool (#702): Normal by default — preferences saved before
+    /// it existed read Normal — and the notches grow in that order.
+    @Test func thePlayerPoolDefaultsToNormalAndOldPreferencesStillRead() throws {
+        #expect(MediaPlaybackPreferences().playerPool == .normal)
+        let sizes = MediaPlaybackPreferences.PlayerPool.allCases.map(\.size)
+        #expect(sizes == sizes.sorted() && Set(sizes).count == sizes.count, "the notches do not grow: \(sizes)")
+        #expect(MediaPlaybackPreferences.PlayerPool.normal.size == 6, "Normal is the pools' long-standing size")
+
+        let defaults = UserDefaults(suiteName: "playback-pool-\(UUID().uuidString)")!
+        defaults.set(Data(#"{"autoplay":"always","startsWithSound":true,"dataSaver":false}"#.utf8), forKey: "mediaPlaybackPreferences")
+        let store = MediaPlaybackPreferencesStore(defaults: defaults)
+        #expect(store.preferences.playerPool == .normal)
+        store.update { $0.playerPool = .less }
+        #expect(MediaPlaybackPreferencesStore(defaults: defaults).preferences.playerPool == .less)
+    }
+
     /// The Lock Screen's lines: the caption's first line and the author.
     @Test func theLockScreenNamesTheClipAndItsAuthor() {
         #expect(SnapFeedViewController.nowPlaying(for: nil) == NowPlayingInfo(title: "Video", artist: ""))

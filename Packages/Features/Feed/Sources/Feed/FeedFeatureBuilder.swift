@@ -179,7 +179,9 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     @MainActor
     public func warmPlayback(of postID: PostID, at seconds: TimeInterval?) -> (any FeedPlaybackWarm)? {
         let entry = repository.peekPost(postID)
-        guard let videoPlayback, MediaPlaybackPolicy.autoplays, let entry,
+        // Not gated on autoplay (#702): the flight lands on a full-screen post,
+        // which plays whatever Autoplay says.
+        guard let videoPlayback, let entry,
               let clip = FlightPlaybackWarm.warmableClip(of: entry) else {
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {

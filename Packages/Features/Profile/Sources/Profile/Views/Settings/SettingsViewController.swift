@@ -221,7 +221,7 @@ final class SettingsViewController: UIViewController {
         return Self.footerText(for: scope, activeHandle: activeHandle, isGuest: onSignIn != nil)
     }
 
-    static let powerSavingFooter = "Stops animated emojis, turns on Reduce Motion and stops videos from playing on their own. Your own settings come back when you turn it off."
+    static let powerSavingFooter = "Stops animated emojis, turns on Reduce Motion and stops videos in grids and previews from playing on their own (a post you open full screen still plays). Your own settings come back when you turn it off."
 
     /// What Settings shows. A guest has no account and no profile, so only
     /// what works without one: this device's settings, and help and the
