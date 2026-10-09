@@ -181,6 +181,20 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     private var settingsItem: UIBarButtonItem?
     /// The own-profile switcher; taps present the profile-switcher menu.
     private var switcherItem: UIBarButtonItem?
+    /// The mute bell, on someone else's profile (#689): the scoped Mute menu
+    /// that used to sit in the see-more menu. `bell`, or `bell.slash` once
+    /// anything is muted. Built once and kept: the trailing run is compared
+    /// by reference (`appliedBarItems`), so a fresh item would be a rebuild.
+    private lazy var muteBellItem: UIBarButtonItem = {
+        let item = UIBarButtonItem(image: UIImage(systemName: "bell"), menu: makeMuteMenu())
+        item.tintColor = .label
+        item.accessibilityLabel = "Notifications"
+        return item
+    }()
+    /// Keeps the bell and the shell's balance two bubbles: iOS 26 groups
+    /// adjacent bar items into one platter (the feed's note on
+    /// `setEngagedChrome`). Kept for the same by-reference reason.
+    private let muteBellSpacer = UIBarButtonItem.fixedSpace(Spacing.sm)
     /// An item the SHELL owns at the head of the leading group — the
     /// notifications bell, on the tab root only (a pushed profile leads with
     /// its back button). Kept as state for the same reason as the trailing
@@ -403,15 +417,15 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         }
         viewModel.onRelationshipSettled = { [weak self] in self?.settlePresentationIfReady() }
         headerView.onPicturesSettled = { [weak self] in self?.settlePresentationIfReady() }
-        viewModel.onMapPinButtonChange = { [weak self] state in
+        viewModel.onMapPinButtonChange = { [weak self] _ in
             HeroScreenCost.measure("landing.mapPin") {
-                self?.headerView.configureMapPin(state)
+                // The rails' rows keep the menu open (`.keepsMenuPresented`):
+                // their checkmarks follow in place.
+                self?.refreshVisibleMapRows()
                 self?.settlePresentationIfReady()
             }
         }
-        headerView.makeMapPinMenu = { [weak self] in
-            self?.makeMapFavoriteMenu() ?? UIMenu()
-        }
+        viewModel.onMuteScopesChange = { [weak self] _ in self?.refreshMuteBell() }
         headerView.onFollowTapped = { [weak self] in
             guard let self else { return }
             MemberGates.perform(.follow(handle: viewModel.profile?.handle), from: self) { [weak self] in
@@ -490,10 +504,6 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         // Mirror the (possibly stub-seeded) relationship into the header's
         // tray, so Message visibility agrees with the toolbar from the start.
         headerView.configureAction(followButtonState)
-        // The pin, by contrast, is NOT seeded from the stub: a stub says who
-        // this is and whether the viewer follows them, never whether they are
-        // pinned. It arrives when the view model has actually asked.
-        headerView.configureMapPin(viewModel.mapPinButton)
         render(.loading)
         viewModel.viewDidLoad()
     }
@@ -1326,7 +1336,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     /// followed. Same instrument as `-profile-menu-audit` for the "..." menu.
     private func printMapFavoriteMenu(stage: String) {
         guard viewModel.mapPinButton != .hidden else {
-            print("[profile] map-pin menu (\(stage)): none — no star on this profile")
+            print("[profile] map-pin menu (\(stage)): none — no Map submenu on this profile")
             return
         }
         let rows = mapFavoriteMenuActions()
@@ -1417,18 +1427,77 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     /// does not have.
     ///
     /// `.keepsMenuPresented` because a checklist that closes after one tick
-    /// makes setting both rails a two-open chore. The rows are rebuilt as the
-    /// state changes — `configureMapPin` reassigns the menu on every
-    /// publication — so the marks track what was just chosen.
+    /// makes setting both rails a two-open chore. The marks are updated in
+    /// the open menu as the state changes (`refreshVisibleMapRows`), so they
+    /// track what was just chosen.
     ///
-    /// Deferred, so the rows resolve when the menu OPENS rather than when the
-    /// button was configured: the star is reconfigured on every state change,
-    /// and a menu captured then would be one edit out of date the moment the
-    /// viewer changed something.
-    private func makeMapFavoriteMenu() -> UIMenu {
-        UIMenu(children: [UIDeferredMenuElement.uncached { [weak self] completion in
-            completion(self?.mapFavoriteMenuActions() ?? [])
-        }])
+    /// ⚠️ A SUBMENU OF SEE-MORE, NOT A STAR (#689, the owner's call
+    /// 2026-10-08): the star left the header's row. Same rows, same rule —
+    /// only a followed profile, Friends only for a mutual, only when the app
+    /// wired a pinning service (`ProfileViewModel.MapPinButton`).
+    private func mapFavoriteSubmenu() -> UIMenu? {
+        let state = viewModel.mapPinButton
+        guard state != .hidden else { return nil }
+        let rows = mapFavoriteMenuActions()
+        return UIMenu(
+            title: "Map",
+            subtitle: Self.mapFavoriteSubtitle(rows),
+            image: UIImage(systemName: state.isFavorited ? "star.circle.fill" : "star.circle"),
+            identifier: Self.mapMenuIdentifier,
+            children: rows
+        )
+    }
+
+    /// Ticks the rail rows of the open see-more menu to the current state:
+    /// a row keeps the menu open, and its mark must follow.
+    ///
+    /// ⚠️ THE BLOCK RUNS ONCE PER MENU ON SCREEN — the root, then the open
+    /// Map submenu (simulator, 2026-10-09). Rebuilding the root's children in
+    /// it put the whole see-more menu inside the Map submenu, so each run
+    /// only re-ticks the rail rows it holds, by identifier, on copies.
+    private func refreshVisibleMapRows() {
+        let current = viewModel.mapPinButton.categories
+        headerView.updateVisibleMoreMenu { menu in
+            Self.retickingMapRows(in: menu, to: current)
+        }
+    }
+
+    private static func retickingMapRows(in menu: UIMenu, to current: Set<MapFavoriteCategory>) -> UIMenu {
+        let reticked = menu.replacingChildren(menu.children.map { child in
+            if let submenu = child as? UIMenu { return retickingMapRows(in: submenu, to: current) }
+            guard let action = child as? UIAction,
+                  let category = mapCategory(for: action.identifier),
+                  let copy = action.copy() as? UIAction else { return child }
+            copy.state = current.contains(category) ? .on : .off
+            return copy
+        })
+        // The Map submenu's subtitle lists the rails it is on.
+        if menu.identifier == mapMenuIdentifier {
+            reticked.subtitle = mapFavoriteSubtitle(reticked.children.compactMap { $0 as? UIAction })
+        }
+        return reticked
+    }
+
+    private static let mapMenuIdentifier = UIMenu.Identifier("profile.map")
+
+    /// "Map Dock, Following Filter" — the ticked rows, or nothing.
+    private static func mapFavoriteSubtitle(_ rows: [UIAction]) -> String? {
+        let on = rows.filter { $0.state == .on }.map(\.title)
+        return on.isEmpty ? nil : on.joined(separator: ", ")
+    }
+
+    /// Stable identities for the rail rows: how an open menu's rows are
+    /// found again to re-tick them.
+    private static func mapRowIdentifier(_ category: MapFavoriteCategory) -> UIAction.Identifier {
+        switch category {
+        case .dock: UIAction.Identifier("profile.map.dock")
+        case .following: UIAction.Identifier("profile.map.following")
+        case .friends: UIAction.Identifier("profile.map.friends")
+        }
+    }
+
+    private static func mapCategory(for identifier: UIAction.Identifier) -> MapFavoriteCategory? {
+        [MapFavoriteCategory.dock, .following, .friends].first { mapRowIdentifier($0) == identifier }
     }
 
     /// The checklist's rows for the CURRENT state, apart from the menu that
@@ -1452,6 +1521,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
             let action = UIAction(
                 title: title,
                 image: UIImage(systemName: symbol),
+                identifier: Self.mapRowIdentifier(category),
                 state: current.contains(category) ? .on : .off
             ) { [weak self] _ in
                 self?.viewModel.toggleMapCategory(category)
@@ -1472,6 +1542,57 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         }
         navigationController?.pushViewController(editViewController, animated: true)
     }
+
+    // MARK: - Mute bell
+
+    /// Whether the bell stands in the bar: someone else's profile, in a
+    /// composition that can mute, for a member. The same rule the see-more
+    /// menu's Mute submenu had (#689): a guest has no account to mute from.
+    private var showsMuteBell: Bool {
+        viewModel.canMute && viewModel.canModerate && MemberGates.gate(from: self)?.isMember != false
+    }
+
+    /// Resolved when it opens, so the checkmarks are the current scopes.
+    private func makeMuteMenu() -> UIMenu {
+        UIMenu(children: [UIDeferredMenuElement.uncached { [weak self] completion in
+            completion(self?.muteMenuElements() ?? [])
+        }])
+    }
+
+    /// One toggle per scope: muting is a set of quiet preferences, not one
+    /// switch (backend #722). Titled "Mute", or "Muted" over a summary of
+    /// what is.
+    private func muteMenuElements() -> [UIMenuElement] {
+        let scopes = viewModel.muteScopes
+        return [UIMenu(
+            title: scopes.isEmpty ? "Mute" : "Muted",
+            subtitle: scopes.isEmpty ? nil : scopes.summary,
+            options: .displayInline,
+            children: MuteScope.allCases.map { scope in
+                UIAction(
+                    title: scope.title,
+                    state: scopes.contains(scope) ? .on : .off
+                ) { [weak self] _ in self?.viewModel.toggleMute(scope) }
+            }
+        )]
+    }
+
+    /// The glyph and the spoken value follow the scopes; the item stays the
+    /// same object, so the bar is not rebuilt.
+    private func refreshMuteBell() {
+        let scopes = viewModel.muteScopes
+        muteBellItem.image = UIImage(systemName: scopes.isEmpty ? "bell" : "bell.slash")
+        muteBellItem.accessibilityValue = scopes.isEmpty ? "Nothing muted" : "Muted: " + scopes.summary
+    }
+
+    #if DEBUG
+    /// The bell, if the bar shows it.
+    var debugMuteBellItem: UIBarButtonItem? {
+        navigationItem.rightBarButtonItems?.first { $0 === muteBellItem }
+    }
+    func debugMuteMenuElements() -> [UIMenuElement] { muteMenuElements() }
+    func debugMoreMenuElements() -> [UIMenuElement] { moreMenuElements() }
+    #endif
 
     // MARK: - Overflow menu
 
@@ -1502,6 +1623,10 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
                 }
             ]))
         }
+        // The map's rails (#689), where the star beside Message used to be.
+        if let map = mapFavoriteSubmenu() {
+            groups.append(UIMenu(options: .displayInline, children: [map]))
+        }
         // Own profile (and the pre-relationship window) offers no moderation:
         // you cannot block or report yourself, and guessing is worse than
         // waiting — the menu is rebuilt on the next open either way.
@@ -1519,33 +1644,15 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
             return groups
         }
 
-        if viewModel.canMute || viewModel.canRestrict {
-            let scopes = viewModel.muteScopes
-            var quiet: [UIMenuElement] = []
-            if viewModel.canRestrict {
-                let restricted = viewModel.isRestricted
-                // Restrict (#416): their comments on your posts are seen only
-                // by them and you.
-                quiet.append(UIAction(
-                    title: restricted ? "Unrestrict" : "Restrict",
-                    image: UIImage(systemName: restricted ? "person.crop.circle.badge.checkmark" : "person.crop.circle.badge.minus")
-                ) { [weak self] _ in self?.viewModel.toggleRestrict() })
-            }
-            // One submenu, a toggle per scope: muting is a set of quiet
-            // preferences, not one switch (backend #722).
-            groups.append(UIMenu(options: .displayInline, children: quiet + (!viewModel.canMute ? [] : [
-                UIMenu(
-                    title: scopes.isEmpty ? "Mute" : "Muted",
-                    subtitle: scopes.isEmpty ? nil : scopes.summary,
-                    image: UIImage(systemName: scopes.isEmpty ? "speaker.slash" : "speaker.slash.fill"),
-                    children: MuteScope.allCases.map { scope in
-                        UIAction(
-                            title: scope.title,
-                            state: scopes.contains(scope) ? .on : .off
-                        ) { [weak self] _ in self?.viewModel.toggleMute(scope) }
-                    }
-                )
-            ])))
+        // Mute is the nav bar's bell now (#689, `muteMenuElements`).
+        if viewModel.canRestrict {
+            let restricted = viewModel.isRestricted
+            // Restrict (#416): their comments on your posts are seen only
+            // by them and you.
+            groups.append(UIMenu(options: .displayInline, children: [UIAction(
+                title: restricted ? "Unrestrict" : "Restrict",
+                image: UIImage(systemName: restricted ? "person.crop.circle.badge.checkmark" : "person.crop.circle.badge.minus")
+            ) { [weak self] _ in self?.viewModel.toggleRestrict() }]))
         }
 
         let blocked = viewModel.isBlocked
@@ -2123,6 +2230,12 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         // The switcher, on the own profile only — see the note above for why it
         // is not in the leading group.
         if let switcherItem { items.append(switcherItem) }
+        // The mute bell (#689), someone else's profile only: `[0]` is the
+        // corner, as the gear is on your own — `[bell][coins]`.
+        if showsMuteBell {
+            items.append(muteBellItem)
+            if trailingAccessoryItem != nil { items.append(muteBellSpacer) }
+        }
         // The shell's accessory LAST, which puts it furthest from the screen
         // edge: `[0]` is the corner, so the gear keeps it and the balance sits
         // inboard — the Explore header's arrangement ([coins] [search]). On a

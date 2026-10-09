@@ -263,9 +263,17 @@ public final class ProfileViewModel {
     private var blockInFlight = false
     private var reportInFlight = false
     /// What of this profile the viewer has muted (#403), read beside the
-    /// relationship; the "..." menu's Mute submenu shows and edits it.
-    public private(set) var muteScopes: MuteScopes = .none
-    private var muteInFlight = false
+    /// relationship; the nav bar's bell shows and edits it (#689).
+    public private(set) var muteScopes: MuteScopes = .none {
+        didSet {
+            guard muteScopes != oldValue else { return }
+            onMuteScopesChange?(muteScopes)
+        }
+    }
+    /// Fires when `muteScopes` changes — a read landing, a toggle, or its
+    /// rollback — so the bell's glyph follows without a re-push.
+    public var onMuteScopesChange: ((MuteScopes) -> Void)?
+    private(set) var muteInFlight = false
     /// Bumped by every mute toggle, so a read that started before one can't
     /// land after it and put the old scopes back.
     private var muteGeneration = 0
