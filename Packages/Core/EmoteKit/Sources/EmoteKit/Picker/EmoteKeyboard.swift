@@ -275,11 +275,101 @@ public final class EmoteKeyboard: NSObject {
         refreshCompletions(in: text, caret: caret)
     }
 
+    /// How long the strip's resize — and its tiles coming and going — takes.
+    static let suggestionSpring: TimeInterval = 0.38
+
+    /// Bumped by every show and hide, so a hide's completion does not take
+    /// away a strip shown again in the meantime.
+    private var stripGeneration = 0
+
     /// Floats the strip just above the anchor, in the anchor's window, or
-    /// takes it away.
+    /// takes it away (#720): it arrives growing out of the field, resizes
+    /// with its matches — its width and its tiles in one spring — and
+    /// leaves shrinking back.
     private func showSuggestions(_ emotes: [Emote]) {
-        strip.show(emotes)
-        place(strip, showing: !emotes.isEmpty)
+        let isShowing = strip.superview != nil && !strip.isHidden && strip.alpha > 0
+        let animates = !UIAccessibility.isReduceMotionEnabled
+        stripGeneration += 1
+        let generation = stripGeneration
+        guard !emotes.isEmpty, let anchor = suggestionAnchor ?? textView, let window = anchor.window else {
+            // Off-window (no field on screen): the matches are kept, nothing floats.
+            if !emotes.isEmpty {
+                strip.removeFromSuperview()
+                strip.show(emotes)
+                return
+            }
+            guard isShowing, animates, strip.window != nil else {
+                strip.removeFromSuperview()
+                strip.show([])
+                return
+            }
+            UIView.animate(withDuration: 0.2, delay: 0, options: [.beginFromCurrentState, .curveEaseIn]) {
+                self.strip.alpha = 0
+                self.strip.transform = Self.stripCollapsed
+            } completion: { _ in
+                guard self.stripGeneration == generation else { return }
+                self.strip.removeFromSuperview()
+                self.strip.transform = .identity
+                self.strip.show([])
+            }
+            return
+        }
+        let frame = suggestionFrame(count: emotes.count, anchor: anchor, in: window)
+        if strip.superview !== window { window.addSubview(strip) }
+        window.bringSubviewToFront(strip)
+        guard isShowing, strip.window != nil else {
+            strip.layer.removeAllAnimations()
+            strip.transform = .identity
+            strip.frame = frame
+            strip.show(emotes)
+            strip.layoutIfNeeded()
+            guard animates else {
+                strip.alpha = 1
+                return
+            }
+            strip.alpha = 0
+            strip.transform = Self.stripCollapsed
+            UIView.animate(withDuration: Self.suggestionSpring, delay: 0, usingSpringWithDamping: 0.82,
+                           initialSpringVelocity: 0, options: [.allowUserInteraction]) {
+                self.strip.alpha = 1
+                self.strip.transform = .identity
+            }
+            return
+        }
+        strip.layer.removeAllAnimations()
+        strip.alpha = 1
+        strip.transform = .identity
+        guard animates else {
+            strip.frame = frame
+            strip.show(emotes)
+            return
+        }
+        // ONE spring for the capsule and its tiles: the batch updates inside
+        // the block take its timing, so a tile shrinks out exactly as the
+        // capsule closes over it.
+        UIView.animate(withDuration: Self.suggestionSpring, delay: 0, usingSpringWithDamping: 0.86,
+                       initialSpringVelocity: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
+            self.strip.frame = frame
+            self.strip.show(emotes, animated: true)
+            self.strip.layoutIfNeeded()
+        }
+    }
+
+    /// Where a strip leaves to and arrives from: a little smaller, toward
+    /// the field.
+    private static let stripCollapsed = CGAffineTransform(translationX: 0, y: 8).scaledBy(x: 0.92, y: 0.92)
+
+    /// Just above the anchor, starting at its leading edge, as wide as
+    /// `count` matches (capped to the window, then scrolling).
+    private func suggestionFrame(count: Int, anchor: UIView, in window: UIWindow) -> CGRect {
+        let field = anchor.convert(anchor.bounds, to: window)
+        let inset: CGFloat = 8
+        let width = min(EmoteSuggestionStrip.fittingWidth(count: count), window.bounds.width - inset * 2, 520)
+        let x = min(max(field.minX, inset), window.bounds.width - inset - width)
+        return CGRect(
+            x: x, y: field.minY - EmoteSuggestionStrip.height - inset,
+            width: width, height: EmoteSuggestionStrip.height
+        )
     }
 
     /// Puts `overlay` just above the anchor, in the anchor's window, or takes
@@ -352,6 +442,7 @@ public final class EmoteKeyboard: NSObject {
     // MARK: - Test seams
 
     var suggestionIDs: [String] { strip.suggestions.map(\.id) }
+    var suggestionStrip: EmoteSuggestionStrip { strip }
     var panel: EmotePickerView { picker }
     func selectSuggestion(at index: Int) {
         guard index < strip.suggestions.count else { return }
