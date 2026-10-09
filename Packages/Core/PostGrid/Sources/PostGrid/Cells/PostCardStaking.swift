@@ -95,6 +95,8 @@ public final class PostCardStaking {
 
     /// Closes the undo window — the surface left the screen.
     public func endSession() {
+        // Moving on commits the session's taps now (#676).
+        for postID in session.keys { wallet.commitStakes(on: postID) }
         session.removeAll()
     }
 

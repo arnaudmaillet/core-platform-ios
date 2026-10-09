@@ -46,6 +46,14 @@ public protocol Moderation_V1_ModerationServiceClientInterface: Sendable {
     @available(iOS 13, *)
     func `listMyReports`(request: Moderation_V1_ListMyReportsRequest, headers: Connect.Headers) async -> ResponseMessage<Moderation_V1_ListMyReportsResponse>
 
+    /// A member's reports, as ListMyReports pages them, for family supervision
+    /// (account, #670: a teen's supervisor sees what the teen reported). Mesh
+    /// only. Never the reporter's free text: `reason` is always empty. Never
+    /// a SELF_HARM, CSAM or NCII report, nor one about content of the
+    /// `hidden_account_ids` (the teen's supervisors).
+    @available(iOS 13, *)
+    func `listReportsByReporter`(request: Moderation_V1_ListReportsByReporterRequest, headers: Connect.Headers) async -> ResponseMessage<Moderation_V1_ListMyReportsResponse>
+
     /// Open (or idempotently return) a review case for a subject.
     @available(iOS 13, *)
     func `openCase`(request: Moderation_V1_OpenCaseRequest, headers: Connect.Headers) async -> ResponseMessage<Moderation_V1_OpenCaseResponse>
@@ -121,6 +129,11 @@ public final class Moderation_V1_ModerationServiceClient: Moderation_V1_Moderati
     }
 
     @available(iOS 13, *)
+    public func `listReportsByReporter`(request: Moderation_V1_ListReportsByReporterRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Moderation_V1_ListMyReportsResponse> {
+        return await self.client.unary(path: "/moderation.v1.ModerationService/ListReportsByReporter", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
     public func `openCase`(request: Moderation_V1_OpenCaseRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Moderation_V1_OpenCaseResponse> {
         return await self.client.unary(path: "/moderation.v1.ModerationService/OpenCase", idempotencyLevel: .unknown, request: request, headers: headers)
     }
@@ -170,6 +183,7 @@ public final class Moderation_V1_ModerationServiceClient: Moderation_V1_Moderati
             public static let screen = Connect.MethodSpec(name: "Screen", service: "moderation.v1.ModerationService", type: .unary)
             public static let submitReport = Connect.MethodSpec(name: "SubmitReport", service: "moderation.v1.ModerationService", type: .unary)
             public static let listMyReports = Connect.MethodSpec(name: "ListMyReports", service: "moderation.v1.ModerationService", type: .unary)
+            public static let listReportsByReporter = Connect.MethodSpec(name: "ListReportsByReporter", service: "moderation.v1.ModerationService", type: .unary)
             public static let openCase = Connect.MethodSpec(name: "OpenCase", service: "moderation.v1.ModerationService", type: .unary)
             public static let assignCase = Connect.MethodSpec(name: "AssignCase", service: "moderation.v1.ModerationService", type: .unary)
             public static let decideCase = Connect.MethodSpec(name: "DecideCase", service: "moderation.v1.ModerationService", type: .unary)

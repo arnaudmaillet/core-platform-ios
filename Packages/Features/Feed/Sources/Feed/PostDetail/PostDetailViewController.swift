@@ -294,6 +294,13 @@ final class PostDetailViewController: UIViewController {
         for task in imageTasks { task.cancel() }
     }
 
+    /// Leaving the post commits its likes now, rather than 10 s after the
+    /// last tap (#676).
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        if let postID = viewModel.postID { wallet?.commitStakes(on: postID.rawValue) }
+    }
+
     /// Rows re-measure on a genuine WIDTH change — rotation, iPad size
     /// classes. Nothing here touches the empty page's HEIGHT: that is
     /// resolved once at configuration time and deliberately never revisited
@@ -615,7 +622,7 @@ final class PostDetailViewController: UIViewController {
         likeButton.configuration = likeConfig
         likeButton.addAction(UIAction { [weak self] _ in
             guard let self else { return }
-            MemberGates.perform(.like, from: self) { [weak self] in self?.viewModel.toggleLike() }
+            MemberGates.perform(.like, from: self) { [weak self] in self?.viewModel.like() }
         }, for: .primaryActionTriggered)
         likeCountLabel.font = .appFont(forTextStyle: .subheadline)
         likeCountLabel.textColor = .secondaryLabel

@@ -442,6 +442,14 @@ final class AppContainer {
     /// about a feed spend because both surfaces hold this same object.
     private(set) lazy var walletStore: WalletStore = {
         let store = WalletStore()
+        // A member's likes are points committed through `wallet.Stake`
+        // (#676): every stake lands in the outbox too, and the sender commits
+        // it — 10 s after the last tap, on leaving the post, on going to the
+        // background — retrying with the batch's key.
+        store.likeOutbox = likeOutbox
+        let sender = LikeOutboxSender(outbox: likeOutbox, wallet: store, staking: likeStaking)
+        sender.start()
+        likeOutboxSender = sender
         // Mock mode has no settlement service, so the claim sheet's stake
         // list would open empty on every fresh install. A one-time demo plan
         // stakes on the first mock posts — some active, some settled.
@@ -500,6 +508,18 @@ final class AppContainer {
     /// shares the same instance, so the two can never disagree.
     private(set) lazy var postDraftStore = PostDraftStore()
 
+    // MARK: - Likes (#676)
+
+    /// The likes waiting to be committed, persisted across launches.
+    private lazy var likeOutbox = LikeOutbox()
+    /// `wallet.Stake`, as the signed-in account.
+    private lazy var likeStaking = WalletLikeStaking(
+        walletClient: Wallet_V1_WalletServiceClient(client: authenticatedRPCClient),
+        viewer: viewerSession
+    )
+    /// Commits `likeOutbox`; started with `walletStore`.
+    private var likeOutboxSender: LikeOutboxSender?
+
     // MARK: - Feed
 
     private lazy var feedRepository = FeedRepository(
@@ -508,6 +528,7 @@ final class AppContainer {
         profileClient: Profile_V1_ProfileServiceClient(client: authenticatedRPCClient),
         counterClient: Counter_V1_CounterServiceClient(client: authenticatedRPCClient),
         engagementClient: Engagement_V1_EngagementServiceClient(client: authenticatedRPCClient),
+        likeStaking: likeStaking,
         authSession: sessionManager,
         viewer: viewerSession,
         snapshotStore: CodableFileStore<[FeedEntry]>(name: "feed-first-page")

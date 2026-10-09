@@ -180,6 +180,30 @@ public protocol Auth_V1_AuthServiceClientInterface: Sendable {
     @available(iOS 13, *)
     func `removePasskey`(request: Auth_V1_RemovePasskeyRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_ListPasskeysResponse>
 
+    /// The apps the caller authorised (partners' "Sign in with"), most recently
+    /// granted first. Empty while no partner integration exists.
+    @available(iOS 13, *)
+    func `listAuthorizedApps`(request: Auth_V1_ListAuthorizedAppsRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_ListAuthorizedAppsResponse>
+
+    /// Withdraws the caller's authorisation of an app — and so every token
+    /// issued under it — and returns the apps left. Idempotent; AUT-5030 when
+    /// the caller never authorised it. No step-up: withdrawing consent must be
+    /// as easy as giving it (GDPR Art. 7(3)). Recorded on the audit plane.
+    @available(iOS 13, *)
+    func `revokeAppAuthorization`(request: Auth_V1_RevokeAppAuthorizationRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_ListAuthorizedAppsResponse>
+
+    /// INTERNAL (mesh only, the OAuth server): records a grant the holder
+    /// consented to. The same scopes again on an active grant change nothing;
+    /// other scopes, or a revoked app, make a new consent. Recorded on the
+    /// audit plane.
+    @available(iOS 13, *)
+    func `recordAppAuthorization`(request: Auth_V1_RecordAppAuthorizationRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_AuthorizedApp>
+
+    /// INTERNAL (mesh only, the OAuth server): an app used its grant. AUT-5030
+    /// when it has no active one — the token must then be refused.
+    @available(iOS 13, *)
+    func `noteAppUse`(request: Auth_V1_NoteAppUseRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_NoteAppUseResponse>
+
     /// INTERNAL. Server-side token introspection returning the normalized
     /// principal, for callers that cannot verify edge tokens locally.
     @available(iOS 13, *)
@@ -309,6 +333,26 @@ public final class Auth_V1_AuthServiceClient: Auth_V1_AuthServiceClientInterface
     }
 
     @available(iOS 13, *)
+    public func `listAuthorizedApps`(request: Auth_V1_ListAuthorizedAppsRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Auth_V1_ListAuthorizedAppsResponse> {
+        return await self.client.unary(path: "/auth.v1.AuthService/ListAuthorizedApps", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `revokeAppAuthorization`(request: Auth_V1_RevokeAppAuthorizationRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Auth_V1_ListAuthorizedAppsResponse> {
+        return await self.client.unary(path: "/auth.v1.AuthService/RevokeAppAuthorization", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `recordAppAuthorization`(request: Auth_V1_RecordAppAuthorizationRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Auth_V1_AuthorizedApp> {
+        return await self.client.unary(path: "/auth.v1.AuthService/RecordAppAuthorization", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `noteAppUse`(request: Auth_V1_NoteAppUseRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Auth_V1_NoteAppUseResponse> {
+        return await self.client.unary(path: "/auth.v1.AuthService/NoteAppUse", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
     public func `introspect`(request: Auth_V1_IntrospectRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Auth_V1_IntrospectResponse> {
         return await self.client.unary(path: "/auth.v1.AuthService/Introspect", idempotencyLevel: .unknown, request: request, headers: headers)
     }
@@ -342,6 +386,10 @@ public final class Auth_V1_AuthServiceClient: Auth_V1_AuthServiceClientInterface
             public static let startPasskeySignIn = Connect.MethodSpec(name: "StartPasskeySignIn", service: "auth.v1.AuthService", type: .unary)
             public static let listPasskeys = Connect.MethodSpec(name: "ListPasskeys", service: "auth.v1.AuthService", type: .unary)
             public static let removePasskey = Connect.MethodSpec(name: "RemovePasskey", service: "auth.v1.AuthService", type: .unary)
+            public static let listAuthorizedApps = Connect.MethodSpec(name: "ListAuthorizedApps", service: "auth.v1.AuthService", type: .unary)
+            public static let revokeAppAuthorization = Connect.MethodSpec(name: "RevokeAppAuthorization", service: "auth.v1.AuthService", type: .unary)
+            public static let recordAppAuthorization = Connect.MethodSpec(name: "RecordAppAuthorization", service: "auth.v1.AuthService", type: .unary)
+            public static let noteAppUse = Connect.MethodSpec(name: "NoteAppUse", service: "auth.v1.AuthService", type: .unary)
             public static let introspect = Connect.MethodSpec(name: "Introspect", service: "auth.v1.AuthService", type: .unary)
             public static let listSessions = Connect.MethodSpec(name: "ListSessions", service: "auth.v1.AuthService", type: .unary)
         }

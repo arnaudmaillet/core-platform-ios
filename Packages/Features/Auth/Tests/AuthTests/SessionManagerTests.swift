@@ -155,6 +155,31 @@ private final class FakeAuthClient: Auth_V1_AuthServiceClientInterface, @uncheck
     ) async -> ResponseMessage<Auth_V1_ListPasskeysResponse> {
         ResponseMessage(result: .success(Auth_V1_ListPasskeysResponse()))
     }
+
+    // Authorized apps (contracts bumped with #676): not this suite's subject.
+    func listAuthorizedApps(
+        request: Auth_V1_ListAuthorizedAppsRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<Auth_V1_ListAuthorizedAppsResponse> {
+        response(from: .failure(.init(code: .unimplemented, message: nil)))
+    }
+
+    func revokeAppAuthorization(
+        request: Auth_V1_RevokeAppAuthorizationRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<Auth_V1_ListAuthorizedAppsResponse> {
+        response(from: .failure(.init(code: .unimplemented, message: nil)))
+    }
+
+    func recordAppAuthorization(
+        request: Auth_V1_RecordAppAuthorizationRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<Auth_V1_AuthorizedApp> {
+        response(from: .failure(.init(code: .unimplemented, message: nil)))
+    }
+
+    func noteAppUse(
+        request: Auth_V1_NoteAppUseRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<Auth_V1_NoteAppUseResponse> {
+        response(from: .failure(.init(code: .unimplemented, message: nil)))
+    }
 }
 
 private func makeTokens(access: String, refresh: String, session: String = "sess-1", expiresIn: Int64 = 900) -> Auth_V1_TokenPair {

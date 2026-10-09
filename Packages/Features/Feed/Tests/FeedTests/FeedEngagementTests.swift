@@ -9,15 +9,15 @@ import Testing
 
 private final class FakeEngagementProvider: EngagementProviding, @unchecked Sendable {
     private let lock = NSLock()
-    var failNextSetLiked = false
-    private(set) var setLikedCalls: [(PostID, Bool)] = []
+    var failNextLike = false
+    private(set) var likeCalls: [PostID] = []
     var counts: [PostID: Int64] = [:]
 
-    func setLiked(_ liked: Bool, for postID: PostID) async throws {
+    func like(_ postID: PostID) async throws {
         let shouldFail = lock.withLock {
-            setLikedCalls.append((postID, liked))
-            let fail = failNextSetLiked
-            failNextSetLiked = false
+            likeCalls.append(postID)
+            let fail = failNextLike
+            failNextLike = false
             return fail
         }
         if shouldFail {
@@ -29,7 +29,7 @@ private final class FakeEngagementProvider: EngagementProviding, @unchecked Send
         lock.withLock { counts.filter { postIDs.contains($0.key) } }
     }
 
-    var recordedCalls: [(PostID, Bool)] { lock.withLock { setLikedCalls } }
+    var recordedCalls: [PostID] { lock.withLock { likeCalls } }
 }
 
 /// Scriptable realtime seam: the test drives events/connection transitions.
@@ -138,7 +138,9 @@ struct FeedEngagementTests {
         #expect(viewModel.engagementState(for: PostID("post-a")).isLiked == false)
     }
 
-    @Test func toggleLikeIsOptimisticAndPersists() async {
+    /// A like is a point (#676): shown at once, and every like adds one —
+    /// there is no unlike.
+    @Test func aLikeIsOptimisticAndEachAddsOne() async {
         let engagement = FakeEngagementProvider()
         let viewModel = await loadedViewModel(engagement: engagement, realtime: nil)
         let id = PostID("post-a")
@@ -146,24 +148,31 @@ struct FeedEngagementTests {
         var updates: [FeedViewModel.EngagementState] = []
         viewModel.onEngagementChange = { _, state in updates.append(state) }
 
-        viewModel.toggleLike(for: id)
+        viewModel.like(for: id)
 
-        // Optimistic: state flips before any RPC completes.
+        // Optimistic: shown before any RPC completes.
         #expect(updates.first == .init(likeCount: 11, isLiked: true))
         #expect(await eventuallyMain { engagement.recordedCalls.count == 1 })
         #expect(viewModel.engagementState(for: id) == .init(likeCount: 11, isLiked: true))
+
+        // A second like adds a second point; it never takes one back. (Once
+        // the first has landed: one like in flight per post.)
+        #expect(await eventuallyMain { !viewModel.isLikeInFlight(id) })
+        viewModel.like(for: id)
+        #expect(await eventuallyMain { engagement.recordedCalls.count == 2 })
+        #expect(viewModel.engagementState(for: id) == .init(likeCount: 12, isLiked: true))
     }
 
     @Test func failedLikeRollsBack() async {
         let engagement = FakeEngagementProvider()
-        engagement.failNextSetLiked = true
+        engagement.failNextLike = true
         let viewModel = await loadedViewModel(engagement: engagement, realtime: nil)
         let id = PostID("post-a")
 
         var updates: [FeedViewModel.EngagementState] = []
         viewModel.onEngagementChange = { _, state in updates.append(state) }
 
-        viewModel.toggleLike(for: id)
+        viewModel.like(for: id)
 
         #expect(await eventuallyMain { updates.count == 2 })
         #expect(updates.first == .init(likeCount: 11, isLiked: true)) // optimistic

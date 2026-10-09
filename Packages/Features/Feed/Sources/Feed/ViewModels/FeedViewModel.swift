@@ -172,32 +172,34 @@ public final class FeedViewModel {
         startComposedPostsIfConfigured()
     }
 
+    /// Whether a like on the post is still on its way. Internal for tests.
+    func isLikeInFlight(_ id: PostID) -> Bool { likesInFlight.contains(id) }
+
     public func engagementState(for id: PostID) -> EngagementState {
         engagement[id] ?? EngagementState(likeCount: 0, isLiked: false)
     }
 
-    /// Optimistic like toggle: flip immediately, roll back if the server
-    /// rejects. One in-flight mutation per post — extra taps are dropped
-    /// rather than queued (single-use rotation semantics don't apply here,
-    /// but interleaved flips would corrupt the count).
-    public func toggleLike(for id: PostID) {
+    /// Optimistic like: one point on the post (#676), shown at once, taken
+    /// back if it does not land. A like is final — there is no unlike — so
+    /// every like adds one. One in flight per post; extra taps are dropped.
+    public func like(for id: PostID) {
         guard let engagementProvider, !likesInFlight.contains(id) else { return }
-        var state = engagementState(for: id)
-        state.isLiked.toggle()
-        state.likeCount = max(0, state.likeCount + (state.isLiked ? 1 : -1))
+        let before = engagementState(for: id)
+        var state = before
+        state.isLiked = true
+        state.likeCount += 1
         engagement[id] = state
         likesInFlight.insert(id)
         onEngagementChange?(id, state)
 
-        let liked = state.isLiked
         Task {
             do {
-                try await engagementProvider.setLiked(liked, for: id)
+                try await engagementProvider.like(id)
             } catch {
-                // Roll back to the pre-toggle state.
+                // Roll back: the point did not land.
                 var reverted = self.engagementState(for: id)
-                reverted.isLiked = !liked
-                reverted.likeCount = max(0, reverted.likeCount + (liked ? -1 : 1))
+                reverted.isLiked = before.isLiked
+                reverted.likeCount = max(0, reverted.likeCount - 1)
                 self.engagement[id] = reverted
                 self.onEngagementChange?(id, reverted)
             }

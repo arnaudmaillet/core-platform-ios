@@ -31,9 +31,32 @@ public protocol GeoDiscovery_V1_GeoDiscoveryServiceClientInterface: Sendable {
     /// neighbouring one. A guest session's map (QueryTile, GetGeoTimeline) shows
     /// only its granted country, and nothing without one. Call it at launch and
     /// at each foreground; an empty current_country (location off) closes it.
-    /// Members are not limited by it in v1.
+    /// Members are limited by their unlocks instead (GetCountryUnlocks).
     @available(iOS 13, *)
     func `getCountryAccess`(request: GeoDiscovery_V1_GetCountryAccessRequest, headers: Connect.Headers) async -> ResponseMessage<GeoDiscovery_V1_GetCountryAccessResponse>
+
+    /// The country ladder (#665): every country the map draws, ranked by the
+    /// likes on posts published there over the last 30 days (ties by country
+    /// code), with what unlocking it costs in gems by rank (1–10: 50, 11–30:
+    /// 30, beyond: 15). Returned whole (≈ 240 rows); the same for every
+    /// reader, refreshed at most every minute. A member's home country costs 0.
+    @available(iOS 13, *)
+    func `getCountryStandings`(request: GeoDiscovery_V1_GetCountryStandingsRequest, headers: Connect.Headers) async -> ResponseMessage<GeoDiscovery_V1_GetCountryStandingsResponse>
+
+    /// A member's countries (#665): the home country (free: the account's
+    /// country of residence, else the network's country at the first visit,
+    /// kept for good) and those unlocked with gems. When the member map
+    /// filter is on (`filtering`), QueryTile and GetGeoTimeline show only
+    /// posts in these countries (and at sea). Edge: the caller's account.
+    @available(iOS 13, *)
+    func `getCountryUnlocks`(request: GeoDiscovery_V1_GetCountryUnlocksRequest, headers: Connect.Headers) async -> ResponseMessage<GeoDiscovery_V1_GetCountryUnlocksResponse>
+
+    /// Unlocks a country with gems, at the price the app showed: answered
+    /// in-band (UNLOCKED, ALREADY_UNLOCKED, INSUFFICIENT_GEMS, PRICE_CHANGED).
+    /// Charged at most once per country. GEO-3001 (PERMISSION_DENIED) under 18
+    /// or with an unknown age. Edge: the caller's account.
+    @available(iOS 13, *)
+    func `unlockCountry`(request: GeoDiscovery_V1_UnlockCountryRequest, headers: Connect.Headers) async -> ResponseMessage<GeoDiscovery_V1_UnlockCountryResponse>
 }
 
 /// Concrete implementation of `GeoDiscovery_V1_GeoDiscoveryServiceClientInterface`.
@@ -59,11 +82,29 @@ public final class GeoDiscovery_V1_GeoDiscoveryServiceClient: GeoDiscovery_V1_Ge
         return await self.client.unary(path: "/geo_discovery.v1.GeoDiscoveryService/GetCountryAccess", idempotencyLevel: .unknown, request: request, headers: headers)
     }
 
+    @available(iOS 13, *)
+    public func `getCountryStandings`(request: GeoDiscovery_V1_GetCountryStandingsRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<GeoDiscovery_V1_GetCountryStandingsResponse> {
+        return await self.client.unary(path: "/geo_discovery.v1.GeoDiscoveryService/GetCountryStandings", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `getCountryUnlocks`(request: GeoDiscovery_V1_GetCountryUnlocksRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<GeoDiscovery_V1_GetCountryUnlocksResponse> {
+        return await self.client.unary(path: "/geo_discovery.v1.GeoDiscoveryService/GetCountryUnlocks", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `unlockCountry`(request: GeoDiscovery_V1_UnlockCountryRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<GeoDiscovery_V1_UnlockCountryResponse> {
+        return await self.client.unary(path: "/geo_discovery.v1.GeoDiscoveryService/UnlockCountry", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
     public enum Metadata {
         public enum Methods {
             public static let queryTile = Connect.MethodSpec(name: "QueryTile", service: "geo_discovery.v1.GeoDiscoveryService", type: .unary)
             public static let getGeoTimeline = Connect.MethodSpec(name: "GetGeoTimeline", service: "geo_discovery.v1.GeoDiscoveryService", type: .unary)
             public static let getCountryAccess = Connect.MethodSpec(name: "GetCountryAccess", service: "geo_discovery.v1.GeoDiscoveryService", type: .unary)
+            public static let getCountryStandings = Connect.MethodSpec(name: "GetCountryStandings", service: "geo_discovery.v1.GeoDiscoveryService", type: .unary)
+            public static let getCountryUnlocks = Connect.MethodSpec(name: "GetCountryUnlocks", service: "geo_discovery.v1.GeoDiscoveryService", type: .unary)
+            public static let unlockCountry = Connect.MethodSpec(name: "UnlockCountry", service: "geo_discovery.v1.GeoDiscoveryService", type: .unary)
         }
     }
 }

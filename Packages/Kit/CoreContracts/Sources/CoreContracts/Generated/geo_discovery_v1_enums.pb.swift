@@ -194,6 +194,60 @@ public nonisolated enum GeoDiscovery_V1_CountryAccessOutcome: SwiftProtobuf.Enum
 
 }
 
+/// What became of an unlock (#665).
+public nonisolated enum GeoDiscovery_V1_UnlockCountryOutcome: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+  case unlocked // = 1
+
+  /// The home country, or unlocked before: nothing charged.
+  case alreadyUnlocked // = 2
+
+  /// `price_gems` is what it costs, `gems` what the wallet holds.
+  case insufficientGems // = 3
+
+  /// The rank moved since the app showed the price: `price_gems` is the new
+  /// one. Nothing charged; ask again with it.
+  case priceChanged // = 4
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .unlocked
+    case 2: self = .alreadyUnlocked
+    case 3: self = .insufficientGems
+    case 4: self = .priceChanged
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .unlocked: return 1
+    case .alreadyUnlocked: return 2
+    case .insufficientGems: return 3
+    case .priceChanged: return 4
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [GeoDiscovery_V1_UnlockCountryOutcome] = [
+    .unspecified,
+    .unlocked,
+    .alreadyUnlocked,
+    .insufficientGems,
+    .priceChanged,
+  ]
+
+}
+
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 nonisolated extension GeoDiscovery_V1_ZoomBand: SwiftProtobuf._ProtoNameProviding {
@@ -206,4 +260,8 @@ nonisolated extension GeoDiscovery_V1_AuthorTier: SwiftProtobuf._ProtoNameProvid
 
 nonisolated extension GeoDiscovery_V1_CountryAccessOutcome: SwiftProtobuf._ProtoNameProviding {
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0COUNTRY_ACCESS_OUTCOME_UNSPECIFIED\0\u{1}COUNTRY_ACCESS_OUTCOME_GRANTED\0\u{1}COUNTRY_ACCESS_OUTCOME_NOT_SENT\0\u{1}COUNTRY_ACCESS_OUTCOME_MISMATCH\0\u{1}COUNTRY_ACCESS_OUTCOME_UNVERIFIABLE\0")
+}
+
+nonisolated extension GeoDiscovery_V1_UnlockCountryOutcome: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0UNLOCK_COUNTRY_OUTCOME_UNSPECIFIED\0\u{1}UNLOCK_COUNTRY_OUTCOME_UNLOCKED\0\u{1}UNLOCK_COUNTRY_OUTCOME_ALREADY_UNLOCKED\0\u{1}UNLOCK_COUNTRY_OUTCOME_INSUFFICIENT_GEMS\0\u{1}UNLOCK_COUNTRY_OUTCOME_PRICE_CHANGED\0")
 }

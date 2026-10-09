@@ -57,6 +57,17 @@ public nonisolated enum Notification_V1_NotificationKind: SwiftProtobuf.Enum, Sw
   /// The recipient's appeal was decided in their favour: a sanction is lifted,
   /// or a reporter's case goes back to review (the appeal says which).
   case appealOverturned // = 9
+
+  /// Family supervision (#670): a parent and a teen paired (sender: the
+  /// other side's profile; subject: the other side's account — the app
+  /// opens Settings → Supervision).
+  case supervisionStarted // = 10
+
+  /// The other side ended the supervision, or their account was erased.
+  case supervisionEnded // = 11
+
+  /// The supervision ended because the teen turned 18.
+  case supervisionCameOfAge // = 12
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -75,6 +86,9 @@ public nonisolated enum Notification_V1_NotificationKind: SwiftProtobuf.Enum, Sw
     case 7: self = .followAccepted
     case 8: self = .appealUpheld
     case 9: self = .appealOverturned
+    case 10: self = .supervisionStarted
+    case 11: self = .supervisionEnded
+    case 12: self = .supervisionCameOfAge
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -91,6 +105,9 @@ public nonisolated enum Notification_V1_NotificationKind: SwiftProtobuf.Enum, Sw
     case .followAccepted: return 7
     case .appealUpheld: return 8
     case .appealOverturned: return 9
+    case .supervisionStarted: return 10
+    case .supervisionEnded: return 11
+    case .supervisionCameOfAge: return 12
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -107,6 +124,9 @@ public nonisolated enum Notification_V1_NotificationKind: SwiftProtobuf.Enum, Sw
     .followAccepted,
     .appealUpheld,
     .appealOverturned,
+    .supervisionStarted,
+    .supervisionEnded,
+    .supervisionCameOfAge,
   ]
 
 }
@@ -129,6 +149,10 @@ public nonisolated enum Notification_V1_SubjectKind: SwiftProtobuf.Enum, Swift.C
   /// The subject is a moderation appeal (appeal_id stored in subject_id; the
   /// app finds it with moderation's ListMyAppeals).
   case appeal // = 4
+
+  /// The subject is an account (account_id in subject_id): the other side
+  /// of a family supervision (#670).
+  case account // = 5
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -142,6 +166,7 @@ public nonisolated enum Notification_V1_SubjectKind: SwiftProtobuf.Enum, Swift.C
     case 2: self = .comment
     case 3: self = .profile
     case 4: self = .appeal
+    case 5: self = .account
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -153,6 +178,7 @@ public nonisolated enum Notification_V1_SubjectKind: SwiftProtobuf.Enum, Swift.C
     case .comment: return 2
     case .profile: return 3
     case .appeal: return 4
+    case .account: return 5
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -164,6 +190,7 @@ public nonisolated enum Notification_V1_SubjectKind: SwiftProtobuf.Enum, Swift.C
     .comment,
     .profile,
     .appeal,
+    .account,
   ]
 
 }
@@ -317,11 +344,11 @@ public nonisolated enum Notification_V1_PushEnvironment: SwiftProtobuf.Enum, Swi
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 nonisolated extension Notification_V1_NotificationKind: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0NOTIFICATION_KIND_UNSPECIFIED\0\u{1}NOTIFICATION_KIND_REACTION\0\u{1}NOTIFICATION_KIND_COMMENT\0\u{1}NOTIFICATION_KIND_REPLY\0\u{1}NOTIFICATION_KIND_MENTION\0\u{1}NOTIFICATION_KIND_FOLLOW\0\u{1}NOTIFICATION_KIND_FOLLOW_REQUEST\0\u{1}NOTIFICATION_KIND_FOLLOW_ACCEPTED\0\u{1}NOTIFICATION_KIND_APPEAL_UPHELD\0\u{1}NOTIFICATION_KIND_APPEAL_OVERTURNED\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0NOTIFICATION_KIND_UNSPECIFIED\0\u{1}NOTIFICATION_KIND_REACTION\0\u{1}NOTIFICATION_KIND_COMMENT\0\u{1}NOTIFICATION_KIND_REPLY\0\u{1}NOTIFICATION_KIND_MENTION\0\u{1}NOTIFICATION_KIND_FOLLOW\0\u{1}NOTIFICATION_KIND_FOLLOW_REQUEST\0\u{1}NOTIFICATION_KIND_FOLLOW_ACCEPTED\0\u{1}NOTIFICATION_KIND_APPEAL_UPHELD\0\u{1}NOTIFICATION_KIND_APPEAL_OVERTURNED\0\u{1}NOTIFICATION_KIND_SUPERVISION_STARTED\0\u{1}NOTIFICATION_KIND_SUPERVISION_ENDED\0\u{1}NOTIFICATION_KIND_SUPERVISION_CAME_OF_AGE\0")
 }
 
 nonisolated extension Notification_V1_SubjectKind: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0SUBJECT_KIND_UNSPECIFIED\0\u{1}SUBJECT_KIND_POST\0\u{1}SUBJECT_KIND_COMMENT\0\u{1}SUBJECT_KIND_PROFILE\0\u{1}SUBJECT_KIND_APPEAL\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0SUBJECT_KIND_UNSPECIFIED\0\u{1}SUBJECT_KIND_POST\0\u{1}SUBJECT_KIND_COMMENT\0\u{1}SUBJECT_KIND_PROFILE\0\u{1}SUBJECT_KIND_APPEAL\0\u{1}SUBJECT_KIND_ACCOUNT\0")
 }
 
 nonisolated extension Notification_V1_PushCategory: SwiftProtobuf._ProtoNameProviding {

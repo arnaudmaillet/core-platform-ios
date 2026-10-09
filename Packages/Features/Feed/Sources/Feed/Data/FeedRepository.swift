@@ -61,13 +61,24 @@ public extension FeedProviding {
 }
 
 /// The engagement write/read path the feed UI consumes.
+///
+/// ⚠️ A LIKE IS A POINT (#676, backend #665): staked through `wallet.Stake`,
+/// final — there is no unlike — and the count is the sum of everyone's
+/// points. The reaction kinds (heart, fire, …) and their upsert/remove are
+/// gone from the contracts.
 public protocol EngagementProviding: Sendable {
-    /// Heart reaction on/off. Throws when the server rejects; callers roll
-    /// back their optimistic state.
-    func setLiked(_ liked: Bool, for postID: PostID) async throws
+    /// One like: one point on the post, committed at once. Throws when it
+    /// does not land — a transport failure, or a refusal (`LikeRefused`) —
+    /// and callers roll back their optimistic state.
+    func like(_ postID: PostID) async throws
     /// Authoritative like counts — the reconcile read after a realtime
-    /// reconnect (the plane buffers nothing).
+    /// reconnect (the plane buffers nothing). engagement.v1 `BatchGetLikes`.
     func likeCounts(for postIDs: [PostID]) async throws -> [PostID: Int64]
+}
+
+/// The server answered a like with a refusal: no point went on the post.
+public struct LikeRefused: Error, Equatable {
+    public let outcome: LikeStakeAnswer.Outcome
 }
 
 /// Orchestrates the timeline read path: bare (post_id, author_id) tuples from
@@ -84,6 +95,9 @@ public actor FeedRepository: FeedProviding {
     private let profileClient: any Profile_V1_ProfileServiceClientInterface
     private let counterClient: any Counter_V1_CounterServiceClientInterface
     private let engagementClient: any Engagement_V1_EngagementServiceClientInterface
+    /// Where a like is committed (`wallet.Stake`); nil outside the app, where
+    /// a like throws.
+    private let likeStaking: (any LikeStaking)?
     private let authSession: any AuthSessionProviding
     private let snapshotStore: CodableFileStore<[FeedEntry]>?
     private let pageSize: Int32
@@ -111,6 +125,7 @@ public actor FeedRepository: FeedProviding {
         profileClient: any Profile_V1_ProfileServiceClientInterface,
         counterClient: any Counter_V1_CounterServiceClientInterface,
         engagementClient: any Engagement_V1_EngagementServiceClientInterface,
+        likeStaking: (any LikeStaking)? = nil,
         authSession: any AuthSessionProviding,
         viewer: (any ViewerProviding)? = nil,
         snapshotStore: CodableFileStore<[FeedEntry]>? = nil,
@@ -121,6 +136,7 @@ public actor FeedRepository: FeedProviding {
         self.profileClient = profileClient
         self.counterClient = counterClient
         self.engagementClient = engagementClient
+        self.likeStaking = likeStaking
         self.authSession = authSession
         // Nil only outside the app (tests, previews): a session of its own,
         // resolving through this repository's profile client.
@@ -410,56 +426,46 @@ public actor FeedRepository: FeedProviding {
 // MARK: - EngagementProviding
 
 extension FeedRepository: EngagementProviding {
-    public func setLiked(_ liked: Bool, for postID: PostID) async throws {
-        let profileID = try await resolveViewerProfileID(forWrite: "setLiked")
-
-        if liked {
-            var request = Engagement_V1_UpsertReactionRequest()
-            request.postID = postID.rawValue
-            request.profileID = profileID.rawValue
-            request.kind = .heart
-            let response = await engagementClient.upsertReaction(request: request, headers: [:])
-            if let error = response.error {
-                throw FeedError.transport(message: error.message ?? "code \(error.code)")
-            }
-        } else {
-            var request = Engagement_V1_RemoveReactionRequest()
-            request.postID = postID.rawValue
-            request.profileID = profileID.rawValue
-            let response = await engagementClient.removeReaction(request: request, headers: [:])
-            if let error = response.error {
-                throw FeedError.transport(message: error.message ?? "code \(error.code)")
-            }
-        }
+    public func like(_ postID: PostID) async throws {
+        let profileID = try await resolveViewerProfileID(forWrite: "like")
+        guard let likeStaking else { throw FeedError.transport(message: "no like path") }
+        let now = Date()
+        let batch = LikeOutbox.Batch(
+            target: .post(postID.rawValue), points: 1, usesStakeShot: false,
+            idempotencyKey: UUID().uuidString.replacingOccurrences(of: "-", with: ""),
+            firstTapAt: now, lastTapAt: now, isSealed: true,
+            accountID: nil, profileID: profileID.rawValue
+        )
+        let answer = try await likeStaking.stake(batch)
+        guard answer.outcome == .staked, answer.spent > 0 else { throw LikeRefused(outcome: answer.outcome) }
     }
 
     public func likeCounts(for postIDs: [PostID]) async throws -> [PostID: Int64] {
         guard !postIDs.isEmpty else { return [:] }
-
-        var request = Counter_V1_BatchGetCountersRequest()
-        request.entities = postIDs.map { id in
-            var entity = Counter_V1_EntityRef()
-            entity.entityType = .post
-            entity.id = id.rawValue
-            return entity
-        }
-        request.metrics = [.like]
-
-        let response = await counterClient.batchGetCounters(request: request, headers: [:])
-        switch response.result {
-        case .success(let body):
-            var counts: [PostID: Int64] = [:]
-            // Snapshots are positional, 1:1 with the request per the contract.
-            for snapshot in body.snapshots {
-                if let like = snapshot.values.first(where: { $0.metric == .like }) {
-                    counts[PostID(snapshot.entity.id)] = like.value
-                }
+        var counts: [PostID: Int64] = [:]
+        // At most 100 targets a call.
+        for start in stride(from: 0, to: postIDs.count, by: 100) {
+            let chunk = postIDs[start..<min(start + 100, postIDs.count)]
+            var request = Engagement_V1_BatchGetLikesRequest()
+            request.targets = chunk.map { id in
+                var target = Engagement_V1_LikeTarget()
+                target.postID = id.rawValue
+                return target
             }
-            return counts
-        case .failure(let error):
-            throw FeedError.transport(message: error.message ?? "code \(error.code)")
+            let response = await engagementClient.batchGetLikes(request: request, headers: [:])
+            switch response.result {
+            case .success(let body):
+                // In request order, one view per target.
+                for view in body.likes where !view.target.postID.isEmpty {
+                    counts[PostID(view.target.postID)] = view.count
+                }
+            case .failure(let error):
+                throw FeedError.transport(message: error.message ?? "code \(error.code)")
+            }
         }
+        return counts
     }
+
 }
 
 /// The lock-guarded shadow behind `FeedRepository.peekPost` — a plain

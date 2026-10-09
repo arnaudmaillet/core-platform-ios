@@ -276,6 +276,12 @@ public final class WalletStore: @unchecked Sendable {
     private var demoStakeTargets: [String]?
     private var scopeObserver: NSObjectProtocol?
 
+    /// Where a member's stakes go to be committed through `wallet.Stake`
+    /// (#676): every stake that lands here is recorded there too, and an undo
+    /// can only take back taps it has not committed yet — a committed like
+    /// is final. Nil (tests, previews): the store stands alone, as before.
+    public var likeOutbox: LikeOutbox?
+
     /// `name`, in the scope's account.
     private func k(_ name: String) -> String { scope.accountKey(name, adoptingLegacyIn: defaults) }
 
@@ -535,8 +541,32 @@ public final class WalletStore: @unchecked Sendable {
                 return outcome
             }
         }
-        if case .boosted = outcome { postDidChange() }
+        if case .boosted(_, _, let spent) = outcome {
+            if case .member = scope.owner, let likeOutbox {
+                switch spend {
+                case .points: likeOutbox.record(points: spent, on: .post(targetID))
+                case .shot: likeOutbox.recordShot(on: .post(targetID), points: spent)
+                }
+            }
+            postDidChange()
+        }
         return outcome
+    }
+
+    /// The viewer moved on from the target: its taps are committed now
+    /// rather than 10 s after the last one (#676).
+    public func commitStakes(on targetID: String) {
+        likeOutbox?.seal(target: .post(targetID))
+    }
+
+    /// The server's answer to a committed batch (#676): what it did not
+    /// spend — clamped to the target's room, the balance or the hour's, or
+    /// refused (expired, own content, not stakeable) — goes back to the
+    /// balance and off the target, as the server never took it.
+    public func settleCommittedStake(targetID: String, asked: Int, spent: Int) {
+        let unspent = asked - max(0, spent)
+        guard unspent > 0 else { return }
+        if refund(targetID: targetID, amount: unspent) != nil { postDidChange() }
     }
 
     /// Buys a ×100 cartridge pack with gems: `Policy.StakePack.shots` shots
@@ -598,15 +628,29 @@ public final class WalletStore: @unchecked Sendable {
     /// target holds nothing (nothing changed, nothing posted).
     public func undoBoost(targetID: String, amount: Int) -> (newBalance: Int, targetTotal: Int)? {
         precondition(amount > 0, "an undo takes something back")
-        let result: (newBalance: Int, targetTotal: Int)? = lock.withLock {
+        var amount = amount
+        // With an outbox, only taps not yet committed come back (#676).
+        if let likeOutbox, case .member = scope.owner {
+            amount = likeOutbox.cancel(points: amount, on: .post(targetID))
+            guard amount > 0 else { return nil }
+        }
+        let result = refund(targetID: targetID, amount: amount)
+        if result != nil { postDidChange() }
+        return result
+    }
+
+    /// Puts up to `amount` of a target's stake back in the balance; nil when
+    /// the target holds nothing. Posts nothing.
+    private func refund(targetID: String, amount: Int) -> (newBalance: Int, targetTotal: Int)? {
+        lock.withLock {
             var totals = boostTotalsLocked()
             let held = totals[targetID] ?? 0
-            let refund = min(amount, held)
-            guard refund > 0 else { return nil }
-            let newBalance = defaults.integer(forKey: k(Key.balance)) + refund
+            let taken = min(amount, held)
+            guard taken > 0 else { return nil }
+            let newBalance = defaults.integer(forKey: k(Key.balance)) + taken
             defaults.set(newBalance, forKey: k(Key.balance))
-            defaults.set(max(0, defaults.integer(forKey: k(Key.lifetimeSpent)) - refund), forKey: k(Key.lifetimeSpent))
-            let remaining = held - refund
+            defaults.set(max(0, defaults.integer(forKey: k(Key.lifetimeSpent)) - taken), forKey: k(Key.lifetimeSpent))
+            let remaining = held - taken
             if remaining > 0 {
                 totals[targetID] = remaining
             } else {
@@ -619,8 +663,6 @@ public final class WalletStore: @unchecked Sendable {
             defaults.set(totals, forKey: k(Key.boostTotals))
             return (newBalance, remaining)
         }
-        if result != nil { postDidChange() }
-        return result
     }
 
     // MARK: - Internals (lock held)

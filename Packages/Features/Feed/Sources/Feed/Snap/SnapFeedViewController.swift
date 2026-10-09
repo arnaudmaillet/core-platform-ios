@@ -1254,6 +1254,8 @@ final class SnapFeedViewController: UIViewController {
         // away — "undo until you move on", and you just moved on. (The
         // retained timeline can come back to the same post; the spend is
         // still final: the window is the visit, not the post.)
+        // The taps are committed now, not 10 s after the last one (#676).
+        if let id = sessionBoostID { wallet?.commitStakes(on: id.rawValue) }
         sessionBoostID = nil
         sessionBoostAmount = 0
     }
@@ -4224,6 +4226,8 @@ final class SnapFeedViewController: UIViewController {
             // Paging away FINALIZES the session's boosts: the undo window
             // is the post's time on screen, and it just ended.
             if orderedIDs.indices.contains(resign), sessionBoostID == orderedIDs[resign] {
+                // …and commits its taps (#676).
+                wallet?.commitStakes(on: orderedIDs[resign].rawValue)
                 sessionBoostID = nil
                 sessionBoostAmount = 0
             }

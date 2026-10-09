@@ -55,7 +55,9 @@ let package = Package(
             name: "CoreNetworkingTests",
             dependencies: [
                 "CoreNetworking", "CoreNetworkingMocks", "CoreContracts",
-                .product(name: "MediaCore", package: "MediaCore")
+                .product(name: "MediaCore", package: "MediaCore"),
+                // A like batch's `first_tap_at` (#676).
+                .product(name: "SwiftProtobuf", package: "swift-protobuf")
             ]
         )
     ]

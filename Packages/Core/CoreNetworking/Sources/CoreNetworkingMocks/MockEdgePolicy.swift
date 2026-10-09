@@ -66,6 +66,9 @@ public enum MockEdgePolicy {
         "/comment.v1.CommentService/ListTopLevel",
         "/comment.v1.CommentService/ListReplies",
         "/counter.v1.CounterService/BatchGetCounters",
+        // Like counts are `public_read` (#676); `mine` is 0 for a guest.
+        "/engagement.v1.EngagementService/GetPostEngagement",
+        "/engagement.v1.EngagementService/BatchGetLikes",
         "/social_graph.v1.SocialGraphService/ListFollowers",
         "/social_graph.v1.SocialGraphService/ListFollowing",
         "/geo_discovery.v1.GeoDiscoveryService/QueryTile",
