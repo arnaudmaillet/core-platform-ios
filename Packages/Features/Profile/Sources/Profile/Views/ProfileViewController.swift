@@ -73,7 +73,11 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     }
     /// Which pages this profile has. The viewer's own carries Saved and Liked;
     /// everyone else's does not, because neither pile is anybody else's to see.
-    private let tabs: [ProfileTab]
+    /// The tabs on show: Posts, and each other source once it has
+    /// something in it (#742). One tab is no selector at all.
+    private var tabs: [ProfileTab]
+    /// Every tab this profile can have.
+    private let allTabs: [ProfileTab]
     /// The strip's home when the tab bar is under this screen. Nil on a pushed
     /// profile, where the bottom toolbar carries it instead.
     ///
@@ -334,13 +338,18 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         self.videoPlayback = videoPlayback
         self.shareTargeting = shareTargeting
         headerView = ProfileHeaderView(imagePipeline: imagePipeline)
-        let tabs = viewModel.isOwnProfile ? ProfileTab.ownTabs : ProfileTab.publicTabs
-        self.tabs = tabs
+        let allTabs = viewModel.isOwnProfile ? ProfileTab.ownTabs : ProfileTab.publicTabs
+        self.allTabs = allTabs
+        // Posts alone until the other sources answer (#742): a source shows
+        // up only with something in it.
+        let shown = allTabs.filter { $0 == .format(.activity) }
+        self.tabs = shown
         galleryPager = ProfileGalleryPagerView(
-            imagePipeline: imagePipeline, tabs: tabs, videoPlayback: videoPlayback,
+            imagePipeline: imagePipeline, tabs: allTabs, videoPlayback: videoPlayback,
             bookmarks: viewModel.bookmarks
         )
-        selectorBar = PagedTabBar(titles: tabs.map(\.title), style: .navigationTitle)
+        galleryPager.setVisibleTabs(shown)
+        selectorBar = PagedTabBar(titles: shown.map(\.title), style: .navigationTitle)
         super.init(nibName: nil, bundle: nil)
 
         // Only for the toolbar-hosted tray, which owns the bottom of the screen
@@ -472,8 +481,14 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
                 self?.pullIndicator.endRefreshing()
             }
         }
+        // A gallery that landed before this screen bound: its tabs now.
+        if let landed = viewModel.publishedGallery {
+            lastGallerySnapshot = landed
+            showTabs(for: landed)
+        }
         viewModel.onGalleryChange = { [weak self] snapshot in
             self?.lastGallerySnapshot = snapshot
+            self?.showTabs(for: snapshot)
             HeroScreenCost.measure("landing.gallery") { self?.galleryPager.render(snapshot) }
             // The media gallery "View all" pushed, if it is up, grows with
             // the pages as they land (#631).
@@ -2007,6 +2022,8 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     /// The pages this profile has, and what its selector would call them.
     var debugPageCount: Int { galleryPager.pageOrder.count }
     var debugTabTitles: [String] { tabs.map(\.title) }
+    /// What the selector reads, segment by segment. Tests.
+    var debugSelectorTitles: [String] { selectorBar.currentTitles }
     var debugActivePageIndex: Int { galleryPager.activePageIndex }
     #endif
 
@@ -2646,7 +2663,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     ///   the item's platter is the glass, so the strip draws none
     ///   (`.platter`).
     private func placeSelectors() {
-        guard viewModel.hasGallery, tabs.count > 1 else { return }
+        guard viewModel.hasGallery, tabs.count > 1, selectorAccessory == nil, selectorItem == nil else { return }
         selectorTouchProbe.attach(to: selectorBar)
         switch trayPlacement {
         case .aboveBottomSafeArea:
@@ -2659,6 +2676,55 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
             let item = UIBarButtonItem(customView: selectorBar)
             selectorItem = item
             toolbarItems = [item, .flexibleSpace()]
+        }
+    }
+
+    /// Takes the selector away when one tab is left (#742).
+    private func removeSelectors() {
+        if let accessory = selectorAccessory {
+            accessory.remove(from: tabBarController, alongside: nil)
+            selectorAccessory = nil
+        }
+        if selectorItem != nil {
+            selectorItem = nil
+            toolbarItems = []
+            if navigationController?.topViewController === self {
+                navigationController?.setToolbarHidden(true, animated: true)
+            }
+        }
+    }
+
+    /// ⚠️ NO TAB FOR A SOURCE WITH NOTHING IN IT (#742, the owner's call
+    /// 2026-10-09). Posts always; Reposts, Tagged, Saved and Liked only once
+    /// they hold something — a source still loading waits, rather than
+    /// showing a tab that might leave. One tab left is no selector at all, in
+    /// the tab bar's accessory as in a pushed profile's toolbar.
+    private func showTabs(for snapshot: ProfileViewModel.GallerySnapshot) {
+        let shown = allTabs.filter { tab in
+            guard tab != .format(.activity) else { return true }
+            if case .content(let posts) = snapshot.state(for: tab) { return !posts.isEmpty }
+            return false
+        }
+        guard shown != tabs else { return }
+        let active = tabs.indices.contains(galleryPager.activePageIndex) ? tabs[galleryPager.activePageIndex] : nil
+        tabs = shown
+        galleryPager.setVisibleTabs(shown)
+        selectorBar.setTitles(shown.map(\.title))
+        let index = active.flatMap { shown.firstIndex(of: $0) } ?? 0
+        mirrorSelection(to: index)
+        if shown.count > 1 {
+            let wasPlaced = selectorAccessory != nil || selectorItem != nil
+            placeSelectors()
+            guard !wasPlaced, view.window != nil else { return }
+            // Arrived while on screen: up now, not at the next appearance.
+            selectorAccessory?.install(into: tabBarController,
+                                       minimizesOnScroll: trayPlacement == .aboveBottomSafeArea,
+                                       alongside: nil)
+            if selectorItem != nil, navigationController?.topViewController === self {
+                navigationController?.setToolbarHidden(false, animated: true)
+            }
+        } else {
+            removeSelectors()
         }
     }
 

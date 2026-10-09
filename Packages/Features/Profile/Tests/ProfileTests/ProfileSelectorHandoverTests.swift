@@ -61,13 +61,33 @@ struct ProfileSelectorHandoverTests {
         func posts(ids: [String]) async throws -> [GalleryPost] { [] }
     }
 
+    /// A gallery with something in every source it is given (#742): posts,
+    /// reposts among them, and posts that tag the profile.
+    private struct StockedGallery: ProfileGalleryProviding {
+        var reposts = true
+        var tagged = true
+
+        private static func post(_ id: String, repost: Bool = false) -> GalleryPost {
+            GalleryPost(id: PostID(id), kind: .photo, isRepost: repost, thumbnailURL: nil, caption: id, publishedAtMS: 1)
+        }
+
+        func authoredPosts(for profileID: ProfileID) async throws -> [GalleryPost] {
+            [Self.post("p1")] + (reposts ? [Self.post("r1", repost: true)] : [])
+        }
+        func taggedPosts(for profileID: ProfileID, handle: String) async throws -> [GalleryPost] {
+            tagged ? [Self.post("t1")] : []
+        }
+        func posts(ids: [String]) async throws -> [GalleryPost] { [] }
+    }
+
     /// A loaded screen with its view up — the selectors are only placed once
     /// the profile has a gallery to filter.
     private func loadedScreen(
         source: ProfileViewModel.Source = .currentUser,
-        trayPlacement: ProfileTrayPlacement = .navigationToolbar
+        trayPlacement: ProfileTrayPlacement = .navigationToolbar,
+        gallery: any ProfileGalleryProviding = StockedGallery()
     ) async -> ProfileViewController? {
-        let viewModel = ProfileViewModel(repository: GalleryProvider(), gallery: EmptyGallery(), source: source)
+        let viewModel = ProfileViewModel(repository: GalleryProvider(), gallery: gallery, source: source)
         viewModel.viewDidLoad()
         for _ in 0..<60 {
             await Task.yield()
@@ -100,7 +120,7 @@ struct ProfileSelectorHandoverTests {
     /// `SnapFeedViewController.successorUsesToolbar` reads it to leave the
     /// shared toolbar up when a post pushed from here is popped.
     @Test func aPushedProfileHostsTheSelectorBottomLeading() async {
-        guard let screen = await loadedScreen() else { return }
+        guard let screen = await loadedScreen(source: .profile(ProfileID("prof-2"))) else { return }
         let items = screen.toolbarItems ?? []
         #expect(items.count == 2)
         #expect(items.first === screen.selectorItem, "the strip does not lead the toolbar")
@@ -108,15 +128,13 @@ struct ProfileSelectorHandoverTests {
         #expect((items.first?.customView as? PagedTabBar)?.hosting == .platter,
                 "the strip draws a capsule inside the item's platter")
         #expect(screen.selectorAccessory == nil, "a pushed profile hung a tab accessory")
-        #expect(screen.navigationItem.leftBarButtonItems?
-            .contains { $0.accessibilityLabel == "Content source" } == true,
-            "the source filter is not leading the bar")
     }
 
     /// The Profile tab's root keeps the strip in the tab bar's accessory, as
     /// it always had (#728) — no toolbar.
     @Test func theTabRootHostsTheSelectorInTheTabAccessory() async {
-        guard let screen = await loadedScreen(trayPlacement: .aboveBottomSafeArea) else { return }
+        guard let screen = await loadedScreen(source: .profile(ProfileID("prof-2")), trayPlacement: .aboveBottomSafeArea)
+        else { return }
         let band = try? #require(screen.selectorAccessory?.hostView)
         #expect(band?.subviews.compactMap { $0 as? PagedTabBar }.count == 1,
                 "the format selector is not in the band")
@@ -211,12 +229,43 @@ struct ProfileSelectorHandoverTests {
             "someone else's profile kept the source filter")
     }
 
-    /// The viewer's own keeps Posts | Saved | Liked.
-    @Test func yourOwnProfileKeepsPostsSavedLiked() async {
+    /// The viewer's own with nothing saved: Liked has no source to fill it
+    /// (no API answers it) and Saved is empty, so Posts alone — no selector
+    /// (#742).
+    @Test func yourOwnProfileWithNothingSavedIsPostsAlone() async {
         guard let screen = await loadedScreen() else { return }
-        #expect(screen.selectorItem?.customView is PagedTabBar, "the strip is not at the foot")
-        #expect(screen.debugTabTitles == ["Posts", "Saved", "Liked"])
-        #expect(screen.debugPageCount == 3)
+        #expect(screen.debugTabTitles == ["Posts"])
+        #expect(screen.debugPageCount == 1)
+        #expect(screen.selectorItem == nil, "a selector with one tab")
+        #expect(screen.toolbarItems?.isEmpty != false)
+    }
+
+    // MARK: - Empty sources (#742)
+
+    /// ⚠️ NO TAB FOR A SOURCE WITH NOTHING IN IT: no reposts, no Reposts —
+    /// not in the selector, not as a page.
+    @Test func anEmptySourceHasNoTabAndNoPage() async {
+        guard let screen = await loadedScreen(
+            source: .profile(ProfileID("prof-2")), gallery: StockedGallery(reposts: false)
+        ) else { return }
+        #expect(screen.debugTabTitles == ["Posts", "Tagged"])
+        #expect(screen.debugSelectorTitles == ["Posts", "Tagged"])
+        #expect(screen.debugPageCount == 2)
+        #expect(screen.selectorItem != nil)
+    }
+
+    /// Posts alone is no selector: no toolbar item on a pushed profile, no
+    /// accessory on the tab root.
+    @Test(arguments: [ProfileTrayPlacement.navigationToolbar, .aboveBottomSafeArea])
+    func postsAloneIsNoSelector(placement: ProfileTrayPlacement) async {
+        guard let screen = await loadedScreen(
+            source: .profile(ProfileID("prof-2")), trayPlacement: placement,
+            gallery: StockedGallery(reposts: false, tagged: false)
+        ) else { return }
+        #expect(screen.debugTabTitles == ["Posts"])
+        #expect(screen.debugPageCount == 1)
+        #expect(screen.selectorItem == nil, "a toolbar selector with one tab")
+        #expect(screen.selectorAccessory == nil, "a tab accessory with one tab")
     }
 
     /// On Posts, with no page to its left, a drag anywhere dismisses a
