@@ -141,6 +141,41 @@ struct ConversationThreadViewControllerTests {
         #expect(screen.contentScrollView(for: .top) === stream, "the bar tracks another scroll view")
     }
 
+    /// ⚠️ THE DAY CHIP SITS JUST BELOW THE HEADER — BELOW ITS BLUR (#746).
+    /// The stream has no top inset (the bar's native blur covers an inset as
+    /// its pocket), its day chips are not pinned (the blur stretches over
+    /// pinned headers), and the day on screen floats below the blur.
+    @Test func theDayChipSitsJustBelowTheHeadersBlur() throws {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let messages = (0..<60).map { index -> ConversationThreadMessage in
+            let day = index < 30 ? calendar.date(byAdding: .day, value: -1, to: today)! : today
+            return ConversationThreadMessage(
+                id: "m\(index)", senderID: ProfileID(index.isMultiple(of: 2) ? "me" : "them"),
+                body: "Message \(index)", sentAt: day.addingTimeInterval(Double(index % 30) * 60),
+                isMine: index.isMultiple(of: 2), quote: nil
+            )
+        }
+        let (screen, _, _, window) = makeScreen(phase: .content(messages))
+        defer { window.isHidden = true }
+        screen.view.layoutIfNeeded()
+        let stream = try #require(Self.firstView(UICollectionView.self, in: screen.view))
+        #expect(abs(stream.contentInset.top) < 0.5, "a top inset drags the bar's blur down with it")
+        #expect(abs(screen.debugDayChipGapBelowHeader - ConversationThreadViewController.dayChipTopInset) < 0.5,
+                "the floating chip rests \(screen.debugDayChipGapBelowHeader) pt below the header")
+
+        // At the tail, today's own chip has scrolled away: the floating one says it.
+        let tail = screen.debugFloatingDayChip
+        #expect(tail.shown, "no day on screen")
+        #expect(tail.title == "Today")
+
+        // At the top of the history, the first day's chip says it itself.
+        stream.setContentOffset(CGPoint(x: 0, y: -stream.adjustedContentInset.top), animated: false)
+        stream.layoutIfNeeded()
+        screen.scrollViewDidScroll(stream)
+        #expect(!screen.debugFloatingDayChip.shown, "two chips for one day")
+    }
+
     /// ⚠️ NO FROSTED TOP (asked 2026-10-02). The thread drew its own 132pt
     /// frost band under the window's status-bar blur — a blur over a blur.
     /// The only band left on the screen is the composer's footer, below the

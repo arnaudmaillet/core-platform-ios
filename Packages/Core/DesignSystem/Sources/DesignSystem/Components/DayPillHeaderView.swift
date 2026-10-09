@@ -15,6 +15,14 @@ public final class DayPillHeaderView: UICollectionReusableView {
 
     private let chip = UIVisualEffectView(effect: nil)
     private let label = UILabel()
+    private var chipTop: NSLayoutConstraint?
+
+    /// How far below the header's top the chip draws — what it keeps clear
+    /// above itself while pinned. A host whose bar draws a blur below itself
+    /// lowers the chip out of it (#746: the conversation).
+    public var chipTopInset: CGFloat = Spacing.sm {
+        didSet { chipTop?.constant = chipTopInset }
+    }
 
     public override init(frame: CGRect) {
         super.init(frame: frame)
@@ -28,9 +36,11 @@ public final class DayPillHeaderView: UICollectionReusableView {
         ))
 
         chip.clipsToBounds = true
+        let top = chip.topAnchor.constraint(equalTo: topAnchor, constant: Spacing.sm)
+        chipTop = top
         chip.constrain(in: self) { parent in
             chip.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
-            chip.topAnchor.constraint(equalTo: parent.topAnchor, constant: Spacing.sm)
+            top
             chip.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -Spacing.xs)
         }
     }

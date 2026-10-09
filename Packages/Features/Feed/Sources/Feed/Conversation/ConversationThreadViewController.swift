@@ -213,9 +213,108 @@ final class ConversationThreadViewController: UIViewController {
             }
             return
         }
+        syncTopInset()
         syncBottomClearance()
+        syncFloatingDayChip()
         // After the clearance, in the same pass: see `pinToTail`.
         if owesTailPin { pinToTail() }
+    }
+
+    /// How far the soft top-edge blur (#741) fades out below the bar's
+    /// bottom with no top inset and nothing pinned — measured on iOS 27
+    /// (iPhone 18 Pro): ~30 pt.
+    static let topEdgeBlurReach: CGFloat = 30
+    /// How far below the header the day chip's top rests (#746).
+    static let dayChipGapBelowHeader: CGFloat = 4
+    /// Where the day chip rests, below the bar's bottom: past the blur, plus
+    /// the gap.
+    static var dayChipTopInset: CGFloat { topEdgeBlurReach + dayChipGapBelowHeader }
+
+    /// ⚠️ THE DAY CHIP SITS JUST BELOW THE HEADER — BELOW ITS BLUR (#746, the
+    /// owner's calls 2026-10-09). The blur is iOS's own (`topEdgeEffect`,
+    /// `.soft`) and two things stretch it, so neither is used:
+    /// - a TOP INSET: the effect covers the whole inset as the bar's pocket,
+    ///   then fades — the inset is ZERO;
+    /// - a PINNED HEADER: the effect reaches down over it — the day chips are
+    ///   not pinned; a floating chip outside the stream says the day instead.
+    private func syncTopInset() {
+        guard abs(collectionView.contentInset.top) > 0.5 else { return }
+        collectionView.contentInset.top = 0
+    }
+
+    /// The day on screen, floating just below the header's blur once that
+    /// day's own chip has scrolled up past it (#746). Outside the stream, so
+    /// the bar's edge effect never reaches for it.
+    private let floatingDayChip = DayPillHeaderView(frame: .zero)
+    private var floatingDayTitle: String?
+
+    private func installFloatingDayChip() {
+        guard mode == .full else { return }
+        floatingDayChip.chipTopInset = 0
+        floatingDayChip.alpha = 0
+        floatingDayChip.isUserInteractionEnabled = false
+        floatingDayChip.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(floatingDayChip)
+        NSLayoutConstraint.activate([
+            floatingDayChip.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            floatingDayChip.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            floatingDayChip.topAnchor.constraint(
+                equalTo: view.safeAreaLayoutGuide.topAnchor, constant: Self.dayChipTopInset
+            ),
+        ])
+    }
+
+    /// Shows the day of the first message under the floating chip — unless
+    /// that day's own chip is still at or below it (it says so itself).
+    private func syncFloatingDayChip() {
+        guard mode == .full, floatingDayChip.superview != nil, hasRenderedContent else { return }
+        let slot = view.safeAreaInsets.top + Self.dayChipTopInset
+        let probe = collectionView.convert(CGPoint(x: collectionView.bounds.midX, y: slot + 1), from: view)
+        let visible = collectionView.indexPathsForVisibleItems.sorted()
+        let below = visible.first { path in
+            guard let frame = collectionView.layoutAttributesForItem(at: path)?.frame else { return false }
+            return frame.maxY > probe.y
+        }
+        guard let path = below,
+              case .day(let day) = dataSource.sectionIdentifier(for: path.section)
+        else { return setFloatingDayChip(shown: false) }
+        let header = collectionView.layoutAttributesForSupplementaryElement(
+            ofKind: DayPillHeaderView.elementKind, at: IndexPath(item: 0, section: path.section)
+        )
+        let inlineChipTop = header.map {
+            collectionView.convert($0.frame, to: view).minY + Self.inlineChipTopInset(section: path.section)
+        } ?? -.greatestFiniteMagnitude
+        let title = DayTitleFormatter.title(for: day)
+        if title != floatingDayTitle {
+            floatingDayTitle = title
+            floatingDayChip.configure(title: title)
+        }
+        setFloatingDayChip(shown: inlineChipTop < slot - 0.5)
+    }
+
+    private func setFloatingDayChip(shown: Bool) {
+        let alpha: CGFloat = shown ? 1 : 0
+        guard floatingDayChip.alpha != alpha else { return }
+        UIView.animate(withDuration: 0.15, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
+            self.floatingDayChip.alpha = alpha
+        }
+    }
+
+    /// The inline chip's top padding: the history's first rests exactly where
+    /// the floating one does, so the hand-over is seamless; the others keep
+    /// the chip's own.
+    static func inlineChipTopInset(section: Int) -> CGFloat {
+        section == 0 ? dayChipTopInset : Spacing.sm
+    }
+
+    /// Whether the floating day chip shows, and what it says. Tests.
+    var debugFloatingDayChip: (shown: Bool, title: String?) {
+        (floatingDayChip.alpha > 0.5, floatingDayTitle)
+    }
+
+    /// The day chip's resting top below the bar's bottom, in points. Tests.
+    var debugDayChipGapBelowHeader: CGFloat {
+        floatingDayChip.frame.minY - view.safeAreaInsets.top
     }
 
     // MARK: - Setup
@@ -256,6 +355,7 @@ final class ConversationThreadViewController: UIViewController {
             collectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             collectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
+        installFloatingDayChip()
         configureDataSource()
     }
 
@@ -278,7 +378,12 @@ final class ConversationThreadViewController: UIViewController {
                     elementKind: DayPillHeaderView.elementKind,
                     alignment: .top
                 )
-                header.pinToVisibleBounds = true
+                // ⚠️ NOT PINNED (#746): iOS stretches the bar's soft
+                // top-edge blur down over pinned headers, so a pinned chip
+                // always sat inside the header's blur. The chip in the flow
+                // marks where each day starts; the floating one
+                // (`floatingDayChip`) says which day is on screen.
+                header.pinToVisibleBounds = false
                 header.zIndex = 2
                 section.boundarySupplementaryItems = [header]
             }
@@ -318,6 +423,9 @@ final class ConversationThreadViewController: UIViewController {
                   case .day(let day) = self.dataSource.sectionIdentifier(for: indexPath.section)
             else { return }
             header.configure(title: DayTitleFormatter.title(for: day))
+            // The first day rests below the bar's blur, where the floating
+            // chip takes over (#746); a peek has no bar.
+            header.chipTopInset = self.mode == .full ? Self.inlineChipTopInset(section: indexPath.section) : Spacing.sm
         }
         dataSource = UICollectionViewDiffableDataSource<Section, Item>(
             collectionView: collectionView
@@ -1155,6 +1263,7 @@ extension ConversationThreadViewController: UICollectionViewDelegate {
     /// the screen's programmatic moves (the tail pin, a quote jump) never do —
     /// and never in a peek.
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        syncFloatingDayChip()
         guard mode == .full, hasRenderedContent, scrollView.isTracking || scrollView.isDecelerating,
               scrollView.contentOffset.y + scrollView.adjustedContentInset.top < scrollView.bounds.height
         else { return }
